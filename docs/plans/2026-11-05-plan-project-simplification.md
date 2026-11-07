@@ -1,12 +1,12 @@
 # PLAN-SIMPL: Project Simplification Program (Architecture Plan)
 
 - Phase: 2 (Solution Architect). Date: 2026-11-05. Base: origin/main fe0e131d (branch `docs/plans-project-simplification`).
-- Input PRD: [2026-11-05-req-project-simplification.md](2026-11-05-req-project-simplification.md) (REQ-SIMPL-01..13; owner decisions OD-1..OD-44 in PRD section 2.0; D1-D17).
+- Input PRD: [2026-11-05-req-project-simplification.md](2026-11-05-req-project-simplification.md) (REQ-SIMPL-01..13; owner decisions OD-1..OD-37 in PRD section 2.0; D1-D17).
 - Related: [2026-10-26-plan-architecture-maintainability.md](2026-10-26-plan-architecture-maintainability.md) (ARCH-MNT-22 dialect dedup; section 2.4 ignored flags). ADR: [ADR-019](../adr/ADR-019-sql-engine-build-vs-buy.md) (Accepted by the owner 2026-11-05: keep and shrink the in-house engine).
 - Tracking: issues #509-#514 (Stage 0), #515 (Stages 1-3, one child issue per stage and per module). CI-speed issues #516-#522 are coordinated, not duplicated.
 - Constraints: no production deployment (breaking changes allowed, no shims); forward-only governance migrations with v1.5.0 frozen base; English only; workflow files under `.github/workflows/` are changed only by the WP that owns the change, and every such change is an **owner-approved item** (marked `[WF]`).
 
-> **Precedence:** the owner decisions OD-1..OD-44 (PRD section 2.0), [ADR-020](../adr/ADR-020-unified-authorization-model.md) (Accepted, OD-30) and the corrections in [`simplification/README.md`](simplification/README.md) override any conflicting body text of this plan; where two owner decisions conflict, the later one wins. The developer-ready WP specs in `simplification/` carry the detail; this plan is the summary.
+> **Precedence:** the owner decisions OD-1..OD-37 (PRD section 2.0), [ADR-020](../adr/ADR-020-unified-authorization-model.md) (Accepted, OD-30) and the corrections in [`simplification/README.md`](simplification/README.md) override any conflicting body text of this plan; where two owner decisions conflict, the later one wins. The developer-ready WP specs in `simplification/` carry the detail; this plan is the summary.
 
 ## 1. Verified code facts used by this plan (verified on fe0e131d, 2026-11-05)
 
@@ -162,9 +162,7 @@ Summary (order = roadmap order; L-PER = serial persistence/DDL lane; L-AUTHZ = c
 | 44 | 1-2 | #459 | No source-metadata reads (OD-25) | L-ENG | 12, 17, 39 PR 3; before 28 | -1,570 | M 6 |
 | 45 | 1-2 | #505 | Governed write access, WebSQL only (OD-26, OD-33, OD-35) | L-AUTHZ | 36 SP0, SP3; PR 1-3 before 46 PR 1; PR 4-6 after 46 PR 1 | +1,680 | L 9-11 |
 | 46 | 1-2 | OD-30 | Unified authorization model: one grant model, one decision point (ADR-020) | L-AUTHZ | 36 SP0, 43 PR 2-3b, 45 PR 1-3; PR 6: 43 PR 5a/5b | -1,950 | L 10 |
-| 47 | 1-2 | OD-28, OD-29 | Catalog and consent API, workflow internal or external, signed time-limited grants | L-AUTHZ | 12, 43, 46 PR 1, 41 PR 3 and PR 5, 45 PR 1-3; PR 7: 48 PR 5-6 | +2,350 | L 16 |
-| 48 | 1-2 | OD-38..OD-43 | Row policies, dynamic object coverage, per-cell column state, effective-access report | L-AUTHZ | 46 PR 1 (PR 1, 2, 5), 46 PR 2 (PR 3, 4) | +940 | L 12 |
-| 49 | after freeze | OD-44 | Data products: views with load modes and procedures, own product owner | L-AUTHZ | Stage 3 exit; 46, 47, 48, 39, 41, 42, 44, 45, 21, 20 | +1,400 | L 10-11 |
+| 47 | 1-2 | OD-28, OD-29 | Catalog and consent API, workflow internal or external, signed time-limited grants | L-AUTHZ | 12, 43, 46 PR 1, 41 PR 3 and PR 5, 45 PR 1-3 | +2,350 | L 15.5 |
 
 Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD per lifecycle; deleting WPs add their rows to the migration guide and the CHANGELOG "Removed" section in the same PR (section 6); removed config keys disappear from `GatewayConfigurationSchema` so `UnknownGatewayKeyGuard` fails fast.
 
@@ -196,10 +194,10 @@ Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD 
 - AC/target: docs referencing non-existent source files = 0.
 
 #### WP-SIMPL-05 Docs hygiene and docs checks (#513)
-- Scope: script-rewrite all `file:///root/autheris/` links to relative links (all tracked `*.md`, including CLAUDE.md, AGENTS.md and docs/plans); fix 23 broken relative links; remove `Status:` tags and "100% GA / Production-Ready" wording outside docs/plans; condense `docs/architecture/konzept-data-governance-und-mcp-documentation.md` into the English architecture doc and delete it. Checks run as architecture tests in the existing CI job, so no workflow edit is needed.
+- Scope: script-rewrite all absolute file links to relative links (all tracked `*.md`, including CLAUDE.md, AGENTS.md and docs/plans); fix 23 broken relative links; remove `Status:` tags and "100% GA / Production-Ready" wording outside docs/plans; condense `docs/architecture/konzept-data-governance-und-mcp-documentation.md` into the English architecture doc and delete it. Checks run as architecture tests in the existing CI job, so no workflow edit is needed.
 - Deps: WP-SIMPL-04 (merge after it to avoid double edits). Effort: M, 2.5 pd.
 - Tests: `DocsIntegrityTests.No_absolute_file_links`, `.Relative_links_resolve`, `.Backticked_source_paths_exist`, `.No_status_tags_outside_plans`, `.Docs_are_english` (heuristic: German stop-word density). Gated scope: README.md, root `*.md`, `docs/` outside `docs/plans`, module READMEs (docs/plans is rewritten but not gated, Q15).
-- AC/target: broken links 0, `file:///` 0, status tags 0.
+- AC/target: broken links 0, absolute file links 0, status tags 0.
 
 #### WP-SIMPL-06 Delete unconsumed options; generated configuration reference (#514)
 - Scope: delete the options of `Baselines/unconsumed-options.txt` that are verified unconsumed (WebhooksOptions delivery block, QueryCostOptions BaseQueryCost/CostPerRowReturned/NestedDepthFactor, RebacOptions OpenFgaApiUrl/OpenFgaStoreId, ...) and then the baseline file; the 14 entries that are read in their declaring file (Webhooks Effective*, AuditGroupCommit MaxBatchDelayMs, TenantRegistryGate CacheTtl, IdentityRealms DefaultRealm, GatewayOptions.OpenSchema, WorkflowOptions.ActiveProfile, ...) are false positives: they are removed from the baseline, not deleted, and the consumption test is fixed to count reads in the declaring file. The `GatewayOptionsConsumptionRatchetTests` keeps running with no baseline escape. ARCH-MNT 2.4 flags (verified): `CasbinOptions.EnforceInQueryPipeline` and `McpOptions.RequirePiiMasking` are already removed; `ScimOptions.AllowedIpRanges` is enforced and stays (SCIM is core, OD-21).
@@ -209,7 +207,7 @@ Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD 
 - AC/target: unconsumed baseline 0 and file deleted; undocumented option names 0.
 
 #### WP-SIMPL-07 Freeze mechanics and program ratchets
-- Scope: architecture ratchets that make the freeze mechanical: `ProgramRatchetTests.Endpoint_count_does_not_grow` (Map* count in src, baseline file `endpoint-count.txt`), `.Options_class_count_does_not_grow`, `.Enabled_flag_count_does_not_grow`, `.Application_top_level_folders_are_allow_listed`, `.Plan_id_comments_do_not_grow` (regex for plan ids such as `REV-\d+`, `SEC-\w+`, `AST-X\d`, `ARCH-MNT-\d+`, `PLAN-[A-Z]+-\d+`, baseline per project). A ratchet may grow only when the same PR updates the committed baseline and carries the label `freeze-exception`, which applies to security PRs and to the owner-mandated WP-SIMPL-38..48 (listed in `simplification/README.md`); the CI check reads the label (PR event), the architecture test reads the committed baseline. PR template gets a freeze checklist and the `freeze-exception` label rule. PR net-LOC check (REQ-SIMPL-02c): a ci.yml step computing `git diff --numstat origin/main...HEAD -- src` minus generated files and migrations, failing above +400 unless the `size-exception` label is present `[WF]`. Tag `pre-simplification` on the base commit (owner action).
+- Scope: architecture ratchets that make the freeze mechanical: `ProgramRatchetTests.Endpoint_count_does_not_grow` (Map* count in src, baseline file `endpoint-count.txt`), `.Options_class_count_does_not_grow`, `.Enabled_flag_count_does_not_grow`, `.Application_top_level_folders_are_allow_listed`, `.Plan_id_comments_do_not_grow` (regex for plan ids such as `REV-\d+`, `SEC-\w+`, `AST-X\d`, `ARCH-MNT-\d+`, `PLAN-[A-Z]+-\d+`, baseline per project). A ratchet may grow only when the same PR updates the committed baseline and carries the label `freeze-exception`, which applies to security PRs and to the owner-mandated WP-SIMPL-38..47 (listed in `simplification/README.md`); the CI check reads the label (PR event), the architecture test reads the committed baseline. PR template gets a freeze checklist and the `freeze-exception` label rule. PR net-LOC check (REQ-SIMPL-02c): a ci.yml step computing `git diff --numstat origin/main...HEAD -- src` minus generated files and migrations, failing above +400 unless the `size-exception` label is present `[WF]`. Tag `pre-simplification` on the base commit (owner action).
 - Deps: none. LOC: +300 (tests). Effort: M, 2 pd.
 - AC: ratchet files committed with current counts; label rules documented in the PR template.
 
@@ -291,7 +289,7 @@ Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD 
 
 | Item | Default | Reason | Issues |
 |---|---|---|---|
-| Analytics (governed aggregation) + differential privacy | **Decided (OD-11):** aggregation with small-group suppression and time buckets KEEP (core); differential-privacy noise DELETE; differencing across overlapping filters is accepted residual risk, mitigated by suppression, `ExposeSuppressedGroupsCount=false` by default and filter-shape audit (WP-SIMPL-50 B16, D-50d) | owner decision 2026-11-05 | #467, #468 obsolete by removal |
+| Analytics (governed aggregation) + differential privacy | **Decided (OD-11):** aggregation with small-group suppression and time buckets KEEP (core); differential-privacy noise DELETE | owner decision 2026-11-05 | #467, #468 obsolete by removal |
 | CDN cache purge | DELETE | C1 false; outbound HTTP (C2) | #474 closed by this WP (R1) |
 | Table cache (DuckDB-backed) | CORE (revised for OD-15): it serves federated staging and DuckDB stays core, so moving it gains no footprint | DuckDB is core | #475 fixed in core (security lane), with an integration test on the real DuckDB engine |
 | Trino client protocol route `/v1/statement` | **Decided (OD-18):** KEEP core, clean redesign in WP-SIMPL-38 | only standard SQL client protocol | #470, #484 fixed in WP-SIMPL-38 |
@@ -410,26 +408,21 @@ Effort in person-days (pd). LOC delta is src (tests in brackets). Every WP: TDD 
 - Tier flip (OD-36, X1-DBX): Databricks is enabled on WebSQL, the Trino protocol and MCP, with parity tests per transport.
 - Deps: WP-SIMPL-36 item 0 (batch 5) for the shared files; runs in the engine lane, parallel to Stage 1. LOC: about +600 src, +800 tests. Effort: M, 4 pd. Phase 3: SEC-SIMPL-95..98.
 
-#### WP-SIMPL-38..48 Owner-decision work packages (OD-18..OD-43)
+#### WP-SIMPL-38..47 Owner-decision work packages (OD-18..OD-37)
 
 Developer-ready specs in `simplification/`; dependencies and order in the README execution table. All run under the `freeze-exception` label (WP-SIMPL-07).
 - [WP-SIMPL-38](simplification/WP-SIMPL-38-trino-protocol-clean.md) Trino client protocol `/v1/statement` (OD-18; #470, #484). Metadata listing reports access status through `IAccessDecisionPoint.DecideManyAsync` (no second decision path).
 - [WP-SIMPL-39](simplification/WP-SIMPL-39-procedures-clean.md) Governed stored procedures (OD-18).
 - [WP-SIMPL-40](simplification/WP-SIMPL-40-docs-ingestion-clean.md) Docs ingestion and MCP doc tools (OD-18; GHSA-p234-g3ph-gqh2); storage move after WP-SIMPL-20.
 - [WP-SIMPL-41](simplification/WP-SIMPL-41-authorized-data-discovery.md) Authorized data discovery (OD-19, OD-22): visibility per OD-19 (everything visible to authenticated users unless explicitly hidden; hidden objects only for admins and the data owner), access status from `DecideManyAsync`; consent requests through the WP-SIMPL-47 API.
-- [WP-SIMPL-42](simplification/WP-SIMPL-42-usage-accounting-users-groups.md) Usage accounting per user and AD group (OD-20, OD-29), replaces FinOps; usage attributed to every contributing grant id carried by the decision record (WP-SIMPL-46, OD-42), each counted in full, including owner grant records (OD-34).
+- [WP-SIMPL-42](simplification/WP-SIMPL-42-usage-accounting-users-groups.md) Usage accounting per user and AD group (OD-20, OD-29), replaces FinOps; usage attributed to the authorizing grant id carried by the decision record (WP-SIMPL-46), including owner grant records (OD-34).
 - [WP-SIMPL-43](simplification/WP-SIMPL-43-authentication-authorization-core.md) Authentication and authorization core (OD-21, OD-27): direct and ForwardAuth modes, SCIM groups; Envoy ext_authz decides through the decision point.
 - [WP-SIMPL-44](simplification/WP-SIMPL-44-no-source-metadata-reads.md) No source-metadata reads (OD-25; #459).
 - [WP-SIMPL-45](simplification/WP-SIMPL-45-governed-write-access.md) Governed write access (OD-26, OD-33, OD-35): write grant records with validity, independent of read grants; enforcement in the shared pipeline; WebSQL only, other transports reject writes fail-closed.
-- [WP-SIMPL-46](simplification/WP-SIMPL-46-unified-authorization-model.md) Unified authorization model ([ADR-020](../adr/ADR-020-unified-authorization-model.md), OD-30, OD-31, OD-32): one grant model and one `IAccessDecisionPoint`; ReBAC removed; access profiles grant only through materialized grant records; plugin hooks narrowing only; the decision record lists every contributing grant (OD-42).
-- [WP-SIMPL-47](simplification/WP-SIMPL-47-external-catalog-and-consent-api.md) Catalog and consent API, workflow internal or external, signed time-limited grant records (OD-28, OD-29, OD-32, OD-40, OD-43); owns the consent request REST route; profile items with patterns and the approval-time effect preview.
-- [WP-SIMPL-48](simplification/WP-SIMPL-48-row-policies-dynamic-coverage.md) Row policies, dynamic object coverage and per-cell column state (OD-38..OD-43): named row policies with parameters at two levels (grant scope ORed, hard policies ANDed), pattern grants evaluated at decision time, per-cell masking for overlapping grants, effective-access report and approval preview.
-- [WP-SIMPL-49](simplification/WP-SIMPL-49-data-products.md) Data products (OD-44): views (two-stage DuckDB execution with load modes schedule, onDemand and live), stored procedures (declared read or write), defined in Autheris with their own product owner; base owners decoupled; new role `DataProductAdmin`; Git sync; built after the feature freeze (not under `freeze-exception`, not in the program total).
-- [WP-SIMPL-50](simplification/WP-SIMPL-50-review-remediation-v1-7-1.md) Remediation of the v1.7.1..HEAD code and security reviews: release blockers (unsigned workspace module fallback, missing-ABAC-service and unknown-IP fail-open, CODEOWNERS remap, module audit serialization, HitL broadcast binding), module host hardening (trust, route prefix, service allowlist, no raw governance connection, signed release path), ABAC row-filter propagation, ITSM and break-glass leftovers removed, aggregation residual risk after the DP removal (OD-11), low cleanups; developer-ready, Phase 3 approved with conditions SEC-50-01..16, owner confirmed all defaults 2026-11-07 (D-50i KMS/HSM signing key with environment-secret interim, D-50k Lakehouse route move); not started (about 9.5 pd).
-- Follow-up to WP-SIMPL-50 D-50j (not scheduled): enable culture analyzers CA1307, CA1309 and CA1310 as errors in `src` (culture-sensitive identifier comparisons are a bypass class); CA1304, CA1305 and CA1311 later.
-- [WP-SIMPL-51](simplification/WP-SIMPL-51-websql-client-contract.md) WebSQL client contract from issues #527, #528, #529, #533: cost estimate and per-caller quota shared with GraphQL, typed columns with mask flags, syntax error positions and trailing semicolon, paging via bound continuation tokens without rewriting the statement (about 8 pd; developer-ready, Phase 3 approved with conditions SEC-51-01..22, owner confirmed all defaults 2026-11-07 incl. D-51m policy-denied statements charged; not started).
+- [WP-SIMPL-46](simplification/WP-SIMPL-46-unified-authorization-model.md) Unified authorization model ([ADR-020](../adr/ADR-020-unified-authorization-model.md), OD-30, OD-31, OD-32): one grant model and one `IAccessDecisionPoint`; ReBAC removed; access profiles grant only through materialized grant records; plugin hooks narrowing only.
+- [WP-SIMPL-47](simplification/WP-SIMPL-47-external-catalog-and-consent-api.md) Catalog and consent API, workflow internal or external, signed time-limited grant records (OD-28, OD-29, OD-32); owns the consent request REST route.
 
-Total effort: about 246.5-253.5 pd (WP-SIMPL-50 review remediation about 9.5 pd and WP-SIMPL-51 WebSQL client contract about 8 pd included) as the sum of the table above: WP-SIMPL-01..37 about 120-124 pd (security lane WP-SIMPL-36 8-12 and WP-SIMPL-37 4 included; WP-SIMPL-30 cancelled; WP-14, WP-16, WP-18 and WP-21 aligned with their specs and owner decisions) plus the owner-decision work packages WP-SIMPL-38..48 about 109-112 pd (WP-48 12 pd, WP-47 raised to 16 pd by OD-43) (estimates from section 11 of each spec). Contingency is not included; the earlier figure of 135-157 pd covered WP-01..37 only.
+Total effort: about 216-223 pd as the sum of the table above: WP-SIMPL-01..37 about 120-124 pd (security lane WP-SIMPL-36 8-12 and WP-SIMPL-37 4 included; WP-SIMPL-30 cancelled; WP-14, WP-16, WP-18 and WP-21 aligned with their specs and owner decisions) plus the owner-decision work packages WP-SIMPL-38..47 about 96-99 pd (estimates from section 11 of each spec). Contingency is not included; the earlier figure of 135-157 pd covered WP-01..37 only.
 
 ## 5. Architecture view: KEEP / MODULE / DELETE
 
@@ -521,7 +514,7 @@ DDL rule: only L-PER changes governance DDL (WP-11 removes the SQLite tree, WP-2
 
 ## Open issues and advisories assessment
 
-Assessment date 2026-11-05 (PM consolidation of seven triage slices; #527, #528, #529 and #533 added 2026-11-07 as WP-SIMPL-51). Scope: all 51 open GitHub issues and the draft security advisories. **Disclosure rule (SEC-SIMPL-01):** advisories are private drafts in a public repository; this plan names them only by GHSA id and the affected component. Details stay in the advisory.
+Assessment date 2026-11-05 (PM consolidation of seven triage slices). Scope: all 51 open GitHub issues and the draft security advisories. **Disclosure rule (SEC-SIMPL-01):** advisories are private drafts in a public repository; this plan names them only by GHSA id and the affected component. Details stay in the advisory.
 
 Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), **QUICK-WIN** (small, independent), **OBSOLETE-BY-REMOVAL** (closed by the deleting WP; no fix work), **PARTLY-OBSOLETE** (the part in deleted code is closed by the deleting WP; the rest is fixed), **DUPLICATE**, **NEEDS-DECISION** (depends on an owner decision below). Priorities P0 (now) to P3 (backlog). "Security lane" means WP-SIMPL-36 (section 4), which runs parallel to Stage 0 under the freeze exception; its first item is merging `fix/security-batch-5`.
 
@@ -592,10 +585,6 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | #521 | Pre-pull Testcontainers images | QUICK-WIN | P2 | Bundled with #519; Oracle image pre-pull stays (OD-12) |
 | #522 | Oracle/Stress/Spark suites to nightly | QUICK-WIN | P1 | Oracle and Spark/Databricks suites stay (OD-12): full suites nightly, security-tagged smoke subset on PRs; after #519; aligned with WP-SIMPL-21 parity split |
 | #523 | CI under 30 min (umbrella) | FIX-IN-CORE | P1 | Umbrella for #516-#522; target definition decided (OD-6) |
-| #527 | WebSQL cost estimate and per-caller quota | FIX-IN-CORE | P1 | WP-SIMPL-51 I1; quota shared with GraphQL (missing gateway policy on a core transport, OD-3) |
-| #528 | WebSQL column types and mask flags | FIX-IN-CORE | P2 | WP-SIMPL-51 I2; breaking response shape allowed |
-| #529 | WebSQL syntax error position, trailing semicolon | QUICK-WIN | P2 | WP-SIMPL-51 I3; position only, no statement echo |
-| #533 | WebSQL and GraphQL paging without rewriting | FIX-IN-CORE | P2 | WP-SIMPL-51 I4; bound continuation token, ORDER BY required (D-51b) |
 
 ### Security advisories
 
@@ -639,11 +628,11 @@ State: see [`simplification/advisories-overview.md`](simplification/advisories-o
 
 ### Owner decisions from the assessment
 
-All owner decisions are recorded in PRD section 2.0 (OD-1..OD-44, binding); this section only maps them to the assessment.
+All owner decisions are recorded in PRD section 2.0 (OD-1..OD-37, binding); this section only maps them to the assessment.
 - **OD-3** WebSQL DML stays core; **OD-4** catalog search including embeddings is core; **OD-5** ITSM integration and the header-based break-glass/justification flow are deleted (access-profile break-glass assignments are removed as well by OD-32).
 - **OD-6** CI target counts queue time (#523 definition: PR wall-clock from push to the last required check, median, < 30 min); **OD-7** ReBAC enforcement on all paths, revised by OD-30 (ReBAC removed); **OD-8** unwired WORM archive export deleted, startup fails on `Audit:Worm:Enabled`, retention purge keeps signed checkpoints and anchors; **OD-9** global operations only for canonical `ClusterAdmin`, `GovernanceAdmin` always tenant-bound (batch 5 is adjusted before merge); **OD-10** the GDPR disclosure report stays core; **OD-11** governed aggregation with small-group suppression and time buckets stays core, differential-privacy noise is deleted (#467, #468 obsolete).
 - **OD-12** Oracle and Databricks stay in core as governed data sources; the Oracle/Databricks parts of #479, #483, #521 and #522 are FIX-IN-CORE or QUICK-WIN instead of closed by removal. **OD-13** the PostgreSQL wire protocol proposal is dropped. **OD-14** deletes the Snowflake generator and keeps Ansi as a generator-only dialect. **OD-15 (extended)** keeps DuckDB entirely in core (federation, Olap, table cache with #475 fixed in core, generator, tests). **OD-16** three Databricks authentication modes (WP-SIMPL-37). **OD-17** accepts all remaining recommendations (embedded Garnet deleted, 220k core target, ADR-019 accepted, module signing scheme re-reviewed before WP-25, freeze and PR limit, second owner before Stage 3, `[WF]` bundles, SQL Server governance kept; its OData pilot item is superseded by OD-24).
-- **OD-18..OD-43** add the work packages WP-SIMPL-38..48 and the defaults of OD-37; OD-38..OD-43 (row policies, dynamic coverage, per-cell column state, grant attribution, transparency) add WP-SIMPL-48; OD-44 (data products) adds WP-SIMPL-49 after the feature freeze; see PRD section 2.0 and `simplification/README.md`.
+- **OD-18..OD-37** add the work packages WP-SIMPL-38..47 and the defaults of OD-37; see PRD section 2.0 and `simplification/README.md`.
 
 ## 8. Open architecture questions (default taken)
 
@@ -690,4 +679,4 @@ See [2026-11-05-sec-project-simplification.md](2026-11-05-sec-project-simplifica
 
 ## Work package specifications
 
-Developer-ready specifications for WP-SIMPL-01..50 (steps, tests, acceptance, PR slicing), execution order and corrections found while writing them: [`simplification/README.md`](simplification/README.md).
+Developer-ready specifications for WP-SIMPL-01..47 (steps, tests, acceptance, PR slicing), execution order and corrections found while writing them: [`simplification/README.md`](simplification/README.md).

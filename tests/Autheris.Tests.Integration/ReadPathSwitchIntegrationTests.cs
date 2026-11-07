@@ -418,6 +418,7 @@ public sealed class ReadPathAsyncJobWebSqlOffIntegrationTests : IClassFixture<We
 
     public void Dispose()
     {
+        _factory.Dispose();
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
     }

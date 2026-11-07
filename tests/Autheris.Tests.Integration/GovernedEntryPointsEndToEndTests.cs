@@ -77,6 +77,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
 
     public void Dispose()
     {
+        _factory.Dispose();
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
     }

@@ -20,33 +20,51 @@ using Xunit;
 /// server instructions, lists tools and resource templates; unauthenticated clients learn from the OAuth protected
 /// resource metadata where to get a token.
 /// </summary>
-public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fixture>
 {
     private const string Authority = "https://login.example.test/adfs";
     private readonly WebApplicationFactory<Program> _factory;
 
-    public McpSdkTransportTests(WebApplicationFactory<Program> factory)
+    public McpSdkTransportTests(Fixture fixture)
     {
-        _factory = factory.WithWebHostBuilder(b =>
+        _factory = fixture.Factory;
+    }
+
+    public sealed class Fixture : IDisposable
+    {
+        private readonly WebApplicationFactory<Program> _root = new();
+        public WebApplicationFactory<Program> Factory { get; }
+
+        public Fixture()
         {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:Authentication:Adfs:Enabled", "true");
-            b.UseSetting("Gateway:Authentication:Adfs:Authority", Authority);
-            b.UseSetting("Gateway:Authentication:Adfs:Audience", "api://autheris");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-McpSdk-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-            b.UseSetting("Gateway:Mcp:Enabled", "true");
-            b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-            // The enabled Adfs scheme needs an explicit realm of its kind (no implicit realm exists).
-            b.ConfigureServices(services => services.PostConfigure<Autheris.Domain.Options.Security.IdentityRealmsOptions>(options =>
-                options.Realms["adfs-test"] = new Autheris.Domain.Options.Security.IdentityRealmConfigOptions
-                {
-                    Kind = Autheris.Domain.Identity.IdentityRealmKind.Adfs,
-                    FixedTenantId = "tenant_sdk",
-                    Provisioning = Autheris.Domain.Identity.RealmProvisioningMode.None
-                }));
-        });
+            Factory = _root.WithWebHostBuilder(b =>
+            {
+                b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                b.UseSetting("Gateway:Authentication:Adfs:Enabled", "true");
+                b.UseSetting("Gateway:Authentication:Adfs:Authority", Authority);
+                b.UseSetting("Gateway:Authentication:Adfs:Audience", "api://autheris");
+                b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
+                b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-McpSdk-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                b.UseSetting("Gateway:Mcp:Enabled", "true");
+                b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+                // The enabled Adfs scheme needs an explicit realm of its kind (no implicit realm exists).
+                b.ConfigureServices(services => services.PostConfigure<Autheris.Domain.Options.Security.IdentityRealmsOptions>(options =>
+                    options.Realms["adfs-test"] = new Autheris.Domain.Options.Security.IdentityRealmConfigOptions
+                    {
+                        Kind = Autheris.Domain.Identity.IdentityRealmKind.Adfs,
+                        FixedTenantId = "tenant_sdk",
+                        Provisioning = Autheris.Domain.Identity.RealmProvisioningMode.None
+                    }));
+            });
+        }
+
+        public void Dispose()
+        {
+            Factory.Dispose();
+            _root.Dispose();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        }
     }
 
     private HttpClient AuthenticatedHttpClient()
@@ -184,7 +202,7 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
         var tempAnchor = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"anchor-{Guid.NewGuid():N}.txt");
         try
         {
-            var prodFactory = _factory.WithWebHostBuilder(b =>
+            await using var prodFactory = _factory.WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Production");
                 b.UseSetting("Gateway:Hosting:AllowedHosts:0", "localhost");
@@ -294,7 +312,7 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
     [Fact]
     public async Task McpDeveloperCors_InDevelopmentWithFlag_HandlesPreflightOptions()
     {
-        var corsFactory = _factory.WithWebHostBuilder(b =>
+        await using var corsFactory = _factory.WithWebHostBuilder(b =>
         {
             b.UseEnvironment("Development");
             b.UseSetting("Gateway:Mcp:EnableDeveloperCors", "true");

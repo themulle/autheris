@@ -14,19 +14,13 @@ using Shouldly;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed class RemovedEndpointsTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class RemovedEndpointsTests : IClassFixture<RemovedEndpointsTests.Fixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public RemovedEndpointsTests(WebApplicationFactory<Program> factory)
+    public RemovedEndpointsTests(Fixture fixture)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment("Development");
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-        });
+        _factory = fixture.Factory;
     }
 
     private HttpClient CreateAdminClient()
@@ -140,6 +134,30 @@ public sealed class RemovedEndpointsTests : IClassFixture<WebApplicationFactory<
         {
             var match = endpoints.Where(e => (e.RoutePattern.RawText ?? "").Contains(pattern, StringComparison.OrdinalIgnoreCase)).ToList();
             match.ShouldBeEmpty($"Found endpoints matching removed pattern '{pattern}'");
+        }
+    }
+
+    public sealed class Fixture : IDisposable
+    {
+        private readonly WebApplicationFactory<Program> _root = new();
+        public WebApplicationFactory<Program> Factory { get; }
+
+        public Fixture()
+        {
+            Factory = _root.WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Development");
+                builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
+                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{nameof(RemovedEndpointsTests)}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            });
+        }
+
+        public void Dispose()
+        {
+            Factory.Dispose();
+            _root.Dispose();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         }
     }
 }

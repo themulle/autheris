@@ -20,40 +20,55 @@ using Shouldly;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed class ODataAccessModelTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class ODataAccessModelTests : IClassFixture<ODataAccessModelTests.Fixture>
 {
     private static readonly TableIdentifier CustomersTable = new("erp", "main", "customers");
     private static readonly Sid EuAnalystSid = new("S-1-5-21-ODATA-EU-ANALYST");
     private static readonly Sid DeniedUserSid = new("S-1-5-21-ODATA-DENIED-USER");
     private const string Tenant = "erp";
 
-    private readonly WebApplicationFactory<Program> _factory;
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"odata-access-{Guid.NewGuid():N}.db");
-    private bool _seeded;
+    private readonly Fixture _fixture;
+    private WebApplicationFactory<Program> _factory => _fixture.Factory;
 
-    public ODataAccessModelTests(WebApplicationFactory<Program> factory)
+    public ODataAccessModelTests(Fixture fixture)
     {
-        SeedDatabase(_dbPath);
-
-        _factory = factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Tenant);
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-odata-access-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-            builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "Sqlite");
-            builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={_dbPath}");
-            builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "erp");
-            builder.UseSetting("Gateway:OData:Enabled", "true");
-            builder.UseSetting("Gateway:Rebac:Enabled", "false");
-        });
+        _fixture = fixture;
     }
 
-    public void Dispose()
+    public sealed class Fixture : IDisposable
     {
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch (IOException) { }
+        private readonly WebApplicationFactory<Program> _root = new();
+        private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"odata-access-{Guid.NewGuid():N}.db");
+        public WebApplicationFactory<Program> Factory { get; }
+        public bool Seeded { get; set; }
+
+        public Fixture()
+        {
+            SeedDatabase(_dbPath);
+
+            var dbPath = _dbPath;
+            Factory = _root.WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Tenant);
+                builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
+                builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
+                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-odata-access-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "Sqlite");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={dbPath}");
+                builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "erp");
+                builder.UseSetting("Gateway:OData:Enabled", "true");
+                builder.UseSetting("Gateway:Rebac:Enabled", "false");
+            });
+        }
+
+        public void Dispose()
+        {
+            Factory.Dispose();
+            _root.Dispose();
+            SqliteConnection.ClearAllPools();
+            try { File.Delete(_dbPath); } catch (IOException) { }
+        }
     }
 
     private static void SeedDatabase(string path)
@@ -81,7 +96,7 @@ public sealed class ODataAccessModelTests : IClassFixture<WebApplicationFactory<
 
     private async Task EnsureSeededAsync()
     {
-        if (_seeded)
+        if (_fixture.Seeded)
         {
             return;
         }
@@ -160,7 +175,7 @@ public sealed class ODataAccessModelTests : IClassFixture<WebApplicationFactory<
             ]
         });
 
-        _seeded = true;
+        _fixture.Seeded = true;
     }
 
     private HttpClient CreateClientFor(Sid sid)
