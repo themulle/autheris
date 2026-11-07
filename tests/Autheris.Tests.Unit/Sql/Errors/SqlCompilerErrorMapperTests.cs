@@ -281,4 +281,20 @@ public sealed class SqlCompilerErrorMapperTests
             mapping.Title.ShouldNotContain(HostileMarker);
         }
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SyntaxError_Body_HasPosition_AndNoStatementText()
+    {
+        var syntaxEx = new SqlSyntaxErrorException(3, 14, "line 3:13: mismatched input 'SECRET_TOKEN'");
+        SqlCompilerErrorMapper.TryMap(syntaxEx, out var mapping).ShouldBeTrue();
+        mapping.Status.ShouldBe(400);
+        mapping.Code.ShouldBe(GovernedSqlErrorCodes.SyntaxError);
+        mapping.Line.ShouldBe(3);
+        mapping.Column.ShouldBe(14);
+        mapping.Title.ShouldBe(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.SyntaxError));
+        mapping.Title.ShouldNotContain("SECRET_TOKEN");
+        mapping.Title.ShouldNotContain("line 3");
+        mapping.Title.ShouldNotContain("mismatched");
+    }
 }

@@ -373,8 +373,7 @@ public sealed class WebSqlParserGatewaySecurityTests
     [InlineData("SELECT * FROM \"public.employees\"")]
     [InlineData("SELECT id FROM employees FOR VERSION AS OF 1")]
     [InlineData("SELECT id FROM employees FOR TIMESTAMP AS OF TIMESTAMP '2026-01-01 00:00:00'")]
-    [InlineData("SELECT id FROM employees -- comment")]
-    public async Task P06_DottedIdentifiersTimeTravelAndComments_AreRejected(string sql)
+    public async Task P06_DottedIdentifiersAndTimeTravel_AreRejected(string sql)
     {
         var service = CreatePostgreSqlService();
 

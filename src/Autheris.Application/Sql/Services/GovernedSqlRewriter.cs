@@ -46,11 +46,7 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 {
-    private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = new()
-    {
-        RejectComments = true, RejectBackslashInStrings = true, RejectEscapedStringLiterals = true,
-        RejectNonAsciiIdentifiers = true, RejectDotsInQuotedIdentifiers = true, RejectTimeTravelQueries = true, RejectReservedIdentifiers = true
-    };
+    private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = ClientSqlTokenPolicy.Analysis;
 
     private const string InternalParameterPrefix = GovernedSqlExecutionService.InternalParameterPrefix;
 

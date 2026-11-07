@@ -313,6 +313,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 {
                     redacted.Append(RedactedLiteralPlaceholder);
                 }
+                else if (tok.Type == SqlBaseLexer.SIMPLE_COMMENT || tok.Type == SqlBaseLexer.BRACKETED_COMMENT)
+                {
+                    redacted.Append(' ');
+                }
                 else
                 {
                     redacted.Append(tok.Text);
