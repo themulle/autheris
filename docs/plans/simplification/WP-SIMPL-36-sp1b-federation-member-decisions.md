@@ -1,6 +1,6 @@
 # WP-SIMPL-36 sub-package 1, part B: federation member column decisions (addendum)
 
-Parent: [WP-SIMPL-36 security lane](WP-SIMPL-36-security-lane.md), sub-package 1, item 5 (GHSA-7ccv-hfgq-5qwm, federation column access checks). Must satisfy SEC-SIMPL-94 (OD-15): each source subtree is authorized and masked against its own access decision before staging. The fix list is the private advisory's fix list; this addendum names no exploit detail. Part A (audit flag from the real read path) is already on `feat/simpl-36-sp1` and stays green.
+Parent: [WP-SIMPL-36 security lane](WP-SIMPL-36-security-lane.md), sub-package 1, item 5 (GHSA-7ccv-hfgq-5qwm, federation column access checks). Must satisfy SEC-SIMPL-94 (OD-15): each source subtree is authorized and masked against its own access decision before staging. The fix list is the private advisory's fix list; this addendum stays neutral. Part A (audit flag from the real read path) is already on `feat/simpl-36-sp1` and stays green.
 
 Verified on `feat/simpl-36-sp1b` (8b0edb42): `CrossSourcePlanner.Plan` partitions at `:266` without decisions, stages each subtree with the root member's decision (`:329`); `SubtreeCompiler.Compile` (`:79`) builds per-member decisions but compiles with a no-op mask provider (`:170`); single tables strip Deny columns (`:383-401`). `SubtreeGraphPartitioner.Partition(statement, tables, max)` has two callers: the planner and `QueryAnalysisService.Sql.cs:355` (explain only).
 

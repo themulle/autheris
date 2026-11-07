@@ -77,8 +77,8 @@ public static class SubtreeCompiler
     }
 
     /// <summary>
-    /// True only when every column of the table is Clear for its own decision, so the table may join a same-source subtree
-    /// (SEC-SIMPL-94). Every branch defaults to "not eligible"; this never throws.
+    /// True only when every column of the table is Clear for its own decision, so the table may join a same-source subtree.
+    /// Every branch defaults to "not eligible"; this never throws.
     /// </summary>
     internal static bool IsPushdownEligible(ResolvedSourceTable? table, TableAccessDecision? decision)
     {
