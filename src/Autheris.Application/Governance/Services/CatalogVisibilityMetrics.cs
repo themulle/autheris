@@ -2,7 +2,7 @@ namespace Autheris.Application.Governance.Services;
 
 using System.Diagnostics.Metrics;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;

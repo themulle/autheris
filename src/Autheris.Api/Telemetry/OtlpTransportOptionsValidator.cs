@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Telemetry;
 
 /// <summary>
-/// ARCH-MNT-06 (SC-01, SC-02): fail-closed start-up check of every resolved OTLP exporter endpoint (traces, metrics, logs, including the
+///  (SC-01, SC-02): fail-closed start-up check of every resolved OTLP exporter endpoint (traces, metrics, logs, including the
 /// per-signal and global <c>OTEL_EXPORTER_OTLP_*</c> overrides). An invalid URI or a scheme other than http/https fails the start. A plaintext
 /// <c>http</c> endpoint is accepted for a loopback host (<c>localhost</c>, <c>127.0.0.0/8</c>, <c>::1</c>, parsed, never by string prefix) and in
 /// Development; anywhere else it fails unless <see cref="OtlpOptions.AllowInsecureTransport"/> is set (which logs a warning). Failure messages

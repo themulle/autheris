@@ -3,7 +3,7 @@ using Autheris.Domain.Audit;
 namespace Autheris.Application.Audit;
 
 /// <summary>
-/// WP-ARC-A-06: explicit <see cref="AuditFailurePolicy"/> per <see cref="AuditEventTypes"/> entry. Every catalog constant has a row
+/// explicit<see cref="AuditFailurePolicy"/> per <see cref="AuditEventTypes"/> entry. Every catalog constant has a row
 /// (enforced by <c>AuditPolicyTableTests</c>). Unknown event types default to <see cref="AuditFailurePolicy.FailClosed"/>.
 /// DENY records are fail-closed for the audit step only; the denial itself never depends on the audit outcome.
 /// </summary>
@@ -75,6 +75,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.ConsentWithdrawn] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentApplied] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ConsentDescriptionChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ConsentRecertificationRequired] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProfileInvalidationFailed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.BreakGlassActivated] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DatasourceTested] = AuditFailurePolicy.FailClosed,

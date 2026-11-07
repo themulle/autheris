@@ -12,12 +12,12 @@ using Autheris.Api.Endpoints;
 using Autheris.Api.Errors;
 using Autheris.Api.Security;
 using Autheris.Application.Analytics;
-using Autheris.Application.Data.Changes;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
-using Autheris.Application.Jobs.Interfaces;
-using Autheris.Application.Jobs.Services;
+using Autheris.Application.DataSources.Changes;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
+using Autheris.Application.Runtime.Jobs.Interfaces;
+using Autheris.Application.Runtime.Jobs.Services;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Policy;
@@ -26,7 +26,7 @@ using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
@@ -190,8 +190,7 @@ public sealed class Batch5SecurityTestsA
                 Enabled = true,
                 ApprovalTimeoutSeconds = 30,
                 RequireDifferentApprover = false,
-                RequireTotp2Fa = false, // Explicitly false!
-                AutoCreateItsmTicket = false
+                RequireTotp2Fa = false // Explicitly false!
             }
         });
 
@@ -606,7 +605,7 @@ public sealed class Batch5SecurityTestsA
 
         // Part 2: ArrowExportEndpoints validates target table matches RebacValidated:table
         var arrowService = Substitute.For<IArrowExportService>();
-        var planner = new Autheris.Application.Data.Services.GovernedTableReadPlanner();
+        var planner = new Autheris.Application.DataSources.Services.GovernedTableReadPlanner();
 
         // 2a. Matching table query succeeds past the ReBAC gate
         var validContext = new DefaultHttpContext

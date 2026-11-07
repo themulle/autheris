@@ -6,8 +6,8 @@ using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Hosting;
 using Autheris.Api.Middleware;
-using Autheris.Application.Interfaces;
-using Autheris.Application.OpenMetadata.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
@@ -32,36 +32,30 @@ using Autheris.Application.Governance;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Lineage;
-using Autheris.Application.Workflows;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Governance.Workflows;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
-using Autheris.Application.ResourceGroups;
+using Autheris.Application.Runtime.ResourceGroups;
 using Autheris.Application.Observability;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.OData.Services;
-using Autheris.Infrastructure.Itsm;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Plugins;
 using Autheris.Domain.Diagnostics;
-using Autheris.Application.Caching.Interfaces;
-using Autheris.Infrastructure.Garnet;
+using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Infrastructure.Serialization;
-using Autheris.Application.Caching.Services;
+using Autheris.Application.State.Caching.Services;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Streaming.Services;
 using Autheris.Infrastructure.Streaming;
 using Autheris.GraphQL.Subscriptions;
-using Autheris.Infrastructure.Cdn;
-using Autheris.Application.SchemaRegistry;
 using Autheris.Application.Extensibility;
 using Autheris.Application.Extensibility.Interceptors;
 using Autheris.Application.Sql;
-using Autheris.Application.Serialization;
-using Autheris.Application.SchemaRegistry.Validation;
+using Autheris.Application.Common.Serialization;
 using System.Net.Http;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Trace;
@@ -172,7 +166,7 @@ public static partial class GatewayServiceCollectionExtensions
 
         Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateSqlRewriterEngine(configuration);
         Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator.ValidateRemovedWebSqlSettings(configuration);
-        // ARCH-MNT-06-FU-03: the telemetry section is outside GatewayOptions; bind it here so the startup report can list insecure OTLP transport.
+        // FU-03: the telemetry section is outside GatewayOptions; bind it here so the startup report can list insecure OTLP transport.
         ValidateGatewayOptions(
             gatewayOptions,
             environment,

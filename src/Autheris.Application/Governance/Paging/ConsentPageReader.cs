@@ -4,11 +4,11 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// WP-SC-10 / WP-SC-16 rule 5: reads one page of consents applying the read-time clamp of legacy individual grants. The repository supplies
+/// 16 rule 5: reads one page of consents applying the read-time clamp of legacy individual grants. The repository supplies
 /// keyset pages; this reader re-applies activity at read time (so a clamped, no longer active grant never shows up as active) and can
 /// restrict the result to grants whose effective expiry was clamped (<c>clamped=true</c> report). Scanning is bounded.
 /// </summary>

@@ -7,7 +7,7 @@ using Autheris.Domain.Model;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
-/// WP-122-2: Dialect capability matrix enforcing superset semantics, collation safety, and ANSI Three-Valued Logic (3VL).
+/// Dialect capability matrix enforcing superset semantics, collation safety, and ANSI Three-Valued Logic (3VL).
 /// </summary>
 public static class PushabilityMatrix
 {
@@ -30,7 +30,7 @@ public static class PushabilityMatrix
     }
 
     /// <summary>
-    /// SEC-DATA122-04: Dialect collation safety check for negative filters on SQL Server.
+    /// Dialect collation safety check for negative filters on SQL Server.
     /// SQL Server string inequality drops rows that DuckDB would retain due to default case-insensitivity.
     /// </summary>
     public static bool IsNegativeFilterSafeForDialect(DatabaseDialect dialect, TableColumn? column)
@@ -61,7 +61,7 @@ public static class PushabilityMatrix
         IsNegativeFilterSafeForDialect(dialect, column);
 
     /// <summary>
-    /// SEC-DATA122-04: ANSI Three-Valued Logic safety check.
+    /// ANSI Three-Valued Logic safety check.
     /// NOT IN (...) containing any NULL literal or parameter evaluates to UNKNOWN (falsy) in SQL.
     /// </summary>
     public static bool HasNullInNotInList(InListExpression inList)

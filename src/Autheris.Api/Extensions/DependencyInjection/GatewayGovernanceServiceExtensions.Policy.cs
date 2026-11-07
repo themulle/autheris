@@ -1,17 +1,17 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
 using Autheris.Application.Audit;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Events.Interfaces;
-using Autheris.Application.DataCatalog.Services;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Services;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Extensions.Dbt;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.Policy.Services;
@@ -20,12 +20,11 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Workflows;
+using Autheris.Application.Governance.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Itsm;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
@@ -44,7 +43,7 @@ public static partial class GatewayGovernanceServiceExtensions
 
         services.AddSingleton<VirtualFilterAdministrationService>();
         services.AddSingleton<IVirtualFilterSnapshotProvider, VirtualFilterSnapshotProvider>();
-        // REQ-GOV-129: caller attribute registry and its administration (four-eyes).
+        // caller attribute registry and its administration (four-eyes).
         services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ClaimsAttributeProvider>();
         services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.ServiceAttributeProvider>();
         services.AddSingleton<Autheris.Application.Identity.Attributes.ICallerAttributeProvider, Autheris.Application.Identity.Attributes.AttributeTableProvider>();
@@ -58,7 +57,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService>(sp => new Autheris.Application.Identity.Attributes.CallerAttributeAdministrationService(
             sp.GetRequiredService<Autheris.Domain.Interfaces.ICallerAttributeRepository>(),
             sp.GetRequiredService<Autheris.Application.Identity.Attributes.ICallerAttributeRegistry>(),
-            sp.GetRequiredService<Autheris.Application.Interfaces.IAuditLogRepository>(),
+            sp.GetRequiredService<Autheris.Application.Common.Interfaces.IAuditLogRepository>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
             sp.GetService<TimeProvider>() ?? TimeProvider.System,
             sp.GetServices<Autheris.Application.Identity.Attributes.ICallerAttributeDefinitionValidator>()));
@@ -70,7 +69,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
         services.AddSingleton<IEffectiveFilterInspector, EffectiveFilterInspector>();
         services.AddScoped<Autheris.Application.Governance.IOpenApiIngestionUseCase, Autheris.Application.Governance.OpenApiIngestionUseCase>();
-        // F-GOV-14 (M4, SEC-10): authorized key sets from the SQL key source, in a dedicated size-limited cache.
+        // F-GOV-14 (M4): authorized key sets from the SQL key source, in a dedicated size-limited cache.
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.VirtualFilterKeySetCache>();
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterKeySetProvider, Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider>();
         // F-GOV-14 (WI-6): without this registration a WebSQL cross-source query over a protected HTTP table is denied.

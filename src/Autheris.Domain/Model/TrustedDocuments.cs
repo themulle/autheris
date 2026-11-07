@@ -43,7 +43,7 @@ public sealed class TrustedDocumentVersionRetiredException : InvalidOperationExc
     }
 }
 
-/// <summary>A PUT would create an active version beyond the configured cap of active versions per app (SEC-281-8).</summary>
+/// <summary>A PUT would create an active version beyond the configured cap of active versions per app.</summary>
 public sealed class TrustedDocumentVersionLimitException : InvalidOperationException
 {
     public TrustedDocumentVersionLimitException() : base("The app already has the maximum number of active versions.")

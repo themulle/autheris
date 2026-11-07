@@ -3,7 +3,7 @@ namespace Autheris.Domain.Options.DataSources;
 using System.ComponentModel.DataAnnotations;
 
 /// <summary>
-/// SEC-DS05-01 / SEC-DS05-02: Global safety ceilings enforced across all data sources.
+/// Global safety ceilings enforced across all data sources.
 /// Per-data-source overrides cannot exceed these bounds unless dual administrative opt-in is enabled.
 /// </summary>
 public sealed class DataSourceSafetyCeilingsOptions
@@ -41,7 +41,7 @@ public sealed class DataSourceSafetyCeilingsOptions
     public int MaxKeySetImportLimitCeiling { get; init; } = 50_000;
 
     /// <summary>
-    /// Master administrative opt-in required to allow any data source to exceed safety ceilings (SEC-DS05-02).
+    /// Master administrative opt-in required to allow any data source to exceed safety ceilings.
     /// Both this and <see cref="DataSourceProfileOptions.AllowCeilingRelaxation"/> must be true to bypass ceilings.
     /// </summary>
     public bool AllowGlobalCeilingRelaxation { get; init; } = false;

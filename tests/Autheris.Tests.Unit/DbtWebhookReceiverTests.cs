@@ -4,7 +4,7 @@ using System;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Dbt;
 using Microsoft.Extensions.Logging.Abstractions;

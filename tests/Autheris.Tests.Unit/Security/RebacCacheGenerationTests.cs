@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Security;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Rebac.Services;
 using Autheris.Domain.Model;

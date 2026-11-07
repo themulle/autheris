@@ -12,7 +12,7 @@ Comprehensive competitive breakdown between **Autheris Enterprise Gateway** and 
 | **Total Cost of Ownership (TCO)** | **Cost-Effective & Predictable:** Flat enterprise licensing without core or tenant extortion | **Extremely Expensive:** Steep per-core pricing, high enterprise tier minimums |
 | **Cross-Domain Federation** | **Embedded DuckDB OLAP:** Multi-source joins executed in zero-copy in-memory DuckDB batches | **Distributed Subgraphs / Connector Fabric:** High complexity to join SQL with REST APIs |
 | **Workflow Governance** | **4-Eyes SoD & ServiceNow / Jira Webhooks:** Interactive challenge responses with JIT consent tickets | **Static Permissions:** Binary Allow/Deny; no native human-in-the-loop (HitL) approval workflows |
-| **Lakehouse & Big Data** | **Native Apache Iceberg & Parquet:** Zero-trust pushdown to lakehouses via DuckDB and Arrow Flight | **Relational DB First:** Limited modern lakehouse catalog integration without extra SaaS components |
+| **Lakehouse & Big Data** | **Native Apache Iceberg & Parquet:** Zero-trust pushdown to lakehouses via DuckDB and Arrow IPC over HTTP | **Relational DB First:** Limited modern lakehouse catalog integration without extra SaaS components |
 | **Extensibility Language** | **First-Class C# (.NET 10):** Direct access to ASP.NET Core DI, Spans, and native NuGet packages | **TypeScript / Go / Rust Plugins:** Requires building separate connector services for custom logic |
 
 ---

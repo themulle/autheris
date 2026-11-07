@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit;
 
 using System;
 using System.IO;
-using Autheris.Application.SqlEndpoints.Services;
+using Autheris.Application.Sql.Endpoints.Services;
 using Shouldly;
 using Xunit;
 

@@ -13,7 +13,7 @@ using TrinoSqlEngine.Governance;
 
 /// <summary>
 /// Typed producers of the advanced row filters (correlated subquery, cross-source set). They build AST nodes only: identifiers are
-/// validated and quoted by the generator, and every consent value is a <see cref="PolicyParameterExpression"/> (SEC-X1-02).
+/// validated and quoted by the generator, and every consent value is a <see cref="PolicyParameterExpression"/>.
 /// The legacy string producers in <see cref="AdvancedRlsFilterGenerator"/> stay until X1.
 /// </summary>
 internal static class AdvancedRlsPredicateBuilder

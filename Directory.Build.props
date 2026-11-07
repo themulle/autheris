@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>1.2.1</Version>
+    <Version Condition="'$(Version)' == ''">0.0.0-dev</Version>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -14,7 +14,7 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode Condition="('$(ContinuousIntegrationBuild)' == 'true' Or '$(GITHUB_ACTIONS)' == 'true') And '$(RuntimeIdentifier)' == ''">true</RestoreLockedMode>
     <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
-    <NoWarn>$(NoWarn);CS1591;CS0108;CA1805;CA1822;CA1859;CA1515;CA1861;CA1707;CA1711;CA1716;CA1305;CA1850;CA1304;CA1307;CA1310;CA1311;CA1816;CA1848;CA1873;CA1865;CA1870;CA1826;CA2012</NoWarn>
+    <NoWarn>$(NoWarn);CS0419;CS1570;CS1571;CS1572;CS1573;CS1574;CS1584;CS1587;CS1589;CS1590;CS1591;CS1592;CS1710;CS1711;CS1712;CS1734;CS1735;CS0108;CA1805;CA1822;CA1859;CA1515;CA1861;CA1707;CA1711;CA1716;CA1305;CA1850;CA1304;CA1307;CA1310;CA1311;CA1816;CA1848;CA1873;CA1865;CA1870;CA1826;CA2012</NoWarn>
     <AutherisIncludeTestAuth Condition="'$(AutherisIncludeTestAuth)' == ''">false</AutherisIncludeTestAuth>
   </PropertyGroup>
 

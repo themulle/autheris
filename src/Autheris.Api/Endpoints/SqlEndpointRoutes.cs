@@ -12,9 +12,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Serialization;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
-using Autheris.Application.SqlEndpoints.Interfaces;
+using Autheris.Application.Sql.Endpoints.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
@@ -77,7 +77,7 @@ public static class SqlEndpointRoutes
         RegisterSqlEndpointRequest? request,
         ISqlEndpointRegistry registry,
         HttpContext context,
-        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? loader = null)
+        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? loader = null)
     {
         if (context.User.IsReadOnly() || !IsListAdmin(context.User))
         {
@@ -95,7 +95,7 @@ public static class SqlEndpointRoutes
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid endpoint name. Must contain only alphanumeric characters, underscores, or hyphens and not exceed 128 characters.", context);
         }
 
-        var endpointLoader = loader ?? context.RequestServices?.GetService<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
+        var endpointLoader = loader ?? context.RequestServices?.GetService<Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader>();
         Autheris.Domain.Model.SqlEndpointDefinition definition;
 
         if (endpointLoader != null)
@@ -216,7 +216,7 @@ public static class SqlEndpointRoutes
                 isRequired = p.IsRequired,
                 description = p.Description,
                 isList = p.IsList,
-                // REQ-SQL-128 FR-128-7: the configured maximum is published; the dialect-clamped effective number reveals the backend and is not.
+                // 128 FR-128-7: the configured maximum is published; the dialect-clamped effective number reveals the backend and is not.
                 maxItems = p.IsList ? (int?)maxListItems : null
             }).ToList()
         }).ToList();
@@ -243,7 +243,7 @@ public static class SqlEndpointRoutes
 
                 if (p.IsList)
                 {
-                    // REQ-SQL-128 AC-128-7: an array of the element type, repeated query key (?ids=1&ids=2), the configured maximum.
+                    // 128 AC-128-7: an array of the element type, repeated query key (?ids=1&ids=2), the configured maximum.
                     schema = new Dictionary<string, object>
                     {
                         ["type"] = "array",
@@ -368,7 +368,7 @@ public static class SqlEndpointRoutes
         try
         {
             var rawInputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            // REQ-SQL-128 FR-128-4 (SEC-128-14): a repeated key becomes a list only for a key that names a LIST-declared parameter; a repeated key of a
+            // 128 FR-128-4: a repeated key becomes a list only for a key that names a LIST-declared parameter; a repeated key of a
             // scalar parameter is refused (no value in the error); every other key (format, paging, undeclared) stays the joined text as before.
             Autheris.Domain.Model.SqlEndpointDefinition? endpointDefinition = null;
             var definitionResolved = false;
@@ -509,7 +509,7 @@ public static class SqlEndpointRoutes
         }
     }
 
-    /// <summary>REQ-SQL-128 C-15: a list error answers 400 with its stable code and the fixed message of that code (no count, no name, no value), in every environment.</summary>
+    /// <summary>128 C-15: a list error answers 400 with its stable code and the fixed message of that code (no count, no name, no value), in every environment.</summary>
     internal static async Task WriteListErrorAsync(HttpContext httpContext, TrinoSqlEngine.Ast.Emit.ClientListException error, CancellationToken ct)
     {
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(error, out var mapped);

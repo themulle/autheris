@@ -18,9 +18,9 @@ internal readonly record struct RelationRowData(
     bool AllowCrossDataSource = false);
 
 /// <summary>
-/// Engine-neutral assembly of <see cref="TableRelation"/> from the single relation read statement (issue #151, PLAN-REL-151 decision 5).
+/// Engine-neutral assembly of <see cref="TableRelation"/>from the single relation read statement (issue #151, 151 decision 5).
 /// Rows must be ordered by relation id, then key ordinal. A relation without key rows, with an ordinal gap or violating
-/// <see cref="RelationKeyRules"/> is skipped (fail closed); the load continues. Logging is bounded per load (SEC-REL151-09).
+/// <see cref="RelationKeyRules"/>is skipped (fail closed); the load continues. Logging is bounded per load.
 /// </summary>
 internal static class RelationRowAssembler
 {

@@ -10,7 +10,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 
 /// <summary>
-/// The caller placeholder of sql Virtual Filters (PLAN-GOV-129 A-4, BC-129-05, BC-129-06): <c>{{caller.&lt;name&gt;}}</c>, unquoted, only as a
+/// The caller placeholder of sql Virtual Filters (129 A-4, BC-129-05, BC-129-06):<c>{{caller.&lt;name&gt;}}</c>, unquoted, only as a
 /// scalar operand of <c>= &lt;&gt; &lt; &lt;= &gt; &gt;=</c> or as the sole item of <c>IN ( ... )</c> / <c>NOT IN ( ... )</c>, and only inside a top-level
 /// conjunct of the WHERE clause (never under OR, NOT, CASE, a function, LIKE or BETWEEN). The fragment is rewritten before parsing to the
 /// reserved quoted sentinel <c>'__autheris_caller__&lt;name&gt;'</c>; a definition that spells the sentinel, or the placeholder inside a literal,

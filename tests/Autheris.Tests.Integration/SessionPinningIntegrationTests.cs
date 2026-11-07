@@ -89,7 +89,7 @@ public sealed class PostgreSqlSessionPinningTests : IClassFixture<AstCompilerPos
     [Fact]
     public async Task MissingDefaultSchemaAtRequestTime_FailsClosed()
     {
-        await Should.ThrowAsync<Autheris.Application.Interfaces.SqlSourceUnavailableException>(() => _factory.CreateOpenConnectionAsync(Options(null)));
+        await Should.ThrowAsync<Autheris.Application.Common.Interfaces.SqlSourceUnavailableException>(() => _factory.CreateOpenConnectionAsync(Options(null)));
     }
 }
 

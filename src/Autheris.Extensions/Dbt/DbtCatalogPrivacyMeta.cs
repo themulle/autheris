@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -15,7 +15,7 @@ using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Issue #448 (WP-4, SEC-MGS-05, SEC-MGS-08, SEC-MGS-09):
+/// Issue #448:
 /// Ingestion of catalog privacy metadata (autheris.min_group_size and autheris.non_personal) from dbt manifests.
 /// </summary>
 internal static class DbtCatalogPrivacyMeta

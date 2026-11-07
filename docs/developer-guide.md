@@ -300,7 +300,7 @@ Autheris provides its own decoupled semantic schema grounding for AI agents via 
 
 ## 8. Testing Data Catalog Synchronization
 
-You can test Data Catalog synchronization against Microsoft Purview, Collibra, Alation, or OpenMetadata locally:
+You can test Data Catalog synchronization against OpenMetadata locally:
 
 ```graphql
 # Administrative Mutation (requires GovernanceAdmin or ClusterAdmin)
@@ -378,7 +378,7 @@ dotnet run --project tools/casbin-policy-lint/casbin-policy-lint.csproj
 
 ## 11. Testing In-Memory OLAP & Arrow Export (`F-DATA-03` / `F-DATA-04`)
 
-Test fast vector analytical queries and Arrow Flight/IPC endpoints:
+Test fast vector analytical queries and Arrow IPC endpoints:
 
 ```bash
 # 1. In-Memory DuckDB OLAP Query

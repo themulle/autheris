@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// RFC 4647 language negotiation service. Resolves caller's requested language via explicit parameter,
 /// HTTP Accept-Language header, or configured gateway default language.
-/// Uses zero-allocation span parsing to defend against ReDoS and oversized header injections (SEC-CAT146-04, T-CAT146-05).
+/// Uses zero-allocation span parsing to defend against ReDoS and oversized header injections (T-CAT146-05).
 /// </summary>
 public sealed class LanguageNegotiator : ILanguageNegotiator
 {

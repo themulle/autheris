@@ -3,7 +3,7 @@ namespace Autheris.Application.Governance.Analysis;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
@@ -198,7 +198,7 @@ public sealed record AnalyzedKeySetPushdown(
     int? EstimatedBatches = null);
 
 /// <summary>
-/// Issue #132 (PLAN-DATA-132, WP-132-4): Co-located SQL Server group plan in query analysis.
+/// Issue #132: Co-located SQL Server group plan in query analysis.
 /// </summary>
 public sealed record CoLocatedGroupPlan(
     string GroupName,
@@ -207,7 +207,7 @@ public sealed record CoLocatedGroupPlan(
     bool SingleStatementExecuted);
 
 /// <summary>
-/// Issue #123 (WP-123-4): Analysis of planned same-source AST subtree pushdown.
+/// Issue #123: Analysis of planned same-source AST subtree pushdown.
 /// </summary>
 public sealed record AnalyzedSubtree(
     string SubtreeId,

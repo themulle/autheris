@@ -3,7 +3,7 @@ namespace Autheris.Domain.Connectors;
 using System.Collections.Generic;
 
 /// <summary>
-/// Issue #238 (PLAN-DATA-238, WP-SC-15): Supported mechanism for identity delegation.
+/// Issue #238: Supported mechanism for identity delegation.
 /// </summary>
 public enum DelegationKind
 {
@@ -18,7 +18,7 @@ public enum DelegationKind
 }
 
 /// <summary>
-/// Issue #238 (PLAN-DATA-238, FR-238-1.1): Connector capability interface declaring native delegation support.
+/// Issue #238 (FR-238-1.1): Connector capability interface declaring native delegation support.
 /// </summary>
 public interface IDelegationCapability
 {

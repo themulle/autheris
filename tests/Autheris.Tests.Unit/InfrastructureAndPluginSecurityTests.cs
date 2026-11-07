@@ -12,9 +12,10 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Extensibility;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Olap;
@@ -24,7 +25,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Garnet;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Plugins;
 using Autheris.Infrastructure.Serialization;
@@ -175,101 +175,6 @@ public sealed class InfrastructureAndPluginSecurityTests : IDisposable
         var afterRollback = await epochService.GetCurrentEpochAsync(table);
         afterRollback.ShouldBeGreaterThan(5);
         (await epochService.IsEpochValidAsync(table, 2)).ShouldBeFalse();
-    }
-
-    [Theory]
-    [InlineData("127.0.0.1", true)]
-    [InlineData("::1", true)]
-    [InlineData("[::1]", true)]
-    [InlineData("localhost", true)]
-    [InlineData("0.0.0.0", false)]
-    [InlineData("10.1.2.3", false)]
-    [InlineData("garnet.internal", false)]
-    public void H01_GarnetLoopbackDetection(string host, bool expected)
-    {
-        GarnetServerManager.IsLoopbackBinding(host).ShouldBe(expected);
-    }
-
-    [Fact]
-    public void H01_GarnetNonLoopbackBinding_OutsideDevelopment_AbortsStart()
-    {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
-        var options = Options.Create(new GatewayOptions
-        {
-            Caching = new CachingOptions
-            {
-                Garnet = new GarnetOptions { EnableEmbeddedServer = true, Host = "0.0.0.0", Port = 3295 }
-            }
-        });
-
-        using var manager = new GarnetServerManager(options, environment: env);
-        Should.Throw<InvalidOperationException>(() => manager.StartServer());
-        manager.IsRunning.ShouldBeFalse();
-    }
-
-    [Fact]
-    public void H01_GarnetAlwaysHasAClientPassword()
-    {
-        using var manager = new GarnetServerManager(Options.Create(new GatewayOptions()));
-        manager.ClientPassword.ShouldNotBeNullOrWhiteSpace();
-        manager.ClientPassword.Length.ShouldBeGreaterThanOrEqualTo(32);
-
-        using var other = new GarnetServerManager(Options.Create(new GatewayOptions()));
-        other.ClientPassword.ShouldNotBe(manager.ClientPassword, "Ephemeral passwords must be random per process/instance.");
-    }
-
-    [Fact]
-    public async Task H01_EmbeddedGarnet_RejectsUnauthenticatedClients()
-    {
-        const int port = 3296;
-        var options = Options.Create(new GatewayOptions
-        {
-            Caching = new CachingOptions
-            {
-                Garnet = new GarnetOptions { EnableEmbeddedServer = true, Host = "127.0.0.1", Port = port }
-            }
-        });
-
-        using var manager = new GarnetServerManager(options);
-        manager.StartServer();
-        try
-        {
-            var anonymousConfig = new ConfigurationOptions
-            {
-                EndPoints = { $"127.0.0.1:{port}" },
-                AbortOnConnectFail = false,
-                ConnectTimeout = 1500,
-                SyncTimeout = 1000
-            };
-
-            var rejected = false;
-            try
-            {
-                using var anonymous = await ConnectionMultiplexer.ConnectAsync(anonymousConfig);
-                await anonymous.GetDatabase().StringSetAsync("consent:l2:forged", "x");
-            }
-            catch (Exception)
-            {
-                rejected = true;
-            }
-            rejected.ShouldBeTrue("An unauthenticated client must not be able to write to the embedded Garnet.");
-
-            var authConfig = new ConfigurationOptions
-            {
-                EndPoints = { $"127.0.0.1:{port}" },
-                Password = manager.ClientPassword,
-                AbortOnConnectFail = false,
-                ConnectTimeout = 2000,
-                SyncTimeout = 1000
-            };
-            using var authenticated = await ConnectionMultiplexer.ConnectAsync(authConfig);
-            (await authenticated.GetDatabase().StringSetAsync("auth:ok", "1")).ShouldBeTrue();
-        }
-        finally
-        {
-            manager.StopServer();
-        }
     }
 
     [Fact]

@@ -28,24 +28,60 @@ public static class ConnectionTlsPolicy
         switch (dialect)
         {
             case DatabaseDialect.PostgreSql:
-                var pg = new NpgsqlConnectionStringBuilder(connectionString);
-                return pg.SslMode is SslMode.VerifyCA or SslMode.VerifyFull
-                    ? null
-                    : "PostgreSQL connections must use 'SSL Mode=VerifyFull' (or 'VerifyCA') outside Development.";
-
-            case DatabaseDialect.SqlServer:
-                var sql = new SqlConnectionStringBuilder(connectionString);
-                if (sql.TrustServerCertificate)
+                try
                 {
-                    return "SQL Server connections must not use 'TrustServerCertificate=true' outside Development.";
+                    var pg = new NpgsqlConnectionStringBuilder(connectionString);
+                    return pg.SslMode is SslMode.VerifyCA or SslMode.VerifyFull
+                        ? null
+                        : "PostgreSQL connections must use 'SSL Mode=VerifyFull' (or 'VerifyCA') outside Development.";
+                }
+                catch (ArgumentException)
+                {
+                    return "PostgreSQL connections must use 'SSL Mode=VerifyFull' (or 'VerifyCA') outside Development.";
                 }
 
-                return sql.Encrypt == SqlConnectionEncryptOption.Optional
-                    ? "SQL Server connections must use 'Encrypt=Mandatory' (or 'Strict') outside Development."
-                    : null;
+            case DatabaseDialect.SqlServer:
+                try
+                {
+                    var sql = new SqlConnectionStringBuilder(connectionString);
+                    if (sql.TrustServerCertificate)
+                    {
+                        return "SQL Server connections must not use 'TrustServerCertificate=true' outside Development.";
+                    }
+
+                    return sql.Encrypt == SqlConnectionEncryptOption.Optional
+                        ? "SQL Server connections must use 'Encrypt=Mandatory' (or 'Strict') outside Development."
+                        : null;
+                }
+                catch (ArgumentException)
+                {
+                    return "SQL Server connections must use 'Encrypt=Mandatory' (or 'Strict') outside Development.";
+                }
 
             default:
                 return null;
+        }
+    }
+
+    /// <summary>
+    /// Validates TLS settings for a governance database connection outside Development.
+    /// Throws <see cref="InvalidOperationException"/> naming only the required setting without echoing the connection string.
+    /// </summary>
+    public static void ValidateGovernanceConnectionTls(string? provider, string? connectionString, bool isDevelopment = false)
+    {
+        if (isDevelopment)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException("Governance connection string must be configured outside Development.");
+        }
+
+        if (Validate(provider, connectionString) is { } reason)
+        {
+            throw new InvalidOperationException(reason);
         }
     }
 }

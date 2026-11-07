@@ -3,11 +3,11 @@
 **Feature-ID:** F-GOV-13  
 **Authors:** Principal .NET & C# Solution Architect & Lead AI/Data Governance Architect  
 **Components:** 
-- Domain: [`TableModels.cs`](file:///root/autheris/src/Autheris.Domain/Model/TableModels.cs), `ClassificationModels.cs`
+- Domain: [`TableModels.cs`](../../src/Autheris.Domain/Model/TableModels.cs), `ClassificationModels.cs`
 - Application: `DataClassificationService.cs`, `SmartDataClassifier.cs`, `AutoMaskingPolicyEnforcer.cs`
 - Persistence: `SqliteGovernanceRepository.Catalog.cs`, `PostgreSqlGovernanceRepository.Catalog.cs`, `SqlServerGovernanceRepository.Catalog.cs`
 - API & MCP: `ClassificationEndpoints.cs`, `ClassificationMutationTypes.cs`, `McpAdminTools.cs`
-- Enforcers: [`TableAccessPolicy.cs`](file:///root/autheris/src/Autheris.Application/Policy/TableAccessPolicy.cs), [`ColumnMaskingProvider.cs`](file:///root/autheris/src/Autheris.Application/Services/ColumnMaskingProvider.cs), [`AstSecurityVisitor.cs`](file:///root/autheris/src/TrinoSqlEngine/AstSecurityVisitor.cs)
+- Enforcers: [`TableAccessPolicy.cs`](../../src/Autheris.Application/Policy/TableAccessPolicy.cs), [`ColumnMaskingProvider.cs`](../../src/Autheris.Application/Services/ColumnMaskingProvider.cs), [`AstSecurityVisitor.cs`](../../src/TrinoSqlEngine/Ast/Visitors/AstSecurityVisitor.cs)
 
 ---
 

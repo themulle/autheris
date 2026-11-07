@@ -3,7 +3,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
@@ -117,7 +117,7 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         var disabledOptions = new GatewayOptions
         {
             OData = new ODataOptions { Enabled = false },
-            Arrow = new ArrowExportOptions { Enabled = false, EnableFlightSql = false },
+            Arrow = new ArrowExportOptions { Enabled = false },
             Lakehouse = new LakehouseOptions { Enabled = false }
         };
 
@@ -154,7 +154,7 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         var enabledOptions = new GatewayOptions
         {
             OData = new ODataOptions { Enabled = true },
-            Arrow = new ArrowExportOptions { Enabled = true, EnableFlightSql = true },
+            Arrow = new ArrowExportOptions { Enabled = true },
             Lakehouse = new LakehouseOptions { Enabled = true }
         };
 
@@ -173,7 +173,6 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         result.Endpoints.ShouldNotBeNull();
         result.Endpoints!.ShouldContain(e => e.Protocol.Contains("OData"));
         result.Endpoints.ShouldContain(e => e.Protocol.Contains("Arrow IPC export"));
-        result.Endpoints.ShouldContain(e => e.Protocol.Contains("Arrow Flight SQL"));
         result.Endpoints.ShouldContain(e => e.Protocol.Contains("Iceberg REST Catalog"));
     }
 

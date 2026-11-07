@@ -4,10 +4,10 @@ using System.Collections.Immutable;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Data.Relations;
-using Autheris.Application.Data.Services;
+using Autheris.Application.DataSources.Relations;
+using Autheris.Application.DataSources.Services;
 using Autheris.Application.Governance.Analysis;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -106,7 +106,7 @@ public sealed class Issues220To227GovernanceRefinementsTests
         var encoder = new KeysetCursorEncoder(secret);
 
         var pkValues = new Dictionary<string, object?> { ["id"] = 100 };
-        var cursorContext = new Autheris.Application.Data.Interfaces.KeysetCursorContext("tenant-1", "sales", "orders", "asc", ["id"], "caller", "dbo");
+        var cursorContext = new Autheris.Application.DataSources.Interfaces.KeysetCursorContext("tenant-1", "sales", "orders", "asc", ["id"], "caller", "dbo");
         var token = encoder.EncodeCursor(pkValues, cursorContext);
         token.ShouldContain(".");
 
@@ -129,7 +129,7 @@ public sealed class Issues220To227GovernanceRefinementsTests
         var encoder = new KeysetCursorEncoder(secret);
 
         var pkValues = new Dictionary<string, object?> { ["id"] = 100 };
-        var cursorContext = new Autheris.Application.Data.Interfaces.KeysetCursorContext("tenant-1", "sales", "orders", "asc", ["id"], "caller", "dbo");
+        var cursorContext = new Autheris.Application.DataSources.Interfaces.KeysetCursorContext("tenant-1", "sales", "orders", "asc", ["id"], "caller", "dbo");
         var token = encoder.EncodeCursor(pkValues, cursorContext);
         var parts = token.Split('.');
         var tampered = parts[0] + "tampered." + parts[1];

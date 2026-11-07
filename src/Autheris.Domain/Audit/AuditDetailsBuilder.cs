@@ -7,7 +7,7 @@ namespace Autheris.Domain.Audit;
 
 /// <summary>
 /// Strongly typed, injection-safe, redaction-aware builder for audit entry DetailsJson.
-/// Enforces data minimization, PII scrubbing, and log-injection prevention (Invariants 2 & 4).
+/// Enforces data minimization, PII scrubbing, and log-injection prevention (Invariants 2 &amp; 4).
 /// </summary>
 public sealed class AuditDetailsBuilder
 {

@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;

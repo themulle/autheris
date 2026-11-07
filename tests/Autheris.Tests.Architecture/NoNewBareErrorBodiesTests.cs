@@ -31,9 +31,7 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         ["src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs|[\"error\"] = errorText"] =
             "Audit details dictionary of a rejected federated statement, not a response body",
         ["src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs|[\"error\"] = new Dictionary<string, object> { [\"type\"] = \"string\" },"] =
-            "OpenAPI schema property declaration, not a response body",
-        ["src/Autheris.Application/Governance/Services/DifferentialPrivacyEngine.cs|new { attempted = request.Epsilon, error = \"Cluster budget store unavailable\" }"] =
-            "Audit DetailsJson payload of a fail-closed privacy budget denial, not a response body (the request itself ends in an exception)"
+            "OpenAPI schema property declaration, not a response body"
     };
 
     /// <summary>
@@ -45,11 +43,9 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
     [
         ("src/Autheris.Api/Endpoints/McpEndpoints.cs", "new { jsonrpc = \"2.0\"", 1, "JSON-RPC 2.0 section 5.1 error object"),
         ("src/Autheris.Api/Endpoints/ODataEndpoints.Query.cs", "new { error = new { code", 6, "OData v4 JSON section 21 error object"),
-        ("src/Autheris.Extensions/OData/ODataResponseFormatter.cs", "new { error = new { code, message }", 1, "OData v4 JSON section 21 error object"),
+        ("src/Autheris.Application/OData/ODataResponseFormatter.cs", "new { error = new { code, message }", 1, "OData v4 JSON section 21 error object"),
         ("src/Autheris.Api/Security/BasicAuthenticationHandler.cs", "new { error = new { code = \"UNAUTHORIZED\"", 1, "OData v4 JSON error object for the OData basic-auth challenge"),
         ("src/Autheris.Api/Endpoints/ODataEndpoints.cs", "new { error = new { code = \"NotFound\"", 1, "OData v4 JSON error object (reshaped, fixed message)"),
-        ("src/Autheris.Api/Endpoints/IcebergRestCatalogEndpoints.cs", "new { error = new { message, type = code", 1, "Iceberg REST catalog ErrorModel {message,type,code}"),
-        ("src/Autheris.Api/Endpoints/BackstageEndpoints.cs", "new { error = new { name = \"NotFoundError\"", 1, "Backstage ErrorResponseBody {error{name,message},response{statusCode}} (reshaped, fixed message)"),
         ("src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs", "new { error = safeBody, status = statusCode }", 1, "Envoy ext_authz denied-response pass-through"),
         ("src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs", "[\"error\"] = trinoError", 1, "Trino in-protocol QueryResults.error (a spec member of a 200 result, not an HTTP-level error body)")
     ];

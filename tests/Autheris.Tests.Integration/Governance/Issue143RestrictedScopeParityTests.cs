@@ -12,7 +12,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Apache.Arrow;
 using Apache.Arrow.Ipc;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -64,7 +64,7 @@ public sealed class Issue143RestrictedScopeParityTests : IClassFixture<Issue143R
 
     public static IEnumerable<object[]> Channels() => new[]
     {
-        "websql", "trino", "odata", "graphql", "mcp-query-graphql", "arrow-export", "flight-sql", "olap"
+        "websql", "trino", "odata", "graphql", "mcp-query-graphql", "arrow-export", "olap"
     }.Select(c => new object[] { c });
 
     [Theory]
@@ -163,20 +163,6 @@ public sealed class Issue143RestrictedScopeParityTests : IClassFixture<Issue143R
             }
 
             return await ArrowValuesAsync(await r.Content.ReadAsStreamAsync());
-        },
-        "flight-sql" => async f =>
-        {
-            var c = f.Client();
-            var info = await c.PostAsJsonAsync("/api/v1/flight/sql/info", new { query = "SELECT value FROM default.main.air1" });
-            using var infoDoc = await JsonOrFailAsync(info);
-            var ticket = infoDoc.RootElement.GetProperty("ticket").GetRawText();
-            var stream = await c.PostAsync("/api/v1/flight/sql/stream", new StringContent(ticket, Encoding.UTF8, "application/json"));
-            if (stream.StatusCode != HttpStatusCode.OK)
-            {
-                throw new ShouldAssertException($"HTTP {(int)stream.StatusCode}: {await stream.Content.ReadAsStringAsync()}");
-            }
-
-            return await ArrowValuesAsync(await stream.Content.ReadAsStreamAsync());
         },
         "olap" => async f =>
         {

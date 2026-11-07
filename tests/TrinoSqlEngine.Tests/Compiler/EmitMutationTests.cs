@@ -147,6 +147,9 @@ public class EmitMutationTests
     [InlineData(GovernedSqlErrorCodes.DialectNotSupported, "The statement is not supported for this data source dialect.")]
     [InlineData(GovernedSqlErrorCodes.LimitExceeded, "The statement exceeds a resource limit.")]
     [InlineData(GovernedSqlErrorCodes.UnfilteredDml, "UPDATE and DELETE statements require a restricting WHERE clause.")]
+    [InlineData(GovernedSqlErrorCodes.AggregationOnMaskedColumn, "Masked columns cannot be aggregated or grouped.")]
+    [InlineData(GovernedSqlErrorCodes.FilterOnMaskedColumn, "Masked columns cannot be used in filters, joins, or ordering.")]
+    [InlineData(GovernedSqlErrorCodes.EndpointDisabled, "The SQL endpoint is disabled by configuration.")]
     [InlineData(GovernedSqlErrorCodes.PolicyDenied, "Access to a referenced table or column is denied.")]
     [InlineData(GovernedSqlErrorCodes.PolicyViolation, "The SQL statement was rejected by the gateway security policy.")]
     [InlineData(GovernedSqlErrorCodes.TenantIdCollision, "Access denied.")]
@@ -180,6 +183,9 @@ public class EmitMutationTests
         Assert.Equal("SQL_DIALECT_NOT_SUPPORTED", GovernedSqlErrorCodes.DialectNotSupported);
         Assert.Equal("SQL_LIMIT_EXCEEDED", GovernedSqlErrorCodes.LimitExceeded);
         Assert.Equal("SQL_UNFILTERED_DML", GovernedSqlErrorCodes.UnfilteredDml);
+        Assert.Equal("AGGREGATION_ON_MASKED_COLUMN", GovernedSqlErrorCodes.AggregationOnMaskedColumn);
+        Assert.Equal("FILTER_ON_MASKED_COLUMN", GovernedSqlErrorCodes.FilterOnMaskedColumn);
+        Assert.Equal("SQL_ENDPOINT_DISABLED", GovernedSqlErrorCodes.EndpointDisabled);
         Assert.Equal("SQL_POLICY_DENIED", GovernedSqlErrorCodes.PolicyDenied);
         Assert.Equal("SQL_POLICY_VIOLATION", GovernedSqlErrorCodes.PolicyViolation);
         Assert.Equal("TENANT_ID_COLLISION", GovernedSqlErrorCodes.TenantIdCollision);

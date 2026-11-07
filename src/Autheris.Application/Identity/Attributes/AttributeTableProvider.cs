@@ -8,7 +8,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -29,7 +29,7 @@ public sealed class CallerAttributeSourceException : Exception
 }
 
 /// <summary>
-/// A fixed, privileged lookup (PLAN-GOV-129 A-5.2, BC-129-03, BC-129-09, BC-129-11): the gateway builds the statement from validated
+/// A fixed, privileged lookup (129 A-5.2, BC-129-03, BC-129-09, BC-129-11): the gateway builds the statement from validated
 /// identifiers (<see cref="AttributeTableQuery"/>), binds subject, tenant and issuer, reads at most <c>Max + 1</c> rows on the governed
 /// read connection (PostgreSQL: read-only transaction, never committed), with a tenant-only session context. The connection must be
 /// marked <c>CallerAttributeLookupAllowed</c> and use a dedicated read-only login (an acknowledgement is honoured in Development only).

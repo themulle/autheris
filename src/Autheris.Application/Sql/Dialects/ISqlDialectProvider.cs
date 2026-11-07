@@ -6,7 +6,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Capabilities;
 
 /// <summary>
-/// WP-ARC-B-09: Declarative descriptor for a SQL database dialect, consolidating AST target mapping,
+/// Declarative descriptor for a SQL database dialect, consolidating AST target mapping,
 /// capability table metadata, execution admission, GraphQL tree-compilation support, CDC support, and parameter limits.
 /// </summary>
 public sealed record SqlDialectDescriptor(
@@ -21,7 +21,7 @@ public sealed record SqlDialectDescriptor(
     int MaxParameterCount);
 
 /// <summary>
-/// WP-ARC-B-09: Port providing dialect-specific metadata, identifier quoting, and parameter formatting.
+/// Port providing dialect-specific metadata, identifier quoting, and parameter formatting.
 /// </summary>
 public interface ISqlDialectProvider
 {

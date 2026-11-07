@@ -10,7 +10,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// Builds the <see cref="CallerSubject"/> of a principal (PLAN-GOV-129 A-6, BC-129-01, BC-129-02). It deliberately does not use
+/// Builds the <see cref="CallerSubject"/>of a principal (129 A-6, BC-129-01, BC-129-02). It deliberately does not use
 /// <c>GetUserSid()</c> (which falls back to <c>appid</c>/<c>client_id</c>/<c>azp</c>) and not the claim-presence classification of the
 /// identity resolver: a caller is a <see cref="CallerSubjectKind.User"/> only with a non-app token, an immutable person key and an
 /// identity of an allowed authentication scheme. UPN, mail and display names are never keys. Anything unclassifiable is

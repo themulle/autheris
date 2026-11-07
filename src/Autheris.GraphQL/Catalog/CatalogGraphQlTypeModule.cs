@@ -2,7 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Analytics;
 using Autheris.Application.Common;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -10,7 +10,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
-using Autheris.GraphQL.Catalog;
 using Autheris.GraphQL.Interceptors;
 using HotChocolate;
 using HotChocolate.Execution.Configuration;
@@ -64,7 +63,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     private readonly GraphQLOptions _graphQlOptions;
     private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
 
-    /// <summary>Logical source -> was it visible over GraphQL when the schema was built (issue #447, REQ-ATR-08).</summary>
+    /// <summary>Logical source -> was it visible over GraphQL when the schema was built (issue #447).</summary>
     private System.Collections.Concurrent.ConcurrentDictionary<string, bool> _transportSeen = new(StringComparer.OrdinalIgnoreCase);
 
     public CatalogGraphQlTypeModule(
@@ -97,7 +96,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Offset pagination is supported up to offset {maxAllowedOffset}.");
 
     /// <summary>
-    /// Issue #447 REQ-ATR-08: the schema omits tables whose source does not allow GraphQL, so the schema never names a source the
+    /// Issue #447 the schema omits tables whose source does not allow GraphQL, so the schema never names a source the
     /// transport may not read (the gate at the data path stays the enforcement point). <paramref name="record"/> notes each decision.
     /// </summary>
     private Func<TableMetadata, bool>? GetTableFilter(System.Collections.Concurrent.ConcurrentDictionary<string, bool>? record = null)
@@ -431,7 +430,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
                     ConnectionGraphQlTypes.AddQueryField(d, table, schemaModel);
 
-                    // Issue #447 (SEC-ATR-06): every root field of this table names its logical data source, so the transport gate
+                    // Issue #447: every root field of this table names its logical data source, so the transport gate
                     // middleware can check the whole operation before any resolver runs.
                     var logicalSource = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table.Metadata);
                     var rootFieldNames = new List<string> { table.QueryFieldName, $"{table.QueryFieldName}Connection" };
@@ -443,7 +442,11 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                     foreach (var rootFieldName in rootFieldNames)
                     {
                         d.Field(rootFieldName).Extend().OnBeforeCreate(
-                            definition => definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(logicalSource)));
+                            definition =>
+                            {
+                                definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(logicalSource));
+                                definition.Features.Set(new CatalogRootFieldFeature(table, schemaModel));
+                            });
                     }
                 }
             }));
@@ -730,7 +733,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
             if (pageRangeViolated)
             {
-                // SEC-RG-08 (#330): the tree was built with a zero-row page and has just passed table authorization, so a denied table
+                // 08 (#330): the tree was built with a zero-row page and has just passed table authorization, so a denied table
                 // answers ACCESS_DENIED for every page size; only an authorized caller learns the fixed page-range error.
                 throw new GatewayPageRangeException();
             }
@@ -805,7 +808,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RequiredFilterColumnMissing)
                 .Build());
         }
-        catch (Autheris.Application.Data.Relations.CrossSourceRelationException ex)
+        catch (Autheris.Application.DataSources.Relations.CrossSourceRelationException ex)
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.ErrorCode).Build());
         }

@@ -9,13 +9,18 @@ namespace Autheris.Tests.Architecture;
 /// </summary>
 internal static class RepositoryScan
 {
-    private static readonly string[] SkippedDirectories = ["bin", "obj", "node_modules", ".git"];
+    private static readonly string[] SkippedDirectories = ["bin", "obj", "node_modules", ".git", ".claude", "worktrees"];
     private static readonly Lazy<string> Root = new(LocateRoot);
     private static readonly Lazy<IReadOnlyList<SourceFile>> SrcFiles = new(() => LoadCsFiles("src"));
 
     internal sealed record SourceFile(string RelativePath, string Text);
 
     public static string RepoRoot => Root.Value;
+
+    public static string FindRepositoryRoot() => RepoRoot;
+
+    public static string ToRelativePath(string path) =>
+        Path.IsPathRooted(path) ? Normalize(Path.GetRelativePath(RepoRoot, path)) : Normalize(path);
 
     /// <summary>All production C# files under src/, sorted by relative path. Throws when none are found.</summary>
     public static IReadOnlyList<SourceFile> ProductionFiles => SrcFiles.Value;

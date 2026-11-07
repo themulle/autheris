@@ -498,8 +498,8 @@ WHERE id = 1;";
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
         metadata.ValidateRequiredFilterColumns();
-        Autheris.Application.Dbt.Services.SemanticVirtualTables.EnsureNamespaceRespected(metadata);
-        // Only a replacing write validates (and later persists) the definition; any other upsert never reads or rewrites it (SEC-94-01).
+        Autheris.Application.Catalog.Semantic.SemanticVirtualTables.EnsureNamespaceRespected(metadata);
+        // Only a replacing write validates (and later persists) the definition; any other upsert never reads or rewrites it.
         if (metadata.ReplaceKeyDefinition)
         {
             metadata = TableKeyDefinitionValidator.Validate(metadata);
@@ -862,11 +862,11 @@ WHERE id = 1;";
 
     public async Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
     {
-        // Rule check before any connection is opened (SEC-REL151-03).
+        // Rule check before any connection is opened.
         RelationWriteSupport.ValidateKeysOrThrow(relation);
 
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        // One connection, one explicit transaction; disposing it uncommitted (failure or cancellation) rolls back all rows (SEC-REL151-06).
+        // One connection, one explicit transaction; disposing it uncommitted (failure or cancellation) rolls back all rows.
         await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         var parentTableId = await ResolveActiveTableIdAsync(conn, tx, relation.RelationName, relation.ParentTableIdentifier, ct).ConfigureAwait(false);
@@ -902,7 +902,7 @@ WHERE id = 1;";
         return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
     }
 
-    /// <summary>Resolves an active table id from its identifier: zero or several matches throw (SEC-REL151-07, no LIMIT 1).</summary>
+    /// <summary>Resolves an active table id from its identifier: zero or several matches throw (no LIMIT 1).</summary>
     private static Task<string> ResolveActiveTableIdAsync(SqlConnection conn, SqlTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
         => CatalogSqlCore.ResolveActiveTableIdAsync(conn, tx, CatalogSql.ResolveActiveTableIdSql, relationName, table, ct);
 

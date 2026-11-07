@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Facade of the webhook pipeline (WP-ARC-A-02): matches an event against the configured subscriptions, builds the signed-at-delivery
+/// Facade of the webhook pipeline: matches an event against the configured subscriptions, builds the signed-at-delivery
 /// CloudEvent body (sanitized) and durably enqueues one outbox row per matching subscription. Delivery, retries and dead letters are
 /// handled by <see cref="WebhookDeliveryHostedService"/>, so <see cref="DispatchEventAsync"/> completes after the enqueue, not after any HTTP call.
 /// </summary>

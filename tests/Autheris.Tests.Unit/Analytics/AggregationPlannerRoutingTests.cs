@@ -7,8 +7,8 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Analytics;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Audit;
@@ -128,8 +128,7 @@ public sealed class AggregationPlannerRoutingTests
             {
                 Aggregation = new AggregationOptions { MaxGroups = maxGroups },
                 Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = minGroupSize }
-            }),
-            dpEngine: null);
+            }));
         return (service, sql, requests);
     }
 

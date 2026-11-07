@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Common;
 
 /// <summary>
-/// Issue #238 (PLAN-DATA-238, WP-SC-15): Context required to acquire downstream delegated credentials.
+/// Issue #238: Context required to acquire downstream delegated credentials.
 /// </summary>
 public sealed record DelegationContext(
     string? CallerToken = null,
@@ -16,7 +16,7 @@ public sealed record DelegationContext(
     string? TraceId = null);
 
 /// <summary>
-/// Issue #238 (PLAN-DATA-238, FR-238-1.2): Generic provider returning connector-specific execution credentials based on DelegationContext.
+/// Issue #238 (FR-238-1.2): Generic provider returning connector-specific execution credentials based on DelegationContext.
 /// </summary>
 public interface IDelegatedCredentialProvider
 {

@@ -39,7 +39,7 @@ public sealed class HotChocolateGraphQlCostAnalysisEngine : IGraphQlCostAnalysis
             ? _options.GraphQL.MaxRootFieldsPerOperation
             : 10;
 
-        // SEC-GOV175-02: Hard root field limit per operation to prevent alias amplification attacks
+        // Hard root field limit per operation to prevent alias amplification attacks
         int maxRootFieldCount = QueryCostAnalyzerRule.CountMaxRootFields(document, maxRootFields);
         if (maxRootFieldCount > maxRootFields)
         {
@@ -53,7 +53,7 @@ public sealed class HotChocolateGraphQlCostAnalysisEngine : IGraphQlCostAnalysis
                 MaxRootFieldsCount: maxRootFieldCount);
         }
 
-        // SEC-GOV175-03: Zero database reads / in-memory schema reuse without pipeline execution
+        // Zero database reads / in-memory schema reuse without pipeline execution
         var executor = await _executorProvider.GetExecutorAsync(cancellationToken: ct).ConfigureAwait(false);
         var schema = executor.Schema;
 

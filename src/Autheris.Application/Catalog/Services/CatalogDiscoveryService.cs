@@ -10,8 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
@@ -190,7 +189,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             }
         }
 
-        var keys = Autheris.Application.Data.Services.DatasetIndexProjection.Project(metadata, clear);
+        var keys = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(metadata, clear);
         var pkSet = new HashSet<string>(keys.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
         var columnDetails = metadata.Columns.Select(c =>
@@ -244,7 +243,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var resolution = _consentResolution ?? new ConsentResolutionService();
             if (CallerScopeResolver.IsAdminView(scope))
             {
-                return Autheris.Application.Data.Services.DatasetIndexProjection.ClearSet(
+                return Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(
                     CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, [], isAdmin: true, isGranted: false, bypass: false, _logger));
             }
 
@@ -259,7 +258,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var consents = await _consentRepository.GetAllActiveConsentsForSubjectsAsync(
                 subjects, principal.GetUserRoles(), _timeProvider.GetUtcNow(), tenantId, ct).ConfigureAwait(false);
             var granted = consents.Any(c => c.Effect == ConsentEffect.Allow && c.TableIdentifier == metadata.Identifier && c.TenantId == tenantId);
-            return Autheris.Application.Data.Services.DatasetIndexProjection.ClearSet(
+            return Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(
                 CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, consents, isAdmin: false, isGranted: granted, bypass: false, _logger));
         }
         catch (OperationCanceledException)
@@ -506,7 +505,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     }
 
     /// <summary>
-    /// Issue #447 (REQ-ATR-11): the effective <c>AllowedTransports</c> of the table's source (a source without a profile inherits
+    /// Issue #447: the effective<c>AllowedTransports</c> of the table's source (a source without a profile inherits
     /// <c>Defaults</c>). Administrator-only data; null when no resolver is wired or the profile cannot be read.
     /// </summary>
     private IReadOnlyList<string>? EffectiveTransportsOf(TableMetadata table)
@@ -531,7 +530,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     }
 
     /// <summary>
-    /// The channel caller. The REST subject (<c>context.SubjectId</c>) and the principal SID must agree (SEC-CAT138-03: the stricter of
+    /// The channel caller. The REST subject (<c>context.SubjectId</c>) and the principal SID must agree (the stricter of
     /// both applies); a mismatch answers as no caller, so the service returns the empty set.
     /// </summary>
     private static CatalogCaller CallerOf(RequestContext context)

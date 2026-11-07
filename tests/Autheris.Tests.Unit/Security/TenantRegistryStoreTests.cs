@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Infrastructure.Persistence;

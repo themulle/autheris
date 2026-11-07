@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Durable webhook outbox (WP-ARC-A-02). Time is always passed in (from a <see cref="TimeProvider"/>); the database clock is never
+/// Durable webhook outbox. Time is always passed in (from a<see cref="TimeProvider"/>); the database clock is never
 /// used, so multi-node deployments rely on NTP-synchronised nodes. Completion calls are fenced by the lease owner so a stale worker
 /// cannot overwrite a row another worker reclaimed.
 /// </summary>

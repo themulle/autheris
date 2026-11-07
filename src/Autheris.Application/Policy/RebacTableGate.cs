@@ -72,7 +72,7 @@ public static class RebacTableGate
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // WP-ARC-A-06: still a denial (fail-closed), but no longer silent; cancellation is not a policy decision and propagates.
+            // still a denial (fail-closed), but no longer silent; cancellation is not a policy decision and propagates.
             Autheris.Domain.Diagnostics.GatewayDiagnostics.AuthzDependencyFailureCounter.Add(1, new KeyValuePair<string, object?>("dependency", "rebac"));
             logger?.LogError(new Microsoft.Extensions.Logging.EventId(4101, "RebacGateDependencyFailure"), ex, "ReBAC evaluation failed; denying access to {Table} (fail-closed).", table);
             return false;

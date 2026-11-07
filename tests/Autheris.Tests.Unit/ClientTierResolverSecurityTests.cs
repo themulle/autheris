@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit;
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using Autheris.Application.Caching.Services;
+using Autheris.Application.State.Caching.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging.Abstractions;

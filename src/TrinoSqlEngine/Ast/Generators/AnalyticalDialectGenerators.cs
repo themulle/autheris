@@ -85,7 +85,7 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsOrderedAggregates => true;
     protected override bool SupportsGroupByDistinct => true;
 
-    // The inline structural positions of this generator are registered with the emitter context (WP-A3 for DuckDB).
+    // The inline structural positions of this generator are registered with the emitter context ( for DuckDB).
     protected override bool BindLiterals => true;
 
     protected override bool EmitsTimeZoneConversion => true;
@@ -355,99 +355,3 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
     }
 }
 
-/// <summary>
-/// Snowflake analytical dialect generator with uppercase folding for unquoted identifiers.
-/// </summary>
-public sealed class SnowflakeDialectGenerator : SqlDialectGeneratorBase
-{
-    public override TargetSqlDialect TargetDialect => TargetSqlDialect.Snowflake;
-    protected override bool SupportsTryCast => true;
-
-    /// <summary>Virtual filters (phase 7b): <c>DATEADD(unit, n, x)</c>.</summary>
-    protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
-    {
-        builder.Append("DATEADD(");
-        builder.Append(DateUnitName(unit));
-        builder.Append(", ");
-        builder.Append(amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        builder.Append(", ");
-        GenerateExpression(source, ref builder, context);
-        builder.Append(')');
-    }
-
-    /// <summary>Wunsch 4: Snowflake names the ISO fields DAYOFWEEKISO, WEEKISO, YEAROFWEEKISO.</summary>
-    protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
-    {
-        builder.Append("EXTRACT(");
-        builder.Append(field switch
-        {
-            "DAY_OF_WEEK" => "DAYOFWEEKISO",
-            "WEEK" => "WEEKISO",
-            "YEAR_OF_WEEK" => "YEAROFWEEKISO",
-            "DAY_OF_YEAR" => "DAYOFYEAR",
-            var f => f
-        });
-        builder.Append(" FROM ");
-        GenerateExpression(source, ref builder, context);
-        builder.Append(')');
-    }
-
-    public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
-    {
-        builder.Append('"');
-        string val = identifier.IsQuoted ? identifier.Value : identifier.Value.ToUpperInvariant();
-        builder.Append(val.Replace("\"", "\"\"", StringComparison.Ordinal));
-        builder.Append('"');
-    }
-
-    public override void FormatStringLiteral(ref ValueStringBuilder builder, string value, SqlEmitterContext context)
-    {
-        builder.Append('\'');
-        builder.Append(value.Replace("'", "''", StringComparison.Ordinal));
-        builder.Append('\'');
-    }
-
-    public override void FormatBoolean(ref ValueStringBuilder builder, bool value, SqlEmitterContext context)
-    {
-        builder.Append(value ? "TRUE" : "FALSE");
-    }
-
-    protected override void GeneratePagination(PaginationClause pagination, OrderByClause? orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
-    {
-        if (pagination.WithTies)
-        {
-            if (orderBy == null)
-            {
-                throw new TrinoSqlEngine.Ast.Builder.AstBuildException("FETCH … WITH TIES requires an ORDER BY clause.");
-            }
-
-            if (pagination.Offset != null)
-            {
-                builder.Append("OFFSET ");
-                GenerateExpression(pagination.Offset, ref builder, context);
-                builder.Append(" ROWS ");
-            }
-
-            if (pagination.Limit != null)
-            {
-                builder.Append("FETCH FIRST ");
-                GenerateExpression(pagination.Limit, ref builder, context);
-                builder.Append(" ROWS WITH TIES");
-            }
-            return;
-        }
-
-        if (pagination.Limit != null)
-        {
-            builder.Append("LIMIT ");
-            GenerateExpression(pagination.Limit, ref builder, context);
-        }
-
-        if (pagination.Offset != null)
-        {
-            if (pagination.Limit != null) builder.Append(' ');
-            builder.Append("OFFSET ");
-            GenerateExpression(pagination.Offset, ref builder, context);
-        }
-    }
-}

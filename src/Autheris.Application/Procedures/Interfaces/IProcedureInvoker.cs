@@ -19,7 +19,7 @@ public interface IProcedureInvoker
 {
     /// <summary>
     /// Reads at most <paramref name="rowBudget"/> rows (must be positive; there is no fallback to a configured limit).
-    /// The caller decides the budget before the call (SEC-PROC152I2-01).
+    /// The caller decides the budget before the call.
     /// </summary>
     Task<RawProcedureResult> ExecuteReadAsync(
         ProcedureDefinition definition,

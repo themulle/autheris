@@ -75,7 +75,7 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     protected GovernanceMigrationOptions Options => _options;
 
     /// <summary>
-    /// Label of the database for the drift message (SEC-94-08g): the SQLite file name or the database name, never a connection
+    /// Label of the database for the drift message (08g): the SQLite file name or the database name, never a connection
     /// string, host, user or directory path.
     /// </summary>
     protected virtual string DatabaseLabel(DbConnection connection) => SanitizeLabel(connection.Database);

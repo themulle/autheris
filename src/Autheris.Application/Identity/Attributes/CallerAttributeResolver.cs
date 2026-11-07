@@ -11,7 +11,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Caching;
+using Autheris.Application.State.Caching;
 using Autheris.Application.Sql.ListParameters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
@@ -22,7 +22,7 @@ using Microsoft.Extensions.Options;
 using TrinoSqlEngine.Ast.Emit;
 
 /// <summary>
-/// The only caller of <see cref="ICallerAttributeProvider"/> (PLAN-GOV-129 A-2, A-6, A-11). Per attribute: registry lookup, routing by
+/// The only caller of <see cref="ICallerAttributeProvider"/>(129 A-2, A-6, A-11). Per attribute: registry lookup, routing by
 /// subject kind (an application subject reads service sets only, a user never does), request memo, value cache (single flight, key
 /// material hashed and length-prefixed with subject kind, tenant, issuer and definition hash), bulkhead and circuit breaker per provider
 /// kind (only infrastructure failures count), provider timeout, normalization through <see cref="ListParameterNormalizer"/> and the

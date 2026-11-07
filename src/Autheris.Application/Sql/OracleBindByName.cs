@@ -4,7 +4,7 @@ using System.Security;
 namespace Autheris.Application.Sql;
 
 /// <summary>
-/// SEC-ADG-03: ODP.NET binds by POSITION unless <c>OracleCommand.BindByName</c> is true. Every Oracle command that carries
+/// ODP.NET binds by POSITION unless<c>OracleCommand.BindByName</c> is true. Every Oracle command that carries
 /// parameters must call <see cref="Enable"/> before it executes; a command without the property is rejected.
 /// </summary>
 public static class OracleBindByName

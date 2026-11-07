@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
@@ -14,7 +14,7 @@ using TrinoSqlEngine.Governance;
 
 /// <summary>
 /// Parses every stored row predicate through the production parser setup (<see cref="PolicyParserSetup"/>) and reports the ones
-/// that would deny their table (SEC-ADG-26, SEC-X1-16). Findings carry table and policy ids and a stable code, never predicate text.
+/// that would deny their table. Findings carry table and policy ids and a stable code, never predicate text.
 /// </summary>
 public sealed partial class PolicyPredicateLinter
 {
@@ -23,7 +23,7 @@ public sealed partial class PolicyPredicateLinter
     public const string CodeCorrelatedRejected = "CORRELATED_FILTER_REJECTED";
     public const string CodeVirtualFilterRejected = "VIRTUAL_FILTER_REJECTED";
 
-    /// <summary>REQ-GOV-129 (A-8, ST-129-18): a caller placeholder in an access profile or Casbin predicate; only Virtual Filters may carry one, so a shared decision never embeds an attribute.</summary>
+    /// <summary>129 (A-8, ST-129-18): a caller placeholder in an access profile or Casbin predicate; only Virtual Filters may carry one, so a shared decision never embeds an attribute.</summary>
     public const string CodeCallerPlaceholderNotAllowed = "CALLER_PLACEHOLDER_NOT_ALLOWED";
 
     [GeneratedRegex(@"\$\{[a-zA-Z0-9_.]+\}", RegexOptions.CultureInvariant)]

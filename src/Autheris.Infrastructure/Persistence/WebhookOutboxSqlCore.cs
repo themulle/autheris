@@ -13,7 +13,7 @@ using Autheris.Domain.Model;
 internal readonly record struct WebhookFencedValues(string SetClause, int? StatusCode, string? ErrorCode, long? Next, DateTimeOffset Now);
 
 /// <summary>
-/// Engine-neutral binding, execution and row mapping of the webhook outbox (ARCH-MNT-22). The dialect repositories own the SQL text, the
+/// Engine-neutral binding, execution and row mapping of the webhook outbox. The dialect repositories own the SQL text, the
 /// connection or write-gate acquisition, the SQL Server unique-violation catch and the dialect-specific fenced-update binding; this class
 /// receives an open connection and never opens, commits, rolls back or disposes it. Tenant scoping stays in the SQL the dialect hands in:
 /// the dead-letter list keeps <c>owner_tenant_id = @tenant</c> (or <c>owner_tenant_id IS NULL</c> for the cluster scope), the claim and

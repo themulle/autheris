@@ -14,7 +14,7 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Engine-neutral statement execution and row mapping for consent queries, batch hydration, consent insertion, consent requests,
-/// four-eyes approval state reads, guarded status transitions, and ITSM activation (ARCH-MNT-22 Step 4).
+/// four-eyes approval state reads, guarded status transitions, and ITSM activation ( Step 4).
 /// This class receives an open connection (and optional transaction) and never opens, commits, rolls back, or disposes either.
 /// </summary>
 internal static class ConsentSqlCore

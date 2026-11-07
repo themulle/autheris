@@ -5,15 +5,15 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Security;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Federation.Conjuncts;
 using Autheris.Domain.Model;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
-/// WP-122-3: Parameterized TableFilterClause AST builder.
-/// Allocates @p_pd_<n> parameters with SEC-ADG-02 collision fail-closed defense and pure TrinoSqlFactory generation.
+/// Parameterized TableFilterClause AST builder.
+/// Allocates @p_pd_<n>parameters with 02 collision fail-closed defense and pure TrinoSqlFactory generation.
 /// </summary>
 public static class PushedClauseBuilder
 {
@@ -251,7 +251,7 @@ public static class PushedClauseBuilder
     private static string AllocateParameter(Dictionary<string, object?> parameters, ref int index, object? value)
     {
         var marker = "@p_pd_" + (index++).ToString(CultureInfo.InvariantCulture);
-        // SEC-ADG-02 / SEC-DATA122-01: Duplicate parameter names must fail closed immediately.
+        // Duplicate parameter names must fail closed immediately.
         if (!parameters.TryAdd(marker, value))
         {
             throw new SecurityException($"Duplicate pushdown parameter name '{marker}' encountered (fail-closed).");

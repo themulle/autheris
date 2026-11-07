@@ -13,11 +13,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Models;
-using Autheris.Application.Interfaces;
-using Autheris.Application.OpenMetadata.Interfaces;
-using Autheris.Application.OpenMetadata.Models;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Models;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -756,16 +755,12 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Theory]
     [InlineData(DataCatalogProviderType.OpenMetadata, false, false)]
     [InlineData(DataCatalogProviderType.OpenMetadata, true, true)]
-    [InlineData(DataCatalogProviderType.Collibra, false, false)]
-    [InlineData(DataCatalogProviderType.Collibra, true, true)]
     public async Task E09_CatalogSync_NewOpenMetadataTables_AreInactiveByDefault(DataCatalogProviderType provider, bool activateNewTables, bool expectedActive)
     {
         var client = Substitute.For<IDataCatalogClient>();
         client.ProviderType.Returns(provider);
         client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<CatalogTableAsset>>([new CatalogTableAsset { Identifier = OrdersId }]));
-        var factory = Substitute.For<IDataCatalogClientFactory>();
-        factory.GetActiveClient().Returns(client);
 
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(null));
@@ -778,7 +773,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
             });
 
         var sut = new DataCatalogSyncService(
-            factory,
+            client,
             repo,
             Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions
@@ -794,7 +789,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         upserted.Table.IsActive.ShouldBe(expectedActive);
     }
 
-    // ------------------------------------------------------------------ E-08 (Alation) / EX-16
+    // ------------------------------------------------------------------ EX-16
 
     private static IHostEnvironment Env(string name)
     {
@@ -803,141 +798,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         return env;
     }
 
-    private static AlationCatalogClient CreateAlation(
-        StubHttpMessageHandler handler,
-        IKeyVaultSecretProvider? secretProvider,
-        IHostEnvironment? environment,
-        ILogger<AlationCatalogClient>? logger = null,
-        bool allowPlaintextInDevelopment = false)
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            Catalog = new DataCatalogOptions
-            {
-                Provider = DataCatalogProviderType.Alation,
-                Alation = new AlationOptions
-                {
-                    BaseUrl = "https://alation.corp.example",
-                    ApiToken = "alation-token-ref",
-                    AllowPlaintextApiTokenInDevelopment = allowPlaintextInDevelopment,
-                    DataSourceToDomainMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["7"] = "clinic" }
-                }
-            }
-        });
-
-        return new AlationCatalogClient(new HttpClient(handler), options, logger ?? NullLogger<AlationCatalogClient>.Instance, secretProvider, environment);
-    }
-
-    private static IKeyVaultSecretProvider ResolvingProvider()
-    {
-        var provider = Substitute.For<IKeyVaultSecretProvider>();
-        provider.GetSecretBytes("alation-token-ref").Returns(Encoding.UTF8.GetBytes("resolved-alation-token"));
-        return provider;
-    }
-
     private static HttpResponseMessage Json(string json) =>
         new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
-
-    [Fact]
-    public async Task E08_Alation_SecretLookupFailure_InDevelopment_FailsClosed_AndLogsNoExceptionMessage()
-    {
-        var handler = new StubHttpMessageHandler(_ => Json("[]"));
-        var provider = Substitute.For<IKeyVaultSecretProvider>();
-        provider.GetSecretBytes(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("Secret 'raw-alation-token-XYZ' not found"));
-        var logger = new CapturingLogger<AlationCatalogClient>();
-
-        var client = CreateAlation(handler, provider, Env(Environments.Development), logger);
-
-        await Should.ThrowAsync<SecurityException>(() => client.GetTablesAsync());
-        handler.Requests.ShouldBeEmpty();
-        logger.Entries.ShouldNotBeEmpty();
-        logger.Entries.ShouldAllBe(e => e.Exception == null && !e.Message.Contains("raw-alation-token-XYZ"));
-    }
-
-    [Fact]
-    public async Task E08_Alation_EmptySecret_FailsClosed()
-    {
-        var handler = new StubHttpMessageHandler(_ => Json("[]"));
-        var provider = Substitute.For<IKeyVaultSecretProvider>();
-        provider.GetSecretBytes(Arg.Any<string>()).Returns(Array.Empty<byte>());
-
-        var client = CreateAlation(handler, provider, Env(Environments.Production));
-
-        await Should.ThrowAsync<SecurityException>(() => client.GetTablesAsync());
-        handler.Requests.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task E08_Alation_MissingSecretProvider_FailsClosed()
-    {
-        var handler = new StubHttpMessageHandler(_ => Json("[]"));
-        var client = CreateAlation(handler, secretProvider: null, environment: null);
-
-        await Should.ThrowAsync<SecurityException>(() => client.GetTablesAsync());
-        handler.Requests.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task E08_Alation_DevelopmentPlaceholder_RequiresExplicitPlaintextOptIn()
-    {
-        // DefaultEnvironmentSecretProvider returns the reference itself in Development – that is not a resolved secret.
-        var provider = Substitute.For<IKeyVaultSecretProvider>();
-        provider.GetSecretBytes("alation-token-ref").Returns(Encoding.UTF8.GetBytes("alation-token-ref"));
-
-        var blockedHandler = new StubHttpMessageHandler(_ => Json("[]"));
-        var blocked = CreateAlation(blockedHandler, provider, Env(Environments.Development));
-        await Should.ThrowAsync<SecurityException>(() => blocked.GetTablesAsync());
-        blockedHandler.Requests.ShouldBeEmpty();
-
-        var allowedHandler = new StubHttpMessageHandler(_ => Json("[]"));
-        var allowed = CreateAlation(allowedHandler, provider, Env(Environments.Development), allowPlaintextInDevelopment: true);
-        await allowed.GetTablesAsync();
-        allowedHandler.Requests.ShouldHaveSingleItem().Headers.GetValues("TOKEN").Single().ShouldBe("alation-token-ref");
-
-        var prodHandler = new StubHttpMessageHandler(_ => Json("[]"));
-        var prod = CreateAlation(prodHandler, provider, Env(Environments.Production), allowPlaintextInDevelopment: true);
-        await Should.ThrowAsync<SecurityException>(() => prod.GetTablesAsync());
-    }
-
-    [Fact]
-    public async Task E08_Alation_PagesUntilShortPage()
-    {
-        static string Page(int count, int offset) =>
-            "[" + string.Join(",", Enumerable.Range(offset, count).Select(i => $"{{\"id\":{i},\"name\":\"t{i}\",\"schema_name\":\"s\",\"ds_id\":7}}")) + "]";
-
-        var handler = new StubHttpMessageHandler(req =>
-            req.RequestUri!.Query.Contains($"skip={AlationCatalogClient.PageSize}", StringComparison.Ordinal)
-                ? Json(Page(1, AlationCatalogClient.PageSize))
-                : Json(Page(AlationCatalogClient.PageSize, 0)));
-
-        var client = CreateAlation(handler, ResolvingProvider(), Env(Environments.Production));
-        var tables = await client.GetTablesAsync();
-
-        handler.Requests.Count.ShouldBe(2);
-        handler.Requests[0].RequestUri!.Query.ShouldContain("skip=0");
-        handler.Requests[1].RequestUri!.Query.ShouldContain($"skip={AlationCatalogClient.PageSize}");
-        tables.Count.ShouldBe(AlationCatalogClient.PageSize + 1);
-        handler.Requests[0].Headers.GetValues("TOKEN").Single().ShouldBe("resolved-alation-token");
-    }
-
-    [Fact]
-    public async Task E08_Alation_UnmappedAndMalformedDataSources_AreDiscarded()
-    {
-        var handler = new StubHttpMessageHandler(_ => Json(
-            """
-            [
-              {"id":1,"name":"patients","schema_name":"clinical","ds_id":7},
-              {"id":2,"name":"ghost","schema_name":"clinical","ds_id":8},
-              {"id":3,"name":"inject","schema_name":"clinical","ds_id":"7; drop"},
-              {"id":4,"name":"nods","schema_name":"clinical"}
-            ]
-            """));
-
-        var client = CreateAlation(handler, ResolvingProvider(), Env(Environments.Production));
-        var tables = await client.GetTablesAsync();
-
-        tables.ShouldHaveSingleItem().Identifier.ShouldBe(new TableIdentifier("clinic", "clinical", "patients"));
-    }
 
     [Fact]
     public void EX16_OpenMetadataClient_SecretLookupFailure_LogsNoExceptionMessage()

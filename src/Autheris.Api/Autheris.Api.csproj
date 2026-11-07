@@ -6,6 +6,7 @@
     <ProjectReference Include="..\Autheris.Application\Autheris.Application.csproj" />
     <ProjectReference Include="..\Autheris.Domain\Autheris.Domain.csproj" />
     <ProjectReference Include="..\Autheris.Extensions\Autheris.Extensions.csproj" />
+    <ProjectReference Include="..\Autheris.Modules.Abstractions\Autheris.Modules.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,12 +32,9 @@
     <OptimizationPreference>Speed</OptimizationPreference>
   </PropertyGroup>
 
-  <!-- PLAN-OPS-150 WP-D: ReadyToRun on the framework-dependent publish (docker-publish.yml). RuntimeIdentifiers keeps the
-       linux-x64 graph in the locked restore; PublishReadyToRun only acts in publish targets; the self-contained
-       single-file release publish (release.yml) is unchanged. -->
+  <!-- #509: ReadyToRun removed (spike NO-GO, benchmarks/results/r2r-spike-report.md). RuntimeIdentifiers keeps the linux-x64 graph in the locked restore used by the framework-dependent publish. -->
   <PropertyGroup>
     <RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>
-    <PublishReadyToRun Condition="'$(SelfContained)' != 'true'">true</PublishReadyToRun>
     <RuntimeIdentifier Condition="'$(_IsPublishing)' == 'true' And '$(RuntimeIdentifier)' == '' And '$(SelfContained)' != 'true'">linux-x64</RuntimeIdentifier>
     <SelfContained Condition="'$(RuntimeIdentifier)' == 'linux-x64' And '$(SelfContained)' == ''">false</SelfContained>
   </PropertyGroup>
@@ -44,11 +42,13 @@
   <ItemGroup>
     <!-- Swagger UI wird lokal ausgeliefert (offline-faehig, kein CDN) -->
     <EmbeddedResource Include="Assets\swagger-ui\*.css;Assets\swagger-ui\*.js;Assets\swagger-ui\*.png" LogicalName="swagger-ui/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Hosting\Keys\module-release-pub.pem" LogicalName="Autheris.Api.Hosting.Keys.module-release-pub.pem" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Autheris.Tests.Unit" />
     <InternalsVisibleTo Include="Autheris.Tests.Integration" />
+    <InternalsVisibleTo Include="Autheris.Tests.Architecture" />
   </ItemGroup>
 
 </Project>

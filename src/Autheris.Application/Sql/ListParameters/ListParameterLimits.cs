@@ -4,7 +4,7 @@ using System;
 using Autheris.Domain.Options;
 using TrinoSqlEngine.Ast.Capabilities;
 
-/// <summary>Limits of list-valued client parameters (REQ-SQL-128). The internal constants are not options (Phase 3 14.7).</summary>
+/// <summary>Limits of list-valued client parameters. The internal constants are not options (Phase 3 14.7).</summary>
 public readonly record struct ListParameterLimits(int ConfiguredMaxValues, int MaxListParameters)
 {
     /// <summary>Documented range of <c>WebSql:MaxListParameterValues</c>.</summary>
@@ -13,13 +13,13 @@ public readonly record struct ListParameterLimits(int ConfiguredMaxValues, int M
     /// <summary>Documented range of <c>WebSql:MaxListParameters</c>.</summary>
     public const int MaxListParametersCeiling = 64;
 
-    /// <summary>Hard ceiling of the raw array length, whatever the configuration (SEC-128-09).</summary>
+    /// <summary>Hard ceiling of the raw array length, whatever the configuration.</summary>
     public const int RawListCeiling = 100_000;
 
     /// <summary>Headroom below the dialect bind budget (owner decision Q-128-1): the budget also holds tenant, policy and literal binds.</summary>
     public const int BindBudgetHeadroom = 100;
 
-    /// <summary>Hard ceiling of the raw array length: <c>min(10 x configured, 100,000)</c> (SEC-128-09), checked before any element is read.</summary>
+    /// <summary>Hard ceiling of the raw array length: <c>min(10 x configured, 100,000)</c>checked before any element is read.</summary>
     public int RawCeiling => (int)Math.Min(10L * ConfiguredMaxValues, RawListCeiling);
 
     public static ListParameterLimits From(WebSqlOptions options)

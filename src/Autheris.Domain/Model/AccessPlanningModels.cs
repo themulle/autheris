@@ -74,7 +74,7 @@ public sealed record AdminApplyAccessResult(
 
 
 /// <summary>
-/// Issue #107 (SEC-RF107-14): request to plan a change of the row filter key-set cache settings. Exactly one of
+/// Issue #107: request to plan a change of the row filter key-set cache settings. Exactly one of
 /// <paramref name="RowFilterId"/> (rule level) or <paramref name="DatasetId"/> (object level) is set. All values are replaced as given:
 /// a missing value means "inherit"; an object-level request with all values missing clears the object level.
 /// <paramref name="Strategy"/> is accepted only as the strings <c>Exists</c> or <c>KeySetCache</c> (no numeric enum values).

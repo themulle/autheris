@@ -6,7 +6,7 @@ using System.Text;
 
 /// <summary>
 /// Fast diacritic folding and normalization with zero-allocation ASCII fast-path.
-/// Emits German umlaut expansions and NFD accent-stripped forms (SEC-CAT146-07).
+/// Emits German umlaut expansions and NFD accent-stripped forms.
 /// </summary>
 public static class DiacriticNormalizer
 {

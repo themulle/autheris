@@ -23,7 +23,7 @@ public sealed record DeclarativeDatasetCatalog(
     string? Visibility = null);
 
 /// <remarks>
-/// WP-SC-16: <c>ValidUntil</c> is an absolute expiry and is mandatory for individual (User / ServicePrincipal) grantees; group and role
+/// <c>ValidUntil</c> is an absolute expiry and is mandatory for individual (User / ServicePrincipal) grantees; group and role
 /// grantees use <c>ValidityDays</c> (default 365). Re-applying a manifest never extends an existing identical grant.
 /// </remarks>
 public sealed record DeclarativeConsentPolicy(

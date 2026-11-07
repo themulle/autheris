@@ -31,10 +31,6 @@ internal static class DialectSqlFragmentExtractor
 
     public static readonly DialectSqlArea[] Areas =
     [
-        new("ItsmOutbox",
-        [
-            "EnqueueAsync(ItsmOutboxMessage)", "GetPendingMessagesAsync", "MarkCompletedAsync", "MarkFailedAsync", "GetDeadLetterMessagesAsync"
-        ]),
         new("WebhookOutbox",
         [
             "EnqueueAsync(WebhookOutboxMessage)", "ClaimBatchAsync", "CompleteAsync", "RescheduleAsync", "DeadLetterAsync", "FencedUpdateAsync",

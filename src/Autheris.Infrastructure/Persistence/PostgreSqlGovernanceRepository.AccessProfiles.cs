@@ -8,7 +8,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
-/// <summary>WP-SC-03: persisted access profiles on PostgreSql; the SQL and the rules live in <see cref="AccessProfileStore"/>.</summary>
+/// <summary>persisted access profiles on PostgreSql; the SQL and the rules live in<see cref="AccessProfileStore"/>.</summary>
 public partial class PostgreSqlGovernanceRepository : IAccessProfileRepository
 {
     private AccessProfileStore? _accessProfileStore;

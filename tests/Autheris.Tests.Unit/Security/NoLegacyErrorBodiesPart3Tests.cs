@@ -5,7 +5,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;

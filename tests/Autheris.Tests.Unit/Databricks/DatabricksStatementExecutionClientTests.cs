@@ -214,7 +214,7 @@ public sealed class DatabricksStatementExecutionClientTests
     [Fact]
     public async Task Token_OnlyViaKeyVaultOutsideDevelopment()
     {
-        var plaintextVault = NSubstitute.Substitute.For<Autheris.Application.Interfaces.IKeyVaultSecretProvider>();
+        var plaintextVault = NSubstitute.Substitute.For<Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider>();
         plaintextVault.GetSecretBytes(NSubstitute.Arg.Any<string>()).Returns(ci => System.Text.Encoding.UTF8.GetBytes((string)ci[0]));
         var handler = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, "[]"))));
         var client = Client(handler, vault: plaintextVault, environment: "Production");

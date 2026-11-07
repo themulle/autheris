@@ -10,9 +10,8 @@ using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Analytics;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -51,7 +50,7 @@ public static class AnalyticsEndpoints
 
     public static IEndpointRouteBuilder MapAnalyticsEndpoints(this IEndpointRouteBuilder app)
     {
-        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        // Issue #447: every route of this group declares its ingress transport via endpoint metadata.
         var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         ingress.MapPost("/api/v1/analytics/aggregate", HandleAggregateAsync)
             .WithName("ExecuteGovernedAggregation")
@@ -126,15 +125,6 @@ public static class AnalyticsEndpoints
 
             var result = await aggregationService.ExecuteAggregationAsync(httpContext.User, query, ct).ConfigureAwait(false);
             return Results.Ok(result);
-        }
-        catch (PrivacyBudgetExhaustedException ex)
-        {
-            SafeErrorResults.LogFailure(httpContext, ex, "PRIVACY_BUDGET_EXHAUSTED");
-            return SafeErrorResults.Problem(
-                StatusCodes.Status429TooManyRequests,
-                "PRIVACY_BUDGET_EXHAUSTED",
-                "The daily differential privacy epsilon budget has been exhausted.",
-                httpContext);
         }
         catch (MaskedAggregationException ex)
         {
@@ -230,15 +220,6 @@ public static class AnalyticsEndpoints
 
             var result = await metricQueryService.QueryMetricsAsync(httpContext.User, metricRequest, ct).ConfigureAwait(false);
             return Results.Ok(result);
-        }
-        catch (PrivacyBudgetExhaustedException ex)
-        {
-            SafeErrorResults.LogFailure(httpContext, ex, "PRIVACY_BUDGET_EXHAUSTED");
-            return SafeErrorResults.Problem(
-                StatusCodes.Status429TooManyRequests,
-                "PRIVACY_BUDGET_EXHAUSTED",
-                "The daily differential privacy epsilon budget has been exhausted.",
-                httpContext);
         }
         catch (MaskedAggregationException ex)
         {

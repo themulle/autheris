@@ -26,7 +26,7 @@ public sealed class TenantRegistryOptions
     /// <summary>When <c>true</c> every authenticated request registers its tenant id; the registry being unavailable then denies the request (503).</summary>
     public bool Enabled { get; init; } = true;
 
-    /// <summary>Budget of new tenant registrations per identity provider issuer and window (SEC-X1-13).</summary>
+    /// <summary>Budget of new tenant registrations per identity provider issuer and window.</summary>
     [Range(1, 100_000)] public int MaxNewTenantsPerIssuerPerWindow { get; init; } = 20;
 
     [Range(1, 86_400)] public int WindowSeconds { get; init; } = 60;

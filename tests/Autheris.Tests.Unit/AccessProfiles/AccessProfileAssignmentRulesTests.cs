@@ -129,45 +129,6 @@ public sealed class AccessProfileAssignmentRulesTests
         AccessProfileAssignmentRules.IsEffective(profile, User(), Now.AddDays(2)).ShouldBeFalse();
     }
 
-    private static AccessProfileAssignment BreakGlass(int hours = 24, string? approved = null, string? why = "outage") => new()
-    {
-        Subject = "alice", SubjectType = AccessProfileSubjectType.User, Kind = AccessProfileAssignmentKind.BreakGlass,
-        AssignedAt = Now, ExpiresAt = Now.AddHours(hours), CreatedBy = "req", ApprovedBy = approved, Justification = why
-    };
-
-    [Fact]
-    public void BreakGlass_IsLimitedTo72Hours_AndNeedsAJustification()
-    {
-        var profile = Profile(MaskingPolicyMode.Unmasked);
-        AccessProfileAssignmentRules.ValidateForAssignment(profile, BreakGlass(72), Now);
-        Rejected(() => AccessProfileAssignmentRules.ValidateForAssignment(profile, BreakGlass(73), Now), AccessProfileAssignmentRules.TooLong);
-        Rejected(() => AccessProfileAssignmentRules.ValidateForAssignment(profile, BreakGlass(why: null), Now), AccessProfileAssignmentRules.BreakGlassRequiresJustification);
-        Rejected(() => AccessProfileAssignmentRules.ValidateForAssignment(profile, BreakGlass(approved: "req"), Now), AccessProfileAssignmentRules.SameApprover);
-    }
-
-    [Fact]
-    public void BreakGlass_WithoutApproval_ExpiresAfter24Hours_AndAtItsOwnExpiry()
-    {
-        var profile = Profile(MaskingPolicyMode.Unmasked);
-        var open = BreakGlass(72);
-
-        AccessProfileAssignmentRules.IsEffective(profile, open, Now.AddHours(23)).ShouldBeTrue();
-        AccessProfileAssignmentRules.IsEffective(profile, open, Now.AddHours(25)).ShouldBeFalse();
-        AccessProfileAssignmentRules.IsEffective(profile, open with { ApprovedBy = "app" }, Now.AddHours(25)).ShouldBeTrue();
-        AccessProfileAssignmentRules.IsEffective(profile, open with { ApprovedBy = "app" }, Now.AddHours(73)).ShouldBeFalse();
-        AccessProfileAssignmentRules.IsEffective(profile, open with { ApprovedBy = "req" }, Now.AddHours(1)).ShouldBeFalse();
-    }
-
-    [Fact]
-    public void BreakGlass_StoredWithALongerExpiry_IsClampedTo72Hours()
-    {
-        var profile = Profile(MaskingPolicyMode.Unmasked);
-        var tooLong = BreakGlass(500, approved: "app");
-
-        AccessProfileAssignmentRules.EffectiveExpiry(profile, tooLong).ShouldBe(Now.AddHours(72));
-        AccessProfileAssignmentRules.IsEffective(profile, tooLong, Now.AddHours(80)).ShouldBeFalse();
-    }
-
     [Fact]
     public void Approver_CannotBeTheGrantee_NorTheRequesterOnFourEyesCases()
     {
@@ -231,20 +192,6 @@ public sealed class AccessProfileAssignmentRulesTests
         AccessProfileAssignmentRules.IsEffective(profile, mapping with { ApprovedAt = Now.AddDays(-91) }, Now).ShouldBeFalse();
         AccessProfileAssignmentRules.IsEffective(profile, mapping with { ApprovedAt = null }, Now).ShouldBeFalse();
         AccessProfileAssignmentRules.EffectiveUntil(profile, mapping).ShouldBe(Now.AddDays(1));
-    }
-
-    [Fact]
-    public void SEC_SC_04_CachedProfile_IsReCheckedForEveryAssignmentExpiry_IncludingUnapprovedBreakGlass()
-    {
-        var profile = Profile(MaskingPolicyMode.Unmasked);
-        var breakGlass = new AccessProfileAssignment
-        {
-            Subject = "alice", AssignedAt = Now, ExpiresAt = Now.AddHours(60), CreatedBy = "req", Justification = "incident", Kind = AccessProfileAssignmentKind.BreakGlass
-        };
-        profile.Assignments.Add(breakGlass);
-
-        profile.IsActive(Now.AddHours(23)).ShouldBeTrue();
-        profile.IsActive(Now.AddHours(25)).ShouldBeFalse("an unapproved break-glass lapses after 24 h even when the profile is served from the cache");
     }
 
     [Fact]

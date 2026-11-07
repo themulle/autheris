@@ -4,7 +4,7 @@ using System;
 using System.Net.Http;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Plugins;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
@@ -13,8 +13,8 @@ using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
-using Autheris.Application.SqlEndpoints.Interfaces;
-using Autheris.Application.SqlEndpoints.Services;
+using Autheris.Application.Sql.Endpoints.Interfaces;
+using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Plugins;
@@ -29,7 +29,7 @@ public static class GatewaySqlEngineServiceExtensions
         this IServiceCollection services,
         GatewayOptions gatewayOptions)
     {
-        // ARCH-MNT-15-SC-04: invalid cache bounds stop the start (the same check also runs as GatewayOptions validation).
+        // SC-04: invalid cache bounds stop the start (the same check also runs as GatewayOptions validation).
         TrinoSqlEngine.Parsing.AntlrCacheGenerations.Shared.Configure(SqlParserCacheOptionsValidator.ToEngineOptions(gatewayOptions.SqlParserCache));
 
         // HTTP & Plugin Data Sources
@@ -49,7 +49,7 @@ public static class GatewaySqlEngineServiceExtensions
             .ConfigurePrimaryHttpMessageHandler(sp => SecureOutboundHttp.CreatePrimaryHandler(sp, "DeclarativeHttp"))
             // SEC I-1: same URL/address decision as every other integration client (also used by plugins).
             .AddHttpMessageHandler(sp => SsrfProtectionHandler.Create(sp, "DeclarativeHttp"))
-            // F-GOV-14 (SEC-17): an upstream body above the per-table staging cap aborts while it is read.
+            // F-GOV-14: an upstream body above the per-table staging cap aborts while it is read.
             // CR-09: configured by DataSources:Http:MaxResponseBytes (global to every user of this client).
             .AddHttpMessageHandler(sp => new ResponseSizeLimitingHandler(
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.DataSources?.Http?.MaxResponseBytes is > 0 and var cap
@@ -58,12 +58,12 @@ public static class GatewaySqlEngineServiceExtensions
 #pragma warning restore CA5359
 
         services.AddSingleton<IPluginManager, PluginManager>();
-        // WP-ARC-B-02: SQL table reads run through the governed pipeline (planner + IGovernedSqlExecutionService). Scoped, because the
+        // SQL table reads run through the governed pipeline (planner + IGovernedSqlExecutionService). Scoped, because the
         // execution service is; it is resolved lazily to keep the FederatedStagingService -> IEnumerable<IDataSourceExecutor> ->
         // IGovernedSqlExecutionService -> IFederatedQueryExecutionService cycle out of the constructor graph.
-        services.TryAddSingleton<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner, Autheris.Application.Data.Services.GovernedTableReadPlanner>();
+        services.TryAddSingleton<Autheris.Application.DataSources.Interfaces.IGovernedTableReadPlanner, Autheris.Application.DataSources.Services.GovernedTableReadPlanner>();
         services.AddScoped<SqlTableReadExecutor>(sp => new SqlTableReadExecutor(
-            sp.GetRequiredService<Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner>(),
+            sp.GetRequiredService<Autheris.Application.DataSources.Interfaces.IGovernedTableReadPlanner>(),
             () => sp.GetRequiredService<IGovernedSqlExecutionService>(),
             sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>(),
             sp.GetService<Autheris.Application.DataSources.IIngressTransportContext>()));
@@ -83,7 +83,7 @@ public static class GatewaySqlEngineServiceExtensions
         {
             // L-2: an unusable audit digest key stops the start outside Development and Test.
             services.AddHostedService<AuditKeyStartupCheck>();
-            // SEC-ADG-26: the start lists the tables that the governed pipeline denies (ids only).
+            // the start lists the tables that the governed pipeline denies (ids only).
             services.AddHostedService<DeniedTablesStartupReporter>();
         }
         services.AddSingleton<IWebSqlStatementManager, WebSqlStatementManager>();

@@ -14,7 +14,8 @@ using Autheris.Api.Middleware;
 using Autheris.Api.Security;
 using NSubstitute.ExceptionExtensions;
 using Autheris.Application.Governance;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
@@ -1076,6 +1077,7 @@ public class SecurityFindingsRemediationTests
         services.AddLogging();
 
         services.AddGatewayInfrastructure(options);
+        Autheris.Modules.Lakehouse.LakehouseServiceCollectionExtensions.AddLakehouseIntegration(services, options);
 
         var sp = services.BuildServiceProvider();
         var factory = sp.GetRequiredService<IHttpClientFactory>();

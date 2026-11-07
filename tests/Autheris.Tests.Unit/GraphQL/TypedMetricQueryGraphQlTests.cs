@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Analytics;
-using Autheris.Application.Dbt.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Exceptions;
@@ -101,7 +101,6 @@ public sealed class TypedMetricQueryGraphQlTests
         { new AggregationColumnUnavailableException(), "AGGREGATION_COLUMN_UNAVAILABLE" },
         { new MetricFilterInvalidException(), "METRIC_FILTER_INVALID" },
         { new AggregationRowCapExceededException(), "AGGREGATION_ROW_CAP_EXCEEDED" },
-        { new PrivacyBudgetExhaustedException("alice", 1.0, 0.0), "PRIVACY_BUDGET_EXHAUSTED" },
         { new ArgumentException("Dimension 'secret_dim' is not declared"), "AGGREGATION_ARGUMENT_INVALID" },
         { new GatewayUnauthorizedException("secret"), "UNAUTHORIZED" },
         { new AggregationPrivacyRestrictedException(), "AGGREGATION_PRIVACY_RESTRICTED" },

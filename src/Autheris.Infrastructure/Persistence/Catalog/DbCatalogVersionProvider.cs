@@ -4,7 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 
 /// <summary>
 /// Database-backed catalog version provider reading (structure_version, content_version) from CATALOG_STATE

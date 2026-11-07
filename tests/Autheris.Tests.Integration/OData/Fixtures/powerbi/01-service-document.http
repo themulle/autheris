@@ -1,0 +1,6 @@
+# Power BI Desktop (Mashup Engine) OData v4 Service Document Discovery
+GET /odata/v4 HTTP/1.1
+Host: localhost
+Accept: application/json;odata.metadata=minimal;q=1.0,application/json;odata=minimalmetadata;q=0.9,application/atomsvc+xml;q=0.8,application/atom+xml;q=0.8,application/xml;q=0.7,text/plain;q=0.7
+OData-MaxVersion: 4.0
+User-Agent: Microsoft.Data.Mashup (https://go.microsoft.com/fwlink/?LinkID=304225)

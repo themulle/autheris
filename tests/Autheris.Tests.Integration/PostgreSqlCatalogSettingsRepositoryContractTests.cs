@@ -2,7 +2,7 @@ namespace Autheris.Tests.Integration;
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
@@ -24,7 +24,7 @@ public sealed class PostgreSqlCatalogSettingsRepositoryContractTests : CatalogSe
         env.EnvironmentName.Returns("Development");
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false },
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, SeedDemoData = false },
             Catalog = new DataCatalogOptions { DefaultVisibility = newTableDefault }
         });
         var repo = GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env);

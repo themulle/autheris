@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -29,7 +30,7 @@ internal readonly record struct AuditChainVerificationResult(
 
 /// <summary>
 /// Engine-neutral statement execution, parameter binding, row hydration, and cryptographic verification
-/// for audit operations across PostgreSQL, SQL Server, and SQLite (ARCH-MNT-22 Step 2).
+/// for audit operations across PostgreSQL, SQL Server, and SQLite ( Step 2).
 /// This class operates over <see cref="DbConnection"/> and <see cref="DbCommand"/>, and never opens,
 /// commits, rolls back, or disposes connections or transactions.
 /// </summary>
@@ -50,7 +51,8 @@ internal static class AuditSqlCore
         DetailsJson = reader.GetString(o + 8),
         PrevHash = reader.GetString(o + 9),
         EntryHash = reader.GetString(o + 10),
-        TenantId = StoredTenant.ParseAudit(reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11))
+        TenantId = StoredTenant.ParseAudit(reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11)),
+        ChainSequence = reader.FieldCount > o + 12 && !reader.IsDBNull(o + 12) ? reader.GetInt64(o + 12) : null
     };
 
     public static AuditPurgeCheckpoint ReadPurgeCheckpoint(DbDataReader reader, int o = 0) => new(
@@ -462,6 +464,7 @@ internal static class AuditSqlCore
         {
             long? seq = reader.IsDBNull(1) ? null : reader.GetInt64(1);
             var entry = ReadAuditEntry(reader, 2);
+            entry.ChainSequence = seq;
             list.Add(new AuditChainRecord(reader.GetInt64(0), seq, entry));
         }
 

@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Autheris.Domain.Options;
 
-/// <summary>PLAN-SEC-115: REST read-path switches (startup only; a restart is required).</summary>
+/// <summary>REST read-path switches (startup only; a restart is required).</summary>
 public sealed class RestApiOptions
 {
     public RestDataEndpointOptions DataEndpoint { get; init; } = new();
@@ -49,9 +49,9 @@ public sealed class WebSqlOptions
     public int StatementRetentionMinutes { get; init; } = 5;
 
     /// <summary>
-    /// Issue #277 (SEC-277-03): opt-in switch for <c>WITH RECURSIVE</c> in governed read statements. Default <c>false</c>; never enabled by
-    /// a profile. Requires <see cref="ExecutionTimeoutSeconds"/> in 1..300 (the timeout is the work bound, SEC-277-07) and the provider
-    /// temp-space prerequisites of the feature doc (SEC-277-08).
+    /// Issue #277: opt-in switch for<c>WITH RECURSIVE</c> in governed read statements. Default <c>false</c>; never enabled by
+    /// a profile. Requires <see cref="ExecutionTimeoutSeconds"/>in 1..300 (the timeout is the work bound) and the provider
+    /// temp-space prerequisites of the feature doc.
     /// </summary>
     public bool AllowRecursiveCte { get; init; } = false;
 
@@ -61,11 +61,11 @@ public sealed class WebSqlOptions
     /// </summary>
     public int MaxRecursionDepth { get; init; } = 100;
 
-    /// <summary>REQ-SQL-128: maximum number of distinct values of one list parameter (1..10,000). Clamped per dialect at runtime.</summary>
+    /// <summary>maximum number of distinct values of one list parameter (1..10,000). Clamped per dialect at runtime.</summary>
     [Range(1, 10_000)]
     public int MaxListParameterValues { get; init; } = 1000;
 
-    /// <summary>REQ-SQL-128: maximum number of list-valued parameters per request (1..64).</summary>
+    /// <summary>maximum number of list-valued parameters per request (1..64).</summary>
     [Range(1, 64)]
     public int MaxListParameters { get; init; } = 8;
 
@@ -119,7 +119,7 @@ public sealed class CrossSourceOptions
     public bool Enabled { get; init; } = false;
     /// <summary>
     /// Transport opt-in for federated (cross-source) queries. Valid names are the constants of <c>SqlTransports</c>:
-    /// WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints, AsyncJob and Olap; an unknown name aborts the start.
+    /// WebSql, Trino, Rest, Mcp, ArrowExport, SqlEndpoints, AsyncJob and Olap; an unknown name aborts the start.
     /// When not configured, only WebSql and Trino are allowed; every other channel (including AsyncJob and Olap) is rejected
     /// on federated queries unless listed here. A configured list replaces the default entirely. An explicitly empty list
     /// allows no transport (fail-closed).
@@ -139,7 +139,7 @@ public sealed class CrossSourceOptions
     public int TimeoutSeconds { get; init; } = 30;
 
     /// <summary>
-    /// Issue #123 (SEC-DATA123-04): Maximum number of tables permitted in a single same-source AST subtree pushdown (default 12).
+    /// Issue #123: Maximum number of tables permitted in a single same-source AST subtree pushdown (default 12).
     /// </summary>
     public int MaxTablesPerSubtree { get; init; } = 12;
 
@@ -172,7 +172,7 @@ public sealed class CrossSourceOptions
     /// <summary>Issue #124: Governed dynamic key-set filters in cross-source WebSQL joins.</summary>
     public DynamicKeySetOptions DynamicKeySet { get; init; } = new();
 
-    /// <summary>Issue #132 (PLAN-DATA-132): Co-located SQL Server data source execution options.</summary>
+    /// <summary>Issue #132: Co-located SQL Server data source execution options.</summary>
     public CoLocationOptions CoLocation { get; init; } = new();
 }
 
@@ -265,7 +265,7 @@ public sealed class ProcedureEndpointsOptions
     public bool AllowDeclaredValidation { get; init; } = false;
 
     /// <summary>
-    /// INC-2 D-8 / SEC-PROC152I2-13: whether <c>validation: declared</c> declarations must carry <c>integrity.ddl_hash</c>.
+    /// INC-2 D-8 / whether<c>validation: declared</c> declarations must carry <c>integrity.ddl_hash</c>.
     /// Null resolves to required in every environment except exactly <c>Development</c> (Staging, Production, unknown and
     /// missing environment names: required). A missing hash is then rejected; otherwise it only logs a warning on every (re)load.
     /// </summary>

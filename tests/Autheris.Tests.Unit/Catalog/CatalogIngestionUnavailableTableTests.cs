@@ -3,13 +3,13 @@ namespace Autheris.Tests.Unit.Catalog;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Audit;
 using System.Text;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Models;
-using Autheris.Application.DataCatalog.Services;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Interfaces;
-using Autheris.Application.OpenMetadata.Interfaces;
-using Autheris.Application.OpenMetadata.Models;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Models;
+using Autheris.Application.Catalog.Services;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -84,14 +84,12 @@ public sealed class CatalogIngestionUnavailableTableTests : IDisposable
         var id = new TableIdentifier("crm", "dbo", "orders");
         await SeedCorruptTableWithMaskingAsync(id);
         var client = Substitute.For<IDataCatalogClient>();
-        client.ProviderType.Returns(DataCatalogProviderType.MicrosoftPurview);
+        client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
         client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new List<CatalogTableAsset>
         {
             new() { Identifier = id, Columns = [new() { ColumnName = "id" }, new() { ColumnName = "ssn" }], PrimaryKeyColumns = ["id"] }
         });
-        var factory = Substitute.For<IDataCatalogClientFactory>();
-        factory.GetActiveClient().Returns(client);
-        var sut = new DataCatalogSyncService(factory, _repo, Substitute.For<IEpochValidationService>(),
+        var sut = new DataCatalogSyncService(client, _repo, Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions()), Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync(dryRun: false);

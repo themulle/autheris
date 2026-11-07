@@ -22,7 +22,7 @@ public enum HttpKeyPushdownKind
 }
 
 /// <summary>
-/// F-GOV-14 (WI-8, M7, SEC-15): the key pushdown an endpoint declares, derived from the existing batch capability of the
+/// F-GOV-14 (WI-8, M7): the key pushdown an endpoint declares, derived from the existing batch capability of the
 /// <see cref="HttpEndpointDescriptor"/> (<c>BatchType</c>, <c>BatchParamName</c>, <c>PrimaryKeyField</c>). Anything the
 /// executor would silently drop, reject mid-flight or answer incompletely (paged endpoints, reserved or malformed
 /// parameter names, a missing path placeholder) is "no capability", so a pushdown is never assumed to filter.

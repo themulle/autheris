@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Integration;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;

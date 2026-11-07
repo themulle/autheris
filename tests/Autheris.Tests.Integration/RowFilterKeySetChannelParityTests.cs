@@ -7,7 +7,7 @@ using System.Linq;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -37,7 +37,6 @@ public sealed class RowFilterKeySetChannelParityTests : IClassFixture<RowFilterK
     [InlineData("mcp-sample-rows")]
     [InlineData("mcp-query-graphql")]
     [InlineData("arrow-export")]
-    [InlineData("flight-sql")]
     [InlineData("olap")]
     public async Task KeySetCache_Channel_ReturnsExactlyTheRowsOfTheConsentFilter(string channel)
     {

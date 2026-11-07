@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Catalog;
 using System.Data.Common;
 using System.Security.Claims;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

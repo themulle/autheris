@@ -6,7 +6,7 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Runtime-managed, app-scoped trusted GraphQL documents (Issue #281): portable SQL (named parameters) shared by the three governance
-/// repositories. Every mutation is one transaction that changes the data and bumps the generation row (SEC-281-7); the store never runs DDL.
+/// repositories. Every mutation is one transaction that changes the data and bumps the generation row; the store never runs DDL.
 /// </summary>
 internal static class TrustedDocumentStore
 {

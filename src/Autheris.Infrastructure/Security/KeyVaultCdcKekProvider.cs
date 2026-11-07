@@ -5,7 +5,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Resolves the CDC stream key-encryption keys through <see cref="IKeyVaultSecretProvider"/> (PLAN-CDC-99 D-A8, SEC-CDC99-14).
+/// Resolves the CDC stream key-encryption keys through <see cref="IKeyVaultSecretProvider"/>(99 D-A8).
 /// Each KEK secret must be at least 32 bytes; the key is <c>HKDF-SHA256(secret, info "autheris-cdc-kek-v1")</c>, cached per process.
 /// A secret that equals the webhook KEK or the masking HMAC secret reference is refused (key separation). Only in Development, and
 /// only when no KEK is configured, an ephemeral random KEK is generated (the stream is unreadable after a restart and fails closed).

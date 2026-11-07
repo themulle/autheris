@@ -1,5 +1,5 @@
 using System.Globalization;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
@@ -136,7 +136,7 @@ public sealed class GovernanceSchemaMigrationTests
         using var repository = NewRawRepository(cs);
         var runner = NewRunner(repository, cs);
 
-        runner.Steps.Count.ShouldBe(5);
+        runner.Steps.Count.ShouldBe(6);
         runner.Steps[0].ShouldSatisfyAllConditions(
             s => s.Version.ShouldBe(1),
             s => s.Name.ShouldBe("baseline_governance_schema"));
@@ -193,7 +193,7 @@ public sealed class GovernanceSchemaMigrationTests
         var cs = NewConnectionString();
         using var repository = NewRawRepository(cs);
         await NewRunner(repository, cs).RunAsync();
-        Exec(repository, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (6, 'future', 'x', 'now', 'test')");
+        Exec(repository, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (7, 'future', 'x', 'now', 'test')");
 
         await Should.ThrowAsync<GovernanceSchemaDriftException>(() => NewRunner(repository, cs).RunAsync());
         await NewRunner(repository, cs, allowNewerSchema: true).RunAsync();

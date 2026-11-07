@@ -7,9 +7,9 @@ using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 
 /// <summary>
-/// PLAN-OPS-150 WP-C (best effort): serialises a <see cref="ListToolsResult"/> built from <see cref="IMcpToolRegistry"/> with the MCP
+/// 150 (best effort): serialises a<see cref="ListToolsResult"/> built from <see cref="IMcpToolRegistry"/> with the MCP
 /// SDK's JSON options so the first <c>tools/list</c> pays no reflection cost. Depends on the registry only: no principal, scope,
-/// handler or tool invocation, and the output is discarded and never logged (SEC-OPS150-11).
+/// handler or tool invocation, and the output is discarded and never logged.
 /// </summary>
 public sealed class McpSerializationWarmup(IMcpToolRegistry toolRegistry) : IStartupWarmup
 {

@@ -2,7 +2,7 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
@@ -31,7 +31,7 @@ public sealed class SqlServerConsentRevokeUnificationContractTests : ConsentRevo
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                Provider = "SqlServer", ConnectionString = _db.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false
+                Provider = "SqlServer", ConnectionString = _db.ConnectionString, SeedDemoData = false
             }
         });
         _repo = GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), options, env);

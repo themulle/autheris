@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Identity.Attributes;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -120,41 +120,6 @@ public sealed class ConsentRequestServiceTests
             service.SubmitAsync(Command(Principal("tenant-a"), "tenant-a")));
 
         ex.Code.ShouldBe("FORBIDDEN");
-    }
-
-    [Fact]
-    public async Task Submit_ItsmDispatchFails_DeletesRequestAndThrows()
-    {
-        var (metadata, approvals, created) = Repositories();
-        var dispatcher = Substitute.For<IConsentRequestDispatcher>();
-        dispatcher.DispatchAsync(Arg.Any<ItsmTicketRequest>(), Arg.Any<ItsmSystemType>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ItsmTicketResult(false, null, "ITSM_DOWN", "down")));
-        var options = Options.Create(new GatewayOptions { Itsm = new ItsmOptions { Enabled = true } });
-        var service = new ConsentRequestService(metadata, approvals, null, dispatcher, options);
-
-        var ex = await Should.ThrowAsync<ConsentRequestException>(() =>
-            service.SubmitAsync(Command(Principal("tenant-a"), "tenant-a")));
-
-        ex.Code.ShouldBe("ITSM_DOWN");
-        await approvals.Received(1).DeleteConsentRequestAsync(created[0].Id, Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Submit_ItsmDispatchSucceeds_StoresTicketAndReturnsPendingExternal()
-    {
-        var (metadata, approvals, created) = Repositories();
-        var reference = new ItsmTicketReference(ItsmSystemType.ServiceNow, "INC1", "https://itsm/INC1");
-        var dispatcher = Substitute.For<IConsentRequestDispatcher>();
-        dispatcher.DispatchAsync(Arg.Any<ItsmTicketRequest>(), Arg.Any<ItsmSystemType>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ItsmTicketResult(true, reference, null, null)));
-        var options = Options.Create(new GatewayOptions { Itsm = new ItsmOptions { Enabled = true } });
-        var service = new ConsentRequestService(metadata, approvals, null, dispatcher, options);
-
-        var result = await service.SubmitAsync(Command(Principal("tenant-a"), "tenant-a"));
-
-        result.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-        result.ItsmTicketReference.ShouldBe(reference);
-        await approvals.Received(1).UpdateConsentRequestTicketIdAsync(created[0].Id, "INC1", Arg.Any<CancellationToken>());
     }
 
     [Fact]

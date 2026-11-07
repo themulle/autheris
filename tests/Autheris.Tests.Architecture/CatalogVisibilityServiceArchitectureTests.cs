@@ -26,7 +26,6 @@ public sealed class CatalogVisibilityServiceArchitectureTests
         "Autheris.Application.Governance.Services.EffectiveAccessExplanationService",
         "Autheris.Application.Mcp.Services.AiDataGuardrailService",
         "Autheris.Application.Mcp.Services.SemanticMcpCompiler",
-        "Autheris.Application.Serialization.ArrowFlightSqlServer",
         "Autheris.Application.Sql.Services.TrinoMetadataQueryHandler",
         "Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService"
     ];
@@ -44,7 +43,8 @@ public sealed class CatalogVisibilityServiceArchitectureTests
         yield return CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
         yield return CecilModuleCache.For(typeof(Autheris.GraphQL.Types.Mutation).Assembly);
         yield return CecilModuleCache.For(typeof(Autheris.Api.Security.GatewayAuthSchemes).Assembly);
-        yield return CecilModuleCache.For(typeof(Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService).Assembly);
+        yield return CecilModuleCache.For(typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly);
+        yield return CecilModuleCache.For(typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly);
     }
 
     /// <summary>The declaring root type: <c>A.B/&lt;&gt;c__DisplayClass0_0</c> and <c>A.B/&lt;Run&gt;d__3</c> belong to <c>A.B</c>.</summary>

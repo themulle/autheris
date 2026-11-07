@@ -26,17 +26,9 @@ public sealed class AuditLineageEgressInterceptor : IEgressInterceptor
 
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["X-Governance-Status"] = "Evaluated"
+            ["X-Governance-Status"] = "Evaluated",
+            ["X-Governance-Mode"] = "Standard-Zero-Trust"
         };
-
-        if (context.Items.ContainsKey("IsBreakGlass"))
-        {
-            headers["X-Governance-Mode"] = "Break-Glass-Active";
-            if (context.Items.TryGetValue("AccessJustification", out var just) && just != null)
-            {
-                headers["X-Audit-Ticket"] = just.ToString()!;
-            }
-        }
 
         // F-OPS-02: Resolve distributed W3C TraceId for correlating APM traces with WORM audit
         var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();

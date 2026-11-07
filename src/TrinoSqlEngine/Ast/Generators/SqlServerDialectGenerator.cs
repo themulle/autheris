@@ -17,7 +17,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.SqlServer;
 
-    // WP-A3: every inline structural position of this generator is registered with the emitter context.
+    // every inline structural position of this generator is registered with the emitter context.
     protected override bool BindLiterals => true;
 
     protected override bool SupportsTryCast => true;
@@ -60,7 +60,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 
     /// <summary>
     /// T-SQL requires a terminating semicolon after MERGE. It is appended exactly once, as the last character, and registered with
-    /// the emitted-text checker, which allows a semicolon nowhere else (SEC-ADG-08 c).
+    /// the emitted-text checker, which allows a semicolon nowhere else (08 c).
     /// </summary>
     protected override void GenerateMerge(MergeStatement merge, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
@@ -257,7 +257,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
                 AppendStructural(ref builder, context, "), 1, 1) AS datetimeoffset)");
                 return;
             case DateUnit.Hour:
-                // #333 (SEC-PGP-05): culture and session independent; no @@DATEFIRST, SET LANGUAGE, FORMAT or string conversions.
+                // #333: culture and session independent; no @@DATEFIRST, SET LANGUAGE, FORMAT or string conversions.
                 builder.Append("CAST(DATEADD(hour, DATEPART(hour, ");
                 GenerateExpression(source, ref builder, context);
                 builder.Append("), CAST(CAST(");
@@ -355,7 +355,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         base.GenerateFunctionCall(fn, ref builder, context);
     }
 
-    // ---- typed column masks (WP-A6) ----
+    // ---- typed column masks ----
 
     private static readonly System.Text.RegularExpressions.Regex NativeTypeRegex = new(
         @"\A(?<name>[a-z][a-z0-9]*)(?:\((?<args>max|[0-9]{1,4}(?:, ?[0-9]{1,4})?)\))?\z",
@@ -672,7 +672,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
     }
 
     /// <summary>
-    /// Issue #132 (PLAN-DATA-132, WP-132-3): Emits physical three-part table names [database].[schema].[table]
+    /// Issue #132: Emits physical three-part table names [database].[schema].[table]
     /// when <see cref="SqlEmitterContext.EmitThreePartNames"/> is true and the table has 3 parts.
     /// Otherwise retains standard two-part qualification [schema].[table].
     /// </summary>

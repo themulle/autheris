@@ -12,7 +12,7 @@ using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// F-SEC-04: In-Memory Multi-Tenant Relationship Tuple Store.
+/// F-In-Memory Multi-Tenant Relationship Tuple Store.
 /// Provides sub-millisecond tuple querying and strict tenant boundary isolation.
 /// </summary>
 public sealed class InMemoryRebacStore : IRebacStore
@@ -90,7 +90,7 @@ public sealed class InMemoryRebacStore : IRebacStore
         }
 
         var now = _timeProvider.GetUtcNow();
-        IEnumerable<RebacTuple> query = store.Values.Where(t => !t.IsExpired(now)); // WP-SC-16: an expired tuple is absent (fail closed)
+        IEnumerable<RebacTuple> query = store.Values.Where(t => !t.IsExpired(now)); // an expired tuple is absent (fail closed)
 
         if (user != null)
         {

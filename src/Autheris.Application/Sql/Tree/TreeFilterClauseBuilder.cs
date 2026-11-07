@@ -1,7 +1,7 @@
 using System.Globalization;
 using Autheris.Application.Analytics;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 
 namespace Autheris.Application.Sql.Tree;
 

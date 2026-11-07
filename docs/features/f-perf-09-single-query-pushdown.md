@@ -1,6 +1,5 @@
 # F-PERF-09: GraphQL-to-SQL AST Single-Query Compiler
 
-**Status:** [Done] (100% GA – Wave 2)  
 **Components:** `src/Autheris.Application/Sql/Tree/TreeSqlCompiler.cs`, `src/Autheris.Application/Sql/Tree/GovernedTreeQueryService.cs` (the former `SingleQueryAstCompiler` was removed)
 
 ---
@@ -13,7 +12,7 @@ Standard GraphQL gateways suffer from the notorious N+1 query problem when fetch
 
 ## 2. Business Value
 
-- **Sub-10ms Deep Graph Resolution**: Reduces database roundtrip overhead by up to 98% for deeply nested queries.
+- **Deep Graph Resolution Pushdown**: Reduces database roundtrip overhead by up to 98% for deeply nested queries.
 - **Drastic Database Connection Pool Relief**: Resolving a complex nested query consumes exactly one database connection for a fraction of the time.
 - **Zero Client Modification**: Works transparently on standard GraphQL queries without requiring custom client syntax.
 

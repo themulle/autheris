@@ -19,7 +19,7 @@ public enum SecurityScope
     MergeSource,
     MergeTarget,
 
-    /// <summary>Tenant predicate of a physical table inside a policy subquery (SEC-ADG-11).</summary>
+    /// <summary>Tenant predicate of a physical table inside a policy subquery.</summary>
     PolicySubquery,
 
     /// <summary>MERGE target predicate in the ON condition.</summary>

@@ -10,7 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -320,7 +320,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
                         continue;
                     }
 
-                    // CRLF injection prevention (SEC-MED-08)
+                    // CRLF injection prevention
                     if (k.Contains('\r') || k.Contains('\n') || (v != null && (v.Contains('\r') || v.Contains('\n'))))
                     {
                         continue;

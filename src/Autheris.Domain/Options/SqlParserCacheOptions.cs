@@ -1,7 +1,7 @@
 namespace Autheris.Domain.Options;
 
 /// <summary>
-/// ARCH-MNT-15: bounds of the SQL parser's ANTLR DFA caches (<c>Gateway:SqlParserCache</c>). The caches are replaced by a fresh generation once
+/// bounds of the SQL parser's ANTLR DFA caches (<c>Gateway:SqlParserCache</c>). The caches are replaced by a fresh generation once
 /// a generation holds more than <see cref="MaxStatesPerGeneration"/> states. Every value must be greater than zero; there is no "unlimited".
 /// </summary>
 public sealed class SqlParserCacheOptions

@@ -1,6 +1,6 @@
 namespace Autheris.Api.Security;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 

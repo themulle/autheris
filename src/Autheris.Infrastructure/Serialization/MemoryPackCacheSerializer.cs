@@ -1,6 +1,6 @@
 using System;
 using System.Text.Json;
-using Autheris.Application.Caching.Interfaces;
+using Autheris.Application.State.Caching.Interfaces;
 using MemoryPack;
 using Microsoft.Extensions.Logging;
 

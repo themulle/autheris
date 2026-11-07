@@ -47,7 +47,7 @@ public static class GatewayApplicationBuilderExtensions
         // SEC C-1 Edge Stripping: Strip any client-supplied x-autheris-* headers from untrusted clients
         app.UseMiddleware<EdgeHeaderStrippingMiddleware>();
 
-        // WP-ARC-C-04 / ARC-A-10: Rewrite /graphql/{domain} to /graphql and set DomainScope + X-Autheris-Domain
+        // 04 / ARC-A-10: Rewrite /graphql/{domain} to /graphql and set DomainScope + X-Autheris-Domain
         // BEFORE CSRF, authentication, authorization, rate limiting, and audit middlewares run.
         app.UseMiddleware<DomainScopeRewriteMiddleware>(gatewayOptions);
 
@@ -88,7 +88,7 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<BasicAuthSessionMiddleware>();
         // ADR-017 / K-K10: Canonicalize AD Windows SIDs, OIDC claims, client certs, and GatewayRoles before authorization
         app.UseMiddleware<ClaimsNormalizationMiddleware>();
-        // PLAN-SEC-115 A-9: only while the REST data family is switched off (no pipeline element otherwise).
+        // 115 A-9: only while the REST data family is switched off (no pipeline element otherwise).
         if (!ResolveReadPathSwitches(app.Services, gatewayOptions).RestDataEndpointEnabled)
         {
             app.UseMiddleware<DisabledReadPathObserverMiddleware>();
@@ -98,8 +98,20 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<ReadOnlyTokenMiddleware>(
             new PathString(ResolveGraphQlPath(gatewayOptions)),
             new PathString(ResolveMcpBasePath(gatewayOptions)));
-        // Issue #447 (SEC-ATR-02): stamp the ingress transport from endpoint metadata only, after routing and before endpoint code runs
+        // Issue #447: stamp the ingress transport from endpoint metadata only, after routing and before endpoint code runs
         app.UseMiddleware<IngressTransportMiddleware>();
+        // Unmapped/removed routes return 404 NotFound for both authenticated and anonymous callers
+        // before AuthorizationMiddleware's FallbackPolicy challenges unmatched endpoints with 401.
+        app.Use(static (context, next) =>
+        {
+            if (context.GetEndpoint() is null)
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return Task.CompletedTask;
+            }
+
+            return next(context);
+        });
         app.UseAuthorization();
         app.UseMiddleware<PostAuthSidRateLimitingMiddleware>();
         app.UseMiddleware<SecurityContextResolutionMiddleware>();
@@ -108,7 +120,6 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<FinOpsBudgetMiddleware>();
         app.UseMiddleware<SchemaContractMiddleware>();
         app.UseMiddleware<IncrementalDeliveryMiddleware>();
-        app.UseMiddleware<TrafficShadowingMiddleware>();
         // F-DATA-01: Parquet output negotiation is the outermost output transformation around the governed JSON
         // (egress interceptors / audit below still operate on JSON).
         app.UseMiddleware<ParquetGraphQLResponseMiddleware>();
@@ -138,7 +149,7 @@ public static class GatewayApplicationBuilderExtensions
 
     public static WebApplication MapGatewayEndpoints(this WebApplication app, GatewayOptions gatewayOptions)
     {
-        // PLAN-SEC-115 C-115-8: the route mapping, the MCP registry and the startup line all read the one startup snapshot.
+        // 115 C-115-8: the route mapping, the MCP registry and the startup line all read the one startup snapshot.
         var switches = ResolveReadPathSwitches(app.Services, gatewayOptions);
         var effectiveOptions = app.Services.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value ?? gatewayOptions;
         LogReadPathInventory(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Autheris.ReadPaths"), effectiveOptions);
@@ -168,7 +179,7 @@ public static class GatewayApplicationBuilderExtensions
         // a headless, deterministic machine-to-machine API without HTML multiplexing.
         var gqlEndpoint = app.MapGraphQL(endpoint)
             .WithOptions((NitroAppOptions nitro) => nitro.Enable = false)
-            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL) // Issue #447 (SEC-ATR-02)
+            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL) // Issue #447
             .WithAudit(AuditLevel.Delegated, AuditEventTypes.TableQuery);
         // SEC H-02: OpenSchema no longer opens /graphql; only the Development-only anonymous mode does.
         // (SEC M-03: with the authenticated-user FallbackPolicy the anonymous mode must opt out explicitly.)
@@ -230,8 +241,6 @@ public static class GatewayApplicationBuilderExtensions
             app.MapODataEndpoints(gatewayOptions);
         }
         app.MapMcpEndpoints(gatewayOptions);
-        app.MapSchemaRegistryEndpoints();
-        app.MapBackstageEndpoints(gatewayOptions);
         app.MapHitLEndpoints();
         app.MapGovernanceApiEndpoints();
         app.MapGovernancePlanEndpoints();
@@ -256,17 +265,9 @@ public static class GatewayApplicationBuilderExtensions
         {
             app.MapArrowExportEndpoints();
         }
-        if (gatewayOptions.Arrow.Enabled && gatewayOptions.Arrow.EnableFlightSql)
-        {
-            app.MapArrowFlightSqlEndpoints();
-        }
         if (gatewayOptions.DuckDbOlap.Enabled)
         {
             app.MapDuckDbOlapEndpoints();
-        }
-        if (gatewayOptions.Lakehouse.Enabled)
-        {
-            app.MapIcebergRestCatalogEndpoints();
         }
         app.MapEnvoyExtAuthzEndpoints();
         app.MapWebSqlEndpoints(gatewayOptions);
@@ -287,9 +288,12 @@ public static class GatewayApplicationBuilderExtensions
 
         app.MapSqlEndpoints(gatewayOptions);
         app.MapProcedureEndpoints(gatewayOptions);
-        app.MapDevPortalEndpoints(gatewayOptions);
-        app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
+        if (app.Environment.IsDevelopment())
+        {
+            app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
+        }
         app.MapAsyncJobEndpoints();
+        app.Services.GetService<Autheris.Api.Hosting.ModuleLoadResult>()?.MapEndpoints(app);
 
         LoadSqlEndpoints(app.Services, gatewayOptions);
 
@@ -315,7 +319,7 @@ public static class GatewayApplicationBuilderExtensions
             return;
         }
 
-        var loader = services.GetRequiredService<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
+        var loader = services.GetRequiredService<Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader>();
         loader.LoadFromDirectory(gatewayOptions.SqlEndpoints.Directory, gatewayOptions.SqlEndpoints.EnableHotReload);
     }
 }

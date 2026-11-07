@@ -138,8 +138,8 @@ The shared cluster state (`IDistributedClusterStateProvider`) distinguishes "key
 - Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, FinOps budget enforcement fails closed, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
 - Every store failure increments `autheris_cluster_state_failure_total{operation}`; failed event handlers increment `autheris_cluster_state_handler_failure_total`. Alert on a sustained rate of the first.
 - Cluster singletons (catalog sync, OpenMetadata sync, MSSQL change tracking) run under renewed, fenced leases (`TryAcquireLeaseAsync`). A replica that cannot confirm its lease for two thirds of the TTL cancels its job. Watch `autheris_scheduled_job_last_success_timestamp_seconds{job}`, `autheris_scheduled_job_skipped_total{job,reason}` and `autheris_cluster_lease_lost_total{reason}` (see F-OPS-02).
-- Multi-replica deployments require an external Redis/Garnet with AOF persistence; without it a store restart drops leases and fence counters. An external Garnet must have Lua scripting enabled (the embedded server starts with `--lua`).
-- The embedded Garnet server is process-local. Startup fails when `HighAvailability:MultiNodeClusterMode` is set or `HighAvailability:Replicas` is greater than 1 while `Caching:Garnet:EnableEmbeddedServer` is true (also when `Caching:Redis:Enabled` is true as well, because the embedded server takes precedence). Use an external Redis/Garnet for multi-replica deployments.
+- Multi-replica deployments require an external Redis with AOF persistence; without it a store restart drops leases and fence counters.
+- Multi-replica deployments require `Caching:Redis:Enabled = true`. Outside Development, startup fails closed if multi-node mode or more than 1 replica is configured without external Redis.
 
 ### 3.2 Recovery
 Once Redis connectivity is restored:
@@ -307,7 +307,7 @@ Reference: F-SEC-06.
 
 ### 4.ai Decision cache kill switch (shape-shared decisions)
 
-By default, users that match exactly the same Casbin rules share one cached decision when no candidate rule reads a user-specific input ([F-SEC-06, section 2.2a](features/f-sec-06-casbin-decision-cache-policy-epoch.md)). If a shared decision is suspected to be wrong for a user (for example after adding a rule whose `sub_rule` uses an unusual construct):
+By default, users that match exactly the same Casbin rules share one cached decision when no candidate rule reads a user-specific input (decision cache shape sharing). If a shared decision is suspected to be wrong for a user (for example after adding a rule whose `sub_rule` uses an unusual construct):
 
 1. Set `Gateway:Casbin:DecisionCache:ShareAcrossUsers=false` (environment variable `Gateway__Casbin__DecisionCache__ShareAcrossUsers=false`) and roll the replicas. Every decision is keyed by user again; nothing else changes.
 2. Expect a lower hit ratio and more `sub_rule` evaluations per request until the cache warms up per user. Keep `Capacity` at the default `100000` or raise it.
@@ -362,7 +362,7 @@ The gateway runs `DataCatalogSyncBackgroundService` periodically (configurable v
   kubectl logs -l app=gql-gateway -n data-governance | grep "DataCatalogSync"
   ```
 - Alerts to monitor:
-  - `Failed to fetch tables from Data Catalog`: Indicates connectivity or credential issues to Microsoft Purview / Collibra / Alation / OpenMetadata.
+  - `Failed to fetch tables from Data Catalog`: Indicates connectivity or credential issues to OpenMetadata.
   - `Sync already in progress`: Indicates previous sync cycle exceeded interval; increase `SyncIntervalMinutes`.
 
 ### 5.2 Manual / On-Demand Catalog Sync
@@ -487,7 +487,7 @@ Based on production load tests (Hetzner Dedicated AX-series, AMD EPYC / Ryzen 9,
 * **L1 Cache Hit (In-Memory Policy):** P50 < 0.2 ms, P99 < 1.0 ms
 * **L2 Cache Hit (Redis Roundtrip):** P50 < 1.5 ms, P99 < 4.0 ms
 * **End-to-End GraphQL Request (with RLS Pushdown):** P50 < 4.0 ms, P95 < 9.0 ms, P99 < 15.0 ms
-* **Arrow Flight SQL Stream (Chunk Egress):** 250 MB/s per core sustained zero-copy throughput
+* **Arrow IPC Stream (Chunk Egress):** 250 MB/s per core sustained zero-copy throughput
 
 ### 9.3 Runtime & Kestrel Concurrency Configuration
 

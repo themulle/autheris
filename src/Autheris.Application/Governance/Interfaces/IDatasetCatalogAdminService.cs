@@ -5,7 +5,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Issue #111 (PLAN-111 C-2): one edit of the admin-managed catalog settings of a dataset. A null member is "unchanged", never a reset;
+/// Issue #111 ( C-2): one edit of the admin-managed catalog settings of a dataset. A null member is "unchanged", never a reset;
 /// an empty <see cref="ReplaceTags"/> list replaces the admin tags with none. <see cref="Visibility"/> is the requested name (Hidden, Summary, Full).
 /// </summary>
 public sealed record DatasetCatalogEdit(
@@ -50,7 +50,7 @@ public sealed record DatasetCatalogResult(
 
 /// <summary>
 /// The only writer of dataset tags and visibility tiers (REST, declarative manifest and the MCP admin tool all call it). It authorizes from the
-/// authenticated principal through <c>CallerScopeResolver</c> and the ownership store, never from request fields (PLAN-111 A-5).
+/// authenticated principal through <c>CallerScopeResolver</c>and the ownership store, never from request fields ( A-5).
 /// </summary>
 public interface IDatasetCatalogAdminService
 {

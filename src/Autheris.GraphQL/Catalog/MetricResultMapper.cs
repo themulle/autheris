@@ -8,10 +8,10 @@ internal sealed record MetricGroupDto(
     bool IsMergedOther,
     IReadOnlyList<AggregateValueDto> Values);
 
-/// <summary>Allow-list view of a metric definition: no filter template, type parameters or meta (SI-112-6, SEC-112-18).</summary>
+/// <summary>Allow-list view of a metric definition: no filter template, type parameters or meta (SI-112-6).</summary>
 internal sealed record MetricDefinitionDto(string Name, string Type, string? Label, string? Description, string? Unit);
 
-/// <summary>The typed <c>queryMetrics</c> result. It deliberately has no suppressed-row count (#112 O-4, SEC-112-20).</summary>
+/// <summary>The typed <c>queryMetrics</c>result. It deliberately has no suppressed-row count (#112 O-4).</summary>
 internal sealed record MetricResultDto(
     IReadOnlyList<string> Metrics,
     string ManifestVersion,
@@ -39,7 +39,7 @@ internal static class MetricResultMapper
             var dimensions = new List<AggregateValueDto>(result.DimensionValueKinds.Count);
             foreach (var (name, kind) in result.DimensionValueKinds)
             {
-                // The merged OTHER row stands for many groups: no dimension value is ever filled (SEC-112-07).
+                // The merged OTHER row stands for many groups: no dimension value is ever filled.
                 var raw = row.IsMergedOther ? null : Lookup(row.GroupKey, name);
                 dimensions.Add(AggregateValueConverter.Convert(name, kind, raw, lenientString: true));
             }

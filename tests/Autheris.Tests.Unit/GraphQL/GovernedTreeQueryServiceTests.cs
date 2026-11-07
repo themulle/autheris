@@ -1,7 +1,7 @@
 using System.Data.Common;
 using System.Security.Claims;
 using System.Text.Json;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
@@ -421,10 +421,10 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         // SEC-B75-05: GraphQL catalog and schema types must not directly depend on cross-source relation resolvers.
         var forbidden = new[]
         {
-            typeof(Autheris.Application.Data.Relations.ICrossSourceRelationResolver),
-            typeof(Autheris.Application.Data.Relations.ICrossSourceRowReader),
-            typeof(Autheris.Application.Data.Relations.CrossSourceRelationResolver),
-            typeof(Autheris.Application.Data.Relations.InMemoryCrossSourceRowReader)
+            typeof(Autheris.Application.DataSources.Relations.ICrossSourceRelationResolver),
+            typeof(Autheris.Application.DataSources.Relations.ICrossSourceRowReader),
+            typeof(Autheris.Application.DataSources.Relations.CrossSourceRelationResolver),
+            typeof(Autheris.Application.DataSources.Relations.InMemoryCrossSourceRowReader)
         };
         var assemblies = new[] { typeof(CatalogSchemaModel).Assembly };
         var offenders = assemblies
@@ -449,7 +449,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             .Select(p => p.ParameterType)
             .ToList();
 
-        constructorParams.ShouldContain(typeof(Autheris.Application.Data.Relations.ICrossSourceRelationResolver));
+        constructorParams.ShouldContain(typeof(Autheris.Application.DataSources.Relations.ICrossSourceRelationResolver));
     }
 
     [Fact]

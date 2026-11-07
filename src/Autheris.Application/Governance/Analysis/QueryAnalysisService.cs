@@ -8,7 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -36,7 +36,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     private readonly Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? _logger;
     private readonly Autheris.Domain.Security.IRestrictedScopePolicy _restrictedScopes;
     private readonly IGraphQlCostAnalysisEngine? _costAnalysisEngine;
-    private readonly Autheris.Application.Caching.Interfaces.IClientTierResolver? _clientTierResolver;
+    private readonly Autheris.Application.State.Caching.Interfaces.IClientTierResolver? _clientTierResolver;
     private readonly IRateLimiterService? _rateLimiterService;
     private readonly int _maxRootFields;
 
@@ -54,10 +54,10 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
         IGraphQlCostAnalysisEngine? costAnalysisEngine = null,
-        Autheris.Application.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
+        Autheris.Application.State.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
         IRateLimiterService? rateLimiterService = null)
     {
-        // The default is the secure list (REQ-GOV-143), never "off".
+        // The default is the secure list, never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -95,10 +95,10 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         Microsoft.Extensions.Logging.ILogger<QueryAnalysisService>? logger = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
         IGraphQlCostAnalysisEngine? costAnalysisEngine = null,
-        Autheris.Application.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
+        Autheris.Application.State.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
         IRateLimiterService? rateLimiterService = null)
     {
-        // The default is the secure list (REQ-GOV-143), never "off".
+        // The default is the secure list, never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));

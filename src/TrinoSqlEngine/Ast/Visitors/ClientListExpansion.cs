@@ -6,7 +6,7 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
-/// Public facade for expanding list parameters in AST statements for DuckDB and cross-source queries (REQ-SQL-128 / Issue #131).
+/// Public facade for expanding list parameters in AST statements for DuckDB and cross-source queries (Issue #131).
 /// </summary>
 public static class ClientListExpansion
 {

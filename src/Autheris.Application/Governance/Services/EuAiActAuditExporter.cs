@@ -8,7 +8,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -25,16 +26,13 @@ public sealed class EuAiActAuditExporter : IEuAiActAuditExporter
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    private readonly IDifferentialPrivacyEngine _dpEngine;
     private readonly IAuditChainExportSource? _auditSource;
     private readonly IAuditLogRepository _auditRepo;
 
     public EuAiActAuditExporter(
-        IDifferentialPrivacyEngine dpEngine,
         IAuditLogRepository auditRepo,
         IAuditChainExportSource? auditSource = null)
     {
-        _dpEngine = dpEngine ?? throw new ArgumentNullException(nameof(dpEngine));
         _auditRepo = auditRepo ?? throw new ArgumentNullException(nameof(auditRepo));
         _auditSource = auditSource;
     }
@@ -46,18 +44,7 @@ public sealed class EuAiActAuditExporter : IEuAiActAuditExporter
         var certId = Guid.NewGuid().ToString("N");
         var now = DateTimeOffset.UtcNow;
 
-        // 1. Fetch current differential privacy metrics
-        var budget = await _dpEngine.GetBudgetAsync(tenantId, ct).ConfigureAwait(false);
-        var remainingEpsilon = Math.Max(0.0, budget.TotalDailyEpsilonBudget - budget.ConsumedEpsilon);
-
-        var dpSummary = new DifferentialPrivacyMetricsSummary(
-            TotalDailyEpsilonBudget: budget.TotalDailyEpsilonBudget,
-            ConsumedEpsilon: budget.ConsumedEpsilon,
-            RemainingEpsilon: remainingEpsilon,
-            LastResetUtc: budget.LastResetUtc
-        );
-
-        // 2. Fetch current audit chain tail hash via verified anchor
+        // 1. Fetch current audit chain tail hash via verified anchor
         string effectiveTailHash = GenesisAnchorHash;
         var anchor = _auditSource?.GetVerifiedChainAnchor();
         if (anchor != null && !string.IsNullOrWhiteSpace(anchor.EntryHash))
@@ -65,15 +52,15 @@ public sealed class EuAiActAuditExporter : IEuAiActAuditExporter
             effectiveTailHash = anchor.EntryHash;
         }
 
-        // 3. Lineage summary (count perturbations and suppressions)
+        // 2. Lineage summary
         var lineageSummary = new AuditLineageSummary(
             TotalAuditEvents: 0,
-            TotalPerturbations: budget.ConsumedEpsilon > 0 ? (int)Math.Ceiling(budget.ConsumedEpsilon) : 0,
+            TotalPerturbations: 0,
             SmallCohortSuppressionCount: 0
         );
 
-        // 4. Compute cryptographic integrity seal over certificate payload bound to tail hash
-        var sealInput = $"{certId}:{tenantId}:{now:O}:{dpSummary.TotalDailyEpsilonBudget:F4}:{dpSummary.ConsumedEpsilon:F4}:{effectiveTailHash}";
+        // 3. Compute cryptographic integrity seal over certificate payload bound to tail hash
+        var sealInput = $"{certId}:{tenantId}:{now:O}:{effectiveTailHash}";
         var sealHash = SHA256.HashData(Encoding.UTF8.GetBytes(sealInput));
         var integritySeal = Convert.ToHexStringLower(sealHash);
 
@@ -82,7 +69,6 @@ public sealed class EuAiActAuditExporter : IEuAiActAuditExporter
             TenantId: tenantId,
             IssuedAtUtc: now,
             Specification: "EU AI Act Article 10 (Data Governance & Privacy-Preserving AI)",
-            DifferentialPrivacyMetrics: dpSummary,
             AuditLineage: lineageSummary,
             AuditChainTailHash: effectiveTailHash,
             IntegritySealSha256: integritySeal

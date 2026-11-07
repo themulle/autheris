@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Envelope encryption of stream events and row images plus the keyed key fingerprint (PLAN-CDC-99 D-A7..D-A9).
+/// Envelope encryption of stream events and row images plus the keyed key fingerprint (99 D-A7..D-A9).
 /// Failures throw <see cref="CdcStreamKeyUnavailableException"/> (fail closed).
 /// </summary>
 public interface ICdcStreamCrypto

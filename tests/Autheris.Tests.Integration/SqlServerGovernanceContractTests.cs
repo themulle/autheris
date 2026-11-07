@@ -3,7 +3,7 @@ namespace Autheris.Tests.Integration;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -52,7 +52,6 @@ public sealed class SqlServerGovernanceContractTests : IAsyncLifetime
             {
                 Provider = "SqlServer",
                 ConnectionString = _connectionString!,
-                EnableOutboxProcessor = false,
                 SeedDemoData = seed
             }
         });

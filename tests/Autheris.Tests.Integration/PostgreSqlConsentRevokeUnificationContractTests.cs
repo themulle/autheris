@@ -2,7 +2,7 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Npgsql;
@@ -31,7 +31,7 @@ public sealed class PostgreSqlConsentRevokeUnificationContractTests : ConsentRev
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                Provider = "PostgreSql", ConnectionString = _db.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false
+                Provider = "PostgreSql", ConnectionString = _db.ConnectionString, SeedDemoData = false
             }
         });
         _repo = GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env);

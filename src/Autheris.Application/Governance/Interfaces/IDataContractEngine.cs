@@ -14,9 +14,3 @@ public interface IDataContractEngine
     Task<bool> UpdateAssertionResultAsync(string contractId, string assertionId, bool isPassing, string? failureReason = null, CancellationToken cancellationToken = default);
     Task<bool> IsTableHealthyAsync(TableIdentifier table, CancellationToken cancellationToken = default);
 }
-
-public interface IDataHubCatalogClient
-{
-    Task<bool> IngestMetadataChangeEventAsync(string mclPayloadJson, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<string>> FetchExternalTagsAsync(TableIdentifier table, CancellationToken cancellationToken = default);
-}

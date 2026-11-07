@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Diagnostics;
 using Microsoft.Extensions.Configuration;
@@ -150,7 +150,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         candidates.Add(secretRef.Replace("-", "_"));
         candidates.Add(secretRef.Replace("-", ":"));
 
-        // 3. Strictly bounded well-known aliases (exact or prefix match only, preventing accidental cross-secret collisions)
+        // 3. Strictly bounded well-known aliases (exact match only, preventing accidental cross-secret collisions)
         // SEC H-06: Instance-specific ITSM references ("itsm:<name>:<instance>", e.g. itsm:webhook-secret:{instanceId})
         // never fall back to the global well-known secret; otherwise every instance would share the global key.
         var isInstanceSpecificItsmRef = secretRef.StartsWith("itsm:", StringComparison.OrdinalIgnoreCase) && IsInstanceSpecificReference(secretRef);
@@ -164,13 +164,12 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         {
             candidates.Add("ITSM__WEBHOOK_SECRET");
             candidates.Add("ITSM_WEBHOOK_SECRET");
-            candidates.Add("Gateway:Itsm:WebhookSecret");
         }
         // R-DEP-1: well-known aliases apply to exact reference names only. A prefix match ("audit:tenant-x") would
         // silently resolve a missing, specific secret to the global one.
         else if (string.Equals(secretRef, "hmac-masking-secret", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(secretRef, "HMAC_SECRET", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(secretRef, "HMAC_SECRET_KEY", StringComparison.OrdinalIgnoreCase))
+            string.Equals(secretRef, "HMAC_SECRET", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(secretRef, "HMAC_SECRET_KEY", StringComparison.OrdinalIgnoreCase))
         {
             candidates.Add("HMAC_SECRET");
             candidates.Add("HMAC_SECRET_KEY");

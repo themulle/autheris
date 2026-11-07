@@ -8,7 +8,7 @@ using System.Text;
 
 /// <summary>
 /// Cryptographic helper for AES-256-GCM authenticated encryption and HMAC-SHA256 signature verification.
-/// Conforms to SEC-BL04-05 and SEC-BL04-06.
+/// Conforms to 06.
 /// </summary>
 public static class TableCacheCryptoHelper
 {
@@ -68,7 +68,7 @@ public static class TableCacheCryptoHelper
 
     /// <summary>
     /// Decrypts ciphertext bytes using AES-256-GCM authenticated encryption.
-    /// Verifies the 128-bit authentication tag. Tampering or corruption throws CryptographicException (SEC-BL04-05).
+    /// Verifies the 128-bit authentication tag. Tampering or corruption throws CryptographicException.
     /// </summary>
     public static byte[] Decrypt(byte[] key, ReadOnlySpan<byte> payload, ReadOnlySpan<byte> associatedData = default)
     {
@@ -109,7 +109,7 @@ public static class TableCacheCryptoHelper
 
     /// <summary>
     /// Verifies HMAC-SHA256 using constant-time comparison (FixedTimeEquals).
-    /// Mismatch throws SecurityException fail-closed (SEC-BL04-06).
+    /// Mismatch throws SecurityException fail-closed.
     /// </summary>
     public static void VerifyHmacOrThrow(byte[] key, ReadOnlySpan<byte> data, ReadOnlySpan<byte> expectedHmac)
     {

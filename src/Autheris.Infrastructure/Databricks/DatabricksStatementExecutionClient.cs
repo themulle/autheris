@@ -8,7 +8,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
@@ -18,7 +18,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Databricks SQL Statement Execution API 2.0 client (design §6.3, WP-X0i). Security controls (SEC-ADG-09): every URL is built
+/// Databricks SQL Statement Execution API 2.0 client (design §6.3, WP-X0i). Security controls: every URL is built
 /// from the configured host and fixed paths; server-supplied ids and chunk links are validated and never used as URLs;
 /// disposition is always INLINE (<c>external_links</c> are rejected); redirects are never followed; response buffers are
 /// bounded; tokens are held in memory only and never logged or put into exception messages; errors carry no driver text.
@@ -466,7 +466,7 @@ public sealed partial class DatabricksStatementExecutionClient(
 
     private static int ParseChunkLink(JsonElement link, string statementId)
     {
-        // SEC-ADG-09 item 1: only a relative link into this statement's own chunk path is followed; the request path is rebuilt from the index.
+        // 09 item 1: only a relative link into this statement's own chunk path is followed; the request path is rebuilt from the index.
         var prefix = $"/api/2.0/sql/statements/{statementId}/result/chunks/";
         if (link.ValueKind != JsonValueKind.String || link.GetString() is not { } text ||
             !text.StartsWith(prefix, StringComparison.Ordinal) ||

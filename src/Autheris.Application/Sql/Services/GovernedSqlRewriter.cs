@@ -73,7 +73,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly SqlDataSourceResolver _dataSourceResolver;
     private readonly TypedPolicySources? _typedPolicies;
     private readonly Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? _timeZoneState;   // null = conversion unavailable (fail closed)
-    private readonly Autheris.Application.Caching.BoundedCache<string, SqlQueryMetadata> _stage1Analyses = new(4_096);
+    private readonly Autheris.Application.State.Caching.BoundedCache<string, SqlQueryMetadata> _stage1Analyses = new(4_096);
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder =>
     [
@@ -159,7 +159,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         // WebSql:Enabled switches the client SQL endpoints; a gateway-planned table read is governed below like any other statement.
         if (!webSqlOptions.Enabled && !plannedTableRead)
         {
-            throw new WebSqlPolicyException("WebSQL execution is disabled by gateway configuration.");
+            throw new WebSqlPolicyException("WebSQL execution is disabled by gateway configuration.", GovernedSqlErrorCodes.EndpointDisabled);
         }
 
         if (rawSql.Length > webSqlOptions.MaxQueryLength)
@@ -169,7 +169,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 $"SQL query length ({rawSql.Length}) exceeds the maximum allowed limit of {webSqlOptions.MaxQueryLength} characters.");
         }
 
-        // SEC-RF107-07(e): "__rls_ks" is the reserved prefix of the key-set subquery parameters.
+        // 07(e): "__rls_ks" is the reserved prefix of the key-set subquery parameters.
         if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
             rawSql.Contains("__rls_ks", StringComparison.OrdinalIgnoreCase))
         {
@@ -182,7 +182,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         SqlQueryMetadata metadata;
         try
         {
-            // WP-PF-12 (Stage 1): the analysis is a pure function of the statement text, so a successful result is shared between
+            // 12 (Stage 1): the analysis is a pure function of the statement text, so a successful result is shared between
             // requests. Only the policy checks below depend on the caller and they run every time. The key is a SHA-256 of the text
             // (a collision would hand one statement's analysis to another); failures and cancellations are never cached.
             var analysisKey = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawSql)));
@@ -210,7 +210,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             throw new ArgumentException("The SQL statement could not be parsed.", nameof(rawSql), parseEx);
         }
 
-        // SEC-277-04 / SEC-277-03: answered from the analysis alone, before any table lookup, so the response never depends on whether a
+        // answered from the analysis alone, before any table lookup, so the response never depends on whether a
         // name is an existing, a forbidden or an unknown table. A recursive WITH in DML is never permitted (read-only scope).
         if (dmlContext != null)
         {
@@ -231,7 +231,9 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         if (metadata.StatementType == SqlStatementType.Ddl)
         {
-            throw new WebSqlPolicyException("DDL statements (CREATE, DROP, ALTER, TRUNCATE, GRANT, REVOKE) are strictly forbidden in WebSQL.");
+            throw new WebSqlPolicyException(
+                "DDL statements (CREATE, DROP, ALTER, TRUNCATE, GRANT, REVOKE) are strictly forbidden in WebSQL.",
+                GovernedSqlErrorCodes.StatementNotPermitted);
         }
 
         bool isDml = metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete;
@@ -247,7 +249,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         if (metadata.StatementType != SqlStatementType.Select && (!isDml || !_options.Value.IsWebSqlDmlAllowed))
         {
             throw new WebSqlPolicyException(
-                $"WebSQL only permits read-only SELECT statements by default. Received '{metadata.StatementType}' operation. DML must be explicitly enabled via configuration.");
+                $"WebSQL only permits read-only SELECT statements by default. Received '{metadata.StatementType}' operation. DML must be explicitly enabled via configuration.",
+                GovernedSqlErrorCodes.StatementNotPermitted);
         }
 
         if (isDml)
@@ -341,7 +344,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
         else if (distinctCatalogs.Count == 1)
         {
-            // #320 (SEC-RG-01): a catalog the caller may not use answers like an unknown table (SQL_POLICY_DENIED), before any metadata lookup.
+            // #320: a catalog the caller may not use answers like an unknown table (SQL_POLICY_DENIED), before any metadata lookup.
             if (!_dataSourceResolver.TryResolveAllowedDataSource(distinctCatalogs[0], tenantId, out effectiveDataSourceName!))
             {
                 var catalogTarget = metadata.ReferencedTables.First(t => string.Equals(t.Catalog, distinctCatalogs[0], StringComparison.OrdinalIgnoreCase));
@@ -605,11 +608,13 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                             ? mRule.RuleType ?? "REDACT"
                             : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
 
-                        throw new WebSqlPolicyException(
-                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
+                        var joinMessage = $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).";
+                        throw lvl == ColumnAccessLevel.Deny
+                            ? new WebSqlTableDeniedException(joinMessage)
+                            : new WebSqlPolicyException(joinMessage, GovernedSqlErrorCodes.FilterOnMaskedColumn);
                     }
 
-                    // #322 (SEC-RG-04): same window decision as the executor guard (masked: window code; denied: filter-style denial).
+                    // #322: same window decision as the executor guard (masked: window code; denied: filter-style denial).
                     bool isUsedInWindow = metadata.WindowColumnReferences is { Count: > 0 } windowRefs &&
                         windowRefs.Any(wc => SqlDataSourceResolver.ReferencesColumn(wc.TableOrAlias, wc.ColumnName, col.ColumnName, target));
                     if (isUsedInWindow && lvl == ColumnAccessLevel.Mask)
@@ -630,8 +635,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                             ? mRule.RuleType ?? "REDACT"
                             : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
 
-                        throw new WebSqlPolicyException(
-                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.");
+                        var filterMessage = $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.";
+                        throw lvl == ColumnAccessLevel.Deny
+                            ? new WebSqlTableDeniedException(filterMessage)
+                            : new WebSqlPolicyException(filterMessage, GovernedSqlErrorCodes.FilterOnMaskedColumn);
                     }
                 }
             }
@@ -654,7 +661,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         EnforceEffectiveListMaximum(clientLists, targetSqlDialect, webSqlOptions);
 
-        // GAP-013 / SEC-PG-03: governed WebSQL translates the Trino date functions (date_trunc, date_add, now, year(x) .. second(x), date_part).
+        // GAP-013 / governed WebSQL translates the Trino date functions (date_trunc, date_add, now, year(x).. second(x), date_part).
         IReadOnlySet<string> allowedFunctions = SqlFunctionAllowlists.WithDateTranslation(
             SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions));
         if (metadata.FunctionCalls is { Count: > 0 })
@@ -672,7 +679,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         // Fail closed when the typed assembly is not wired (a DI defect, never a silent downgrade to string policies).
         var policyFactory = _policyFactory ?? throw new SqlCompileConfigurationException();
 
-        // Issue #107 (D-WPC-1, SEC-RF107-17): IsRead comes from the same classification as isDml; the stage never runs for anything but a SELECT.
+        // Issue #107 (D-WPC-1): IsRead comes from the same classification as isDml; the stage never runs for anything but a SELECT.
         bool isRead = metadata.StatementType == SqlStatementType.Select && !isDml;
         GovernedPolicyInput PolicyInput(bool disabled) =>
             new(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
@@ -695,7 +702,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
         catch (SqlLimitExceededException limit) when (IsRetryableLimit(limit.Kind) && assembly.KeySets.HasSubstitution)
         {
-            // SEC-RF107-15 / SEC-RF107-19, D-WPC-4: once, only because a site was substituted, only for the bind or expansion limit. The values of the
+            // 19, D-WPC-4: once, only because a site was substituted, only for the bind or expansion limit. The values of the
             // first exception (Actual, Maximum) are a function of the key-set size: only the kind is used, nothing is logged, audited or surfaced.
             assembly.KeySets.MarkSubstitutedSitesAsRetried(
                 limit.Kind == SqlLimitKind.BindParameters ? KeySetFallbackReason.BindLimitRetry : KeySetFallbackReason.ExpansionLimitRetry);
@@ -724,7 +731,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();
 
     /// <summary>
-    /// Stage 2 of the list limits (PLAN-SQL-128 A-6): the dialect is known now, so each list is checked against
+    /// Stage 2 of the list limits (128 A-6): the dialect is known now, so each list is checked against
     /// <c>min(configured, MaxBindParameters - 100, MaxInListItems)</c>. A configured value above that is clamped at runtime and logged once
     /// per dialect, with numbers only. Nothing is truncated: a larger list is refused.
     /// </summary>
@@ -765,7 +772,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         IReadOnlySet<string> allowedFunctions,
         ClientListShapes? clientLists)
     {
-        // SEC-X1-05: a table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
+        // a table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
         // is denied here with the same exception as every other "table not usable" cause, before the compiler could answer differently.
         foreach (var (identity, deniedTarget) in decidedTargets)
         {
@@ -790,7 +797,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException
                                    && !(mayRetry && ex is SqlLimitExceededException limit && IsRetryableLimit(limit.Kind)))
         {
-            // A retryable limit of a statement with substituted key sets is handled by the caller without logging (SEC-RF107-15 b).
+            // A retryable limit of a statement with substituted key sets is handled by the caller without logging (15 b).
             _logger?.Warning(ex, "WebSQL statement rejected by the SQL compiler.");
             throw;
         }
@@ -813,7 +820,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
     }
 
-    /// <summary>A-14: one Debug line per site after the compiled SQL line. Counts are allowed here (SEC-RF107-09 c); never values or hashes.</summary>
+    /// <summary>A-14: one Debug line per site after the compiled SQL line. Counts are allowed here (09 c); never values or hashes.</summary>
     private void LogKeySets(RowFilterKeySetReport report)
     {
         foreach (var o in report.Outcomes)

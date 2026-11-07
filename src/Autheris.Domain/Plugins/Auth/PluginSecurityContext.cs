@@ -7,7 +7,7 @@ using Autheris.Domain.Common;
 
 /// <summary>
 /// Sanitized, immutable security context passed to IPluginRoleProvider.
-/// Deliberately omits raw tokens, client secrets, passwords, and sensitive headers (SEC-BL08-12).
+/// Deliberately omits raw tokens, client secrets, passwords, and sensitive headers.
 /// </summary>
 public sealed record PluginSecurityContext
 {

@@ -103,7 +103,7 @@ public sealed class TrustedDocumentStore
 /// </summary>
 public sealed class TrustedDocumentsOnlyMiddleware
 {
-    /// <summary>Error code of the rejection result; shared with the readiness executor gate (PLAN-OPS-150).</summary>
+    /// <summary>Error code of the rejection result; shared with the readiness executor gate.</summary>
     public const string RejectionCode = "TRUSTED_DOCUMENT_REQUIRED";
 
     private readonly RequestDelegate _next;
@@ -113,7 +113,7 @@ public sealed class TrustedDocumentsOnlyMiddleware
         _next = next ?? throw new ArgumentNullException(nameof(next));
     }
 
-    /// <summary>Why an app-scoped request was rejected. Only logged (Debug), never returned to the caller (SEC-281-4).</summary>
+    /// <summary>Why an app-scoped request was rejected. Only logged (Debug), never returned to the caller.</summary>
     internal enum AppRejectionReason
     {
         MalformedHeader,
@@ -132,7 +132,7 @@ public sealed class TrustedDocumentsOnlyMiddleware
     {
         if (TryGetAppHeader(context, out var headerValues, out var httpContext))
         {
-            // SEC-281-2: header present means app path only; no failure falls back to the global store.
+            // header present means app path only; no failure falls back to the global store.
             if (await IsAppRequestTrustedAsync(context, httpContext, headerValues).ConfigureAwait(false))
             {
                 await _next(context).ConfigureAwait(false);
@@ -176,7 +176,7 @@ public sealed class TrustedDocumentsOnlyMiddleware
         await _next(context).ConfigureAwait(false);
     }
 
-    /// <summary>The single rejection result of both paths: identical message, code and shape (SEC-281-4).</summary>
+    /// <summary>The single rejection result of both paths: identical message, code and shape.</summary>
     private static void Reject(RequestContext context)
     {
         var error = ErrorBuilder.New()
@@ -239,14 +239,14 @@ public sealed class TrustedDocumentsOnlyMiddleware
             return Fail(AppRejectionReason.UnsupportedRequestShape, app.ToString());
         }
 
-        // SEC-281-3: exactly one Origin value, normalized, exact match; no Referer/Host fallback, no non-browser exemption.
+        // exactly one Origin value, normalized, exact match; no Referer/Host fallback, no non-browser exemption.
         var origins = httpContext.Request.Headers.Origin;
         if (origins.Count != 1 || !AllowedOrigin.TryNormalize(origins[0], out var origin))
         {
             return Fail(AppRejectionReason.OriginRejected, app.ToString());
         }
 
-        // SEC-281-1: only source text is hashable; a pre-parsed document without text is never trusted.
+        // only source text is hashable; a pre-parsed document without text is never trusted.
         if (request.Document is null || request.Document is IOperationDocumentNodeProvider)
         {
             return Fail(AppRejectionReason.NoSourceText, app.ToString());

@@ -21,7 +21,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c> body (ARCH-MNT-12).</summary>
+/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c>body.</summary>
 internal static class StorageStartupChecks
 {
     internal static void ProductionStorageAndAudit(StartupCheckContext context)
@@ -42,7 +42,7 @@ internal static class StorageStartupChecks
             throw new ValidationException("Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.");
         }
 
-        // WP-ARC-B-13: an unset connection string resolves to the state-directory file outside Development/Test, so only an
+        // an unset connection string resolves to the state-directory file outside Development/Test, so only an
         // explicitly configured in-memory database can be in effect here (and is rejected).
         if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
             GatewayStartupValidator.IsInMemorySqlite(options.GovernanceDb.ConnectionString))
@@ -127,15 +127,6 @@ internal static class StorageStartupChecks
             DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
         {
             throw new ValidationException("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.");
-        }
-
-        // WP-ARC-A-09: an embedded Garnet server lives inside one process and is shared with no other replica, so it cannot
-        // provide cluster-wide state. This also catches EnableEmbeddedServer = true combined with Redis.Enabled = true,
-        // where the embedded server silently wins the registration.
-        if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
-            options.Caching.Garnet.EnableEmbeddedServer)
-        {
-            throw new ValidationException("NF-HA-02 violation: Multi-node cluster mode or more than one replica requires an external Redis/Garnet. The embedded Garnet server (Caching.Garnet.EnableEmbeddedServer = true) is local to one process and cannot provide cluster-wide state; disable it and configure Caching.Redis.");
         }
     }
 }

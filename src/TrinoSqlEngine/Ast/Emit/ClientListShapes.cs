@@ -68,7 +68,7 @@ public sealed class ClientListShapes
     internal bool IsEmpty => _counts.Count == 0;
 }
 
-/// <summary>Sizing seam of the list shape (PLAN-SQL-128 A-6): identity in this item; a bucket policy would change only this function.</summary>
+/// <summary>Sizing seam of the list shape (128 A-6): identity in this item; a bucket policy would change only this function.</summary>
 internal static class ListShapeSizer
 {
     public static int Size(int count) => count;

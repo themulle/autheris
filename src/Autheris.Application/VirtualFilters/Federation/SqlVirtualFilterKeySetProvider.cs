@@ -7,14 +7,14 @@ using System.Data.Common;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Exceptions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// F-GOV-14 (M4; C-3, C-4; SEC-4, SEC-5, SEC-6, SEC-10, SEC-11): loads the authorized key set of a structured Virtual
+/// F-GOV-14 (M4; C-3, C-4): loads the authorized key set of a structured Virtual
 /// Filter from its SQL key source.
 /// <list type="bullet">
 /// <item>Only structured filters without validity window whose FROM and JOIN tables are SQL tables of one data source
@@ -111,7 +111,7 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
 
         try
         {
-            // SEC-23: the repository load path does not validate; every identifier used below must be safe.
+            // the repository load path does not validate; every identifier used below must be safe.
             filter.Validate();
         }
         catch (ArgumentException)
@@ -154,7 +154,7 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
         }
         catch (Exception ex) when (ex is not GatewaySecurityException)
         {
-            // SEC-11: database messages can quote data values; only the type is logged, the exception is attached.
+            // database messages can quote data values; only the type is logged, the exception is attached.
             _logger?.LogWarning("Virtual filter key source of '{Filter}' could not be read ({ExceptionType}); denied.", filter.Name, ex.GetType().Name);
             throw new GatewaySecurityException(
                 $"The key source of the Virtual Filter '{filter.Name}' is unavailable.", VirtualFilterErrorCodes.SourceUnavailable, ex);

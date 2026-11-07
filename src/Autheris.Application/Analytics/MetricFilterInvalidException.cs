@@ -4,7 +4,7 @@ using Autheris.Domain.Exceptions;
 
 /// <summary>
 /// A typed metric filter leaf declares a value kind that does not fit the resolved column (<c>METRIC_FILTER_INVALID</c>). The fixed
-/// message never echoes the dimension name or the value (SEC-112-11).
+/// message never echoes the dimension name or the value.
 /// </summary>
 public sealed class MetricFilterInvalidException : GatewayInvalidQueryException
 {

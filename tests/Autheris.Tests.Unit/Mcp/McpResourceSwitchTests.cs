@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Mcp;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;

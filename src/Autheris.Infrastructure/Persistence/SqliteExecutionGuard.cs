@@ -6,7 +6,7 @@ using SQLitePCL;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// WP-X0h (SEC-X1-10): the interrupt-based execution timeout of governed SQLite statements. <see cref="SqliteCommand.CommandTimeout"/>
+/// WP-X0h: the interrupt-based execution timeout of governed SQLite statements.<see cref="SqliteCommand.CommandTimeout"/>
 /// is only a busy timeout, so a recursive CTE would run unbounded and hold a worker thread. The guard installs a progress handler on
 /// the connection (called from inside the VM every 1000 instructions, on the thread that runs the statement); once the timeout
 /// elapsed or the request is cancelled, the handler aborts the statement with <c>SQLITE_INTERRUPT</c>. A progress handler is used

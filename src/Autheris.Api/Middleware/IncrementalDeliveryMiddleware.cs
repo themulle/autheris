@@ -4,7 +4,7 @@ using Autheris.Api.Errors;
 using System;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Performance.IncrementalDelivery;
+using Autheris.Application.Observability.IncrementalDelivery;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 

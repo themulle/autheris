@@ -12,7 +12,7 @@ using TrinoSqlEngine.Ast.Visitors;
 public readonly record struct PointLiteral(object Value, LiteralType Type);
 
 /// <summary>
-/// F-GOV-14 (WI-7, M6, SEC-21): finds the point lookups on a protected table in a user query. A lookup only ever
+/// F-GOV-14 (WI-7, M6): finds the point lookups on a protected table in a user query. A lookup only ever
 /// narrows what is fetched, so eligibility is strict and everything else is a scan (always safe):
 /// <list type="bullet">
 /// <item>a single <see cref="QuerySpecification"/> without <c>WITH</c>, set operation, sub-query, lateral or derived table;</item>

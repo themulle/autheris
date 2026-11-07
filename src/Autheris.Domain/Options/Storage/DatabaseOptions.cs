@@ -23,7 +23,7 @@ public sealed class SqlDataSourceOptions
     public Dictionary<string, DataSourceConnectionOptions> Connections { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// WP-X0c (SEC-X1-09): how long the column types and collations read from the database metadata are cached, in seconds.
+    /// WP-X0c: how long the column types and collations read from the database metadata are cached, in seconds.
     /// The hard maximum is 300; configuration can only lower it. A larger value fails the startup.
     /// </summary>
     [Range(1, 300)] public int CatalogCacheTtlSeconds { get; init; } = 300;
@@ -39,12 +39,12 @@ public sealed class DataSourceConnectionOptions
     [Range(1, 300)] public int CommandTimeoutSeconds { get; init; } = 30;
 
     /// <summary>
-    /// Issue #238 (PLAN-DATA-238, WP-SC-15): Policy enforcement mode (AutherisEnforced, Delegated, DelegatedDefenceInDepth).
+    /// Issue #238: Policy enforcement mode (AutherisEnforced, Delegated, DelegatedDefenceInDepth).
     /// </summary>
     public EnforcementMode EnforcementMode { get; init; } = EnforcementMode.AutherisEnforced;
 
     /// <summary>
-    /// Issue #132 (PLAN-DATA-132, SEC-DATA132-06): Administrative co-location group identifier for SQL Server data sources
+    /// Issue #132: Administrative co-location group identifier for SQL Server data sources
     /// hosted on the same physical database instance with symmetric credentials.
     /// </summary>
     public string? CoLocationGroup { get; init; }
@@ -71,14 +71,14 @@ public sealed class DataSourceConnectionOptions
     [Range(0, 86400)] public int LoginFailureCooldownSeconds { get; init; } = 300;
 
     /// <summary>
-    /// Issue #107 (SEC-RF107-01): operator attestation that the dependent tables of correlated row filters are not filtered per user
+    /// Issue #107: operator attestation that the dependent tables of correlated row filters are not filtered per user
     /// at this source (no source-native per-user RLS). The key-set cache key query runs with a tenant-only session; without this flag
     /// every correlated filter of the data source falls back to <c>EXISTS</c> (reason <c>SourceNotEligible</c>). Default false.
     /// </summary>
     public bool KeySetCacheAllowed { get; init; }
 
     /// <summary>
-    /// Issue #124 (SEC-DATA124-02): operator/data-owner consent allowing dynamic key-set pushdown filters
+    /// Issue #124: operator/data-owner consent allowing dynamic key-set pushdown filters
     /// to be imported and executed against this target data source during cross-source WebSQL joins. Default false (fail closed).
     /// </summary>
     public bool AllowKeySetImport { get; init; } = false;
@@ -100,7 +100,7 @@ public sealed class DataSourceConnectionOptions
     public bool CallerAttributeDedicatedLogin { get; init; }
 
     /// <summary>
-    /// Oracle only (WP-F1, CR-ADG-08): Key Vault reference of the database password. Outside Development the connection string
+    /// Oracle only (CR-ADG-08): Key Vault reference of the database password. Outside Development the connection string
     /// must not contain a plaintext <c>Password</c>; the factory injects the resolved secret when it opens the connection.
     /// </summary>
     public string? PasswordKeyVaultRef { get; init; }
@@ -122,7 +122,7 @@ public sealed class DataSourceConnectionOptions
     /// </summary>
     public bool RequireDefaultSchema { get; init; } = true;
 
-    /// <summary>Databricks only (WP-X0i, SEC-ADG-09): Statement Execution API settings. Required when <c>Provider</c> is databricks.</summary>
+    /// <summary>Databricks only (WP-X0i): Statement Execution API settings. Required when<c>Provider</c> is databricks.</summary>
     public DatabricksDataSourceOptions? Databricks { get; init; }
 
     /// <summary>
@@ -202,7 +202,7 @@ public sealed class SqlServerWindowsAuthOptions
 }
 
 /// <summary>
-/// Issue #238 (PLAN-DATA-238, REQ-DATA-238): Governed enforcement mode for a data source connection.
+/// Issue #238: Governed enforcement mode for a data source connection.
 /// </summary>
 public enum EnforcementMode
 {
@@ -222,15 +222,15 @@ public enum DatabricksAuthMode
     /// <summary>OAuth machine-to-machine (service principal client credentials). Default and the only mode outside Development.</summary>
     OAuthM2M = 0,
 
-    /// <summary>Personal access token. Development only (SEC-ADG-09 item 4).</summary>
+    /// <summary>Personal access token. Development only (09 item 4).</summary>
     Pat = 1,
 
-    /// <summary>OAuth 2.0 On-Behalf-Of (OBO) token exchange for Azure Databricks (WP-SC-15 / Issue #238).</summary>
+    /// <summary>OAuth 2.0 On-Behalf-Of (OBO) token exchange for Azure Databricks (Issue #238).</summary>
     OAuthObo = 2
 }
 
 /// <summary>
-/// Issue #238 (PLAN-DATA-238, WP-SC-15): Configuration for Azure Databricks OAuth 2.0 On-Behalf-Of (OBO) token exchange.
+/// Issue #238: Configuration for Azure Databricks OAuth 2.0 On-Behalf-Of (OBO) token exchange.
 /// </summary>
 public sealed class DatabricksOboOptions
 {
@@ -251,9 +251,6 @@ public sealed class DatabricksOboOptions
 
     /// <summary>Optional custom Entra ID authority URL (e.g. for national clouds).</summary>
     public string? Authority { get; init; }
-
-    /// <summary>Controls refresh token retention for long-running statements (default false).</summary>
-    public bool AllowLongRunning { get; init; } = false;
 }
 
 public sealed class DatabricksAuthOptions
@@ -269,13 +266,13 @@ public sealed class DatabricksAuthOptions
     /// <summary>PAT mode (Development only): Key Vault reference or plaintext token.</summary>
     public string? PatRef { get; init; }
 
-    /// <summary>OAuth OBO settings (Issue #238 / WP-SC-15).</summary>
+    /// <summary>OAuth OBO settings (Issue #238).</summary>
     public DatabricksOboOptions? Obo { get; init; }
 }
 
 /// <summary>
 /// Settings of one Databricks SQL warehouse data source (design §6.3). The OAuth token endpoint is NOT configurable: it is
-/// always <c>https://{Host}/oidc/v1/token</c> (SEC-ADG-09 item 3).
+/// always <c>https://{Host}/oidc/v1/token</c>(09 item 3).
 /// </summary>
 public sealed class DatabricksDataSourceOptions
 {
@@ -287,7 +284,7 @@ public sealed class DatabricksDataSourceOptions
     public string Schema { get; init; } = "default";
     public DatabricksAuthOptions Auth { get; init; } = new();
 
-    /// <summary>Server-side wait per call; clamped to 5-50 seconds (SEC-ADG-09 item 6).</summary>
+    /// <summary>Server-side wait per call; clamped to 5-50 seconds (09 item 6).</summary>
     public int WaitTimeoutSeconds { get; init; } = 30;
 
     /// <summary>Maximum inline result size in bytes (also bounds the response buffer).</summary>
@@ -297,7 +294,7 @@ public sealed class DatabricksDataSourceOptions
     [Range(10, 10000)] public int PollIntervalMilliseconds { get; init; } = 500;
 }
 
-/// <summary>WP-X0b, SEC-X1-08: strict identifier rule for <see cref="DataSourceConnectionOptions.DefaultSchema"/>.</summary>
+/// <summary>WP-X0b, strict identifier rule for<see cref="DataSourceConnectionOptions.DefaultSchema"/>.</summary>
 public static partial class DefaultSchemaPolicy
 {
     // \z instead of $: in .NET "$" also matches before a trailing line feed.

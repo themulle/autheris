@@ -1,6 +1,6 @@
 using System.Data;
 using System.Text.Json;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -12,7 +12,7 @@ namespace Autheris.Infrastructure.Persistence;
 public partial class SqlServerGovernanceRepository
 {
     /// <summary>
-    /// Test seam (WP-0, SEC-113-R2-03): runs inside the decision transaction between the status read under the lock and the guarded
+    /// Test seam: runs inside the decision transaction between the status read under the lock and the guarded
     /// status UPDATE, so a test can change the status where no concurrent writer can be injected. Always null in production.
     /// </summary>
     internal Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, CancellationToken, Task>? ConsentStatusUpdateSeam { get; set; }
@@ -214,7 +214,7 @@ public partial class SqlServerGovernanceRepository
         return consents;
     }
 
-    /// <summary>PLAN-GOV-158-INC1: opt-in load of <c>CONSENTS.description</c> (<see cref="IConsentDescriptionRepository.LoadDescriptionsAsync"/>); never part of hydration.</summary>
+    /// <summary>opt-in load of<c>CONSENTS.description</c> (<see cref="IConsentDescriptionRepository.LoadDescriptionsAsync"/>); never part of hydration.</summary>
     public async Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(consents);

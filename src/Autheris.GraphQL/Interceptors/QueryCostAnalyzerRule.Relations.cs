@@ -46,7 +46,7 @@ public sealed partial class QueryCostAnalyzerRule
         string fieldName,
         IOutputFieldDefinition? fieldDef)
     {
-        // SEC-GOV177-05: Multiplier 1.0 is ONLY permitted when the schema field and catalog metadata
+        // Multiplier 1.0 is ONLY permitted when the schema field and catalog metadata
         // explicitly verify RelationCardinality.OneToOne or RelationCardinality.ManyToOne and IsListType == false.
         // Ambiguous, uncataloged, union, interface, or unverified field types MUST fail closed and apply DefaultListMultiplier (10).
 

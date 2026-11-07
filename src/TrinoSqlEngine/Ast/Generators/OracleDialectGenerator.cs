@@ -434,7 +434,7 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
     {
         builder.Append('"');
         // The reserved target alias is defined unquoted by the security rewriter (folded to upper case) and referenced quoted in lower case by the
-        // typed policy builders; both spellings must name the same alias (issue #107 WP-C, found by the Oracle alias test). The name is reserved
+        // typed policy builders; both spellings must name the same alias (issue #107 , found by the Oracle alias test). The name is reserved
         // (user SQL cannot contain the autheris_ prefix), so one canonical spelling for every occurrence is safe.
         string val = string.Equals(identifier.Value, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase)
             ? RowFilterAliases.Target.ToUpperInvariant()

@@ -40,7 +40,8 @@ public sealed class CutoverArchitectureTests
         typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
         typeof(Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor).Assembly,
         typeof(Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator).Assembly,
-        typeof(Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService).Assembly,
+        typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
+        typeof(Autheris.Modules.Abstractions.IAutherisModule).Assembly,
         typeof(TrinoSqlEngine.FastSqlEngine).Assembly
     ];
 
@@ -422,7 +423,6 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.AccessProfileStore", "access profile tables of the governance store (WP-SC-03): fixed statements with bound values, only integer-indexed parameter names and enum literals are spliced, no client text"),
         ("Autheris.Infrastructure.Persistence.ConsumerAggregationStore", "consumer aggregation store (Issue #114, SEC-AUD114-05): fixed rollup statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.CdcStreamSqlCore", "CDC durable stream store (Issue #99, SEC-CDC-05): fixed event and row-image statements over engine-specific schemas, bound values, no client text"),
-        ("Autheris.Infrastructure.Persistence.ItsmOutboxSqlCore", "ITSM outbox (ARCH-MNT-22): the dialect repositories hand in fixed statements, the core binds values only; system queue, no client text"),
         ("Autheris.Infrastructure.Persistence.WebhookOutboxSqlCore", "webhook outbox (ARCH-MNT-22): the dialect repositories hand in fixed statements, the core binds values only; owner scope predicate stays in the SQL, no client text"),
         ("Autheris.Infrastructure.Persistence.DataOwnerAssignmentSqlCore", "data owner assignment of the dbt governance import (issue #393 part b): the dialect repositories hand in the table lookup, the core owns fixed statements and binds values only; no client text"),
         ("Autheris.Infrastructure.Persistence.ConsentGrantSqlCore", "consent grant statements (ARCH-MNT-22, SC-04): tenant-scoped statements plus the row-locked revoke by id; fixed SQL, bound values, no client text"),
@@ -430,8 +430,8 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.CatalogSqlCore", "catalog statement execution (ARCH-MNT-22 Step 3): the dialect repositories hand in dialect statements, the core binds values and maps rows only; no client text"),
         ("Autheris.Infrastructure.Persistence.ConsentSqlCore", "consent statement execution (ARCH-MNT-22 Step 4): the dialect repositories hand in dialect statements, the core binds values and maps rows only; no client text"),
         ("Autheris.Extensions.Cdc.CustomQuery.CustomQueryPollerService", "CDC custom query poller service (Issue #101, Issue #210): reads watermark batches using configured poller queries, bound parameters, no client text"),
-        ("Autheris.Application.Data.Relations.GovernedCrossSourceRowReader", "Cross-source GraphQL relation row reader (Issue #75, Issue #223): executes batched key lookups over child data sources (VF-02): quoted catalog identifiers, explicit projection, bound key values and bound tenant predicate, session initialized per read, no client text"),
-        ("Autheris.Application.Caching.TableCache.Governance.GovernedTableCacheExecutionService", "Governed table cache execution service (BL-04, REQ-DATA-BL04): executes governed SELECT queries with AST tenant pushdown and bound parameters over embedded cache store; no client text"),
+        ("Autheris.Application.DataSources.Relations.GovernedCrossSourceRowReader", "Cross-source GraphQL relation row reader (Issue #75, Issue #223): executes batched key lookups over child data sources (VF-02): quoted catalog identifiers, explicit projection, bound key values and bound tenant predicate, session initialized per read, no client text"),
+        ("Autheris.Application.State.Caching.TableCache.Governance.GovernedTableCacheExecutionService", "Governed table cache execution service (BL-04, REQ-DATA-BL04): executes governed SELECT queries with AST tenant pushdown and bound parameters over embedded cache store; no client text"),
         ("Autheris.Infrastructure.Caching.TableCache.DuckDbPersistentTableCacheStore", "DuckDB persistent table cache store (BL-04, REQ-DATA-BL04): executes internal staging, swapping, insertion and drop statements on embedded cache database with bound parameters; no client text"),
         ("Autheris.Infrastructure.Caching.TableCache.InMemoryTableCacheStore", "In-memory table cache store (BL-04, REQ-DATA-BL04): executes internal memory-table DDL and mutation statements with bound parameters; no client text"),
         ("Autheris.Api.Hosting.Warmup.DataSourceConnectionWarmup", "Startup pre-warming probe (Issue #254, SEC-PERF254-02): executes read-only constant expression SELECT 1 to verify database connectivity on startup; constants only, no client text"),
@@ -531,21 +531,18 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Api.Endpoints.WebSqlEndpoints", "HandleWebSqlRequest", true),
         ("Autheris.Api.Endpoints.WebSqlEndpoints", "HandleParquetWebSqlRequestAsync", true),
         ("Autheris.Application.Sql.Services.WebSqlStatementManager", "SubmitOrWaitAsync", true),
-        ("Autheris.Application.SqlEndpoints.Services.SqlEndpointExecutionService", "ExecuteEndpointAsync", true),
-        ("Autheris.Application.Jobs.Services.AsyncQueryJobBackgroundWorker", "ProcessJobItemAsync", true),
+        ("Autheris.Application.Sql.Endpoints.Services.SqlEndpointExecutionService", "ExecuteEndpointAsync", true),
+        ("Autheris.Application.Runtime.Jobs.Services.AsyncQueryJobBackgroundWorker", "ProcessJobItemAsync", true),
         ("Autheris.Api.Endpoints.ArrowExportEndpoints", "HandleArrowExportAsync", true),
-        // Flight SQL: GetFlightInfo only validates (compiles) the statement before it issues a ticket; DoGet executes it.
-        ("Autheris.Application.Serialization.ArrowFlightSqlServer", "GetFlightInfoAsync", false),
-        ("Autheris.Application.Serialization.ArrowFlightSqlServer", "DoGetStreamAsync", true),
         ("Autheris.Application.Mcp.Services.McpToolExecutionHandler", "ExecuteToolAsync", true),
         ("Autheris.Application.Mcp.Services.ApiDispatcherService", "InvokeApiAsync", true),
-        ("Autheris.Application.Data.Services.GovernedDataQueryService", "ExecuteQueryAsync", true),
+        ("Autheris.Application.DataSources.Services.GovernedDataQueryService", "ExecuteQueryAsync", true),
         // WP-ARC-B-02: the SQL table reads of GraphQL flat reads, OData, MCP, connectors and batch relations run through the planner and
         // the governed execution service (Compile + binder); SqlDataSourceExecutor no longer exists.
         ("Autheris.Application.Services.SqlTableReadExecutor", "ExecuteAsync", true),
         ("Autheris.Application.Services.GatewayExecutionService", "ExecuteTablePageAsync", true),
         ("Autheris.Application.Services.GatewayExecutionService", "ExecuteTableQueryAsync", true),
-        ("Autheris.Extensions.OData.ODataHandler", "ExecuteEntitySetQueryAsync", true),
+        ("Autheris.Application.OData.ODataHandler", "ExecuteEntitySetQueryAsync", true),
         ("Autheris.GraphQL.Mcp.GatewayMcpQueryExecutor", "ExecuteOperationAsync", true)
     ];
 
@@ -779,12 +776,12 @@ public sealed class CutoverArchitectureTests
         "Autheris.Application.Services.GatewayExecutionService",
         "Autheris.Application.Sql.Tree.GovernedTreeQueryService",
         "Autheris.Application.Procedures.Services.GovernedProcedureExecutionService",
-        "Autheris.Application.Data.Services.GovernedDataQueryService",
+        "Autheris.Application.DataSources.Services.GovernedDataQueryService",
         "Autheris.Application.Services.SqlTableReadExecutor"
     ];
 
     private const string StagesPrefix = "Autheris.Application.Policy.GovernedQueryStages::";
-    private const string AuditWriteTarget = "Autheris.Application.Interfaces.IAuditLogRepository::RecordAuditEventAsync";
+    private const string AuditWriteTarget = "Autheris.Application.Common.Interfaces.IAuditLogRepository::RecordAuditEventAsync";
 
     [Fact]
     public void AllExecutorsUseGovernedQueryStages()
@@ -803,7 +800,7 @@ public sealed class CutoverArchitectureTests
     // PlannerOutput_NeverReachesACommand (WP-ARC-B-02)
     // ---------------------------------------------------------------------------------------------------------------------
 
-    private const string PlannerPrefix = "Autheris.Application.Data.Interfaces.IGovernedTableReadPlanner::";
+    private const string PlannerPrefix = "Autheris.Application.DataSources.Interfaces.IGovernedTableReadPlanner::";
 
     /// <summary>
     /// The text of <c>IGovernedTableReadPlanner</c> is Trino text for the governed compile path. A type that plans a read must hand the text
@@ -821,10 +818,10 @@ public sealed class CutoverArchitectureTests
             .ToList();
 
         plannerUsers.ShouldContain("Autheris.Application.Services.SqlTableReadExecutor", "positive control: the table-read executor plans reads");
-        plannerUsers.ShouldContain("Autheris.Application.Data.Services.GovernedDataQueryService", "positive control: the dataset service plans reads");
+        plannerUsers.ShouldContain("Autheris.Application.DataSources.Services.GovernedDataQueryService", "positive control: the dataset service plans reads");
 
         var commandTypes = CommandTextSetterSites(ProductionTypes()).Select(s => s.Top).ToHashSet(StringComparer.Ordinal);
-        var violations = plannerUsers.Append("Autheris.Application.Data.Services.GovernedTableReadPlanner").Where(commandTypes.Contains).ToList();
+        var violations = plannerUsers.Append("Autheris.Application.DataSources.Services.GovernedTableReadPlanner").Where(commandTypes.Contains).ToList();
         violations.ShouldBeEmpty("Types that plan a table read must not assign CommandText: " + string.Join(", ", violations));
     }
 

@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
@@ -384,7 +384,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
 
         lock (bucket.Lock)
         {
-            // SEC-GOV177-04: Monotonic time progression
+            // Monotonic time progression
             if (currentTimestamp > bucket.LastRefillTimestamp)
             {
                 var elapsedSeconds = _timeProvider.GetElapsedTime(bucket.LastRefillTimestamp, currentTimestamp).TotalSeconds;
@@ -392,7 +392,7 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
                 bucket.LastRefillTimestamp = currentTimestamp;
             }
 
-            // SEC-GOV177-01 & SEC-GOV177-02: delta = reservedCost - actualCost, clamped to [0, MaxTokensCapacity]
+            // delta = reservedCost - actualCost, clamped to [0, MaxTokensCapacity]
             var delta = reservedCost - actualCost;
             bucket.Tokens = Math.Clamp(bucket.Tokens + delta, 0, policy.MaxTokensCapacity);
 
@@ -401,12 +401,12 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
     }
 
     /// <summary>
-    /// SEC-GOV175B-01 &amp; SEC-GOV175B-03: Non-destructive probe of token bucket state without mutations or deductions.
+    /// 01 &amp; Non-destructive probe of token bucket state without mutations or deductions.
     /// </summary>
     public Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default)
     {
         var capacity = policy.MaxTokensCapacity;
-        // SEC-GOV175B-F1: project with the real policy rate (never the retry-wait fallback), so the probe
+        // project with the real policy rate (never the retry-wait fallback), so the probe
         // never reports more tokens than the consuming path would grant.
         var refillRate = Math.Max(0.0, policy.TokenRefillRatePerSecond);
         var currentTimestamp = _timeProvider.GetTimestamp();

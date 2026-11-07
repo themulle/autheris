@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -18,7 +18,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Application.Audit;
 
 /// <summary>
-/// SEC-AUD161-01 / SEC-AUD161-02 / SEC-AUD161-03: Fenced background worker that periodically purges
+/// Fenced background worker that periodically purges
 /// expired audit entries older than configured retention floors, maintaining tamper-evident cryptographic continuity.
 /// </summary>
 public sealed class AuditRetentionPurgeWorker : BackgroundService

@@ -93,7 +93,7 @@ public sealed record VirtualFilterKeySet
         return new VirtualFilterKeySet(keyTypes.ToArray(), keys.ToFrozenSet(), dropped);
     }
 
-    /// <summary>Approximate memory footprint in bytes (cache size accounting, SEC-10).</summary>
+    /// <summary>Approximate memory footprint in bytes (cache size accounting).</summary>
     public long EstimateBytes()
     {
         long bytes = 64;

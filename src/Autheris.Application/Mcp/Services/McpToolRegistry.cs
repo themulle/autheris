@@ -24,7 +24,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
     private readonly ILogger<McpToolRegistry>? _logger;
 
     /// <param name="demoData">Without a switch (direct construction) the demo tools are registered, as before.</param>
-    /// <param name="switches">PLAN-SEC-115: without switches (direct construction) every tool is registered, as before.</param>
+    /// <param name="switches">without switches (direct construction) every tool is registered, as before.</param>
     public McpToolRegistry(
         IOptions<GatewayOptions>? options = null,
         IDemoDataSwitch? demoData = null,
@@ -41,7 +41,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
     /// <summary>
     /// Registers a tool. A tool registered after the built-in initialisation (GraphQL discovery, <c>Mcp:AllowedOperations</c>) is
     /// dynamic and belongs to the <c>Query</c> group by origin, whatever its name; a dynamic tool whose name collides with a
-    /// built-in tool is refused instead of overwriting it (PLAN-SEC-115 C-115-3).
+    /// built-in tool is refused instead of overwriting it (115 C-115-3).
     /// </summary>
     public void RegisterTool(McpToolDefinition tool)
     {

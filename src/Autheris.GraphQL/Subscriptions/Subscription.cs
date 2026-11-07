@@ -7,7 +7,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Streaming.Services;
 using Autheris.Domain.Model;
@@ -151,7 +151,7 @@ public sealed class Subscription
 
         var sourceStream = eventChannel.SubscribeAsync(topic, guardCts.Token);
 
-        // REQ-CDC-99 I1 (D-A13): MSSQL-tracked tables are read from the durable stream through the shared tail hub; other sources keep using the channel.
+        // 99 I1 (D-A13): MSSQL-tracked tables are read from the durable stream through the shared tail hub; other sources keep using the channel.
         var streamStore = services.GetService<ICdcStreamStore>();
         var tailHub = services.GetService<ICdcStreamTailHub>();
         if (streamStore != null && tailHub != null)
@@ -181,7 +181,7 @@ public sealed class Subscription
             }
             catch (CdcResyncRequiredException ex)
             {
-                // The subscriber fell behind the stream (full buffer): end explicitly instead of silently losing events (SEC-CDC99-18).
+                // The subscriber fell behind the stream (full buffer): end explicitly instead of silently losing events.
                 throw new GraphQLException(
                     ErrorBuilder.New()
                         .SetMessage("The subscription fell behind the change stream; resubscribe.")

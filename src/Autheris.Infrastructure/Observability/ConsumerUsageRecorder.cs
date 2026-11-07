@@ -7,7 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Security;
@@ -100,7 +100,7 @@ public sealed class ConsumerUsageRecorder : IConsumerUsageRecorder
 
             var key = new DailyUsageKey(tenantId.Value, tableId.ToString(), day, app, clientId, ver);
 
-            // SEC-AUD114-05: Enforce MaxSeriesCapacity
+            // Enforce MaxSeriesCapacity
             if (_dailyUsage.Count >= MaxSeriesCapacity && !_dailyUsage.ContainsKey(key))
             {
                 Interlocked.Increment(ref _overflowCount);
@@ -154,7 +154,7 @@ public sealed class ConsumerUsageRecorder : IConsumerUsageRecorder
                 }
             }
 
-            // SEC-AUD114-04: HMAC-SHA256 pseudonymized actor sample (Raw SID is NEVER stored)
+            // HMAC-SHA256 pseudonymized actor sample (Raw SID is NEVER stored)
             if (!string.IsNullOrWhiteSpace(actorSid.Value))
             {
                 string actorHash = ComputeActorHmac(actorSid.Value);

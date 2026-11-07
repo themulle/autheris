@@ -1,0 +1,63 @@
+using Autheris.Domain.Audit;
+using Autheris.Domain.Model;
+
+namespace Autheris.Application.Audit;
+
+/// <summary>
+/// SEC H-17: Signed end anchor of the audit hash chain (last sequence number + last entry hash).
+/// <see cref="Signature"/> is an HMAC-SHA256 (hex) computed by the audit repository with a dedicated HKDF sub-key.
+/// </summary>
+/// <see cref="ExternalSignature"/> (SEC E-11) is an optional asymmetric (KMS/HSM) signature over the whole anchor.
+public sealed record AuditChainAnchor(long Sequence, string EntryHash, DateTimeOffset UpdatedAt, string Signature, string? ExternalSignature = null);
+
+/// <summary>
+/// SEC E-11: Signs audit chain anchors with a key that never lives next to the audited database (KMS / HSM / Key Vault).
+/// </summary>
+public interface IAuditAnchorSigner
+{
+    /// <summary>Hex encoded signature over <paramref name="data"/>.</summary>
+    string Sign(ReadOnlySpan<byte> data);
+
+    /// <summary>Verifies a hex encoded signature; must not throw on malformed input.</summary>
+    bool Verify(ReadOnlySpan<byte> data, string signature);
+}
+
+/// <summary>
+/// SEC H-17: Persists the audit chain end anchor OUTSIDE of the audited database (file on a separate volume,
+/// WORM storage, notary service ...). The repository never trusts the database alone for the chain tail.
+/// </summary>
+public interface IAuditChainAnchorStore
+{
+    /// <summary>Returns the last persisted anchor or <c>null</c> if none exists yet.</summary>
+    AuditChainAnchor? Load();
+
+    /// <summary>Atomically replaces the persisted anchor.</summary>
+    void Save(AuditChainAnchor anchor);
+
+    /// <summary>Returns the last persisted purge checkpoint anchor or <c>null</c> if none exists yet.</summary>
+    AuditPurgeCheckpoint? LoadPurgeCheckpoint() => null;
+
+    /// <summary>Atomically replaces the persisted purge checkpoint anchor.</summary>
+    void SavePurgeCheckpoint(AuditPurgeCheckpoint checkpoint) { }
+}
+
+/// <summary>A contiguous slice (by rowid) of the audit chain.</summary>
+public sealed record AuditChainRecord(long RowId, long? Sequence, AuditLogEntry Entry);
+
+/// <summary>Rowid range and exact record count of the audit chain covering an export window.</summary>
+public sealed record AuditChainRange(long FirstRowId, long LastRowId, long Count);
+
+/// <summary>
+/// SEC M-31: Gap-free, paged access to the audit chain for WORM exports (no silent result capping).
+/// </summary>
+public interface IAuditChainExportSource
+{
+    /// <summary>Determines the contiguous rowid range spanning all entries in the window (null if none).</summary>
+    Task<AuditChainRange?> GetAuditChainRangeAsync(DateTimeOffset windowFrom, DateTimeOffset windowTo, CancellationToken ct = default);
+
+    /// <summary>Returns up to <paramref name="pageSize"/> records with rowid in (<paramref name="afterRowId"/>, <paramref name="lastRowIdInclusive"/>] ordered by rowid.</summary>
+    Task<IReadOnlyList<AuditChainRecord>> GetAuditChainPageAsync(long afterRowId, long lastRowIdInclusive, int pageSize, CancellationToken ct = default);
+
+    /// <summary>The current end anchor if it exists and its signature is valid; otherwise <c>null</c>.</summary>
+    AuditChainAnchor? GetVerifiedChainAnchor();
+}

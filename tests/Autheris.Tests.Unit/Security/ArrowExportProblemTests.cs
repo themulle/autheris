@@ -6,7 +6,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
@@ -41,7 +41,7 @@ public sealed class ArrowExportProblemTests
     private static async Task<ProblemHttpResult> RunAsync(DefaultHttpContext ctx, IGovernedSqlExecutionService? sql)
     {
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
-            ctx, Service(), sql, new Autheris.Application.Data.Services.GovernedTableReadPlanner(), CancellationToken.None);
+            ctx, Service(), sql, new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), CancellationToken.None);
         return result.ShouldBeOfType<ProblemHttpResult>();
     }
 

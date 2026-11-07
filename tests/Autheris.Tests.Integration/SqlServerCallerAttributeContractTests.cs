@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Identity.Attributes;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -45,7 +45,7 @@ public sealed class SqlServerCallerAttributeContractTests : IAsyncLifetime
         env.EnvironmentName.Returns("Development");
         return GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db!.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
+            GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db!.ConnectionString, SeedDemoData = false }
         }), env);
     }
 

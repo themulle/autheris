@@ -5,7 +5,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 
 /// <summary>
-/// SEC-X1-13: cache and per-issuer rate limit in front of the persistent tenant registry.
+/// cache and per-issuer rate limit in front of the persistent tenant registry.
 /// <list type="bullet">
 /// <item>Only positive results (<see cref="TenantRegistration.Registered"/>/<see cref="TenantRegistration.Existing"/>) are cached, for a short
 /// TTL and in a bounded map. A collision, a rate-limit decision or an unavailable registry is never cached as an allow, and a

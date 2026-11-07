@@ -11,7 +11,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -164,7 +164,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         var executionTask = Task.Run(async () =>
         {
             using var scope = _scopeFactory.CreateScope();
-            // Issue #447 (SEC-ATR-05): the background scope carries the ingress of the submitting request. An unstamped submit
+            // Issue #447: the background scope carries the ingress of the submitting request. An unstamped submit
             // (None) leaves the scope unset, which the transport gate denies.
             if (ingress != DataSourceTransportFlags.None)
             {
@@ -188,7 +188,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             }
             finally
             {
-                // Issue #447: the sources the choke points checked, kept to re-check later pages (REQ-ATR-10).
+                // Issue #447: the sources the choke points checked, kept to re-check later pages.
                 sources.Names = scope.ServiceProvider.GetService<IDataSourceTransportGate>()?.CheckedSources ?? [];
             }
         }, sessionCts.Token);
@@ -222,7 +222,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
 
         ValidateSessionOwnership(session, owner, tenantId);
 
-        // Issue #447 (SEC-ATR-05, REQ-ATR-10): the statement is only served over the ingress that created it, and every page is
+        // Issue #447: the statement is only served over the ingress that created it, and every page is
         // re-checked against the live source configuration. A denial returns a FAILED status without data.
         if (await RecheckTransportAsync(session, owner, tenantId, ingress, ct).ConfigureAwait(false) is { } denied)
         {
@@ -521,7 +521,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         public CancellationTokenSource Cts { get; } = cts;
         public Task<GovernedSqlResult> ExecutionTask { get; } = executionTask;
 
-        /// <summary>The ingress transport that submitted the statement (SEC-ATR-05 binding input).</summary>
+        /// <summary>The ingress transport that submitted the statement (05 binding input).</summary>
         public DataSourceTransportFlags Ingress { get; } = ingress;
         public volatile bool IsCancelled;
     }

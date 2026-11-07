@@ -15,7 +15,7 @@ public readonly record struct DbColumnMetadata(string Name, string NativeType, s
 
 /// <summary>
 /// Reads column metadata from the system catalog of one dialect. Implementations query fully qualified system catalogs
-/// with bound names only (SEC-X1-09), so a synonym or a table in the current schema cannot shadow the catalog.
+/// with bound names only, so a synonym or a table in the current schema cannot shadow the catalog.
 /// </summary>
 public interface IColumnMetadataReader
 {

@@ -4,7 +4,7 @@ using System;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
@@ -36,7 +36,6 @@ public sealed class SubmitConsentRequestResult
     public Guid RequestId { get; init; }
     public string Status { get; init; } = string.Empty;
     public string Message { get; init; } = string.Empty;
-    public ItsmTicketReference? ItsmTicketReference { get; init; }
 }
 
 /// <summary>Business failure of a consent use case; <see cref="Code"/> is the stable error code exposed to clients.</summary>
@@ -56,13 +55,4 @@ public interface IConsentRequestService
 {
     Task<SubmitConsentRequestResult> SubmitAsync(ConsentRequestSubmission command, CancellationToken ct = default);
     Task<bool> WithdrawAsync(Guid requestId, ClaimsPrincipal principal, CancellationToken ct = default);
-}
-
-/// <summary>
-/// Seam for the external approval hand-off (ITSM ticket creation) of a consent request. The transactional outbox
-/// replaces the implementation later without touching <see cref="IConsentRequestService"/>.
-/// </summary>
-public interface IConsentRequestDispatcher
-{
-    Task<ItsmTicketResult> DispatchAsync(ItsmTicketRequest request, ItsmSystemType preferredSystem, CancellationToken ct = default);
 }

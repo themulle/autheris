@@ -6,7 +6,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Security;
@@ -48,7 +49,7 @@ public sealed class SecretKeyLengthRDep1Tests
         });
 
         var ex = Should.Throw<InvalidOperationException>(() =>
-            GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, Env(Environments.Production), Provider("short-key"), auditAnchorStore: Substitute.For<Autheris.Application.Interfaces.IAuditChainAnchorStore>()));
+            GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, Env(Environments.Production), Provider("short-key"), auditAnchorStore: Substitute.For<Autheris.Application.Audit.IAuditChainAnchorStore>()));
 
         ex.Message.ShouldContain("32");
     }

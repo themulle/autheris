@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Autheris.Application.Analytics;
-using Autheris.Application.Data.Services;
+using Autheris.Application.DataSources.Services;
 using Autheris.Domain.Model;
 using Shouldly;
 using TrinoSqlEngine;

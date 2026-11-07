@@ -5,7 +5,7 @@
 High-throughput enterprise API gateways operating in multi-tenant environments encounter targeted denial-of-service, protocol surface sprawl, authentication scheme misconfiguration, audit attribution gaps, and enumeration side-channels:
 
 1. **Pre-Authentication Rate Limiter Starvation:** When unauthenticated IP rate limiting indiscriminately limits high-volume API consumers (such as batch analytical workers or internal microservices sharing an egress NAT IP), legitimate authenticated clients with valid Bearer credentials are unintentionally throttled.
-2. **Protocol Attack Surface Sprawl:** Enterprise environments that do not require legacy OData, bulk Arrow IPC export, Arrow Flight SQL, or Iceberg REST Catalog endpoints require zero-overhead protocol kill-switches that fail closed (HTTP 404) and hide disabled protocols from agentic MCP catalogs.
+2. **Protocol Attack Surface Sprawl:** Enterprise environments that do not require legacy OData, bulk Arrow IPC export, Arrow IPC over HTTP, or Iceberg REST Catalog endpoints require zero-overhead protocol kill-switches that fail closed (HTTP 404) and hide disabled protocols from agentic MCP catalogs.
 3. **Kerberos/Negotiate Challenge Leakage:** When Kerberos is not configured on Linux/container environments, unauthenticated 401 challenges should cleanly default to JWT Bearer authentication rather than emitting SPNEGO `Negotiate` headers, and malformed SPNEGO tokens must fail with clean 401 Unauthorized status codes rather than 500 exceptions.
 4. **Caller Application Attribution in WORM Audit Logs:** Services operating on behalf of end users need to record upstream application identity, version, and curated query operations within the tamper-evident HMAC audit log.
 5. **Machine-Readable Error Codes Without an Existence Oracle:** Clients require distinguishable GraphQL/REST error codes (`COLUMN_NOT_RELEASED`, `FILTER_ON_MASKED_COLUMN`, `COST_LIMIT`, `ROW_LIMIT`, `RATE_LIMIT`), while queries against unknown datasets must remain indistinguishable from unauthorized ones (`FORBIDDEN` / `Access denied.`).
@@ -39,7 +39,7 @@ flowchart TD
 ### Component Details
 
 - **`PreAuthIpRateLimitingMiddleware`:** Inspects incoming `Authorization: Bearer <token>` headers. When `ExemptAuthenticatedRequests = true`, authenticated requests skip the crude IP-based pre-auth bucket while remaining strictly constrained by downstream identity-based SID and cost limiters. Dynamic `Retry-After: <seconds>` headers inform throttled clients of the remaining window duration.
-- **Protocol Kill-Switches (`GatewayOptions`):** Independent toggle switches for `OData.Enabled`, `Arrow.Enabled`, `Arrow.EnableFlightSql`, `Lakehouse.Enabled`, and `DuckDbOlap.Enabled`. Disabled protocols are not mapped in Kestrel and are filtered out of `McpDatasetCatalog`.
+- **Protocol Kill-Switches (`GatewayOptions`):** Independent toggle switches for `OData.Enabled`, `Arrow.Enabled`, `Lakehouse.Enabled`, and `DuckDbOlap.Enabled`. Disabled protocols are not mapped in Kestrel and are filtered out of `McpDatasetCatalog`.
 - **`NegotiateHardening` & Authentication Schemes:** `AddNegotiate(...)` is only registered when `gatewayOptions.Authentication.IsKerberosConfigured = true`. Fallback challenges return `Bearer`. `OnAuthenticationFailed` intercepts malformed SPNEGO payloads and cleanly fails with 401.
 - **`ICallerContextProvider` & `CallerContext`:** Extracts sanitized client headers (`X-Caller-Application`, `X-Caller-Version`, `X-Caller-Query-Name`), attaching them to `SecurityPrincipalContext` and automatically embedding `"caller": { "app", "ver", "query" }` into `AuditLogEntry.DetailsJson` and the immutable HMAC-SHA256 hash chain.
 - **`ErrorSanitizingFilter`:** Whitelists machine-readable codes (`COLUMN_NOT_RELEASED`, `FILTER_ON_MASKED_COLUMN`, `COST_LIMIT`, `ROW_LIMIT`, `RATE_LIMIT`) while enforcing anti-oracle masking for `TableNotFoundException` in staging and production environments.
@@ -73,8 +73,7 @@ flowchart TD
       "Enabled": false
     },
     "Arrow": {
-      "Enabled": true,
-      "EnableFlightSql": false
+      "Enabled": true
     },
     "Lakehouse": {
       "Enabled": false

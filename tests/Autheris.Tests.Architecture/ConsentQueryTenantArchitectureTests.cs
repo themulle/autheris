@@ -20,7 +20,8 @@ public sealed class ConsentQueryTenantArchitectureTests
         yield return CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
         yield return CecilModuleCache.For(typeof(Autheris.GraphQL.Types.Mutation).Assembly);
         yield return CecilModuleCache.For(typeof(Autheris.Api.Security.GatewayAuthSchemes).Assembly);
-        yield return CecilModuleCache.For(typeof(Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService).Assembly);
+        yield return CecilModuleCache.For(typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly);
+        yield return CecilModuleCache.For(typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly);
     }
 
     private static bool IsTenantLess(MethodReference m) =>
@@ -58,8 +59,8 @@ public sealed class ConsentQueryTenantArchitectureTests
     [Fact]
     public void TheGuardRecognisesTheTenantAwareOverload()
     {
-        var module = CecilModuleCache.For(typeof(Autheris.Application.Interfaces.IConsentRepository).Assembly);
-        var iface = module.GetType("Autheris.Application.Interfaces.IConsentRepository");
+        var module = CecilModuleCache.For(typeof(Autheris.Application.Common.Interfaces.IConsentRepository).Assembly);
+        var iface = module.GetType("Autheris.Application.Common.Interfaces.IConsentRepository");
         var guarded = iface.Methods.Where(m => Guarded.Contains(m.Name)).ToList();
 
         guarded.Count(m => IsTenantLess(m)).ShouldBe(2);

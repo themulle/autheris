@@ -7,10 +7,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Models;
-using Autheris.Application.DataCatalog.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Models;
+using Autheris.Application.Catalog.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql.Catalog;
@@ -24,7 +24,7 @@ using Microsoft.Extensions.Options;
 
 public sealed class DataCatalogSyncService : IDataCatalogSyncService
 {
-    private readonly IDataCatalogClientFactory _clientFactory;
+    private readonly IDataCatalogClient _client;
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly IEpochValidationService _epochService;
     private readonly IOptions<GatewayOptions> _options;
@@ -35,7 +35,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
     private readonly PhysicalIndexSync _physicalIndexSync;
 
     public DataCatalogSyncService(
-        IDataCatalogClientFactory clientFactory,
+        IDataCatalogClient client,
         ITableMetadataRepository metadataRepo,
         IEpochValidationService epochService,
         IOptions<GatewayOptions> options,
@@ -45,7 +45,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         IRebacStore? rebacStore = null,
         IPhysicalIndexRepository? physicalIndexes = null)
     {
-        _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
+        _client = client ?? throw new ArgumentNullException(nameof(client));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _epochService = epochService ?? throw new ArgumentNullException(nameof(epochService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -58,7 +58,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
     public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
     {
-        var client = _clientFactory.GetActiveClient();
+        var client = _client;
         _logger.LogInformation("Starting data catalog sync from provider {Provider} (DryRun: {DryRun})...", client.ProviderType, dryRun);
 
         var tables = await client.GetTablesAsync(null, ct).ConfigureAwait(false);
@@ -92,7 +92,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                     continue;
                 }
 
-                // SEC-94-01: an unavailable table is never ingested as a new one (its stored masking rules would be lost).
+                // an unavailable table is never ingested as a new one (its stored masking rules would be lost).
                 warnings.Add($"Table '{tableAsset.Identifier}': skipped, its stored metadata is unavailable (invalid key or index definition).");
                 continue;
             }
@@ -205,7 +205,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             bool finalRequiresFourEyes = isArt9 || (existing?.Table?.RequiresFourEyes == true);
             var finalDataSourceType = existing?.Table?.DataSourceType ?? DataSourceType.Sql;
 
-            // D-1: catalogs such as Alation, Collibra or Purview report themselves as source type. A supported dialect on
+            // D-1: external catalogs may report themselves as source type. A supported dialect on
             // the table is kept; a SQL table without one stays unqueryable (fail-closed) until an administrator sets it.
             var finalSourceType = DatabaseDialectExtensions.ResolveCatalogSourceType(tableAsset.SourceType, existing?.Table?.SourceType, out var dialectSupported);
             if (!dialectSupported && finalDataSourceType == DataSourceType.Sql)
@@ -276,7 +276,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                 }
                 finally
                 {
-                    // SEC-SYNC-EPOCH: the epoch of a table is invalidated right after its own upsert (also when the upsert
+                    // the epoch of a table is invalidated right after its own upsert (also when the upsert
                     // fails part-way), not after the whole loop: an exception or cancellation later in the run must not leave
                     // an already written table (e.g. with tightened masking) behind cached decisions of the old metadata.
                     // CancellationToken.None: a cancelled run still invalidates the table it may already have written.
@@ -366,8 +366,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
     public async Task<TableMetadata?> EnrichOrReferenceTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        var client = _clientFactory.GetActiveClient();
-        var asset = await client.GetTableAsync(table, ct).ConfigureAwait(false);
+        var asset = await _client.GetTableAsync(table, ct).ConfigureAwait(false);
         if (asset == null) return null;
 
         var existing = await _metadataRepo.GetTableMetadataAsync(table, ct).ConfigureAwait(false);

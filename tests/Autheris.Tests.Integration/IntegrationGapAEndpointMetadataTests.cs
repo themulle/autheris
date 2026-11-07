@@ -54,16 +54,9 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     [Theory]
     [InlineData("GET", "/health/live")]
     [InlineData("GET", "/health/ready")]
-    [InlineData("GET", "/")]
-    [InlineData("GET", "/getting-started")]
     [InlineData("GET", "/odata/v4/$swagger")]
     [InlineData("GET", "/docs")]
     [InlineData("POST", "/api/webhooks/openmetadata")]
-    [InlineData("POST", "/api/webhooks/itsm/status-change")]
-    [InlineData("POST", "/api/webhooks/servicenow")]
-    [InlineData("POST", "/api/webhooks/jira")]
-    [InlineData("POST", "/api/webhooks/catalog")]
-    [InlineData("POST", "/api/v1/governance/catalog/webhook/{provider}")]
     [InlineData("POST", "/api/extensions/dbt/webhooks/dbt-cloud")]
     public void GAP01_PreviouslyAnonymousRoutes_AllowAnonymous(string method, string rawPattern)
     {
@@ -149,7 +142,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     {
         var client = _factory.CreateClient();
 
-        foreach (var path in new[] { "/health/live", "/health/ready", "/", "/getting-started", "/odata/v4/$swagger", "/docs" })
+        foreach (var path in new[] { "/health/live", "/health/ready", "/", "/odata/v4/$swagger", "/docs" })
         {
             var response = await client.GetAsync(path);
             response.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized, $"GET {path}");
@@ -171,11 +164,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     [InlineData("/api/extensions/dbt/validate-contract", 100 * Mb)]
     [InlineData("/api/extensions/dbt/run-results", 50 * Mb)]
     [InlineData("/api/extensions/dbt/webhooks/dbt-cloud", 10 * Mb)]
-    [InlineData("/api/webhooks/catalog", 10 * Mb)]
-    [InlineData("/api/v1/governance/catalog/webhook/{provider}", 10 * Mb)]
     [InlineData("/api/v1/cdc/events", 10 * Mb)]
-    [InlineData("/api/schema-registry/publish", 10 * Mb)]
-    [InlineData("/api/schema-registry/check", 10 * Mb)]
     [InlineData("/api/governance/catalog/ingest-openapi", 20 * Mb)]
     public void GAP02_LargeBodyRoutes_DeclareRequestSizeLimitAboveGlobalKestrelLimit(string rawPattern, long expectedBytes)
     {

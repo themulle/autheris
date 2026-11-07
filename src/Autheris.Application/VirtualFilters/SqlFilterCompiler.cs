@@ -79,7 +79,7 @@ public static partial class SqlFilterCompiler
             throw Reject(filter, "string literals must not contain the reserved name 'target'.");
         }
 
-        // REQ-GOV-129 (A-4): a caller placeholder becomes the reserved sentinel before the fragment is parsed.
+        // 129 (A-4): a caller placeholder becomes the reserved sentinel before the fragment is parsed.
         IReadOnlyList<string> callerNames = [];
         if (CallerPlaceholders.Contains(fragment))
         {

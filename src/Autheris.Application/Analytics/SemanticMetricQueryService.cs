@@ -7,12 +7,11 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Application.Data;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.DataSources;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Policy.Lint;
 using Autheris.Application.Sql.Tree;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -196,7 +195,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
         }
         catch (TableNotFoundException notFound)
         {
-            // WP-0 (W0-4): a missing backing table and a denied one are one indistinguishable error for the caller; the true reason stays in the audit.
+            //  (W0-4): a missing backing table and a denied one are one indistinguishable error for the caller; the true reason stays in the audit.
             await RecordMetricAuditAsync(
                 tenantId,
                 userSid,
@@ -243,7 +242,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
                 },
                 ct).ConfigureAwait(false);
 
-            // WP-0 (W0-4): fixed message without metric names, table name or denial reasons (those are in the audit entry above).
+            //  (W0-4): fixed message without metric names, table name or denial reasons (those are in the audit entry above).
             throw new GatewayForbiddenException(DeniedMessage);
         }
 
@@ -272,7 +271,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
             }
         }
 
-        // SEC-112-16 (d): the stored filter template is parsed again here against the current base table, so a manifest stored before a
+        // 16 (d): the stored filter template is parsed again here against the current base table, so a manifest stored before a
         // schema change (a column removed, a function disallowed) fails closed at query time instead of reaching the compile path.
         EnsureStoredTemplatesStillParse(resolvedMetrics.Values, tableMetadata);
 
@@ -550,7 +549,7 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
         }
     }
 
-    internal static (DbtSemanticModel Model, List<DbtMeasure> Measures) ResolveModelAndMeasures(
+    public static (DbtSemanticModel Model, List<DbtMeasure> Measures) ResolveModelAndMeasures(
         DbtMetric metric,
         IReadOnlyList<DbtSemanticModel> allModels)
     {
@@ -615,8 +614,8 @@ public sealed partial class SemanticMetricQueryService : ISemanticMetricQuerySer
 
     private async Task<TableMetadata> ResolveTableMetadataAsync(DbtSemanticModel model, CancellationToken ct)
     {
-        var resolver = new Autheris.Application.Dbt.Services.SemanticBaseTableResolver(_metadataRepository);
+        var resolver = new Autheris.Application.Catalog.Semantic.SemanticBaseTableResolver(_metadataRepository);
         return await resolver.TryResolveAsync(model, isVisible: null, ct).ConfigureAwait(false)
-            ?? throw new TableNotFoundException(Autheris.Application.Dbt.Services.SemanticBaseTableResolver.Candidates(model).FirstOrDefault());
+            ?? throw new TableNotFoundException(Autheris.Application.Catalog.Semantic.SemanticBaseTableResolver.Candidates(model).FirstOrDefault());
     }
 }

@@ -17,7 +17,7 @@ public enum BooleanRepresentation { Native, Integer01, Number1 }
 public enum IdentifierLengthUnit { Characters, Bytes }
 
 /// <summary>
-/// How the tenant column is compared (SEC-ADG-04, INV-15). Tenant comparison is always binary-exact, independent of the
+/// How the tenant column is compared (INV-15). Tenant comparison is always binary-exact, independent of the
 /// column collation or session settings.
 /// </summary>
 public enum TenantComparisonStyle
@@ -57,7 +57,7 @@ public enum TenantComparisonStyle
 
     /// <summary>
     /// SQLite: <c>col = t AND CAST(col AS BLOB) = CAST(t AS BLOB)</c>. A BLOB comparison is a plain <c>memcmp</c> and ignores the
-    /// column collation (<c>NOCASE</c>, <c>RTRIM</c>). The tenant column must have TEXT affinity (SEC-X1-09), otherwise the stored
+    /// column collation (<c>NOCASE</c>, <c>RTRIM</c>). The tenant column must have TEXT affinity, otherwise the stored
     /// value was already converted (a NUMERIC column stores <c>'007'</c> as <c>7</c>).
     /// </summary>
     CastBlob
@@ -99,7 +99,7 @@ public sealed record DialectFunctionMap(FrozenDictionary<string, FunctionRewrite
 
 /// <summary>
 /// Per-dialect limits and feature flags. Data, not code (plan section 4.5 and 5). <c>DmlStatements</c> lists the DML classes the
-/// governed compiler may emit for the dialect (WP-A7); a class that is not listed is rejected fail closed.
+/// governed compiler may emit for the dialect; a class that is not listed is rejected fail closed.
 /// </summary>
 public sealed record DialectCapabilities(
     TargetSqlDialect Dialect,
@@ -138,7 +138,7 @@ public sealed record DialectCapabilities(
     bool SupportsTimeZoneConversion = false,
     bool IntersectBindsTighter = false)
 {
-    /// <summary>Version of the capability data. Part of the compile cache key (SEC-ADG-01).</summary>
+    /// <summary>Version of the capability data. Part of the compile cache key.</summary>
     public const string TableVersion = "cap-7";
 }
 

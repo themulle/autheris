@@ -7,11 +7,10 @@ public sealed class GovernanceDbOptions
     public string Provider { get; init; } = "Sqlite"; // "Sqlite", "PostgreSql" ("Postgres", "PgSql") or "SqlServer" ("MsSql")
     /// <summary>
     /// ADO.NET connection string. Empty (default) for SQLite: Development/Test use a private in-memory database, every other environment
-    /// the governance database file in <c>Gateway:State:StateDirectory</c> (WP-ARC-B-13).
+    /// the governance database file in <c>Gateway:State:StateDirectory</c>.
     /// </summary>
     public string ConnectionString { get; init; } = string.Empty;
     [Range(1, 60)] public int CommandTimeoutSeconds { get; init; } = 15;
-    public bool EnableOutboxProcessor { get; init; } = true;
     public bool? SeedDemoData { get; init; } = null;
     public string? AuditHmacKeyVaultRef { get; init; }
 
@@ -29,7 +28,7 @@ public sealed class GovernanceDbOptions
     /// </summary>
     public string JournalMode { get; init; } = "WAL";
 
-    /// <summary>WP-ARC-B-12: versioned governance schema migrations (<c>GovernanceDb:Migrations</c>).</summary>
+    /// <summary>versioned governance schema migrations (<c>GovernanceDb:Migrations</c>).</summary>
     public GovernanceMigrationOptions Migrations { get; init; } = new();
 }
 

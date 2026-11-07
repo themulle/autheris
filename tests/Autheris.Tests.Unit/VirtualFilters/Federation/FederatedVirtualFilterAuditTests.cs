@@ -72,7 +72,7 @@ public sealed class FederatedVirtualFilterAuditTests
 
     private static List<AuditLogEntry> Entries(Pipeline pipeline) =>
         pipeline.Audit.ReceivedCalls()
-            .Where(c => c.GetMethodInfo().Name == nameof(Autheris.Application.Interfaces.IAuditLogRepository.RecordAuditEventAsync))
+            .Where(c => c.GetMethodInfo().Name == nameof(Autheris.Application.Common.Interfaces.IAuditLogRepository.RecordAuditEventAsync))
             .Select(c => (AuditLogEntry)c.GetArguments()[0]!)
             .ToList();
 

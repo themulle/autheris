@@ -1,17 +1,16 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
 using Autheris.Application.Audit;
-using Autheris.Application.DataCatalog.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Events.Interfaces;
-using Autheris.Application.DataCatalog.Services;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Api.Security;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.Policy.Services;
@@ -20,12 +19,11 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Workflows;
+using Autheris.Application.Governance.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Itsm;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
@@ -71,7 +69,7 @@ public static partial class GatewayGovernanceServiceExtensions
 
             if (string.IsNullOrWhiteSpace(secret))
             {
-                var secretProvider = sp.GetService<Autheris.Application.Interfaces.IKeyVaultSecretProvider>();
+                var secretProvider = sp.GetService<Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider>();
                 var auditRef = gatewayOptions?.GovernanceDb?.AuditHmacKeyVaultRef ?? gatewayOptions?.DataMasking?.HmacSecretKeyVaultRef;
                 if (secretProvider != null && !string.IsNullOrWhiteSpace(auditRef))
                 {

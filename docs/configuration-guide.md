@@ -2,6 +2,8 @@
 
 Dieses Handbuch bietet eine vollständige, praxiserprobte Referenz aller Konfigurationsoptionen des **GraphQL Enterprise Gateway**, inklusive Validierungsregeln, Sicherheitsinvariablen, Umgebungsvariablen, Kubernetes-Konfiguration und Profilen (Entwicklung vs. Produktion).
 
+Eine automatisch generierte, vollständige Referenz aller gebundenen Konfigurationsschlüssel finden Sie in der [Configuration Reference](reference/configuration.md).
+
 ---
 
 ## 1. Architektur der Konfiguration
@@ -39,7 +41,7 @@ Beim Hochfahren des Hosts (`Program.cs`) führt `GatewayServiceCollectionExtensi
 
 ## 2. Vollständige Referenz der Konfigurationssektionen (`Gateway:*`)
 
-Alle gateway-spezifischen Optionen befinden sich unter dem Hauptknoten `"Gateway"`.
+Alle gateway-spezifischen Optionen befinden sich unter dem Hauptknoten `"Gateway"`. Eine automatisch generierte Tabelle aller Optionen und ihrer Quellcodedateien ist in der [Configuration Reference](reference/configuration.md) hinterlegt.
 
 ### 2.1 `HighAvailability` (Hochverfügbarkeit & Graceful Shutdown)
 
@@ -75,7 +77,6 @@ Das Gateway unterstützt ein flexibles, mehrgleisiges Authentifizierungskonzept 
 | `Domain` | `string` | Gültiger FQDN | `"CORP.LOCAL"` | Active Directory Domäne. |
 | `ServicePrincipalName` | `string` | SPN-Format | `"HTTP/gql-gateway.corp.local"` | Kerberos Service Principal Name für SPNEGO/Negotiate. |
 | `RequireKerberosOnly` | `bool` | `true \| false` | `true` | Enforces Kerberos: `NTLM` Authorization headers are not routed to Negotiate, and identities authenticated by Negotiate with an authentication type other than Kerberos (e.g. NTLM) are rejected. `PersistNtlmCredentials`/`PersistKerberosCredentials` are always disabled so credentials never carry over on shared upstream connections. |
-| `GroupCacheTtlMinutes` | `int` | `1 .. 60` | `5` | TTL für den lokalen Cache aufgelöster Windows-Gruppen-SIDs. |
 | `EnableTestAuthHandler` | `bool` | `true \| false` | `false` | Ermöglicht `X-Test-User-Sid`-Header zur Simulation von Identitäten (**nur in Development erlaubt!**). |
 
 #### 2.2.2 `Authentication.ForwardAuth` (Kubernetes / Traefik Ingress)
@@ -450,7 +451,7 @@ Kombiniert Pre-Authentication IP-Limiting mit Token-Bucket-Verbrauch pro Windows
 
 #### `RateLimiting.ClientTiers` (GraphQL Pre-Execution Cost & Quota Defense)
 
-Steuert die [`CostAndQuotaMiddleware`](file:///root/autheris/src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs) ([`F-PERF-13`](features/f-perf-13-cost-and-quota-rate-limiting.md)) zur dynamischen Zuordnung von Aufrufern zu Kontingent-Stufen (`Free`, `Standard`, `Enterprise`, `Internal`) vor der GraphQL-Ausführung.
+Steuert die [`CostAndQuotaMiddleware`](../src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs) ([`F-PERF-13`](features/f-perf-13-cost-and-quota-rate-limiting.md)) zur dynamischen Zuordnung von Aufrufern zu Kontingent-Stufen (`Free`, `Standard`, `Enterprise`, `Internal`) vor der GraphQL-Ausführung.
 
 | Eigenschaft | Typ | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- |
@@ -737,13 +738,12 @@ Für deklarative HTTP-Datenquellen (`DeclarativeHttpDataSourceExecutor`) gelten 
 
 ### 2.13 `Catalog` (Enterprise Data Catalog Integration & DSGVO-Klassifizierung)
 
-Ermöglicht die zentrale Anbindung an externe Unternehmens-Datenkataloge (**Microsoft Purview**, **Collibra**, **Alation**, **OpenMetadata**) zur automatisierten Spiegelung von Metadaten und Sensitivitäts-Klassifizierungen.
+Ermöglicht die zentrale Anbindung an **OpenMetadata** zur automatisierten Spiegelung von Metadaten und Sensitivitäts-Klassifizierungen.
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
 | `Enabled` | `bool` | `true \| false` | `false` | Aktiviert die Data-Catalog-Integration. |
-| `Provider` | `string` | `OpenMetadata \| MicrosoftPurview \| Collibra \| Alation` | `"OpenMetadata"` | Aktiver Datenkatalog-Provider. |
-| `SyncMode` | `string` | `Mirror \| Reference` | `"Mirror"` | `Mirror`: Synct Tabellen/Spalten periodisch in den lokalen Store. `Reference`: Führt On-Demand-Lookups durch. |
+| `Provider` | `string` | `OpenMetadata` | `"OpenMetadata"` | Aktiver Datenkatalog-Provider. |
 | `SyncIntervalMinutes` | `int` | `1 .. 1440` | `60` | Synchronisationsintervall des Hintergrunddienstes in Minuten. |
 | `TagToMaskingRuleMap` | `Dictionary<string, string>` | Key-Value Paare | *(Standard-Map)* | Mappt Katalog-Tags auf Maskierungsregeln (`REDACT`, `MASK_EMAIL`, `HMAC_SHA256`). |
 | `GdprArticle9Tags` | `List<string>` | Tag-Namen | *(Art. 9 Tags)* | Tags für besondere Kategorien (Gesundheit, Biometrie, Genetik, Religion). Erzwingt `HIGH`, Four-Eyes und `REDACT`. |
@@ -764,23 +764,11 @@ Ermöglicht die zentrale Anbindung an externe Unternehmens-Datenkataloge (**Micr
 > - Tables classified as `MEDIUM` are **not** treated as high-sensitivity.
 > - High-sensitivity triggers mandatory Four-Eyes approval (`RequiresFourEyes = true`), shorter consent cache TTL, and fail-closed behavior in degraded mode.
 
-#### Provider-Konfigurationen:
-- **`Catalog.Purview`**: Azure Purview / Apache Atlas (`Endpoint`, `TenantId`, `ClientId`, `ClientSecretKeyVaultRef`).
-- **`Catalog.Collibra`**: Collibra Data Intelligence Cloud Core API v2 (`BaseUrl`, `Username`, `PasswordKeyVaultRef`).
-- **`Catalog.Alation`**: Alation Integration API v2 (`BaseUrl`, `ApiRefreshTokenKeyVaultRef`, `DefaultDataSourceId`).
-
 ```json
 "Catalog": {
   "Enabled": true,
-  "Provider": "MicrosoftPurview",
-  "SyncMode": "Mirror",
+  "Provider": "OpenMetadata",
   "SyncIntervalMinutes": 60,
-  "Purview": {
-    "Endpoint": "https://corp-purview.purview.azure.com",
-    "TenantId": "72f988bf-86f1-41af-91ab-2d7cd011db47",
-    "ClientId": "a820c78a-f326-4d1d-91b4-2195f1342618",
-    "ClientSecretKeyVaultRef": "PURVIEW-SP-SECRET"
-  },
   "TagToMaskingRuleMap": {
     "PII.Sensitive": "REDACT",
     "PII.Email": "MASK_EMAIL",
@@ -803,18 +791,15 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 - **`danger_` (Kritischer Impact)**: Deaktiviert Authentifizierung, Autorisierung oder Zertifikatsprüfungen vollständig.
 
 > [!CAUTION]
-> **Production & Staging Warning (DANGER Switches & R-API-1 Migration Notice)**:
+> **Production & Staging Warning (DANGER Switches)**:
 > All `danger_`-prefixed switches, as well as flags reclassified as `DANGER:` (such as `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance`, `Catalog.OpenSchema`, `OpenMetadata.AutoCreateConsents`, and `WebSql.MaxAffectedRows <= 0` with DML enabled), **strictly abort application startup outside of the `Development` environment** (`ValidationException` fail-fast).
-> 
-> **Migration Notice (R-API-1 / API-1)**:
-> The shared global ITSM webhook secret is no longer accepted in any environment; webhooks are verified with instance-specific secrets (`itsm:webhook-secret:<instanceId>`) only, configured via Key Vault or environment variables. An ITSM instance without a tenant mapping (`Itsm:InstanceToTenantMap`) is always rejected.
 
 | Eigenschaft | Typ | Standard | Sicherheits-Level | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
 | `danger_allow_anonymous_access` | `bool` | `false` | **CRITICAL** | Erlaubt GraphQL-Abfragen ohne jegliche Authentifizierung (anonymer Benutzer). |
 | `danger_bypass_consent_checks` | `bool` | `false` | **CRITICAL** | Umgeht die Zero-Trust Consent-Prüfung (`ALLOW` für alle Tabellen). |
-| `danger_bypass_webhook_signature_validation` | `bool` | `false` | **CRITICAL** | Erlaubt ungesignete Webhook-Aufrufe (z. B. ServiceNow, Jira, OpenMetadata ohne HMAC-Prüfung). |
-| `danger_allow_untrusted_certificates` | `bool` | `false` | **CRITICAL** | Akzeptiert selbstsignierte oder abgelaufene SSL/TLS-Zertifikate bei ausgehenden HTTP-Aufrufen (Purview, Collibra, APIs). |
+| `danger_bypass_webhook_signature_validation` | `bool` | `false` | **CRITICAL** | Erlaubt ungesignete Webhook-Aufrufe (z. B. OpenMetadata ohne HMAC-Prüfung). |
+| `danger_allow_untrusted_certificates` | `bool` | `false` | **CRITICAL** | Akzeptiert selbstsignierte oder abgelaufene SSL/TLS-Zertifikate bei ausgehenden HTTP-Aufrufen. |
 | `danger_allow_anonymous_webhooks` | `bool` | `false` | **CRITICAL** | Akzeptiert eingehende Webhook-Payloads ohne Auth-Token oder Secret. |
 | `warn_allow_all_cors_origins` | `bool` | `false` | **WARN** | Setzt `Access-Control-Allow-Origin: *` und deaktiviert CSRF-Preflight. |
 | `warn_disable_rate_limiting` | `bool` | `false` | **WARN** | Deaktiviert IP- und SID-basiertes Rate-Limiting (keine `429 Too Many Requests`). |
@@ -938,7 +923,7 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 | Key | Type | Range | Default | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `WebSql:CrossSource:Enabled` | `bool` | `true \| false` | `false` | Federation switch. When `false`, requests that join several data sources are denied on every transport, including OLAP. |
-| `WebSql:CrossSource:AllowedTransports` | `string[]` | `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints`, `AsyncJob`, `Olap` (case-insensitive) | `["WebSql", "Trino"]` | Transports that may run cross-source queries. A configured list replaces the default entirely (list every transport you need); an empty list allows none. `Olap` is never implied: add it explicitly to allow cross-source requests on `POST /api/v1/olap/query`. An unknown or blank name aborts the start. A start-up warning is logged when `Olap` is listed while `Enabled` is `false`. |
+| `WebSql:CrossSource:AllowedTransports` | `string[]` | `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `SqlEndpoints`, `AsyncJob`, `Olap` (case-insensitive) | `["WebSql", "Trino"]` | Transports that may run cross-source queries. A configured list replaces the default entirely (list every transport you need); an empty list allows none. `Olap` is never implied: add it explicitly to allow cross-source requests on `POST /api/v1/olap/query`. An unknown or blank name aborts the start. A start-up warning is logged when `Olap` is listed while `Enabled` is `false`. |
 | `WebSql:CrossSource:MaxTableCount` | `int` | `1 ..` | `5` | Maximum distinct tables of a cross-source request. |
 | `WebSql:CrossSource:MaxStagedRowsPerTable` / `MaxTotalStagedRows` | `int` | `1 ..` | `50000` / `200000` | Row budgets of the SQL federation. |
 | `WebSql:CrossSource:MaxStagedBytesPerTable` / `MaxTotalStagedBytes` | `long` | `1 ..` | `33554432` / `134217728` | Byte budgets; the OLAP endpoint uses the smaller of these and the `DuckDbOlap` values for cross-source requests. |
@@ -978,7 +963,7 @@ Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-S
 | `EpochCheckSeconds` | `int` | `1 .. TtlSeconds` | `5` | Interval of cluster policy epoch reads per tenant. |
 | `UnavailableBackoffMilliseconds` | `int` | `100 .. 10000` | `1000` | Cache bypass after a failed epoch read. |
 
-Details: [F-SEC-06](features/f-sec-06-casbin-decision-cache-policy-epoch.md).
+Details: see [Operations Runbook](operations-runbook.md).
 
 #### Startup Validation & Model Contract (Probes M1–M8, W1–W6)
 
@@ -1056,7 +1041,6 @@ Alle SQL-Transporte laufen durch dieselbe WebSQL-Pipeline. Ohne eigene Werte gel
 | `RowLimits:Parquet:...` | WebSQL mit `Accept: application/vnd.apache.parquet` | `ParquetEgress:MaxRowsPerFile` |
 | `RowLimits:SqlEndpoints:...` | Deklarierte SQL-Endpunkte (`/api/v1/queries/...`) | – |
 | `RowLimits:ArrowExport:...` | Arrow-Export (`POST /api/v1/export/arrow`) | `Arrow:MaxExportRows` |
-| `RowLimits:FlightSql:...` | Arrow Flight SQL (`/api/v1/flight/sql/*`) | `Arrow:MaxExportRows` |
 
 Ergebnisse, die das Limit erreichen, werden als gekürzt gemeldet (`truncated`, `X-Autheris-Truncated`, bei Parquet zusätzlich `X-Export-Truncated`).
 
@@ -1097,7 +1081,7 @@ Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilt
 | :--- | :--- | :--- | :--- |
 | `VirtualFilters:MaxRemovals` | `int` | `10` | Maximale Anzahl an Bindungen, die ein GitOps-Sync ohne `?force=true` entfernen darf. Das Entfernen erweitert die Sichtrechte des Berechtigten; `0` deaktiviert die Schranke. |
 | `VirtualFilters:GenerationCheckSeconds` | `int` | `5` | Intervall in Sekunden, in dem eine Gateway-Instanz die Generation mit der Datenbank abgleicht. `0` prüft bei jedem Zugriff. |
-| `RowFilters:SubqueryStrategy` | `enum` | `Exists` | SQL strategy for row-filter subqueries built as SQL text: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` or `In`. Applies to the REST data API, OLAP and federated staging, governed aggregations, procedures and change detection. **No effect on the governed SQL compiler** (WebSQL, Trino protocol, Arrow/Flight SQL, async jobs, SQL endpoints, MCP SQL tools), which always emits correlated policy subqueries; a non-default value is reported as a startup warning (`Configuration: Gateway:RowFilters:SubqueryStrategy ... has no effect ...`). |
+| `RowFilters:SubqueryStrategy` | `enum` | `Exists` | SQL strategy for row-filter subqueries built as SQL text: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` or `In`. Applies to the REST data API, OLAP and federated staging, governed aggregations, procedures and change detection. **No effect on the governed SQL compiler** (WebSQL, Trino protocol, Arrow IPC over HTTP, async jobs, SQL endpoints, MCP SQL tools), which always emits correlated policy subqueries; a non-default value is reported as a startup warning (`Configuration: Gateway:RowFilters:SubqueryStrategy ... has no effect ...`). |
 | `Logging:LogGeneratedSql` | `bool` | `false` | Diagnoseschalter zur Protokollierung generierter Ziel-SQL-Abfragen inklusive RLS- und Virtual-Filter-Prädikate. |
 
 ```json
@@ -1194,7 +1178,7 @@ The tenant signal of the tenant administrator view is derived from consent recor
 |---|---|---|---|
 | `Gateway:Dbt:ImportDataOwners` | bool | `false` | Allows `POST /api/extensions/dbt/governance` to write table data owners (`owner` / `owners` per table item). Data owners act as consent approvers, so the switch is explicit configuration and never a request parameter. |
 
-With the default `false`, a payload that carries `owner`, `owners`, `group` or `groups` is rejected as a whole (`dbt_owner_import_disabled`); nothing is written. With `true`, the caller must additionally hold the `GovernanceAdmin` role (re-checked in the import service; `DbtAdmin` alone is rejected), and the write repository and the audit repository must be registered. The manifest sync (`/sync`) never writes owners. See `docs/features/f-dbt-05-streaming-metadata-ingestion.md` for the payload and its limits.
+With the default `false`, a payload that carries `owner`, `owners`, `group` or `groups` is rejected as a whole (`dbt_owner_import_disabled`); nothing is written. With `true`, the caller must additionally hold the `GovernanceAdmin` role (re-checked in the import service; `DbtAdmin` alone is rejected), and the write repository and the audit repository must be registered. The manifest sync (`/sync`) never writes owners. See the dbt module documentation for the payload and its limits.
 
 ## 3. Deployment & Umgebungsvariablen
 

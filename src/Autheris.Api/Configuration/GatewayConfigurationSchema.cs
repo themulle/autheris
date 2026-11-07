@@ -16,7 +16,7 @@ using Microsoft.Extensions.Configuration;
 namespace Autheris.Api.Configuration;
 
 /// <summary>
-/// ARCH-MNT-06: the typed shape of the <c>Gateway</c> configuration root, used by <see cref="UnknownGatewayKeyGuard"/>. The root binds to
+/// the typed shape of the<c>Gateway</c> configuration root, used by <see cref="UnknownGatewayKeyGuard"/>. The root binds to
 /// <see cref="GatewayOptions"/>; a number of subsections are additionally bound to their own options types (side-bound), and several
 /// intermediate nodes (<c>Gateway:Startup</c>) exist only through those. A key is known when some type bound at its parent path declares it.
 /// </summary>
@@ -50,8 +50,17 @@ public static class GatewayConfigurationSchema
         ("Gateway:State", typeof(StateOptions)),
         ("Gateway:TableCache", typeof(TableCacheOptions)),
         ("Gateway:AsyncJobs", typeof(AsyncJobOptions)),
-        ("Gateway:Tenancy", typeof(TenancyOptions))
+        ("Gateway:Tenancy", typeof(TenancyOptions)),
+        ("Gateway:CustomQueryPoller", typeof(CustomQueryPollerOptions))
     ];
+
+    /// <summary>
+    /// All configured configuration schema entry points: root GatewayOptions and all side-bound sections.
+    /// </summary>
+    public static IReadOnlyList<(string Path, Type Type)> Entries { get; } =
+        new List<(string Path, Type Type)> { (Root, typeof(GatewayOptions)) }
+            .Concat(SideBound)
+            .ToList();
 
     /// <summary>
     /// Keys (and subtrees) that are not options properties but are owned by a dedicated guard or validator that reports a specific message.
@@ -78,13 +87,35 @@ public static class GatewayConfigurationSchema
         "Gateway:Cluster:Secret",
         // DefaultEnvironmentSecretProvider resolves these well-known secret references from configuration.
         "Gateway:DataMasking:HmacSecret",
-        "Gateway:Itsm:WebhookSecret",
-        "Gateway:Secrets:VaultHostSuffixes"
+        "Gateway:Secrets:VaultHostSuffixes",
+        "Gateway:Modules:AllowUnsignedInDevelopment",
+        "Gateway:Modules:Enabled",
+        "Gateway:Modules:Path"
     ];
 
     /// <summary>
+    /// Maps known external module configuration sections to the module ID that owns them.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> KnownModuleSections { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [GatewaySections.Lakehouse] = "lakehouse",
+            [GatewaySections.Dbt] = "dbt",
+            [GatewaySections.OpenMetadata] = "openmetadata",
+            [GatewaySections.CdcStream] = "cdc",
+            [GatewaySections.PostgreSqlCdc] = "cdc",
+            [GatewaySections.MssqlChangeTracking] = "cdc",
+            [Root + ":AiGateway"] = "ai-gateway",
+            [Root + ":SemanticLayer"] = "semantic-layer",
+            [Root + ":DataQuality"] = "data-quality",
+            [Root + ":AsyncExport"] = "async-export",
+            [Root + ":CatalogSync"] = "catalog-sync",
+            [Root + ":Scim"] = "scim",
+        };
+
+    /// <summary>
     /// The only subtrees (configuration paths) whose content is not checked key by key (<c>object</c>, <c>IConfigurationSection</c>,
-    /// dictionaries with scalar values). None may sit under a security root; <c>ARCH-MNT-06-T-08</c> pins this list.
+    /// dictionaries with scalar values). None may sit under a security root; <c>T-08</c> pins this list.
     /// </summary>
     public static IReadOnlyList<string> FreeFormSubtrees() => FindFreeForm();
 
@@ -99,9 +130,9 @@ public static class GatewayConfigurationSchema
         OwnedByOtherGuards.Concat(RawReadKeys).Any(o => string.Equals(path, o, StringComparison.OrdinalIgnoreCase)
             || path.StartsWith(o + ":", StringComparison.OrdinalIgnoreCase));
 
-    internal enum Shape { Scalar, Complex, List, Dictionary, FreeForm }
+    public enum Shape { Scalar, Complex, List, Dictionary, FreeForm }
 
-    internal static Shape Classify(Type type, out Type? element)
+    public static Shape Classify(Type type, out Type? element)
     {
         element = null;
         type = Nullable.GetUnderlyingType(type) ?? type;

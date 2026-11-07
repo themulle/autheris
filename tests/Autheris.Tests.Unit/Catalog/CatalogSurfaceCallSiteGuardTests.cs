@@ -14,14 +14,14 @@ using Xunit;
 /// </summary>
 public sealed class CatalogSurfaceCallSiteGuardTests
 {
-    private static string SrcRoot()
+    private static string RepoRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
         while (current != null)
         {
             if (File.Exists(Path.Combine(current.FullName, "Autheris.sln")))
             {
-                return Path.Combine(current.FullName, "src");
+                return current.FullName;
             }
 
             current = current.Parent;
@@ -30,10 +30,20 @@ public sealed class CatalogSurfaceCallSiteGuardTests
         throw new InvalidOperationException("Autheris.sln not found.");
     }
 
-    private static IEnumerable<string> SourceFiles() =>
-        Directory.EnumerateFiles(SrcRoot(), "*.cs", SearchOption.AllDirectories)
+    private static IEnumerable<string> SourceFiles()
+    {
+        var root = RepoRoot();
+        var dirs = new List<string> { Path.Combine(root, "src") };
+        var lakehouseModuleDir = Path.Combine(root, "modules", "Autheris.Modules.Lakehouse");
+        if (Directory.Exists(lakehouseModuleDir))
+        {
+            dirs.Add(lakehouseModuleDir);
+        }
+
+        return dirs.SelectMany(d => Directory.EnumerateFiles(d, "*.cs", SearchOption.AllDirectories))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") &&
                         !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
+    }
 
     private static string Name(string path) => Path.GetFileName(path);
 
@@ -61,7 +71,6 @@ public sealed class CatalogSurfaceCallSiteGuardTests
     [InlineData("AiDataGuardrailService.cs")]
     [InlineData("SemanticMcpCompiler.cs")]
     [InlineData("TrinoMetadataQueryHandler.cs")]
-    [InlineData("ArrowFlightSqlServer.cs")]
     [InlineData("IcebergRestCatalogFederationService.cs")]
     [InlineData("EffectiveAccessExplanationService.cs")]
     [Trait("Category", "Security")]

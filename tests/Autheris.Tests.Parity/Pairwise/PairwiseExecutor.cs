@@ -19,11 +19,6 @@ public sealed class PairwiseExecutor(IParityHost host, string schema = "main")
 
     public async Task RunAsync(PairwiseCase c, string channel)
     {
-        if (c.Dialect == PairwiseModel.SqlServer)
-        {
-            throw new PendingCellException(channel, "pairwise_sqlserver_host_pending");
-        }
-
         var web = channel == "WebSql";
         if (!web && c.Grouping == "expression")
         {
@@ -59,19 +54,21 @@ public sealed class PairwiseExecutor(IParityHost host, string schema = "main")
     }
 
     /// <summary>
-    /// WebSQL text of the grouping key. SQLite uses <c>strftime</c>; PostgreSQL uses <c>EXTRACT</c> (year) and <c>to_char</c> (month, day) and
-    /// expects the oracle result: whether the product accepts them is decided by the first nightly dispatch (gaps are registered afterwards).
+    /// WebSQL text of the grouping key. SQLite uses <c>strftime</c>; SQL Server uses <c>YEAR</c>/<c>FORMAT</c>; PostgreSQL uses <c>EXTRACT</c> (year) and <c>to_char</c> (month, day).
     /// </summary>
-    public static string? RenderGroupKey(string grouping, string dialect) => (grouping, dialect == PairwiseModel.Sqlite) switch
+    public static string? RenderGroupKey(string grouping, string dialect) => (grouping, dialect) switch
     {
         ("none", _) => null,
         ("column", _) => "region",
-        ("year", true) => "strftime('%Y', sale_date)",
-        ("month", true) => "strftime('%Y-%m', sale_date)",
-        ("day", true) => "strftime('%Y-%m-%d', sale_date)",
-        ("year", false) => "EXTRACT(YEAR FROM sale_date)",
-        ("month", false) => "to_char(sale_date, 'YYYY-MM')",
-        ("day", false) => "to_char(sale_date, 'YYYY-MM-DD')",
+        ("year", PairwiseModel.Sqlite) => "strftime('%Y', sale_date)",
+        ("month", PairwiseModel.Sqlite) => "strftime('%Y-%m', sale_date)",
+        ("day", PairwiseModel.Sqlite) => "strftime('%Y-%m-%d', sale_date)",
+        ("year", PairwiseModel.SqlServer) => "YEAR(sale_date)",
+        ("month", PairwiseModel.SqlServer) => "FORMAT(sale_date, 'yyyy-MM')",
+        ("day", PairwiseModel.SqlServer) => "FORMAT(sale_date, 'yyyy-MM-dd')",
+        ("year", _) => "EXTRACT(YEAR FROM sale_date)",
+        ("month", _) => "to_char(sale_date, 'YYYY-MM')",
+        ("day", _) => "to_char(sale_date, 'YYYY-MM-DD')",
         _ => "LOWER(region)",
     };
 

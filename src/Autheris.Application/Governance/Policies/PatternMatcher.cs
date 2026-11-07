@@ -51,7 +51,7 @@ public static class PatternMatcher
         }
         catch (RegexMatchTimeoutException)
         {
-            // SEC-SC-13: ReDoS fail-closed
+            // ReDoS fail-closed
             return false;
         }
         catch (ArgumentException)

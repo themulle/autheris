@@ -54,7 +54,7 @@ public static class McpEndpoints
 
         // Streamable HTTP on the official MCP SDK (GatewayMcpServer); stateless, so there are no session endpoints.
         var endpoint = app.MapMcp(mcpBasePath)
-            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Mcp) // Issue #447 (SEC-ATR-02)
+            .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Mcp) // Issue #447
             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // SEC M-09: hard body limit for JSON-RPC messages and MCP >= 2025-06-18 batch rejection.
@@ -230,7 +230,7 @@ public static class McpEndpoints
             ? (securityContext != null ? securityContext.GroupSids.Select(s => s.Value).ToList() : principal.GetGroupSids().Select(s => s.Value).ToList())
             : new List<string>();
         var clientIp = securityContext?.ClientIp?.ToString()
-                        ?? (context.RequestServices?.GetService<Autheris.Application.Interfaces.IClientIpResolver>()?.ResolveClientIp()
+                        ?? (context.RequestServices?.GetService<Autheris.Application.Common.Interfaces.IClientIpResolver>()?.ResolveClientIp()
                             ?? context.Connection.RemoteIpAddress)?.ToString();
 
         var isReadOnly = principal.IsReadOnly();

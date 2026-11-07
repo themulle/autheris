@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// F-SEC-04: Google Zanzibar / OpenFGA Relationship-Based Access Control (ReBAC) Models.
+/// F-Google Zanzibar / OpenFGA Relationship-Based Access Control (ReBAC) Models.
 /// Represents relationship tuples, check queries, and batch results for multi-tenant entity authorization.
 /// </summary>
 
@@ -22,7 +22,7 @@ public sealed record RebacTuple(
 )
 {
     /// <summary>
-    /// WP-SC-16: absolute expiry of a time-bound individual grant. Null for standing tuples. Stores must treat a tuple past this
+    /// absolute expiry of a time-bound individual grant. Null for standing tuples. Stores must treat a tuple past this
     /// instant as absent (fail closed).
     /// </summary>
     public DateTimeOffset? ExpiresAt { get; init; }

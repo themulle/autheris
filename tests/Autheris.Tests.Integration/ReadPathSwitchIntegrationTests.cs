@@ -129,8 +129,7 @@ public sealed class ReadPathRestSwitchOffIntegrationTests : IClassFixture<WebApp
         foreach (var client in new[] { authenticated, anonymous })
         {
             var unknown = await Send(client, "GET /api/v1/data-nonexistent-xyz");
-            // Anonymous callers get the fallback policy's 401 for any unmapped path (so closed and unknown cannot be told apart either).
-            unknown.Status.ShouldBe(ReferenceEquals(client, authenticated) ? HttpStatusCode.NotFound : HttpStatusCode.Unauthorized);
+            unknown.Status.ShouldBe(HttpStatusCode.NotFound);
             // The dataset catch-all route /api/v1/catalog/datasets/{*id} answers any deeper path: the closed sample-rows route must
             // look exactly like another unknown sub-path there.
             var unknownDataset = await Send(client, "GET /api/v1/catalog/datasets/a.b.c/zzz-nonexistent-xyz");

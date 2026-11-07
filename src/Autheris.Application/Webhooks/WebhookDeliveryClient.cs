@@ -24,7 +24,7 @@ public sealed record ResolvedWebhookTarget(
 public sealed record WebhookDeliveryAttemptResult(WebhookRetryDecision Decision, int? StatusCode);
 
 /// <summary>
-/// Single outbound delivery path for configured and CloudEvents webhooks (WP-ARC-A-02). Every attempt re-validates the egress target,
+/// Single outbound delivery path for configured and CloudEvents webhooks. Every attempt re-validates the egress target,
 /// takes a fresh timestamp, signs <c>"{timestamp}.{body}"</c> and disposes the response. Only redacted URLs, stable error codes and
 /// exception type names are logged; exception messages and resolved addresses never are.
 /// </summary>

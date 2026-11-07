@@ -10,7 +10,7 @@ using Autheris.Api.Configuration;
 using Autheris.Api.Extensions;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Middleware;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;

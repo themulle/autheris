@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Health;
@@ -158,7 +159,6 @@ public class PostgreSqlGovernanceProviderTests
         services.Any(d => d.ServiceType == typeof(IGovernanceRepository)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(ITableMetadataRepository)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(IConsentRepository)).ShouldBeTrue();
-        services.Any(d => d.ServiceType == typeof(IItsmOutboxRepository)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(IAuditChainExportSource)).ShouldBeTrue();
     }
 

@@ -2,14 +2,14 @@ namespace Autheris.Api.Security;
 
 using System;
 using System.Diagnostics;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// Issue #238 (PLAN-DATA-238, WP-SC-15): Resolves ambient caller token, principal, and correlation headers from HttpContext.
+/// Issue #238: Resolves ambient caller token, principal, and correlation headers from HttpContext.
 /// </summary>
 public sealed class HttpDelegationContextProvider(IHttpContextAccessor? httpContextAccessor = null) : IDelegationContextProvider
 {

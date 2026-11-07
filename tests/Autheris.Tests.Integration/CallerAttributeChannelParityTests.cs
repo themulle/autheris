@@ -7,7 +7,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -111,7 +111,7 @@ INSERT INTO air_broken SELECT * FROM air1;";
 
     public static IEnumerable<object[]> Channels() => new[]
     {
-        "websql", "trino", "sql-endpoint", "odata", "graphql", "graphql-tree", "mcp-sample-rows", "mcp-query-graphql", "arrow-export", "flight-sql", "olap"
+        "websql", "trino", "sql-endpoint", "odata", "graphql", "graphql-tree", "mcp-sample-rows", "mcp-query-graphql", "arrow-export", "olap"
     }.Select(c => new object[] { c });
 
     private async Task<IReadOnlySet<long>> Ids(string channel, string sid, string? appId = null)

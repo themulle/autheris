@@ -3,7 +3,7 @@ namespace Autheris.Domain.Common;
 using System;
 
 /// <summary>
-/// Architecture Phase 2 (WP 2.1): Canonical TableIdentifier & Case-Folding Normalizer.
+/// Architecture Phase 2 (WP 2.1): Canonical TableIdentifier &amp; Case-Folding Normalizer.
 /// Eliminates RR-L3-06 (Arrow raw table injection) and RR-L5-02 (PostgreSQL / Oracle case sensitivity mismatches).
 /// </summary>
 public static class TableIdentifierNormalizer

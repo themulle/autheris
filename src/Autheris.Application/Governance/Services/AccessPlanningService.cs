@@ -16,7 +16,7 @@ using Autheris.Application.Audit;
 using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Grants;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
@@ -216,7 +216,7 @@ public class AccessPlanningService : IAccessPlanningService
 
         var now = _time.GetUtcNow();
 
-        // WP-SC-16: every individual (user) principal needs a mandatory, class-bounded validUntil already at planning time.
+        // every individual (user) principal needs a mandatory, class-bounded validUntil already at planning time.
         EnsureGrantsAllowed(request, meta, diffs, now, ActorIdentifiers.Collect(caller, new Sid(adminSid), null), rejectFourEyes: false);
 
         var planId = $"plan_{Guid.NewGuid():N}";
@@ -328,7 +328,7 @@ public class AccessPlanningService : IAccessPlanningService
 
         var tableId = ParseTableIdentifier(stored.Request.DatasetId);
 
-        // WP-SC-16: re-evaluated at apply time (the plan may have been stored with a validUntil that has meanwhile lapsed).
+        // re-evaluated at apply time (the plan may have been stored with a validUntil that has meanwhile lapsed).
         var applyMeta = await _tableRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
         EnsureGrantsAllowed(stored.Request, applyMeta, stored.Result.Diffs, _time.GetUtcNow(), ActorIdentifiers.Collect(caller, new Sid(adminSid), null), rejectFourEyes: true);
 
@@ -403,7 +403,7 @@ public class AccessPlanningService : IAccessPlanningService
                 : "Access applied successfully.");
     }
 
-    // ---- Issue #107: row filter evaluation plans (SEC-RF107-14) ----
+    // ---- Issue #107: row filter evaluation plans ----
 
     private IRowFilterEvaluationAdminService RowFilterAdmin
         => _rowFilterEvaluationAdmin ?? throw new SecurityException("Row filter evaluation administration is not available.");
@@ -605,7 +605,7 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException($"Plan '{request.PlanId}' was not found.");
         }
 
-        // Issue #107 (SEC-RF107-14c): every apply path accepts only plans of its own kind, in both directions.
+        // Issue #107 (14c): every apply path accepts only plans of its own kind, in both directions.
         if (stored.PlanKind != expectedKind)
         {
             throw new SecurityException("The plan is not of the kind this operation applies.");

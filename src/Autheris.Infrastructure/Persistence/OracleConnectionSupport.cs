@@ -4,7 +4,7 @@ using Oracle.ManagedDataAccess.Client;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// WP-F1: connection string rules of the Oracle runtime. The gateway only ever connects with an ordinary, non-privileged
+/// connection string rules of the Oracle runtime. The gateway only ever connects with an ordinary, non-privileged
 /// application account over TCPS (outside Development). SYSDBA, SYSOPER, SYSASM, OS authentication and proxy logins are
 /// rejected, so a mis-configured data source cannot give the governed path database-administrator rights.
 /// </summary>
@@ -59,18 +59,8 @@ public static class OracleConnectionStringPolicy
     }
 
     /// <summary>True when the connection string carries a literal (non-empty) <c>Password</c>.</summary>
-    public static bool HasPlaintextPassword(string connectionString)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        try
-        {
-            return !string.IsNullOrEmpty(new OracleConnectionStringBuilder(connectionString).Password);
-        }
-        catch (Exception ex) when (ex is ArgumentException or FormatException)
-        {
-            throw new SecurityException("The Oracle connection string is not valid.");
-        }
-    }
+    public static bool HasPlaintextPassword(string connectionString) =>
+        ConnectionSecretPolicy.HasPlaintextPassword(Domain.Common.DatabaseDialect.Oracle, connectionString);
 
     private static bool HasValue(OracleConnectionStringBuilder builder, string key) =>
         builder.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value?.ToString());
@@ -86,9 +76,9 @@ public static class OracleConnectionStringPolicy
 }
 
 /// <summary>
-/// WP-F2: session semantics of an Oracle connection. ODP.NET pools keep <c>ALTER SESSION</c> state across rentals, so the block
+/// session semantics of an Oracle connection. ODP.NET pools keep<c>ALTER SESSION</c> state across rentals, so the block
 /// runs on every pool rental, pins everything that changes comparison, escaping or formatting semantics and verifies the result
-/// inside the database (a deviation raises, the connection is disposed and the request fails closed, INV-14, SEC-ADG-14).
+/// inside the database (a deviation raises, the connection is disposed and the request fails closed, INV-14).
 /// The statement text is constant: it contains no tenant, user or request data.
 /// </summary>
 public static class OracleSessionInitialization

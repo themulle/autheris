@@ -6,9 +6,9 @@ using HotChocolate.Execution.Instrumentation;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// PLAN-OPS-150 WP-A: logs the duration of the parse, validate, compile and execute stages for the first
+/// 150 logs the duration of the parse, validate, compile and execute stages for the first
 /// <see cref="MaxOperations"/> occurrences of each stage. The request context is never read, so no document text, variables, user or
-/// tenant can reach the log (SEC-OPS150-12).
+/// tenant can reach the log.
 /// </summary>
 public sealed partial class ColdPathTimingListener(ILogger<ColdPathTimingListener> logger) : ExecutionDiagnosticEventListener
 {
@@ -28,7 +28,7 @@ public sealed partial class ColdPathTimingListener(ILogger<ColdPathTimingListene
 
     public override IDisposable ExecuteOperation(RequestContext context) => IsWarmup(context) ? EmptyScope : Stage("execute", ref _execute);
 
-    // SEC-OPS150-18: the in-process warm-up request is neither logged nor counted against the budget (the null guard serves unit tests).
+    // the in-process warm-up request is neither logged nor counted against the budget (the null guard serves unit tests).
     private static bool IsWarmup(RequestContext context) => context is not null && context.IsWarmupRequest();
 
     // Each stage is counted separately: HotChocolate raises the parse event before the request scope opens, so a shared

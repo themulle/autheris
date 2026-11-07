@@ -11,9 +11,9 @@ using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
-using Autheris.Application.Data.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
@@ -38,7 +38,7 @@ public static class ArrowExportEndpoints
 
     public static IEndpointRouteBuilder MapArrowExportEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        // Issue #447: every route of this group declares its ingress transport via endpoint metadata.
         var ingress = endpoints.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         ArgumentNullException.ThrowIfNull(endpoints);
 

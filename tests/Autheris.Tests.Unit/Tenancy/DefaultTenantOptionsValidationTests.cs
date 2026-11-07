@@ -52,7 +52,7 @@ public sealed class DefaultTenantOptionsValidationTests
         var options = new GatewayOptions
         {
             Tenancy = new TenancyOptions { DefaultTenantId = "Acme" },
-            Itsm = new ItsmOptions { InstanceToTenantMap = new() { ["i1"] = "acme" } }
+            OpenMetadata = new OpenMetadataOptions { ServiceDatabaseToTenantMap = new() { ["i1"] = "acme" } }
         };
 
         Failures(options).ShouldNotBeEmpty();
@@ -64,7 +64,7 @@ public sealed class DefaultTenantOptionsValidationTests
         var options = new GatewayOptions
         {
             Tenancy = new TenancyOptions { DefaultTenantId = "acme" },
-            Itsm = new ItsmOptions { InstanceToTenantMap = new() { ["i1"] = "acme" } }
+            OpenMetadata = new OpenMetadataOptions { ServiceDatabaseToTenantMap = new() { ["i1"] = "acme" } }
         };
 
         Failures(options).ShouldBeEmpty();

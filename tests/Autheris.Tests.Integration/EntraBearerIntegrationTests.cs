@@ -74,7 +74,7 @@ public sealed class EntraBearerIntegrationTests : IClassFixture<WebApplicationFa
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", idToken);
 
-        var response = await client.GetAsync("/api/v1/catalog/tables");
+        var response = await client.GetAsync("/api/v1/catalog/datasets");
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 }

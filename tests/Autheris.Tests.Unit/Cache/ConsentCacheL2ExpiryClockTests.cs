@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Cache;
 
 using System;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Infrastructure.Serialization;
 using Autheris.Domain.Options;

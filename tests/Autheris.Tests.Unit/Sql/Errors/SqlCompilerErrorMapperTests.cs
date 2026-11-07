@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Sql.Errors;
 using System;
 using System.Security;
 using Antlr4.Runtime.Misc;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Services;
@@ -237,5 +237,48 @@ public sealed class SqlCompilerErrorMapperTests
         SqlCompilerErrorMapper.TryMap(new ParseCanceledException("line 1:1: Square brackets are not permitted", new InvalidOperationException()), out var mapping).ShouldBeTrue();
         mapping.Code.ShouldBe("SQL_SYNTAX_ERROR");
         mapping.Status.ShouldBe(400);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void EndpointDisabled_MapsTo403WithFixedMessage()
+    {
+        var ex = new WebSqlPolicyException(HostileMarker, GovernedSqlErrorCodes.EndpointDisabled);
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+        mapping.Status.ShouldBe(403);
+        mapping.Code.ShouldBe("SQL_ENDPOINT_DISABLED");
+        mapping.Title.ShouldBe("The SQL endpoint is disabled by configuration.");
+        mapping.Title.ShouldNotContain(HostileMarker);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void StatementNotPermitted_MapsTo403WithFixedMessage()
+    {
+        var ex = new WebSqlPolicyException(HostileMarker, GovernedSqlErrorCodes.StatementNotPermitted);
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+        mapping.Status.ShouldBe(403);
+        mapping.Code.ShouldBe("SQL_STATEMENT_NOT_PERMITTED");
+        mapping.Title.ShouldBe("This kind of statement is not permitted.");
+        mapping.Title.ShouldNotContain(HostileMarker);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FilterOnMaskedColumn_MapsTo403WithFixedMessageWithoutColumnName()
+    {
+        foreach (var ex in new Exception[]
+        {
+            new MaskedColumnPredicateException($"Masked column '{HostileMarker}' cannot be referenced in WHERE."),
+            new WebSqlPolicyException($"Column '{HostileMarker}' is masked.", GovernedSqlErrorCodes.FilterOnMaskedColumn),
+            new FilterOnMaskedColumnException(HostileMarker)
+        })
+        {
+            SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+            mapping.Status.ShouldBe(403);
+            mapping.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
+            mapping.Title.ShouldBe("Masked columns cannot be used in filters, joins, or ordering.");
+            mapping.Title.ShouldNotContain(HostileMarker);
+        }
     }
 }

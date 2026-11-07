@@ -9,7 +9,7 @@ using Autheris.Domain.Options.Observability;
 
 /// <summary>
 /// Hardened HttpClient factory for OTLP export channels.
-/// Enforces SEC-OT06-13: no auto-redirects, TLS &gt;= 1.2, no proxy by default, mTLS from mounted secrets.
+/// Enforces no auto-redirects, TLS &gt;= 1.2, no proxy by default, mTLS from mounted secrets.
 /// </summary>
 public static class OtlpHttpClientFactory
 {

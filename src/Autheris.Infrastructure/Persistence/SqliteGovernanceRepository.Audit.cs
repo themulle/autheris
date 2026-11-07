@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -36,14 +36,14 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             SelectMaxEligibleSeqSql: "SELECT MAX(seq) FROM AUDIT_LOG_ENTRIES WHERE seq < @survivingSeq");
 
         public static string GetAuditLogEntries(bool withTenant) =>
-            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
                             FROM AUDIT_LOG_ENTRIES
                             {(withTenant ? " WHERE tenant_id = @tenantId" : "")}
                             ORDER BY rowid ASC
                             LIMIT @lim";
 
         public static string FormatQueryAuditLogs(string whereSql) =>
-            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
                             FROM AUDIT_LOG_ENTRIES
                             {whereSql}
                             ORDER BY occurred_at DESC
@@ -526,7 +526,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             {
                 if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
                 {
-                    // SEC-CRYPTO-01 / SR15-24: If an uncommitted transaction was rolled back without calling OnTransactionRolledBack,
+                    // 01 / SR15-24: If an uncommitted transaction was rolled back without calling OnTransactionRolledBack,
                     // clean up pending states and revert in-memory pointers to the committed DB tail.
                     if (!_pendingAuditTxStates.IsEmpty && dbTailSeq < _lastAuditSeq)
                     {
@@ -558,7 +558,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
                 lastEntryHash = _lastAuditHash;
             }
 
-            // WP-PF-04: hashes are computed in memory from the single tail read, then the rows are written with multi-row inserts.
+            // hashes are computed in memory from the single tail read, then the rows are written with multi-row inserts.
             var sequenced = new List<(AuditLogEntry Entry, long Seq)>(batch.Count);
             foreach (var entry in batch)
             {
@@ -638,7 +638,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             }
             else
             {
-                // SEC-CRYPTO-01 / SR15-24: Caller-managed transaction (e.g. Consent approval/creation).
+                // 01 / SR15-24: Caller-managed transaction (e.g. Consent approval/creation).
                 // Do NOT advance the external signed anchor until the caller explicitly commits the transaction!
                 // Append-only (WORM) anchor stores cannot take an anchor back, so writing the anchor before commit
                 // causes permanent chain violation if the transaction rolls back.
@@ -688,7 +688,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource, IAudi
             ownedTx?.Dispose();
         }
 
-        // WP-PF-04 / SEC-SC-08: a batch containing a Tier-A event is acknowledged only after its anchor is written. The rows are
+        // a batch containing a Tier-A event is acknowledged only after its anchor is written. The rows are
         // committed (the chain stays linear and the next batch anchors the tail), but the caller fails closed instead of being acknowledged.
         // Tier-B-only batches (channel processor) never fail on a late anchor; the next batch anchors the tail.
         // M1: a chain violation latched DURING this write means no anchor was written; the Tier-A event is then not acknowledged (a violation latched before admission follows the configured policy: Tier-A is written marked).

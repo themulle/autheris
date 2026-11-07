@@ -1,0 +1,6 @@
+# Power BI Desktop (Mashup Engine) OData v4 CSDL Metadata Fetch
+GET /odata/v4/$metadata HTTP/1.1
+Host: localhost
+Accept: application/xml
+OData-MaxVersion: 4.0
+User-Agent: Microsoft.Data.Mashup (https://go.microsoft.com/fwlink/?LinkID=304225)

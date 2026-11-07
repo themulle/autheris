@@ -1,6 +1,6 @@
 namespace Autheris.Api.Hosting.Warmup;
 
-/// <summary>PLAN-OPS-150 (D-150-7): how a warm-up step affects readiness.</summary>
+/// <summary>150 (D-150-7): how a warm-up step affects readiness.</summary>
 public enum WarmupKind
 {
     /// <summary>
@@ -12,7 +12,7 @@ public enum WarmupKind
 
 /// <summary>
 /// A compiled-in warm-up step run by <see cref="StartupWarmupService"/>. Steps must not resolve a principal, call a connector or
-/// write audit, consent or governance data (SEC-OPS150-07).
+/// write audit, consent or governance data.
 /// </summary>
 public interface IStartupWarmup
 {

@@ -25,7 +25,7 @@ using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// Issue #123 (WP-123-2, SEC-DATA123-01..03) / Issue #132 (WP-132-3, SEC-DATA132-02, SEC-DATA132-04):
+/// Issue #123 (01..03) / Issue #132:
 /// Compiles same-source AST subtrees and co-located SQL Server subtrees strictly via governed compilation,
 /// embedding universal member RLS conjunctions, isolated parameter naming, and transitive masking heritage.
 /// </summary>
@@ -36,7 +36,7 @@ public static class SubtreeCompiler
         RegexOptions.Compiled);
 
     /// <summary>
-    /// SEC-DATA132-04: Cross-Database Policy Isolation.
+    /// Cross-Database Policy Isolation.
     /// Asserts that table-level RLS policies (CombinedRowFilterSql) do not reference tables in other databases.
     /// Correlated cross-database RLS policies fail closed.
     /// </summary>
@@ -97,7 +97,7 @@ public static class SubtreeCompiler
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(sqlEngine);
 
-        // 1. Universal Authorization check (SEC-DATA123-02, fail-closed)
+        // 1. Universal Authorization check (fail-closed)
         var memberDecisions = new Dictionary<TableIdentifier, TableAccessDecision>();
         foreach (var member in subtree.MemberTables)
         {
@@ -110,9 +110,9 @@ public static class SubtreeCompiler
             memberDecisions[member.Metadata.Identifier] = dec;
         }
 
-        // 2. Validate function allowlists for target dialect (V-4, SEC-DATA123-01)
+        // 2. Validate function allowlists for target dialect (V-4)
         var dialect = subtree.Dialect;
-        // GAP-013 / SEC-PG-03: federated WebSQL translates the Trino date functions like single-source WebSQL (one behaviour per capability).
+        // GAP-013 / federated WebSQL translates the Trino date functions like single-source WebSQL (one behaviour per capability).
         var allowlist = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.GetDefault(dialect));
         var functionsInSubtree = CollectFunctionCalls(subtree);
         foreach (var func in functionsInSubtree)
@@ -123,7 +123,7 @@ public static class SubtreeCompiler
             }
         }
 
-        // 3. Universal RLS Conjunction for ALL member tables (SEC-DATA123-02)
+        // 3. Universal RLS Conjunction for ALL member tables
         Expression? combinedWhere = null;
         foreach (var pred in subtree.PushablePredicates)
         {
@@ -156,7 +156,7 @@ public static class SubtreeCompiler
         var ansiGenerator = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.Ansi);
         var canonicalSql = ansiGenerator.GenerateSql(selectStmt);
 
-        // 6. Governed Compilation via ISqlEngine.Compile (SEC-DATA123-01)
+        // 6. Governed Compilation via ISqlEngine.Compile
         var entries = subtree.MemberTables.Select(m => new TableCatalogEntry(
             new TableIdentity(m.Metadata.Table.SchemaName, m.Metadata.Table.TableName, null),
             m.Metadata.Columns.Select(c => new CatalogColumn(c.ColumnName, c.DataType)).ToImmutableArray(),
@@ -183,7 +183,7 @@ public static class SubtreeCompiler
 
         var compiled = sqlEngine.Compile(canonicalSql.AsMemory(), compileRequest, ct);
 
-        // 7. Isolated Parameter Isolation (@p_st_<n>) (SEC-DATA123-01)
+        // 7. Isolated Parameter Isolation (@p_st_<n>)
         var isolatedParams = new Dictionary<string, object?>();
         string isolatedSql = compiled.Sql;
 
@@ -213,7 +213,7 @@ public static class SubtreeCompiler
             }
         }
 
-        // 8. Transitive Masking Heritage (SEC-DATA123-03)
+        // 8. Transitive Masking Heritage
         var maskedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var projectedColNames = new List<string>(subtree.ProjectedItems.Count);
 

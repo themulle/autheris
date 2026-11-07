@@ -1,0 +1,179 @@
+namespace Autheris.Application.OData;
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using Autheris.Domain.Model;
+
+public static class ODataCsdlGenerator
+{
+    public static string GenerateMetadataXml(IReadOnlyList<TableMetadata> tables, string serviceNamespace = "Autheris.OData")
+    {
+        var sb = new StringBuilder();
+        var escapedNamespace = EscapeAttribute(serviceNamespace);
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine("<edmx:Edmx Version=\"4.0\" xmlns:edmx=\"http://docs.oasis-open.org/odata/ns/edmx\">");
+        sb.AppendLine("  <edmx:Reference Uri=\"https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Core.V1.xml\">");
+        sb.AppendLine("    <edmx:Include Namespace=\"Org.OData.Core.V1\" Alias=\"Core\" />");
+        sb.AppendLine("  </edmx:Reference>");
+        sb.AppendLine("  <edmx:DataServices>");
+        sb.AppendLine($"    <Schema Namespace=\"{escapedNamespace}\" xmlns=\"http://docs.oasis-open.org/odata/ns/edm\">");
+
+        // 1. Generate EntityTypes
+        foreach (var table in tables)
+        {
+            var rawEntityName = GetEntityName(table);
+            var entityName = EscapeAttribute(rawEntityName);
+            sb.AppendLine($"      <EntityType Name=\"{entityName}\">");
+
+            // Keys (Befund 4a.4: ensure keys always reference existing properties with Nullable="false")
+            var keys = ResolveEntityKeys(table);
+            sb.AppendLine("        <Key>");
+            foreach (var key in keys)
+            {
+                var escapedKey = EscapeAttribute(key);
+                sb.AppendLine($"          <PropertyRef Name=\"{escapedKey}\" />");
+            }
+            sb.AppendLine("        </Key>");
+
+            // Entity description annotations
+            if (!string.IsNullOrWhiteSpace(table.Table.Description))
+            {
+                var escapedDesc = EscapeAttribute(table.Table.Description);
+                sb.AppendLine($"        <Annotation Term=\"Core.Description\" String=\"{escapedDesc}\" />");
+            }
+            if (!string.IsNullOrWhiteSpace(table.Table.LongDescription))
+            {
+                var escapedLongDesc = EscapeAttribute(table.Table.LongDescription);
+                sb.AppendLine($"        <Annotation Term=\"Core.LongDescription\" String=\"{escapedLongDesc}\" />");
+            }
+
+            // Properties
+            if (table.Columns.Count > 0)
+            {
+                foreach (var col in table.Columns)
+                {
+                    var edmType = MapToEdmType(col.DataType);
+                    var isKey = keys.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase);
+                    var nullStr = isKey ? " Nullable=\"false\"" : "";
+                    var escapedColName = EscapeAttribute(col.ColumnName);
+
+                    var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
+                    var hasLongDesc = !string.IsNullOrWhiteSpace(col.LongDescription);
+
+                    if (hasDesc || hasLongDesc)
+                    {
+                        sb.AppendLine($"        <Property Name=\"{escapedColName}\" Type=\"{edmType}\"{nullStr}>");
+                        if (hasDesc)
+                        {
+                            var escapedDesc = EscapeAttribute(col.Description);
+                            sb.AppendLine($"          <Annotation Term=\"Core.Description\" String=\"{escapedDesc}\" />");
+                        }
+                        if (hasLongDesc)
+                        {
+                            var escapedLongDesc = EscapeAttribute(col.LongDescription);
+                            sb.AppendLine($"          <Annotation Term=\"Core.LongDescription\" String=\"{escapedLongDesc}\" />");
+                        }
+                        sb.AppendLine("        </Property>");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"        <Property Name=\"{escapedColName}\" Type=\"{edmType}\"{nullStr} />");
+                    }
+                }
+            }
+            else
+            {
+                // Fallback id property if no columns defined
+                sb.AppendLine("        <Property Name=\"id\" Type=\"Edm.Int32\" Nullable=\"false\" />");
+            }
+
+            sb.AppendLine("      </EntityType>");
+        }
+
+        // 2. Generate EntityContainer & EntitySets
+        sb.AppendLine("      <EntityContainer Name=\"Container\">");
+        foreach (var table in tables)
+        {
+            var rawEntityName = GetEntityName(table);
+            var entityName = EscapeAttribute(rawEntityName);
+            sb.AppendLine($"        <EntitySet Name=\"{entityName}\" EntityType=\"{escapedNamespace}.{entityName}\" />");
+        }
+        sb.AppendLine("      </EntityContainer>");
+
+        sb.AppendLine("    </Schema>");
+        sb.AppendLine("  </edmx:DataServices>");
+        sb.AppendLine("</edmx:Edmx>");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Escapes XML attribute values. In addition to standard XML characters (&lt;, &gt;, &amp;, &quot;, &apos;),
+    /// converts line breaks and tabs into XML character references (&amp;#10;, &amp;#13;, &amp;#9;) to prevent
+    /// raw unescaped newlines in attributes which break strict XML parsers such as Microsoft Excel's OData feed consumer.
+    /// </summary>
+    public static string EscapeAttribute(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var escaped = System.Security.SecurityElement.Escape(value) ?? value;
+        return escaped
+            .Replace("\r\n", "&#10;")
+            .Replace("\r", "&#13;")
+            .Replace("\n", "&#10;")
+            .Replace("\t", "&#9;");
+    }
+
+    public static string GetEntityName(TableMetadata table)
+    {
+        var id = table.Identifier;
+        return $"{id.Domain}_{id.Schema}_{id.TableName}";
+    }
+
+    public static string MapToEdmType(string? dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType))
+        {
+            return "Edm.String";
+        }
+
+        var normalized = dataType.Trim().ToLowerInvariant();
+
+        return normalized switch
+        {
+            "int" or "integer" or "int4" or "serial" => "Edm.Int32",
+            "bigint" or "int8" or "bigserial" => "Edm.Int64",
+            "smallint" or "int2" => "Edm.Int16",
+            "decimal" or "numeric" or "money" => "Edm.Decimal",
+            "float" or "real" or "float4" => "Edm.Single",
+            "double" or "float8" or "double precision" => "Edm.Double",
+            "bool" or "boolean" or "bit" => "Edm.Boolean",
+            "date" => "Edm.Date",
+            "timestamp" or "timestamptz" or "datetime" or "datetime2" or "datetimeoffset" => "Edm.DateTimeOffset",
+            "guid" or "uuid" => "Edm.Guid",
+            _ => "Edm.String"
+        };
+    }
+
+    /// <summary>
+    /// Befund 4a.4 / issue #94 (SD-4): entity keys reference existing properties only. The key is the row identity of the
+    /// metadata that is passed in (<see cref="Autheris.Application.DataSources.Services.TableRowIdentity"/>: declared primary key,
+    /// unique index, Meta marker key, the <c>(client_id, ts)</c> convention), always complete. Callers pass the metadata filtered
+    /// for the caller, so a key that touches a hidden column is dropped as a whole, never emitted as a subset. Without a
+    /// resolvable key all properties form a composite key (CSDL needs a key); a table without columns keeps the <c>id</c> placeholder.
+    /// </summary>
+    public static IReadOnlyList<string> ResolveEntityKeys(TableMetadata table)
+    {
+        var identity = Autheris.Application.DataSources.Services.TableRowIdentity.Select(table);
+        if (identity.Count > 0)
+        {
+            return identity;
+        }
+
+        return table.Columns.Count > 0 ? table.Columns.Select(c => c.ColumnName).ToList() : ["id"];
+    }
+}

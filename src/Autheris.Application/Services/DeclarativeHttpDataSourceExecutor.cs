@@ -11,7 +11,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -176,7 +176,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
             totalBytes += rawBytes > 0 ? rawBytes : ResponseSizeLimitingHandler.BytesRead(stream);
             if (totalBytes > config.MaxStagedBytes)
             {
-                throw new Autheris.Application.Connectors.ConnectorRowLimitExceededException(
+                throw new Autheris.Application.DataSources.Connectors.ConnectorRowLimitExceededException(
                     context.Metadata.Identifier,
                     config.MaxStagedRows);
             }
@@ -190,7 +190,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
             allRows.AddRange(rows);
             if (allRows.Count > config.MaxStagedRows)
             {
-                throw new Autheris.Application.Connectors.ConnectorRowLimitExceededException(
+                throw new Autheris.Application.DataSources.Connectors.ConnectorRowLimitExceededException(
                     context.Metadata.Identifier,
                     config.MaxStagedRows);
             }
@@ -522,7 +522,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
                 }
 
                 var strVal = v?.ToString() ?? string.Empty;
-                // SEC-5: Disallow directory traversal sequences in path placeholder parameters
+                // Disallow directory traversal sequences in path placeholder parameters
                 if (strVal.Contains("..") || strVal.Contains('/') || strVal.Contains('\\'))
                 {
                     throw new System.Security.SecurityException($"Potential path traversal attack in parameter '{k}': path separators and '..' are not allowed.");
@@ -538,7 +538,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         {
             if (!usedArgs.Contains(k) && v != null && v is not IEnumerable<object>)
             {
-                // SEC-5 / SEC M-26: only well-formed argument names; reserved (gateway-set) names are dropped.
+                // SEC M-26: only well-formed argument names; reserved (gateway-set) names are dropped.
                 if (!IsAllowedArgumentName(k) || IsReservedParameter(k, reservedNames))
                 {
                     _logger.LogWarning("Security: Dropped caller argument '{Argument}' (reserved or malformed parameter name).", k);

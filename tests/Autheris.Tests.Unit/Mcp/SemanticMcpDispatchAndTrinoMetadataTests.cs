@@ -8,9 +8,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Analytics;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Data.Interfaces;
-using Autheris.Application.Dbt.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Extensions.Dbt;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Sql.Interfaces;
@@ -213,7 +215,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
         await ingestion.ParseAndIngestAsync(manifestJson, Autheris.Tests.Common.TestTenants.Default);
 
         capturedMeta.Should().NotBeNull();
-        capturedMeta!.Identifier.Should().Be(new TableIdentifier("semantic", Autheris.Application.Dbt.Services.SemanticVirtualTables.TenantSchema(Autheris.Tests.Common.TestTenants.Default), "orders"));
+        capturedMeta!.Identifier.Should().Be(new TableIdentifier("semantic", Autheris.Application.Catalog.Semantic.SemanticVirtualTables.TenantSchema(Autheris.Tests.Common.TestTenants.Default), "orders"));
         capturedMeta.Table.Description.Should().Be("Orders semantic model");
         // Issue #111: the upsert ignores Table.Tags; the synthetic tags are imported as dbt dataset tags (see DbtDatasetTagTests).
         capturedMeta.Table.Tags.Should().BeEmpty();

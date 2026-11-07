@@ -9,7 +9,7 @@ using Autheris.Domain.Common;
 using TrinoSqlEngine;
 
 /// <summary>
-/// WP-ARC-B-09: Infrastructure implementation of <see cref="ISqlDialectRegistry"/> backed by the registered
+/// Infrastructure implementation of<see cref="ISqlDialectRegistry"/> backed by the registered
 /// <see cref="ISqlDialectProvider"/> instances. Fail-closed for unknown or unmapped dialect names.
 /// </summary>
 public sealed class SqlDialectRegistry : ISqlDialectRegistry

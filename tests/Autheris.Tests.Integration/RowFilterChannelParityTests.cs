@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 using Apache.Arrow;
 using Table = Autheris.Domain.Model.Table;
 using Apache.Arrow.Ipc;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -55,7 +55,6 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
     [InlineData("mcp-sample-rows")]
     [InlineData("mcp-query-graphql")]
     [InlineData("arrow-export")]
-    [InlineData("flight-sql")]
     [InlineData("olap")]
     public async Task Channel_ReturnsExactlyTheRowsOfTheConsentFilter(string channel)
     {
@@ -96,7 +95,6 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
                 ["mcp-sample-rows"] = McpSampleRowsAsync,
                 ["mcp-query-graphql"] = McpQueryGraphQlAsync,
                 ["arrow-export"] = ArrowExportAsync,
-                ["flight-sql"] = FlightSqlAsync,
                 ["olap"] = OlapAsync
             };
 
@@ -178,22 +176,6 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             }
 
             return await ArrowIdsAsync(await r.Content.ReadAsStreamAsync());
-        }
-
-        private static async Task<IReadOnlySet<long>> FlightSqlAsync(Fixture f)
-        {
-            var c = f.Client();
-            var info = await c.PostAsJsonAsync("/api/v1/flight/sql/info", new { query = "SELECT id FROM default.main.air1" });
-            using var infoDoc = await JsonOrFailAsync(info);
-            var ticket = infoDoc.RootElement.GetProperty("ticket").GetRawText();
-
-            var stream = await c.PostAsync("/api/v1/flight/sql/stream", new StringContent(ticket, Encoding.UTF8, "application/json"));
-            if (stream.StatusCode != HttpStatusCode.OK)
-            {
-                throw new ShouldAssertException($"HTTP {(int)stream.StatusCode}: {await stream.Content.ReadAsStringAsync()}");
-            }
-
-            return await ArrowIdsAsync(await stream.Content.ReadAsStreamAsync());
         }
 
         private static async Task<IReadOnlySet<long>> OlapAsync(Fixture f)

@@ -3,8 +3,8 @@ namespace Autheris.Tests.Unit.Dbt;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
@@ -33,8 +33,7 @@ public sealed class SemanticManifestRepositorySqliteTests : IDisposable
             GovernanceDb = new GovernanceDbOptions
             {
                 ConnectionString = $"Data Source={System.IO.Path.Combine(_dir.Path, "gov.db")}",
-                SeedDemoData = false,
-                EnableOutboxProcessor = false
+                SeedDemoData = false
             }
         });
         return GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, env);
@@ -147,18 +146,18 @@ public sealed class SemanticManifestRepositorySqliteTests : IDisposable
     public async Task UserSchemaNamedLikeTenantHash_CannotBeCreated_AndTheSemanticDomainIsReserved()
     {
         using var repository = NewRepository();
-        var hash = Autheris.Application.Dbt.Services.SemanticVirtualTables.TenantSchema(TenantA);
+        var hash = Autheris.Application.Catalog.Semantic.SemanticVirtualTables.TenantSchema(TenantA);
 
         // A real table with a tenant-hash schema name, and a semantic-domain table without the server-set marker, are refused.
         await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayInvalidQueryException>(() =>
-            ((Autheris.Application.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("sales", hash, null), default));
+            ((Autheris.Application.Common.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("sales", hash, null), default));
         await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayInvalidQueryException>(() =>
-            ((Autheris.Application.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("semantic", hash, null), default));
+            ((Autheris.Application.Common.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("semantic", hash, null), default));
         await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayInvalidQueryException>(() =>
-            ((Autheris.Application.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("semantic", "my_schema", "dbt"), default));
+            ((Autheris.Application.Common.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("semantic", "my_schema", "dbt"), default));
 
         // The ingestion service's own shape and ordinary tables are accepted.
-        await ((Autheris.Application.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("semantic", hash, "dbt"), default);
-        await ((Autheris.Application.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("sales", "public", null), default);
+        await ((Autheris.Application.Common.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("semantic", hash, "dbt"), default);
+        await ((Autheris.Application.Common.Interfaces.ITableMetadataRepository)repository).UpsertTableMetadataAsync(TableOf("sales", "public", null), default);
     }
 }

@@ -1,6 +1,6 @@
 namespace Autheris.Application.Services;
 
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,7 +8,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Tenancy;
@@ -211,7 +211,7 @@ public static class CatalogVisibility
     }
 
     /// <summary>
-    /// #112 A1-13 (SEC-112-15, -22, -23): a table of the semantic catalog domain (the virtual tables a manifest import creates) stays only
+    /// #112 A1-13 (-22, -23): a table of the semantic catalog domain (the virtual tables a manifest import creates) stays only
     /// when it lives in the <c>t_&lt;hash&gt;</c> schema of <paramref name="tenantId"/>; every other one, including a malformed or empty
     /// schema, is dropped. The rule applies to every tenant, the default tenant (catalog owner) included (DT-SC-08: virtual tables are
     /// tenant-scoped objects, only physical metadata is widened). The one place that recognises a virtual table is <see cref="SemanticVirtualTables"/>.
@@ -374,7 +374,7 @@ public static class CatalogVisibility
                 }
 
                 // Same confinement rule as the GraphQL catalog (consent-derived ownership plus Gateway:Catalog:SharedTables).
-                // #112 A1-13 (SEC-112-22/-23): the foreign virtual-table drop runs on the full list first, with the claim tenant.
+                // #112 A1-13 (-23): the foreign virtual-table drop runs on the full list first, with the claim tenant.
                 var claimTenant = resolution.RequireTenant();
                 var ownVirtual = DropForeignVirtualTables(allTables, claimTenant);
                 var tenantConsentTables = await consentRepository.GetTablesWithConsentsForTenantAsync(claimTenant, ct).ConfigureAwait(false);

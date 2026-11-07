@@ -122,8 +122,8 @@ public sealed class ArchitectureNoSourceKeyCatalogQueriesTests
         AllSourceFiles().Select(Relative).ShouldContain(f => f.StartsWith(MigrationsDirectory, StringComparison.Ordinal), "positive control: the migrations exist");
         // positive controls: the scope really covers the code that must stay free of key catalog reads
         scanned.ShouldContain(f => f.StartsWith("Autheris.Infrastructure/Persistence/Catalog/", StringComparison.Ordinal));
-        scanned.ShouldContain(f => f.StartsWith("Autheris.Application/Data/", StringComparison.Ordinal));
-        scanned.ShouldContain(f => f.StartsWith("Autheris.Extensions/OData/", StringComparison.Ordinal));
+        scanned.ShouldContain(f => f.StartsWith("Autheris.Application/DataSources/", StringComparison.Ordinal));
+        scanned.ShouldContain(f => f.StartsWith("Autheris.Application/OData/", StringComparison.Ordinal));
         // the change tracking producer reads keys from the declared definition only (REQ-CDC-99 D-A3): it must be in the scanned set
         scanned.ShouldContain(f => f.StartsWith("Autheris.Extensions/Cdc/", StringComparison.Ordinal));
         scanned.ShouldContain("Autheris.Extensions/Cdc/MssqlChangeTrackingPoller.cs");

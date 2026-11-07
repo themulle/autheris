@@ -17,7 +17,7 @@ internal sealed class BasicAuthAttemptGuard
     private const int MaxTrackedEntries = 10_000;
 
     /// <summary>
-    /// SEC-12H-05: Atomic failure increment, TTL sliding window initialization, and lockout flag setting via Lua script.
+    /// Atomic failure increment, TTL sliding window initialization, and lockout flag setting via Lua script.
     /// </summary>
     private const string AtomicRecordFailureScript = """
         local count = redis.call('INCR', KEYS[1])
@@ -72,7 +72,7 @@ internal sealed class BasicAuthAttemptGuard
     }
 
     /// <summary>
-    /// WP-PF-08: provides the key of the cluster-shared marker (derived from the secret behind <c>MarkerKeyRef</c>). Resolved at most once;
+    /// provides the key of the cluster-shared marker (derived from the secret behind<c>MarkerKeyRef</c>). Resolved at most once;
     /// a failure or an empty secret leaves the shared marker disabled (every replica verifies itself: fail closed, never open).
     /// </summary>
     internal void ConfigureSharedMarker(Func<string, byte[]?> resolveSecret)

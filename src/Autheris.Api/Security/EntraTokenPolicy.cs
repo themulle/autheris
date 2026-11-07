@@ -3,7 +3,7 @@ namespace Autheris.Api.Security;
 using System;
 using System.Linq;
 using System.Security.Claims;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;

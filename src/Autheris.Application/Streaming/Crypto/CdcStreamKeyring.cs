@@ -24,8 +24,8 @@ public enum CdcDekClassification
 public readonly record struct CdcDek(string DekId, byte[] Key);
 
 /// <summary>
-/// Per-stream data-encryption keys (PLAN-CDC-99 D-A8): creation, wrapping under the active KEK, rotation by age and by nonce budget
-/// (SEC-CDC99-15), a bounded LRU cache of unwrapped keys that are zeroed on eviction (SEC-CDC99-14), and re-wrapping after a KEK rotation.
+/// Per-stream data-encryption keys (99 D-A8): creation, wrapping under the active KEK, rotation by age and by nonce budget
+/// a bounded LRU cache of unwrapped keys that are zeroed on eviction, and re-wrapping after a KEK rotation.
 /// Every failure surfaces as <see cref="CdcStreamKeyUnavailableException"/> with a stable code only (fail closed).
 /// </summary>
 public sealed class CdcStreamKeyring : IDisposable
@@ -56,7 +56,7 @@ public sealed class CdcStreamKeyring : IDisposable
 
     /// <summary>
     /// Checks out the DEK for exactly one encryption (counts against the nonce budget). Rotates when the key is older than
-    /// <c>DekRotationHours</c> or has encrypted <c>MaxEventsPerDek</c> payloads in this process (SEC-CDC99-15). Image keys are bounded the same way.
+    /// <c>DekRotationHours</c> or has encrypted <c>MaxEventsPerDek</c>payloads in this process. Image keys are bounded the same way.
     /// </summary>
     public async ValueTask<CdcDek> AcquireForEncryptionAsync(CdcStreamId id, CdcKeyPurpose purpose, CancellationToken ct = default)
     {

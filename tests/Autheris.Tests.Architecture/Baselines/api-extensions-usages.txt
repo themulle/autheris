@@ -1,0 +1,18 @@
+# WP-SIMPL-25: Baseline of files in src/Autheris.Api referencing Autheris.Extensions.
+# Count may only decrease as WP-SIMPL-26..29 move modules out of core, reaching 0.
+src/Autheris.Api/Endpoints/CatalogEndpoints.cs
+src/Autheris.Api/Endpoints/CdcStreamAdminEndpoints.cs
+src/Autheris.Api/Endpoints/DbtEndpoints.cs
+src/Autheris.Api/Endpoints/StreamingCdcEndpoints.cs
+src/Autheris.Api/Extensions/DependencyInjection/GatewayAnalyticsServiceExtensions.cs
+src/Autheris.Api/Extensions/DependencyInjection/GatewayCatalogServiceExtensions.cs
+src/Autheris.Api/Extensions/DependencyInjection/GatewayDataSourceServiceExtensions.cs
+src/Autheris.Api/Extensions/DependencyInjection/GatewayExecutionServiceExtensions.cs
+src/Autheris.Api/Extensions/DependencyInjection/GatewayGovernanceServiceExtensions.Catalog.cs
+src/Autheris.Api/Extensions/DependencyInjection/GatewayGovernanceServiceExtensions.Identity.cs
+src/Autheris.Api/Extensions/DependencyInjection/GatewayGovernanceServiceExtensions.Policy.cs
+src/Autheris.Api/Extensions/DependencyInjection/GatewayStreamingServiceExtensions.cs
+src/Autheris.Api/Extensions/DependencyInjection/StartupChecks/DbtManifestSignatureStartupCheck.cs
+src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.GraphQL.cs
+src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.Options.cs
+src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.cs

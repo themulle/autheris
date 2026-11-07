@@ -68,7 +68,6 @@ public class AuditEndpointCoverageTests : IClassFixture<WebApplicationFactory<Pr
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-auditcov-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:GraphQL:EnableBananaCakePop", "true");
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
-            builder.UseSetting("Gateway:Backstage:Enabled", "true");
         });
     }
 

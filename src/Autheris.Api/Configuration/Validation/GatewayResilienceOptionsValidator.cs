@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// WP-ARC-C-02: Validates high-availability and drain/shutdown timeout invariants.
+/// Validates high-availability and drain/shutdown timeout invariants.
 /// </summary>
 public sealed class GatewayResilienceOptionsValidator : IValidateOptions<GatewayOptions>
 {

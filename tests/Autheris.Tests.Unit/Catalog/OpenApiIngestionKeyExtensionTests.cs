@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Unit.Catalog;
 
-using Autheris.Application.DataCatalog.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging.Abstractions;

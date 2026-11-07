@@ -6,7 +6,7 @@ using System.Text.Json;
 
 /// <summary>
 /// Writes provider values as JSON for WebSQL result streams. All formatting is culture-invariant
-/// with fixed ISO formats (SEC-PGP-07).
+/// with fixed ISO formats.
 /// </summary>
 internal static class WebSqlValueWriter
 {

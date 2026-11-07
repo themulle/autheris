@@ -70,7 +70,7 @@ public sealed class ConsentRowFilter
     public int? KeySetMaxKeys { get; init; }
 }
 
-/// <summary>PLAN-GOV-158-INC1: an in-place description change of a non-revoked consent (applied inside <c>ReplaceConsentsAsync</c>; never touches validity, rules or the epoch).</summary>
+/// <summary>an in-place description change of a non-revoked consent (applied inside<c>ReplaceConsentsAsync</c>; never touches validity, rules or the epoch).</summary>
 public sealed record ConsentDescriptionUpdate(Guid ConsentId, TenantId Tenant, string? Description);
 
 public sealed class Consent
@@ -95,11 +95,11 @@ public sealed class Consent
     public DateTimeOffset? RevokedAt { get; init; }
     public string? RevokeReason { get; init; }
 
-    /// <summary>WP-SC-16: number of approved renewals (extensions) of this grant; persisted by the repositories.</summary>
+    /// <summary>number of approved renewals (extensions) of this grant; persisted by the repositories.</summary>
     public int RenewalCount { get; init; }
 
     /// <summary>
-    /// PLAN-GOV-158-INC1: owner-authored explanation of why this grant exists (persisted, normalised by <c>UntrustedText</c>). Settable because
+    /// owner-authored explanation of why this grant exists (persisted, normalised by<c>UntrustedText</c>). Settable because
     /// the repositories hydrate it after the row mapper. Untrusted text: it never influences a decision; output only through
     /// <c>ConsentDescriptionText.ForOutput</c>.
     /// </summary>
@@ -109,7 +109,7 @@ public sealed class Consent
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
     public string? RowFilterCondition { get; init; }
 
-    /// <summary>WP-SC-16: expiry after the read-time clamp of legacy individual grants (never later than <see cref="ValidTo"/>).</summary>
+    /// <summary>expiry after the read-time clamp of legacy individual grants (never later than<see cref="ValidTo"/>).</summary>
     public DateTimeOffset EffectiveValidTo => IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo, Effect);
 
     public bool IsActive(DateTimeOffset atTime)

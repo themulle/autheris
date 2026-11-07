@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.GraphQL;
 
 using System.Security.Claims;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.GraphQL.Types;
 using HotChocolate;
 using Microsoft.AspNetCore.Http;

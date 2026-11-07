@@ -3,8 +3,8 @@ namespace Autheris.Tests.Integration;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
@@ -50,7 +50,7 @@ public sealed class SemanticManifestPostgreSqlContractTests : IAsyncLifetime
         env.EnvironmentName.Returns("Development");
         return GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, SeedDemoData = false }
         }), env);
     }
 

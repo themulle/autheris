@@ -11,7 +11,7 @@ using TrinoSqlEngine.Governance;
 
 namespace TrinoSqlEngine.Ast.Visitors;
 
-// Typed DML injection (WP-A7). Every write goes through the catalog: the target and the written columns are emitted as canonical
+// Typed DML injection. Every write goes through the catalog: the target and the written columns are emitted as canonical
 // delimited names, the tenant of every written row is the gateway-bound tenant parameter (never request text), the tenant and
 // policy predicates are opaque SecurityPredicateExpression conjuncts of the WHERE (UPDATE, DELETE) or of the ON (MERGE), and the
 // user part is checked for masked-column reads, policy-column writes and unfiltered scope before anything is injected.
@@ -65,7 +65,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     break;
                 }
                 default:
-                    // The clause set is closed (SEC-ADG-08 a).
+                    // The clause set is closed (08 a).
                     throw new SecurityException($"MERGE clause '{clause.GetType().Name}' is not supported.");
             }
         }
@@ -231,7 +231,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private TableCatalogEntry ResolveDmlTarget(NamedTableSource target)
     {
-        // SEC-ADG-07: a DML target is never a CTE (CTE names are not catalog tables; they are rejected, not skipped).
+        // a DML target is never a CTE (CTE names are not catalog tables; they are rejected, not skipped).
         if (IsCte(target.Name))
         {
             throw new SecurityException("A DML target must be a catalog table, not a CTE.");
@@ -466,7 +466,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
             if (policyColumns.Contains(column.Name.ToLowerInvariant()))
             {
-                // SEC-ADG-06: an assignment to a policy column would move the row across the policy boundary.
+                // an assignment to a policy column would move the row across the policy boundary.
                 throw new SecurityException("A column referenced by the row policy must not be assigned.");
             }
 

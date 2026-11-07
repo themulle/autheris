@@ -179,7 +179,7 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
             tableJson.GetProperty("tableName").GetString()!);
         using (var scope = _factory.Services.CreateScope())
         {
-            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Interfaces.ITableMetadataRepository>();
+            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
             await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
             {
                 Identifier = tableId,

@@ -21,7 +21,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c> body (ARCH-MNT-12).</summary>
+/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c>body.</summary>
 internal static class ProductionStartupChecks
 {
     internal static void ProductionGovernance(StartupCheckContext context)
@@ -39,7 +39,7 @@ internal static class ProductionStartupChecks
             throw new ValidationException("Sicherheitsverletzung: GovernanceDb.SeedDemoData darf AUSSCHLIESSLICH in der Development-Umgebung true sein!");
         }
 
-        // WP-ARC-B-12 (fail closed): the schema must never be started unchecked outside Development.
+        // 12 (fail closed): the schema must never be started unchecked outside Development.
         if (options.GovernanceDb.Migrations.Mode == GovernanceMigrationMode.Skip)
         {
             throw new ValidationException("Security violation: GovernanceDb:Migrations:Mode = Skip is only allowed in the Development environment. Use Apply or Verify.");
@@ -96,7 +96,7 @@ internal static class ProductionStartupChecks
                 "may be active only with an explicit opt-in (AllowInsecureWarnFlagsInProduction = true).");
         }
 
-        // API-16: warn_allow_all_cors_origins is prohibited outside Development without explicit opt-in
+        // warn_allow_all_cors_origins is prohibited outside Development without explicit opt-in
         if (options.IsAllCorsAllowed && !options.AllowInsecureWarnFlagsInProduction)
         {
             throw new ValidationException(

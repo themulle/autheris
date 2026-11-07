@@ -86,7 +86,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        // REQ-SQL-130 (BC-130-5d): a time zone slot is bound only by the production binder, which maps its value through the closed zone set. This path
+        // 130 (BC-130-5d): a time zone slot is bound only by the production binder, which maps its value through the closed zone set. This path
         // binds BoundParameter.Value as it is (null for a client slot), so it refuses a zone slot until the federated binding exists (#131).
         if (query.Compiled == null && query.Parameters is not null)
         {
@@ -121,7 +121,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         int? boundCount = request.Compiled?.Parameters.Length ?? request.Parameters?.Count;
         ValidateUserSql(request.Sql, request.Sources, boundCount, enforceTextFloor: !trustedGeneratedSql);
 
-        // SEC-OLAP-02: Enforce MaxStagedRowsPerTable limits before opening DuckDB
+        // Enforce MaxStagedRowsPerTable limits before opening DuckDB
         if (request.Sources != null)
         {
             foreach (var src in request.Sources)
@@ -153,11 +153,11 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
 
         try
         {
-            // SEC-OLAP-03: Completely transient in-memory database session
+            // Completely transient in-memory database session
             using var connection = new DuckDBConnection("DataSource=:memory:");
             await connection.OpenAsync(cts.Token).ConfigureAwait(false);
 
-            // SEC-OLAP-01 & SEC-OLAP-02 & SG-01: Sandbox isolation, session temp dir, disable external filesystem/network access, limit RAM & threads
+            // 02 & SG-01: Sandbox isolation, session temp dir, disable external filesystem/network access, limit RAM & threads
             using (var setupCmd = connection.CreateCommand())
             {
                 var maxMem = SanitizeMemoryString(_options.MaxMemory);
@@ -451,7 +451,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
     }
 
     /// <summary>
-    /// WP-X3: the only <c>$</c> allowed is a <c>$n</c> marker outside quotes whose ordinal has a bound parameter. A <c>$</c> inside a
+    /// the only<c>$</c> allowed is a <c>$n</c> marker outside quotes whose ordinal has a bound parameter. A <c>$</c> inside a
     /// quoted literal or identifier, <c>$$</c>, <c>$name</c> and a marker without a parameter are rejected (SG-24).
     /// </summary>
     private static void ValidateDollarMarkers(string sql, int parameterCount)

@@ -3,7 +3,7 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Api.Extensions;
 using Autheris.Api.Hosting.Warmup;
@@ -89,8 +89,8 @@ public static class HealthEndpoints
                 }
             }
 
-            // PLAN-OPS-150 D-150-2: executor gate (required, positive proof, missing or unknown means 503), then the best-effort
-            // warm-up state. Both are read live (no cache). Production bodies carry status and timestamp only (SEC-OPS150-09).
+            // 150 D-150-2: executor gate (required, positive proof, missing or unknown means 503), then the best-effort
+            // warm-up state. Both are read live (no cache). Production bodies carry status and timestamp only.
             var gateState = executorGate?.State ?? ExecutorGateState.Pending;
             if (gateState != ExecutorGateState.Ready)
             {

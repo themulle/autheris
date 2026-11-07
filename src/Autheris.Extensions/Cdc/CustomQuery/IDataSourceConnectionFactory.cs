@@ -4,12 +4,12 @@ using System;
 using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Abstraction for creating database connections to heterogeneous source databases (PLAN-CDC-101 D-A).
+/// Abstraction for creating database connections to heterogeneous source databases (101 D-A).
 /// </summary>
 public interface IDataSourceConnectionFactory
 {

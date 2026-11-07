@@ -14,7 +14,6 @@ using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Localization;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -327,7 +326,7 @@ public static class CatalogApiEndpoints
         Guid relationId,
         SetRelationCrossDataSourceDto request,
         HttpContext context,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableRelationRepository relationRepo,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableRelationRepository relationRepo,
         CancellationToken ct)
     {
         if (!EndpointSecurity.IsCanonicalClusterAdmin(context.User) && !EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
@@ -425,7 +424,7 @@ public static class CatalogApiEndpoints
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
-    /// <summary>One mapping for all four routes; NotFound has one fixed body so unknown, inactive and non-manageable datasets cannot be told apart (SEC-111-08).</summary>
+    /// <summary>One mapping for all four routes; NotFound has one fixed body so unknown, inactive and non-manageable datasets cannot be told apart.</summary>
     private static IResult MapCatalogResult(Autheris.Application.Governance.Interfaces.DatasetCatalogResult result)
     {
         switch (result.Outcome)
@@ -463,7 +462,7 @@ public static class CatalogApiEndpoints
     /// <summary>Resolves an active dataset by table id or domain.schema.table (shared with the row filter strategy endpoints).</summary>
     private static Task<TableIdentifier?> ResolveActiveDatasetAsync(
         string? id,
-        Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         CancellationToken ct)
         => Autheris.Application.Governance.Services.DatasetIdResolver.ResolveActiveAsync(id, metadataRepository, ct);
 
@@ -527,7 +526,7 @@ public static class CatalogApiEndpoints
     internal static async Task<IResult> SetDatasetKeysHandler(
         string id,
         SetDatasetKeysDto? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Audit.IAuditWriter auditWriter,
         HttpContext httpContext,
         CancellationToken ct)
@@ -602,7 +601,7 @@ public static class CatalogApiEndpoints
             return DatasetKeysNotFound();
         }
 
-        // SEC-94-06: a changed definition is traceable in the HMAC-chained audit log (identifiers only, no data). Post-commit: a client
+        // a changed definition is traceable in the HMAC-chained audit log (identifiers only, no data). Post-commit: a client
         // disconnect must not drop the record; an unavailable audit store surfaces as 503 through the exception handler (fail closed).
         await auditWriter.RecordRequiredAsync(new AuditLogEntry
         {
@@ -677,7 +676,7 @@ public static class CatalogApiEndpoints
     internal static async Task<IResult> SetDatasetRequiredFiltersHandler(
         string id,
         SetDatasetRequiredFiltersDto? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Audit.IAuditWriter auditWriter,
         HttpContext httpContext,
         CancellationToken ct)
@@ -770,7 +769,7 @@ public static class CatalogApiEndpoints
     internal static async Task<IResult> SetDatasetSyntheticSamplesHandler(
         string id,
         System.Collections.Generic.IReadOnlyList<System.Collections.Generic.Dictionary<string, object?>>? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
         HttpContext httpContext,
         CancellationToken ct)
@@ -811,7 +810,7 @@ public static class CatalogApiEndpoints
     /// </summary>
     internal static async Task<IResult> GetDatasetSyntheticSamplesHandler(
         string id,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Interfaces.ITableMetadataRepository metadataRepository,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
         [Microsoft.AspNetCore.Mvc.FromServices] ICatalogVisibilityService visibility,
         HttpContext httpContext,

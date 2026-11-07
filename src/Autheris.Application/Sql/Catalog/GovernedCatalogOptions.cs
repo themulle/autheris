@@ -3,7 +3,7 @@ namespace Autheris.Application.Sql.Catalog;
 /// <summary>Settings of the metadata-backed catalog (WP-X0c).</summary>
 public sealed class GovernedCatalogOptions
 {
-    /// <summary>Hard upper bound of <see cref="CacheTtlSeconds"/> (SEC-X1-09). Configuration can only lower the TTL.</summary>
+    /// <summary>Hard upper bound of <see cref="CacheTtlSeconds"/>. Configuration can only lower the TTL.</summary>
     public const int MaxCacheTtlSeconds = 300;
 
     /// <summary>How long a loaded table entry is served before the database metadata is read again.</summary>

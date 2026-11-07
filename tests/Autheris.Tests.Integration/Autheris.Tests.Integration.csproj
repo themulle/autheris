@@ -45,6 +45,8 @@
     <Compile Include="..\Autheris.Tests.Unit\Governance\ConsentDescriptionRepositoryContractBase.cs" Link="ConsentDescriptionRepositoryContractBase.cs" />
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\RuntimeSkip.cs" Link="TestDoubles\RuntimeSkip.cs" />
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\Autheris.Modules.Abstractions\Autheris.Modules.Abstractions.csproj" />
+    <ProjectReference Include="..\..\modules\Autheris.Modules.Lakehouse\Autheris.Modules.Lakehouse.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -60,6 +62,7 @@
     <None Include="Spark\runner.py" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
     <None Include="Spark\Dockerfile" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
     <None Include="Spark\fetch-delta.py" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
+    <None Update="OData\Fixtures\**\*.http" CopyToOutputDirectory="PreserveNewest" />
     <None Update="xunit.runner.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

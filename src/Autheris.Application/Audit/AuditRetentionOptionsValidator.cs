@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// SEC-AUD161-01: Validates AuditRetentionOptions at application startup.
+/// Validates AuditRetentionOptions at application startup.
 /// Enforces mandatory retention floors outside Development environments.
 /// </summary>
 public sealed class AuditRetentionOptionsValidator : IValidateOptions<AuditRetentionOptions>

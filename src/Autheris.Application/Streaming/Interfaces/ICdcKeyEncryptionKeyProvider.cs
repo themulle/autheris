@@ -15,7 +15,7 @@ public enum CdcKekLookup
     Unavailable = 2
 }
 
-/// <summary>Resolves the key-encryption keys of the CDC stream (PLAN-CDC-99 D-A8, SEC-CDC99-14). Key bytes are never logged.</summary>
+/// <summary>Resolves the key-encryption keys of the CDC stream (99 D-A8). Key bytes are never logged.</summary>
 public interface ICdcKeyEncryptionKeyProvider
 {
     string? ActiveKekId { get; }

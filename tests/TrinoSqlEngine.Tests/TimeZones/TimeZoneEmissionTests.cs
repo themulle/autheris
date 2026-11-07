@@ -233,7 +233,6 @@ public sealed class TimeZoneEmissionTests
 
     [Theory]
     [InlineData(TargetSqlDialect.Ansi)]
-    [InlineData(TargetSqlDialect.Snowflake)]
     [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.Databricks)]

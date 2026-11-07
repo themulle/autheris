@@ -13,7 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using RequestDelegate = HotChocolate.Execution.RequestDelegate;
 
 /// <summary>
-/// Issue #447 (SEC-ATR-06): the data sources that every root field of the compiled operation reads (all aliases, fragments and
+/// Issue #447: the data sources that every root field of the compiled operation reads (all aliases, fragments and
 /// variable-selected fields are already flattened by the operation compiler) are checked all-or-nothing before any resolver runs.
 /// One denied source denies the whole operation: a request-level error and no <c>data</c>, so no resolver result or side effect
 /// precedes the denial. The per-table gate at C3/C1 stays in place as the second line (subscriptions and nested access).
@@ -32,7 +32,7 @@ public sealed class TransportGateMiddleware
 
     public async ValueTask InvokeAsync(RequestContext context)
     {
-        // HotChocolate may hand a resolver another service scope than the request scope that carries the stamped ingress (SEC-ATR-05):
+        // HotChocolate may hand a resolver another service scope than the request scope that carries the stamped ingress:
         // the request value travels in the request's context data, and TransportIngressFieldMiddleware copies it into the resolver scope.
         if (context.RequestServices.GetService<IIngressTransportContext>() is { Current: not DataSourceTransportFlags.None } requestIngress)
         {
@@ -63,7 +63,7 @@ public sealed class TransportGateMiddleware
             }
             catch (TransportNotAllowedException)
             {
-                // Fixed text and code (SEC-ATR-08): no source name, no sub-reason; the audit event was written by the gate.
+                // Fixed text and code: no source name, no sub-reason; the audit event was written by the gate.
                 context.Result = OperationResult.FromError(
                     ErrorBuilder.New()
                         .SetMessage("Access to the data source is not allowed over this transport.")

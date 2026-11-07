@@ -27,7 +27,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         // while the gateway would treat a catalog-named reference as a secured physical scan).
         if (node.Name.IsSimple && !_cteScopeStack.Peek().Contains(scopeKey) && _definingNonRecursiveCtes.Contains(scopeKey))
         {
-            // Issue #277 (SEC-277-04): the same typed answer as the router's pre-check (422); fixed text, no CTE or table name.
+            // Issue #277: the same typed answer as the router's pre-check (422); fixed text, no CTE or table name.
             throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "CTE self-reference without WITH RECURSIVE");
         }
 
@@ -47,7 +47,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     }
 
     /// <summary>
-    /// Typed injection (WP-A5): the table becomes <c>(SELECT cataloged columns FROM [schema].[table] WHERE tenant AND policy)</c>.
+    /// Typed injection: the table becomes<c>(SELECT cataloged columns FROM [schema].[table] WHERE tenant AND policy)</c>.
     /// The tenant predicate (binary-exact) always applies when the catalog declares a tenant column; the policy predicate
     /// applies when the provider says so. Both are opaque <see cref="SecurityPredicateExpression"/> nodes.
     /// </summary>

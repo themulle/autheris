@@ -92,7 +92,7 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
     }
 
     /// <summary>
-    /// WP-PF-09: non-null for a shape-shared key. The bit i says whether the subjects of the request match the subject of candidate
+    /// non-null for a shape-shared key. The bit i says whether the subjects of the request match the subject of candidate
     /// rule i, so two users that match exactly the same candidate rules (and read no user-specific input) share one entry. The key
     /// then carries no user, group set or client IP; <see cref="CreateShared"/> documents when that is allowed.
     /// </summary>
@@ -155,7 +155,7 @@ internal readonly struct DecisionKey : IEquatable<DecisionKey>
     }
 
     /// <summary>
-    /// Builds the shape-shared key (WP-PF-09 / SEC-SC-09). The caller must have established that no candidate rule references the
+    /// Builds the shape-shared key. The caller must have established that no candidate rule references the
     /// user, its aliases or groups (beyond the match bits), the client IP or time, and that the request is not for a delegated source.
     /// The attributes and the purpose are part of the key only when a candidate rule reads them.
     /// </summary>

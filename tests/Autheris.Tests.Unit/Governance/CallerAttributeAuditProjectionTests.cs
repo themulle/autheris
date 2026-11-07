@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
 using Autheris.Application.Governance.Paging;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Common;
 using Microsoft.AspNetCore.Http;

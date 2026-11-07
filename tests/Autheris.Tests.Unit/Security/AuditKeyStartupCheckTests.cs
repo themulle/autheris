@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Security;
 
 using System.Text;
 using Autheris.Api.Extensions.DependencyInjection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;

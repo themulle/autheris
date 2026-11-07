@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Extensions.DependencyInjection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql;
@@ -15,7 +15,6 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Infrastructure.Garnet;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -27,7 +26,7 @@ using Xunit;
 
 public sealed class CompositionRootModularizationTests
 {
-    private static (ServiceCollection Services, GatewayOptions Options, IHostEnvironment Env) CreateTestSetup(bool garnet = false)
+    private static (ServiceCollection Services, GatewayOptions Options, IHostEnvironment Env) CreateTestSetup()
     {
         var services = new ServiceCollection();
         var env = Substitute.For<IHostEnvironment>();
@@ -38,13 +37,6 @@ public sealed class CompositionRootModularizationTests
 
         var options = new GatewayOptions
         {
-            Caching = new CachingOptions
-            {
-                Garnet = new GarnetOptions
-                {
-                    EnableEmbeddedServer = garnet
-                }
-            },
             GovernanceDb = new GovernanceDbOptions
             {
                 Provider = "Sqlite",
@@ -110,20 +102,6 @@ public sealed class CompositionRootModularizationTests
             .ShouldBeOfType<Autheris.Application.Sql.Services.GovernedSqlExecutionService>();
         // The federated service is reachable lazily from the same scope.
         scope.ServiceProvider.GetRequiredService<Lazy<IFederatedQueryExecutionService>>().Value.ShouldNotBeNull();
-    }
-
-    [Fact]
-    public void AddAutherisStorage_GarnetEmbedded_DoesNotStartServerDuringRegistration()
-    {
-        var (services, options, env) = CreateTestSetup(garnet: true);
-
-        services.AddAutherisStorage(options, env);
-
-        var sp = services.BuildServiceProvider();
-        var garnetManager = sp.GetService<IGarnetServerManager>();
-        garnetManager.ShouldNotBeNull();
-        // Server should NOT be running yet; it must be started asynchronously by IHostedService
-        garnetManager.IsRunning.ShouldBeFalse();
     }
 
     [Fact]

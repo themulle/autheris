@@ -43,7 +43,7 @@ public sealed partial class CasbinEnforcementService
 
     private static void ValidateSubRuleTokens(string subRule, string? rlsFilter)
     {
-        // REQ-GOV-129 (A-8, ST-129-18): a Casbin rule never carries a caller attribute (a shared decision must not embed one); refused on publish, import and sync alike.
+        // 129 (A-8, ST-129-18): a Casbin rule never carries a caller attribute (a shared decision must not embed one); refused on publish, import and sync alike.
         if (Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(subRule) || Autheris.Application.VirtualFilters.CallerPlaceholders.Contains(rlsFilter))
         {
             throw new ArgumentException("Security validation error: a Casbin rule cannot use a caller attribute placeholder.", nameof(rlsFilter));
@@ -415,7 +415,7 @@ public sealed partial class CasbinEnforcementService
             subjects.AddRange(context.GroupSids.Select(g => g.Value));
         }
 
-        // WP-PF-09 / SEC-SC-09: users that match exactly the same candidate rules share one decision, but only when no candidate rule
+        // users that match exactly the same candidate rules share one decision, but only when no candidate rule
         // reads the user, its aliases or groups, the client IP or the clock, and never for a delegated source (where the source itself
         // decides per user). Otherwise the key carries the user, as before.
         DecisionKey cacheKey;

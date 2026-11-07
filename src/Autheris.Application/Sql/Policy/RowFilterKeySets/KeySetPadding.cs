@@ -3,7 +3,7 @@ namespace Autheris.Application.Sql.Policy.RowFilterKeySets;
 using System.Numerics;
 
 /// <summary>
-/// IN-list padding buckets (PLAN-GOV-107 A-10): a list of <c>count</c> keys has <c>min(nextPow2(count), maxKeys)</c> items, so that the
+/// IN-list padding buckets (107 A-10): a list of<c>count</c> keys has <c>min(nextPow2(count), maxKeys)</c> items, so that the
 /// shape of a statement (and with it the template-cache entry) changes only per bucket, not per key count.
 /// </summary>
 public static class KeySetPadding

@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// WP-ARC-C-02: Validates core gateway options (row filter strategy, Casbin files, plugin manifest, and OpenMetadata HTTPS).
+/// Validates core gateway options (row filter strategy, Casbin files, plugin manifest, and OpenMetadata HTTPS).
 /// </summary>
 public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOptions>
 {
@@ -72,14 +72,14 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
             failures.Add("Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.");
         }
 
-        // REQ-SQL-130 (BC-130-9): a time zone function without the closed zone set must not be admitted by configuration.
+        // 130 (BC-130-9): a time zone function without the closed zone set must not be admitted by configuration.
         if (opts.WebSql?.AdditionalAllowedFunctions is { Count: > 0 } additional &&
             additional.Any(TrinoSqlEngine.SqlFunctionAllowlists.IsTimeZoneFunctionName))
         {
             failures.Add("Gateway:WebSql:AdditionalAllowedFunctions must not list a time zone function; convert_timezone is the governed one.");
         }
 
-        // Issue #277 (FR-11, SEC-277-05/-07): the recursion bound is validated at start (never taken from SQL text), and with the
+        // Issue #277 (FR-11, 05/-07): the recursion bound is validated at start (never taken from SQL text), and with the
         // opt-in on the timeout is the work bound of a recursive statement, so it must be finite and sane.
         if (opts.WebSql is { } webSql)
         {
@@ -152,7 +152,7 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
     }
 
     /// <summary>
-    /// REQ-GOV-129 (PLAN-GOV-129 section 7, BC-129-04): ranges of the TTL family and the trusted claim issuers. Every trusted issuer must be an
+    /// 129 (129 section 7, BC-129-04): ranges of the TTL family and the trusted claim issuers. Every trusted issuer must be an
     /// issuer the bearer scheme validates, so a claim of another issuer can never be trusted by configuration.
     /// </summary>
     private static void ValidateCallerAttributes(GatewayOptions opts, List<string> failures)

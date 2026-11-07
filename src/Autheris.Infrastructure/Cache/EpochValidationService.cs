@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
@@ -75,7 +75,7 @@ end";
     // epoch it has observed per table; a lower value (Redis restart without persistence, or a tampered key that
     // tries to re-validate an older, still-signed L2 entry) is treated as a rollback and forces a fresh epoch
     // above the highest observed one. Residual risk: a node that never observed the higher epoch cannot detect
-    // the rollback, therefore Redis/Garnet must additionally be protected by authentication (see GarnetServerManager).
+    // the rollback, therefore Redis must additionally be protected by authentication.
     public EpochValidationService(
         IOptions<GatewayOptions>? options = null,
         IEventBus? eventBus = null,
@@ -257,7 +257,7 @@ end";
     }
 
     /// <summary>
-    /// Issue #107 (SEC-RF107-05, C-6): all-or-nothing authoritative epoch read for the key-set cache. Redis is read for every table on every call (no
+    /// Issue #107 (C-6): all-or-nothing authoritative epoch read for the key-set cache. Redis is read for every table on every call (no
     /// staleness budget, no local fallback). <c>null</c> when Redis is configured but not connected, when any read fails or cannot be confirmed, or on any
     /// exception (Warning with the exception type only); it never throws and never returns a partial result. Without Redis (single node) the local epoch
     /// is authoritative.
@@ -390,7 +390,7 @@ end";
                 continue;
             }
 
-            // SEC-SC-05: the staleness budget applies to non-sensitive tables of Autheris-enforced sources only. Sensitive
+            // the staleness budget applies to non-sensitive tables of Autheris-enforced sources only. Sensitive
             // tables (flagged by the caller or by the metadata lookup, which fails closed) and delegated sources always read Redis.
             if (!check.IsHighlySensitive && !check.IsDelegatedSource && budgetMs > 0 && !_epochFloors.ContainsKey(key) &&
                 _microCache.TryGetValue(key, out var entry) &&
@@ -417,7 +417,7 @@ end";
         {
             var db = _multiplexer.GetDatabase();
 
-            // SEC-SC-05 / WP-PF-01: single-key GETs only. A multi-key MGET raises CROSSSLOT on Redis Cluster,
+            // single-key GETs only. A multi-key MGET raises CROSSSLOT on Redis Cluster,
             // which would invalidate every multi-table decision. The multiplexer pipelines concurrent single-key
             // commands over one connection per node, so this costs no extra round trips. Any failure fails closed.
             var redisKeys = new RedisKey[pendingRedisChecks.Count];

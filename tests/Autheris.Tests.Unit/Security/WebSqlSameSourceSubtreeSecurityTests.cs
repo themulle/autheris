@@ -7,8 +7,8 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Connectors;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Federation.Subtrees;
@@ -577,7 +577,7 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         await stagingService.StageAsync([subtreeRequest], CreateUser(), new TenantId(Tenant), CreateBudget(maxRows: 100));
 
         captured.ShouldNotBeNull();
-        Autheris.Application.Connectors.ConnectorSecurityPolicyEvaluator.EnforceSecurityPolicy(captured!, subtreeRequest.Subtree!.SyntheticMetadata);
+        Autheris.Application.DataSources.Connectors.ConnectorSecurityPolicyEvaluator.EnforceSecurityPolicy(captured!, subtreeRequest.Subtree!.SyntheticMetadata);
         captured!.Items["SubtreeSql"].ShouldBe(subtreeRequest.Subtree!.Compiled.Sql);
         captured.Items.ShouldContainKey("SubtreePlan");
     }

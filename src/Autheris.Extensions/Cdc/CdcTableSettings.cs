@@ -9,7 +9,7 @@ using Autheris.Domain.Options;
 
 /// <summary>
 /// The effective producer settings of one tracked table: <c>MssqlChangeTracking</c> defaults overridden by the table's entry in
-/// <c>Tables</c> (PLAN-CDC-99 section 3.4). Pure value; resolved from live options on every use.
+/// <c>Tables</c>(99 section 3.4). Pure value; resolved from live options on every use.
 /// </summary>
 public sealed record CdcTableSettings(
     TableIdentifier Table,

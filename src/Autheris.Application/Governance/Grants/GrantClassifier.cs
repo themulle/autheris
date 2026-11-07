@@ -6,7 +6,7 @@ using System.Linq;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// WP-SC-16: derives the <see cref="GrantSensitivity"/> of a grant from catalog metadata. Any gap in the metadata
+/// derives the<see cref="GrantSensitivity"/> of a grant from catalog metadata. Any gap in the metadata
 /// (no table found, null column list) classifies as <see cref="GrantSensitivity.Sensitive"/> so that the shorter maximum applies (fail closed).
 /// </summary>
 public static class GrantClassifier

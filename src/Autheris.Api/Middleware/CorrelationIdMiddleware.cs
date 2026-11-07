@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// Captures the physical TCP remote IP prior to <c>UseForwardedHeaders</c> and propagates a canonical correlation ID (WP-ARC-C-04).
+/// Captures the physical TCP remote IP prior to <c>UseForwardedHeaders</c>and propagates a canonical correlation ID.
 /// </summary>
 public sealed class CorrelationIdMiddleware
 {

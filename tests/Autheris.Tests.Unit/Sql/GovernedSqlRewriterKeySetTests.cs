@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Sql;
 
 using System.Security;
 using System.Security.Claims;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Policy;

@@ -2,7 +2,7 @@
 
 ## 1. Übersicht & Befund
 
-- **Befund-ID**: DEP-12 (aus dem [Security-Review Gesamtprojekt 2026-10-07](../plans/security-review-2026-10-07.md))
+- **Befund-ID**: DEP-12 (aus dem [Security-Review Gesamtprojekt 2026-10-07](../plans/security.md))
 - **Schweregrad**: Niedrig (Härtung / Secret-Hygiene)
 - **Status im HEAD**: **Sauber** (HEAD enthält keinerlei Klartext-Secrets; Credentials werden über `.env` bzw. dynamische Generierung injected).
 - **Problem**: In früheren Commits der Historie (u. a. `9fa510b`, `9292081`, `dae958c`, `ad13db6`) wurden Benchmark- und Test-Passwörter im Klartext committed, bevor Commits `2839be6` (S-1) und `30fb839` (S-2) die Umgebungsvariablen-Übersteuerung eingeführt haben.

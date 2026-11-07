@@ -73,7 +73,7 @@ public sealed class UnknownGatewayKeyGuardTests
         // L4/L5: the global ITSM webhook secret fallback and the payload-only catalog signature are removed.
         var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config((key, "false"))));
 
-        ex.Message.ShouldContain(key);
+        ex.Message.ShouldContain(key.StartsWith("Gateway:Itsm", StringComparison.OrdinalIgnoreCase) ? "Gateway:Itsm" : key);
     }
 
     [Fact]
@@ -239,6 +239,53 @@ public sealed class UnknownGatewayKeyGuardTests
         ex.Message.ShouldContain("Gateway:" + relativeKey);
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("Gateway:Audit:ElasticsearchSinkUrl")]
+    [InlineData("Gateway:Audit:CatalogReadMode")]
+    [InlineData("Gateway:Audit:CatalogSummaryWindowSeconds")]
+    [InlineData("Gateway:Audit:TierBAggregationWindowSeconds")]
+    [InlineData("Gateway:QueryCost:BaseQueryCost")]
+    [InlineData("Gateway:QueryCost:CostPerRowReturned")]
+    [InlineData("Gateway:QueryCost:NestedDepthFactor")]
+    [InlineData("Gateway:Rebac:OpenFgaApiUrl")]
+    [InlineData("Gateway:Rebac:OpenFgaStoreId")]
+    [InlineData("Gateway:Authentication:GroupCacheTtlMinutes")]
+    [InlineData("Gateway:DataSources:Connections:testSource:Databricks:Auth:Obo:AllowLongRunning")]
+    [InlineData("Gateway:CatalogSearch:FieldWeights")]
+    [InlineData("Gateway:DataMasking:MaskingCacheTtlHours")]
+    [InlineData("Gateway:Federation:GatewayPackagePath")]
+    [InlineData("Gateway:FinOps:ScopeMonthlyBudgets")]
+    [InlineData("Gateway:Caching:L1MemoryCache:DefaultTtlMinutes")]
+    [InlineData("Gateway:Lakehouse:MaxConcurrentFileScans")]
+    [InlineData("Gateway:Catalog:Alation:CustomFieldIdPii")]
+    [InlineData("Gateway:Catalog:Collibra:CommunityId")]
+    [InlineData("Gateway:Catalog:SyncMode")]
+    [InlineData("Gateway:Telemetry:Metrics:DataSourceCardinalityLimit")]
+    [InlineData("Gateway:Telemetry:Metrics:DefaultCardinalityLimit")]
+    [InlineData("Gateway:Telemetry:Metrics:TenantCardinalityLimit")]
+    [InlineData("Gateway:Telemetry:Redaction:AttributeValueLengthLimit")]
+    [InlineData("Gateway:TableCache:CronExpression")]
+    public void Removed_unconsumed_option_keys_fail_startup(string key)
+    {
+        var expectedContainedKey = key switch
+        {
+            "Gateway:Catalog:Alation:CustomFieldIdPii" => "Gateway:Catalog:Alation",
+            "Gateway:Catalog:Collibra:CommunityId" => "Gateway:Catalog:Collibra",
+            _ => key
+        };
+        foreach (var value in new[] { "false", "", "sample" })
+        {
+            var configuration = Config((key, value));
+            var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+            ex.Message.ShouldContain(expectedContainedKey);
+            if (!string.IsNullOrEmpty(value))
+            {
+                ex.Message.ShouldNotContain(value);
+            }
+        }
+    }
+
     [Fact]
     public void SideBoundPairs_CoverEverySectionNameConstant()
     {
@@ -287,14 +334,11 @@ public sealed class UnknownGatewayKeyGuardTests
 
     private static readonly string[] ExpectedFreeFormSubtrees =
     [
-        "Gateway:Catalog:Alation:DataSourceToDomainMap",
         "Gateway:Catalog:TagToMaskingRuleMap",
         "Gateway:Classification:Workflow:Profiles:OwnerResolution:RuleBasedMappings",
         "Gateway:Dbt:DatabaseMappings",
         "Gateway:Federation:FieldClassifications",
-        "Gateway:FinOps:ScopeMonthlyBudgets",
         "Gateway:FinOps:TenantMonthlyBudgets",
-        "Gateway:Itsm:InstanceToTenantMap",
         "Gateway:OpenMetadata:RoleToGatewayRoleMap",
         "Gateway:OpenMetadata:ServiceDatabaseToDomainMap",
         "Gateway:OpenMetadata:ServiceDatabaseToTenantMap",

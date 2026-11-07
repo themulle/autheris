@@ -29,7 +29,7 @@ public interface ICheckedDmlExecutor
     /// X0k (G-3): runs <paramref name="compiled"/> inside the caller's session transaction (no nested transaction: PostgreSQL pins the
     /// tenant with a transaction-local setting) with the command timeout of <paramref name="limits"/>. Binds, executes, enforces the
     /// check option and then <see cref="CheckedDmlLimits.MaxAffectedRows"/>. This method is the single owner of the completion of
-    /// <paramref name="transaction"/> (SEC-X1-06): it commits on success and rolls back on any failure, including a timeout and a
+    /// <paramref name="transaction"/>it commits on success and rolls back on any failure, including a timeout and a
     /// cancellation (the rollback ignores the token). The caller must neither commit nor roll it back again, and disposes it.
     /// A transaction that is no longer usable (completed, or on a closed connection) is rejected.
     /// </summary>
@@ -53,7 +53,7 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
     private readonly DbCommandCompiledSqlBinder _binder;
 
     /// <param name="binder">The provider binder of the dialect; only the engine's own binders can bind a checked statement.</param>
-    /// <remarks>Internal (SEC-X1-07): <see cref="CompiledSqlBinders.CheckedExecutorFor"/> is the only factory.</remarks>
+    /// <remarks>Internal:<see cref="CompiledSqlBinders.CheckedExecutorFor"/> is the only factory.</remarks>
     internal CheckedDmlExecutor(DbCommandCompiledSqlBinder binder)
     {
         _binder = binder ?? throw new ArgumentNullException(nameof(binder));

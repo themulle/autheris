@@ -13,7 +13,7 @@ using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -32,7 +32,7 @@ using TableDecision = (Autheris.Domain.Interfaces.TableAccessDecision Decision, 
 /// </summary>
 public sealed class GovernedProcedureExecutionService : IProcedureExecutionService
 {
-    /// <summary>The one message of every pre-visibility failure (SEC-PROC152-03); never contains the name or the reason.</summary>
+    /// <summary>The one message of every pre-visibility failure; never contains the name or the reason.</summary>
     public const string NotFoundMessage = "Procedure endpoint not found.";
 
     internal const string UnavailableMessage = "Procedure endpoint is currently unavailable.";
@@ -116,7 +116,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         string traceId = Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
 
         // 1. Registry lookup. An unknown name is audited through the same writer as every denial (one awaited write, no early
-        // return) and answered exactly like an invisible procedure (SEC-PROC152-03/04).
+        // return) and answered exactly like an invisible procedure (04).
         if (string.IsNullOrWhiteSpace(name) || !_registry.TryGet(name, out var registered) || registered == null)
         {
             await AuditUnknownAsync(name, user, tenantId, traceId, ct).ConfigureAwait(false);
@@ -125,7 +125,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 
         var definition = registered.Definition;
 
-        // 1a. Write-mode guard (SEC-PROC152I2-10): only read procedures are executable. A write-mode definition is not visible,
+        // 1a. Write-mode guard: only read procedures are executable. A write-mode definition is not visible,
         // answered exactly like an unknown name, before anything caller-controlled is looked at.
         if (definition.Mode != ProcedureMode.Read)
         {
@@ -183,7 +183,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 userSid.Value,
                 user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value);
 
-            // 6a. Row budget, decided before the invoke from the visibility decisions (SEC-PROC152I2-01): a scoped call scans up
+            // 6a. Row budget, decided before the invoke from the visibility decisions: a scoped call scans up
             // to MaxScanRows raw rows (the limit is applied after the row scope), an unscoped call reads the limit itself.
             var procedureOptions = _options.Value.SqlEndpoints.Procedures;
             int effectiveLimit = requestedLimit ?? procedureOptions.MaxRows;
@@ -197,7 +197,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
             catch (ProcedureBusinessException bex)
             {
-                // SEC-PROC152-08: number/SQLSTATE and ids only, never the database message text.
+                // number/SQLSTATE and ids only, never the database message text.
                 _logger?.LogWarning(
                     "Procedure '{Procedure}' rejected the request: number {Number}, sqlState {SqlState}, trace {TraceId}.",
                     definition.ProcedureName, bex.ErrorNumber, bex.SqlState, traceId);
@@ -211,7 +211,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
             catch (DbException dbx)
             {
-                // SEC-PROC152-08: driver text (messages, inner exceptions) may contain values; log the type and number only.
+                // driver text (messages, inner exceptions) may contain values; log the type and number only.
                 _logger?.LogError(
                     "Stored procedure endpoint '{Procedure}' failed with {ExceptionType} (number {Number}, trace {TraceId}).",
                     definition.ProcedureName, dbx.GetType().Name, DbErrorNumber(dbx), traceId);
@@ -220,7 +220,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // SEC-PROC152-08: exception type only; never the message, inner exceptions or ToString (may carry values).
+                // exception type only; never the message, inner exceptions or ToString (may carry values).
                 _logger?.LogError(
                     "Stored procedure endpoint '{Procedure}' failed with {ExceptionType} (trace {TraceId}).",
                     definition.ProcedureName, ex.GetType().Name, traceId);
@@ -229,7 +229,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
 
             // 6b. Row scope: keep only the rows the consent row filter of the result table allows, THEN cut to the limit
-            // (SEC-PROC152I2-02: the cut never precedes the scope; a scope failure stays fail-closed).
+            // (the cut never precedes the scope; a scope failure stays fail-closed).
             int rowsRemovedByScope = 0;
             bool truncated = raw.MoreRowsAvailable;
             bool scanCapReached = scoped && raw.MoreRowsAvailable;
@@ -237,7 +237,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             {
                 var scopedRaw = await ApplyRowScopeAsync(definition, raw, resultDecision.Decision, resultDecision.Meta, registered.Validation.ResultColumnSources, context, tenantId, userSid, traceId, ct).ConfigureAwait(false);
                 rowsRemovedByScope = raw.Rows.Count - scopedRaw.Rows.Count;
-                // 'truncated' may be true when the scan cap was hit with few (or no) in-scope rows. Accepted by SEC-PROC152I2-03:
+                // 'truncated' may be true when the scan cap was hit with few (or no) in-scope rows. Accepted by
                 // a coarse signal only, it reveals nothing about which rows exist.
                 truncated = scopedRaw.Rows.Count > effectiveLimit || raw.MoreRowsAvailable;
                 raw = scopedRaw.Rows.Count > effectiveLimit
@@ -295,7 +295,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     }
 
     /// <summary>
-    /// SEC-PROC152-01/02/10: the visibility stage. Every failure except cancellation (including an unexpected exception) is
+    /// 01/02/10: the visibility stage. Every failure except cancellation (including an unexpected exception) is
     /// "not visible"; nothing from the caller or the exception reaches the response.
     /// </summary>
     internal async Task<ProcedureVisibility> EvaluateVisibilityAsync(
@@ -368,7 +368,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 
     private async Task AuditUnknownAsync(string? name, ClaimsPrincipal user, TenantId tenantId, string traceId, CancellationToken ct)
     {
-        // SEC-PROC152-05: only authenticated callers, rate limited per tenant and SID; anonymous (bypass) callers are not audited.
+        // only authenticated callers, rate limited per tenant and SID; anonymous (bypass) callers are not audited.
         var sid = user.GetUserSid();
         if (sid == null)
         {
@@ -391,7 +391,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     }
 
     /// <summary>
-    /// SEC-PROC152-06/07: one lease per consent-checked table in ordinal order of the qualified name, key and limit exactly as in
+    /// 06/07: one lease per consent-checked table in ordinal order of the qualified name, key and limit exactly as in
     /// the SQL path (so both share one budget). A partial acquisition is rolled back. Limit greater than zero without a gate
     /// fails closed.
     /// </summary>
@@ -463,7 +463,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private Dictionary<string, object?> ValidateInputs(ProcedureDefinition definition, IReadOnlyDictionary<string, object?>? rawInputs, out int? requestedLimit)
     {
         // The reserved key 'limit' (any case) is taken out before the unknown-parameter check: it never reaches the parameter
-        // values, the parameter hashes, the SQL call or SESSION_CONTEXT (SEC-PROC152I2-07).
+        // values, the parameter hashes, the SQL call or SESSION_CONTEXT.
         var inputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         object? limitRaw = null;
         int limitKeys = 0;
@@ -697,7 +697,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return null;
         }
 
-        // SEC-PROC152-09: computed BEFORE the ABAC rewrite below, which makes a sensitivity mask indistinguishable from an
+        // computed BEFORE the ABAC rewrite below, which makes a sensitivity mask indistinguishable from an
         // explicit one. null (not computable) lifts nothing.
         var sensitivityOnlyMasked = ComputeSensitivityOnlyMask(decision, meta);
 
@@ -721,7 +721,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         {
             var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // REQ-GOV-143 (SEC-GOV143-08): a caller holding a restricted scope never gets a contract lift: such a column carries no rule, so it
+            // a caller holding a restricted scope never gets a contract lift: such a column carries no rule, so it
             // can never carry the scope-specific Clear the restriction asks for. This set is the single source of every procedure lift.
             if (decision.ScopeClearance is not null)
             {
@@ -778,7 +778,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         definition.ResultTable != null && string.Equals(key, definition.ResultTable, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// SEC-PROC152I2-01: the single predicate for "a row filter is active on the result table". The invoker budget and the
+    /// the single predicate for "a row filter is active on the result table". The invoker budget and the
     /// row scope branch both use it.
     /// </summary>
     private static bool IsRowScoped(ProcedureDefinition definition, Dictionary<string, TableDecision> decisions, out TableDecision resultDecision)
@@ -958,7 +958,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
 
             var level = decision.GetEffectiveColumnAccess(sourceColumn, meta);
-            // Zero-Trust (SEC-PROC152-09): ClearedResultColumns lifts only a Mask that stems from catalog sensitivity alone; an explicit
+            // Zero-Trust: ClearedResultColumns lifts only a Mask that stems from catalog sensitivity alone; an explicit
             // base or scope-specific Mask and any Deny stay; an unknown sensitivity set lifts nothing.
             if (cleared.Contains(col) && level == ColumnAccessLevel.Mask && sensitivityOnly != null && sensitivityOnly.Contains(sourceColumn))
             {
@@ -1087,7 +1087,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 
         if (mandatory.CallerAttributesTextConstant)
         {
-            // REQ-GOV-129 (BC-129-05, F-4): this consent bypass path is text only; the text of a caller attribute filter is a constant, so the table is denied.
+            // 129 (BC-129-05, F-4): this consent bypass path is text only; the text of a caller attribute filter is a constant, so the table is denied.
             return TableAccessDecision.Denied(decision.Table, "Denied by virtual filters.");
         }
 

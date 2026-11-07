@@ -2,7 +2,7 @@ namespace Autheris.Tests.SqlCompilerGate.Parity;
 
 using System.Collections.Immutable;
 using System.Security.Claims;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Policy;

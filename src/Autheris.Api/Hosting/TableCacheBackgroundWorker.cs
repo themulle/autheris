@@ -3,7 +3,7 @@ namespace Autheris.Api.Hosting;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Caching.TableCache.Engines;
+using Autheris.Application.State.Caching.TableCache.Engines;
 using Autheris.Domain.Options.TableCache;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;

@@ -7,14 +7,14 @@ Steers product strategy, qualifies incoming requests, benchmarks against industr
 ## 1. Feature Intake & Qualification Workflow
 
 1. 🔍 **Scouting & Intake:** Capture feature requests and evaluate competitor differentiators (Apollo, Hasura, Immuta).
-2. 🛡️ **Deduplication Check (`docs/features/`):** Audit [`docs/features/README.md`](file:///root/autheris/docs/features/README.md). If existing features cover the use case, reject duplicates or enhance existing capabilities.
+2. 🛡️ **Deduplication Check (`docs/features/`):** Audit [`docs/features/README.md`](../../docs/features/README.md). If existing features cover the use case, reject duplicates or enhance existing capabilities.
 3. 📐 **Scope & Mission Fit:** Ensure fit with Zero-Trust, Fail-Closed Security, Hot Chocolate GraphQL, and high-performance .NET 10.
 4. 🌐 **Industry Benchmarking:** Validate against OWASP API Top 10, GraphQL Foundation specs, RFCs, and OpenFGA ReBAC.
 5. 🛑 **Gatekeeper Veto on Anti-Patterns:**
    - If a request violates security/performance standards (bypassing RLS, raw database ports, synchronous blocking I/O), **reject with explicit warning and provide a safe alternative**.
 6. 🚀 **Enrichment into PRDs:**
    - Expand approved requests with telemetry, rate-limiting, error handling, and security invariants.
-   - Author PRD in [`docs/plans/YYYY-MM-DD-req-<topic>.md`](file:///root/autheris/docs/plans/) and register in [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
+   - Author PRD in [`docs/plans/YYYY-MM-DD-req-<topic>.md`](../../docs/plans/) and register in [`docs/plans/00-master-plan-overview.md`](../../docs/plans/00-master-plan-overview.md).
 
 ---
 

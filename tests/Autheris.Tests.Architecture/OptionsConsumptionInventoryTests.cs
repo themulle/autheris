@@ -6,15 +6,13 @@ using Shouldly;
 namespace Autheris.Tests.Architecture;
 
 /// <summary>
-/// ARCH-MNT-05: inventory of option properties that no production code reads. For every settable property on a
+/// ARCH-MNT-05, WP-SIMPL-06: inventory of option properties that no production code reads. For every settable property on a
 /// production type whose name ends in "Options", a text scan looks for a member access <c>.PropertyName</c> in any
-/// src file other than the file(s) declaring the type. The heuristic over-approximates consumption (a common name
-/// read elsewhere counts as read), so it under-reports unconsumed properties but never flags a consumed one. Only new
-/// candidates fail; baseline entries that became consumed produce a hint. Current candidates are baselined in
-/// Baselines/unconsumed-options.txt ("Namespace.Type.Property"); the baseline may only shrink (ARCH-MNT-06 resolves
-/// the dead security options).
+/// src file, or an identifier read inside the file(s) declaring the type (outside its own declaration). The heuristic
+/// over-approximates consumption (a common name read elsewhere counts as read), so it under-reports unconsumed properties
+/// but never flags a consumed one. The unconsumed set must be empty (WP-SIMPL-06).
 /// </summary>
-public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.ITestOutputHelper output)
+public sealed partial class OptionsConsumptionInventoryTests
 {
     private static readonly Assembly[] ProductionAssemblies =
     [
@@ -30,21 +28,34 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
     private static partial Regex MemberAccess();
 
     [Fact]
-    public void UnconsumedOptionProperties_DoNotGrow()
+    public void UnconsumedOptionProperties_MustBeEmpty()
     {
-        var baseline = RepositoryScan.ReadBaseline("unconsumed-options.txt").ToHashSet(StringComparer.Ordinal);
-        var current = FindUnconsumed(ProductionAssemblies.SelectMany(SafeTypes), RepositoryScan.ProductionFiles);
+        var current = FindUnconsumed(ProductionAssemblies.SelectMany(SafeTypes), ProductionAndModuleFiles.Value);
+        current.ShouldBeEmpty("Option properties that no production code reads. Wire them up or delete them (ARCH-MNT-06, WP-SIMPL-06).");
+    }
 
-        foreach (var stale in baseline.Except(current, StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal))
+    [Theory]
+    [InlineData("X", "public int X { get; set; } public int EffectiveX => Math.Max(1, X);", true)]
+    [InlineData("A", "public bool A { get; set; } public bool IsA => A || B;", true)]
+    [InlineData("X", "public int X { get; set; } // X is ignored", false)]
+    [InlineData("X", "public int X { get; set; } string s = \"X\";", false)]
+    public void Reads_inside_the_declaring_file_count_as_consumption(string propertyName, string propertyBody, bool shouldBeConsumed)
+    {
+        var source = $"namespace Autheris.Tests.Architecture; public sealed class InlineDeclaringTestOptions {{ {propertyBody} }}";
+        var files = new List<RepositoryScan.SourceFile>
         {
-            output.WriteLine("HINT (not a failure): now consumed or gone, remove from the baseline: " + stale);
+            new("src/InlineDeclaringTestOptions.cs", source)
+        };
+        var unconsumed = FindUnconsumed([typeof(InlineDeclaringTestOptions)], files);
+        var key = $"{typeof(InlineDeclaringTestOptions).FullName}.{propertyName}";
+        if (shouldBeConsumed)
+        {
+            unconsumed.ShouldNotContain(key);
         }
-
-        var indirect = ParseIndirect(RepositoryScan.ReadBaseline("options-consumed-indirectly.txt"))
-            .Select(e => e.Property).ToHashSet(StringComparer.Ordinal);
-
-        current.Except(baseline, StringComparer.Ordinal).Except(indirect, StringComparer.Ordinal)
-            .ShouldBeEmpty("New option properties that no production code reads. Wire them up or delete them (ARCH-MNT-06).");
+        else
+        {
+            unconsumed.ShouldContain(key);
+        }
     }
 
     /// <summary>
@@ -58,7 +69,7 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
         var entries = ParseIndirect(RepositoryScan.ReadBaseline("options-consumed-indirectly.txt"));
 
         entries.Count.ShouldBeGreaterThan(0, "The indirect-consumer file must not be empty; an empty file would hide a broken ratchet.");
-        CheckIndirect(entries, ProductionAssemblies.SelectMany(SafeTypes), RepositoryScan.ProductionFiles).ShouldBeEmpty();
+        CheckIndirect(entries, ProductionAssemblies.SelectMany(SafeTypes), ProductionAndModuleFiles.Value).ShouldBeEmpty();
     }
 
     [Fact]
@@ -108,8 +119,8 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
     private static List<string> CheckIndirect(IReadOnlyList<IndirectEntry> entries, IEnumerable<Type> types, IReadOnlyList<RepositoryScan.SourceFile> files)
     {
         var typeList = types.ToList();
-        var index = ReferenceEquals(files, RepositoryScan.ProductionFiles) ? ProductionIndex.Value : BuildIndex(files);
-        var unconsumed = FindUnconsumed(typeList, files).ToHashSet(StringComparer.Ordinal);
+        var index = ReferenceEquals(files, ProductionAndModuleFiles.Value) ? ProductionIndex.Value : BuildIndex(files);
+        var unconsumed = FindUnconsumed(typeList, files, countDeclaringReads: false).ToHashSet(StringComparer.Ordinal);
         var problems = new List<string>();
         foreach (var entry in entries)
         {
@@ -154,13 +165,11 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
         // A property that becomes consumed simply drops out of the result (and out of the failing set).
         var withReader = files.Append(new("src/X/Reader2.cs", "var y = options.Value.Dead;")).ToList();
         FindUnconsumed([typeof(PlantedOptions)], withReader).ShouldBeEmpty();
-        FindUnconsumed(ProductionAssemblies.SelectMany(SafeTypes), RepositoryScan.ProductionFiles)
-            .Count.ShouldBeGreaterThan(0, "Scanner must see option types; a zero result means it is broken.");
     }
 
-    private static List<string> FindUnconsumed(IEnumerable<Type> types, IReadOnlyList<RepositoryScan.SourceFile> files)
+    private static List<string> FindUnconsumed(IEnumerable<Type> types, IReadOnlyList<RepositoryScan.SourceFile> files, bool countDeclaringReads = true)
     {
-        var index = ReferenceEquals(files, RepositoryScan.ProductionFiles) ? ProductionIndex.Value : BuildIndex(files);
+        var index = ReferenceEquals(files, ProductionAndModuleFiles.Value) ? ProductionIndex.Value : BuildIndex(files);
         var accessedByFile = index.Accessed;
 
         var result = new List<string>();
@@ -182,6 +191,11 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
                 }
 
                 var consumed = accessedByFile.Any(kv => !declaring.Contains(kv.Key) && kv.Value.Contains(property.Name));
+                if (!consumed && countDeclaringReads)
+                {
+                    consumed = IsConsumedInDeclaring(property.Name, declaring, files);
+                }
+
                 if (!consumed)
                 {
                     result.Add($"{type.FullName}.{property.Name}");
@@ -192,11 +206,47 @@ public sealed partial class OptionsConsumptionInventoryTests(Xunit.Abstractions.
         return result.Distinct(StringComparer.Ordinal).OrderBy(r => r, StringComparer.Ordinal).ToList();
     }
 
+    private static bool IsConsumedInDeclaring(string propertyName, HashSet<string> declaringFiles, IReadOnlyList<RepositoryScan.SourceFile> files)
+    {
+        var declPattern = new Regex(
+            @"(?:\[[^\]]*\]\s*)*" +
+            @"(?:\b(?:public|protected|internal|private|required|virtual|override|abstract|static|sealed|new|readonly)\s+)*" +
+            @"[A-Za-z0-9_<>?,\[\]\s]+\b" +
+            Regex.Escape(propertyName) +
+            @"\b\s*(?:\{[^}]*\}|(?=[,)])|;)(?:\s*=[^;]*;)?"
+        );
+
+        foreach (var file in files)
+        {
+            if (!declaringFiles.Contains(file.RelativePath))
+            {
+                continue;
+            }
+
+            var text = StripCommentsAndStrings(file.Text);
+            var m = declPattern.Match(text);
+            var withoutDecl = m.Success ? text.Remove(m.Index, m.Length) : text;
+            if (Regex.IsMatch(withoutDecl, @"\b" + Regex.Escape(propertyName) + @"\b"))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private sealed record FileIndex(
         Dictionary<string, HashSet<string>> Accessed,
         Dictionary<string, HashSet<string>> Declaring);
 
-    private static readonly Lazy<FileIndex> ProductionIndex = new(() => BuildIndex(RepositoryScan.ProductionFiles));
+    private static readonly Lazy<IReadOnlyList<RepositoryScan.SourceFile>> ProductionAndModuleFiles = new(() =>
+        RepositoryScan.ProductionFiles
+            .Concat(RepositoryScan.EnumerateFiles("modules", "*.cs")
+                .Where(f => !f.Contains(".Tests/", StringComparison.OrdinalIgnoreCase))
+                .Select(r => new RepositoryScan.SourceFile(r, RepositoryScan.ReadText(r))))
+            .ToArray());
+
+    private static readonly Lazy<FileIndex> ProductionIndex = new(() => BuildIndex(ProductionAndModuleFiles.Value));
 
     private static FileIndex BuildIndex(IReadOnlyList<RepositoryScan.SourceFile> files)
     {
@@ -252,4 +302,11 @@ public sealed class PlantedOptions
     public int Used { get; set; }
 
     public int Dead { get; set; }
+}
+
+public sealed class InlineDeclaringTestOptions
+{
+    public int X { get; set; }
+
+    public bool A { get; set; }
 }

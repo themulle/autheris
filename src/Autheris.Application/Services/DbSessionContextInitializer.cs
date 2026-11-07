@@ -5,7 +5,7 @@ using System.Data;
 using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Procedures.Services;
 using Autheris.Domain.Common;
 
@@ -21,7 +21,7 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
             return dialect;
         }
 
-        // SEC-ADG-14: an unknown provider must never fall back to another dialect (fail closed).
+        // an unknown provider must never fall back to another dialect (fail closed).
         throw new NotSupportedException($"SQL provider '{provider}' is not supported for session initialization.");
     }
 
@@ -172,7 +172,7 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
     }
 
     /// <summary>
-    /// WP-F2: client identifier and module for the Oracle session. The identifier is an opaque correlation id (never the tenant
+    /// client identifier and module for the Oracle session. The identifier is an opaque correlation id (never the tenant
     /// id in clear); NLS semantics are pinned and verified by the connection factory on every pool rental. Only bound values.
     /// </summary>
     private static async Task ExecuteOracleInitAsync(DbConnection connection, DbTransaction? tx, CancellationToken ct)

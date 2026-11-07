@@ -4,7 +4,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -23,7 +24,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
     private readonly IEpochValidationService _epochValidationService;
 
     /// <summary>
-    /// The single write gate (WP-ARC-B-13): held by EVERY mutating operation, the audit channel batches, the synchronous Tier-A path, the
+    /// The single write gate: held by EVERY mutating operation, the audit channel batches, the synchronous Tier-A path, the
     /// flush and the chain verification. In-memory databases also serialize their readers behind it. It keeps the audit hash chain linear
     /// (the in-memory tail is advanced inside business transactions) and makes check-then-write sequences such as the four-eyes
     /// approval atomic.
@@ -197,8 +198,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
         await using var scope = await ReadScopeAsync(ct, snapshot).ConfigureAwait(false);
         return await body(scope.Connection).ConfigureAwait(false);
     }
-    // WP-PF-06: bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
-    private readonly Autheris.Application.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
+    // bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
+    private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private volatile bool _isAuditPipelineFaulted = false;
     public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted || Volatile.Read(ref _auditChainViolation) != null;
@@ -267,7 +268,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
         var connStr = statePaths.ResolveGovernanceConnectionString(options.Value?.GovernanceDb?.ConnectionString);
 
         // No I/O and no DDL here: the provider opens connections lazily (directory, journal mode) and the schema is created and
-        // evolved by the governance migration runner (WP-ARC-B-12).
+        // evolved by the governance migration runner.
         _connections = new SqliteGovernanceConnectionProvider(
             connStr,
             options.Value?.GovernanceDb?.JournalMode,
@@ -283,7 +284,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IConsen
         };
         _auditChannel = Channel.CreateBounded<AuditLogEntry>(channelOptions);
 
-        // SEC-04: Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging (N-6)
+        // Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging (N-6)
         byte[]? key = null;
         var auditSecretRef = options?.Value?.GovernanceDb?.AuditHmacKeyVaultRef;
         if (secretProvider != null && !string.IsNullOrWhiteSpace(auditSecretRef))

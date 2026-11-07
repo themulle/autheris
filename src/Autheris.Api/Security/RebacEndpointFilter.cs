@@ -30,7 +30,7 @@ public enum RebacParameterSource
 }
 
 /// <summary>
-/// F-SEC-04: ASP.NET Core Endpoint Filter enforcing Google Zanzibar ReBAC authorization on HTTP / REST endpoints.
+/// F-ASP.NET Core Endpoint Filter enforcing Google Zanzibar ReBAC authorization on HTTP / REST endpoints.
 /// </summary>
 public sealed class RebacEndpointFilter : IEndpointFilter
 {

@@ -16,7 +16,7 @@ using Autheris.Api.Mcp;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Olap;
@@ -240,25 +240,6 @@ public sealed class RawExceptionMessageNeverReachesClientTests
 
         c.Body.ShouldNotContain(Sentinel);
         c.Body.ShouldNotContain("Analytical query execution failed.");
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task PrivacyBudget_429_Keeps_Only_Allowlisted_Typed_Extensions()
-    {
-        var engine = Substitute.For<IDifferentialPrivacyEngine>();
-        engine.PerturbAsync(default!, default).ThrowsAsyncForAnyArgs(new PrivacyBudgetExhaustedException("client-1", 4.5, 5.0));
-        var ctx = Ctx();
-
-        var c = await RunAsync(await GovernanceEndpoints.HandlePerturbAsync(new DifferentialPrivacyPerturbationRequest("client-1", 1.0), engine, ctx), ctx);
-
-        AssertGoverned(c, 429, ApiErrorCodes.PrivacyBudgetExhausted);
-        c.Headers["X-Privacy-Budget-Exhausted"].ToString().ShouldBe("true");
-        // NL-T-32 / NL-SC-32: the allowlisted typed budget figures are present.
-        c.Json.GetProperty("clientId").GetString().ShouldBe("client-1");
-        c.Json.GetProperty("consumed").GetDouble().ShouldBe(4.5);
-        c.Json.GetProperty("totalBudget").GetDouble().ShouldBe(5.0);
-        c.Body.ShouldNotContain("Epsilon privacy budget exhausted");
     }
 
     [Fact]

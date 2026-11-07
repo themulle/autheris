@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// Configuration for Federated Subgraphs & Hot Chocolate Fusion execution (P7).
+/// Configuration for Federated Subgraphs &amp; Hot Chocolate Fusion execution (P7).
 /// </summary>
 public sealed class FederationOptions
 {
@@ -12,11 +12,6 @@ public sealed class FederationOptions
     /// Enables Hot Chocolate Fusion federated GraphQL gateway execution.
     /// </summary>
     public bool Enabled { get; init; } = false;
-
-    /// <summary>
-    /// Path to the compiled Fusion Gateway Package file (.fgp) containing the composed supergraph.
-    /// </summary>
-    public string GatewayPackagePath { get; init; } = string.Empty;
 
     /// <summary>
     /// Enables Zero-Trust context forwarding (User SID, Tenant ID, Roles) to downstream subgraphs.

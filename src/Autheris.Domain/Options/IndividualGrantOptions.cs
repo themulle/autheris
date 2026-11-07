@@ -3,7 +3,7 @@ namespace Autheris.Domain.Options;
 using System.ComponentModel.DataAnnotations;
 
 /// <summary>
-/// WP-SC-16: realm profile of the time-bound individual grant policy, bound to <c>Gateway:Governance:IndividualGrants</c>.
+/// realm profile of the time-bound individual grant policy, bound to<c>Gateway:Governance:IndividualGrants</c>.
 /// Every value can only SHORTEN the built-in ceiling (<see cref="IndividualGrantCeilings"/>); the effective value is always
 /// <c>min(configured, ceiling)</c> and a value above the ceiling is rejected at startup.
 /// </summary>
@@ -26,10 +26,6 @@ public sealed class IndividualGrantOptions
     /// <summary>Individual privileged functional right (just-in-time elevation).</summary>
     [Range(1, IndividualGrantCeilings.PrivilegedDays)]
     public int PrivilegedMaxDays { get; set; } = IndividualGrantCeilings.PrivilegedDays;
-
-    /// <summary>Break-glass exception.</summary>
-    [Range(1, IndividualGrantCeilings.BreakGlassHours)]
-    public int BreakGlassMaxHours { get; set; } = IndividualGrantCeilings.BreakGlassHours;
 
     /// <summary>Service principal (direct grantee).</summary>
     [Range(1, IndividualGrantCeilings.ServicePrincipalDays)]
@@ -61,7 +57,6 @@ public static class IndividualGrantCeilings
     public const int SensitiveDays = 90;
     public const int UnmaskedDays = 30;
     public const int PrivilegedDays = 7;
-    public const int BreakGlassHours = 72;
     public const int ServicePrincipalDays = 365;
     public const int CustomerRegularDays = 90;
 }

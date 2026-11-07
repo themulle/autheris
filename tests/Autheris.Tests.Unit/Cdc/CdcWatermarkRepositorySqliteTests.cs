@@ -2,7 +2,7 @@ namespace Autheris.Tests.Unit.Cdc;
 
 using System;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Common;
@@ -29,8 +29,7 @@ public sealed class CdcWatermarkRepositorySqliteTests : IDisposable
             GovernanceDb = new GovernanceDbOptions
             {
                 ConnectionString = $"Data Source={System.IO.Path.Combine(_dir.Path, "gov.db")}",
-                SeedDemoData = false,
-                EnableOutboxProcessor = false
+                SeedDemoData = false
             }
         });
         return GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, env);

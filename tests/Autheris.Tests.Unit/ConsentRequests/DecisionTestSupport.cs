@@ -2,7 +2,7 @@ using System.Security.Claims;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

@@ -5,7 +5,7 @@ using Autheris.Api.Middleware;
 using HotChocolate.Execution;
 
 /// <summary>
-/// PLAN-OPS-150 A-150-2: reference-identifiable proof that the constant <c>{ __typename }</c> completed for one executor instance.
+/// 150 A-150-2: reference-identifiable proof that the constant<c>{ __typename }</c> completed for one executor instance.
 /// Written by <see cref="GraphQlExecutorWarmupTask"/> (or the gate's own run), read by <see cref="GraphQlExecutorGate"/>.
 /// </summary>
 public sealed class GraphQlWarmupProof
@@ -18,7 +18,7 @@ public sealed class GraphQlWarmupProof
     internal void Record(IRequestExecutor executor) => Volatile.Write(ref _warmed, executor);
 }
 
-/// <summary>Shared warm-up execution and proof rule for the task and the gate (SEC-OPS150-01/-07/-16).</summary>
+/// <summary>Shared warm-up execution and proof rule for the task and the gate (-07/-16).</summary>
 internal static class GraphQlWarmupRun
 {
     internal const string Document = "{ __typename }";

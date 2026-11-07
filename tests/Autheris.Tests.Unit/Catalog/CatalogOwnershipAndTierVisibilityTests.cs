@@ -8,13 +8,12 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Extensions.Backstage;
 using Autheris.GraphQL.Interceptors;
 using Autheris.GraphQL.Types;
 using HotChocolate;
@@ -176,90 +175,6 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
         desc.DataOwnerDelegates[0].ShouldBe("Bob Smith <bob@example.com>");
         desc.Tags.ShouldNotBeNull();
         desc.Tags!.ShouldContain("sales");
-    }
-
-    [Fact]
-    public async Task BackstageCatalogExport_PopulatesDataOwnerAndTags()
-    {
-        // Arrange
-        var table = CreateTableMetadata(Orders, "Customer orders", ["sales", "orders"]);
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
-
-        var dataOwnerRepo = Substitute.For<IDataOwnershipRepository>();
-        dataOwnerRepo.GetDataOwnersForTableAsync(Orders, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<DataOwner>>(
-            [
-                new DataOwner
-                {
-                    DisplayName = "Data Steward",
-                    Email = "steward@corp.internal",
-                    IsActive = true
-                }
-            ]));
-
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
-        {
-            Backstage = new BackstageIntegrationOptions
-            {
-                Enabled = true,
-                DefaultOwner = "group:default-team"
-            }
-        });
-
-        var exportService = new BackstageCatalogExportService(
-            options: options,
-            tableRepository: tableRepo,
-            dataOwnershipRepository: dataOwnerRepo);
-
-        // Act
-        var entities = await exportService.ExportCatalogEntitiesAsync();
-
-        // Assert
-        var tableEntity = entities.FirstOrDefault(e => e.Metadata.Name.Contains("orders"));
-        tableEntity.ShouldNotBeNull();
-        tableEntity.Spec.Owner.ShouldBe("steward@corp.internal");
-        tableEntity.Metadata.Tags.ShouldContain("sales");
-        tableEntity.Metadata.Tags.ShouldContain("orders");
-        tableEntity.Metadata.Annotations.ShouldContainKey("autheris.io/data-owner");
-        tableEntity.Metadata.Annotations["autheris.io/data-owner"].ShouldBe("steward@corp.internal");
-    }
-
-    [Fact]
-    public async Task BackstageCatalogExport_WithoutDataOwner_FallsBackToDefaultOwner()
-    {
-        // Arrange
-        var table = CreateTableMetadata(Orders, "Unowned orders", ["unowned"]);
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
-
-        var dataOwnerRepo = Substitute.For<IDataOwnershipRepository>();
-        dataOwnerRepo.GetDataOwnersForTableAsync(Orders, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<DataOwner>>([]));
-
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
-        {
-            Backstage = new BackstageIntegrationOptions
-            {
-                Enabled = true,
-                DefaultOwner = "group:platform-governance"
-            }
-        });
-
-        var exportService = new BackstageCatalogExportService(
-            options: options,
-            tableRepository: tableRepo,
-            dataOwnershipRepository: dataOwnerRepo);
-
-        // Act
-        var entities = await exportService.ExportCatalogEntitiesAsync();
-
-        // Assert
-        var tableEntity = entities.FirstOrDefault(e => e.Metadata.Name.Contains("orders"));
-        tableEntity.ShouldNotBeNull();
-        tableEntity.Spec.Owner.ShouldBe("group:platform-governance");
     }
 
     [Fact]

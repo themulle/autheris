@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// F-SEC-04: Storage provider for ReBAC relationship tuples (Google Zanzibar / OpenFGA).
+/// F-Storage provider for ReBAC relationship tuples (Google Zanzibar / OpenFGA).
 /// Manages (TenantId, User, Relation, Object) tuples with strict multi-tenant partitioning.
 /// </summary>
 public interface IRebacStore

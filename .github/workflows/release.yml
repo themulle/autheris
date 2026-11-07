@@ -14,11 +14,20 @@ on:
 permissions: {}
 
 jobs:
+  footprint:
+    name: Footprint & CI Duration Budget Gate
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/footprint-budget.yml
+
   build:
     name: Build, Attest & Sign Release Binaries
+    needs: footprint
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
       id-token: write
       attestations: write
     steps:
@@ -30,6 +39,33 @@ jobs:
             echo "Error: '$RELEASE_TAG' is not a release tag" >&2
             exit 1
           fi
+
+      - name: Derive version
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "Error: '$VERSION' does not match semver pattern" >&2
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Nightly gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          WORKFLOWS=("parity-nightly.yml" "sql-compiler-gate-nightly.yml")
+          for WF in "${WORKFLOWS[@]}"; do
+            echo "Checking last completed run on main for $WF..."
+            CONCLUSION=$(gh run list --workflow "$WF" --branch main --status completed --limit 1 --json conclusion -q '.[0].conclusion')
+            if [ "$CONCLUSION" != "success" ]; then
+              echo "::error::Nightly gate failed: $WF last completed run conclusion is '$CONCLUSION' (expected 'success')" >&2
+              exit 1
+            fi
+            echo "Workflow $WF is green (conclusion: $CONCLUSION)."
+          done
 
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,6 +118,7 @@ jobs:
               --self-contained true \
               -p:PublishSingleFile=true \
               -p:AutherisIncludeTestAuth=false \
+              -p:Version="$VERSION" \
               -o "$OUT_DIR"
 
             # Single-file bundles embed the assembly, so scan the per-RID compiled assembly (SC-04).
@@ -103,10 +140,33 @@ jobs:
             fi
           done
 
+      - name: Package Helm chart
+        run: |
+          helm package deploy/helm/autheris --version "$VERSION" --app-version "$VERSION" -d dist
+          cp "dist/autheris-${VERSION}.tgz" artifacts/
+
+      - name: Validate release version
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          bash scripts/release/validate-release-version.sh --self-test
+          mapfile -t API_DLLS < <(find src/Autheris.Api/obj/Release -type f -path "*/linux-x64/Autheris.Api.dll" -not -path "*/ref/*" -not -path "*/refint/*")
+          if [ "${#API_DLLS[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one compiled Autheris.Api.dll for linux-x64, found ${#API_DLLS[@]}"
+            exit 1
+          fi
+          IMAGE_REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
+          bash scripts/release/validate-release-version.sh "$RELEASE_TAG" "${API_DLLS[0]}" "dist/autheris-${VERSION}.tgz" "$IMAGE_REPO"
+
+      - name: Extract release notes
+        run: |
+          bash scripts/release/extract-changelog.sh "$VERSION" > dist/RELEASE_NOTES.md
+          cp dist/RELEASE_NOTES.md artifacts/
+
       - name: Generate SHA256SUMS
         run: |
           cd artifacts
-          sha256sum Autheris-* > SHA256SUMS
+          sha256sum Autheris-* autheris-* > SHA256SUMS
           cat SHA256SUMS
 
       - name: Attest Build Provenance (SLSA)
@@ -154,10 +214,15 @@ jobs:
           name: release-artifacts
           path: artifacts
 
+      - name: Prepare release notes
+        run: |
+          mkdir -p dist
+          cp artifacts/RELEASE_NOTES.md dist/RELEASE_NOTES.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: artifacts/*
-          generate_release_notes: true
+          body_path: dist/RELEASE_NOTES.md
           overwrite_files: false

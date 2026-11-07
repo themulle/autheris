@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -82,7 +82,7 @@ public sealed partial class TableAccessPolicy
 
         if (query.Metadata.IsDelegatedSource && decision.IsAllowed)
         {
-            // Task B3 (PLAN-SCALE-5000-WAVE2 / SEC-SC-13): Coarse gate on delegated sources
+            // Task B3: Coarse gate on delegated sources
             // Defers fine-grained row-level filters and column masks to native source dynamic policies (current_user())
             return decision with { CombinedRowFilterSql = null, RowPolicy = null, MandatoryRowPredicateSql = null };
         }
@@ -137,7 +137,7 @@ public sealed partial class TableAccessPolicy
 
         try
         {
-            // REQ-GOV-129 (A-1, B-consent): values are bound here, per request, into the typed policy; the cached decision stays value-free.
+            // 129 (A-1, B-consent): values are bound here, per request, into the typed policy; the cached decision stays value-free.
             var (attributes, padding) = await ResolveRecipeAttributesAsync(decision.ConsentFilterRecipe, query, ct).ConfigureAwait(false);
             var policy = _rowPolicyFactory!.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect, attributes, padding);
             var typed = policy == null
@@ -183,7 +183,7 @@ public sealed partial class TableAccessPolicy
     }
 
     /// <summary>
-    /// REQ-GOV-129 (A-1, B-vf): binds the slots of a Virtual Filter predicate for this request. Feature off or anything unresolved: deny all rows
+    /// 129 (A-1, B-vf): binds the slots of a Virtual Filter predicate for this request. Feature off or anything unresolved: deny all rows
     /// (a Virtual Filter is a restriction ANDed with the consent decision, never a grant).
     /// </summary>
     private async Task<(TrinoSqlEngine.Governance.PolicyPredicate Predicate, IReadOnlyList<CallerAttributeAuditEntry>? Audit)> BindVirtualFilterAttributesAsync(
@@ -315,7 +315,7 @@ public sealed partial class TableAccessPolicy
             return [];
         }
 
-        // WP-SC-03: ONE lookup with every identity of the caller (SIDs, aliases), its groups and its roles. Group and role mappings only match through
+        // ONE lookup with every identity of the caller (SIDs, aliases), its groups and its roles. Group and role mappings only match through
         // this call; the profile of the first SID must not hide the profiles of the other identities.
         var users = new List<string> { query.UserSid.Value };
         if (query.AllUserSids != null)

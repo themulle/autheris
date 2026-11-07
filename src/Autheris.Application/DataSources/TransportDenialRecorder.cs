@@ -21,7 +21,7 @@ public sealed record TransportDenial(
     DataSourceTransportFlags Transport,
     TransportDecisionReason Reason);
 
-/// <summary>Issue #447 (REQ-ATR-05, SEC-ATR-09): writes one audit event and one metric increment per denial; never throws.</summary>
+/// <summary>Issue #447: writes one audit event and one metric increment per denial; never throws.</summary>
 public interface ITransportDenialRecorder
 {
     Task RecordDenialAsync(TransportDenial denial, CancellationToken ct = default);
@@ -80,7 +80,7 @@ public sealed class TransportDenialRecorder : ITransportDenialRecorder
         }
         catch (Exception)
         {
-            // SEC-ATR-09: the denial still throws. A failed write is counted by IAuditWriter (autheris_audit_write_failed_total);
+            // the denial still throws. A failed write is counted by IAuditWriter (autheris_audit_write_failed_total);
             // no exception text is recorded here.
         }
     }

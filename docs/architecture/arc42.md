@@ -162,13 +162,20 @@ Contains domain models (`Table`, `Consent`, `AuditLogEntry`, `PolicyEpoch`, `Dat
 Implements high-performance multi-target SQL AST compiler pipeline:
 - `SqlAstBuilder`: ANTLR4-based parser with FAIL-LOUD validation on advanced SQL constructs (`TABLESAMPLE`, `PIVOT`, `MATCH_RECOGNIZE`).
 - `AstSecurityVisitor`: Deep tree injection of RLS predicates and column masking rules.
-- `ISqlDialectGenerator`: Native dialect emitters (T-SQL, PostgreSQL, SQLite, DuckDB, Oracle, Snowflake).
+- `ISqlDialectGenerator`: Native dialect emitters for governed data sources (SQL Server, PostgreSQL, Oracle, Databricks) and federated staging (DuckDB).
 
 ### 5.4 Autheris.Infrastructure
-Implements persistence using ADO.NET (`SqliteGovernanceRepository`, `SqlServerGovernanceRepository`, `PostgreSqlGovernanceRepository`), in-memory and Redis caching (`ConsentCacheService`), pub/sub event channels (`InProcessChannelEventBus`), policy epoch validation (`EpochValidationService`), and secret storage (`KeyVaultSecretProvider`).
+Implements governance persistence using ADO.NET (`PostgreSqlGovernanceRepository`, `SqlServerGovernanceRepository`), in-memory and Redis caching (`ConsentCacheService`), pub/sub event channels (`InProcessChannelEventBus`), policy epoch validation (`EpochValidationService`), and secret storage (`KeyVaultSecretProvider`).
 
 ### 5.5 Autheris.GraphQL, Autheris.Api & WebHost
-Configures Hot Chocolate schema, dynamic query resolvers, mutations, REST Data API (`/api/v1/data/*`), Catalog endpoints (`/api/v1/catalog/*`), TOTP endpoints (`/api/v1/auth/2fa/*`), MCP server (`/mcp`), rate-limiting middlewares, error sanitization, and traffic drain lifecycle.
+Configures Hot Chocolate schema, dynamic query resolvers, mutations, REST Data API (`/api/v1/data/*`), OData v4 (`/odata/v4/*`), Trino client protocol (`/v1/statement`), Catalog endpoints (`/api/v1/catalog/*`), TOTP endpoints (`/api/v1/auth/2fa/*`), MCP server (`/mcp`), rate-limiting middlewares, error sanitization, and traffic drain lifecycle.
+
+### 5.6 Optional Modules (`Autheris.Extensions` / Module Packages)
+Capabilities outside the core access-enforcement pipeline are packaged as optional modules enabled via `Gateway:Modules:Enabled` (or shipped in the `autheris-full` image):
+- **Lakehouse (`Lakehouse`)**: Delta Lake and Apache Iceberg v2 connectors and metadata pruning.
+- **dbt & OpenMetadata (`Dbt`, `OpenMetadata`)**: Streaming dbt artifact ingestion, model contracts, and OpenMetadata catalog synchronization.
+- **CDC & Event Webhooks (`Cdc`)**: Change Data Capture streaming (SQL Server Change Tracking, PostgreSQL logical replication) and outbound event webhooks (consent workflow webhooks remain in core).
+- **Lineage (`Lineage`)**: Downstream impact analysis and OpenLineage export (GDPR Art. 15 disclosure reporting remains in core).
 
 ---
 
@@ -251,8 +258,7 @@ sequenceDiagram
 - Sanitized responses return standardized domain codes: `FORBIDDEN`, `UNAUTHENTICATED`, `NOT_FOUND`, `INVALID_REQUEST`.
 
 ### 8.4 Enterprise Data Catalog Federation & Lineage Analysis
-- **Multi-Catalog Provider Integration**: Pluggable `IDataCatalogClient` architecture integrating **Microsoft Purview**, **Collibra**, **Alation**, and **OpenMetadata**.
-- **Mirror vs Reference Mode**: Mirroring ingests metadata, descriptions, and classifications into local governance storage; Reference mode queries external catalogs on-demand.
+- **OpenMetadata Catalog Integration**: `IDataCatalogClient` integration synchronizing metadata, descriptions, and classifications from **OpenMetadata** into local governance storage.
 - **Automated GDPR Art. 9 & PII Tagging**: Automatic detection of special categories of data under GDPR Art. 9 (health, biometrics, genetics, religious, political) enforcing `HIGH` sensitivity, mandatory four-eyes approval (`RequiresFourEyes = true`), and `REDACT` masking.
 - **Static & Operational Lineage Traversal**: Iterative BFS graph traversal over BI Dashboards, ETL Pipelines, and External Services combined with cryptographic audit log correlation to assess breaking change blast radius before schema modifications.
 - **GDPR Art. 15 Right of Access Reporting**: Aggregates all disclosed recipients, access timestamps, purposes, and masking rules over up to 365 days.
@@ -286,9 +292,14 @@ sequenceDiagram
 - **Data Health Circuit Breaker**: Tables with failing upstream `dbt test` executions are quarantined (`CircuitBreaker: Open`) to prevent serving dirty data.
 - **Model Contract Breaking-Change CI Gate**: Validates dbt model contracts against active schemas before deployment.
 
-### 8.11 Dual-Mode Enterprise Extensibility Framework
-- **In-Process C# Middlewares**: High-performance `.dll` / NuGet middlewares plugged into ASP.NET Core DI pipeline with direct AST access, zero IPC latency (< 0.1ms), and zero-copy `ReadOnlySpan<T>`.
-- **Out-of-Process gRPC Coprocess**: Polyglot gRPC interceptors for isolated microservice lifecycles.
+### 8.11 Enterprise Extensibility Framework
+- **In-Process C# Middlewares**: High-performance `.dll` / NuGet middlewares plugged into ASP.NET Core DI pipeline with direct AST access, zero IPC latency, and zero-copy `ReadOnlySpan<T>`.
+
+### 8.12 Data Governance and MCP
+- **Zero-Assumption Ingestion & Dynamic Sensitivity Classification**: Incoming schemas and documentation are ingested with fail-closed sensitivity tagging. Sensitive classifications (e.g. GDPR Art. 9, PII) trigger automated masking rules and four-eyes approval workflows.
+- **Enterprise Model Context Protocol (MCP)**: AI agents access catalog metadata, schema definitions, and governed datasets exclusively through typed MCP tools (`catalog_search`, `query_dataset`, `get_dataset_schema`). All agent tool invocations are checked against row-level security and column masking before query compilation.
+- **Offline & Air-Gapped Operation**: In-memory catalog discovery and local rule evaluation operate without outbound internet access, ensuring sensitive schema metadata never leaves the perimeter.
+- **Tamper-Evident Audit Trails**: All agent interactions, governance changes, and schema discovery operations are recorded in HMAC-SHA256 hash-chained WORM audit logs.
 
 ---
 

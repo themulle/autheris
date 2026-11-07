@@ -14,6 +14,6 @@ public sealed class SemanticOptions
     /// <summary>Cross-node staleness bound in seconds; 0 re-checks the store on every access.</summary>
     public int ManifestCacheSeconds { get; init; } = 30;
 
-    /// <summary>Maximum length of a metric filter template (SEC-112-16 a).</summary>
+    /// <summary>Maximum length of a metric filter template (16 a).</summary>
     public int MaxFilterTemplateLength { get; init; } = 2048;
 }

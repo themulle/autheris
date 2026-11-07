@@ -2,8 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Autheris.Application.OpenMetadata.Interfaces;
-using Autheris.Application.OpenMetadata.Models;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
@@ -36,7 +35,7 @@ public sealed class OpenMetadataClient : IOpenMetadataClient
         HttpClient httpClient,
         IOptions<GatewayOptions> options,
         ILogger<OpenMetadataClient> logger,
-        Autheris.Application.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
+        Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
     {
         _httpClient = httpClient;

@@ -13,7 +13,8 @@ using Autheris.Api.Security;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Paging;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -55,7 +56,7 @@ public static partial class GovernanceEndpoints
     private static TenantId ResolveRequestTenant(HttpContext context) => EndpointSecurity.GetRequestTenant(context);
 
     /// <summary>
-    /// WP-SC-10 / SEC-SC-16: keyset-paged audit listing. Tenant administrators and auditors read their tenant; a data owner reads only the
+    /// keyset-paged audit listing. Tenant administrators and auditors read their tenant; a data owner reads only the
     /// audit of one table they own. A foreign tenant is honoured for ClusterAdmin only. A malformed cursor is a 400, never a silent restart.
     /// </summary>
     internal static async Task<IResult> ListAuditPageAsync(
@@ -126,7 +127,7 @@ public static partial class GovernanceEndpoints
     }
 
     /// <summary>
-    /// WP-SC-10: keyset-paged consent / grant listing (also the <c>clamped=true</c> report of legacy individual grants, WP-SC-16 rule 5).
+    /// keyset-paged consent / grant listing (also the<c>clamped=true</c>report of legacy individual grants, 16 rule 5).
     /// Same authorization as the audit listing: tenant administrators and auditors for the tenant, a data owner for one owned table.
     /// </summary>
     internal static async Task<IResult> ListGrantsPageAsync(
@@ -260,90 +261,6 @@ public static partial class GovernanceEndpoints
             EvaluateFieldSunsettingRequest? request,
             ISchemaSunsettingService sunsettingService,
             HttpContext context) => EvaluateSunsettingAsync(request, sunsettingService, context)).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
-
-        // P12: Federated Differential Privacy & Dynamic Epsilon-Perturbation Engine
-        app.MapGet("/api/governance/differential-privacy/budget/{clientId}", async (
-            string clientId,
-            IDifferentialPrivacyEngine dpEngine,
-            HttpContext context) =>
-        {
-            var authenticatedClientId = context.User.FindFirst("client_id")?.Value
-                                        ?? context.User.FindFirst("azp")?.Value
-                                        ?? context.User.FindFirst("sub")?.Value
-                                        ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                                        ?? context.User.Identity?.Name;
-
-            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
-
-            var targetKey = ResolveTenantBoundClientId(context, clientId, out var isForbidden);
-            if (isForbidden)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            if (!isPrivileged && !string.Equals(clientId, authenticatedClientId, StringComparison.OrdinalIgnoreCase))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var budget = await dpEngine.GetBudgetAsync(targetKey, context.RequestAborted);
-            return Results.Ok(budget);
-        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-
-        app.MapPost("/api/governance/differential-privacy/budget/{clientId}/reset", async (
-            string clientId,
-            IDifferentialPrivacyEngine dpEngine,
-            HttpContext context) =>
-        {
-            var isCanonicalClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
-            var isPrivileged = isCanonicalClusterAdmin ||
-                               GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
-            if (!isPrivileged)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            // SEC M-4: Non-canonical cluster admins may only reset clients within their tenant scope
-            var targetKey = ResolveTenantBoundClientId(context, clientId, out var isForbidden);
-            if (isForbidden)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            // SEC SG-29 / EP-02: Prevent self-reset of privacy budget across all identity forms and tenant-qualifications
-            if (IsSelfBudgetReset(context, targetKey))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var callerId = EndpointSecurity.GetCallerIdentity(context)
-                         ?? context.User.FindFirst("client_id")?.Value
-                         ?? "unknown";
-
-            await dpEngine.ResetBudgetAsync(targetKey, context.RequestAborted);
-
-            var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-            await auditRepo.RecordRequiredAsync(new AuditLogEntry
-            {
-                TenantId = EndpointSecurity.GetRequestTenant(context),
-                EventType = AuditEventTypes.AuditConfigChanged,
-                ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
-                TargetTable = clientId,
-                Decision = "ALLOW",
-                TraceId = context.TraceIdentifier,
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    clientId,
-                    targetKey,
-                    resetBy = callerId
-                })
-            }, CancellationToken.None).ConfigureAwait(false);
-
-            return Results.Ok(new { message = $"Privacy budget reset for client '{clientId}'." });
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
-
-        app.MapPost("/api/governance/differential-privacy/perturb", HandlePerturbAsync).RequireAuthorization()
-          .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // F-AI-12-B: EU AI Act Article 10 Compliance Certificate Endpoint
         app.MapGet("/api/governance/eu-ai-act/article-10-certificate", async (
@@ -508,100 +425,5 @@ public static partial class GovernanceEndpoints
             return Results.Ok(new { message = "OpenLineage sync completed successfully." });
         }
         return Results.StatusCode(StatusCodes.Status502BadGateway);
-    }
-
-    internal static bool IsSelfBudgetReset(HttpContext context, string targetKey)
-    {
-        var callerForms = new List<string>();
-
-        void AddIfNotEmpty(string? val)
-        {
-            if (!string.IsNullOrWhiteSpace(val))
-            {
-                callerForms.Add(val.Trim());
-            }
-        }
-
-        AddIfNotEmpty(context.User.FindFirst("client_id")?.Value);
-        AddIfNotEmpty(context.User.FindFirst("azp")?.Value);
-        AddIfNotEmpty(context.User.FindFirst("sub")?.Value);
-        AddIfNotEmpty(context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-        AddIfNotEmpty(context.User.Identity?.Name);
-        AddIfNotEmpty(EndpointSecurity.GetCallerIdentity(context));
-
-        // Fail-closed: caller without any resolvable identity is treated as self-reset / denied
-        if (callerForms.Count == 0)
-        {
-            return true;
-        }
-
-        foreach (var callerId in callerForms)
-        {
-            if (string.Equals(callerId, targetKey, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            var callerKey = ResolveTenantBoundClientId(context, callerId, out _);
-            if (string.Equals(callerKey, targetKey, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    internal static async Task<IResult> HandlePerturbAsync(
-        DifferentialPrivacyPerturbationRequest request,
-        IDifferentialPrivacyEngine dpEngine,
-        HttpContext context)
-    {
-        try
-        {
-            var authenticatedClientId = context.User.FindFirst("client_id")?.Value
-                                        ?? context.User.FindFirst("azp")?.Value
-                                        ?? context.User.FindFirst("sub")?.Value
-                                        ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                                        ?? context.User.Identity?.Name;
-
-            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
-
-            if (!isPrivileged || string.IsNullOrWhiteSpace(request.ClientId))
-            {
-                if (string.IsNullOrWhiteSpace(authenticatedClientId))
-                {
-                    return Results.Unauthorized();
-                }
-                request = request with { ClientId = authenticatedClientId };
-            }
-
-            var targetKey = ResolveTenantBoundClientId(context, request.ClientId, out var isForbidden);
-            if (isForbidden)
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-
-            var boundRequest = request with { ClientId = targetKey };
-            var result = await dpEngine.PerturbAsync(boundRequest, context.RequestAborted);
-            context.Response.Headers["X-Privacy-Budget-Consumed"] = result.ConsumedEpsilon.ToString("F2");
-            context.Response.Headers["X-Privacy-Budget-Remaining"] = result.RemainingEpsilon.ToString("F2");
-            return Results.Ok(result with { ClientId = request.ClientId });
-        }
-        catch (PrivacyBudgetExhaustedException ex)
-        {
-            context.Response.Headers["X-Privacy-Budget-Exhausted"] = "true";
-            ApiProblems.LogFailure(context, ex, ApiErrorCodes.PrivacyBudgetExhausted);
-            return ApiProblems.TooManyRequests(
-                ApiErrorCodes.PrivacyBudgetExhausted,
-                "The privacy budget for this client is exhausted.",
-                context,
-                extraExtensions: new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["clientId"] = ex.ClientId,
-                    ["consumed"] = ex.ConsumedEpsilon,
-                    ["totalBudget"] = ex.TotalBudget
-                });
-        }
     }
 }

@@ -8,7 +8,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -38,7 +38,7 @@ public sealed class EffectiveAccessExplanationService(
     /// <summary>Row filter description for callers who are not allowed to see the filter definition.</summary>
     internal const string RowFilterDescription = "Row filter applies (defined by data owner).";
 
-    /// <summary>REQ-GOV-129 (V-129-10): all a caller (and an owner) learns of a filter that depends on a caller attribute: that one applies. No attribute name, no value.</summary>
+    /// <summary>129 (V-129-10): all a caller (and an owner) learns of a filter that depends on a caller attribute: that one applies. No attribute name, no value.</summary>
     internal const string AttributeRowFilterDescription = "Row filter applies (depends on an attribute of the caller).";
 
     public async Task<EffectiveTableAccessDto> ExplainMyAccessAsync(
@@ -127,7 +127,7 @@ public sealed class EffectiveAccessExplanationService(
         var maskedCols = new List<string>();
         var deniedCols = new List<string>();
 
-        // REQ-GOV-143 (SEC-GOV143-09): only the subject's own decision, only non-Deny columns, no scope name and no rule or consent id.
+        // only the subject's own decision, only non-Deny columns, no scope name and no rule or consent id.
         var restrictedScope = decision.ScopeClearance is not null;
         var scopeClearRequired = restrictedScope ? new List<string>() : null;
 
@@ -179,7 +179,7 @@ public sealed class EffectiveAccessExplanationService(
             }
         }
 
-        // PLAN-GOV-158-INC1 decision 9 (SEC-GOV158I1-09): descriptions come only from the contributing consents (the set above), the most specific
+        // INC1 decision 9: descriptions come only from the contributing consents (the set above), the most specific
         // grantee first (user or service principal, then group, then role), then the earliest expiry, then the id. Output only through ForOutput.
         var describing = applicableConsents
             .OrderBy(c => GranteeSpecificity(c.GranteeType))

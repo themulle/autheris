@@ -1,6 +1,6 @@
 using System.Reflection;
-using Autheris.Application.Data.Services;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence;

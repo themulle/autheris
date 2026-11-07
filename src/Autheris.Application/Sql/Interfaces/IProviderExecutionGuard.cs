@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 /// <summary>
-/// SEC-X1-10 (X1.2): provider-specific protection around the execution of a governed statement. SQLite has no server-side statement
+/// 10 (X1.2): provider-specific protection around the execution of a governed statement. SQLite has no server-side statement
 /// timeout (<c>CommandTimeout</c> is only a busy timeout), so a recursive CTE would run unbounded and hold a worker thread; its guard
 /// interrupts the statement at the timeout and on cancellation. The executor runs the execution of every governed statement (the read,
 /// including the streaming of its rows, and the DML) through this guard. The default passes through.

@@ -34,7 +34,7 @@ public static class SqlDialectMapper
         }
     }
 
-    /// <summary>SEC-X1-14: never defaults. A dialect without a mapping throws, so a new enum value cannot be mapped silently.</summary>
+    /// <summary>never defaults. A dialect without a mapping throws, so a new enum value cannot be mapped silently.</summary>
     public static TargetSqlDialect ToTargetDialect(DatabaseDialect dialect) =>
         TryToTargetDialect(dialect, out var target)
             ? target
@@ -51,7 +51,7 @@ public static class SqlDialectMapper
     /// X1.3, WebSQL admission: a dialect is executable when it maps to an AST dialect, the connection factory supports it and its
     /// capability entry has the tier <see cref="DialectSupportTier.Production"/>. A tier flip therefore admits a dialect, which is why
     /// <c>DialectCapabilityTable.cs</c> is under security CODEOWNERS and the admitted set is pinned by <c>Admission_ExactSet</c>.
-    /// Databricks maps and connects but stays Experimental until X1-DBX (S-4); DuckDb, Snowflake and Ansi are not database dialects.
+    /// Databricks maps and connects but stays Experimental until X1-DBX (S-4); DuckDb and Ansi are not database dialects.
     /// </summary>
     public static bool IsExecutable(DatabaseDialect dialect) => IsExecutable(dialect, DialectCapabilityTable.Default);
 

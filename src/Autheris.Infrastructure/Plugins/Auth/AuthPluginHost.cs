@@ -15,6 +15,7 @@ using Autheris.Application.Plugins.Auth;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Plugins.Auth;
+using Autheris.Infrastructure.Modules.Trust;
 using Autheris.Infrastructure.Plugins;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -128,8 +129,20 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
             return 0;
         }
 
-        var dllFiles = Directory.GetFiles(fullDirectoryPath, "*.dll", SearchOption.AllDirectories);
-        if (dllFiles.Length == 0)
+        var rawDllFiles = Directory.GetFiles(fullDirectoryPath, "*.dll", SearchOption.AllDirectories);
+        var dllFiles = new List<string>(rawDllFiles.Length);
+        foreach (var candidateDll in rawDllFiles)
+        {
+            if (IntegrityHashHelper.ContainsModuleManifestInHierarchy(fullDirectoryPath, candidateDll))
+            {
+                _logger.LogWarning("Skipping signed module assembly '{DllPath}' during auth plugin discovery.", candidateDll);
+                continue;
+            }
+
+            dllFiles.Add(candidateDll);
+        }
+
+        if (dllFiles.Count == 0)
         {
             return 0;
         }
@@ -177,7 +190,7 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
                 continue;
             }
 
-            // SEC M-27 / SEC-BL08-01: Hash and load the SAME bytes (zero TOCTOU window)
+            // SEC M-27 / Hash and load the SAME bytes (zero TOCTOU window)
             var verifiedBytes = trustList != null
                 ? trustList.ReadVerifiedBytes(fullDllPath)
                 : File.ReadAllBytes(fullDllPath);
@@ -328,7 +341,7 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
 
                 if (!execResult.Success)
                 {
-                    // SEC-BL08-04: Multi-provider fail-closed
+                    // Multi-provider fail-closed
                     return PluginRoleEnrichmentExecutionResult.Failed(execResult.ErrorCode ?? "AUTH_PLUGIN_FAILED", execResult.ErrorMessage);
                 }
 
@@ -401,7 +414,7 @@ public sealed class AuthPluginHost : IAuthPluginHost, IDisposable
 
                 if (hookResult.Outcome == PluginAuthorizationOutcome.Deny)
                 {
-                    // SEC-BL08-04: Short circuit on first Deny
+                    // Short circuit on first Deny
                     RecordHookDecisionAudit(context, hook.HookName, "DENY", hookResult.ReasonCode, hookResult.ClientMessage);
                     return hookResult;
                 }

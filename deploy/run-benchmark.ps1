@@ -184,7 +184,7 @@ $scenarioInfo = switch ($Scenario) {
             EnableEnterprise = "true"
             EnableSqlServer = "false"
             Profiles = "enterprise"
-            Description = "Enterprise Extensions (Purview, Collibra, Alation, OpenMetadata, ITSM, dbt)"
+            Description = "Enterprise Extensions (OpenMetadata, dbt)"
         }
     }
     "azure" {

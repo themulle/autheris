@@ -6,7 +6,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 /// <summary>
-/// Custom W3C trace context propagator enforcing SEC-OT06-09 and SEC-OT06-11:
+/// Custom W3C trace context propagator enforcing
 /// - Validates and extracts W3C traceparent (version 00, non-zero trace and span IDs).
 /// - Validates tracestate (length &lt;= 512 bytes, &lt;= 32 members).
 /// - Completely drops incoming and outbound baggage.
@@ -100,7 +100,7 @@ public sealed class AutherisDistributedContextPropagator : DistributedContextPro
         object? carrier,
         PropagatorGetterCallback? getter)
     {
-        // SEC-OT06-11: Baggage is never extracted
+        // Baggage is never extracted
         return null;
     }
 }

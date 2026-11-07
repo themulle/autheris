@@ -2,7 +2,7 @@ namespace Autheris.Application.Governance.Interfaces;
 
 using Autheris.Domain.Common;
 
-/// <summary>Issue #111 WP-6: what a dbt tag import did for one table (counts only, never tag values).</summary>
+/// <summary>Issue #111 what a dbt tag import did for one table (counts only, never tag values).</summary>
 public sealed record DatasetTagImportResult(bool Changed, int InvalidDropped, int OverflowDropped, bool Failed)
 {
     public static DatasetTagImportResult Unchanged { get; } = new(false, 0, 0, false);

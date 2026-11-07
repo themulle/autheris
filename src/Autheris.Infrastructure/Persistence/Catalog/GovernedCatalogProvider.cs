@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Data.Common;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Common;
@@ -333,7 +333,7 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
                 return (null, string.Empty);
             }
 
-            // With NUMERIC or INTEGER affinity '007' and '7' compare equal: such a column cannot isolate tenants (SEC-X1-09).
+            // With NUMERIC or INTEGER affinity '007' and '7' compare equal: such a column cannot isolate tenants.
             if (target == TargetSqlDialect.Sqlite && SqliteTypeAffinity.Of(tenant.NativeType) != SqliteAffinity.TextAffinity)
             {
                 return (null, string.Empty);

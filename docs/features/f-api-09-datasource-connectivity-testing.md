@@ -1,7 +1,6 @@
 # F-API-09: Pre-Flight Datasource Connectivity Testing & Secret Scrubbing
 
-**Status:** [Done] (100% GA – Production-Ready)  
-**Components:** [`DatasourceTestingService.cs`](file:///root/autheris/src/Autheris.Application/Catalog/Services/DatasourceTestingService.cs), [`IDatasourceTestingService.cs`](file:///root/autheris/src/Autheris.Application/Catalog/Interfaces/IDatasourceTestingService.cs), [`CatalogApiEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs), [`EgressUrlPolicy.cs`](file:///root/autheris/src/Autheris.Application/Security/EgressUrlPolicy.cs), [`SecretScrubber.cs`](file:///root/autheris/src/Autheris.Domain/Security/SecretScrubber.cs)
+**Components:** [`DatasourceTestingService.cs`](../../src/Autheris.Application/Catalog/Services/DatasourceTestingService.cs), [`IDatasourceTestingService.cs`](../../src/Autheris.Application/Catalog/Interfaces/IDatasourceTestingService.cs), [`CatalogApiEndpoints.cs`](../../src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs), [`EgressUrlPolicy.cs`](../../src/Autheris.Application/Security/EgressUrlPolicy.cs), [`SecretScrubber.cs`](../../src/Autheris.Application/Security/SecretScrubber.cs)
 
 ---
 
@@ -28,7 +27,7 @@ When onboarding new upstream databases (PostgreSQL, SQL Server, Oracle, Snowflak
 
 ```mermaid
 flowchart TD
-    CLIENT["Admin / DevPortal Client<br/>POST /api/v1/catalog/datasources/{id}/test"] --> AUTH["Tenant & Role Check<br/>(ClusterAdmin or DomainOwner)"]
+    CLIENT["Admin Client<br/>POST /api/v1/catalog/datasources/{id}/test"] --> AUTH["Tenant & Role Check<br/>(ClusterAdmin or DomainOwner)"]
     AUTH --> SSRF{"EgressUrlPolicy<br/>Check Host/IP"}
     
     SSRF -- Loopback / Cloud Metadata --> BLOCKED["SecurityException<br/>HTTP 400 Bad Request<br/>'Target IP/host is prohibited by egress policy.'"]

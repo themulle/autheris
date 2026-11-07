@@ -8,7 +8,7 @@ namespace Autheris.Infrastructure.Persistence.Catalog;
 
 /// <summary>
 /// PostgreSQL: every catalog relation and function is <c>pg_catalog</c>-qualified, so a relation of the same name earlier on
-/// <c>search_path</c> cannot shadow it (SEC-X1-09). The type comes from <c>pg_catalog.format_type</c> (<c>numeric(18,3)</c>,
+/// <c>search_path</c>cannot shadow it. The type comes from<c>pg_catalog.format_type</c> (<c>numeric(18,3)</c>,
 /// <c>character varying(64)</c>); a column of a non-collatable type has a null collation.
 /// </summary>
 public sealed class PostgreSqlColumnMetadataReader : IColumnMetadataReader

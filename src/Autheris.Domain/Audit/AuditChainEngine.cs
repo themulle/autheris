@@ -156,7 +156,7 @@ public static class AuditChainEngine
     }
 
     /// <summary>
-    /// SEC-AUD161-02: Builds the canonical payload string for a purge checkpoint anchor.
+    /// Builds the canonical payload string for a purge checkpoint anchor.
     /// Format: PURGE_CHECKPOINT_V1|firstSurvivingSeq|survivingPrevHash|purgedCount|purgedThroughUtc:O|createdAtUtc:O
     /// </summary>
     public static string BuildPurgeCheckpointPayload(
@@ -183,7 +183,7 @@ public static class AuditChainEngine
     }
 
     /// <summary>
-    /// SEC-AUD161-02: Computes the HMAC-SHA256 signature for a purge checkpoint anchor (or SHA-256 fallback if no key).
+    /// Computes the HMAC-SHA256 signature for a purge checkpoint anchor (or SHA-256 fallback if no key).
     /// </summary>
     public static string ComputePurgeCheckpointSignature(
         byte[]? hmacKey,
@@ -226,7 +226,7 @@ public static class AuditChainEngine
     }
 
     /// <summary>
-    /// SEC-AUD161-02: Verifies the HMAC-SHA256 signature of a purge checkpoint using constant-time comparison.
+    /// Verifies the HMAC-SHA256 signature of a purge checkpoint using constant-time comparison.
     /// </summary>
     public static bool VerifyPurgeCheckpointSignature(
         byte[]? hmacKey,

@@ -2,7 +2,7 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -48,7 +48,6 @@ public sealed class SqlServerVirtualFilterContractTests : IAsyncLifetime
             {
                 Provider = "SqlServer",
                 ConnectionString = _db!.ConnectionString,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
         }), env);

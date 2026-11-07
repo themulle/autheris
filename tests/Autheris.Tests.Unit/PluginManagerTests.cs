@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Plugins;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -177,5 +177,53 @@ public sealed class PluginManagerTests
         using var manager = new PluginManager(NullLogger<PluginManager>.Instance);
         var count = manager.LoadPluginsFromDirectory("/non/existent/plugins/dir");
         count.ShouldBe(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Signed_module_dll_is_not_loaded_as_plugin()
+    {
+        var tempPluginDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"autheris-plugin-mod-{Guid.NewGuid():N}");
+        using var ecdsa = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+
+        try
+        {
+            System.IO.Directory.CreateDirectory(tempPluginDir);
+            var dllBytes = Autheris.Tests.Unit.Hosting.ModulePackageBuilder.GetValidModuleDllBytes();
+            var dllSha = Autheris.Infrastructure.Modules.Trust.IntegrityHashHelper.ComputeSha256HexLower(dllBytes);
+            var dllPath = System.IO.Path.Combine(tempPluginDir, "Sample.TestModule01.dll");
+            System.IO.File.WriteAllBytes(dllPath, dllBytes);
+
+            var manifest = Autheris.Tests.Unit.Hosting.ModulePackageBuilder.CreateSignedManifest(
+                ecdsa,
+                files: [new Autheris.Infrastructure.Modules.Trust.ModuleManifestFile("Sample.TestModule01.dll", dllSha)]);
+            System.IO.File.WriteAllText(
+                System.IO.Path.Combine(tempPluginDir, "module.json"),
+                Autheris.Tests.Unit.Hosting.ModulePackageBuilder.SerializeManifestJson(manifest));
+
+            var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions
+            {
+                Plugins = new Autheris.Domain.Options.PluginsOptions
+                {
+                    TrustedPluginHashes =
+                    {
+                        ["Sample.TestModule01.dll"] = dllSha,
+                    },
+                },
+            });
+
+            using var manager = new PluginManager(NullLogger<PluginManager>.Instance, options: options);
+            var loaded = manager.LoadPluginsFromDirectory(tempPluginDir);
+
+            loaded.ShouldBe(0);
+            manager.GetAllPlugins().ShouldBeEmpty();
+        }
+        finally
+        {
+            if (System.IO.Directory.Exists(tempPluginDir))
+            {
+                System.IO.Directory.Delete(tempPluginDir, recursive: true);
+            }
+        }
     }
 }

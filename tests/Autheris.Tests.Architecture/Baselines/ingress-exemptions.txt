@@ -7,7 +7,6 @@
 #   executor <path>    src file that references IDataSourceExecutor, GovernedConnectorReader, ReadRawAsync, ExecuteCoreAsync or an IAutherisConnector(Registry|Factory).
 
 # --- routes without IngressTransportMetadata (each verified to reach no C1..C5 choke point) ---
-route / | static docs, swagger or Nitro portal page; no data access
 route /api/admin/tenant-registry/{tenantId}/resolve-collision | admin route (tenant registry, token revocation); governance state only
 route /api/admin/tokens/revoke | admin route (tenant registry, token revocation); governance state only
 route /api/auth/login | auth, dev-persona or portal route; no governed data access
@@ -44,9 +43,6 @@ route /api/governance/classification/transition | governance admin route (Catalo
 route /api/governance/consents/apply | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/datasources | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/datasources/{id}/refresh-physical-keys | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/differential-privacy/budget/{clientId} | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/differential-privacy/budget/{clientId}/reset | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/differential-privacy/perturb | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/eu-ai-act/article-10-certificate | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/gdpr/export-pdf | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/hitl/approve | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
@@ -64,16 +60,7 @@ route /api/governance/sunsetting/rules | governance admin route (CatalogApiEndpo
 route /api/governance/system/health | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/system/metrics | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/system/resource-groups | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/integrations/backstage/catalog-entities | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/integrations/backstage/catalog-entities/{name} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/integrations/backstage/catalog-info.yaml | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/lineage/openlineage/sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/check | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/publish | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/{service}/history | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/{service}/latest | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/schema-registry/services | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/v1/catalog/datahub/events | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/cdc/events | CDC ingestion: the caller pushes the event body and the response carries only an event id; no source is read (Streaming services have no source-reader dependency, CdcRoutesReachNoSourceReaderTests)
 route /api/v1/cdc/streams | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/streams/{id}/reset-watermark | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
@@ -109,7 +96,6 @@ route /api/v1/governance/caller-attributes/service-sets | governance, consent, R
 route /api/v1/governance/caller-attributes/service-sets/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/caller-attributes/service-sets/reject | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/caller-attributes/simulate | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/governance/catalog/webhook/{provider} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/config-sync/status | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/consents/apply | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/consents/bundle | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
@@ -141,22 +127,13 @@ route /api/v1/tenants/{tenantId}/governance/rights/{realmId}/ | governance, cons
 route /api/v1/tenants/{tenantId}/governance/rights/{realmId}/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/lifecycle/deprovision | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/lifecycle/locks/{realmId}/{userKey} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/webhooks/catalog | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/webhooks/config-sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/webhooks/itsm/status-change | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/webhooks/jira | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/webhooks/openmetadata | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
-route /api/webhooks/servicenow | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /docs | static docs, swagger or Nitro portal page; no data access
-route /getting-started | static docs, swagger or Nitro portal page; no data access
 route /health/live | health probe or metrics; no governed data access
 route /health/ready | health probe or metrics; no governed data access
 route /metrics | health probe or metrics; no governed data access
 route /odata/v4/$swagger | static docs, swagger or Nitro portal page; no data access
-route /portal/2fa/enroll | auth, dev-persona or portal route; no governed data access
-route /portal/2fa/enroll/verify | auth, dev-persona or portal route; no governed data access
-route /portal/approvals | auth, dev-persona or portal route; no governed data access
-route /portal/approvals/{ticketId}/step-up | auth, dev-persona or portal route; no governed data access
 route /scim/v2/{realmId}/Groups/ | SCIM provisioning route; identity store only
 route /scim/v2/{realmId}/Groups/{id} | SCIM provisioning route; identity store only
 route /scim/v2/{realmId}/ResourceTypes | SCIM provisioning route; identity store only
@@ -174,32 +151,29 @@ scope src/Autheris.Api/Configuration/Validation/DataSourceTransportConfiguration
 scope src/Autheris.Api/Extensions/DependencyInjection/DataApiServiceExtensions.cs | exempt: VirtualSystemTablesHostedService registration; reaches no governed data
 scope src/Autheris.Api/Hosting/Warmup/GraphQlExecutorGate.cs | exempt: GraphQL warmup probe/eviction Task.Run; reaches no governed data
 scope src/Autheris.Api/Hosting/Warmup/StartupWarmupService.cs | exempt: startup warmup Task.Run bound; no request ingress, reaches no governed data
+scope src/Autheris.Application/Audit/AuditGroupCommitSink.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Audit/AuditRetentionPurgeWorker.cs | exempt: audit retention purge; reaches no governed data
-scope src/Autheris.Application/Auditing/AuditGroupCommitSink.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Caching/SingleFlightKeySetCache.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Caching/TableCache/TableCacheManager.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Catalog/Search/OllamaEmbeddingGenerator.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Events/InMemoryGatewayEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Governance/Caching/PolicyEpochGuard.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Governance/Services/CatalogVisibilityMetrics.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Hosting/ClusterPartitionedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Hosting/ClusterScheduledService.cs | exempt: cluster-scheduled lease runner; reaches no governed data
-scope src/Autheris.Application/Jobs/Services/AsyncJobScheduler.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Application/Jobs/Services/AsyncQueryJobBackgroundWorker.cs | copy: re-stamps the ingress transport captured at submission
-scope src/Autheris.Application/Mcp/Services/HitLStepUpApprovalService.cs | exempt: approval bookkeeping; reaches no governed data
 scope src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs | exempt: procedure registry sync; reaches no governed data
-scope src/Autheris.Application/Serialization/ArrowFlightSqlServer.cs | copy: stamps ArrowFlight ingress into its scopes
+scope src/Autheris.Application/Runtime/Hosting/ClusterPartitionedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
+scope src/Autheris.Application/Runtime/Hosting/ClusterScheduledService.cs | exempt: cluster-scheduled lease runner; reaches no governed data
+scope src/Autheris.Application/Runtime/Jobs/Services/AsyncJobScheduler.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
+scope src/Autheris.Application/Runtime/Jobs/Services/AsyncQueryJobBackgroundWorker.cs | copy: re-stamps the ingress transport captured at submission
 scope src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs | copy: copies the ingress transport into the new scope (stamp site)
+scope src/Autheris.Application/State/Caching/SingleFlightKeySetCache.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
+scope src/Autheris.Application/State/Caching/TableCache/TableCacheManager.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Streaming/Services/CdcStreamTailHub.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Streaming/Services/CdcWebhookDeliveryService.cs | copy: stamps Rest ingress for webhook outbox delivery
 scope src/Autheris.Application/Webhooks/WebhookDeliveryHostedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Connectors/SqlConnector.cs | copy: copies ConnectorSessionContext.Items into its scope
+scope src/Autheris.Infrastructure/Governance/ConsentRecertificationHostedService.cs | exempt: consent recertification; governance state only
 scope src/Autheris.Infrastructure/Health/CachedGatewayHealthCheckService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Infrastructure/Itsm/ConsentRecertificationHostedService.cs | exempt: consent recertification; governance state only
-scope src/Autheris.Infrastructure/Itsm/ItsmOutboxDispatcherHostedService.cs | exempt: ITSM outbox dispatch; governance state only
 scope src/Autheris.Infrastructure/Messaging/InProcessChannelEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Messaging/RedisEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Observability/ConsumerUsageFlushWorker.cs | exempt: usage flush; governance state only
@@ -212,11 +186,11 @@ scope src/Autheris.Infrastructure/RateLimiting/InMemoryRateLimiterService.cs | e
 executor src/Autheris.Api/Extensions/DependencyInjection/GatewayExecutionServiceExtensions.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Api/Extensions/DependencyInjection/GatewaySqlEngineServiceExtensions.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Analytics/GovernedAggregationService.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Connectors/Adapters/LegacyDataSourceExecutorAdapter.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Connectors/GovernedConnectorReader.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Connectors/IAutherisConnectorFactory.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Connectors/IAutherisConnectorRegistry.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Application/Interfaces/IDataSourceExecutor.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/Common/Interfaces/IDataSourceExecutor.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/DataSources/Connectors/Adapters/LegacyDataSourceExecutorAdapter.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/DataSources/Connectors/GovernedConnectorReader.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/DataSources/Connectors/IAutherisConnectorFactory.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
+executor src/Autheris.Application/DataSources/Connectors/IAutherisConnectorRegistry.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Olap/DuckDbOlapEngine.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Olap/FederatedStagingService.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Olap/OlapStagingService.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
@@ -224,9 +198,6 @@ executor src/Autheris.Application/Services/DeclarativeHttpDataSourceExecutor.cs 
 executor src/Autheris.Application/Services/GatewayExecutionService.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Services/SqlTableReadExecutor.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Extensions/Lakehouse/LakehouseServiceCollectionExtensions.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Extensions/Lakehouse/Services/DeltaLakeDataSourceExecutor.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
-executor src/Autheris.Extensions/Lakehouse/Services/LakehouseDataSourceExecutor.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Infrastructure/Connectors/InMemoryConnectorRegistry.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Infrastructure/Connectors/SqlConnector.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)
 executor src/Autheris.Infrastructure/Plugins/PluginHttpDataSourceExecutor.cs | reviewed data-execution reference (choke point, executor implementation, interface or DI wiring)

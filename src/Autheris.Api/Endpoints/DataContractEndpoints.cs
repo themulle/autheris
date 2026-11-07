@@ -37,27 +37,6 @@ public static class DataContractEndpoints
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin)
           .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        // 3. DataHub Inbound Webhook / Events Emitter
-        app.MapPost("/api/v1/catalog/datahub/events", async (
-            HttpContext context,
-            IDataHubCatalogClient dataHubClient) =>
-        {
-            var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
-                context.Request,
-                10 * 1024 * 1024,
-                "Event payload exceeds maximum allowed size (10 MB).",
-                context.RequestAborted);
-            if (payload == null)
-            {
-                return tooLarge!;
-            }
-
-            var success = await dataHubClient.IngestMetadataChangeEventAsync(payload, context.RequestAborted);
-            return success ? Results.Ok(new { received = true }) : ApiProblems.BadRequest(ApiErrorCodes.DataContractInvalid, "The event payload is invalid.");
-        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-          .WithRequestBodyLimit(10 * 1024 * 1024)
-          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
-
         return app;
     }
 

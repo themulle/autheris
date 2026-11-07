@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Data.Common;
 using System.Security.Claims;
 using System.Text.Json;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
 using Autheris.Application.Procedures.Tools;
@@ -55,7 +55,7 @@ public class ProcedureRowBudgetAndScanCapTests
         public List<AuditLogEntry> AuditEntries { get; } = [];
         public List<int> Budgets { get; } = [];
         public ProcedureEndpointsOptions Procedures { get; set; } = new() { MaxRows = 10 };
-        public global::Autheris.Application.Interfaces.ITableReadConcurrencyGate? Gate { get; set; }
+        public global::Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate? Gate { get; set; }
         public CapturingLogger<GovernedProcedureExecutionService> Logger { get; } = new();
 
         public GovernedProcedureExecutionService Create()
@@ -606,7 +606,7 @@ public class ProcedureRowBudgetAndScanCapTests
     public async Task T_PROC152I2_08_Limit_Invalid_LeaseDenied_Is429_NotValidation(string limit)
     {
         var f = Active(scoped: false, total: 100);
-        f.Gate = Substitute.For<global::Autheris.Application.Interfaces.ITableReadConcurrencyGate>();
+        f.Gate = Substitute.For<global::Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate>();
         f.Gate.TryEnter(Arg.Any<string>(), Arg.Any<int>()).Returns((IDisposable?)null);
 
         await Should.ThrowAsync<GatewayThrottledException>(() => RunWith(f, Inputs(limit)));

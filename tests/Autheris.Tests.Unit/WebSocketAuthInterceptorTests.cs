@@ -83,9 +83,9 @@ public sealed class WebSocketAuthInterceptorTests
         return (session, payload, httpContext);
     }
 
-    private static Autheris.Application.Interfaces.ISocketTokenValidator CreateValidator(string token, ClaimsPrincipal? principal)
+    private static Autheris.Application.Common.Interfaces.ISocketTokenValidator CreateValidator(string token, ClaimsPrincipal? principal)
     {
-        var validator = NSubstitute.Substitute.For<Autheris.Application.Interfaces.ISocketTokenValidator>();
+        var validator = NSubstitute.Substitute.For<Autheris.Application.Common.Interfaces.ISocketTokenValidator>();
         validator.ValidateTokenAsync(token, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult((principal != null, principal)));
         return validator;

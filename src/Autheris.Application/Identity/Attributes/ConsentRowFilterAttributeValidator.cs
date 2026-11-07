@@ -7,7 +7,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// Save-time rules of consent row filters that carry caller attributes (PLAN-GOV-129 A-9, V-129-4, BC-129-11, SEC-129-16). The message names
+/// Save-time rules of consent row filters that carry caller attributes (129 A-9, V-129-4, BC-129-11). The message names
 /// the filter's column and the rule, never a value. Two layers: <see cref="ValidateShape"/> needs nothing from the registry (the three
 /// repositories run it at their insert, so no writer can bypass it) and <see cref="ValidateAgainstRegistry"/> (the decorating repository).
 /// </summary>

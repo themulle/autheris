@@ -2,7 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Hosting.Warmup;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;

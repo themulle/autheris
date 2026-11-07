@@ -9,10 +9,10 @@ Dieser Leitfaden beschreibt die End-to-End-Integration von **dbt Core / dbt Clou
 Moderne Data-Mesh- und Analytics-Teams nutzen dbt für Transformationen, Datenqualitätsprüfungen (`dbt test`) und Schemaverträge (`contract: { enforced: true }`).
 
 Das Modul `Dbt` schlägt die Brücke zwischen Data Engineering und GraphQL-API-Governance:
-1. **Streaming Ingestion von `manifest.json`**: Modelle, Seeds und Quellen (top-level `sources`), Spaltentypen, DSGVO-Tags und Abhängigkeiten fließen direkt in den [`LineageGraphStore`](file:///root/gql/src/Autheris.Application/Interfaces/ILineageGraphStore.cs) und den Governance-Katalog.
-2. **Zero-Trust Proposal & Freigabe-Workflow**: Erkannte PII- und DSGVO-Attribute werden nicht ungeprüft aktiv, sondern erzeugen [`DbtMetadataProposal`](file:///root/gql/src/Autheris.Domain/Model/DbtMetadataModels.cs)-Einträge (`PendingReview`). Nach 4-Augen-Freigabe werden Maskierungsregeln im [`ITableMetadataRepository`](file:///root/gql/src/Autheris.Application/Interfaces/IGovernanceRepository.cs) aktiviert und die Policy-Epoche invalidiert.
-3. **CI/CD Breaking-Change Contract Enforcement**: Der [`DbtContractValidator`](file:///root/gql_extensions/src/Autheris.Extensions/Dbt/DbtContractValidator.cs) gleicht neue dbt-Manifeste im Pull-Request-CI gegen aktive GraphQL-Schemata ab und verhindert Breaking Changes (entfernte Pflichtfelder, Typ-Inkompatibilitäten).
-4. **Bidirektionale Exposures**: Der [`DbtExposurePublisher`](file:///root/gql_extensions/src/Autheris.Extensions/Dbt/DbtExposurePublisher.cs) meldet aktive GraphQL-Entitäten und Konsumenten als `exposures.yaml` an dbt zurück.
+1. **Streaming Ingestion von `manifest.json`**: Modelle, Seeds und Quellen (top-level `sources`), Spaltentypen, DSGVO-Tags und Abhängigkeiten fließen direkt in den [`LineageGraphStore`](../../src/Autheris.Application/Lineage/ILineageGraphStore.cs) und den Governance-Katalog.
+2. **Zero-Trust Proposal & Freigabe-Workflow**: Erkannte PII- und DSGVO-Attribute werden nicht ungeprüft aktiv, sondern erzeugen [`DbtMetadataProposal`](../../src/Autheris.Domain/Model/DbtMetadataModels.cs)-Einträge (`PendingReview`). Nach 4-Augen-Freigabe werden Maskierungsregeln im [`ITableMetadataRepository`](../../src/Autheris.Application/Common/Interfaces/IGovernanceRepository.cs) aktiviert und die Policy-Epoche invalidiert.
+3. **CI/CD Breaking-Change Contract Enforcement**: Der [`DbtContractValidator`](../../src/Autheris.Extensions/Dbt/DbtContractValidator.cs) gleicht neue dbt-Manifeste im Pull-Request-CI gegen aktive GraphQL-Schemata ab und verhindert Breaking Changes (entfernte Pflichtfelder, Typ-Inkompatibilitäten).
+4. **Bidirektionale Exposures**: Der [`DbtExposurePublisher`](../../src/Autheris.Extensions/Dbt/DbtExposurePublisher.cs) meldet aktive GraphQL-Entitäten und Konsumenten als `exposures.yaml` an dbt zurück.
 
 ---
 
@@ -91,7 +91,7 @@ models:
         data_type: varchar
 ```
 
-Prüft der [`DbtContractValidator`](file:///root/gql_extensions/src/Autheris.Extensions/Dbt/DbtContractValidator.cs):
+Prüft der [`DbtContractValidator`](../../src/Autheris.Extensions/Dbt/DbtContractValidator.cs):
 1. **Entfernte Spalten (`DROPPED_COLUMN`)**: Wurde eine Spalte gelöscht, die in aktiven GraphQL-Clients abgefragt wird?
 2. **Datentyp-Mismatches (`DATA_TYPE_MISMATCH`)**: Wurde ein Typ inkompatibel geändert (z. B. `integer` zu `varchar`), der Serialisierer oder Client-Typen bricht?
 
@@ -118,7 +118,7 @@ Rückgabe bei Inkompatibilität (HTTP 422):
 
 ## 5. Streaming Ingestion & Performance
 
-Da dbt-Manifeste in großen Projekten Hunderte Megabytes groß sein können, liest [`DbtArtifactStreamingParser`](file:///root/gql_extensions/src/Autheris.Extensions/Dbt/DbtArtifactStreamingParser.cs) den Stream asynchron mit konfigurierbarer Tiefen- und Kommentar-Toleranz (`JsonDocumentOptions.MaxDepth = 64`, `CommentHandling = Skip`).
+Da dbt-Manifeste in großen Projekten Hunderte Megabytes groß sein können, liest [`DbtArtifactStreamingParser`](../../src/Autheris.Extensions/Dbt/DbtArtifactStreamingParser.cs) den Stream asynchron mit konfigurierbarer Tiefen- und Kommentar-Toleranz (`JsonDocumentOptions.MaxDepth = 64`, `CommentHandling = Skip`).
 
 - **Selektive Node- & Source-Verarbeitung**: Der Parser verarbeitet `model.*`- und `seed.*`-Knoten aus `nodes` sowie alle deklarierten Tabellen unter dem Top-Level-Objekt `sources`. Makros, Tests und Operationen werden im Lesepfad übersprungen.
 - **Mapping von dbt Sources**:

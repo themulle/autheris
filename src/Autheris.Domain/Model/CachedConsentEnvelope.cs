@@ -8,7 +8,7 @@ using MemoryPack;
 namespace Autheris.Domain.Model;
 
 /// <summary>
-/// High-speed binary DTO serialized with MemoryPack for Redis and Microsoft Garnet L2 caching.
+/// High-speed binary DTO serialized with MemoryPack for Redis L2 caching.
 /// Zero-allocation, blitting-optimized binary layout.
 /// </summary>
 [MemoryPackable]
@@ -30,7 +30,7 @@ public partial class CachedConsentEnvelope
     /// <summary>Current layout of the restricted-scope fields; an entry with another value (a legacy entry has 0) is a cache miss. Appended (MemoryPack layout).</summary>
     public const int CurrentRestrictionLayout = 1;
 
-    /// <summary>REQ-GOV-143: layout marker of the restriction fields (<see cref="CurrentRestrictionLayout"/>). Appended last (MemoryPack layout).</summary>
+    /// <summary>layout marker of the restriction fields (<see cref="CurrentRestrictionLayout"/>). Appended last (MemoryPack layout).</summary>
     public int RestrictionLayout { get; set; }
 
     /// <summary>Fingerprint of the restricted-scope list of the writing instance; a reader with another list treats the entry as a miss.</summary>
@@ -74,7 +74,7 @@ public partial class CachedConsentEnvelope
 
     /// <summary>
     /// The decision of this entry, or <c>null</c> (a cache miss) when the entry has another layout (legacy) or was written under another
-    /// restricted-scope list (<paramref name="expectedFingerprint"/>): the restriction of such a decision cannot be trusted (SEC-GOV143-04).
+    /// restricted-scope list (<paramref name="expectedFingerprint"/>): the restriction of such a decision cannot be trusted.
     /// </summary>
     public TableAccessDecision? ToDecision(string expectedFingerprint)
     {

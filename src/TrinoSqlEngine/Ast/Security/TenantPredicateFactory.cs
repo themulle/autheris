@@ -7,13 +7,13 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
-/// Builds the tenant predicate with the dialect's binary-exact comparison (SEC-ADG-04, INV-15, decision B-1). Tenant equality
+/// Builds the tenant predicate with the dialect's binary-exact comparison (INV-15, decision B-1). Tenant equality
 /// never depends on the column collation or session settings: tenants <c>acme</c> and <c>ACME</c> are different tenants even
 /// when the column is case-insensitive.
 /// </summary>
 public static class TenantPredicateFactory
 {
-    /// <param name="columnCollation">Kept for callers; no dialect reads it (the collation is never trusted for the tenant comparison, SEC-X1-09).</param>
+    /// <param name="columnCollation">Kept for callers; no dialect reads it (the collation is never trusted for the tenant comparison).</param>
     public static Expression Build(DialectCapabilities capabilities, string tenantColumn, string parameterName, SqlParameterType parameterType, string? columnType = null, string? columnCollation = null)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
@@ -22,7 +22,7 @@ public static class TenantPredicateFactory
 
         if (capabilities.TenantComparison == TenantComparisonStyle.CastBlob && !SqliteTypeAffinity.IsText(columnType))
         {
-            // SEC-X1-09: fail closed. A NUMERIC, INTEGER, REAL or BLOB affinity column no longer holds the text that was written.
+            // fail closed. A NUMERIC, INTEGER, REAL or BLOB affinity column no longer holds the text that was written.
             throw new SecurityException("The tenant column of a SQLite table must have TEXT affinity.");
         }
 
@@ -111,7 +111,7 @@ public static class TenantPredicateFactory
             }
             case TenantComparisonStyle.CastBinary:
             {
-                // SEC-X1-09 (WP-X0j): the binary template is always used. The former plain-equality relaxation for a catalog collation
+                // 09 (WP-X0j): the binary template is always used. The former plain-equality relaxation for a catalog collation
                 // of UTF8_BINARY trusted cached metadata, so a collation change inside the cache TTL would have made the tenant comparison
                 // case-insensitive. X1-DBX may re-enable it only with G9 evidence and a catalog freshness check per compile.
                 // Only the binary comparison. A plain "col = t" conjunct must NOT be added for the index/data-skipping benefit:

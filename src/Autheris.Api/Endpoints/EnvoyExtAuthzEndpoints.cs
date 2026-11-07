@@ -22,7 +22,7 @@ public static class EnvoyExtAuthzEndpoints
 {
     public static IEndpointRouteBuilder MapEnvoyExtAuthzEndpoints(this IEndpointRouteBuilder app)
     {
-        // API-2: the former JSON protocol endpoint (POST /api/v1/envoy/authz) decided with the identity of the calling
+        // the former JSON protocol endpoint (POST /api/v1/envoy/authz) decided with the identity of the calling
         // mesh service instead of the end user (confused deputy) and is no longer mapped. The header mode below
         // receives the original request, so the decision uses the end user's credentials.
 

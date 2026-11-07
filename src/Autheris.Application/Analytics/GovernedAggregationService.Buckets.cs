@@ -7,9 +7,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Application.Data;
-using Autheris.Application.Data.Interfaces;
-using Autheris.Application.Data.Services;
+using Autheris.Application.DataSources;
+using Autheris.Application.DataSources.Interfaces;
+using Autheris.Application.DataSources.Services;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Domain.Audit;
@@ -420,7 +420,7 @@ public sealed partial class GovernedAggregationService
     {
         var totals = ComputeDifferencingSafeTotalsCore(survivingBuckets, aggregates, metadata);
 
-        // WP-0 (SEC-112-07): when a merged OTHER row is part of the visible set, the totals must not expose the extremes, the distinct count
+        // when a merged OTHER row is part of the visible set, the totals must not expose the extremes, the distinct count
         // or the average of the merged small groups either (a size-1 group can be exactly the global minimum or maximum).
         return survivingBuckets.Any(b => b.IsMergedOther) ? WithoutNonMergeableValues(totals, aggregates) : totals;
     }
@@ -501,7 +501,7 @@ public sealed partial class GovernedAggregationService
     {
         var configured = ResolveConfiguredSmallGroupStrategy(query, metadata);
 
-        // WP-0 (SEC-112-02): a request or manifest override may not weaken the configured strategy; suppression is stricter than merging.
+        // a request or manifest override may not weaken the configured strategy; suppression is stricter than merging.
         if (query.SmallGroupStrategyOverride.HasValue && configured != SmallGroupStrategy.Suppress)
         {
             return query.SmallGroupStrategyOverride.Value;

@@ -78,7 +78,7 @@ public sealed class LdapsRoleProvider : IRoleProvider
         }
         catch (Exception)
         {
-            // SEC-SC-12: Fail closed
+            // Fail closed
             return ProviderRoleResult.FailedResult;
         }
     }

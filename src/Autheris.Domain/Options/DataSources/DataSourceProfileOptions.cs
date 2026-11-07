@@ -43,7 +43,7 @@ public sealed class DataSourceProfileOptions
     [Range(0.0, 1.0)]
     public double? SamplingRatio { get; init; }
 
-    /// <summary>Outbound W3C TraceContext propagation policy for this data source (SEC-DS05-07).</summary>
+    /// <summary>Outbound W3C TraceContext propagation policy for this data source.</summary>
     public OutboundPropagationMode OutboundPropagation { get; init; } = OutboundPropagationMode.Inherit;
 
     // ==========================================
@@ -74,8 +74,8 @@ public sealed class DataSourceProfileOptions
     public IsolationLevel? DefaultIsolationLevel { get; init; }
 
     /// <summary>
-    /// Permitted ingress transports authorized to query this data source (SEC-DS05-03). <c>null</c> inherits
-    /// <c>Defaults.AllowedTransports</c> and, when that is unset too, <see cref="DataSourceTransportFlags.All"/> (SEC-ATR-01, decision 13).
+    /// Permitted ingress transports authorized to query this data source.<c>null</c> inherits
+    /// <c>Defaults.AllowedTransports</c> and, when that is unset too, <see cref="DataSourceTransportFlags.All"/>(decision 13).
     /// An explicit <see cref="DataSourceTransportFlags.None"/> denies every transport and is never replaced by the default.
     /// </summary>
     public DataSourceTransportFlags? AllowedTransports { get; init; }
@@ -100,7 +100,7 @@ public sealed class DataSourceProfileOptions
     // ==========================================
 
     /// <summary>
-    /// Explicit per-source opt-in to relax safety ceilings (SEC-DS05-02).
+    /// Explicit per-source opt-in to relax safety ceilings.
     /// Requires <see cref="DataSourceSafetyCeilingsOptions.AllowGlobalCeilingRelaxation"/> to be true.
     /// </summary>
     public bool AllowCeilingRelaxation { get; init; } = false;

@@ -1,4 +1,4 @@
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;

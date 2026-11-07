@@ -6,7 +6,7 @@ using OpenTelemetry;
 
 /// <summary>
 /// Enriches started spans with ambient authenticated tenant identity from <see cref="TelemetryTenantContext"/>.
-/// Enforces SEC-OT06-12.
+/// Enforces 12.
 /// </summary>
 public sealed class TenantEnrichmentProcessor : BaseProcessor<Activity>
 {

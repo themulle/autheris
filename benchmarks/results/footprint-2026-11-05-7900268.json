@@ -1,0 +1,25 @@
+{
+  "metric": "footprint",
+  "date": "2026-11-05",
+  "sha": "7900268",
+  "host": {
+    "hostname": "6c2a39d7878e",
+    "os": "Linux",
+    "kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "arch": "x86_64",
+    "cpu": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics"
+  },
+  "values": {
+    "image_uncompressed_bytes": 463232707,
+    "image_uncompressed_mb": 441.77,
+    "image_compressed_bytes": 178257920,
+    "image_compressed_mb": 170.0,
+    "cold_p50_ms": 5576.9,
+    "cold_p95_ms": 6193.5,
+    "warm_p50_ms": 2.97,
+    "warm_p99_ms": 10.24,
+    "lazy_duckdb": true,
+    "lazy_oracle": true
+  },
+  "method": "bash benchmarks/scripts/footprint.sh"
+}

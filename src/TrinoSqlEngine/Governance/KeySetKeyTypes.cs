@@ -3,7 +3,7 @@ namespace TrinoSqlEngine.Governance;
 using System;
 using System.Globalization;
 
-/// <summary>Class of a catalog key column type for the key-set cache (PLAN-GOV-107 A-9).</summary>
+/// <summary>Class of a catalog key column type for the key-set cache (107 A-9).</summary>
 public enum KeyTypeClass
 {
     /// <summary>Anything outside the allowlist: LOB and MAX types, floating point, dates, binary, unbounded text, unknown.</summary>
@@ -25,7 +25,7 @@ public enum KeyTypeClass
 public readonly record struct KeyTypeInfo(KeyTypeClass Class, int Rank);
 
 /// <summary>
-/// SEC-RF107-07 (a), (c): the closed allowlist of key type pairs. A key loaded through the primary key column of the dependent table is
+/// 07 (a), (c): the closed allowlist of key type pairs. A key loaded through the primary key column of the dependent table is
 /// bound against the foreign key column of the target table; every pair outside the allowlist, and every pair of columns with differing
 /// catalog collations, is not bindable (the filter stays <c>EXISTS</c>). Pure functions over the catalog type strings.
 /// </summary>
@@ -71,7 +71,7 @@ public static class KeySetKeyTypes
     /// <summary>
     /// The A-9 pair allowlist: integer to integer of equal or wider range; exact numeric with scale 0 to the same; bounded character to
     /// bounded character of the same Unicode class (<c>varchar</c> to <c>nvarchar</c> is allowed, <c>nvarchar</c> to <c>varchar</c> is not);
-    /// uuid to uuid. A differing collation of two columns that both expose one rejects the pair (SEC-RF107-07 c).
+    /// uuid to uuid. A differing collation of two columns that both expose one rejects the pair (07 c).
     /// </summary>
     public static bool IsBindablePair(TargetSqlDialect dialect, string? keyType, string? foreignKeyType, string? keyCollation = null, string? foreignKeyCollation = null)
     {

@@ -13,7 +13,7 @@ public sealed class DataSourceConfigurationOptions
     /// <summary>Default profile options used when a specific data source does not specify an override.</summary>
     public DataSourceProfileOptions Defaults { get; init; } = new();
 
-    /// <summary>Global safety ceilings enforcing non-escalation guardrails across all sources (SEC-DS05-01).</summary>
+    /// <summary>Global safety ceilings enforcing non-escalation guardrails across all sources.</summary>
     public DataSourceSafetyCeilingsOptions Ceilings { get; init; } = new();
 
     /// <summary>Per-data-source profile overrides keyed by data source name (case-insensitive).</summary>

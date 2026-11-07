@@ -11,7 +11,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
@@ -44,7 +44,7 @@ public sealed class CallerAttributeSimulationException : Exception
 }
 
 /// <summary>
-/// The admin simulation of the attribute resolution for a chosen subject (PLAN-GOV-129 A-11, BC-129-13). It resolves through the same resolver
+/// The admin simulation of the attribute resolution for a chosen subject (129 A-11, BC-129-13). It resolves through the same resolver
 /// as the data path. Default output: names, outcome, counts and the first 8 hex characters of an HMAC with a per-tenant pepper; clear values need
 /// the <c>CallerAttributeInspector</c> role, a reason and are audited; every simulation is audited and rate limited per administrator; the subject
 /// must belong to the administrator's tenant. Claims attributes cannot be simulated (there is no token): they resolve as missing.

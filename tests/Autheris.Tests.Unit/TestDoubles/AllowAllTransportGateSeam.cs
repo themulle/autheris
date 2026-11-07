@@ -35,5 +35,14 @@ internal sealed class AllowAllTransportGate : IDataSourceTransportGate
 internal static class AllowAllTransportGateSeam
 {
     [ModuleInitializer]
-    internal static void Install() => TransportGateFallback.Current = AllowAllTransportGate.Instance;
+    internal static void Install()
+    {
+        if (typeof(AllowAllTransportGateSeam).Assembly.GetName().Name == "Autheris.Tests.Unit")
+        {
+            InstallCore();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void InstallCore() => TransportGateFallback.Current = AllowAllTransportGate.Instance;
 }

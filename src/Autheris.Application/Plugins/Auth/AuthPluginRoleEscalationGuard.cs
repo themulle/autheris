@@ -149,7 +149,7 @@ public sealed partial class AuthPluginRoleEscalationGuard
 
             var trimmedRole = role.Trim();
 
-            // SEC-BL08-05: Prohibited privileged role check (before the syntax check, so a tenant-prefixed admin role is reported as
+            // Prohibited privileged role check (before the syntax check, so a tenant-prefixed admin role is reported as
             // an escalation attempt and not only as malformed)
             if (IsProhibitedRole(trimmedRole))
             {
@@ -160,7 +160,7 @@ public sealed partial class AuthPluginRoleEscalationGuard
                 continue;
             }
 
-            // SEC-BL08-05: Strict syntax regex allowlist
+            // Strict syntax regex allowlist
             if (!RoleNameRegex().IsMatch(trimmedRole))
             {
                 _logger?.LogWarning("Auth plugin '{PluginName}' returned malformed role '{Role}'. Stripping role (SEC-BL08-05).",
@@ -182,7 +182,7 @@ public sealed partial class AuthPluginRoleEscalationGuard
                 continue;
             }
 
-            // SEC-BL08-06: Reserved system SID check
+            // Reserved system SID check
             if (ReservedSystemSids.Contains(sidStr))
             {
                 _logger?.LogWarning("Auth plugin '{PluginName}' attempted to assign reserved system SID '{Sid}'. Stripping SID (SEC-BL08-06).",
@@ -192,7 +192,7 @@ public sealed partial class AuthPluginRoleEscalationGuard
                 continue;
             }
 
-            // SEC-BL08-06: SID structure validation
+            // SID structure validation
             if (!IsValidSidStructure(sidStr))
             {
                 _logger?.LogWarning("Auth plugin '{PluginName}' returned malformed SID '{Sid}'. Stripping SID (SEC-BL08-06).",
@@ -205,7 +205,7 @@ public sealed partial class AuthPluginRoleEscalationGuard
             sanitizedSids.Add(new Sid(sidStr));
         }
 
-        // SEC-BL08-07: Cardinality caps
+        // Cardinality caps
         int maxRoles = Math.Clamp(_options.MaxEnrichedRolesPerCaller, 1, 256);
         if (sanitizedRoles.Count > maxRoles)
         {

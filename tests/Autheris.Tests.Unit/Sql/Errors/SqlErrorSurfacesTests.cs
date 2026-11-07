@@ -11,12 +11,12 @@ using System.Threading.Tasks;
 using Antlr4.Runtime.Misc;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
-using Autheris.Application.Interfaces;
-using Autheris.Application.Jobs.Interfaces;
-using Autheris.Application.Jobs.Services;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Runtime.Jobs.Interfaces;
+using Autheris.Application.Runtime.Jobs.Services;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using TrinoSqlEngine.Analysis;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
@@ -193,34 +193,6 @@ public sealed class SqlErrorSurfacesTests
         var root = JsonDocument.Parse(body).RootElement;
         root.GetProperty("code").GetString().ShouldBe("SQL_LIMIT_EXCEEDED");
         root.GetProperty("limit").GetString().ShouldBe("QueryLength");
-    }
-
-    [Theory]
-    [MemberData(nameof(Environments))]
-    public async Task Flight_MapsStatusAndCode_WithoutMessage(string environment)
-    {
-        var server = Substitute.For<IArrowFlightSqlServer>();
-        server.DoGetStreamAsync(Arg.Any<FlightSqlTicket>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId?>(), Arg.Any<Autheris.Domain.Options.DataSources.DataSourceTransportFlags>(), Arg.Any<CancellationToken>())
-            .Returns(_ => ThrowingStream(new WebSqlPolicyException(HostileMarker)));
-        var context = Context(environment);
-        context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1"), new Claim("tenant_id", "t")], "Test"));
-
-        var result = await ArrowFlightSqlEndpoints.HandleStreamAsync(new FlightSqlTicket("t", "t", "SELECT 1", DateTimeOffset.UtcNow, "sig"), context, server);
-        await result.ExecuteAsync(context);
-
-        var (status, body) = await ReadAsync(context);
-        status.ShouldBe(403);
-        body.ShouldNotContain(HostileMarker);
-        JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().ShouldBe("SQL_POLICY_VIOLATION");
-    }
-
-    private static async IAsyncEnumerable<Apache.Arrow.RecordBatch> ThrowingStream(Exception ex)
-    {
-        await Task.Yield();
-        throw ex;
-#pragma warning disable CS0162
-        yield break;
-#pragma warning restore CS0162
     }
 
     private static McpToolDefinition Tool(string name) => new(name, name, "{}", "");

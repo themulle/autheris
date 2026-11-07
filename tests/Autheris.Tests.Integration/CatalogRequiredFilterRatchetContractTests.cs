@@ -3,8 +3,8 @@ namespace Autheris.Tests.Integration;
 using System;
 using System.Collections.Immutable;
 using System.Threading.Tasks;
-using Autheris.Application.DataCatalog.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -101,7 +101,7 @@ public sealed class PostgreSqlCatalogRequiredFilterRatchetContractTests : Catalo
                 env.EnvironmentName.Returns("Development");
                 var options = Options.Create(new GatewayOptions
                 {
-                    GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
+                    GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db.ConnectionString, SeedDemoData = false }
                 });
                 Repository = GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env);
                 Available = true;
@@ -152,7 +152,7 @@ public sealed class SqlServerCatalogRequiredFilterRatchetContractTests : Catalog
             env.EnvironmentName.Returns("Development");
             var options = Options.Create(new GatewayOptions
             {
-                GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
+                GovernanceDb = new GovernanceDbOptions { Provider = "SqlServer", ConnectionString = _db.ConnectionString, SeedDemoData = false }
             });
             Repository = GovernanceStoreFactory.CreateSqlServer(Substitute.For<IEpochValidationService>(), options, env);
             Available = true;

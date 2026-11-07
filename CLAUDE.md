@@ -1,11 +1,11 @@
 # Autheris Guidelines for Claude Code & AI Assistants
 
-See [AGENTS.md](file:///root/autheris/AGENTS.md) for full project governance.
+See [AGENTS.md](AGENTS.md) for full project governance.
 
 ## Mandatory Directives
 
 1. **Language Standard:**
-   - All documentation, READMEs, PRDs, architecture plans, inline comments, and commit messages **MUST be written in English**, matching the root [README.md](file:///root/autheris/README.md).
+   - All documentation, READMEs, PRDs, architecture plans, inline comments, and commit messages **MUST be written in English**, matching the root [README.md](README.md).
 
 2. **Strict Separation of Documentation vs. Development Progress:**
    - **`docs/` (outside `docs/plans/`) is ONLY for system reference & manuals** describing how the system currently works.
@@ -14,7 +14,7 @@ See [AGENTS.md](file:///root/autheris/AGENTS.md) for full project governance.
 
 3. **Requirements & Plans Repository (`docs/plans/`):**
    - All new requirements, design proposals, roadmaps, and feature plans must be placed in `docs/plans/`.
-   - The central origin plan is: [`docs/plans/00-master-plan-overview.md`](file:///root/autheris/docs/plans/00-master-plan-overview.md).
+   - The central origin plan is: [`docs/plans/00-master-plan-overview.md`](docs/plans/00-master-plan-overview.md).
 
 4. **Origin Plan Refinement Protocol:**
    - Always read and update `docs/plans/00-master-plan-overview.md`.
@@ -22,7 +22,7 @@ See [AGENTS.md](file:///root/autheris/AGENTS.md) for full project governance.
 
 5. **Individual Feature Documentation (`docs/features/`):**
    - Feature documentation is **not** part of the implementation lifecycle (there is no documentation phase). Write feature docs only when the owner explicitly asks for them.
-   - When a feature doc is written, it goes to `docs/features/` (e.g., `docs/features/f-<category>-<number>-<name>.md`), is registered in [`docs/features/README.md`](file:///root/autheris/docs/features/README.md), and describes how the feature works, configuration, and architecture (strictly without WIP or progress notes).
+   - When a feature doc is written, it goes to `docs/features/` (e.g., `docs/features/f-<category>-<number>-<name>.md`), is registered in [`docs/features/README.md`](docs/features/README.md), and describes how the feature works, configuration, and architecture (strictly without WIP or progress notes).
 
 6. **The 5-Phase Standard Implementation Lifecycle:**
    - **Phase 1: Product Manager (`product-manager`)**: Qualify, benchmark with best practices, reject anti-patterns, enrich into PRD in `docs/plans/`.

@@ -17,7 +17,7 @@ namespace Autheris.Application.Sql.Tree;
 /// <c>(SELECT … FROM table AS autheris_target WHERE tenant AND (row filter) AND join AND where ORDER BY … LIMIT …)</c>,
 /// so row filters bind to the reserved alias exactly as in WebSQL and OData, nested limits apply per parent row, and the
 /// outer levels only see governed rows. Masks are SQL literals; HMAC columns are read raw and pseudonymized by the
-/// gateway afterwards. Filter, sort and join columns must be effectively Clear (SEC-01). All values are parameters.</para>
+/// gateway afterwards. Filter, sort and join columns must be effectively Clear. All values are parameters.</para>
 /// </summary>
 public static partial class TreeSqlCompiler
 {
@@ -33,7 +33,7 @@ public static partial class TreeSqlCompiler
     private static readonly string TargetAlias = TrinoSqlEngine.RowFilterAliases.Target;
 
     /// <summary>
-    /// WP-ARC-B-03 / G-6: the dialects whose single-statement JSON aggregation the tree compiler implements (the constant
+    /// 03 / G-6: the dialects whose single-statement JSON aggregation the tree compiler implements (the constant
     /// stand-in for the dialect provider capability <c>SupportsTreeCompile</c>). Tables of other dialects remain readable
     /// as flat tables through the governed compile path but offer no nested relation fields.
     /// </summary>
@@ -234,7 +234,7 @@ public static partial class TreeSqlCompiler
                 return filterSql;
             }
 
-            // SEC-ADG-02: two keys of one decision that name the same parameter (marker prefix or case) fail closed.
+            // two keys of one decision that name the same parameter (marker prefix or case) fail closed.
             _ = Autheris.Application.Sql.Policy.RowFilterParameterNames.Checked(parameters);
 
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -353,9 +353,9 @@ public static partial class TreeSqlCompiler
         {
             // SD-2: the same default ordering as every other read path. The composite fallback sorts every clear column, so
             // nested relation lists stop after the key rules to bound the cost.
-            var defaultOrdering = Autheris.Application.Data.Services.DefaultReadOrdering.Resolve(metadata, tableAccess.Decision);
-            var useDefault = defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.None &&
-                (path.Count == 0 || defaultOrdering.Kind != Autheris.Application.Data.Services.DefaultOrderingKind.ClearColumnComposite);
+            var defaultOrdering = Autheris.Application.DataSources.Services.DefaultReadOrdering.Resolve(metadata, tableAccess.Decision);
+            var useDefault = defaultOrdering.Kind != Autheris.Application.DataSources.Services.DefaultOrderingKind.None &&
+                (path.Count == 0 || defaultOrdering.Kind != Autheris.Application.DataSources.Services.DefaultOrderingKind.ClearColumnComposite);
             if (useDefault)
             {
                 if (!defaultOrdering.Terms.All(t => SafeNameRegex().IsMatch(t.Name)))
@@ -371,10 +371,10 @@ public static partial class TreeSqlCompiler
                     Need(term.Name);
                 }
             }
-            else if (defaultOrdering.Kind == Autheris.Application.Data.Services.DefaultOrderingKind.None && path.Count == 0 && node.Offset > 0)
+            else if (defaultOrdering.Kind == Autheris.Application.DataSources.Services.DefaultOrderingKind.None && path.Count == 0 && node.Offset > 0)
             {
                 // No clear orderable column: paging beyond the first page would be unstable (same refusal and text as the planner).
-                throw new GatewayInvalidQueryException(Autheris.Application.Data.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
+                throw new GatewayInvalidQueryException(Autheris.Application.DataSources.Services.GovernedTableReadPlanner.NoOrderableColumnMessage);
             }
         }
 
@@ -449,7 +449,7 @@ public static partial class TreeSqlCompiler
         return column;
     }
 
-    /// <summary>SEC-01: filter, sort and join columns must be effectively Clear (no inference on masked/denied values).</summary>
+    /// <summary>filter, sort and join columns must be effectively Clear (no inference on masked/denied values).</summary>
     private static string ResolveClearColumn(TableMetadata metadata, TableAccessDecision decision, string requested)
     {
         var column = metadata.GetColumn(requested?.Trim() ?? string.Empty)?.ColumnName;
@@ -741,7 +741,7 @@ public static partial class TreeSqlCompiler
 
         var where = BuildInnerPredicates(plan, context, parent, relation, correlate: true);
 
-        // SEC-PG-07: SQL Server rejects FETCH NEXT 0 ROWS (provider error). A zero page there fetches one row behind a constant-false predicate.
+        // SQL Server rejects FETCH NEXT 0 ROWS (provider error). A zero page there fetches one row behind a constant-false predicate.
         if (limit == 0 && isRoot && dialect == DatabaseDialect.SqlServer)
         {
             where.Add("1 = 0");

@@ -183,7 +183,7 @@ public static class PasswordHasher
             byte[] salt = Convert.FromBase64String(parts[4]);
             byte[] expectedHash = Convert.FromBase64String(parts[5]);
 
-            // API-05: a truncated hash or a short salt is never accepted (a 1-byte hash would match ~1 in 256 passwords).
+            // a truncated hash or a short salt is never accepted (a 1-byte hash would match ~1 in 256 passwords).
             if (!HasExpectedLengths(salt, expectedHash))
             {
                 return false;
@@ -201,7 +201,7 @@ public static class PasswordHasher
     private static bool HasExpectedLengths(byte[] salt, byte[] hash) => salt.Length >= SaltLength && hash.Length == HashLength;
 
     /// <summary>
-    /// API-05: true when the salt and hash segments of a stored <c>$argon2id$...</c> or <c>$pbkdf2$...</c> value decode to at least
+    /// true when the salt and hash segments of a stored<c>$argon2id$...</c> or <c>$pbkdf2$...</c> value decode to at least
     /// <see cref="SaltLength"/> and exactly <see cref="HashLength"/> bytes (used by the startup validator and the verifier).
     /// </summary>
     public static bool HasWellFormedSaltAndHash(string storedHash)

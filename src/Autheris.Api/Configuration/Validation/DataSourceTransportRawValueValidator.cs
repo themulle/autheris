@@ -7,7 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #447 (SEC-ATR-01, decision 13): the configuration binder turns an empty or unparsable <c>AllowedTransports</c> into
+/// Issue #447 (decision 13): the configuration binder turns an empty or unparsable<c>AllowedTransports</c> into
 /// <c>null</c> (which now inherits <c>Defaults</c>). This validator inspects the raw configuration text so such a value fails startup
 /// instead of silently widening access.
 /// </summary>

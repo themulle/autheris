@@ -1,7 +1,8 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
@@ -265,7 +266,7 @@ public sealed class InMemoryAuditChainAnchorStore : IAuditChainAnchorStore
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
 
-        // SEC-AUD161-02: monotonic purge checkpoint
+        // monotonic purge checkpoint
         while (true)
         {
             var current = Volatile.Read(ref _purgeCheckpoint);

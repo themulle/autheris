@@ -31,7 +31,7 @@ public sealed class SecurityCoverageException : SecurityException
 /// <param name="MaskedColumns">Canonical names of columns that must be projected as <see cref="MaskExpression"/> (never raw).</param>
 /// <param name="CatalogColumns">Canonical names of the cataloged columns; a secured derived table may project only these (CR-ADG-06). Null: any named column.</param>
 /// <param name="TenantColumn">Canonical tenant column (DML writes must carry the bound tenant there), or null.</param>
-/// <param name="PolicyColumns">Lower-case names of the columns the applicable row-policy predicate references (SEC-ADG-06); an assignment to one of them is rejected.</param>
+/// <param name="PolicyColumns">Lower-case names of the columns the applicable row-policy predicate references; an assignment to one of them is rejected.</param>
 public sealed record TableCoverageRequirement(
     string Identity,
     string Schema,

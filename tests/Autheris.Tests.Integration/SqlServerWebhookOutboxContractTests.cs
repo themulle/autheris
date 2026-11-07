@@ -2,7 +2,7 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Options;
 using Autheris.Tests.Unit.Webhooks;
@@ -51,7 +51,6 @@ public sealed class SqlServerWebhookOutboxContractTests : WebhookOutboxContractT
             {
                 Provider = "SqlServer",
                 ConnectionString = _db.ConnectionString,
-                EnableOutboxProcessor = false,
                 SeedDemoData = false
             }
         });

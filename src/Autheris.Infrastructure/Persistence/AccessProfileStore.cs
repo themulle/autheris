@@ -5,6 +5,7 @@ using System.Text.Json;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 
 namespace Autheris.Infrastructure.Persistence;
 
@@ -24,16 +25,18 @@ internal sealed class AccessProfileStoreScope(DbConnection connection, Func<Valu
 }
 
 /// <summary>
-/// WP-SC-03: the persisted access profiles (<c>ACCESS_PROFILES</c>, <c>ACCESS_PROFILE_ASSIGNMENTS</c>) shared by the three governance repositories.
+/// the persisted access profiles (<c>ACCESS_PROFILES</c>, <c>ACCESS_PROFILE_ASSIGNMENTS</c>) shared by the three governance repositories.
 /// The SQL differs only in the upsert statements and the timestamp representation. A store failure always propagates (never an empty result),
 /// so a database outage denies. Which assignments are effective, and in what order, is decided by <see cref="AccessProfileAssignmentRules"/>.
 /// </summary>
 internal sealed class AccessProfileStore(
     AccessProfileDialect dialect,
     Func<bool, CancellationToken, Task<AccessProfileStoreScope>> open,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    ILogger? logger = null)
 {
     private const int MaxTermsPerStatement = 900;
+    private const AccessProfileAssignmentKind UnknownAssignmentKind = (AccessProfileAssignmentKind)(-1);
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
     private const string ProfileColumns = "p.profile_id, p.tenant_id, p.name, p.masking_mode, p.target_tables, p.row_filter_predicate, p.justification, p.created_by, p.created_at, p.valid_to";
@@ -316,11 +319,6 @@ internal sealed class AccessProfileStore(
             throw new KeyNotFoundException($"Assignment of '{subject}' to access profile '{profileId}' does not exist.");
         }
 
-        if (existing.Kind == AccessProfileAssignmentKind.BreakGlass)
-        {
-            throw new AccessProfileAssignmentRejectedException(AccessProfileAssignmentRules.BreakGlassNotRenewable, "A break-glass exception cannot be renewed.");
-        }
-
         AccessProfileAssignmentRules.ValidateApprover(profile, existing, approvedBy);
         var renewed = existing with
         {
@@ -451,9 +449,20 @@ internal sealed class AccessProfileStore(
         ApprovedBy = reader.IsDBNull(o + 5) ? null : reader.GetString(o + 5),
         ApprovedAt = ReadTs(reader, o + 6),
         Justification = reader.IsDBNull(o + 7) ? null : reader.GetString(o + 7),
-        Kind = Enum.TryParse<AccessProfileAssignmentKind>(reader.GetString(o + 8), true, out var k) ? k : AccessProfileAssignmentKind.BreakGlass,
+        Kind = ReadKind(reader.GetString(o + 8)),
         RenewalCount = reader.GetInt32(o + 9)
     };
+
+    internal AccessProfileAssignmentKind ReadKind(string rawKind)
+    {
+        if (Enum.TryParse<AccessProfileAssignmentKind>(rawKind, true, out var k) && Enum.IsDefined(k))
+        {
+            return k;
+        }
+
+        logger?.LogWarning("Access profile assignment with an unknown kind was read from storage and ignored (fail closed).");
+        return UnknownAssignmentKind;
+    }
 
     private static void AddParam(DbCommand cmd, string name, object? value)
     {

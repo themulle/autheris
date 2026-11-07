@@ -14,7 +14,6 @@ public enum GrantKind
     McpAdminGrant,
     BulkGrant,
     Renewal,
-    BreakGlass,
     RebacTuple
 }
 
@@ -34,7 +33,6 @@ public enum GrantClass
     Sensitive,
     IndividualUnmasked,
     IndividualPrivileged,
-    BreakGlass,
     ServicePrincipal,
     CustomerRegular
 }
@@ -99,7 +97,7 @@ public static class GrantErrorCodes
     public const string Indeterminate = "INDIVIDUAL_GRANT_INDETERMINATE";
 }
 
-/// <summary>Single decision point for every grant write path (WP-SC-16, SEC-SC-20). Fail closed on any error.</summary>
+/// <summary>Single decision point for every grant write path. Fail closed on any error.</summary>
 public interface IGrantPolicy
 {
     GrantDecision Evaluate(GrantRequest request);

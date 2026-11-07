@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "tolerancePercent": 10,
+  "metrics": {
+    "coreImageUncompressedMB": {
+      "budget": 325,
+      "unit": "MB",
+      "source": "footprint"
+    },
+    "coldStartP50Seconds": {
+      "budget": 3.0,
+      "unit": "s",
+      "source": "footprint"
+    },
+    "warmP99Milliseconds": {
+      "budget": 3.47,
+      "unit": "ms",
+      "source": "footprint"
+    },
+    "ciPrWallClockMedianMinutes": {
+      "budget": 30,
+      "unit": "min",
+      "source": "ci-duration",
+      "tolerancePercent": 0,
+      "comparison": "lessThan"
+    }
+  }
+}

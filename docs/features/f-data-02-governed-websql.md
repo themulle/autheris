@@ -1,7 +1,6 @@
 # F-DATA-02: Governed WebSQL Engine & Trino REST Protocol
 
-**Status:** [Done] (100% GA – Wave 1 & 100% Trino Compatibility)  
-**Components:** [`WebSqlEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/WebSqlEndpoints.cs), [`WebSqlStatementManager.cs`](file:///root/autheris/src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs), [`GovernedSqlExecutionService.cs`](file:///root/autheris/src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs), [`TrinoSqlEngine`](file:///root/autheris/src/TrinoSqlEngine)
+**Components:** [`WebSqlEndpoints.cs`](../../src/Autheris.Api/Endpoints/WebSqlEndpoints.cs), [`WebSqlStatementManager.cs`](../../src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs), [`GovernedSqlExecutionService.cs`](../../src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs), [`TrinoSqlEngine`](../../src/TrinoSqlEngine)
 
 ---
 
@@ -26,7 +25,7 @@ Ad-hoc SQL queries are compiled by the governed AST compiler ([F-DIALECT-02](f-d
   - The `catalog` part selects or validates against the target data source.
   - The compiler strips the catalog prefix when generating backend SQL (`"dbo"."invoices"` for PostgreSQL, `[dbo].[invoices]` for MSSQL, `[invoices]` for SQLite), preventing cross-database collision errors.
 - **Deep AST SQL Injection Protection**: Prevents multi-statement attacks, system function execution, and comment-based evasion.
-- **Granular Transport Row Limits & Truncation Accuracy**: Configurable row limits per egress transport (`RowLimits:Trino`, `RowLimits:Parquet`, `RowLimits:FlightSql`) with accurate truncation reporting (only reported as truncated when rows were actually cut by the limit).
+- **Granular Transport Row Limits & Truncation Accuracy**: Configurable row limits per egress transport (`RowLimits:Trino`, `RowLimits:Parquet`, `RowLimits:ArrowExport`) with accurate truncation reporting (only reported as truncated when rows were actually cut by the limit).
 - **Cross-Channel Virtual Filters Pushdown**: Seamlessly integrates relation-scoped Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)) into the AST compiler along with data-owner consents.
 - **Controlled DML Guardrails**: High-risk statements (`UPDATE`, `DELETE`) require special writer roles, are bounded by max affected row limits, and are logged to the cryptographic WORM audit chain.
 
@@ -66,7 +65,7 @@ Ad-hoc SQL queries are compiled by the governed AST compiler ([F-DIALECT-02](f-d
 
 ### Federated Query Transport Opt-In (`WebSql:CrossSource:AllowedTransports`)
 
-Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is true, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints` and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. WebSQL itself is part of the default list; other channels that run federated queries (`Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints`, `AsyncJob`) must be opted in. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
+Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is true, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `SqlEndpoints` and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. WebSQL itself is part of the default list; other channels that run federated queries (`Rest`, `Mcp`, `ArrowExport`, `SqlEndpoints`, `AsyncJob`) must be opted in. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
 
 #### How federated queries read their sources
 
@@ -213,8 +212,7 @@ WebSQL adds no ordering of its own. A user `ORDER BY` on a column without an ind
       "Trino": { "DefaultMaxRows": 5000, "MaxAllowedRows": 25000 },
       "Parquet": { "DefaultMaxRows": 50000, "MaxAllowedRows": 100000 },
       "SqlEndpoints": { "DefaultMaxRows": 5000, "MaxAllowedRows": 20000 },
-      "ArrowExport": { "DefaultMaxRows": 25000, "MaxAllowedRows": 100000 },
-      "FlightSql": { "DefaultMaxRows": 25000, "MaxAllowedRows": 100000 }
+      "ArrowExport": { "DefaultMaxRows": 25000, "MaxAllowedRows": 100000 }
     }
   }
 }

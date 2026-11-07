@@ -3,7 +3,7 @@ namespace Autheris.Application.Sql.Services;
 using System;
 using System.Security.Cryptography;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
@@ -12,7 +12,7 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Visitors;
 
 /// <summary>
-/// SEC-ADG-23, X1.2: the keyed links between an audit record and the statement. Two values, each under its own HKDF sub-key (own info
+/// 23, X1.2: the keyed links between an audit record and the statement. Two values, each under its own HKDF sub-key (own info
 /// string) of the audit key, so neither can be brute-forced without the key and neither contains a value:
 /// <list type="bullet">
 /// <item><c>sql.compiled_digest = HMAC-SHA256(key, CompilerVersion || Dialect || CompiledSql.Sql || parameter shape)</c>

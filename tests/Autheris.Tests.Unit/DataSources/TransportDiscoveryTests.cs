@@ -12,15 +12,15 @@ using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.DataSources;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.OData.Services;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Autheris.Tests.Unit.Catalog;
 using Autheris.Tests.Unit.TestSupport;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -163,32 +163,6 @@ public sealed class TransportDiscoveryTests
 
         (await Visibility(tables, Ingress(DataSourceTransportFlags.None), resolver).GetVisibleAsync(caller)).Tables.Count.ShouldBe(2);
         (await Visibility(tables, null, resolver).GetVisibleAsync(caller)).Tables.Count.ShouldBe(2);
-    }
-
-    // ----- Flight GetTables -----
-
-    [Fact]
-    public async Task Discovery_FlightGetTablesOmits()
-    {
-        using var resolver = NewResolver();
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
-            [Row(SecretSource, "a", domain: "default"), Row(OpenSource, "b", domain: "default")]));
-        var options = Options.Create(new GatewayOptions
-        {
-            WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = "default" },
-            Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" }
-        });
-        var admin = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "admin"), new Claim(ClaimTypes.PrimarySid, "admin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Bearer"));
-        var tenant = new TenantId("tenant_finance");
-
-        var open = new ArrowFlightSqlServer(Substitute.For<IArrowExportService>(), repo, options, NullLogger<ArrowFlightSqlServer>.Instance);
-        (await open.GetTablesAsync(admin, tenant)).Count.ShouldBe(2);
-
-        var filtered = new ArrowFlightSqlServer(
-            Substitute.For<IArrowExportService>(), repo, options, NullLogger<ArrowFlightSqlServer>.Instance, transportResolver: resolver);
-        (await filtered.GetTablesAsync(admin, tenant)).Select(t => t.TableName).ShouldBe(["b"]);
     }
 
     // ----- OData $metadata, service document and OpenAPI -----

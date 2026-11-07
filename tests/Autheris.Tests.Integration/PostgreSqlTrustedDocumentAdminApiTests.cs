@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.TrustedDocuments;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -54,7 +54,7 @@ public sealed class PostgreSqlTrustedDocumentAdminApiTests : IAsyncLifetime
         env.EnvironmentName.Returns("Development");
         return GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, EnableOutboxProcessor = false, SeedDemoData = false }
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db!.ConnectionString, SeedDemoData = false }
         }), env);
     }
 

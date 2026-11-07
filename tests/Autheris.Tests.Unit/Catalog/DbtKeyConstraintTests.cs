@@ -1,8 +1,9 @@
 namespace Autheris.Tests.Unit.Catalog;
 
 using System.Text;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Extensions.Dbt;

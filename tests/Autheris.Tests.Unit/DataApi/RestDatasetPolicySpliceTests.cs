@@ -9,11 +9,12 @@ using System.Threading.Tasks;
 using System.Text.Json;
 using Autheris.Api.Mcp;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Data.Services;
+using Autheris.Application.DataSources.Services;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Tests.Unit.VirtualFilters.Federation;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
@@ -353,7 +354,7 @@ public sealed class RestDatasetPolicySpliceTests
         doc.RootElement.GetProperty("data").GetArrayLength().ShouldBe(2);
     }
 
-    private sealed class Services(Fixture fx) : Autheris.Application.Data.Interfaces.IGovernedDataQueryService
+    private sealed class Services(Fixture fx) : Autheris.Application.DataSources.Interfaces.IGovernedDataQueryService
     {
         public Task<DatasetQueryEnvelope> ExecuteQueryAsync(DatasetQueryRequest request, RequestContext context, CancellationToken ct = default) =>
             fx.Service().ExecuteQueryAsync(request, context, ct);

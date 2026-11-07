@@ -8,7 +8,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// WP-SC-10: opaque keyset cursor. It only encodes a position (a chain sequence or an id) and carries no authority: every page query
+/// opaque keyset cursor. It only encodes a position (a chain sequence or an id) and carries no authority: every page query
 /// still applies the tenant and the caller's filters, so a forged or replayed cursor can never widen what a caller may read.
 /// </summary>
 public static class PageCursor

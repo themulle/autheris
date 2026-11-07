@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Services;
 using Autheris.Domain.Audit;
@@ -19,8 +19,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
 /// <summary>
-/// PLAN-CDC-99 D-A14 / SEC-CDC99-21: administration of the governed CDC streams. Global governance administrators only; never returns
-/// payloads, fingerprints, wrapped keys or key material (SEC-CDC99-11). Unknown and malformed ids answer identically (404).
+/// 99 D-A14 / administration of the governed CDC streams. Global governance administrators only; never returns
+/// payloads, fingerprints, wrapped keys or key material. Unknown and malformed ids answer identically (404).
 /// </summary>
 public static class CdcStreamAdminEndpoints
 {
@@ -80,7 +80,7 @@ public static class CdcStreamAdminEndpoints
             return Results.NotFound();
         }
 
-        // SEC-CDC99-21: the destructive variant needs an explicit confirmation naming the stream.
+        // the destructive variant needs an explicit confirmation naming the stream.
         if (discardUnreadable && !string.Equals(confirmStreamId, streamId.Value, StringComparison.Ordinal))
         {
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "discardUnreadable requires confirmStreamId equal to the stream id.");

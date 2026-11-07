@@ -357,7 +357,7 @@ public sealed record FilterBinding
     /// <summary>
     /// Whether the binding's target pattern matches <paramref name="table"/>: a glob <see cref="ObjectPattern"/>, or a
     /// regex (<see cref="TargetPatternMatcher"/>, full match on <c>domain.schema.table</c>). No error is swallowed: an
-    /// invalid stored pattern or a regex timeout propagates so the caller denies (F-GOV-14 SEC-7/SEC-8).
+    /// invalid stored pattern or a regex timeout propagates so the caller denies (F-GOV-14 ).
     /// </summary>
     public bool MatchesTarget(TableIdentifier table)
     {

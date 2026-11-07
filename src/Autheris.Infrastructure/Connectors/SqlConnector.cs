@@ -5,8 +5,8 @@ using System.Runtime.CompilerServices;
 using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Connectors;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
@@ -152,7 +152,7 @@ public sealed class SqlConnector : IAutherisConnector
         {
             var dsContext = CreateExecutionContext(session);
 
-            // WP-ARC-B-02: the read runs through the governed pipeline (planner + compiler + binder), resolved in its own scope.
+            // the read runs through the governed pipeline (planner + compiler + binder), resolved in its own scope.
             using var scope = _scopeFactory.CreateScope();
             CopyIngress(session, scope);
             var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
@@ -161,7 +161,7 @@ public sealed class SqlConnector : IAutherisConnector
         }
 
         /// <summary>
-        /// Issue #447 SEC-ATR-05: the new scope carries the caller's ingress (stored in the session by the gated caller). A session without it
+        /// Issue #447 the new scope carries the caller's ingress (stored in the session by the gated caller). A session without it
         /// leaves the scope unset, which the transport gate denies (fail-closed).
         /// </summary>
         private static void CopyIngress(ConnectorSessionContext session, IServiceScope scope)

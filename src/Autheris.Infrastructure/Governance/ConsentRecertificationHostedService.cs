@@ -1,0 +1,89 @@
+namespace Autheris.Infrastructure.Governance;
+
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+/// <summary>
+/// Background worker checking for expiring temporary consents and triggering recertification workflows.
+/// </summary>
+public sealed class ConsentRecertificationHostedService : BackgroundService
+{
+    public const string ScanLockKey = "governance:recertification:scan";
+
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ILogger<ConsentRecertificationHostedService> _logger;
+    private readonly TimeSpan _checkInterval;
+
+    public ConsentRecertificationHostedService(
+        IServiceProvider serviceProvider,
+        ILogger<ConsentRecertificationHostedService> logger,
+        TimeSpan? checkInterval = null)
+    {
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _checkInterval = checkInterval ?? TimeSpan.FromHours(4);
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("Consent Recertification hosted service started. Interval: {Interval}h", _checkInterval.TotalHours);
+
+        using var timer = new PeriodicTimer(_checkInterval);
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var clusterState = scope.ServiceProvider.GetService<Autheris.Application.State.IDistributedClusterStateProvider>();
+                IAsyncDisposable? scanLock = null;
+                if (clusterState != null)
+                {
+                    scanLock = await clusterState.TryAcquireLockAsync(ScanLockKey, TimeSpan.FromMinutes(30), stoppingToken).ConfigureAwait(false);
+                    if (scanLock == null)
+                    {
+                        _logger.LogDebug("Consent recertification scan lock held by another cluster replica; skipping cycle.");
+                    }
+                }
+
+                if (clusterState == null || scanLock != null)
+                {
+                    await using (scanLock)
+                    {
+                        var recertificationService = scope.ServiceProvider.GetService<IConsentRecertificationService>();
+                        if (recertificationService != null)
+                        {
+                            await recertificationService.ScanAndTriggerExpiringConsentRecertificationsAsync(ct: stoppingToken).ConfigureAwait(false);
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error executing consent recertification scan: {Message}", ex.Message);
+            }
+
+            try
+            {
+                if (!await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+                {
+                    break;
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+
+        _logger.LogInformation("Consent Recertification hosted service stopped.");
+    }
+}

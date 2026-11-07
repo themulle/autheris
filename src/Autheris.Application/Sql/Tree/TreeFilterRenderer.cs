@@ -94,7 +94,7 @@ internal static class TreeFilterRenderer
                 var items = ToList(comparison, out var hasNull);
                 if (hasNull)
                 {
-                    // SEC-RG-16 (#328): x NOT IN (..., NULL) is never true under three-valued logic, and x IN (..., NULL) is true or unknown. Under an
+                    // 16 (#328): x NOT IN (..., NULL) is never true under three-valued logic, and x IN (..., NULL) is true or unknown. Under an
                     // odd number of enclosing NOTs the term is rendered so that its negation is that same never-wider answer: the negated NOT IN
                     // keeps its matches (NOT (x IN (...))), the negated IN is true so that its NOT is false.
                     if (comparison.Operator == TreeFilterOperator.NotIn)
@@ -133,7 +133,7 @@ internal static class TreeFilterRenderer
         }
     }
 
-    // SEC-PG-06: the NULL operand is a bound parameter (never `= NULL` text, never a FALSE constant), so NOT/OR keep three-valued logic.
+    // the NULL operand is a bound parameter (never `= NULL` text, never a FALSE constant), so NOT/OR keep three-valued logic.
     private static string? TryRenderNullOperand(TreeFilterOperator op, string column, ITreeFilterTarget target)
     {
         var symbol = op switch

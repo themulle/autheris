@@ -22,7 +22,7 @@ Autheris exposes an **Enterprise Model Context Protocol (MCP)** server built dir
 
 ### Federated Query Transport Opt-In (`WebSql:CrossSource:AllowedTransports`)
 
-Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is true, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints` and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. MCP query tools use the transport name `Mcp`. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
+Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is true, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `SqlEndpoints` and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. MCP query tools use the transport name `Mcp`. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
 
 ```json
 {
@@ -42,4 +42,4 @@ Federated queries that span several data sources are only available when `Gatewa
 - **Transport:** Streamable HTTP with Server-Sent Events (SSE) and stateless request handling at `/mcp`.
 - **Discovery Endpoint:** `/.well-known/oauth-protected-resource/mcp`.
 - **Native resources:** rendered by `IMcpResourceProvider` (`src/Autheris.Application/Mcp/Services/McpResourceProvider.cs`); `src/Autheris.Api/Mcp/GatewayMcpServer.cs` only maps the result to the MCP SDK types.
-- **Implementation:** `src/Autheris.Application/Mcp/Server/GatewayMcpServer.cs` and `src/Autheris.Application/Mcp/Tools/HybridMcpTools.cs`.
+- **Implementation:** `src/Autheris.Api/Mcp/GatewayMcpServer.cs` and `src/Autheris.Application/Mcp/Services/McpSemanticTools.cs`.

@@ -142,8 +142,8 @@ public sealed partial class CallerAttributeArchitectureTests
         {
             ["src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs"] = "effective-filters explanation for administrators: shows the constant",
             ["src/Autheris.Application/Analytics/NoisyCacheKey.cs"] = "noisy cache key (#112 SEC-112-12/-26): hashes the predicate text with the bound caller-attribute values and the Generation; an unresolved attribute skips the cache",
-            ["src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.Cursors.cs"] = "known-key disclosure check only (presence of a filter); row evaluation goes through InMemoryRowFilterEvaluator.RowPassesDecision",
-            ["src/Autheris.Application/Data/Relations/CrossSourceRelationResolver.cs"] = "cross-source child read: an applying Virtual Filter refuses the request (VF-02, presence check; no row evaluation of the text)",
+            ["src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.Cursors.cs"] = "known-key disclosure check only (presence of a filter); row evaluation goes through InMemoryRowFilterEvaluator.RowPassesDecision",
+            ["src/Autheris.Application/DataSources/Relations/CrossSourceRelationResolver.cs"] = "cross-source child read: an applying Virtual Filter refuses the request (VF-02, presence check; no row evaluation of the text)",
             ["src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs"] = "an applying Virtual Filter denies (ext_authz cannot enforce row filters)",
             ["src/Autheris.Application/Policy/TableAccessPolicy.cs"] = "the decision point: a caller attribute outcome without a typed predicate denies the table (BC-129-05)",
             ["src/Autheris.Application/Policy/TableAccessPolicy.Consent.cs"] = "delegated source coarse gate: clears row-level predicates for native source pushdown (SEC-SC-13)",
@@ -157,7 +157,7 @@ public sealed partial class CallerAttributeArchitectureTests
             ["src/Autheris.Application/VirtualFilters/Federation/VirtualFilterFederationPlanner.cs"] = "planner of the gateway-side enforcement: presence check only",
             ["src/Autheris.Application/VirtualFilters/MandatoryRowFilterResolver.cs"] = "producer: marks CallerAttributesTextConstant",
             ["src/Autheris.Domain/Interfaces/TableAccessDecision.cs"] = "the decision itself",
-            ["src/Autheris.Extensions/Lakehouse/Services/IcebergRestCatalogFederationService.cs"] = "an applying Virtual Filter denies (not enforceable on the catalog)"
+            ["src/Autheris.Application/Policy/AccessDecisionPoint.cs"] = "mandatory row filter presence check for Iceberg/data source access decisions"
         };
 
         var readers = Sources("src")

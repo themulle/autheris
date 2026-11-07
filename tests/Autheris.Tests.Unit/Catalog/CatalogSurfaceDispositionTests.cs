@@ -70,7 +70,7 @@ public sealed class CatalogSurfaceDispositionTests
     [Fact]
     public void SurfaceDispositionList_ODataMetadata_KeepsATableOnlyAfterTheDataPathDecision()
     {
-        var source = File.ReadAllText(RepoFile("src", "Autheris.Extensions", "OData", "ODataHandler.cs"));
+        var source = File.ReadAllText(RepoFile("src", "Autheris.Application", "OData", "ODataHandler.cs"));
         var start = source.IndexOf("GetAuthorizedTablesCoreAsync(ClaimsPrincipal", StringComparison.Ordinal);
         start.ShouldBeGreaterThan(0);
         var body = source[start..Math.Min(source.Length, start + 4000)];

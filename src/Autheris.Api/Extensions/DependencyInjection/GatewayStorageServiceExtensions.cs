@@ -2,9 +2,9 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
 using System.Linq;
-using Autheris.Application.Caching.Interfaces;
-using Autheris.Application.Caching.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.State.Caching.Interfaces;
+using Autheris.Application.State.Caching.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Catalog;
@@ -15,7 +15,6 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Databricks;
 using Autheris.Domain.Diagnostics;
-using Autheris.Infrastructure.Garnet;
 using Autheris.Infrastructure.Health;
 using Autheris.Infrastructure.Idempotency;
 using Autheris.Infrastructure.Messaging;
@@ -42,37 +41,7 @@ public static class GatewayStorageServiceExtensions
 
         services.AddSingleton<IBinaryCacheSerializer, MemoryPackCacheSerializer>();
 
-        if (gatewayOptions.Caching.Garnet.EnableEmbeddedServer)
-        {
-            // SEC H-01 / AR-06: Register GarnetServerManager as singleton and hosted service.
-            services.AddSingleton<IGarnetServerManager, GarnetServerManager>();
-            services.AddHostedService(sp => (GarnetServerManager)sp.GetRequiredService<IGarnetServerManager>());
-
-            services.AddSingleton<IConnectionMultiplexer>(sp =>
-            {
-                var garnetManager = sp.GetRequiredService<IGarnetServerManager>();
-                // SEC H-01 / AR-06: Imperatively ensure Garnet is running before establishing RESP connection
-                // to prevent race conditions when services resolve multiplexer before HostedService.StartAsync.
-                garnetManager.StartServer();
-
-                var garnetConfig = new ConfigurationOptions
-                {
-                    EndPoints = { $"{gatewayOptions.Caching.Garnet.Host}:{gatewayOptions.Caching.Garnet.Port}" },
-                    Password = garnetManager.ClientPassword, // SEC H-01: Garnet runs with --auth Password
-                    ConnectTimeout = gatewayOptions.Caching.Redis.ConnectTimeoutMs,
-                    SyncTimeout = gatewayOptions.Caching.Redis.SyncTimeoutMs,
-                    AbortOnConnectFail = false
-                };
-                RedisConnectionSecurity.ApplyGarnetClientTls(garnetConfig, gatewayOptions.Caching.Garnet); // SEC H-01: optional TLS
-                return ConnectionMultiplexer.Connect(garnetConfig);
-            });
-            services.AddSingleton<IEventBus, RedisEventBus>();
-            services.AddSingleton<IRateLimiterService, RedisRateLimiterService>();
-            services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
-            services.AddSingleton<ITokenRevocationService, RedisTokenRevocationService>(); // SEC M-14 (GAP-B)
-            services.AddClusterState(ClusterStateMode.Embedded);
-        }
-        else if (gatewayOptions.Caching.Redis.Enabled)
+        if (gatewayOptions.Caching.Redis.Enabled)
         {
             var redisConfig = ConfigurationOptions.Parse(gatewayOptions.Caching.Redis.Configuration);
             redisConfig.ConnectTimeout = gatewayOptions.Caching.Redis.ConnectTimeoutMs;
@@ -115,12 +84,13 @@ public static class GatewayStorageServiceExtensions
         // admitted to WebSQL (SqlDialectMapper.IsExecutable, S-4) until a green G9 run.
         services.AddDatabricksStatementExecution();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
+        services.AddSingleton<Autheris.Modules.Abstractions.IGovernanceConnectionFactory, Autheris.Api.Hosting.GovernanceConnectionFactory>();
         services.AddSingleton<ISqlSourceDescriber, Autheris.Infrastructure.Persistence.SqlSourceDescriber>();
-        // SEC-X1-10: SQLite statements are interrupted at the execution timeout and on cancellation.
+        // SQLite statements are interrupted at the execution timeout and on cancellation.
         services.AddSingleton<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard, SqliteProviderExecutionGuard>();
 
         // WP-X0c (CR-ADG-47): column types and collations from database metadata. The TTL is validated here, so a value above
-        // the 300 s maximum fails the startup (SEC-X1-09). Nothing consumes the provider before X1.
+        // the 300 s maximum fails the startup. Nothing consumes the provider before X1.
         var catalogOptions = new GovernedCatalogOptions { CacheTtlSeconds = gatewayOptions.DataSources.CatalogCacheTtlSeconds };
         catalogOptions.Validate();
         services.AddSingleton(catalogOptions);

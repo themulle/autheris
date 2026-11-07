@@ -6,7 +6,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Generates dynamic OpenAPI 3.1 specifications from registered table metadata and contracts (F-API-03).
+/// Generates dynamic OpenAPI 3.1 specifications from registered table metadata and contracts (F-).
 /// </summary>
 public interface IDynamicOpenApiGenerator
 {

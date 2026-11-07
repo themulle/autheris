@@ -7,7 +7,7 @@ using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// Issue #107 WP-B: discovery and substitution of correlated filter sites (PLAN-GOV-107 A-10, SEC-RF107-06, -10). A site is substituted only
+/// Issue #107 discovery and substitution of correlated filter sites (107 A-10, -10). A site is substituted only
 /// when it is reached from the predicate root through <c>AND</c>, <c>OR</c> and parentheses and its node instance occurs exactly once in
 /// the tree; every other position keeps the <c>EXISTS</c> (<c>NOT (fk IN ...)</c> and <c>NOT EXISTS</c> differ for NULL foreign keys, and a
 /// shared instance could sit in a positive and a negated position). The result is a new <see cref="PolicyPredicate"/> in which only the

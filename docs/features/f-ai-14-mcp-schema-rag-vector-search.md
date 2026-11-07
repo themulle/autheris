@@ -1,7 +1,6 @@
 # F-AI-14: MCP Schema-RAG & Hybrid-Vector Search Engine
 
-**Status:** [Done] (100% GA – Production-Ready)  
-**Components:** [`CatalogSearchEngine.cs`](file:///root/autheris/src/Autheris.Application/Catalog/Search/CatalogSearchEngine.cs), [`Bm25SearchIndex.cs`](file:///root/autheris/src/Autheris.Application/Catalog/Search/Bm25SearchIndex.cs), [`VectorSearchIndex.cs`](file:///root/autheris/src/Autheris.Application/Catalog/Search/VectorSearchIndex.cs), [`LocalDeterministicEmbeddingGenerator.cs`](file:///root/autheris/src/Autheris.Application/Catalog/Search/LocalDeterministicEmbeddingGenerator.cs), [`CatalogSearchSnapshot.cs`](file:///root/autheris/src/Autheris.Application/Catalog/Search/CatalogSearchSnapshot.cs), [`McpDatasetTools.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/McpDatasetTools.cs)
+**Components:** [`CatalogSearchEngine.cs`](../../src/Autheris.Application/Catalog/Search/CatalogSearchEngine.cs), [`Bm25SearchIndex.cs`](../../src/Autheris.Application/Catalog/Search/Bm25SearchIndex.cs), [`VectorSearchIndex.cs`](../../src/Autheris.Application/Catalog/Search/VectorSearchIndex.cs), [`LocalDeterministicEmbeddingGenerator.cs`](../../src/Autheris.Infrastructure/AI/LocalDeterministicEmbeddingGenerator.cs), [`CatalogSearchSnapshot.cs`](../../src/Autheris.Application/Catalog/Search/CatalogSearchSnapshot.cs), [`McpDatasetTools.cs`](../../src/Autheris.Application/Mcp/Services/McpDatasetTools.cs)
 
 ---
 
@@ -52,7 +51,7 @@ flowchart TD
    - Boosts exact table name and primary key column matches over general descriptions.
 
 3. **Hardware-Accelerated SIMD Vector Matching (`VectorSearchIndex.cs`)**:
-   - Computes 384-dimensional deterministic, L2-normalized embeddings via [`LocalDeterministicEmbeddingGenerator.cs`](file:///root/autheris/src/Autheris.Application/Catalog/Search/LocalDeterministicEmbeddingGenerator.cs).
+   - Computes 384-dimensional deterministic, L2-normalized embeddings via [`LocalDeterministicEmbeddingGenerator.cs`](../../src/Autheris.Infrastructure/AI/LocalDeterministicEmbeddingGenerator.cs).
    - Leverages `System.Numerics.Tensors.TensorPrimitives.CosineSimilarity` for AVX-512 / ARM Neon vector processing.
 
 4. **Reciprocal Rank Fusion (RRF)**:

@@ -8,9 +8,9 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Search;
-using Autheris.Application.Connectors;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
@@ -49,32 +49,6 @@ public sealed class Perf254SecurityTests
         hash2.Length.ShouldBe(64);
         Sha256HexRegex.IsMatch(hash1).ShouldBeTrue();
         Sha256HexRegex.IsMatch(hash2).ShouldBeTrue();
-    }
-
-    [Fact]
-    public void SEC_PERF254_02_ContainerMemoryLimits_AreStrictlyClamped()
-    {
-        var tempDir = Path.Combine(Path.GetTempPath(), "cgroup_sec_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
-        try
-        {
-            var v2Path = Path.Combine(tempDir, "memory.max");
-            var v1Path = Path.Combine(tempDir, "memory.limit_in_bytes");
-
-            // Extremely small: 10 MB -> clamped to 64 MB
-            File.WriteAllText(v2Path, "10485760\n");
-            var minLimit = ContainerMemoryDetector.ResolveGarnetMemoryLimitMb(null, v2Path, v1Path);
-            minLimit.ShouldBe(64);
-
-            // Extremely large: 64 GB -> clamped to 4096 MB
-            File.WriteAllText(v2Path, "68719476736\n");
-            var maxLimit = ContainerMemoryDetector.ResolveGarnetMemoryLimitMb(null, v2Path, v1Path);
-            maxLimit.ShouldBe(4096);
-        }
-        finally
-        {
-            Directory.Delete(tempDir, true);
-        }
     }
 
     [Fact]

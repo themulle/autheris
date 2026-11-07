@@ -45,11 +45,11 @@ public sealed record ComputeDatasetProfileHttpRequest(
 public static class QueryAnalysisAndProfilingEndpoints
 {
     /// <param name="mapSampleRows">
-    /// PLAN-SEC-115 C-115-1: the sample-rows route returns rows, so it belongs to the REST data family and is mapped only while
+    /// 115 C-115-1: the sample-rows route returns rows, so it belongs to the REST data family and is mapped only while
     /// <c>Gateway:RestApi:DataEndpoint:Enabled</c> is on.
     /// </param>
     /// <param name="mapQueryAnalysis">
-    /// PLAN-GOV-240: dedicated switch for <c>POST /api/v1/governance/queries/analyze</c>, gated by <c>Gateway:Governance:QueryAnalysis:Enabled</c>.
+    /// dedicated switch for<c>POST /api/v1/governance/queries/analyze</c>, gated by <c>Gateway:Governance:QueryAnalysis:Enabled</c>.
     /// </param>
     public static IEndpointRouteBuilder MapQueryAnalysisAndProfilingEndpoints(
         this IEndpointRouteBuilder app,
@@ -71,7 +71,7 @@ public static class QueryAnalysisAndProfilingEndpoints
 
         if (mapSampleRows)
         {
-            // Issue #447 (SEC-ATR-04): a non-synthetic sample reads rows through the C3 choke point, so the route carries the REST ingress.
+            // Issue #447: a non-synthetic sample reads rows through the C3 choke point, so the route carries the REST ingress.
             var ingress = app.MapGroup("").WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest);
             ingress.MapGet("/api/v1/catalog/datasets/{dataset}/sample-rows", HandleSampleRowsAsync)
                 .WithName("GetDatasetSampleRowsWithSyntheticSupport")

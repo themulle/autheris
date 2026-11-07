@@ -7,7 +7,7 @@ using System.Threading;
 using Autheris.Domain.Interfaces;
 
 /// <summary>
-/// Bounded, sharded LRU cache of policy decisions (WP-PF-09). The key space is split over independent shards, each an exact
+/// Bounded, sharded LRU cache of policy decisions. The key space is split over independent shards, each an exact
 /// O(1) LRU under its own lock, so hits and misses of different users no longer serialise on one global lock. A small cache
 /// (fewer than 512 entries) uses a single shard, which keeps strict LRU order. At capacity only the least recently used entry of
 /// a shard is evicted (never a global flush); entries older than the TTL are dropped on access. Time comes from the injected

@@ -6,14 +6,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Paging;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// The one write seam for consents (PLAN-GOV-129 A-9): GraphQL, REST admin, OpenMetadata sync and declarative apply all call
+/// The one write seam for consents (129 A-9): GraphQL, REST admin, OpenMetadata sync and declarative apply all call
 /// <see cref="CreateConsentAsync"/> or <see cref="ReplaceConsentsAsync"/> on <see cref="IConsentRepository"/>; this decorator checks the
 /// registry rules before the inner repository stores anything. Everything else is forwarded unchanged.
 /// </summary>
@@ -60,7 +60,7 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
         await _inner.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, ct).ConfigureAwait(false);
     }
 
-    // PLAN-GOV-158-INC1: the description seam is additive and shares the same validation of the create list.
+    // the description seam is additive and shares the same validation of the create list.
     private IConsentDescriptionRepository InnerDescriptions =>
         _inner as IConsentDescriptionRepository ?? throw new NotSupportedException("The inner consent repository does not support consent descriptions.");
 

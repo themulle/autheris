@@ -1,7 +1,7 @@
 namespace Autheris.Application.Policy;
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 A-7, C-3): pure resolution of the effective key-set settings. Strategy, duration and maxKeys are resolved
+/// Issue #107 (107 A-7, C-3): pure resolution of the effective key-set settings. Strategy, duration and maxKeys are resolved
 /// independently (rule ?? object ?? global), then duration is clamped to <c>MaxDuration</c> and maxKeys to <c>MaxKeys</c>.
 /// A level that carries an invalid stored value (direct load, D-11) is read as "not set" for that setting and its strategy as
 /// <see cref="RowFilterEvaluationStrategy.Exists"/> (safe and exact); callers log one Warning per table/rule id (no values) using
@@ -33,7 +33,7 @@ public static class RowFilterEvaluationResolver
     }
 
     /// <summary>
-    /// Resolution for a stored consent rule (SEC-RF107-06e, read side): a directly loaded rule that is not eligible (DENY, not a correlated
+    /// Resolution for a stored consent rule (06e, read side): a directly loaded rule that is not eligible (DENY, not a correlated
     /// subquery filter, temporal) has its rule-level strategy treated as not set and the result is <see cref="RowFilterEvaluationStrategy.Exists"/>
     /// from the rule level. Callers log one Warning per rule (no values) when <see cref="IsEligibleRule"/> is false and the rule carries settings.
     /// </summary>

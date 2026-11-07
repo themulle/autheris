@@ -3,7 +3,7 @@ using System.Text;
 namespace Autheris.Infrastructure.Persistence;
 
 /// <summary>
-/// WP-PF-04: builds the multi-row <c>INSERT</c> of audit rows shared by the three governance repositories. Parameter names are
+/// builds the multi-row<c>INSERT</c> of audit rows shared by the three governance repositories. Parameter names are
 /// <c>@name0..@nameN</c> per row; the statement size is bounded (13 parameters per row, well below the 2,100-parameter limit of SQL Server).
 /// The chain hashes are computed in memory before the rows are written, so the statement shape never influences the chain.
 /// </summary>

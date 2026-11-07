@@ -35,6 +35,5 @@ public sealed class TenantCollisionGuard
         foreach (var id in options.WebSql.TenantDataSourceAllowlist.Keys) yield return id;
         yield return options.OpenMetadata.DefaultTenantId;
         foreach (var id in options.OpenMetadata.ServiceDatabaseToTenantMap.Values) yield return id;
-        foreach (var id in options.Itsm.InstanceToTenantMap.Values) yield return id;
     }
 }

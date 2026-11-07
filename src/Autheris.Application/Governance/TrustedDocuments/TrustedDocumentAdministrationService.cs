@@ -9,7 +9,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
-/// <summary>Who changes the trusted documents: the immutable subject key and the scope that authorised the call (SEC-281-9).</summary>
+/// <summary>Who changes the trusted documents: the immutable subject key and the scope that authorised the call.</summary>
 public sealed record TrustedDocumentActor(string SubjectKey, string Scope);
 
 /// <summary>What a PUT changed (counts only; the hashes are in the audit row).</summary>
@@ -41,8 +41,8 @@ public sealed class TrustedDocumentAdminException : Exception
 }
 
 /// <summary>
-/// The rules for changing the trusted documents (Issue #281): validated server-side (SEC-281-8), stored with a generation bump in one
-/// transaction, the local registry invalidated before the audit write, and a required audit row for every change including no-ops (SEC-281-9).
+/// The rules for changing the trusted documents (Issue #281): validated server-side, stored with a generation bump in one
+/// transaction, the local registry invalidated before the audit write, and a required audit row for every change including no-ops.
 /// </summary>
 public sealed class TrustedDocumentAdministrationService
 {

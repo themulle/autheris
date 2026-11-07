@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
-/// Reference-identity registry of correlated <c>EXISTS</c> nodes. SEC-RF107-10 (a): <c>Register</c> is called only from
+/// Reference-identity registry of correlated <c>EXISTS</c>nodes. 10 (a):<c>Register</c> is called only from
 /// <c>AdvancedRlsPredicateBuilder.CorrelatedExpression</c> (architecture test), so no other writer can mark an arbitrary node as a site.
 /// The table is process-global but holds its keys weakly (<see cref="ConditionalWeakTable{TKey, TValue}"/> compares by reference and never
 /// keeps a node alive): an entry disappears with its node, so registration cannot leak memory, and the value (<see cref="CorrelatedFilterSite"/>)

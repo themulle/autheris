@@ -34,7 +34,7 @@ public sealed record EffectiveFilterInspection
     public int Total { get; init; }
 }
 
-/// <summary>WP-ARC-B-07: authorization, audit and resolution of the effective-filters inspection (phase 6 of the virtual filters).</summary>
+/// <summary>authorization, audit and resolution of the effective-filters inspection (phase 6 of the virtual filters).</summary>
 public interface IEffectiveFilterInspector
 {
     Task<EffectiveFilterInspection> InspectAsync(SecurityPrincipalContext caller, EffectiveFilterQuery query, CancellationToken ct);

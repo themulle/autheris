@@ -10,7 +10,7 @@ using Autheris.Api.Errors;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Security;
 using Autheris.Application.Governance.Grants;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -231,7 +231,7 @@ public static partial class GovernanceEndpoints
 
         var subjectType = string.IsNullOrWhiteSpace(req.SubjectType) ? "User" : req.SubjectType.Trim();
 
-        // WP-SC-16: every individual grant is time-bound within the class maximum (also for bulk grants).
+        // every individual grant is time-bound within the class maximum (also for bulk grants).
         if (!Enum.TryParse<GranteeType>(subjectType, ignoreCase: true, out var bulkGranteeType) || !Enum.IsDefined(bulkGranteeType))
         {
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The subjectType is invalid. Supported values: User, Group, Role, ServicePrincipal.", context);
@@ -273,7 +273,7 @@ public static partial class GovernanceEndpoints
 
         await accessProfileRepo.UpsertProfileAsync(profile, ct).ConfigureAwait(false);
 
-        // WP-SC-03: the assignment goes through the strict assignment API (time-bound individual grants, Unmasked and break-glass rules).
+        // the assignment goes through the strict assignment API (time-bound individual grants, Unmasked and break-glass rules).
         // A rejection leaves no unassigned profile behind.
         var assignmentSubjectType = bulkGranteeType switch
         {
@@ -431,7 +431,7 @@ public static partial class GovernanceEndpoints
     }
 
     /// <summary>
-    /// WP-SC-03 / SEC-SC-04: the second person approves an access-profile assignment (typically a standing Unmasked group/role mapping or an individual
+    /// the second person approves an access-profile assignment (typically a standing Unmasked group/role mapping or an individual
     /// Unmasked grant). Four-eyes: the approver is never the creator (requester) nor the grantee; for an individual Unmasked grant the approver must be the data
     /// owner (or a delegate) of every matched table. The approval is a Tier-A audit event and bumps the profile epoch (an unavailable epoch store is a 503).
     /// </summary>

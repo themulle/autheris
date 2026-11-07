@@ -2,9 +2,9 @@ namespace Autheris.Tests.Unit.Catalog;
 
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Audit;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Models;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Models;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -25,13 +25,11 @@ public sealed class DataCatalogSyncKeyDefinitionTests
 
     private DataCatalogSyncService Sut()
     {
-        var factory = Substitute.For<IDataCatalogClientFactory>();
-        _client.ProviderType.Returns(DataCatalogProviderType.MicrosoftPurview);
-        factory.GetActiveClient().Returns(_client);
+        _client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
         _repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
             .Returns(c => { _upserts.Add(c.Arg<TableMetadata>()); return Task.FromResult(c.Arg<TableMetadata>()); });
-        return new DataCatalogSyncService(factory, _repo, Substitute.For<IEpochValidationService>(),
-            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.MicrosoftPurview } }),
+        return new DataCatalogSyncService(_client, _repo, Substitute.For<IEpochValidationService>(),
+            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.OpenMetadata } }),
             Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
     }
 

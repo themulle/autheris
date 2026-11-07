@@ -1,14 +1,14 @@
 namespace Autheris.Tests.Unit.Analytics;
 
 using System;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Semantic;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Analytics;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;

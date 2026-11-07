@@ -21,7 +21,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c> body (ARCH-MNT-12).</summary>
+/// <summary>Ordered startup checks of one area; each method is one contiguous section of the former <c>ValidateStartup</c>body.</summary>
 internal static class GraphQlAndSwitchStartupChecks
 {
     internal static void DevelopmentInContainer(StartupCheckContext context)
@@ -74,7 +74,7 @@ internal static class GraphQlAndSwitchStartupChecks
     {
         var options = context.Options;
 
-        // SR-P2-02 / SEC-GQL-02: Federation context header signing key must be configured outside Development
+        // SR-P2-02 / Federation context header signing key must be configured outside Development
         if (!context.IsDevelopment && options.Federation.Enabled && options.Federation.SignContextHeaders)
         {
             if (string.IsNullOrWhiteSpace(options.Federation.SigningKey) ||

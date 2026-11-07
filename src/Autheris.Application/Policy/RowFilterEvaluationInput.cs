@@ -1,7 +1,7 @@
 namespace Autheris.Application.Policy;
 
 /// <summary>
-/// Issue #107 (SEC-RF107-14b): strict input handling shared by the REST endpoints and the MCP tools. The strategy is accepted only as the
+/// Issue #107 (14b): strict input handling shared by the REST endpoints and the MCP tools. The strategy is accepted only as the
 /// exact strings <c>Exists</c> or <c>KeySetCache</c> (or absent): numeric values, numeric strings, other casings and whitespace are rejected
 /// (<c>Enum.TryParse</c> would accept all of them). Range checks against the caps are done by <see cref="RowFilterEvaluationResolver.Validate"/>.
 /// </summary>

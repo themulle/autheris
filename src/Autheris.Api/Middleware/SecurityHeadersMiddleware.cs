@@ -10,7 +10,7 @@ using Microsoft.Extensions.Hosting;
 
 /// <summary>
 /// Applies HTTP security response headers (CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy),
-/// OData v4 protocol version headers, and Development insecure-mode diagnostic headers (WP-ARC-C-04).
+/// OData v4 protocol version headers, and Development insecure-mode diagnostic headers.
 /// </summary>
 public sealed class SecurityHeadersMiddleware
 {
@@ -58,6 +58,19 @@ public sealed class SecurityHeadersMiddleware
         if (_options.OData.Enabled && context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
         {
             context.Response.Headers["OData-Version"] = "4.0";
+            if (Autheris.Api.Endpoints.ODataEndpoints.IsWriteMethod(context.Request.Method))
+            {
+                context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+                context.Response.Headers.Allow = "GET, HEAD, OPTIONS";
+                var payload = Autheris.Application.OData.ODataResponseFormatter.FormatErrorResponse(
+                    "MethodNotAllowed",
+                    "OData write operations and $batch write requests are not permitted. The gateway OData surface is strictly read-only.");
+                return context.Response.WriteAsJsonAsync(
+                    payload,
+                    options: null,
+                    contentType: "application/json;odata.metadata=minimal;charset=utf-8",
+                    cancellationToken: context.RequestAborted);
+            }
         }
 
         if (_insecureModeHeader != null)

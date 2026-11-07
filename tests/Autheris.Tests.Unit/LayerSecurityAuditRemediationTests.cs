@@ -12,7 +12,7 @@ using Autheris.Application.Extensibility;
 using Autheris.Application.Extensibility.Interceptors;
 using Autheris.Application.Federation.Services;
 using Autheris.Application.Governance;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Streaming.Services;
@@ -231,40 +231,6 @@ public sealed class LayerSecurityAuditRemediationTests
 
         var nonMatchResult = await enforcer.EvaluateAndMaskAsync(nonMatchingEvent, principal);
         nonMatchResult.IsAllowed.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task Application_BreakGlass_RejectsUnauthenticated()
-    {
-        // CRIT-03: Unauthenticated break-glass request must be rejected with 401
-        var gatewayOptions = new GatewayOptions
-        {
-            Extensibility = new ExtensibilityOptions
-            {
-                Enabled = true,
-                EnableBreakGlass = true,
-                RequireRoleForBreakGlass = true,
-                BreakGlassAllowedRoles = ["EmergencyAdmin"]
-            }
-        };
-
-        var interceptor = new JustificationAndBreakGlassInterceptor(
-            Options.Create(gatewayOptions),
-            NullLogger<JustificationAndBreakGlassInterceptor>.Instance);
-
-        var context = new IngressContext
-        {
-            User = null, // unauthenticated
-            Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["X-Break-Glass"] = "true",
-                ["X-Access-Justification"] = "INC-12345"
-            }
-        };
-
-        var result = await interceptor.OnIngressAsync(context);
-        result.Decision.ShouldBe(IngressDecision.Deny);
-        result.StatusCode.ShouldBe(401);
     }
 
     [Fact]

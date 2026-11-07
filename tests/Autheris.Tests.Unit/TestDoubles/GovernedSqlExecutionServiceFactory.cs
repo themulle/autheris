@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.TestDoubles;
 using System;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.Contracts;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;

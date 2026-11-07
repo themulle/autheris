@@ -62,7 +62,7 @@ public sealed class EpochRedisFailureInf1Tests
         var multiplexer = Substitute.For<IConnectionMultiplexer>();
         multiplexer.IsConnected.Returns(false); // degraded
 
-        var tableMetaRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        var tableMetaRepo = Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
         var metadata = new Autheris.Domain.Model.TableMetadata
         {
             Identifier = Table,

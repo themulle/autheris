@@ -9,7 +9,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
@@ -46,6 +46,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<WebApplicationFactory<Pr
 
         _factory = factory.WithWebHostBuilder(b =>
         {
+            b.UseEnvironment("Development");
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
@@ -68,7 +69,6 @@ public sealed class EndToEndSqliteTests : IClassFixture<WebApplicationFactory<Pr
             b.UseSetting("Gateway:SqlEndpoints:AutoSyncFromDbt", "false");
 
             b.UseSetting("Gateway:Mcp:Enabled", "true");
-            b.UseSetting("Gateway:Backstage:Enabled", "true");
         });
     }
 
@@ -293,20 +293,6 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
         (await ok.Content.ReadAsStringAsync()).ShouldContain("Query");
     }
 
-    // ---------- 7. Governance-DB / Backstage-Export ----------
-    [Fact]
-    public async Task Backstage_Export_ListsCatalogedTable()
-    {
-        await RegisterCatalogAsync();
-        var c = Client(roles: "CatalogSync,Reader");
-        var r = await c.GetAsync("/api/integrations/backstage/catalog-entities");
-        r.StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await r.Content.ReadAsStringAsync()).ShouldContain("e2e_cranes");
-
-        var yaml = await c.GetAsync("/api/integrations/backstage/catalog-info.yaml");
-        yaml.StatusCode.ShouldBe(HttpStatusCode.OK);
-    }
-
     // ---------- 8. MCP ----------
     [Fact]
     public async Task Mcp_Initialize_IsReachableAndAuthenticated()
@@ -325,7 +311,6 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
     [Theory]
     [InlineData("GET", "/api/extensions/dbt/exposures")]
     [InlineData("GET", "/api/governance/sunsetting/rules")]
-    [InlineData("GET", "/api/schema-registry/services")]
     [InlineData("GET", "/api/v1/cdc/subscriptions")]
     public async Task RoleProtectedEndpoints_RejectPlainReader_AcceptAdmin(string method, string path)
     {
@@ -342,10 +327,9 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
 
     // ---------- 10. Dev-Endpunkte ----------
     [Fact]
-    public async Task Dev_Info_And_GettingStarted_AreServedInDevelopment()
+    public async Task Dev_Docs_AreServedInDevelopment()
     {
         var c = Client(authenticated: false);
-        (await c.GetAsync("/getting-started")).StatusCode.ShouldBe(HttpStatusCode.OK);
         (await c.GetAsync("/docs")).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 }

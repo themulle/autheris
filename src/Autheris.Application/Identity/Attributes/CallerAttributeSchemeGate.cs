@@ -6,7 +6,7 @@ using System.Security.Claims;
 using Autheris.Domain.Options;
 
 /// <summary>
-/// The authentication-scheme gate of caller attributes (PLAN-GOV-129 BC-129-01, F-6). The MCP session rebuilds its caller as an <c>McpAuth</c>
+/// The authentication-scheme gate of caller attributes (129 BC-129-01, F-6). The MCP session rebuilds its caller as an<c>McpAuth</c>
 /// identity and loses the original scheme, so that identity passes the gate only with a gateway marker claim, which the gateway sets only when
 /// the original identity was of an allowed scheme. Any marker claim a client supplies is stripped on entry.
 /// </summary>

@@ -1,7 +1,7 @@
 namespace Autheris.Extensions.Dbt;
 
 /// <summary>
-/// Identifier rules for dbt relation import (issue #151, SEC-REL151-02): identifiers that reach logs, warnings or exceptions are
+/// Identifier rules for dbt relation import (issue #151): identifiers that reach logs, warnings or exceptions are
 /// truncated and stripped of control characters; identifiers that are empty, too long or contain control characters are rejected.
 /// </summary>
 public static class DbtIdentifierSanitizer

@@ -6,8 +6,8 @@ using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Api.Hosting;
 using Autheris.Api.Middleware;
-using Autheris.Application.Interfaces;
-using Autheris.Application.OpenMetadata.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
@@ -32,36 +32,30 @@ using Autheris.Application.Governance;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Lineage;
-using Autheris.Application.Workflows;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Governance.Workflows;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
-using Autheris.Application.ResourceGroups;
+using Autheris.Application.Runtime.ResourceGroups;
 using Autheris.Application.Observability;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.OData.Services;
-using Autheris.Infrastructure.Itsm;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Plugins;
 using Autheris.Domain.Diagnostics;
-using Autheris.Application.Caching.Interfaces;
-using Autheris.Infrastructure.Garnet;
+using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Infrastructure.Serialization;
-using Autheris.Application.Caching.Services;
+using Autheris.Application.State.Caching.Services;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Streaming.Services;
 using Autheris.Infrastructure.Streaming;
 using Autheris.GraphQL.Subscriptions;
-using Autheris.Infrastructure.Cdn;
-using Autheris.Application.SchemaRegistry;
 using Autheris.Application.Extensibility;
 using Autheris.Application.Extensibility.Interceptors;
 using Autheris.Application.Sql;
-using Autheris.Application.Serialization;
-using Autheris.Application.SchemaRegistry.Validation;
+using Autheris.Application.Common.Serialization;
 using System.Net.Http;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Trace;
@@ -93,7 +87,7 @@ public static partial class GatewayServiceCollectionExtensions
         services.TryAddSingleton<IConfiguration>(static _ => new ConfigurationBuilder().Build());
         var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
 
-        // WP-ARC-B-12: must stay the first hosted service so the governance schema is migrated before anything else starts.
+        // must stay the first hosted service so the governance schema is migrated before anything else starts.
         services.AddAutherisGovernanceMigrations();
         services.AddAutherisEvents(gatewayOptions);
         services.AddAutherisStorage(gatewayOptions, hostEnv);
@@ -106,6 +100,29 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddAutherisStartupWarmup();
         services.AddAutherisCore(gatewayOptions, hostEnv);
 
+        return services;
+    }
+
+    public static IServiceCollection AddGatewayModules(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        GatewayOptions gatewayOptions)
+    {
+        services.TryAddScoped<Autheris.Application.Policy.IAccessDecisionPoint, Autheris.Application.Policy.AccessDecisionPoint>();
+        var hostContext = new ModuleHostContext(
+            TimeProvider.System,
+            ModuleLoader.DefaultHostVersion,
+            new GovernanceConnectionFactory(gatewayOptions.GovernanceDb, statePaths: null, environment));
+        var loader = new ModuleLoader();
+        var moduleLoadResult = loader.LoadAndConfigureServices(services, configuration, environment, hostContext);
+        Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(
+            configuration,
+            moduleLoadResult,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [Autheris.Domain.Options.GatewaySections.Lakehouse] = "lakehouse"
+            });
         return services;
     }
     public static IServiceCollection AddGatewayAuth(
@@ -221,7 +238,7 @@ public static partial class GatewayServiceCollectionExtensions
         var entraConfig = gatewayOptions.Authentication.EntraId;
         var adfsConfig = gatewayOptions.Authentication.Adfs;
 
-        // API-14: with Entra ID and AD FS both enabled a single JwtBearer scheme could only load the signing keys of one
+        // with Entra ID and AD FS both enabled a single JwtBearer scheme could only load the signing keys of one
         // authority (Entra), so every AD FS token failed. Each IdP then gets its own scheme with its own metadata;
         // Bearer tokens are routed by their (unverified) issuer and fully validated by the selected scheme.
         bool splitJwtSchemes = entraConfig.Enabled && adfsConfig.Enabled;
@@ -344,7 +361,7 @@ public static partial class GatewayServiceCollectionExtensions
                 var authHeader = context.Request.Headers.Authorization.ToString();
 
                 // 1. Explicit Authorization headers have top priority (prevents ForwardAuth Header-Preemption DoS)
-                // API-07: the opaque SCIM secret is not a JWT; route it to the Scim scheme so valid provisioning calls are authenticated
+                // the opaque SCIM secret is not a JWT; route it to the Scim scheme so valid provisioning calls are authenticated
                 // before the unauthenticated-bearer IP budget and do not produce JwtBearer failures.
                 if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && GatewayAuthSchemes.IsScimPath(context.Request.Path))
                 {
@@ -464,7 +481,7 @@ public static partial class GatewayServiceCollectionExtensions
         // O9: every unhandled exception becomes application/problem+json without details (all environments)
         services.AddProblemDetails();
         services.AddExceptionHandler<Autheris.Api.Middleware.GatewayExceptionHandler>();
-        services.AddSingleton<Autheris.Application.Interfaces.IGatewayRoleEvaluator, Autheris.Application.Security.GatewayRoleEvaluator>();
+        services.AddSingleton<Autheris.Application.Common.Interfaces.IGatewayRoleEvaluator, Autheris.Application.Security.GatewayRoleEvaluator>();
         services.AddHttpContextAccessor();
     }
 

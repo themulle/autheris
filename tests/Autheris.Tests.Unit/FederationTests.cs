@@ -9,7 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Federation.Interfaces;
 using Autheris.Application.Federation.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;

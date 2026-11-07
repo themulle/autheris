@@ -3,7 +3,7 @@ using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using StackExchange.Redis;
@@ -69,25 +69,6 @@ public static class RedisConnectionSecurity
                 "Security error: Redis connections to non-loopback hosts require TLS outside Development. Set Caching.Redis.UseTls = true (or ssl=true in the connection string).");
         }
 
-        return configuration;
-    }
-
-    /// <summary>
-    /// SEC H-01: Client-side TLS for the embedded Garnet server (only if <see cref="GarnetOptions.EnableTls"/>).
-    /// </summary>
-    public static ConfigurationOptions ApplyGarnetClientTls(ConfigurationOptions configuration, GarnetOptions garnetOptions)
-    {
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentNullException.ThrowIfNull(garnetOptions);
-
-        if (!garnetOptions.EnableTls)
-        {
-            return configuration;
-        }
-
-        configuration.Ssl = true;
-        configuration.SslHost = string.IsNullOrWhiteSpace(garnetOptions.TlsSslHost) ? garnetOptions.Host : garnetOptions.TlsSslHost;
-        ApplyCertificatePinning(configuration, garnetOptions.TlsAllowedServerCertificateThumbprints, "Caching.Garnet.TlsAllowedServerCertificateThumbprints");
         return configuration;
     }
 

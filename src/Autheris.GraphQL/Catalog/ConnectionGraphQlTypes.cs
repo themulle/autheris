@@ -6,9 +6,9 @@ using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Data.Interfaces;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -49,7 +49,7 @@ public sealed record GraphQlConnection(
     int? TotalCount = null);
 
 /// <summary>
-/// REQ-GQL-420: Relay-compliant keyset cursor connections for governed catalog tables.
+/// Relay-compliant keyset cursor connections for governed catalog tables.
 /// Generates and validates cryptographic HMAC keyset cursors binding tenant, table,
 /// key columns, directions, and query shape to prevent full sorts on the underlying database.
 /// </summary>
@@ -366,7 +366,7 @@ internal static class ConnectionGraphQlTypes
             pkCols,
             defaultOrdering);
 
-        // Pre-execution SEC-412 masked columns check and registration
+        // Pre-execution masked columns check and registration
         var maskedColumns = treeService.GetMaskedColumns(principal, queryNode, opId);
         if (maskedColumns != null)
         {
@@ -385,7 +385,7 @@ internal static class ConnectionGraphQlTypes
             RegisterMaskedColumns(ctx, maskedColumns);
         }
 
-        // SEC-RG-08: Execute tree query
+        // Execute tree query
         JsonDocument doc;
         try
         {
@@ -401,7 +401,7 @@ internal static class ConnectionGraphQlTypes
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage("Access denied.").SetCode("ACCESS_DENIED").Build());
         }
-        catch (Autheris.Application.Data.Relations.CrossSourceRelationException ex)
+        catch (Autheris.Application.DataSources.Relations.CrossSourceRelationException ex)
         {
             throw new GraphQLException(ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.ErrorCode).Build());
         }

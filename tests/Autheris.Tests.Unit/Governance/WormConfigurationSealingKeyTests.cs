@@ -3,7 +3,7 @@ namespace Autheris.Tests.Unit.Governance;
 using System;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;

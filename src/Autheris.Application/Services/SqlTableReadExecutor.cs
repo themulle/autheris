@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Security;
-using Autheris.Application.Data.Interfaces;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Application.Services;
 
 /// <summary>
-/// WP-ARC-B-02: the governed table-read executor of SQL data sources. It replaces the former <c>SqlDataSourceExecutor</c>, which
+/// the governed table-read executor of SQL data sources. It replaces the former<c>SqlDataSourceExecutor</c>, which
 /// built its own SQL text: the read intent is planned by <see cref="IGovernedTableReadPlanner"/> (Trino text plus client
 /// parameters) and executed through <see cref="IGovernedSqlExecutionService"/>, so tenant, row policy, masks, limits and the audit
 /// digest all come from the single compiler path. No SQL text is built here and no <c>DbCommand</c> is touched.
@@ -27,7 +27,7 @@ namespace Autheris.Application.Services;
 /// </summary>
 public sealed class SqlTableReadExecutor : IDataSourceExecutor
 {
-    /// <summary>16 MB limit per binary column value (SEC-SPEC-05).</summary>
+    /// <summary>16 MB limit per binary column value.</summary>
     public const int MaxAllowedBinaryBytes = 16 * 1024 * 1024;
 
     internal const string RlsPushdownExecutedKey = "RlsPushdownExecuted";
@@ -43,7 +43,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
     private readonly IOptions<GatewayOptions>? _options;
     private readonly Autheris.Application.DataSources.IIngressTransportContext? _ingress;
 
-    /// <summary>SEC-ATR-03: the federation transport of a planned read comes from the server-stamped ingress, never a hard-coded name.</summary>
+    /// <summary>the federation transport of a planned read comes from the server-stamped ingress, never a hard-coded name.</summary>
     private string FederationTransport(string fallback) =>
         (_ingress is null ? null : SqlTransports.ForIngress(_ingress.Current)) ?? fallback;
 
@@ -76,7 +76,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         var metadata = context.Metadata;
         var decision = context.AccessDecision;
 
-        // SEC-AC-01: fail closed before any plan or connection.
+        // fail closed before any plan or connection.
         if (!decision.IsAllowed)
         {
             var reasons = decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "Table is blocked by access policy.";
@@ -110,7 +110,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         var selected = ResolveSelectedColumns(context);
         RejectSpatialColumns(metadata, decision, selected);
 
-        // #301/SEC-PG-07: 0 is an explicit zero-row page (the planner emits a bounded, unsatisfiable read); it never becomes 1 or a default.
+        // #301/0 is an explicit zero-row page (the planner emits a bounded, unsatisfiable read); it never becomes 1 or a default.
         // Planner callers: this executor (ExecuteAsync/StreamAsync) and GovernedDataQueryService (REST/MCP). Out of #301 scope and
         // unchanged: GovernedTableReadPlanner.Keyset (stream slices), TableStreamEndpoints (slice limit) and LakehouseDataSourceExecutor.
         var limit = Math.Max(0, context.Limit);
@@ -188,7 +188,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         var selected = ResolveSelectedColumns(context);
         RejectSpatialColumns(metadata, decision, selected);
 
-        // #301/SEC-PG-07: 0 is an explicit zero-row page (the planner emits a bounded, unsatisfiable read); it never becomes 1 or a default.
+        // #301/0 is an explicit zero-row page (the planner emits a bounded, unsatisfiable read); it never becomes 1 or a default.
         // Planner callers: this executor (ExecuteAsync/StreamAsync) and GovernedDataQueryService (REST/MCP). Out of #301 scope and
         // unchanged: GovernedTableReadPlanner.Keyset (stream slices), TableStreamEndpoints (slice limit) and LakehouseDataSourceExecutor.
         var limit = Math.Max(0, context.Limit);
@@ -382,7 +382,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         {
             foreach (var (name, value) in clause.Parameters)
             {
-                // SEC-ADG-02: a duplicate parameter name fails closed instead of letting one of two values win.
+                // a duplicate parameter name fails closed instead of letting one of two values win.
                 if (!parameters.TryAdd(name, value))
                 {
                     throw new SecurityException("A statement parameter name is bound twice (fail-closed).");
@@ -408,7 +408,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             return null;
         }
 
-        // SEC-SPEC-05: LOH allocation defense & safe base64 representation for binary blobs
+        // LOH allocation defense & safe base64 representation for binary blobs
         if (rawValue is byte[] bytes)
         {
             if (bytes.Length > MaxAllowedBinaryBytes)
@@ -419,7 +419,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             return Convert.ToBase64String(bytes);
         }
 
-        // SEC-SPEC-04: Deterministic culture-invariant UTC normalization
+        // Deterministic culture-invariant UTC normalization
         if (rawValue is DateTime dt)
         {
             if (dt.Kind == DateTimeKind.Unspecified)

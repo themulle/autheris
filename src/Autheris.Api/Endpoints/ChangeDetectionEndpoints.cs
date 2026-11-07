@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
-using Autheris.Application.Data.Changes;
+using Autheris.Application.DataSources.Changes;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -31,7 +31,7 @@ public static class ChangeDetectionEndpoints
 {
     public static IEndpointRouteBuilder MapChangeDetectionEndpoints(this IEndpointRouteBuilder app)
     {
-        // Issue #447 (SEC-ATR-02, SEC-ATR-04): both routes read the table's source (version, change log, current rows); REST ingress.
+        // Issue #447: both routes read the table's source (version, change log, current rows); REST ingress.
         var ingress = app.MapGroup("").WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest);
         ingress.MapGet("/api/v1/data/{domain}/{schema}/{table}/change-token", HandleGetChangeTokenAsync)
             .WithName("GetDatasetChangeToken")

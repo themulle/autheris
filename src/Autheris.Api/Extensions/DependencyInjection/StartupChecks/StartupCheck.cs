@@ -8,14 +8,14 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// One named startup check (ARCH-MNT-12). Checks are not DI services because validation runs before the container exists; they
+/// One named startup check. Checks are not DI services because validation runs before the container exists; they
 /// live in one static ordered list and run fail-fast: the first check that throws wins and later checks do not run.
 /// </summary>
 internal sealed record StartupCheck(string Name, Action<StartupCheckContext> Run);
 
 /// <summary>
 /// The inputs shared by all checks. The danger bypass and warning lists are pure functions of the options and are computed once
-/// (ARCH-MNT-14-SC-03).
+/// (SC-03).
 /// </summary>
 internal sealed class StartupCheckContext
 {
@@ -41,7 +41,7 @@ internal sealed class StartupCheckContext
     public TelemetryOptions? Telemetry { get; }
 
     /// <summary>
-    /// WARN entries of option groups outside <see cref="GatewayOptions"/> (ARCH-MNT-06-FU-03). Reported in the startup banner only;
+    /// WARN entries of option groups outside <see cref="GatewayOptions"/>(FU-03). Reported in the startup banner only;
     /// the health component keeps reading <see cref="GatewayOptions.GetActiveWarnings"/>. Entries name the key, never a value.
     /// </summary>
     public IReadOnlyList<string> ExtraWarnings { get; }

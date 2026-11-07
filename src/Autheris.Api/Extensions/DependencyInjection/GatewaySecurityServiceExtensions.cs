@@ -5,7 +5,7 @@ using System.IO;
 using Autheris.Api.Security;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mesh.Interfaces;
 using Autheris.Application.Mesh.Services;
 using Autheris.Application.Security.Rebac.Interfaces;
@@ -82,7 +82,7 @@ public static class GatewaySecurityServiceExtensions
             return service;
         });
 
-        // ReBAC / OpenFGA Relationship-Based Access Control (F-SEC-04)
+        // ReBAC / OpenFGA Relationship-Based Access Control (F-)
         // RR-L4-04: cluster-wide persistent tuple store whenever Redis/Garnet is configured; in-memory only for single-node.
         services.AddSingleton<IRebacStore>(sp =>
         {
@@ -107,8 +107,8 @@ public static class GatewaySecurityServiceExtensions
         // Security, Context & Audit
         services.AddHttpContextAccessor();
         services.AddScoped<IClientIpResolver, HttpContextClientIpResolver>();
-        services.AddSingleton<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
-        services.AddSingleton<Autheris.Application.Interfaces.IDelegationContextProvider, Autheris.Api.Security.HttpDelegationContextProvider>();
+        services.AddSingleton<Autheris.Application.Common.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
+        services.AddSingleton<Autheris.Application.Common.Interfaces.IDelegationContextProvider, Autheris.Api.Security.HttpDelegationContextProvider>();
         services.AddScoped<AuditContext>();
         services.AddSingleton<IAuthFailureAggregator, AuthFailureAggregator>();
         services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();

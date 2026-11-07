@@ -22,6 +22,12 @@ public sealed class GatewayExtensibilityMiddleware
     /// <summary>Ingress item carrying the connection-derived client IP (SEC M-06).</summary>
     public const string ClientIpItemKey = "GatewayClientIp";
 
+    private static readonly string[] LegacyIgnoredIngressHeaders =
+    [
+        "X-Break-Glass",
+        "X-Access-Justification"
+    ];
+
     public GatewayExtensibilityMiddleware(
         RequestDelegate _next,
         IExtensibilityPipeline pipeline,
@@ -52,6 +58,17 @@ public sealed class GatewayExtensibilityMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            foreach (var legacyHeader in LegacyIgnoredIngressHeaders)
+            {
+                if (context.Request.Headers.ContainsKey(legacyHeader))
+                {
+                    _logger.LogDebug("Ignored legacy header {HeaderName} on ingress request.", legacyHeader);
+                }
+            }
+        }
+
         if (!_options.Extensibility.Enabled)
         {
             await _next(context);
@@ -151,7 +168,7 @@ public sealed class GatewayExtensibilityMiddleware
             return;
         }
 
-        // WP-ARC-C-14: Zero-copy slice of the underlying MemoryStream buffer
+        // Zero-copy slice of the underlying MemoryStream buffer
         ReadOnlyMemory<byte> responseMemory = boundedStream.WrittenMemory;
 
         // 3. Egress phase

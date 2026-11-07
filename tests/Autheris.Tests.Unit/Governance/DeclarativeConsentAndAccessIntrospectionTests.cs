@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Services;
@@ -379,7 +379,7 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
     }
 
     [Fact]
-    public void Issue29_GatewayOptions_Defaults_Include_AppRead_And_ScopeBudgets()
+    public void Issue29_GatewayOptions_Defaults_Include_AppRead()
     {
         // Arrange
         var options = new GatewayOptions();
@@ -387,9 +387,5 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
         // Assert
         options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("Agent.Read");
         options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("App.Read");
-
-        options.FinOps.ScopeMonthlyBudgets.ShouldNotBeNull();
-        options.FinOps.ScopeMonthlyBudgets["Agent.Read"] = 250.0m;
-        options.FinOps.ScopeMonthlyBudgets["Agent.Read"].ShouldBe(250.0m);
     }
 }

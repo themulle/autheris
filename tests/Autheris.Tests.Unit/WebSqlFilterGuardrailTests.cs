@@ -6,7 +6,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
@@ -168,6 +168,6 @@ public sealed class WebSqlFilterGuardrailTests
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(() => service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
 
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
-        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
+        mapped.Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 }

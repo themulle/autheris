@@ -5,11 +5,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Security;
-using Autheris.Application.Data.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Services;
+using Autheris.Application.Common.Interfaces;
 
 /// <summary>
-/// WP-124-3: Builds parameterized TableFilterClause instances representing dynamic IN lists.
+/// Builds parameterized TableFilterClause instances representing dynamic IN lists.
 /// Uses isolated @k_<n> parameter markers and supports combining with existing single-table pushdown filters.
 /// </summary>
 public static class KeySetClauseBuilder

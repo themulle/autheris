@@ -7,18 +7,18 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
-/// REQ-SQL-128 pass <c>"lists"</c>. Replaces an <c>IN</c> / <c>NOT IN</c> list whose only item is a synthetic client parameter named in
+/// 128 pass<c>"lists"</c>. Replaces an <c>IN</c> / <c>NOT IN</c> list whose only item is a synthetic client parameter named in
 /// the request's <see cref="ClientListShapes"/> with one indexed <see cref="ParameterReference"/> per element (an empty list becomes
 /// the constant <c>1 = 0</c> / <c>1 = 1</c>). Every other occurrence of such a parameter is refused (SQL_LIST_PARAM_POSITION).
-/// It runs on the USER tree only: after simplification and before the typed security visitor (SEC-128-01), so the DML guard sees the
+/// It runs on the USER tree only: after simplification and before the typed security visitor, so the DML guard sees the
 /// expanded predicate. No element value is known here; elements are bound by the binder from the request.
 /// </summary>
 internal sealed class ClientListExpander : SqlAstRewriter
 {
-    /// <summary>Upper bound of the text one expanded element adds: the longest marker plus the separator (PLAN-SQL-128 D-EXP).</summary>
+    /// <summary>Upper bound of the text one expanded element adds: the longest marker plus the separator (128 D-EXP).</summary>
     public const int MarkerAllowance = 12;
 
-    /// <summary>Hard ceiling of expanded items per statement, independent of the dialect budget (SEC-128-02).</summary>
+    /// <summary>Hard ceiling of expanded items per statement, independent of the dialect budget.</summary>
     public const int ExpandedItemsCeiling = 10_000;
 
     private static readonly BinaryExpression ConstantFalse = new(
@@ -38,10 +38,10 @@ internal sealed class ClientListExpander : SqlAstRewriter
         _maxExpanded = MaxExpandedItems(capabilities);
     }
 
-    /// <summary>Running total of expanded items over all uses; the output allowance of the compiler is derived from it (SEC-128-03).</summary>
+    /// <summary>Running total of expanded items over all uses; the output allowance of the compiler is derived from it.</summary>
     public long ExpandedItems { get; private set; }
 
-    /// <summary><c>min(MaxBindParameters - 100, 10,000)</c> (SEC-128-02).</summary>
+    /// <summary><c>min(MaxBindParameters - 100, 10,000)</c>.</summary>
     public static int MaxExpandedItems(DialectCapabilities capabilities)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
@@ -50,7 +50,7 @@ internal sealed class ClientListExpander : SqlAstRewriter
 
     public override SqlNode VisitInListExpression(InListExpression node)
     {
-        // The sole-item rule is on the exact node type: a parenthesized or wrapped item is never unwrapped (SEC-128-10 d).
+        // The sole-item rule is on the exact node type: a parenthesized or wrapped item is never unwrapped (10 d).
         if (node.Items.Count == 1
             && node.Items[0] is ParameterReference { IsSynthetic: true, ListIndex: null } reference
             && _shapes.TryGetCount(reference.Name, out int count))
@@ -61,7 +61,7 @@ internal sealed class ClientListExpander : SqlAstRewriter
                 return node.IsNotIn ? ConstantTrue : ConstantFalse;
             }
 
-            // Checked before any node is allocated (SEC-128-02).
+            // Checked before any node is allocated.
             if (!CompilerHooks.IsDisabled(SecurityControl.ClientListMaxExpanded) && ExpandedItems + count > _maxExpanded)
             {
                 throw new ClientListException(GovernedSqlErrorCodes.ListParamTooLarge);

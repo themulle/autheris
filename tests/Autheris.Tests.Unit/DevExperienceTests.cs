@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Tests.Unit.TestDoubles;
 using System.Text.Json;
 using Autheris.Api.Endpoints;

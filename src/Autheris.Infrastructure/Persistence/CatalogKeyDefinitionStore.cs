@@ -10,7 +10,7 @@ namespace Autheris.Infrastructure.Persistence;
 internal sealed record KeyDefinitionDialect(string Prefix, string ExistsSql, bool QualifyExistsName, string TableLookupSql);
 
 /// <summary>
-/// Shared read/write of the declared primary key and indexes (issue #94, D-6/D-7, SD-3, SEC-94-07) for all governance engines.
+/// Shared read/write of the declared primary key and indexes (issue #94, D-6/D-7, SD-3) for all governance engines.
 /// Read side: the persisted rows are validated with the full <see cref="TableKeyDefinitionValidator"/>; anything invalid makes
 /// the table's metadata unavailable (<see cref="TableMetadataUnavailableException"/>), a partial key is never returned.
 /// </summary>

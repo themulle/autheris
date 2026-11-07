@@ -9,7 +9,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -506,7 +506,7 @@ public sealed class StoredProcedureCatalogValidator
         }
     }
 
-    /// <summary>SEC-PROC152I2-08: a catalog procedure with a parameter named 'limit' is never registered (fixed message).</summary>
+    /// <summary>a catalog procedure with a parameter named 'limit' is never registered (fixed message).</summary>
     internal static IReadOnlyList<string> ReservedParameterErrors(IEnumerable<string> dbParameterNames)
         => dbParameterNames.Any(ProcedureDefinitionParser.IsReservedName)
             ? ["Procedure parameter '@limit' uses the reserved name 'limit'."]

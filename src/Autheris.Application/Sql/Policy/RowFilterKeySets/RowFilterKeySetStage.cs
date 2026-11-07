@@ -1,7 +1,7 @@
 namespace Autheris.Application.Sql.Policy.RowFilterKeySets;
 
 using System.Diagnostics;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
@@ -15,16 +15,16 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// Issue #107 (PLAN-GOV-107 A-2, A-10, A-13, D-WPC-2, -3, -7, -9): the per-statement stage that replaces eligible correlated <c>EXISTS</c> sites by
-/// cached key sets. It runs after admission, rewrites the compiler input only (never a decision, recipe or cache: SEC-RF107-04 a, -10 c) and
+/// Issue #107 (107 A-2, A-10, A-13, D-WPC-2, -3, -7, -9): the per-statement stage that replaces eligible correlated<c>EXISTS</c> sites by
+/// cached key sets. It runs after admission, rewrites the compiler input only (never a decision, recipe or cache: 04 a, -10 c) and
 /// fails safe: every condition that is not met leaves the exact <c>EXISTS</c>.
 /// <list type="bullet">
-/// <item>Per site: resolve settings (rule, object, global), data source opt-in (SEC-RF107-01 c), dialect, authoritative epochs (read once before the
-/// lookup, SEC-RF107-04 e, -05), key query compile (only <see cref="KeyQueryNotDerivableException"/> maps to a fallback, SEC-RF107-08), the
+/// <item>Per site: resolve settings (rule, object, global), data source opt-in (01 c), dialect, authoritative epochs (read once before the
+/// lookup, 04 e, -05), key query compile (only<see cref="KeyQueryNotDerivableException"/>maps to a fallback), the
 /// pre-load text gate (D-WPC-3), the single-flight cache and the loader (a loader failure is a <c>ROW_FILTER_KEY_SET_UNAVAILABLE</c> denial).</item>
-/// <item>After all sites are resolved one combined loop applies the bind budget and the text budget; a budget fallback never touches the entry (SEC-RF107-18).</item>
+/// <item>After all sites are resolved one combined loop applies the bind budget and the text budget; a budget fallback never touches the entry.</item>
 /// <item>Site ordinals are unique per statement and assigned before any fallback decision (D-WPC-7). Errors of the substitution are programming errors and propagate.</item>
-/// <item>No key value, no hash of key values and no count reaches a log line here; counts go to the report only (SEC-RF107-09).</item>
+/// <item>No key value, no hash of key values and no count reaches a log line here; counts go to the report only.</item>
 /// </list>
 /// </summary>
 public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
@@ -91,13 +91,13 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         ArgumentNullException.ThrowIfNull(predicates);
         ArgumentNullException.ThrowIfNull(report);
 
-        // SEC-RF107-15 / SEC-RF107-17: the retry and every non-read statement perform no epoch read, cache lookup or key query.
+        // the retry and every non-read statement perform no epoch read, cache lookup or key query.
         if (context.Disabled || !context.IsRead)
         {
             return predicates;
         }
 
-        var options = _options.CurrentValue;   // read per statement: lowered caps apply on the next request (SEC-RF107-16)
+        var options = _options.CurrentValue;   // read per statement: lowered caps apply on the next request
         var global = options.RowFilters.KeySetCache;
         int firstOutcome = report.Outcomes.Count;
         var sites = Scan(context, predicates, global, warn: true);
@@ -144,7 +144,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         RowFilterKeySetCacheOptions global,
         CancellationToken ct)
     {
-        // SEC-RF107-01 c / dialect: the same for every site of the statement.
+        // 01 c / dialect: the same for every site of the statement.
         if (context.Dialect is not (TargetSqlDialect.SqlServer or TargetSqlDialect.PostgreSql or TargetSqlDialect.Oracle or TargetSqlDialect.Sqlite))
         {
             FallbackAll(report, candidates, KeySetFallbackReason.DialectUnsupported);
@@ -161,7 +161,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
             return predicates;
         }
 
-        // Key query compilation and converter derivation need no epoch: sites that cannot be substituted never cause an authoritative read (SEC-RF107-04 e).
+        // Key query compilation and converter derivation need no epoch: sites that cannot be substituted never cause an authoritative read (04 e).
         var prepared = new List<Prepared>();
         foreach (var site in candidates.OrderBy(static c => c.Ordinal))
         {
@@ -181,7 +181,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
             return predicates;
         }
 
-        // SEC-RF107-04 e / -05: target and dependent epochs are read once, before any lookup; the same values go into the keys.
+        // 04 e / -05: target and dependent epochs are read once, before any lookup; the same values go into the keys.
         var epochTables = new HashSet<TableIdentifier>();
         foreach (var table in prepared.Select(static c => c.Site.Table).Distinct())
         {
@@ -268,7 +268,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         }
         catch (KeyQueryNotDerivableException ex)
         {
-            // SEC-RF107-08: the only exception that maps to a fallback; SecurityException and SqlLimitExceededException propagate.
+            // the only exception that maps to a fallback; SecurityException and SqlLimitExceededException propagate.
             return (null, Enum.TryParse<KeySetFallbackReason>(ex.ReasonCode, out var mapped)
                           && mapped is KeySetFallbackReason.NotDerivable or KeySetFallbackReason.TypeNotBindable or KeySetFallbackReason.DialectUnsupported
                 ? mapped
@@ -312,7 +312,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         var timeout = global.KeyQueryTimeout;
         var request = new RowFilterKeySetLoadRequest(connection, context.Dialect, context.Tenant, context.DataSourceName, query, converter, site.Eval.MaxKeys, timeout);
 
-        // SEC-RF107-08: a loader failure (GatewaySecurityException ROW_FILTER_KEY_SET_UNAVAILABLE) propagates and denies the statement.
+        // a loader failure (GatewaySecurityException ROW_FILTER_KEY_SET_UNAVAILABLE) propagates and denies the statement.
         var result = await _cache.GetOrLoadAsync(
             cacheKey, tenant, context.DataSourceName, site.Eval.Duration,
             async loadCt =>
@@ -362,7 +362,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
     /// <summary>
     /// D-WPC-3: one combined loop over the bind budget (A-10) and the text budget. While either is exceeded the site with the largest padded list
     /// falls back (lowest ordinal on ties): <c>ParameterBudget</c> when the bind budget is exceeded at that moment, else <c>ExpansionBudget</c>.
-    /// Nothing is cached or evicted here (SEC-RF107-18).
+    /// Nothing is cached or evicted here.
     /// </summary>
     private static void DropBudgetExceeding(
         RowFilterKeySetContext context,

@@ -18,7 +18,7 @@ public sealed record CustomQueryPollerValidationResult(bool IsValid, IReadOnlyLi
 }
 
 /// <summary>
-/// Fail-closed AST DQL safety gate and configuration validator for multi-watermark query pollers (PLAN-CDC-101 D-1, SEC-CDC101-01, SEC-CDC101-02).
+/// Fail-closed AST DQL safety gate and configuration validator for multi-watermark query pollers (101 D-1).
 /// </summary>
 public sealed class CustomQueryPollerValidator
 {
@@ -183,7 +183,7 @@ public sealed class CustomQueryPollerValidator
             return;
         }
 
-        // SEC-CDC101-02: Whitelist pattern ^[a-zA-Z0-9_]+$
+        // Whitelist pattern ^[a-zA-Z0-9_]+$
         if (!SafeIdentifierRegex.IsMatch(wm.Name))
         {
             errors.Add($"Watermark dimension Name '{wm.Name}' contains invalid characters. Must match ^[a-zA-Z0-9_]+$.");
@@ -195,7 +195,7 @@ public sealed class CustomQueryPollerValidator
             errors.Add($"Watermark dimension ParameterName '{wm.ParameterName}' contains invalid characters. Must match ^[a-zA-Z0-9_]+$.");
         }
 
-        // SEC-CDC101-02: Silent-NULL Defense
+        // Silent-NULL Defense
         if (string.IsNullOrWhiteSpace(wm.InitialValue))
         {
             errors.Add($"Watermark dimension '{wm.Name}' must declare a non-empty InitialValue to prevent SQL three-valued logic silent NULL starvation.");

@@ -2,7 +2,8 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -39,8 +40,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
         return _dataSource.OpenConnection();
     }
     private readonly IEpochValidationService _epochValidationService;
-    // WP-PF-06: bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
-    private readonly Autheris.Application.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
+    // bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
+    private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Test seam: drops cached metadata after a test changed rows behind the repository.</summary>
     private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();
@@ -147,7 +148,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
         };
         _auditChannel = Channel.CreateBounded<AuditLogEntry>(channelOptions);
 
-        // SEC-04: Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging
+        // Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging
         byte[]? key = null;
         var auditSecretRef = options?.Value?.GovernanceDb?.AuditHmacKeyVaultRef;
         if (secretProvider != null && !string.IsNullOrWhiteSpace(auditSecretRef))
@@ -245,7 +246,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
 
         _auditAnchorStore = auditAnchorStore;
 
-        // No DDL and no database I/O here: the schema is created by the governance migration runner (WP-ARC-B-12).
+        // No DDL and no database I/O here: the schema is created by the governance migration runner.
         _shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
     }
 

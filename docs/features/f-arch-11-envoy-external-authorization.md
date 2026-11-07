@@ -1,7 +1,6 @@
 # F-ARCH-11: Envoy External Authorization (ext_authz) & Istio Service Mesh Integration
 
-**Status:** [Done] (100% GA – Production-Ready)  
-**Components:** [`EnvoyExtAuthzEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs), [`IEnvoyExtAuthzService.cs`](file:///root/autheris/src/Autheris.Application/Mesh/Interfaces/IEnvoyExtAuthzService.cs), [`EnvoyExtAuthzService.cs`](file:///root/autheris/src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs)
+**Components:** [`EnvoyExtAuthzEndpoints.cs`](../../src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs), [`IEnvoyExtAuthzService.cs`](../../src/Autheris.Application/Mesh/Interfaces/IEnvoyExtAuthzService.cs), [`EnvoyExtAuthzService.cs`](../../src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs)
 
 ---
 

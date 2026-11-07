@@ -3,16 +3,14 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Diagnostics;
 using Autheris.Application.Extensibility;
 using Autheris.Application.Extensibility.Interceptors;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Observability;
+using Autheris.Application.OData;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.OData.Services;
-using Autheris.Application.ResourceGroups;
-using Autheris.Application.SchemaRegistry;
-using Autheris.Application.SchemaRegistry.Validation;
+using Autheris.Application.Runtime.ResourceGroups;
 using Autheris.Application.Services;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -27,7 +25,7 @@ using OpenTelemetry.Trace;
 public static class GatewayCoreServiceExtensions
 {
     /// <summary>
-    /// Allowed request headers of the developer CORS policy. The app identity header (Issue #281, SEC-281-10) is added only while app-scoped
+    /// Allowed request headers of the developer CORS policy. The app identity header (Issue #281) is added only while app-scoped
     /// trusted documents are enabled; CORS never replaces the Origin check of the middleware.
     /// </summary>
     internal static string[] DeveloperCorsHeaders(GatewayOptions options)
@@ -52,6 +50,7 @@ public static class GatewayCoreServiceExtensions
             IncludeWebSqlSpec = gatewayOptions.WebSql.Enabled
         });
         services.AddSingleton<IDynamicOpenApiGenerator, DynamicOpenApiGenerator>();
+        services.AddODataIntegration(gatewayOptions);
 
         // Resource Groups & Workload Isolation (F-PERF-08)
         services.AddSingleton<IResourceGroupManager, ResourceGroupManager>();
@@ -59,7 +58,7 @@ public static class GatewayCoreServiceExtensions
         services.AddSingleton(sp => new PersistentConnectionLimiter(
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.ResourceGroups));
 
-        // Canonical System Metadata & Monitoring (F-API-07)
+        // Canonical System Metadata & Monitoring (F-)
         services.AddSingleton<IGatewaySystemMetricsService, GatewaySystemMetricsService>();
 
         // Explicit CORS policy configuration
@@ -137,14 +136,7 @@ public static class GatewayCoreServiceExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddSingleton<IExtensibilityPipeline, ExtensibilityPipeline>();
-        services.AddSingleton<IIngressInterceptor, JustificationAndBreakGlassInterceptor>();
         services.AddSingleton<IEgressInterceptor, AuditLineageEgressInterceptor>();
-
-        // Schema Registry & AST Linter (P8)
-        services.AddSingleton<IValidator<SchemaRegistrationRequest>, SchemaRegistrationRequestValidator>();
-        services.AddSingleton<ISchemaLinter, SchemaLinter>();
-        services.AddSingleton<ISchemaRegistryRepository, InMemorySchemaRegistryRepository>();
-        services.AddSingleton<ISchemaRegistryService, SchemaRegistryService>();
 
         return services;
     }

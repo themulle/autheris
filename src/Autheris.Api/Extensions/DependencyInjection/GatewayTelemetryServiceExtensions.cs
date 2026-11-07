@@ -3,7 +3,7 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 using System;
 using System.Diagnostics;
 using Autheris.Api.Telemetry;
-using Autheris.Application.Telemetry;
+using Autheris.Application.Observability.Telemetry;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Options.Observability;
 using Autheris.Infrastructure.Telemetry;
@@ -19,7 +19,7 @@ using OpenTelemetry.Trace;
 
 /// <summary>
 /// Service collection and logging builder extensions for OpenTelemetry composition.
-/// Enforces WP-A1, WP-A2, and D-1 through D-18.
+/// Enforces , and D-1 through D-18.
 /// </summary>
 public static class GatewayTelemetryServiceExtensions
 {
@@ -34,7 +34,7 @@ public static class GatewayTelemetryServiceExtensions
         var telemetryOptions = telemetrySection.Get<TelemetryOptions>() ?? new TelemetryOptions();
 
         services.Configure<TelemetryOptions>(telemetrySection);
-        // ARCH-MNT-06: plaintext OTLP to a non-loopback host fails the start outside Development unless AllowInsecureTransport is set.
+        // plaintext OTLP to a non-loopback host fails the start outside Development unless AllowInsecureTransport is set.
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<TelemetryOptions>, OtlpTransportOptionsValidator>();
         services.AddOptions<TelemetryOptions>().ValidateOnStart();
         services.AddDataSourceTelemetryPolicy();

@@ -25,7 +25,7 @@ public sealed class SqlEmitterContext
     private static readonly Regex ClientNameRegex = new(
         @"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
 
-    // SEC-ADG-19: client names that could look like internal markers or reserved parameters are rejected.
+    // client names that could look like internal markers or reserved parameters are rejected.
     private static readonly Regex ReservedClientNameRegex = new(
         @"\A(p[0-9]|__|gql_|autheris)", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
 
@@ -40,19 +40,19 @@ public sealed class SqlEmitterContext
     public bool InPredicateContext { get; set; }
 
     /// <summary>
-    /// REQ-SQL-130 (BC-130-12): set by the compiler or the federated planner after the time zone call validator ran over the statement. The default is
+    /// 130 (BC-130-12): set by the compiler or the federated planner after the time zone call validator ran over the statement. The default is
     /// false: a generator refuses to emit <c>convert_timezone</c> for an unvalidated statement, so a future emit site that skips the validator fails closed.
     /// </summary>
     internal bool TimeZoneCallsValidated { get; init; }
 
     /// <summary>
-    /// Issue #132 (PLAN-DATA-132, WP-132-3): When true, the SQL Server dialect generator emits physical
+    /// Issue #132: When true, the SQL Server dialect generator emits physical
     /// three-part table names [database].[schema].[table] for multi-database co-located execution.
     /// </summary>
     public bool EmitThreePartNames { get; init; }
 
     /// <summary>
-    /// Issue #277 (SEC-277-05): the validated SQL Server <c>OPTION (MAXRECURSION n)</c> value. It is set by the compiler from the request,
+    /// Issue #277: the validated SQL Server<c>OPTION (MAXRECURSION n)</c> value. It is set by the compiler from the request,
     /// never from SQL text; the default applies to the legacy string overloads only.
     /// </summary>
     public int MaxRecursionDepth { get; init; } = CompileLimits.DefaultMaxRecursionDepth;
@@ -91,7 +91,7 @@ public sealed class SqlEmitterContext
         Values = values ?? throw new ArgumentNullException(nameof(values));
         CancellationToken = cancellationToken;
         _bound = new List<BoundParameter>(8);
-        _dedup = new Dictionary<DedupKey, int>(8); // string fields hash with the randomized default string comparer (SEC-ADG-05)
+        _dedup = new Dictionary<DedupKey, int>(8); // string fields hash with the randomized default string comparer
         _ranges = new List<EmittedRange>(16);
     }
 
@@ -99,7 +99,7 @@ public sealed class SqlEmitterContext
 
     public IReadOnlyList<EmittedRange> Ranges => _ranges ?? (IReadOnlyList<EmittedRange>)Array.Empty<EmittedRange>();
 
-    /// <summary>Cooperative cancellation: checked every 256 emitted nodes (SEC-ADG-05).</summary>
+    /// <summary>Cooperative cancellation: checked every 256 emitted nodes.</summary>
     public void Tick()
     {
         if ((++_ticks & 255) == 0)
@@ -118,14 +118,14 @@ public sealed class SqlEmitterContext
 
     /// <summary>
     /// Registers the single statement terminator at <paramref name="start"/>. Only the SQL Server <c>MERGE</c> generator uses it,
-    /// at the last position of the statement (SEC-ADG-08 c); the emitted-text checker rejects it anywhere else.
+    /// at the last position of the statement (08 c); the emitted-text checker rejects it anywhere else.
     /// </summary>
     public void RegisterStatementTerminator(int start) =>
         _ranges?.Add(new EmittedRange(start, 1, EmittedRangeKind.StatementTerminator));
 
     /// <summary>
     /// Registers the single SQL Server <c>OPTION (MAXRECURSION n)</c> tail at [start, start+length). The emitted-text checker accepts
-    /// exactly this form as the final text of the statement (SEC-277-05).
+    /// exactly this form as the final text of the statement.
     /// </summary>
     public void RegisterRecursionOptionTail(int start, int length) =>
         _ranges?.Add(new EmittedRange(start, length, EmittedRangeKind.RecursionOptionTail));
@@ -161,7 +161,7 @@ public sealed class SqlEmitterContext
 
         if (escapeLikePattern)
         {
-            // SEC-ADG-18: a value used as a LIKE pattern must not act as a pattern (%, _, [ and the escape character).
+            // a value used as a LIKE pattern must not act as a pattern (%, _, [ and the escape character).
             if (policyValue.Value is not string text)
             {
                 throw new SecurityException("A LIKE pattern parameter must be a string.");
@@ -179,7 +179,7 @@ public sealed class SqlEmitterContext
     {
         ValidateClientParameter(parameter);
 
-        // List element slots (REQ-SQL-128): both members or none, and the index lies inside the count (SEC-128-10 c).
+        // List element slots: both members or none, and the index lies inside the count (10 c).
         if (parameter.ListIndex.HasValue != parameter.ListCount.HasValue
             || (parameter.ListIndex is { } index && (index < 0 || index >= parameter.ListCount!.Value)))
         {
@@ -193,7 +193,7 @@ public sealed class SqlEmitterContext
     }
 
     /// <summary>
-    /// REQ-SQL-130 (A-4): binds a client named parameter that is used as a time zone argument. The slot carries <see cref="BoundParameter.ZoneArgument"/>;
+    /// 130 (A-4): binds a client named parameter that is used as a time zone argument. The slot carries<see cref="BoundParameter.ZoneArgument"/>;
     /// only the production binder may consume it (it maps the value through the closed zone set before the command exists).
     /// </summary>
     public string BindZoneClient(ParameterReference parameter)
@@ -325,13 +325,12 @@ public sealed class SqlEmitterContext
         }
     }
 
-    // Dialects without a capability entry (string-only generation for Ansi and Snowflake) keep an explicit marker style; any other
+    // Dialects without a capability entry (string-only generation for Ansi) keep an explicit marker style; any other
     // dialect without an entry fails closed instead of falling back to a silent default.
     private static readonly FrozenDictionary<TargetSqlDialect, ParameterMarkerStyle> UnboundOnlyMarkerStyles =
         new Dictionary<TargetSqlDialect, ParameterMarkerStyle>
         {
-            [TargetSqlDialect.Ansi] = ParameterMarkerStyle.QuestionOrdinal,
-            [TargetSqlDialect.Snowflake] = ParameterMarkerStyle.ColonOrdinal
+            [TargetSqlDialect.Ansi] = ParameterMarkerStyle.QuestionOrdinal
         }.ToFrozenDictionary();
 
     /// <summary>

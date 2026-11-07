@@ -5,7 +5,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.Exceptions;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.State;
@@ -189,7 +189,7 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
 
             using var entry = _memoryCache.CreateEntry(cacheKey);
             entry.Value = dbProfiles;
-            // WP-PF-06: the shared L1 SizeLimit counts bytes, so an entry is sized in (estimated) bytes, not as "1".
+            // the shared L1 SizeLimit counts bytes, so an entry is sized in (estimated) bytes, not as "1".
             entry.Size = EstimateEntryBytes(cacheKey, dbProfiles.Count);
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1);
             entry.SlidingExpiration = TimeSpan.FromMinutes(15);

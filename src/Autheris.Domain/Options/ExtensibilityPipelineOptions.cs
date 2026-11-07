@@ -27,3 +27,17 @@ public sealed class ExtensibilityPipelineOptions
     [Range(1, 600000)]
     public int InterceptorTimeoutMs { get; init; } = 5000;
 }
+
+public sealed class PluginsOptions
+{
+    public string Directory { get; init; } = "plugins";
+    public bool RequireIntegrityManifest { get; init; } = false;
+    public Dictionary<string, string> TrustedPluginHashes { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Autheris.Domain.Options.Plugins.AuthPluginOptions Auth { get; init; } = new();
+}
+
+public sealed class ExtensibilityOptions
+{
+    public bool Enabled { get; init; } = true;
+}
+

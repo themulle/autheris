@@ -8,7 +8,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Application.Data;
+using Autheris.Application.DataSources;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Domain.Audit;
@@ -254,11 +254,11 @@ public sealed partial class SemanticMetricQueryService
                 referencedCols.Add(c);
             }
 
-            // WP-0 (SEC-112-01): the column set of the combined clause is a union. A free-text request clause has an empty set, so its
+            // the column set of the combined clause is a union. A free-text request clause has an empty set, so its
             // columns are extracted from its text; otherwise they would be missing next to the metric filter columns and never be checked.
             if (requestWhere.ReferencedColumns.Count == 0)
             {
-                foreach (var c in Autheris.Application.Data.Services.DataApiFilterTranslator.ExtractReferencedColumns(requestWhere.SqlPredicate, metadata))
+                foreach (var c in Autheris.Application.DataSources.Services.DataApiFilterTranslator.ExtractReferencedColumns(requestWhere.SqlPredicate, metadata))
                 {
                     referencedCols.Add(c);
                 }
@@ -282,7 +282,7 @@ public sealed partial class SemanticMetricQueryService
                 {
                     sqlParts.Add(cleaned);
                     trinoParts.Add(_ => cleaned);
-                    foreach (var col in Autheris.Application.Data.Services.DataApiFilterTranslator.ExtractReferencedColumns(cleaned, metadata))
+                    foreach (var col in Autheris.Application.DataSources.Services.DataApiFilterTranslator.ExtractReferencedColumns(cleaned, metadata))
                     {
                         referencedCols.Add(col);
                     }

@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Docs.Interfaces;
 using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Diagnostics;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Tools;
@@ -52,7 +52,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IReadPathSwitches? _switches;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? _datasetCatalogAdmin;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
-    private readonly Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? _semanticCatalog;
+    private readonly Autheris.Application.Catalog.Semantic.ISemanticCatalogService? _semanticCatalog;
     private readonly Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? _catalogVisibility;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
@@ -83,7 +83,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         IReadPathSwitches? switches = null,
         Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null,
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Dbt.Interfaces.ISemanticCatalogService? semanticCatalog = null,
+        Autheris.Application.Catalog.Semantic.ISemanticCatalogService? semanticCatalog = null,
         Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
@@ -155,7 +155,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", request.ToolName, false, false);
             _logger.LogWarning("AI Agent attempted to call unauthorized or unknown MCP tool '{ToolName}'.", request.ToolName);
-            // PLAN-SEC-115 C-115-4: the internal audit row names the switch behind the denial; the caller-visible result below is
+            // 115 C-115-4: the internal audit row names the switch behind the denial; the caller-visible result below is
             // byte-identical to the one for a name that never existed. Only names a switch really closed get a reason and a count.
             var disabledReason = _switches?.DisabledReason(request.ToolName);
             var denyDetails = $"Tool '{request.ToolName}' is not registered or allowed.";
@@ -272,7 +272,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
         if (string.Equals(sqlSyntaxError, McpDataTargetResolver.ConstructNotSupportedMarker, StringComparison.Ordinal))
         {
-            // SEC-277-04: identical text for every table state (existing, forbidden, unknown); fixed message, no request text.
+            // identical text for every table state (existing, forbidden, unknown); fixed message, no request text.
             var constructMessage = $"{TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ConstructNotSupported}: " +
                                    TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ConstructNotSupported);
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");

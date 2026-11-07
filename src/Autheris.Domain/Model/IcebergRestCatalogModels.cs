@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 /// <summary>
-/// F-DATA-05: Apache Iceberg REST Catalog (IRC) Federation & Dynamic STS Credential Vending.
+/// F-DATA-05: Apache Iceberg REST Catalog (IRC) Federation &amp; Dynamic STS Credential Vending.
 /// </summary>
 public sealed record IcebergListNamespacesResponse(
     [property: JsonPropertyName("namespaces")] IReadOnlyList<IReadOnlyList<string>> Namespaces

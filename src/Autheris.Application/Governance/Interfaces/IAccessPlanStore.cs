@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
-/// <summary>What a stored plan changes when it is applied (issue #107, SEC-RF107-14c): each apply path accepts only its own kind.</summary>
+/// <summary>What a stored plan changes when it is applied (issue #107, 14c): each apply path accepts only its own kind.</summary>
 public enum AccessPlanKind
 {
     /// <summary>Access grants (ReBAC tuples); the default of every plan stored before issue #107.</summary>

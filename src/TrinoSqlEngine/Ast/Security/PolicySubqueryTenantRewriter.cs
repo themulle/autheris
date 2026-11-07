@@ -9,7 +9,7 @@ using TrinoSqlEngine.Ast.Visitors;
 using TrinoSqlEngine.Governance;
 
 /// <summary>
-/// SEC-ADG-11: tables referenced inside a policy subquery (correlated row filters, virtual filters) receive the tenant
+/// tables referenced inside a policy subquery (correlated row filters, virtual filters) receive the tenant
 /// predicate, so another tenant's rows can never decide which of this tenant's rows are visible. They do not receive
 /// consent or row filters (no recursion). Policy subqueries are one level deep; a nested one is rejected. Physical names are
 /// replaced by the catalog's canonical schema-qualified names (INV-11).

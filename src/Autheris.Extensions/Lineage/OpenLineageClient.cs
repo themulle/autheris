@@ -9,7 +9,8 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -20,7 +21,7 @@ using Autheris.Domain.Interfaces;
 /// <summary>
 /// OpenLineage 1.x/2.x and Apache Atlas compatible lineage client.
 /// Pushes Autheris dataset dependencies, column lineage, and downstream consumer graphs
-/// to OpenLineage backends (e.g. Marquez, Apache Atlas, Collibra Lineage).
+/// to OpenLineage backends (e.g. Marquez, Apache Atlas).
 /// </summary>
 public sealed class OpenLineageClient : IOpenLineageClient
 {

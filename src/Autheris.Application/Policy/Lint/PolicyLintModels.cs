@@ -28,7 +28,7 @@ public sealed record PolicyLintInput(
 {
     public IReadOnlyList<string> AdditionalAllowedFunctions { get; init; } = [];
 
-    /// <summary>The active caller attribute registry (REQ-GOV-129); null when the feature is off: a placeholder is then a finding.</summary>
+    /// <summary>The active caller attribute registry; null when the feature is off: a placeholder is then a finding.</summary>
     public Autheris.Application.Identity.Attributes.CallerAttributeSnapshot? CallerAttributes { get; init; }
 }
 

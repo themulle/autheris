@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// SEC-PROC152-05: bounds the audit rows an authenticated caller can cause by probing unknown procedure names
+/// bounds the audit rows an authenticated caller can cause by probing unknown procedure names
 /// (per tenant and SID, fixed one-minute window). Excess is dropped by the caller silently. Register as a singleton.
 /// The tracked key set has a hard bound: expired keys are swept at most once per window, and new keys beyond the
 /// bound are dropped (not audited, counted in <see cref="Dropped"/>). All state changes happen under one short lock,

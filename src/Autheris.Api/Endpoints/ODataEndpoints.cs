@@ -6,12 +6,12 @@ using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Serialization;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
-using Autheris.Extensions.OData;
+using Autheris.Application.OData;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -21,7 +21,7 @@ public static partial class ODataEndpoints
 {
     public static IEndpointRouteBuilder MapODataEndpoints(this IEndpointRouteBuilder app, GatewayOptions gatewayOptions)
     {
-        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        // Issue #447: every route of this group declares its ingress transport via endpoint metadata.
         var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.OData);
         // OData v4 / Power BI & Excel Direct Adapter Endpoints
         async Task<IResult> HandleServiceDocumentAsync(IODataHandler odataHandler, HttpContext context, IWebHostEnvironment env)
@@ -88,7 +88,7 @@ public static partial class ODataEndpoints
             {
                 return null;
             }
-            // API-15: challenge (WWW-Authenticate) instead of a bare 401, so Kerberos/Negotiate clients can authenticate.
+            // challenge (WWW-Authenticate) instead of a bare 401, so Kerberos/Negotiate clients can authenticate.
             return context.User?.Identity?.IsAuthenticated == true ? Results.Forbid() : Results.Challenge();
         }
 
@@ -106,7 +106,7 @@ public static partial class ODataEndpoints
             return builder;
         }
 
-        // Dynamic OpenAPI 3.1 & Swagger UI Explorer (F-API-03)
+        // Dynamic OpenAPI 3.1 & Swagger UI Explorer (F-)
         ConfigureOpenApiAuth(ingress.MapGet("/odata/v4/$openapi", async (
             IDynamicOpenApiGenerator generator,
             IOpenApiCacheManager cacheManager,

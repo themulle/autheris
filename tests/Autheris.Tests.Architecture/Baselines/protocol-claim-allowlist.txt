@@ -1,0 +1,3 @@
+# Baseline for protocol claims outside docs/plans/ and docs/adr/.
+# Format: path|substring|TestClass.TestMethod
+# Empty baseline enforced: 0 unverified claims permitted.

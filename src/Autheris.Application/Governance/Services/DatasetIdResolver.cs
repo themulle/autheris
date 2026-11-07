@@ -1,12 +1,12 @@
 namespace Autheris.Application.Governance.Services;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 
 /// <summary>
 /// Resolves an active dataset by table id (strict "D" GUID) or by <c>domain.schema.table</c> without loading the whole catalog.
-/// Shared by <c>PUT /datasets/{id}/keys</c> (issue #94) and the row filter strategy endpoints (issue #107, SEC-RF107-14a), so both use
-/// the same resolution. Unknown and inactive datasets are indistinguishable (SEC-94-15).
+/// Shared by <c>PUT /datasets/{id}/keys</c>(issue #94) and the row filter strategy endpoints (issue #107, 14a), so both use
+/// the same resolution. Unknown and inactive datasets are indistinguishable.
 /// </summary>
 public static class DatasetIdResolver
 {

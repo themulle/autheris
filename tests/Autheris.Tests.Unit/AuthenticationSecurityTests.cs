@@ -258,7 +258,7 @@ public class AuthenticationSecurityTests
 
     private static (ForwardAuthAuthenticationHandler Handler, DefaultHttpContext Context) CreateForwardAuthHandler(
         GatewayOptions options,
-        Autheris.Application.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
+        Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider? secretProvider = null,
         Microsoft.AspNetCore.Hosting.IWebHostEnvironment? env = null)
     {
         if (env == null)

@@ -4,10 +4,10 @@ using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Catalog.Interfaces;
-using Autheris.Application.Data.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Interfaces;
 

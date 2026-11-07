@@ -1,6 +1,6 @@
 namespace Autheris.Tests.Unit.DependencyInjection;
 
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Infrastructure.Persistence;
 using Shouldly;
@@ -30,7 +30,7 @@ public sealed class Issue404PhysicalIndexWiringTests
         foreach (var profile in new[] { "dev-sqlite", "production-like" })
         {
             var path = Autheris.Tests.Unit.Common.SnapshotFile.SnapshotPath($"composition-{profile}.txt");
-            File.ReadAllText(path).ShouldContain("Autheris.Application.Interfaces.IPhysicalIndexRepository Singleton", Case.Sensitive);
+            File.ReadAllText(path).ShouldContain("Autheris.Application.Common.Interfaces.IPhysicalIndexRepository Singleton", Case.Sensitive);
         }
     }
 }

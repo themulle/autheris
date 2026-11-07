@@ -5,7 +5,7 @@ using Antlr4.Runtime.Dfa;
 
 /// <summary>
 /// One set of ANTLR caches (parser and lexer DFA arrays and prediction-context caches). ANTLR itself adds states while it predicts; nothing else
-/// mutates a generation, and nothing clears one (ARCH-MNT-15-SC-02). It becomes garbage when the last parse or lexer that references it is gone.
+/// mutates a generation, and nothing clears one (SC-02). It becomes garbage when the last parse or lexer that references it is gone.
 /// </summary>
 public sealed class AntlrCacheGeneration
 {

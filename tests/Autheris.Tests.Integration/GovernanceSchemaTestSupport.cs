@@ -3,7 +3,7 @@ namespace Autheris.Tests.Integration;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
@@ -23,7 +23,6 @@ internal static class GovernanceSchemaTestSupport
         {
             Provider = "PostgreSql",
             ConnectionString = connectionString,
-            EnableOutboxProcessor = false,
             SeedDemoData = false,
             Migrations = new GovernanceMigrationOptions { Mode = mode }
         }
@@ -35,7 +34,6 @@ internal static class GovernanceSchemaTestSupport
         {
             Provider = "SqlServer",
             ConnectionString = connectionString,
-            EnableOutboxProcessor = false,
             SeedDemoData = false,
             Migrations = new GovernanceMigrationOptions { Mode = mode }
         }

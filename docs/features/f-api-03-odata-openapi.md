@@ -1,6 +1,6 @@
 # F-API-03: Dual-Access Exposure (OData v4 & Dynamic OpenAPI 3.1)
 
-**Components:** [`ODataEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/ODataEndpoints.cs), [`IODataHandler.cs`](file:///root/autheris/src/Autheris.Application/OData/IODataHandler.cs), [`ODataCsdlGenerator.cs`](file:///root/autheris/src/Autheris.Extensions/OData/ODataCsdlGenerator.cs), [`DynamicOpenApiGenerator.cs`](file:///root/autheris/src/Autheris.Application/OData/Services/DynamicOpenApiGenerator.cs)
+**Components:** [`ODataEndpoints.cs`](../../src/Autheris.Api/Endpoints/ODataEndpoints.cs), [`IODataHandler.cs`](../../src/Autheris.Application/OData/IODataHandler.cs), [`ODataCsdlGenerator.cs`](../../src/Autheris.Application/OData/ODataCsdlGenerator.cs), [`DynamicOpenApiGenerator.cs`](../../src/Autheris.Application/OData/Services/DynamicOpenApiGenerator.cs)
 
 ---
 
@@ -12,7 +12,7 @@ Modern frontend web applications demand GraphQL, whereas enterprise BI tools (su
 
 ## 2. Business Value
 
-- **Zero-Code Enterprise BI Integration**: Direct, seamless import into Power BI, Excel, and SAP without requiring custom ODBC/JDBC drivers or separate data marts.
+- **Zero-Code Enterprise BI Integration**: Direct, seamless import into Power BI, Excel, and SAP without requiring custom drivers or separate data marts.
 - **Unified Single Source of Truth**: Eliminates disparate governance rules between GraphQL apps and BI spreadsheets; column masking and RLS apply identically across all protocols.
 - **Broad Developer Ecosystem**: Allows legacy REST clients to integrate via OpenAPI 3.1 definitions while modern clients use GraphQL.
 

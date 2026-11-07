@@ -10,7 +10,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Capabilities;
 
 /// <summary>
-/// WP-ARC-B-09: Base implementation for infrastructure SQL dialect providers.
+/// Base implementation for infrastructure SQL dialect providers.
 /// </summary>
 public abstract class SqlDialectProviderBase : ISqlDialectProvider
 {

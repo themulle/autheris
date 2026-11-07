@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -16,7 +16,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
     private readonly ILogger<ConsentResolutionService>? _logger;
 
     /// <param name="sqlBuilder">Row filter SQL builder; defaults to <see cref="RowFilterSqlBuilder"/>.</param>
-    /// <param name="restrictedScopes">The restricted scopes (REQ-GOV-143); <c>null</c> = the secure default (<c>Agent.Read</c>), also for parameterless construction.</param>
+    /// <param name="restrictedScopes">The restricted scopes;<c>null</c> = the secure default (<c>Agent.Read</c>), also for parameterless construction.</param>
     /// <param name="logger">Receives the exception type only when the restriction step fails.</param>
     public ConsentResolutionService(
         IRowFilterSqlBuilder? sqlBuilder = null,
@@ -169,9 +169,9 @@ public sealed class ConsentResolutionService : IConsentResolutionService
     }
 
     /// <summary>
-    /// REQ-GOV-143 (PLAN-GOV-143 D-5/A-2): <c>null</c> for an unrestricted caller; otherwise the restricted scopes held and the columns for which
+    /// 143 (143 D-5/A-2):<c>null</c> for an unrestricted caller; otherwise the restricted scopes held and the columns for which
     /// a rule supplies a scope-specific <c>Clear</c> for every held scope (same grouping as rule 3), intersected with the columns whose level in
-    /// the same decision is <c>Clear</c>. Fails closed: any exception yields a clearance with a held marker and no cleared column (SEC-GOV143-01).
+    /// the same decision is <c>Clear</c>. Fails closed: any exception yields a clearance with a held marker and no cleared column.
     /// </summary>
     private RestrictedScopeClearance? ComputeScopeClearance(
         IReadOnlyDictionary<string, ColumnAccessLevel> columnAccess,
@@ -259,7 +259,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
                 && string.Equals(ScopeNames.ToBareName(a), restrictedScope, StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
-    /// SEC (Low): Cache lifetime of a consent decision. Bounded by the earliest <c>EffectiveValidTo</c> (after the read-time clamp of individual grants, WP-SC-16) of the consents the decision
+    /// SEC (Low): Cache lifetime of a consent decision. Bounded by the earliest <c>EffectiveValidTo</c>(after the read-time clamp of individual grants) of the consents the decision
     /// was derived from, so an expired consent is never served from the cache.
     /// </summary>
     public static TimeSpan ComputeDecisionCacheTtl(bool isHighlySensitive, IReadOnlyList<Consent> consents, DateTimeOffset now)

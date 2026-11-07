@@ -13,7 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// I1 compatibility feed (PLAN-CDC-99 D-A13, SEC-CDC99-18): keeps the existing at-most-once webhook behaviour working from the durable
+/// I1 compatibility feed (99 D-A13): keeps the existing at-most-once webhook behaviour working from the durable
 /// stream. Decoded stream deliveries of MSSQL-tracked tables are mapped to <see cref="CdcEvent"/> (opaque id, tenant attribution) and handed to
 /// a sink. It runs only on the replica holding the lease <c>cdc:webhook:compat</c> (outbox dedupe on <c>event_id</c> covers a takeover) and is
 /// replaced by durable consumers in I2. Without a registered stream store it is inert.
@@ -27,7 +27,7 @@ public sealed class CdcStreamCompatFeed(IServiceProvider services, TimeProvider 
     private static readonly TimeSpan RescanInterval = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Maps a stream delivery to channel-style events: <c>[0]</c> for the event tenant and, when a row moved between tenants (SEC-CDC99-01),
+    /// Maps a stream delivery to channel-style events: <c>[0]</c>for the event tenant and, when a row moved between tenants,
     /// a delete for the previous tenant. A before-image is only ever attached to an event of its own tenant. Control events, unresolved and
     /// shared-scope changes map to nothing.
     /// </summary>

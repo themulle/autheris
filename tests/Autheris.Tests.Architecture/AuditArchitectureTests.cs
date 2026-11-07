@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Shouldly;
 using Xunit;
 
@@ -13,7 +13,8 @@ public sealed class AuditArchitectureTests
     private static readonly Assembly[] AutherisAssemblies =
     [
         typeof(IAuditLogRepository).Assembly,
-        typeof(Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService).Assembly,
+        typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
+        typeof(Autheris.Modules.Lakehouse.LakehouseModule).Assembly,
         typeof(Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor).Assembly
     ];
 

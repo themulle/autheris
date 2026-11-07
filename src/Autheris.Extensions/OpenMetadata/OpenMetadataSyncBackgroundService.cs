@@ -1,5 +1,5 @@
-using Autheris.Application.Hosting;
-using Autheris.Application.OpenMetadata.Interfaces;
+using Autheris.Application.Runtime.Hosting;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.State;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;

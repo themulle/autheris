@@ -23,7 +23,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     /// <summary>
     /// Bind-parameter budget of the inline (string only) emission: the capability table entry of the dialect, or a fixed ceiling for a
-    /// dialect without an entry (ANSI and the test-only Snowflake generator).
+    /// dialect without an entry (ANSI generator).
     /// </summary>
     private static int InlineParameterBudget(TargetSqlDialect dialect) =>
         DialectCapabilityTable.Default.TryGet(dialect, out var caps) ? caps.MaxBindParameters : 65535;
@@ -62,7 +62,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
         catch (InsufficientExecutionStackException)
         {
-            // SEC-ADG-05: a StackOverflowException cannot be caught, so deep trees are rejected before the stack runs out.
+            // a StackOverflowException cannot be caught, so deep trees are rejected before the stack runs out.
             throw new SqlLimitExceededException(SqlLimitKind.NestingDepth, TargetDialect, 0, 0);
         }
         finally
@@ -98,7 +98,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     }
 
     /// <summary>
-    /// Literals are bound instead of inlined on a bound emitter context (WP-A3, INV-4). A dialect opts in once its inline
+    /// Literals are bound instead of inlined on a bound emitter context (INV-4). A dialect opts in once its inline
     /// structural positions are registered with the emitter context. Off for dialects without a governed path.
     /// </summary>
     protected virtual bool BindLiterals => false;
@@ -591,7 +591,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     /// <summary>
     /// ANSI/PostgreSQL-style MERGE (SQL Server, PostgreSQL 15+, DuckDB, Databricks). The WHEN clause set is closed: only matched
-    /// UPDATE or DELETE and not-matched INSERT can be emitted, never <c>BY SOURCE</c> (SEC-ADG-08 a). Oracle overrides it.
+    /// UPDATE or DELETE and not-matched INSERT can be emitted, never <c>BY SOURCE</c>(08 a). Oracle overrides it.
     /// </summary>
     protected virtual void GenerateMerge(MergeStatement merge, ref ValueStringBuilder builder, SqlEmitterContext context)
     {

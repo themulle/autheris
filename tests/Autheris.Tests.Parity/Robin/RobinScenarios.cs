@@ -550,7 +550,7 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
 
         // A join key on a masked column would let a caller probe the clear values: rejected, never a 200.
         var on = await Sql("SELECT s.id, m.id AS mid FROM parity_sales s JOIN parity_masked m ON s.amount = m.amount WHERE s.id IN (3, 8) ORDER BY s.id");
-        Denied(on, "join on a masked column", "SQL_POLICY_VIOLATION");
+        Denied(on, "join on a masked column", "FILTER_ON_MASKED_COLUMN");
     }, variant);
 
     /// <summary>SEC-R100-15: a clear masked amount anywhere in a response body is a hard failure (ids and keys only in the message, SEC-R100-10).</summary>

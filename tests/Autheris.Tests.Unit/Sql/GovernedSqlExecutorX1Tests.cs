@@ -9,7 +9,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Interfaces;
@@ -411,6 +411,7 @@ public sealed class GovernedSqlExecutorX1Tests
 
     [Theory]
     [InlineData("Snowflake")]
+    [InlineData("Ansi")]
     [InlineData("duckdb")]
     [InlineData("nonsense")]
     public async Task UnmappedProvider_FailsClosed_NoCommandCreated(string provider)

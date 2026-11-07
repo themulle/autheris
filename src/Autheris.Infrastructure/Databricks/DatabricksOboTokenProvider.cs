@@ -13,7 +13,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
@@ -23,10 +23,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #238 (PLAN-DATA-238, WP-SC-15): Databricks token provider supporting OAuth M2M, PAT, and OAuth 2.0 On-Behalf-Of (OBO)
+/// Issue #238: Databricks token provider supporting OAuth M2M, PAT, and OAuth 2.0 On-Behalf-Of (OBO)
 /// delegation for Unity Catalog native access enforcement.
-/// Enforces fail-closed semantics (SEC-OBO238-01: zero fallback to service principal), user cache isolation (SEC-OBO238-03),
-/// and zero token leakage in logs/exceptions (SEC-OBO238-02).
+/// Enforces fail-closed semantics (zero fallback to service principal), user cache isolation,
+/// and zero token leakage in logs/exceptions.
 /// </summary>
 public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, IDelegatedCredentialProvider, IDelegationCapability
 {
@@ -176,7 +176,7 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
                 "Auth.Obo.ClientId is required for OAuthObo mode.");
         }
 
-        // SEC-OBO238-01: Zero fallback policy! Missing caller token MUST fail closed.
+        // Zero fallback policy! Missing caller token MUST fail closed.
         if (string.IsNullOrWhiteSpace(context?.CallerToken))
         {
             throw new DatabricksProviderException(
@@ -203,7 +203,7 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
                 "Databricks OBO authentication failed: caller token assertion is expired.");
         }
 
-        // Partition cache by SHA-256 hash of caller assertion (SEC-OBO238-03)
+        // Partition cache by SHA-256 hash of caller assertion
         var assertionHash = HashAssertion(rawToken);
         if (_tokenCache.TryGet(db.Host, obo.ClientId, assertionHash, now, out var cached))
         {
@@ -266,7 +266,7 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
                 // Non-JSON error body
             }
 
-            // SEC-OBO238-02: Never log or bubble raw tokens or assertions
+            // Never log or bubble raw tokens or assertions
             _logger?.LogWarning("Databricks OBO token exchange failed with HTTP {Status} (error: {OAuthError}).",
                 (int)response.StatusCode, oauthError ?? "unknown");
 
@@ -316,7 +316,7 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
         var secret = SecretReferenceResolver.Resolve(_secrets, auth.ClientSecretRef, _environment, true, _logger, "Databricks client secret")
                      ?? throw new DatabricksProviderException(DatabricksErrorCodes.Configuration, "The Databricks client secret could not be resolved.");
 
-        // SEC-ADG-09 item 3: the token endpoint is derived from the host, never configurable.
+        // 09 item 3: the token endpoint is derived from the host, never configurable.
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"https://{db.Host}/oidc/v1/token"))
         {
             Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["grant_type"] = "client_credentials", ["scope"] = "all-apis" })

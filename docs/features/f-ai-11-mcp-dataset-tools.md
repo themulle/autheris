@@ -1,6 +1,5 @@
 # F-AI-11: MCP Dataset Tools (Catalog Discovery and GraphQL Queries for AI Agents)
 
-**Status:** [Done]  
 **Components:** [`McpDatasetCatalog.cs`](../../src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs), [`McpDatasetTools.cs`](../../src/Autheris.Application/Mcp/Services/McpDatasetTools.cs), [`CatalogGraphQlMap.cs`](../../src/Autheris.GraphQL/Mcp/CatalogGraphQlMap.cs), [`GatewayMcpQueryExecutor.cs`](../../src/Autheris.GraphQL/Mcp/GatewayMcpQueryExecutor.cs)
 
 ---

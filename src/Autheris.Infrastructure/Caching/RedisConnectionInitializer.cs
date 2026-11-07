@@ -3,24 +3,22 @@ namespace Autheris.Infrastructure.Caching;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Garnet;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 /// <summary>
-/// Hosted initializer that establishes the Redis/Garnet <see cref="IConnectionMultiplexer"/> asynchronously
+/// Hosted initializer that establishes the Redis <see cref="IConnectionMultiplexer"/> asynchronously
 /// via <see cref="ConnectionMultiplexer.ConnectAsync(ConfigurationOptions, System.IO.TextWriter?)"/> so DI container
 /// resolution never blocks synchronously on network I/O (ARC-I-10).
 /// </summary>
 public sealed class RedisConnectionInitializer : IRedisConnectionProvider, IHostedService, IAsyncDisposable, IDisposable
 {
     private readonly GatewayOptions _options;
-    private readonly IGarnetServerManager? _garnetManager;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly IHostEnvironment? _environment;
     private readonly ILogger<RedisConnectionInitializer>? _logger;
@@ -31,7 +29,6 @@ public sealed class RedisConnectionInitializer : IRedisConnectionProvider, IHost
 
     public RedisConnectionInitializer(
         IOptions<GatewayOptions> options,
-        IGarnetServerManager? garnetManager = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IHostEnvironment? environment = null,
         ILogger<RedisConnectionInitializer>? logger = null,
@@ -39,7 +36,6 @@ public sealed class RedisConnectionInitializer : IRedisConnectionProvider, IHost
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options.Value;
-        _garnetManager = garnetManager;
         _secretProvider = secretProvider;
         _environment = environment;
         _logger = logger;
@@ -49,8 +45,7 @@ public sealed class RedisConnectionInitializer : IRedisConnectionProvider, IHost
     private static async Task<IConnectionMultiplexer> DefaultConnectAsync(ConfigurationOptions cfg, CancellationToken _) =>
         await ConnectionMultiplexer.ConnectAsync(cfg).ConfigureAwait(false);
 
-    public bool IsConfigured =>
-        _options.Caching.Garnet.EnableEmbeddedServer || _options.Caching.Redis.Enabled;
+    public bool IsConfigured => _options.Caching.Redis.Enabled;
 
     public bool IsConnected => _multiplexer is { IsConnected: true };
 
@@ -85,7 +80,7 @@ public sealed class RedisConnectionInitializer : IRedisConnectionProvider, IHost
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger?.LogWarning(ex, "Asynchronous Redis/Garnet connection initialization did not complete during startup; continuing in degraded/fail-closed mode until reachable.");
+            _logger?.LogWarning(ex, "Asynchronous Redis connection initialization did not complete during startup; continuing in degraded/fail-closed mode until reachable.");
         }
     }
 
@@ -125,21 +120,6 @@ public sealed class RedisConnectionInitializer : IRedisConnectionProvider, IHost
 
     private ConfigurationOptions BuildConfigurationOptions()
     {
-        if (_options.Caching.Garnet.EnableEmbeddedServer)
-        {
-            _garnetManager?.StartServer();
-            var garnetConfig = new ConfigurationOptions
-            {
-                EndPoints = { $"{_options.Caching.Garnet.Host}:{_options.Caching.Garnet.Port}" },
-                Password = _garnetManager?.ClientPassword,
-                ConnectTimeout = _options.Caching.Redis.ConnectTimeoutMs,
-                SyncTimeout = _options.Caching.Redis.SyncTimeoutMs,
-                AbortOnConnectFail = false
-            };
-
-            return RedisConnectionSecurity.ApplyGarnetClientTls(garnetConfig, _options.Caching.Garnet);
-        }
-
         var redisConfig = ConfigurationOptions.Parse(_options.Caching.Redis.Configuration);
         redisConfig.ConnectTimeout = _options.Caching.Redis.ConnectTimeoutMs;
         redisConfig.SyncTimeout = _options.Caching.Redis.SyncTimeoutMs;

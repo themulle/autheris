@@ -10,7 +10,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
@@ -53,7 +53,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(clientValues);
         ArgumentNullException.ThrowIfNull(security);
-        // SEC-PROC152I2-04: fail-closed, no unbounded read and no fallback to a configured limit.
+        // fail-closed, no unbounded read and no fallback to a configured limit.
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(rowBudget, 0);
 
         var settings = _options.Value.SqlEndpoints.Procedures;
@@ -340,7 +340,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
             return true;
         }
 
-        // SEC-PROC152I2-12: a SQLSTATE is only read from a non-MSSQL exception (one without a Number); P0001 stays business,
+        // a SQLSTATE is only read from a non-MSSQL exception (one without a Number); P0001 stays business,
         // anything else only when the procedure declares it in its error map (classes like 08/28/40/53 cannot be declared).
         if (number is null && ex.SqlState is { } state
             && (state == "P0001" || (definition is not null && definition.ErrorCodes.Any(e => e.SqlState == state))))

@@ -51,7 +51,6 @@ public sealed class IngressStampingTests : IClassFixture<WebApplicationFactory<P
             builder.UseSetting("Gateway:OData:Enabled", "true");
             builder.UseSetting("Gateway:Mcp:Enabled", "true");
             builder.UseSetting("Gateway:Arrow:Enabled", "true");
-            builder.UseSetting("Gateway:Arrow:EnableFlightSql", "true");
             builder.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
             builder.ConfigureServices(services =>
             {
@@ -176,17 +175,6 @@ public sealed class IngressStampingTests : IClassFixture<WebApplicationFactory<P
         (await SendAsync(new HttpMethod(method), path, json)).ShouldBe([DataSourceTransportFlags.Rest]);
     }
 
-    [Theory]
-    [InlineData("GET", "/api/v1/flight/sql/tables")]
-    [InlineData("POST", "/api/v1/flight/sql/stream")]
-    [InlineData("POST", "/api/v1/flight/sql/info")]
-    public async Task FlightRoute_StampsIngress_ArrowFlight(string method, string path)
-    {
-        var json = method == "POST" ? "{\"query\":\"SELECT 1\"}" : null;
-        // The Flight server also stamps its own validation/redeem scopes, so the same value may be recorded more than once.
-        (await SendAsync(new HttpMethod(method), path, json)).Distinct().ShouldBe([DataSourceTransportFlags.ArrowFlight]);
-    }
-
     [Fact]
     public async Task McpStdio_StampsMcpPerRequest()
     {
@@ -296,8 +284,6 @@ public sealed class IngressStampingTests : IClassFixture<WebApplicationFactory<P
     [InlineData("/api/v1/analytics/metrics/query", DataSourceTransportFlags.Rest)]
     [InlineData("/api/v1/queries/{name}", DataSourceTransportFlags.Rest)]
     [InlineData("/api/v1/olap/query", DataSourceTransportFlags.Rest)]
-    [InlineData("/api/v1/flight/sql/stream", DataSourceTransportFlags.ArrowFlight)]
-    [InlineData("/api/v1/flight/sql/tables", DataSourceTransportFlags.ArrowFlight)]
     public void DataRoutes_DeclareExactlyOneIngress(string pattern, DataSourceTransportFlags expected)
     {
         using var client = Client(); // starts the host

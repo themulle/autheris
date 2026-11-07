@@ -8,10 +8,9 @@ using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.DataCatalog.Services;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -20,7 +19,7 @@ using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #111 (PLAN-111 A-5, A-8, A-9): the only writer of dataset tags and visibility tiers. Authorization comes from the authenticated principal
+/// Issue #111 ( A-5, A-8, A-9): the only writer of dataset tags and visibility tiers. Authorization comes from the authenticated principal
 /// (<see cref="CallerScopeResolver"/> plus the ownership store), never from the request. The mandatory order is: caller class, ownership lookup
 /// on the parsed identifier for every non-admin caller (also for unknown datasets, so both take the same path), dataset resolution, manageable check
 /// (identical NotFound), body validation, the <c>Full</c> rule, then one strict before-read and the writes. The before-state is read strictly, so a

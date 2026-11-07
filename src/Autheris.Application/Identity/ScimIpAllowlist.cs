@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Net;
 
 /// <summary>
-/// ARCH-MNT-06 (SC-01, SC-03): CIDR allowlist for SCIM callers (<c>Authentication:Realms:Scim:AllowedIpRanges</c>). An empty list is
+///  (SC-01, SC-03): CIDR allowlist for SCIM callers (<c>Authentication:Realms:Scim:AllowedIpRanges</c>). An empty list is
 /// unrestricted. A non-empty list admits only a peer inside one of its ranges; an entry that cannot be parsed, or a peer address that cannot
 /// be evaluated (null, <see cref="IPAddress.None"/>), denies (fail closed, never silently disabled). IPv4-mapped IPv6 peers and ranges are
 /// normalised to IPv4 before the comparison.

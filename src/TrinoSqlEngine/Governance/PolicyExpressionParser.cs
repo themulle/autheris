@@ -49,7 +49,7 @@ public sealed record PolicyParseContext(
 
     /// <summary>
     /// The dialect the predicate will run on, when known. For Oracle the parser rejects forms in which an empty string (which is
-    /// NULL there) could loosen the predicate (SEC-ADG-17 item 2, CR-ADG-18).
+    /// NULL there) could loosen the predicate (17 item 2, CR-ADG-18).
     /// </summary>
     public TargetSqlDialect? TargetDialect { get; init; }
 }
@@ -64,7 +64,7 @@ public sealed class PolicyParseCacheOptions
 public sealed record PolicyParseCacheStats(long Hits, long Misses, long NegativeHits, int Entries);
 
 /// <summary>
-/// Parses admin-authored policy predicates (canonical Trino syntax) into typed IR (plan 3.5, SEC-ADG-11, -17, -18, -20).
+/// Parses admin-authored policy predicates (canonical Trino syntax) into typed IR (plan 3.5, -17, -18, -20).
 /// Every literal and named marker becomes a <see cref="PolicyParameterExpression"/>, columns resolve to the catalog's canonical
 /// spelling, functions must be allow-listed and deterministic, and subqueries may only reference catalog tables, one level deep.
 /// </summary>
@@ -306,7 +306,7 @@ public sealed class PolicyExpressionParser : IPolicyExpressionParser
     };
 
     /// <summary>
-    /// SEC-ADG-17 item 2: in Oracle the empty string is NULL. <c>NOT (col = :p)</c>, <c>CASE ... ELSE</c> and <c>COALESCE</c>
+    /// 17 item 2: in Oracle the empty string is NULL.<c>NOT (col = :p)</c>, <c>CASE ... ELSE</c> and <c>COALESCE</c>
     /// over a string parameter turn into a looser predicate when the value is empty. The Oracle binder already rejects an empty
     /// tenant or policy string; this closes the same hole at parse time (defense in depth) because any string parameter can be
     /// empty by configuration.

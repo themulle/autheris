@@ -1,8 +1,8 @@
 namespace Autheris.Api.Hosting.Warmup;
 
 /// <summary>
-/// PLAN-OPS-150 WP-A: opt-in measurement of the GraphQL cold path. Bound to <see cref="SectionName"/>. Development only
-/// (SEC-OPS150-12); enabling it elsewhere fails the host start.
+/// 150 opt-in measurement of the GraphQL cold path. Bound to<see cref="SectionName"/>. Development only
+/// enabling it elsewhere fails the host start.
 /// </summary>
 public sealed class ColdPathTimingOptions
 {

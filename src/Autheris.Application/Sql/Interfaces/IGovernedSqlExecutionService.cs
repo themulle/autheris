@@ -20,7 +20,6 @@ public static class SqlTransports
     public const string Rest = "Rest";
     public const string Mcp = "Mcp";
     public const string ArrowExport = "ArrowExport";
-    public const string FlightSql = "FlightSql";
     public const string SqlEndpoints = "SqlEndpoints";
     public const string AsyncJob = "AsyncJob";
 
@@ -28,7 +27,7 @@ public static class SqlTransports
     public const string Olap = "Olap";
 
     /// <summary>
-    /// Issue #447 (SEC-ATR-03): the federation transport name of a server-stamped ingress; <c>null</c> for an unset ingress.
+    /// Issue #447: the federation transport name of a server-stamped ingress;<c>null</c> for an unset ingress.
     /// GraphQL and OData read through the planner like REST, so they are judged as <see cref="Rest"/>.
     /// </summary>
     public static string? ForIngress(Autheris.Domain.Options.DataSources.DataSourceTransportFlags ingress) => ingress switch
@@ -36,7 +35,6 @@ public static class SqlTransports
         Autheris.Domain.Options.DataSources.DataSourceTransportFlags.WebSql => WebSql,
         Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino => Trino,
         Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Mcp => Mcp,
-        Autheris.Domain.Options.DataSources.DataSourceTransportFlags.ArrowFlight => FlightSql,
         Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest
             or Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL
             or Autheris.Domain.Options.DataSources.DataSourceTransportFlags.OData => Rest,
@@ -45,7 +43,7 @@ public static class SqlTransports
 
     /// <summary>Every registered transport name; <c>WebSql:CrossSource:AllowedTransports</c> entries are validated against it at start-up.</summary>
     public static IReadOnlyList<string> All { get; } =
-        [WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints, AsyncJob, Olap];
+        [WebSql, Trino, Rest, Mcp, ArrowExport, SqlEndpoints, AsyncJob, Olap];
 }
 
 /// <param name="PlannedTableRead">
@@ -100,7 +98,7 @@ public interface IGovernedSqlExecutionService
         CancellationToken ct = default);
 
     /// <summary>
-    /// WP-ARC-C-13: Streams governed query rows asynchronously via <c>yield return</c> without buffering the entire result set in memory.
+    /// Streams governed query rows asynchronously via<c>yield return</c> without buffering the entire result set in memory.
     /// Governance evaluation, AST compilation, and audit recording complete before rows are yielded.
     /// </summary>
     async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(

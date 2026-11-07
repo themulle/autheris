@@ -21,7 +21,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Volatile in-memory DuckDB table cache store.
 /// Provides sub-millisecond query execution over in-memory columnar tables.
-/// Conforms to SEC-BL04-07, SEC-BL04-11, and SEC-BL04-14.
+/// Conforms to 07, and 14.
 /// </summary>
 public sealed class InMemoryTableCacheStore : ITableCacheStore, IDisposable
 {
@@ -189,7 +189,7 @@ public sealed class InMemoryTableCacheStore : ITableCacheStore, IDisposable
         await _lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // SEC-BL04-07 Zero-Row Protection Guard:
+            // 07 Zero-Row Protection Guard:
             // A shadow generation with 0 rows MUST NOT replace a healthy active generation with >0 rows
             if (_metadata.TryGetValue(table, out var existing) && existing.RowCount > 0 && rowCount == 0)
             {

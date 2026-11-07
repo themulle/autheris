@@ -7,9 +7,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Models;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Models;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -21,28 +21,25 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// Tests for the single remaining <see cref="DataCatalogSyncService"/> (formerly the gateway core implementation,
-/// moved to Autheris.Extensions/DataCatalog in EXT-MOVE): active client via <see cref="IDataCatalogClientFactory"/>,
+/// Tests for <see cref="DataCatalogSyncService"/>:
 /// GDPR Art. 9 tightening, masking via TagToMaskingRuleMap, governance ratchet, epoch invalidation and dry-run.
 /// </summary>
 public class DataCatalogSyncTests
 {
     private readonly IDataCatalogClient _catalogClient = Substitute.For<IDataCatalogClient>();
-    private readonly IDataCatalogClientFactory _clientFactory = Substitute.For<IDataCatalogClientFactory>();
     private readonly ITableMetadataRepository _tableRepo = Substitute.For<ITableMetadataRepository>();
     private readonly IEpochValidationService _epochService = Substitute.For<IEpochValidationService>();
     private readonly DataCatalogSyncService _sut;
 
     public DataCatalogSyncTests()
     {
-        _catalogClient.ProviderType.Returns(DataCatalogProviderType.MicrosoftPurview);
-        _clientFactory.GetActiveClient().Returns(_catalogClient);
+        _catalogClient.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
 
         var gatewayOptions = new GatewayOptions
         {
             Catalog = new DataCatalogOptions
             {
-                Provider = DataCatalogProviderType.MicrosoftPurview,
+                Provider = DataCatalogProviderType.OpenMetadata,
                 GdprArticle9Tags = ["gdpr_art9"],
                 TagToMaskingRuleMap = new Dictionary<string, string>
                 {
@@ -52,7 +49,7 @@ public class DataCatalogSyncTests
         };
 
         _sut = new DataCatalogSyncService(
-            _clientFactory,
+            _catalogClient,
             _tableRepo,
             _epochService,
             Options.Create(gatewayOptions),
@@ -259,13 +256,13 @@ public class DataCatalogSyncTests
         {
             Catalog = new DataCatalogOptions
             {
-                Provider = DataCatalogProviderType.MicrosoftPurview,
+                Provider = DataCatalogProviderType.OpenMetadata,
                 ActivateNewTables = true
             }
         };
 
         var sut = new DataCatalogSyncService(
-            _clientFactory,
+            _catalogClient,
             _tableRepo,
             _epochService,
             Options.Create(gatewayOptions),
@@ -298,7 +295,7 @@ public class DataCatalogSyncTests
     {
         var rebacStore = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>();
         var sut = new DataCatalogSyncService(
-            _clientFactory,
+            _catalogClient,
             _tableRepo,
             _epochService,
             Options.Create(new GatewayOptions()),

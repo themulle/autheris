@@ -11,7 +11,6 @@ public sealed class AuthenticationOptions
     public bool RequireKerberosOnly { get; init; } = true;
     public bool EnableKerberos { get; init; } = false;
     public bool IsKerberosConfigured => EnableKerberos;
-    [Range(1, 60)] public int GroupCacheTtlMinutes { get; init; } = 5;
     public bool EnableTestAuthHandler { get; init; }
 
     public BasicAuthOptions BasicAuth { get; init; } = new();
@@ -90,14 +89,14 @@ public sealed class BasicAuthOptions
     public int SuccessCacheSeconds { get; init; } = 30;
 
     /// <summary>
-    /// WP-PF-08: secret reference (resolved through <c>IKeyVaultSecretProvider</c>) of the key that signs the cluster-shared verified-credential
+    /// secret reference (resolved through<c>IKeyVaultSecretProvider</c>) of the key that signs the cluster-shared verified-credential
     /// marker. When set and a distributed cache is registered, replicas share the marker (keyed HMAC bound to a credential version) so a client
     /// pays the password hash once per cluster instead of once per replica. Unset: the marker stays per process.
     /// </summary>
     public string? MarkerKeyRef { get; init; }
 
     /// <summary>DoS protection: Maximum concurrent password hash computations (Argon2id/PBKDF2).</summary>
-    public int MaxConcurrentPasswordHashes { get; init; } = Environment.ProcessorCount;
+    public int MaxConcurrentPasswordHashes { get; init; } = 16;
 
     /// <summary>
     /// F-AUTH-DX: Optional cookie session issued after a successful Basic login (developer experience).
@@ -193,19 +192,19 @@ public sealed class EntraIdAuthOptions
     public IReadOnlyList<string> GetEffectiveReadOnlyScopes() => ReadOnlyScopes ?? (IReadOnlyList<string>)DefaultReadOnlyScopes;
 
     /// <summary>
-    /// SEC-GOV113-01 / Issue #226 / #237: Global switch for self-service access requests and reviews.
+    /// 01 / Issue #226 / #237: Global switch for self-service access requests and reviews.
     /// When false, self-service operations are disabled.
     /// </summary>
     public bool SelfServiceEnabled { get; init; } = true;
 
     /// <summary>
-    /// SEC-GOV113-01: Scopes that permit self-service access requests for read-only tokens.
+    /// Scopes that permit self-service access requests for read-only tokens.
     /// A token carrying these scopes remains read-only (writes rejected), but is permitted to execute self-service mutations.
     /// </summary>
     public List<string> ReadOnlySelfServiceScopes { get; init; } = ["data.access.request"];
 
     /// <summary>
-    /// SEC-GOV113-02 / Issue #226: Scopes that permit reviewing (approving or rejecting) access requests.
+    /// 02 / Issue #226: Scopes that permit reviewing (approving or rejecting) access requests.
     /// </summary>
     public List<string> AccessReviewScopes { get; init; } = ["data.access.review"];
 
@@ -269,8 +268,6 @@ public sealed class HitLStepUpOptions
     public bool Enabled { get; init; } = true;
     public int ApprovalTimeoutSeconds { get; init; } = 15;
     public bool RequireDifferentApprover { get; init; } = true;
-    public bool AutoCreateItsmTicket { get; init; } = true;
-    public ItsmSystemType PreferredItsmSystem { get; init; } = ItsmSystemType.ServiceNow;
     public bool RequireTotp2Fa { get; init; } = true;
     public bool FailClosedOnClusterPartition { get; init; } = false;
 }

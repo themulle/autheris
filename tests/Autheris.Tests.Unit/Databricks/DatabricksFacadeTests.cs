@@ -5,7 +5,7 @@ using System.Data;
 using System.Data.Common;
 using System.Net;
 using System.Text.Json;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Databricks;

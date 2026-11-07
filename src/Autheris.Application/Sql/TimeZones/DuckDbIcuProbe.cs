@@ -14,7 +14,7 @@ public enum DuckDbProbeResult
 }
 
 /// <summary>
-/// REQ-SQL-130 (BC-130-7): proves on an in-memory DuckDB connection that the time zone functions work under the production sandbox. The connection is
+/// 130 (BC-130-7): proves on an in-memory DuckDB connection that the time zone functions work under the production sandbox. The connection is
 /// set up with <see cref="DuckDbOlapEngine.BuildSetupSql"/> itself (autoload and autoinstall off, no external access, configuration locked), not with a
 /// copy of its statements. The ICU extension must be loaded and statically linked: an ICU that depends on autoload would pass on a developer machine and
 /// fail on a locked-down node. Constants only; no user text reaches DuckDB.

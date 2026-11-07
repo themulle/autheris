@@ -3,7 +3,7 @@ using System.IO;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// WP-ARC-C-02: Abstracts filesystem existence checks for <see cref="Microsoft.Extensions.Options.IValidateOptions{TOptions}"/>
+/// Abstracts filesystem existence checks for<see cref="Microsoft.Extensions.Options.IValidateOptions{TOptions}"/>
 /// validators so option validation remains pure and deterministic in unit tests.
 /// </summary>
 public interface IFileSystemProbe

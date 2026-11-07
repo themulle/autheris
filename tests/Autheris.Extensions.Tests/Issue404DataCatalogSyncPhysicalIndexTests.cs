@@ -6,9 +6,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Models;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Models;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -52,7 +52,7 @@ public sealed class Issue404DataCatalogSyncPhysicalIndexTests
 
     public Issue404DataCatalogSyncPhysicalIndexTests()
     {
-        _client.ProviderType.Returns(DataCatalogProviderType.MicrosoftPurview);
+        _client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
         _repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>()).Returns(c =>
         {
             _calls.Add("upsert");
@@ -79,10 +79,8 @@ public sealed class Issue404DataCatalogSyncPhysicalIndexTests
 
     private DataCatalogSyncService Sut()
     {
-        var factory = Substitute.For<IDataCatalogClientFactory>();
-        factory.GetActiveClient().Returns(_client);
-        return new DataCatalogSyncService(factory, _repo, _epoch,
-            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.MicrosoftPurview } }),
+        return new DataCatalogSyncService(_client, _repo, _epoch,
+            Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.OpenMetadata } }),
             _physical, _audit, _log, physicalIndexes: _indexes);
     }
 

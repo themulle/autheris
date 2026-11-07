@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// PLAN-SEC-OLAP-01: fail-closed start-up validation of the federation and OLAP options. An <c>AllowedTransports</c> entry must be a
+/// fail-closed start-up validation of the federation and OLAP options. An<c>AllowedTransports</c> entry must be a
 /// registered transport name (a typo would silently deny a transport, or, in a deny-minded list, silently allow one); limits must be
 /// positive instead of falling back to silent defaults. Failure messages name option paths and the offending transport name only.
 /// The removed <c>CrossSource:MaxMemory</c> / <c>MaxTempDirectorySize</c> keys fail validation; the only warning left is

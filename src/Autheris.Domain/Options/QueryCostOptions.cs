@@ -9,29 +9,11 @@ public sealed class QueryCostOptions
     [Range(1, 1000)]
     public int BaseCost { get; set; } = 1;
 
-    public int BaseQueryCost
-    {
-        get => BaseCost;
-        set => BaseCost = value;
-    }
-
     [Range(0, 1000)]
     public double RowCostFactor { get; set; } = 0.5;
 
-    public double CostPerRowReturned
-    {
-        get => RowCostFactor;
-        set => RowCostFactor = value;
-    }
-
     [Range(0, 500)]
     public int NestedCostFactor { get; set; } = 1;
-
-    public int NestedDepthFactor
-    {
-        get => NestedCostFactor;
-        set => NestedCostFactor = value;
-    }
 
     [Range(1, 1000)]
     public int FailureFee { get; set; } = 1;
@@ -47,7 +29,7 @@ public sealed class QueryCostOptions
     public int DefaultListMultiplier { get; set; } = 10;
 
     /// <summary>
-    /// REQ-COST-419: Relative weight for plain scalar columns selected on a list (default 1.0).
+    /// Relative weight for plain scalar columns selected on a list (default 1.0).
     /// Lower values (e.g. 0.2) discount scalar fields to allow realistic page sizes on wide tables.
     /// </summary>
     [Range(0.01, 1.0)]

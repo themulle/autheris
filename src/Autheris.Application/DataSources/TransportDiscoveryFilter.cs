@@ -8,9 +8,9 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options.DataSources;
 
 /// <summary>
-/// Issue #447 (REQ-ATR-08, decision 10): discovery hides, it never errors. A table whose source does not allow the ingress transport is
+/// Issue #447 (decision 10): discovery hides, it never errors. A table whose source does not allow the ingress transport is
 /// dropped from catalog listings, schemas and metadata documents, so a caller cannot learn that a source exists or which transports it
-/// allows. Hiding is not the enforcement point (the gate at the data choke points is, SEC-ATR-04); a dropped row therefore never
+/// allows. Hiding is not the enforcement point (the gate at the data choke points is); a dropped row therefore never
 /// widens access, and every doubt (resolver failure, invalid transport) hides.
 /// </summary>
 public static class TransportDiscoveryFilter

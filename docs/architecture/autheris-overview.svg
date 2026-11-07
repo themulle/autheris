@@ -248,7 +248,7 @@
     <g transform="translate(16, 138)">
       <rect width="318" height="80" rx="6" fill="#09271d" stroke="#047857" stroke-width="1"/>
       <text x="12" y="18" font-size="12" font-weight="700" fill="#34d399">Enterprise Data Catalogs</text>
-      <text x="12" y="34" font-size="11" fill="#d1d5db">• Purview, Collibra, Alation &amp; OpenMetadata Sync</text>
+      <text x="12" y="34" font-size="11" fill="#d1d5db">• OpenMetadata &amp; dbt Manifest Sync</text>
       <text x="12" y="50" font-size="11" fill="#d1d5db">• Auto GDPR Art. 9 Tagging &amp; PII Masking Maps</text>
       <text x="12" y="70" font-size="10.5" font-weight="600" fill="#10b981">🚀 Dynamic PII Masking Inherited from Catalogs</text>
     </g>
@@ -262,13 +262,13 @@
       <text x="12" y="70" font-size="10.5" font-weight="600" fill="#10b981">⚡ High-Availability Scaling in Kubernetes</text>
     </g>
 
-    <!-- Card 4: ITSM & AI Triage -->
+    <!-- Card 4: Lineage & Audit Export -->
     <g transform="translate(16, 310)">
       <rect width="318" height="76" rx="6" fill="#09271d" stroke="#047857" stroke-width="1"/>
-      <text x="12" y="18" font-size="12" font-weight="700" fill="#34d399">ITSM &amp; Backstage Export</text>
-      <text x="12" y="34" font-size="11" fill="#d1d5db">• ServiceNow &amp; Jira Bi-Directional Webhooks</text>
-      <text x="12" y="50" font-size="11" fill="#d1d5db">• OpenJEV AI Justification Triage &amp; Backstage Catalog</text>
-      <text x="12" y="68" font-size="10.5" font-weight="600" fill="#10b981">🚀 Seamless ITIL Governance Workflow Integration</text>
+      <text x="12" y="18" font-size="12" font-weight="700" fill="#34d399">Lineage &amp; Event Export</text>
+      <text x="12" y="34" font-size="11" fill="#d1d5db">• OpenLineage &amp; OpenJEV Event Export</text>
+      <text x="12" y="50" font-size="11" fill="#d1d5db">• Proactive Consent Recertification Audit</text>
+      <text x="12" y="68" font-size="10.5" font-weight="600" fill="#10b981">🚀 Seamless Enterprise Governance Integration</text>
     </g>
   </g>
 

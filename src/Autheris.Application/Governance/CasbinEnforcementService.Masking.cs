@@ -109,7 +109,7 @@ public sealed partial class CasbinEnforcementService
     }
 
     /// <summary>
-    /// SEC-X1-02: the target dialect is mandatory for a correlated row filter. There is no default (the former SQL Server default
+    /// the target dialect is mandatory for a correlated row filter. There is no default (the former SQL Server default
     /// rendered the wrong quoting and strategy for every other source); an unknown dialect fails closed.
     /// </summary>
     private static DatabaseDialect RequireTargetDialect(DatabaseDialect? dialect)
@@ -123,7 +123,7 @@ public sealed partial class CasbinEnforcementService
     }
 
     /// <summary>
-    /// Typed form of the correlated row filter (SEC-X1-02): an EXISTS predicate whose values are policy parameters.
+    /// Typed form of the correlated row filter: an EXISTS predicate whose values are policy parameters.
     /// <paramref name="ruleOrdinal"/> gives every rule distinct parameter names, so the predicates of several matched allow rules merge.
     /// </summary>
     /// <exception cref="SecurityException">The target dialect is unknown.</exception>
@@ -222,8 +222,8 @@ public sealed partial class CasbinEnforcementService
         }
     }
 
-    // WP-PF-03 / M6: one compiled matcher per distinct RAW pattern in a bounded LRU (no per-call string building, no clear-all at the limit).
-    private static readonly Autheris.Application.Caching.BoundedCache<string, ObjectPatternMatcher> ObjectPatternMatchers = new(MaxObjectPatternMatchers, comparer: StringComparer.Ordinal);
+    // 03 / M6: one compiled matcher per distinct RAW pattern in a bounded LRU (no per-call string building, no clear-all at the limit).
+    private static readonly Autheris.Application.State.Caching.BoundedCache<string, ObjectPatternMatcher> ObjectPatternMatchers = new(MaxObjectPatternMatchers, comparer: StringComparer.Ordinal);
     private const int MaxObjectPatternMatchers = 20_000;
 
     /// <summary>Test seam for the regex evaluation (a linear-time regex cannot be made to time out reliably in a unit test).</summary>

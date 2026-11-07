@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -75,14 +75,14 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
     {
         ArgumentNullException.ThrowIfNull(metadata);
 
-        // SEC-277-04: a keyword-less self-reference is answered before any table lookup, so the response is the same whether the name is an
+        // a keyword-less self-reference is answered before any table lookup, so the response is the same whether the name is an
         // existing, a forbidden or an unknown table (no existence oracle).
         if (metadata.HasNonRecursiveSelfReference)
         {
             throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "a CTE that references itself requires the RECURSIVE keyword");
         }
 
-        // SEC-277-03: the opt-in gate runs before any table lookup (also for table-less statements).
+        // the opt-in gate runs before any table lookup (also for table-less statements).
         if (metadata.HasRecursiveCte && !_webSqlOptions.AllowRecursiveCte)
         {
             throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE is not enabled");
@@ -107,7 +107,7 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
 
             // SR-H-06: same data-source allowlists as the single-catalog path, for every referenced catalog,
             // before any metadata lookup or data read.
-            // SEC-RG-01: a denied source answers exactly like an unknown table (no existence oracle between unknown source and unknown table).
+            // a denied source answers exactly like an unknown table (no existence oracle between unknown source and unknown table).
             if (!DataSourceAllowlistGuard.IsAllowed(_webSqlOptions, tenantId, domain))
             {
                 throw new WebSqlTableDeniedException($"WebSQL access denied to table '{target.FullName}'.");
@@ -168,7 +168,7 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
 
         if (isCrossSource)
         {
-            // SEC-277-12 / D-8: no recursive CTE across sources (the staging engine rejects RECURSIVE); decided before planning or staging.
+            // 12 / D-8: no recursive CTE across sources (the staging engine rejects RECURSIVE); decided before planning or staging.
             if (metadata.HasRecursiveCte)
             {
                 throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE across data sources");

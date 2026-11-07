@@ -7,7 +7,7 @@ using Autheris.Domain.Model;
 using DynamicExpresso;
 
 /// <summary>
-/// WP-PF-03: compiles each Casbin <c>sub_rule</c> once into a typed delegate instead of building an interpreter and running a
+/// compiles each Casbin<c>sub_rule</c> once into a typed delegate instead of building an interpreter and running a
 /// regex on every evaluation. Compile failures are stored as <c>null</c> and surface as an "unknown" result, which callers treat
 /// fail-closed (an allow rule does not match, a deny rule matches). The interpreter is sandboxed: assignment is disabled and no
 /// additional types or references are registered beyond the defaults.

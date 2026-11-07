@@ -84,7 +84,7 @@ public sealed class TimeZoneRegistryTests
         Assert.True(TimeZoneRegistry.TryResolve(TargetSqlDialect.DuckDb, "Europe/Berlin", out var duck));
         Assert.Equal("Europe/Berlin", duck);
 
-        foreach (var dialect in new[] { TargetSqlDialect.Sqlite, TargetSqlDialect.Oracle, TargetSqlDialect.Databricks, TargetSqlDialect.Ansi, TargetSqlDialect.Snowflake })
+        foreach (var dialect in new[] { TargetSqlDialect.Sqlite, TargetSqlDialect.Oracle, TargetSqlDialect.Databricks, TargetSqlDialect.Ansi })
         {
             Assert.False(TimeZoneRegistry.TryResolve(dialect, "Europe/Berlin", out var none));
             Assert.Equal(string.Empty, none);

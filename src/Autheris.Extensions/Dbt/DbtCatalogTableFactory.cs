@@ -9,14 +9,14 @@ using Autheris.Domain.Options;
 
 /// <summary>
 /// Issue #282: builds the catalog entry for a dbt model or source that has none yet. Pure data mapping: no connection is opened,
-/// no SQL is run and no manifest text is interpolated into SQL (SEC-282-4). Every failure is a fixed reason code (fail-closed).
+/// no SQL is run and no manifest text is interpolated into SQL. Every failure is a fixed reason code (fail-closed).
 /// </summary>
 internal static partial class DbtCatalogTableFactory
 {
-    /// <summary>SEC-282-8: columns per registered table; a larger manifest entry is skipped as a whole.</summary>
+    /// <summary>columns per registered table; a larger manifest entry is skipped as a whole.</summary>
     internal const int MaxColumnsPerTable = 1000;
 
-    // SEC-282-1: explicit ASCII classes, \z (not $, which admits a trailing newline), no \w / \d (Unicode letters and digits).
+    // explicit ASCII classes, \z (not $, which admits a trailing newline), no \w / \d (Unicode letters and digits).
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.None)]
     private static partial Regex IdentifierRegex();
 
@@ -106,7 +106,7 @@ internal static partial class DbtCatalogTableFactory
         return true;
     }
 
-    /// <summary>SEC-282-3: mapping entry or the database name itself, looked up in the configured connections; never a fallback.</summary>
+    /// <summary>mapping entry or the database name itself, looked up in the configured connections; never a fallback.</summary>
     private static bool TryResolveConnection(string database, GatewayOptions options, out string connectionName, out string provider)
     {
         connectionName = string.Empty;

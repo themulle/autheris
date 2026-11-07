@@ -1,0 +1,71 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security;
+using Autheris.Application.Sql;
+using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
+using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
+
+namespace Autheris.Application.DataSources.Connectors;
+
+/// <summary>
+/// Centralized Zero-Trust & Side-Channel Inference Evaluator for Connector-SPI implementations.
+/// Consolidates security enforcement across all connectors and prevents duplicated audit/security logic.
+/// </summary>
+public static class ConnectorSecurityPolicyEvaluator
+{
+    private static readonly HashSet<string> ReservedPaginationArgs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "limit", "offset", "first", "last", "after", "before", "take", "skip"
+    };
+
+    public static void EnforceSecurityPolicy(ConnectorSessionContext session, TableMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        // Zero-Trust / Fail-Closed: Refuse execution if table access is denied by policy
+        if (!session.AccessDecision.IsAllowed)
+        {
+            var reasons = session.AccessDecision.DeniedReasons.Count > 0
+                ? string.Join("; ", session.AccessDecision.DeniedReasons)
+                : "Table is blocked by access policy.";
+            throw new SecurityException($"Zero-Trust violation: Access to table '{metadata.Identifier}' denied: {reasons}");
+        }
+
+        // Zero-Trust: Validate RLS filter early before any connection or query execution
+        if (!string.IsNullOrWhiteSpace(session.PushdownFilterSql))
+        {
+            SqlSecurityValidator.ValidatePredicateSql(
+                session.PushdownFilterSql,
+                "PushdownFilterSql",
+                allowSubqueries: true,
+                SqlSecurityValidator.MaxLengthFor(session.AccessDecision));
+        }
+
+        // Side-channel inference protection: verify column filters target only Clear columns
+        if (session.Arguments != null && session.Arguments.Count > 0)
+        {
+            foreach (var (argKey, argVal) in session.Arguments)
+            {
+                if (ReservedPaginationArgs.Contains(argKey) || argVal == null)
+                {
+                    continue;
+                }
+
+                var matchingCol = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, argKey, StringComparison.OrdinalIgnoreCase));
+                if (matchingCol != null)
+                {
+                    // SEC H-10: Filter only on effectively Clear columns (catalog-sensitive/masked columns need an explicit Clear).
+                    var access = session.AccessDecision.GetEffectiveColumnAccess(matchingCol.ColumnName, metadata);
+                    if (access != ColumnAccessLevel.Clear)
+                    {
+                        throw new SecurityException($"Zero-Trust violation: Filtering on column '{matchingCol.ColumnName}' in table '{metadata.Identifier}' is not permitted (access level: {access}).");
+                    }
+                }
+            }
+        }
+    }
+}

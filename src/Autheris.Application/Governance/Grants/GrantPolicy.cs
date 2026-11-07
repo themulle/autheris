@@ -7,7 +7,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// WP-SC-16 time-bound individual grant policy. Individual grants (<see cref="GranteeType.User"/>, <see cref="GranteeType.ServicePrincipal"/>)
+/// 16 time-bound individual grant policy. Individual grants (<see cref="GranteeType.User"/>, <see cref="GranteeType.ServicePrincipal"/>)
 /// always need an explicit <c>ValidTo</c> within the maximum of their class; group and role grants are standing and unaffected.
 /// Renewal is a new approval, never by the grantee. Any unexpected state denies.
 /// </summary>
@@ -30,17 +30,17 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
     private GrantDecision EvaluateCore(GrantRequest r)
     {
         ArgumentNullException.ThrowIfNull(r);
-        if (!Enum.IsDefined(r.GranteeType))
+        if (!Enum.IsDefined(r.GranteeType) || !Enum.IsDefined(r.Kind))
         {
-            return GrantDecision.Deny(GrantErrorCodes.Indeterminate, "Unknown grantee type.");
+            return GrantDecision.Deny(GrantErrorCodes.Indeterminate, "Unknown grantee type or grant kind.");
         }
 
-        if (r.Effect == ConsentEffect.Deny && r.Kind != GrantKind.BreakGlass)
+        if (r.Effect == ConsentEffect.Deny)
         {
             return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Deny grants only restrict access and have no maximum.");
         }
 
-        if (r.GranteeType is GranteeType.Group or GranteeType.Role && r.Kind != GrantKind.BreakGlass)
+        if (r.GranteeType is GranteeType.Group or GranteeType.Role)
         {
             return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Standing group/role grant.");
         }
@@ -92,7 +92,7 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
                 $"The requested expiry exceeds the maximum of {FormatSpan(maxSpan)} for this grant class.", cls, maxValidTo);
         }
 
-        if ((cls is GrantClass.IndividualUnmasked or GrantClass.BreakGlass or GrantClass.IndividualPrivileged) &&
+        if ((cls is GrantClass.IndividualUnmasked or GrantClass.IndividualPrivileged) &&
             string.IsNullOrWhiteSpace(r.Justification))
         {
             return GrantDecision.Deny(GrantErrorCodes.JustificationRequired, "A justification is required for this grant class.", cls, maxValidTo);
@@ -110,10 +110,6 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count();
             var needed = cls is GrantClass.ServicePrincipal ? 1 : 2;
-            if (cls is GrantClass.BreakGlass)
-            {
-                needed = 1; // second approval may follow after the fact within 24 h; at least one independent approver is required
-            }
 
             if (distinct < needed)
             {
@@ -127,11 +123,6 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
 
     private GrantClass Classify(GrantRequest r)
     {
-        if (r.Kind == GrantKind.BreakGlass)
-        {
-            return GrantClass.BreakGlass;
-        }
-
         if (r.GranteeType == GranteeType.ServicePrincipal)
         {
             return GrantClass.ServicePrincipal;
@@ -162,7 +153,6 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
         GrantClass.Sensitive => (Days(_options.SensitiveMaxDays, IndividualGrantCeilings.SensitiveDays), GrantRecertClass.Campaign90, true),
         GrantClass.IndividualUnmasked => (Days(_options.UnmaskedMaxDays, IndividualGrantCeilings.UnmaskedDays), GrantRecertClass.Campaign90, true),
         GrantClass.IndividualPrivileged => (Days(_options.PrivilegedMaxDays, IndividualGrantCeilings.PrivilegedDays), GrantRecertClass.Campaign90, true),
-        GrantClass.BreakGlass => (Hours(_options.BreakGlassMaxHours, IndividualGrantCeilings.BreakGlassHours), GrantRecertClass.Campaign90, true),
         GrantClass.ServicePrincipal => (Days(_options.ServicePrincipalMaxDays, IndividualGrantCeilings.ServicePrincipalDays), GrantRecertClass.Campaign90, false),
         _ => throw new InvalidOperationException("Unhandled grant class.")
     };
@@ -184,8 +174,6 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
 
     // A realm profile can only shorten: clamp into [1, ceiling]; a non-positive value fails closed to the shortest span.
     private static TimeSpan Days(int configured, int ceiling) => TimeSpan.FromDays(Math.Clamp(configured, 1, ceiling));
-
-    private static TimeSpan Hours(int configured, int ceiling) => TimeSpan.FromHours(Math.Clamp(configured, 1, ceiling));
 
     private static string FormatSpan(TimeSpan s) => s.TotalHours < 24 * 2 ? $"{s.TotalHours:0} hours" : $"{s.TotalDays:0} days";
 }

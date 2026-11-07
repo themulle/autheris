@@ -4,7 +4,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 
-/// <summary>PLAN-SEC-115: the four switchable MCP tool groups. <see cref="None"/> tools are controlled by <c>Mcp:DisabledTools</c> only.</summary>
+/// <summary>the four switchable MCP tool groups.<see cref="None"/> tools are controlled by <c>Mcp:DisabledTools</c> only.</summary>
 public enum McpToolGroup
 {
     None = 0,
@@ -15,7 +15,7 @@ public enum McpToolGroup
 }
 
 /// <summary>
-/// PLAN-SEC-115 A-2: the closed, name-keyed group table of every built-in MCP tool (case-insensitive, like the registry). A name
+/// 115 A-2: the closed, name-keyed group table of every built-in MCP tool (case-insensitive, like the registry). A name
 /// that is not in the table is a dynamic tool (GraphQL discovery, <c>Mcp:AllowedOperations</c>) and belongs to <see cref="McpToolGroup.Query"/>,
 /// so it is never "ungrouped and always on". The completeness tests fail CI when the registry holds a tool that is not classified here.
 /// </summary>

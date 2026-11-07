@@ -1,0 +1,6 @@
+# Microsoft Excel (Get Data -> From OData Feed) CSDL Metadata Fetch
+GET /odata/v4/$metadata HTTP/1.1
+Host: localhost
+Accept: application/xml
+OData-MaxVersion: 4.0
+User-Agent: Microsoft.Data.Mashup; Excel (https://go.microsoft.com/fwlink/?LinkID=304225)

@@ -7,7 +7,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
@@ -198,7 +198,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         CancellationToken ct = default)
     {
         // F-C11: the service has already dropped every row the shaping rule maps to NotFound; the check below is the second line of
-        // defence (SEC-CAT138-16) so such a row never reaches the filters, the total or the paging.
+        // defence so such a row never reaches the filters, the total or the paging.
         var (allVisible, isAdminView) = await VisibleSetAsync(principal, ct).ConfigureAwait(false);
         var visible = allVisible
             .Where(t => Shape(isAdminView, t) != CatalogOutputShape.NotFound)
@@ -429,7 +429,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
         // I404-SC-L1/L4: keys and indexes only when wholly Clear for this caller (the level lookup fails closed to Deny).
-        var keyView = Autheris.Application.Data.Services.DatasetIndexProjection.Project(table, Autheris.Application.Data.Services.DatasetIndexProjection.ClearSet(columnAccessLevels));
+        var keyView = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(table, Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(columnAccessLevels));
         var primaryKeys = new HashSet<string>(keyView.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
         // Token-efficient Brief view for AI App & Report Generators
@@ -592,7 +592,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
     /// <summary>
     /// Issue #111 A-4: the <c>Summary</c> answer is built from an allow-list (a property added to <see cref="McpDatasetDescription"/> is
-    /// excluded until it is listed here): identifier, sanitised display name (PLAN-CAT-146-A, same trust as the description), description,
+    /// excluded until it is listed here): identifier, sanitised display name (same trust as the description), description,
     /// sensitivity, four-eyes flag, tags, display-name-only owners, access status and the view marker. No long description, columns, examples, GraphQL block, access hints, keys or profiles.
     /// </summary>
     private async Task<McpDatasetDescription> BuildSummaryDescriptionAsync(TableMetadata table, string accessStatus, string? negotiatedLanguage, string? requestedLanguage, CancellationToken ct)
@@ -961,7 +961,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var (table, shape) = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
         if (shape != CatalogOutputShape.Full)
         {
-            // SEC-CAT138-15: rows are read only for a Full shape; a Summary row exposes no sample rows.
+            // rows are read only for a Full shape; a Summary row exposes no sample rows.
             throw new GatewayForbiddenException("Sample rows require full catalog access to the dataset.");
         }
 
@@ -1128,10 +1128,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         if (o.Arrow.Enabled)
         {
             endpoints.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow", "Columnar bulk export of one dataset."));
-            if (o.Arrow.EnableFlightSql)
-            {
-                endpoints.Add(new("Arrow Flight SQL", "POST", "/api/v1/flight/sql", "Arrow Flight SQL protocol for analytical clients."));
-            }
         }
 
         if (o.Lakehouse.Enabled)
@@ -1166,7 +1162,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
     /// <summary>
     /// The discoverable tables and the admin view that shaped them. SEC H-02: only the explicit (production-blocked) MCP auth bypass
-    /// opens the whole catalog; it keeps its own admin view and never widens the shaping of the service (SEC-CAT138-13).
+    /// opens the whole catalog; it keeps its own admin view and never widens the shaping of the service.
     /// </summary>
     private async Task<(IReadOnlyList<TableMetadata> Tables, bool IsAdminView)> VisibleSetAsync(ClaimsPrincipal principal, CancellationToken ct)
     {
@@ -1221,7 +1217,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         }
 
         var row = visibility == null ? null : await visibility.FindVisibleAsync(CallerOf(principal), requested, ct).ConfigureAwait(false);
-        // Second line of defence (SEC-CAT138-16): a NotFound shape is unrepresentable in CatalogVisibleRow, but is never served.
+        // Second line of defence: a NotFound shape is unrepresentable in CatalogVisibleRow, but is never served.
         return row is { Shape: not CatalogOutputShape.NotFound } visible
             ? (visible.Table, visible.Shape)
             : throw new TableNotFoundException(requested);

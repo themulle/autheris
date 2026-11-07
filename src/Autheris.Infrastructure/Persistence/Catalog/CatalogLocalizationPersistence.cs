@@ -22,7 +22,7 @@ internal class CatalogLocalizationPersistence
         }
         catch (Exception ex) when (ex is JsonException or FormatException)
         {
-            // SEC-CAT146-05: Log target ID and ex.GetType().Name only, do NOT log raw JSON payload bytes or ex.Message
+            // Log target ID and ex.GetType.Name only, do NOT log raw JSON payload bytes or ex.Message
             logger?.LogWarning("Corrupt texts_json for {TargetId}: {ExceptionType}", targetId, ex.GetType().Name);
             return LocalizedTexts.Empty;
         }

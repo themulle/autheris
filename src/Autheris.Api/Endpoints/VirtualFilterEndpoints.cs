@@ -8,7 +8,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Audit;

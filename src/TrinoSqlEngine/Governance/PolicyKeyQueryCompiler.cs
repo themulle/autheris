@@ -13,7 +13,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
 
 /// <summary>
-/// Issue #107 WP-B (PLAN-GOV-107 A-3, SEC-RF107-11): derives the key query of a registered correlated <c>EXISTS</c> and compiles it through
+/// Issue #107 (107 A-3): derives the key query of a registered correlated<c>EXISTS</c> and compiles it through
 /// the same controls as a policy subquery. The derivation (single correlation conjunct, no remaining reference to the target, a
 /// <c>dep.pk IS NOT NULL</c> conjunct) is checked structurally and every violation is a <see cref="KeyQueryNotDerivableException"/>. The
 /// governance is <see cref="PolicySubqueryTenantRewriter"/> (unchanged: tenant wrapper per physical table, nested subqueries and unknown
@@ -226,7 +226,7 @@ public sealed class PolicyKeyQueryCompiler : IPolicyKeyQueryCompiler
         _ => true
     };
 
-    // ---- SEC-RF107-01 (a), SEC-RF107-07 (a), (c) ----
+    // ---- 01 (a), 07 (a), (c) ----
 
     private static (string? KeyType, string? ForeignKeyType) ResolveTypes(PolicyKeyQueryRequest request, Derivation derived)
     {
@@ -265,7 +265,7 @@ public sealed class PolicyKeyQueryCompiler : IPolicyKeyQueryCompiler
     }
 
     /// <summary>
-    /// SEC-RF107-01 (a): every value of the body is a policy parameter of the filter definition (<see cref="ParameterOrigin.Policy"/> with a
+    /// 01 (a): every value of the body is a policy parameter of the filter definition (<see cref="ParameterOrigin.Policy"/> with a
     /// value of its declared type in the request); a client parameter, another origin or a node that can depend on the caller or on time
     /// makes the filter not derivable, so one principal's key set can never serve another.
     /// </summary>
@@ -313,7 +313,7 @@ public sealed class PolicyKeyQueryCompiler : IPolicyKeyQueryCompiler
         }
     }
 
-    // ---- SEC-RF107-11: the result is re-checked after the injector hook, so a mutated pipeline cannot slip through ----
+    // ---- the result is re-checked after the injector hook, so a mutated pipeline cannot slip through ----
 
     private static void AssertKeyStatement(SqlStatement secured, ColumnReference keyColumn, int rowLimit)
     {

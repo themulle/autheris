@@ -9,7 +9,7 @@ using System.Net;
 using System.Threading.Tasks;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;

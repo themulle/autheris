@@ -11,7 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Identity.Attributes;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -35,7 +35,6 @@ public sealed class ConsentRequestService : IConsentRequestService
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IConsentApprovalRepository _approvalRepository;
     private readonly IIdempotencyStore? _idempotencyStore;
-    private readonly IConsentRequestDispatcher? _dispatcher;
     private readonly IOptions<GatewayOptions>? _gatewayOptions;
     private readonly IGrantPolicy _grantPolicy;
     private readonly IIdentitySubjectResolver? _subjectResolver;
@@ -45,7 +44,6 @@ public sealed class ConsentRequestService : IConsentRequestService
         ITableMetadataRepository metadataRepository,
         IConsentApprovalRepository approvalRepository,
         IIdempotencyStore? idempotencyStore = null,
-        IConsentRequestDispatcher? dispatcher = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
         IGrantPolicy? grantPolicy = null,
         IIdentitySubjectResolver? subjectResolver = null,
@@ -56,7 +54,6 @@ public sealed class ConsentRequestService : IConsentRequestService
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _idempotencyStore = idempotencyStore;
-        _dispatcher = dispatcher;
         _gatewayOptions = gatewayOptions;
         _subjectResolver = subjectResolver;
     }
@@ -131,7 +128,7 @@ public sealed class ConsentRequestService : IConsentRequestService
             }
         }
 
-        // WP-SC-16: a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
+        // a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
         var now = DateTimeOffset.UtcNow;
         var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
             GranteeType.User,
@@ -147,8 +144,6 @@ public sealed class ConsentRequestService : IConsentRequestService
             throw new ConsentRequestException(grantDecision.ErrorCode ?? GrantErrorCodes.Indeterminate, grantDecision.Reason);
         }
 
-        bool isItsmEnabled = _dispatcher != null && (_gatewayOptions?.Value.Itsm.Enabled == true);
-
         string? contextJson = command.Context != null
             ? System.Text.Json.JsonSerializer.Serialize(command.Context)
             : null;
@@ -162,7 +157,7 @@ public sealed class ConsentRequestService : IConsentRequestService
             RequestedGranteeRef = userSid.Value,
             BusinessJustification = justification.Trim(),
             RequestedValidTo = now.AddDays(durationDays),
-            Status = isItsmEnabled ? "PENDING_EXTERNAL_APPROVAL" : "PENDING",
+            Status = "PENDING",
             TenantId = tenantId,
             RequesterIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value),
             ContextJson = contextJson
@@ -181,58 +176,6 @@ public sealed class ConsentRequestService : IConsentRequestService
             };
             await StoreIdempotentAsync(userSid, command.IdempotencyKey, requestFingerprint, approved, ct).ConfigureAwait(false);
             return approved;
-        }
-
-        if (isItsmEnabled)
-        {
-            ItsmTicketResult? ticketResult;
-            try
-            {
-                var itsmRequest = new ItsmTicketRequest(
-                    tenantId,
-                    userSid,
-                    tableId,
-                    justification,
-                    Math.Clamp(durationDays, MinDurationDays, MaxDurationDays),
-                    null,
-                    null);
-
-                var preferredSystem = _gatewayOptions?.Value.Itsm.DefaultSystem ?? ItsmSystemType.ServiceNow;
-                ticketResult = await _dispatcher!.DispatchAsync(itsmRequest, preferredSystem, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                await _approvalRepository.DeleteConsentRequestAsync(created.Id, ct).ConfigureAwait(false);
-                throw new ConsentRequestException("ITSM_UNAVAILABLE", $"ITSM system unavailable: {ex.Message}");
-            }
-
-            if (ticketResult == null || !ticketResult.Success)
-            {
-                await _approvalRepository.DeleteConsentRequestAsync(created.Id, ct).ConfigureAwait(false);
-                throw new ConsentRequestException(
-                    ticketResult?.ErrorCode ?? "ITSM_UNAVAILABLE",
-                    ticketResult?.ErrorMessage ?? "Failed to create external ITSM ticket.");
-            }
-
-            try
-            {
-                await _approvalRepository.UpdateConsentRequestTicketIdAsync(created.Id, ticketResult.TicketReference!.TicketId, ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await _approvalRepository.DeleteConsentRequestAsync(created.Id, ct).ConfigureAwait(false);
-                throw new ConsentRequestException("ITSM_UNAVAILABLE", "Failed to record ITSM ticket reference.");
-            }
-
-            var pendingExternal = new SubmitConsentRequestResult
-            {
-                RequestId = created.Id,
-                Status = "PENDING_EXTERNAL_APPROVAL",
-                Message = "Consent request submitted to ITSM for external approval.",
-                ItsmTicketReference = ticketResult.TicketReference
-            };
-            await StoreIdempotentAsync(userSid, command.IdempotencyKey, requestFingerprint, pendingExternal, ct).ConfigureAwait(false);
-            return pendingExternal;
         }
 
         var submitted = new SubmitConsentRequestResult

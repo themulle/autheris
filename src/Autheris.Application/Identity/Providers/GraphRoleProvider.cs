@@ -90,7 +90,7 @@ public sealed class GraphRoleProvider : IRoleProvider
         }
         catch (GraphThrottledException throttled)
         {
-            // SEC-SC-24: 429 Throttle response - record failure and trip circuit for Retry-After duration if large
+            // 429 Throttle response - record failure and trip circuit for Retry-After duration if large
             lock (_lock)
             {
                 _consecutiveFailures++;
@@ -104,7 +104,7 @@ public sealed class GraphRoleProvider : IRoleProvider
         }
         catch (Exception)
         {
-            // SEC-SC-12 / SEC-SC-24: Fail-closed on any error or timeout
+            // Fail-closed on any error or timeout
             lock (_lock)
             {
                 _consecutiveFailures++;

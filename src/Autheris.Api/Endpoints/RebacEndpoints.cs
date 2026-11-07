@@ -22,7 +22,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 
 /// <summary>
-/// F-SEC-04: ReBAC REST Endpoints.
+/// F-ReBAC REST Endpoints.
 /// Exposes tuple management and relationship-based access check APIs with strict multi-tenant boundary checks.
 /// </summary>
 public static class RebacEndpoints
@@ -131,7 +131,7 @@ public static class RebacEndpoints
             canonicalTuples.Add(t with { User = parsed.Canonical });
         }
 
-        // WP-SC-16: a tuple for an individual user is a time-bound individual grant (explicit ExpiresAt within the class maximum).
+        // a tuple for an individual user is a time-bound individual grant (explicit ExpiresAt within the class maximum).
         // Usersets (group#member) and structural tuples (parent) are standing and not limited.
         var policy = grantPolicy ?? new GrantPolicy();
         var now = DateTimeOffset.UtcNow;

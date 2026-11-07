@@ -3,20 +3,19 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using Autheris.Api.Hosting;
-using Autheris.Application.Connectors;
-using Autheris.Application.Connectors.CrossDomain;
-using Autheris.Application.Diagnostics.Shadowing;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.DataSources.Connectors.CrossDomain;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Events.Services;
 using Autheris.Application.FinOps.Interfaces;
 using Autheris.Application.FinOps.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
-using Autheris.Application.Performance.IncrementalDelivery;
+using Autheris.Application.Observability.IncrementalDelivery;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Application.Services;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Tree;
@@ -53,7 +52,7 @@ public static class GatewayExecutionServiceExtensions
             var opts = sp.GetService<IOptions<GatewayOptions>>();
             var maskingProvider = sp.GetService<IColumnMaskingProvider>();
 
-            // WP-ARC-B-02 / ARC-I-13: the default SQL connector reads through the governed pipeline and requires the masking provider.
+            // 02 / ARC-I-13: the default SQL connector reads through the governed pipeline and requires the masking provider.
             if (metaRepo != null && maskingProvider != null)
             {
                 var defaultSqlConnector = new SqlConnector(
@@ -102,9 +101,8 @@ public static class GatewayExecutionServiceExtensions
         // Hierarchical Parquet Egress (F-DATA-01)
         services.AddSingleton<IParquetExportService, ParquetExportService>();
 
-        // Native Apache Arrow Flight SQL & IPC Egress (F-DATA-04 & F-DATA-04-B)
+        // Native Apache Arrow IPC Egress (F-DATA-04 & F-DATA-04-B)
         services.AddSingleton<IArrowExportService, ArrowExportService>();
-        services.AddSingleton<IArrowFlightSqlServer, ArrowFlightSqlServer>();
 
         // Embedded In-Memory OLAP via DuckDB.NET (F-DATA-03)
         services.AddSingleton<IDuckDbOlapEngine>(sp =>
@@ -112,7 +110,7 @@ public static class GatewayExecutionServiceExtensions
                 sp.GetRequiredService<IOptions<GatewayOptions>>(),
                 sp.GetService<ILogger<DuckDbOlapEngine>>()));
 
-        // REQ-SQL-130: time zone conversion state (registry self-test and DuckDB ICU probe), evaluated once at startup; fail closed until then.
+        // time zone conversion state (registry self-test and DuckDB ICU probe), evaluated once at startup; fail closed until then.
         services.AddSingleton<Autheris.Application.Sql.TimeZones.TimeZoneConversionState>();
         services.AddSingleton<Autheris.Application.Sql.TimeZones.ITimeZoneConversionState>(sp => sp.GetRequiredService<Autheris.Application.Sql.TimeZones.TimeZoneConversionState>());
         services.AddHostedService<Autheris.Application.Sql.TimeZones.TimeZoneConversionStartupCheck>();
@@ -124,7 +122,7 @@ public static class GatewayExecutionServiceExtensions
         // Connectors to foreign systems (Autheris.Extensions)
         services.AddGatewayExtensions(gatewayOptions);
 
-        // Realtime Event Subscriptions & In-Stream RLS (P5, F-CDC-03, WP-ARC-A-13)
+        // Realtime Event Subscriptions & In-Stream RLS (P5, F-CDC-03)
         services.AddAutherisStreaming();
         services.AddSingleton<ICdcEventIngestionService, CdcEventIngestionService>();
         services.AddScoped<IStreamRlsPolicyEnforcer, StreamRlsPolicyEnforcer>();
@@ -150,17 +148,6 @@ public static class GatewayExecutionServiceExtensions
             Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(services, TimeProvider.System);
             services.AddHostedService<Autheris.Application.Streaming.Services.CdcWebhookDeliveryService>();
             services.AddHostedService<Autheris.Api.Hosting.CdcWebhookStartupCheck>();
-        }
-
-        // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01, INF-2)
-        services.AddHttpClient<TrafficShadowingService>()
-            .AddSecureOutboundHandlers(EgressIntegrations.Shadowing);
-        services.AddSingleton<TrafficShadowingService>();
-        services.AddSingleton<ITrafficShadowingService>(sp =>
-            sp.GetRequiredService<TrafficShadowingService>());
-        if (gatewayOptions.TrafficShadowing.Enabled)
-        {
-            services.AddHostedService(sp => sp.GetRequiredService<TrafficShadowingService>());
         }
 
         // FOCUS FinOps Accounting (F-AI-08)

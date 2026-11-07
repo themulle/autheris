@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using Autheris.Application.Governance.Grants;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -596,14 +596,5 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         body.IndexOf("policy.Evaluate(", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
         body.IndexOf("policy.Evaluate(", StringComparison.Ordinal)
             .ShouldBeLessThan(body.IndexOf("ApproveConsentRequestStepAsync(", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void W7_ItsmWebhookHandler_DoesNotUseTheDecisionGuard()
-    {
-        var source = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.Extensions", "Itsm", "ItsmWebhookHandler.cs"));
-
-        source.ShouldNotContain("IConsentDecisionGuard");
-        source.ShouldNotContain("ConsentDecisionGuard");
     }
 }

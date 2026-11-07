@@ -17,12 +17,6 @@ public sealed class WormAuditOptions
     public bool EnforceObjectLock { get; init; } = true;
 }
 
-public enum AuditCatalogReadMode
-{
-    Summarized,
-    Full
-}
-
 public sealed class AuditRetentionOptions
 {
     public const string SectionName = GatewaySections.AuditRetention;
@@ -63,14 +57,11 @@ public sealed class AuditOptions
     /// </summary>
     public AuditChainViolationPolicy? OnChainViolation { get; init; }
 
-    [Range(1, 3600)] public int TierBAggregationWindowSeconds { get; init; } = 60;
     [Range(365, 7300)] public int AuditLogRetentionDays { get; init; } = 3650;
-    public AuditCatalogReadMode CatalogReadMode { get; init; } = AuditCatalogReadMode.Summarized;
-    [Range(1, 3600)] public int CatalogSummaryWindowSeconds { get; init; } = 60;
     public AuditRetentionOptions Retention { get; init; } = new();
 
     /// <summary>
-    /// SEC-ADG-23 (X1.2): store the compiled SQL text (markers only, no values by construction) in the audit record of a governed
+    /// 23 (X1.2): store the compiled SQL text (markers only, no values by construction) in the audit record of a governed
     /// statement. Default <c>false</c>: the record carries only the compiler version, the dialect, the bind count and the
     /// <c>sql.compiled_digest</c>.
     /// </summary>
@@ -82,7 +73,6 @@ public sealed class AuditOptions
 
     /// <summary>Review E-11: a broken audit hash chain turns the readiness probe unhealthy (set false to only log it).</summary>
     public bool FailReadinessOnChainViolation { get; init; } = true;
-    public string ElasticsearchSinkUrl { get; init; } = string.Empty;
     public WormAuditOptions Worm { get; init; } = new();
 
     /// <summary>

@@ -25,9 +25,9 @@ public sealed partial class TransportGateCoverageTests
         "src/Autheris.Application/Olap/OlapStagingService.cs",
         "src/Autheris.Application/Olap/FederatedStagingService.cs",
         "src/Autheris.Application/Analytics/GovernedAggregationService.ValidationAndExecution.cs",
-        "src/Autheris.Application/Data/Changes/GovernedChangeDetectionService.cs",
+        "src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.cs",
         "src/Autheris.Application/Procedures/Services/GovernedProcedureExecutionService.cs",
-        "src/Autheris.Extensions/Lakehouse/Services/IcebergRestCatalogFederationService.cs",
+        "src/Autheris.Application/Policy/AccessDecisionPoint.cs",
         "src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs"
     ];
 
@@ -164,19 +164,7 @@ public sealed partial class TransportGateCoverageTests
             })
             .ToList();
 
-    private static IEnumerable<RepositoryScan.SourceFile> AllRepositoryCs()
-    {
-        var root = RepositoryScan.RepoRoot;
-        foreach (var path in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
-        {
-            var relative = RepositoryScan.Normalize(Path.GetRelativePath(root, path));
-            var segments = relative.Split('/');
-            if (segments.Any(s => s is "bin" or "obj" or "node_modules" or ".git"))
-            {
-                continue;
-            }
-
-            yield return new RepositoryScan.SourceFile(relative, File.ReadAllText(path));
-        }
-    }
+    private static IEnumerable<RepositoryScan.SourceFile> AllRepositoryCs() =>
+        RepositoryScan.EnumerateFiles("", "*.cs")
+            .Select(relative => new RepositoryScan.SourceFile(relative, RepositoryScan.ReadText(relative)));
 }

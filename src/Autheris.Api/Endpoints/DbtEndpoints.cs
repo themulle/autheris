@@ -9,8 +9,8 @@ using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Extensions.Dbt;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Audit;
@@ -382,7 +382,7 @@ public static class DbtEndpoints
 
     private const int MaxAuditedCreatedTables = 100;
 
-    /// <summary>Issue #282 (SEC-282-9): the created table names (capped) and counts go into the audit entry; never columns or secrets.</summary>
+    /// <summary>Issue #282: the created table names (capped) and counts go into the audit entry; never columns or secrets.</summary>
     internal static void WriteSyncAudit(HttpContext context, DbtSyncResult? result, bool dryRun)
     {
         if (context.Features.Get<AuditContext>() is not { } auditContext)

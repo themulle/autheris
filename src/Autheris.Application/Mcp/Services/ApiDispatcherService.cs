@@ -12,7 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.Data.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.Sql.Interfaces;
@@ -41,7 +41,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     private readonly TenantId? _catalogOwner;
     private readonly IReadPathSwitches? _switches;
 
-    // PLAN-SEC-115 A-5: what each branch reaches. Without switches (direct construction) everything is allowed, as before.
+    // 115 A-5: what each branch reaches. Without switches (direct construction) everything is allowed, as before.
     private bool DataBranchAllowed => _switches is null || (_switches.RestDataEndpointEnabled && _switches.IsGroupEnabled(McpToolGroup.Query));
     private bool CatalogBranchAllowed => _switches?.IsGroupEnabled(McpToolGroup.Catalog) ?? true;
     private bool StatementBranchAllowed => _switches is null || (_switches.IsGroupEnabled(McpToolGroup.Query) && _switches.IsToolEnabled(McpDatasetTools.QuerySql));
@@ -253,7 +253,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
 
     public Task<string> GetEndpointsDocumentationAsync(CancellationToken ct = default)
     {
-        // PLAN-SEC-115 A-5: the sections of switched-off branches are omitted; the remaining ones are renumbered (default: 1..4 as shipped).
+        // 115 A-5: the sections of switched-off branches are omitted; the remaining ones are renumbered (default: 1..4 as shipped).
         var sections = new List<string>();
         if (DataBranchAllowed)
         {

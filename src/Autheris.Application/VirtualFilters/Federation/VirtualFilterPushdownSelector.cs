@@ -35,7 +35,7 @@ internal sealed record PushdownPair(
     VirtualFilterKey[]? Queried);
 
 /// <summary>
-/// F-GOV-14 (WI-8, M7, SEC-15, SEC-21): chooses the values to push to an upstream. Only single-key pairs on the
+/// F-GOV-14 (WI-8, M7): chooses the values to push to an upstream. Only single-key pairs on the
 /// endpoint's key column contribute; the pushed values are the intersection of their key sets (narrowed to the queried
 /// keys for a point lookup), so an unauthorized key is never sent. The gateway enforcement still filters every row.
 /// </summary>

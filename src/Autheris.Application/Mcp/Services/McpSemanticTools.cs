@@ -8,9 +8,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Analytics;
-using Autheris.Application.Dbt.Interfaces;
-using Autheris.Application.Dbt.Services;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 

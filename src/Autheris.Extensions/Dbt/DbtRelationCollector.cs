@@ -1,10 +1,10 @@
 namespace Autheris.Extensions.Dbt;
 
 using System.Collections.Generic;
-using Autheris.Application.DataCatalog.Services;
+using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Model;
 
-/// <summary>Collects relation definitions and reason-coded warnings with the SEC-REL151-02 limits.</summary>
+/// <summary>Collects relation definitions and reason-coded warnings with the 02 limits.</summary>
 internal sealed class RelationCollector
 {
     public const int MaxRelations = 10_000;
@@ -30,7 +30,7 @@ internal sealed class RelationCollector
         return _warnings;
     }
 
-    /// <summary>Counts one relation attempt (SEC-REL151-02, I392-SC-08); false when the per-manifest limit is reached.</summary>
+    /// <summary>Counts one relation attempt (I392-SC-08); false when the per-manifest limit is reached.</summary>
     public bool Reserve() => Count();
 
     /// <summary>Reserves <paramref name="count"/> held <c>depends_on</c> ids; false (and overflow) when the budget is exhausted.</summary>

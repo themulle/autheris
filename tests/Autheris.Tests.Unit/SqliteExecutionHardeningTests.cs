@@ -51,7 +51,7 @@ public sealed class SqliteExecutionHardeningTests
         }
         else
         {
-            Should.Throw<Autheris.Application.Interfaces.SqlSourceUnavailableException>(() => SessionPinning.EnsureSqliteTrustedSchemaOff(readBack))
+            Should.Throw<Autheris.Application.Common.Interfaces.SqlSourceUnavailableException>(() => SessionPinning.EnsureSqliteTrustedSchemaOff(readBack))
                 .Message.ShouldNotContain("trusted_schema = 1");
         }
     }

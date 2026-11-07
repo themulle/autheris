@@ -6,7 +6,7 @@ using System.Linq;
 using HotChocolate.Language;
 
 /// <summary>
-/// SEC-GOV113-01: AST classifier for self-service mutations accessible by read-only tokens.
+/// AST classifier for self-service mutations accessible by read-only tokens.
 /// Inspects GraphQL operation definitions and field selections: returns true iff ALL selected root fields
 /// are exclusively in the allowlist ('requestTableAccess', 'withdrawAccessRequest').
 /// Aliases, introspection fields, fragments or unallowlisted mutations fail closed.

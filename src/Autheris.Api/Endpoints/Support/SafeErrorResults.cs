@@ -5,7 +5,7 @@ using Autheris.Api.Errors;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// Thin compatibility wrapper that delegates directly to <see cref="ApiProblems"/> (WP-ARC-C-05).
+/// Thin compatibility wrapper that delegates directly to <see cref="ApiProblems"/>.
 /// </summary>
 internal static class SafeErrorResults
 {

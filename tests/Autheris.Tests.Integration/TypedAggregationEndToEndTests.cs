@@ -9,7 +9,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
@@ -201,34 +201,6 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
 
         doc.RootElement.TryGetProperty("errors", out _).ShouldBeTrue();
         doc.RootElement.TryGetProperty("data", out var data).ShouldBeFalse(doc.RootElement.ToString() + data);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "I389-T-06")]
-    public async Task Aggregate_MinUnderNoise_ReturnsPrivacyRestrictedCode()
-    {
-        using (var seeding = NewHost())
-        {
-            await RegisterCatalogAsync(seeding);
-        }
-
-        using var host = NewHost().WithWebHostBuilder(b =>
-        {
-            b.UseSetting("Analytics:Privacy:Noise:Enabled", "true");
-            b.UseSetting("Analytics:Privacy:Noise:Epsilon", "1");
-            b.UseSetting("Analytics:Privacy:Noise:DailyBudgetEpsilon", "100");
-            b.UseSetting("Analytics:Privacy:Noise:MeasureBounds:amount:Min", "0");
-            b.UseSetting("Analytics:Privacy:Noise:MeasureBounds:amount:Max", "10");
-        });
-
-        using var doc = await GraphQlAsync(Client(host), $"{{ {Field}(aggregates: [{{ fn: MIN, column: amount, alias: \"sentinelalias\" }}]) {{ count }} }}");
-
-        var errors = doc.RootElement.GetProperty("errors").EnumerateArray().ToList();
-        errors.Select(e => e.GetProperty("extensions").GetProperty("code").GetString()).ShouldBe(["AGGREGATION_PRIVACY_RESTRICTED"]);
-        errors[0].GetProperty("message").GetString().ShouldBe("The requested aggregate is not available under the privacy policy.");
-        doc.RootElement.ToString().ShouldNotContain("sentinelalias");
-        doc.RootElement.ToString().ShouldNotContain("INTERNAL_SERVER_ERROR");
     }
 
     private const string Manifest = """

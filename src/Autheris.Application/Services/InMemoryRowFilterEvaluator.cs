@@ -9,7 +9,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Applies row-level security filters in memory for non-SQL or mock data sources (WP-ARC-B-04). A decision that carries a typed
+/// Applies row-level security filters in memory for non-SQL or mock data sources. A decision that carries a typed
 /// <see cref="IRowPolicy"/> is evaluated from its typed predicate (<see cref="PolicyPredicateRowEvaluator"/>); no SQL text is parsed for
 /// it. Only a decision that still has no typed policy (string-only legacy sources) falls back to the isolated
 /// <see cref="LegacyTextRowFilterEvaluator"/>. Everything is fail closed.
@@ -75,7 +75,7 @@ public static class InMemoryRowFilterEvaluator
     }
 
     /// <summary>
-    /// One row against the row filters of <paramref name="decision"/> (change detection, relation resolution): typed first (REQ-GOV-129 A-8: a
+    /// One row against the row filters of <paramref name="decision"/>(change detection, relation resolution): typed first (129 A-8: a
     /// typed policy carries bound caller attributes, its text projection only markers a text evaluator cannot read), text only for a decision
     /// without a typed policy. A typed policy that this evaluator cannot evaluate, or whose text drifted, denies the row.
     /// </summary>

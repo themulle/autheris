@@ -40,7 +40,7 @@ public sealed class ScimStoreRoleProvider : IRoleProvider
         }
         catch (Exception)
         {
-            // SEC-SC-12: Fail closed on store failure
+            // Fail closed on store failure
             return ProviderRoleResult.FailedResult;
         }
     }

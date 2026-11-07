@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Audit;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -36,13 +36,13 @@ public partial class SqlServerGovernanceRepository
             SelectMaxEligibleSeqSql: "SELECT MAX(seq) FROM dbo.AUDIT_LOG_ENTRIES WHERE seq < @survivingSeq");
 
         public static string GetAuditLogEntries(bool withTenant) =>
-            $@"SELECT TOP (@lim) id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+            $@"SELECT TOP (@lim) id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
                             FROM AUDIT_LOG_ENTRIES
                             {(withTenant ? " WHERE tenant_id = @tenantId" : "")}
                             ORDER BY rowid DESC";
 
         public static string FormatQueryAuditLogs(string whereSql) =>
-            $@"SELECT TOP (@lim) id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+            $@"SELECT TOP (@lim) id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
                             FROM AUDIT_LOG_ENTRIES
                             {whereSql}
                             ORDER BY rowid DESC";
@@ -643,7 +643,7 @@ public partial class SqlServerGovernanceRepository
         long lastSequence = pendingState.LastSeq;
         string lastEntryHash = pendingState.LastHash;
 
-        // WP-PF-04: hashes are computed in memory from the single tail read; the rows are then written with multi-row inserts.
+        // hashes are computed in memory from the single tail read; the rows are then written with multi-row inserts.
         var rows = new List<AuditInsertRow>(batch.Count);
         for (int i = 0; i < batch.Count; i++)
         {
@@ -766,7 +766,7 @@ public partial class SqlServerGovernanceRepository
         long lastSequence = dbTailSeq;
         string lastEntryHash = effectiveDbHash;
 
-        // WP-PF-04: hashes are computed in memory from the single tail read; the rows are then written with multi-row inserts.
+        // hashes are computed in memory from the single tail read; the rows are then written with multi-row inserts.
         var rows = new List<AuditInsertRow>(batch.Count);
         for (int i = 0; i < batch.Count; i++)
         {
@@ -844,7 +844,7 @@ public partial class SqlServerGovernanceRepository
             }
         }
 
-        // WP-PF-04 / SEC-SC-08: a batch containing a Tier-A event is acknowledged only after its anchor is written. The rows are
+        // a batch containing a Tier-A event is acknowledged only after its anchor is written. The rows are
         // committed and the next batch anchors the tail, but the caller fails closed. Tier-B-only batches never fail on a late anchor.
         // M1: a chain violation latched DURING this write means no anchor was written; the Tier-A event is then not acknowledged (a violation latched before admission follows the configured policy: Tier-A is written marked).
         if (anchorFailure == null && violationAtStart == null && Volatile.Read(ref _auditChainViolation) != null && ViolationPolicy != AuditChainViolationPolicy.AlertOnly)

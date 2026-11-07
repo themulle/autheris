@@ -65,7 +65,7 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
         return Task.FromResult(removed);
     }
 
-    // WP-SC-03: the typed assignment API of the in-memory test double. It applies the same rules as the persisted stores for the explicit
+    // the typed assignment API of the in-memory test double. It applies the same rules as the persisted stores for the explicit
     // API; the Production registers the persisted repositories.
 
     public Task<IReadOnlyList<AccessProfile>> GetProfilesForSubjectsAsync(
@@ -108,11 +108,6 @@ public sealed class InMemoryAccessProfileRepository : IAccessProfileRepository
     {
         var profile = RequireProfile(tenantId, profileId);
         var existing = RequireAssignment(profile, subjectType, subject);
-        if (existing.Kind == AccessProfileAssignmentKind.BreakGlass)
-        {
-            throw new AccessProfileAssignmentRejectedException(AccessProfileAssignmentRules.BreakGlassNotRenewable, "A break-glass exception cannot be renewed.");
-        }
-
         AccessProfileAssignmentRules.ValidateApprover(profile, existing, approvedBy);
         var now = DateTimeOffset.UtcNow;
         var renewed = existing with { AssignedAt = now, ExpiresAt = newExpiresAt, ApprovedBy = approvedBy.Trim(), ApprovedAt = now, RenewalCount = existing.RenewalCount + 1 };

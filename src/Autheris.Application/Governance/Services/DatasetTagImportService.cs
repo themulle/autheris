@@ -3,7 +3,7 @@ namespace Autheris.Application.Governance.Services;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -11,7 +11,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-/// <summary>Issue #111 WP-6 (A-2, A-3): see <see cref="IDatasetTagImportService"/>.</summary>
+/// <summary>Issue #111 (A-2, A-3): see<see cref="IDatasetTagImportService"/>.</summary>
 public sealed class DatasetTagImportService : IDatasetTagImportService
 {
     private static readonly Sid ImportActor = new("system:dbt-import");

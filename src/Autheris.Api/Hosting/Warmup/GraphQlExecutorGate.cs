@@ -8,11 +8,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// PLAN-OPS-150 A-150-1/-2/-4/-5: drives the executor probe. Ready means <c>GetExecutorAsync</c> returned an executor X and either
+/// 150 A-150-1/-2/-4/-5: drives the executor probe. Ready means<c>GetExecutorAsync</c> returned an executor X and either
 /// <see cref="GraphQlWarmupProof.WarmedExecutor"/> is X (warm-up task path) or the gate's own run of the constant <c>{ __typename }</c>
 /// (in-process marker, empty context, no principal) proved X. A build exception sets <see cref="ExecutorGateState.Failed"/> and retries
 /// with back-off (5 s doubling, cap 60 s); the global warm-up timeout never opens the gate. Once Ready it latches; later
-/// <c>ExecutorEvicted</c> events trigger one coalesced eager probe (SEC-OPS150-15) whose failure never flips readiness.
+/// <c>ExecutorEvicted</c>events trigger one coalesced eager probe whose failure never flips readiness.
 /// </summary>
 public sealed partial class GraphQlExecutorGate(
     IRequestExecutorProvider executorProvider,
@@ -107,7 +107,7 @@ public sealed partial class GraphQlExecutorGate(
 
     private static TimeSpan NextBackoff(TimeSpan backoff) => TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, MaxBackoff.Ticks));
 
-    /// <summary>SEC-OPS150-05: the probe never inherits an ambient request context.</summary>
+    /// <summary>the probe never inherits an ambient request context.</summary>
     private Task<ExecutorGateState> RunProbeAsync(CancellationToken ct)
     {
         Task<ExecutorGateState> probe;
@@ -127,7 +127,7 @@ public sealed partial class GraphQlExecutorGate(
         {
             var executor = await GetExecutorWatchedAsync(ct).ConfigureAwait(false);
 
-            // A-150-5 / SEC-OPS150-16: an ambient caller context means the work must not run here; stay Pending, never Ready.
+            // A-150-5 / an ambient caller context means the work must not run here; stay Pending, never Ready.
             if (httpContextAccessor?.HttpContext is not null)
             {
                 LogAmbientContext(logger);
@@ -162,7 +162,7 @@ public sealed partial class GraphQlExecutorGate(
         }
     }
 
-    /// <summary>SEC-OPS150-16: a <c>GetExecutorAsync</c> that has not returned after the warm-up timeout is logged once; the gate stays Pending.</summary>
+    /// <summary>a<c>GetExecutorAsync</c> that has not returned after the warm-up timeout is logged once; the gate stays Pending.</summary>
     private async Task<IRequestExecutor> GetExecutorWatchedAsync(CancellationToken ct)
     {
         var pending = executorProvider.GetExecutorAsync(cancellationToken: ct).AsTask();
@@ -215,7 +215,7 @@ public sealed partial class GraphQlExecutorGate(
                 return; // coalesced into the follow-up of the running worker
             }
 
-            // The event can fire on a request thread during a catalog refresh (SEC-OPS150-05).
+            // The event can fire on a request thread during a catalog refresh.
             using (ExecutionContext.SuppressFlow())
             {
                 EvictionWorker = Task.Run(EvictionWorkerAsync, CancellationToken.None);
@@ -223,7 +223,7 @@ public sealed partial class GraphQlExecutorGate(
         }
         catch (Exception ex)
         {
-            // Never throw into the HotChocolate observer (SEC-OPS150-15).
+            // Never throw into the HotChocolate observer.
             LogEvictionHandlerFailed(logger, ex.GetType().Name);
         }
     }

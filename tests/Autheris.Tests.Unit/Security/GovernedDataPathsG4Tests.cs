@@ -13,10 +13,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Security;
-using Autheris.Application.Caching.Interfaces;
-using Autheris.Application.Connectors;
-using Autheris.Application.Connectors.CrossDomain;
-using Autheris.Application.Interfaces;
+using Autheris.Application.State.Caching.Interfaces;
+using Autheris.Application.DataSources.Connectors;
+using Autheris.Application.DataSources.Connectors.CrossDomain;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Connectors;
 using Autheris.Application.Olap;
 using Autheris.Application.Policy;
@@ -24,7 +24,7 @@ using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Serialization;
+using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
@@ -459,80 +459,5 @@ public sealed class GovernedDataPathsG4Tests
 
         // WP-ARC-A-06: a missing audit writer is a composition error, never a silently unaudited read.
         await Should.ThrowAsync<InvalidOperationException>(() => RunOlapAsync(null));
-    }
-
-    // ------------------------------------------------------------------ Low: Arrow Flight SQL tickets
-
-    private static ArrowFlightSqlServer NewFlight(string? key = null)
-    {
-        var sql = Substitute.For<IGovernedSqlExecutionService>();
-        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("SELECT 1", ["_col0"], [], 0, 1));
-        var provider = Substitute.For<IServiceProvider>();
-        provider.GetService(typeof(IGovernedSqlExecutionService)).Returns(sql);
-        var scope = Substitute.For<IServiceScope>();
-        scope.ServiceProvider.Returns(provider);
-        var scopeFactory = Substitute.For<IServiceScopeFactory>();
-        scopeFactory.CreateScope().Returns(scope);
-
-        return new(
-            Substitute.For<IArrowExportService>(),
-            Substitute.For<ITableMetadataRepository>(),
-            Options.Create(new GatewayOptions
-            {
-                Arrow = new ArrowExportOptions { FlightTicketSigningKey = key }
-            }),
-            NullLogger<ArrowFlightSqlServer>.Instance,
-            scopeFactory: scopeFactory);
-    }
-
-    private static ClaimsPrincipal FlightUser(string sid, string tenant) =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", tenant)], "Bearer"));
-
-    [Fact]
-    public async Task Low_FlightTicket_IsBoundToSidAndTenantOfTheIssuedCaller()
-    {
-        var server = NewFlight("0123456789abcdef0123456789abcdef");
-        var owner = FlightUser("S-1-5-21-1", "tenant-1");
-        var info = await server.GetFlightInfoAsync("SELECT 1", owner, Tenant1);
-        info.Ticket.UserSid.ShouldBe("S-1-5-21-1");
-
-        // owner can redeem
-        var count = 0;
-        await foreach (var _ in server.DoGetStreamAsync(info.Ticket, owner, Tenant1)) count++;
-        count.ShouldBe(1);
-
-        // another user of the same tenant and the same user in another tenant cannot
-        await Should.ThrowAsync<SecurityException>(async () =>
-        {
-            await foreach (var _ in server.DoGetStreamAsync(info.Ticket, FlightUser("S-1-5-21-2", "tenant-1"), Tenant1)) { }
-        });
-        await Should.ThrowAsync<SecurityException>(async () =>
-        {
-            await foreach (var _ in server.DoGetStreamAsync(info.Ticket, FlightUser("S-1-5-21-1", "tenant-2"), new TenantId("tenant-2"))) { }
-        });
-
-        // swapping the SID inside the ticket invalidates the signature
-        var forged = info.Ticket with { UserSid = "S-1-5-21-2" };
-        await Should.ThrowAsync<SecurityException>(async () =>
-        {
-            await foreach (var _ in server.DoGetStreamAsync(forged, FlightUser("S-1-5-21-2", "tenant-1"), Tenant1)) { }
-        });
-    }
-
-    [Fact]
-    public async Task Low_FlightTicket_IsNotSignedWithTheForwardAuthSecret()
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            Authentication = new AuthenticationOptions { ForwardAuth = new ForwardAuthOptions { SharedSecret = "forward-auth-shared-secret-value" } }
-        });
-        var server = new ArrowFlightSqlServer(
-            Substitute.For<IArrowExportService>(), Substitute.For<ITableMetadataRepository>(), options, NullLogger<ArrowFlightSqlServer>.Instance);
-        var info = await server.GetFlightInfoAsync("SELECT 1", FlightUser("S-1-5-21-1", "tenant-1"), Tenant1);
-
-        var withSharedSecret = ArrowFlightSqlServer.ComputeSignature(
-            info.Ticket.TicketId, info.Ticket.TenantId, info.Ticket.Query, info.Ticket.CreatedAtUtc, "forward-auth-shared-secret-value", info.Ticket.UserSid);
-        info.Ticket.Signature.ShouldNotBe(withSharedSecret);
     }
 }

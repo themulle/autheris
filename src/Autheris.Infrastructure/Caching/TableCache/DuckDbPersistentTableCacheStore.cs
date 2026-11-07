@@ -13,7 +13,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Caching.TableCache;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -25,7 +25,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// INF-05: Persistent DuckDB table cache store backed by native DuckDB encrypted disk files.
-/// Conforms to SEC-BL04-05, SEC-BL04-06, SEC-BL04-07, and SEC-BL04-14.
+/// Conforms to 07, and 14.
 /// Generation files are created and accessed via DuckDB native encryption:
 /// ATTACH '<path>' AS g (ENCRYPTION_KEY '<hex(HKDF(KEK, "duckdb-gen-"+epoch))>')
 /// No plaintext generation copy or .enc file is ever written to disk.
@@ -338,7 +338,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         await _lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // SEC-BL04-07 Zero-Row Protection Guard:
+            // 07 Zero-Row Protection Guard:
             if (_metadata.TryGetValue(table, out var existing) && existing.RowCount > 0 && rowCount == 0)
             {
                 _logger?.LogWarning("SEC-BL04-07: Aborted persistent swap for table '{Table}' because shadow staging has 0 rows while active generation has {ActiveRows} rows.", table, existing.RowCount);
@@ -387,7 +387,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
 
             _connectionPools[table] = new DuckDbConnectionPool("DataSource=:memory:", attachSql);
 
-            // SEC-BL04-06: Write current_epoch.meta and HMAC-SHA256 signature
+            // Write current_epoch.meta and HMAC-SHA256 signature
             await WriteEpochMetadataWithHmacAsync(dir, epoch, meta, ct).ConfigureAwait(false);
 
             return meta;
@@ -561,7 +561,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         }
     }
 
-    // SEC-BL04-06 Metadata HMAC Verification
+    // 06 Metadata HMAC Verification
     private async Task WriteEpochMetadataWithHmacAsync(string dir, long epoch, TableCacheEntryMetadata meta, CancellationToken ct)
     {
         var metaFile = Path.Combine(dir, "current_epoch.meta");
@@ -587,7 +587,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         var json = await File.ReadAllBytesAsync(metaFile, ct).ConfigureAwait(false);
         var expectedHmac = await File.ReadAllBytesAsync(hmacFile, ct).ConfigureAwait(false);
 
-        // Constant-time HMAC check; throws SecurityException on mismatch (SEC-BL04-06)
+        // Constant-time HMAC check; throws SecurityException on mismatch
         TableCacheCryptoHelper.VerifyHmacOrThrow(_metadataHmacKey, json, expectedHmac);
 
         return JsonSerializer.Deserialize<TableCacheEntryMetadata>(json)

@@ -3,7 +3,7 @@ namespace Autheris.Application.Catalog;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 
 /// <summary>
 /// Provides typed and formatted catalog version stamps directly from the CATALOG_STATE table via the repository.

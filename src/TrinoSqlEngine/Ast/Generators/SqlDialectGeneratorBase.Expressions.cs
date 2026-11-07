@@ -63,7 +63,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(lk.IsNotLike ? " NOT LIKE " : " LIKE ");
                 if (context.IsBound && lk.Escape == null && LikePatternEscaper.ContainsPolicyParameter(lk.Pattern))
                 {
-                    // SEC-ADG-18 / SQLE-09: LIKE semantics differ per dialect ([...] classes, default escapes). A policy pattern always has
+                    // 18 / SQLE-09: LIKE semantics differ per dialect ([...] classes, default escapes). A policy pattern always has
                     // an explicit ESCAPE from a constant template, and every declared value inside the pattern (also in a || chain) is escaped
                     // when bound; the policy parser admits only literals, declared parameters and || in a pattern.
                     bool previous = context.EmittingLikePattern;
@@ -305,7 +305,6 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                         builder.Append(rawName);
                         return;
                     case TargetSqlDialect.Oracle:
-                    case TargetSqlDialect.Snowflake:
                         builder.Append(':');
                         builder.Append(rawName);
                         return;

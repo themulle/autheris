@@ -2,7 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Governance;
-using Autheris.Application.Interfaces;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
@@ -32,7 +32,7 @@ public sealed class MustFixRemediationTests
         var governed = NSubstitute.Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>();
         governed.ExecuteQueryBufferedAsync(default!, default!, default, default)
             .ReturnsForAnyArgs(new Autheris.Application.Sql.Interfaces.GovernedSqlResult("", [], [], 0, 0));
-        var executor = new SqlTableReadExecutor(new Autheris.Application.Data.Services.GovernedTableReadPlanner(), () => governed);
+        var executor = new SqlTableReadExecutor(new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), () => governed);
 
         var table = new Table
         {

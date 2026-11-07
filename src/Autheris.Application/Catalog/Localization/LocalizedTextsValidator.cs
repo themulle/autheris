@@ -16,7 +16,7 @@ public sealed class LocalizedTextsValidationException : ValidationException
 /// <summary>
 /// Write-side and ingestion validator for localized catalog texts.
 /// Enforces character whitelisting, script tag rejection, and field length caps.
-/// Fails closed without echoing untrusted input payloads in error messages (SEC-CAT146-03, T-CAT146-04).
+/// Fails closed without echoing untrusted input payloads in error messages (T-CAT146-04).
 /// </summary>
 public sealed class LocalizedTextsValidator
 {
@@ -173,7 +173,7 @@ public sealed class LocalizedTextsValidator
 
     private static void CheckForInjectionAndControlChars(string text, string fieldName, string lang, string entityContext, bool allowStandardWhitespace)
     {
-        // 1. Check for script / HTML tags (SEC-CAT146-03: do NOT echo payload in exception message)
+        // 1. Check for script / HTML tags (do NOT echo payload in exception message)
         if (ContainsHtmlTags(text))
         {
             throw new LocalizedTextsValidationException(

@@ -3,7 +3,7 @@ namespace Autheris.Application.Sql.ListParameters;
 using System;
 using TrinoSqlEngine.Ast.Emit;
 
-/// <summary>The element type of a declared list parameter (REQ-SQL-128, PLAN-SQL-128 A-4): CLR element type to bind type.</summary>
+/// <summary>The element type of a declared list parameter (128 A-4): CLR element type to bind type.</summary>
 internal static class ListElementTypes
 {
     /// <summary>A GUID is bound as its canonical "D" text (<paramref name="guidStrings"/>); there is no GUID bind type.</summary>

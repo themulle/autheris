@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Application.Sql.Errors;
-using Autheris.Application.Data.Interfaces;
+using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -32,7 +32,7 @@ public static class DatasetDataEndpoints
 
     public static IEndpointRouteBuilder MapDatasetDataEndpoints(this IEndpointRouteBuilder app)
     {
-        // Issue #447 (SEC-ATR-02): every route of this group declares its ingress transport via endpoint metadata.
+        // Issue #447: every route of this group declares its ingress transport via endpoint metadata.
         var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
         // 1. GET /api/v1/data/{domain}/{schema}/{table}
         ingress.MapGet("/api/v1/data/{domain}/{schema}/{table}", HandleQueryThreePartAsync)
@@ -198,7 +198,7 @@ public static class DatasetDataEndpoints
         {
             if (mapped.Code == TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.SyntaxError)
             {
-                // #329 (SEC-RG-14): REST builds the SQL from quoted select and orderBy parts, so the filter is the only free text that reaches the
+                // #329: REST builds the SQL from quoted select and orderBy parts, so the filter is the only free text that reaches the
                 // parser: a parser failure is a malformed request, answered like every other bad parameter. Only the code is logged (no filter text).
                 logger.LogWarning("Malformed filter for {Table}: governed SQL error {Code}", tableId, mapped.Code);
                 await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage, httpContext.RequestAborted).ConfigureAwait(false);
@@ -227,7 +227,7 @@ public static class DatasetDataEndpoints
         }
         catch (ArgumentException ex)
         {
-            // SEC-PG-14: ArgumentException messages name internal parameters; they stay in the log.
+            // ArgumentException messages name internal parameters; they stay in the log.
             logger.LogWarning("Invalid query parameters for {Table}: {Message}", tableId, ex.Message);
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidQuery, InvalidQueryMessage, httpContext.RequestAborted).ConfigureAwait(false);
         }
@@ -250,7 +250,7 @@ public static class DatasetDataEndpoints
     private const int MaxParamDigits = 10;
 
     /// <summary>
-    /// #313 / #301, SEC-PG-14: strict parse of <c>limit</c> and <c>offset</c>. Each must occur at most once and consist of ASCII
+    /// #313 / #301, strict parse of<c>limit</c> and <c>offset</c>. Each must occur at most once and consist of ASCII
     /// digits only (no sign, whitespace, exponent or fraction), at most <see cref="MaxParamDigits"/> long before parsing, and fit an int.
     /// </summary>
     internal static bool TryParsePaging(HttpRequest request, out int limit, out int offset)

@@ -171,7 +171,7 @@ public sealed partial class AiDataGuardrailService
 
     /// <summary>
     /// Protocol-mandated error bodies that an MCP-reachable tool may relay (NL-SC-29): an object-valued <c>error</c> member with a string
-    /// <c>message</c> (JSON-RPC, OData, Iceberg, Backstage) or the Envoy pass-through <c>{ "error": "...", "status": 4xx }</c>.
+    /// <c>message</c> (JSON-RPC, OData, Iceberg) or the Envoy pass-through <c>{ "error": "...", "status": 4xx }</c>.
     /// </summary>
     private static bool IsProtocolErrorShape(JsonElement root, out string? errorCode)
     {
@@ -354,14 +354,14 @@ public sealed partial class AiDataGuardrailService
         if (!_procedureRegistry.TryGet(name, out var registered) || registered == null)
         {
             // An unknown procedure runs nothing (the executor answers NOT_FOUND); denying here instead would answer unknown and
-            // hidden procedures differently (SEC-GOV153-02 existence oracle).
+            // hidden procedures differently (02 existence oracle).
             return [];
         }
 
         if (registered.State != ProcedureState.Active)
         {
             // A non-Active procedure reads nothing: the executor refuses it (NOT_FOUND, or unavailable only for callers that may
-            // see it). Denying here would answer it differently from an unknown procedure (SEC-GOV153-02 existence oracle).
+            // see it). Denying here would answer it differently from an unknown procedure (02 existence oracle).
             return [];
         }
 
@@ -442,13 +442,13 @@ public sealed partial class AiDataGuardrailService
         }
 
         var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-        if (Autheris.Application.Dbt.Services.SemanticTenancy.FromOptions(_options).ResolveCallerTenant(principal) is not { } tenant)
+        if (Autheris.Application.Catalog.Semantic.SemanticTenancy.FromOptions(_options).ResolveCallerTenant(principal) is not { } tenant)
         {
             return null;
         }
 
         var models = await _semanticCatalog.ListSemanticModelsAsync(tenant, ct).ConfigureAwait(false);
-        var resolver = new Autheris.Application.Dbt.Services.SemanticBaseTableResolver(_tableMetadataRepository);
+        var resolver = new Autheris.Application.Catalog.Semantic.SemanticBaseTableResolver(_tableMetadataRepository);
         var tables = new List<TableIdentifier>();
         foreach (var metricName in metricNames)
         {

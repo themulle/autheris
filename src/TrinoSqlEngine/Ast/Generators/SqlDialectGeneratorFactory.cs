@@ -18,7 +18,6 @@ public static class SqlDialectGeneratorFactory
             [TargetSqlDialect.PostgreSql] = new PostgreSqlDialectGenerator(),
             [TargetSqlDialect.Sqlite] = new SqliteDialectGenerator(),
             [TargetSqlDialect.DuckDb] = new DuckDbDialectGenerator(),
-            [TargetSqlDialect.Snowflake] = new SnowflakeDialectGenerator(),
             [TargetSqlDialect.Oracle] = new OracleDialectGenerator(),
             [TargetSqlDialect.Databricks] = new DatabricksDialectGenerator()
         }.ToFrozenDictionary();

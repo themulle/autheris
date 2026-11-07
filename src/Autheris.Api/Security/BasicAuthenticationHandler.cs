@@ -27,7 +27,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
     private readonly int _dummyArgon2Parallelism;
     private readonly int _dummyPbkdf2Iterations;
     private readonly string _dummyStoredHash;
-    private readonly Autheris.Application.Interfaces.IClientIpResolver? _clientIpResolver;
+    private readonly Autheris.Application.Common.Interfaces.IClientIpResolver? _clientIpResolver;
 
     private static readonly System.Diagnostics.Metrics.Meter Meter = new("Autheris.Core");
     private static readonly System.Diagnostics.Metrics.Counter<long> PasswordHashRejectedTotal = Meter.CreateCounter<long>(
@@ -62,7 +62,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         UrlEncoder encoder,
         IOptions<GatewayOptions> gatewayOptions,
         Microsoft.AspNetCore.Hosting.IWebHostEnvironment? environment = null,
-        Autheris.Application.Interfaces.IClientIpResolver? clientIpResolver = null)
+        Autheris.Application.Common.Interfaces.IClientIpResolver? clientIpResolver = null)
         : base(options, logger, encoder)
     {
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
@@ -146,7 +146,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
 
     private string ResolveClientIp()
     {
-        var ipResolver = _clientIpResolver ?? Context.RequestServices?.GetService<Autheris.Application.Interfaces.IClientIpResolver>();
+        var ipResolver = _clientIpResolver ?? Context.RequestServices?.GetService<Autheris.Application.Common.Interfaces.IClientIpResolver>();
         var ip = ipResolver?.ResolveClientIp();
         if (ip != null && !ip.Equals(System.Net.IPAddress.None))
         {
@@ -224,13 +224,13 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
             guard.TryGetCachedSuccess(authHeader, out var cachedUser) &&
             string.Equals(cachedUser, configuredUser.Username, StringComparison.Ordinal);
 
-        // WP-PF-08: cluster-shared marker (keyed HMAC bound to the credential version). Lock-outs were checked above, a removed user has no
+        // cluster-shared marker (keyed HMAC bound to the credential version). Lock-outs were checked above, a removed user has no
         // configuredUser and a changed password has another credential version, so none of them can be revived by a marker.
         string? credentialVersion = null;
         if (configuredUser != null)
         {
             guard.ConfigureSharedMarker(secretRef =>
-                (Context.RequestServices?.GetService(typeof(Autheris.Application.Interfaces.IKeyVaultSecretProvider)) as Autheris.Application.Interfaces.IKeyVaultSecretProvider)
+                (Context.RequestServices?.GetService(typeof(Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider)) as Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider)
                 ?.GetSecretBytes(secretRef));
             credentialVersion = BasicAuthAttemptGuard.CredentialVersion(configuredUser.Password);
             if (!isCached)
@@ -330,7 +330,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
             ? "Autheris"
             : _gatewayOptions.Authentication.BasicAuth.Realm;
 
-        // F-AUTH-DX: script requests (fetch/XHR from the DevPortal, Nitro, Swagger) get a plain 401 without the
+        // F-AUTH-DX: script requests (fetch/XHR from Nitro, Swagger) get a plain 401 without the
         // Basic challenge so the browser does not pop up its native login dialog in the middle of a page.
         if (!Request.Headers.ContainsKey("X-Requested-With"))
         {

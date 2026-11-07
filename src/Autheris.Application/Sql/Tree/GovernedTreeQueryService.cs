@@ -5,8 +5,8 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Autheris.Application.Data.Relations;
-using Autheris.Application.Interfaces;
+using Autheris.Application.DataSources.Relations;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Tree.Federation;
@@ -328,7 +328,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                 throw new GatewayInvalidQueryException("Relations across data sources are not supported in one query.");
             }
 
-            // SEC-DATA75-02: Master federation opt-in check
+            // Master federation opt-in check
             if (!_options.IsCrossSourceEnabled)
             {
                 throw new CrossSourceRelationException(
@@ -340,7 +340,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             {
                 var childAccess = resolved[cr.Child.Table];
 
-                // SEC-DATA75-01: Clear keys check on parent join keys
+                // Clear keys check on parent join keys
                 foreach (var parentCol in cr.ParentColumns)
                 {
                     var col = rootAccess.Metadata.GetColumn(parentCol);
@@ -352,7 +352,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                     }
                 }
 
-                // SEC-DATA75-01: Clear keys check on child join keys
+                // Clear keys check on child join keys
                 foreach (var childCol in cr.ChildColumns)
                 {
                     var col = childAccess.Metadata.GetColumn(childCol);
@@ -364,7 +364,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                     }
                 }
 
-                // SEC-DATA75-02: Four-eyes consent check
+                // Four-eyes consent check
                 TableRelation? tableRel = null;
                 if (_relationRepository != null)
                 {
@@ -539,7 +539,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
 
         if (crossSourceRelations.Count > 0 && node is JsonArray rootArray)
         {
-            // SEC-DATA75-03: Parameter-bounded batching & row cap limit
+            // Parameter-bounded batching & row cap limit
             if (rootArray.Count > maxRows)
             {
                 throw new RowLimitExceededException($"Cross-source parent row count of {rootArray.Count} exceeds the maximum allowed limit of {maxRows}.");
@@ -661,7 +661,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                         }
                     }
 
-                    // SEC-DATA75-05: Dedicated audit log event
+                    // Dedicated audit log event
                     var auditEntry = GovernedQueryStages.BuildEntry(
                         AuditEventTypes.CrossSourceRelationResolved,
                         rootAccess.Tenant,

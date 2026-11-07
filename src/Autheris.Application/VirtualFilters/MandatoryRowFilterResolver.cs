@@ -40,13 +40,13 @@ public sealed record MandatoryFilterOutcome(bool IsDenied, string? DenyReason, s
     public TrinoSqlEngine.Governance.PolicyPredicate? TypedPredicate { get; init; }
 
     /// <summary>
-    /// REQ-GOV-129 (A-1, A-4): the caller attributes the typed predicate needs bound (its slots). Names only: the memoized outcome never holds a
+    /// 129 (A-1, A-4): the caller attributes the typed predicate needs bound (its slots). Names only: the memoized outcome never holds a
     /// value, so it can be served to the next caller with the same key tuple (BC-129-05).
     /// </summary>
     public IReadOnlyList<string> CallerAttributes { get; init; } = Array.Empty<string>();
 
     /// <summary>
-    /// REQ-GOV-129 (BC-129-05): a filter with caller placeholders contributes the constant <c>(1 = 0)</c> to <see cref="PredicateSql"/>. Without a typed
+    /// 129 (BC-129-05): a filter with caller placeholders contributes the constant<c>(1 = 0)</c> to <see cref="PredicateSql"/>. Without a typed
     /// predicate the text is not authoritative for it, so the decision point denies the table instead of falling back to the text.
     /// </summary>
     public bool CallerAttributesTextConstant { get; init; }
@@ -189,9 +189,9 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
 {
     private readonly IVirtualFilterSnapshotProvider _snapshots;
     private readonly IVirtualFilterPredicateBuilder _predicates;
-    // WP-PF-06: bounded per-user memo (5,000 users x 100 tables would otherwise grow to hundreds of MB); a miss re-resolves.
-    private readonly Autheris.Application.Caching.BoundedCache<VirtualFilterMemoKey, MandatoryFilterOutcome> _memo = new(50_000);
-    private readonly Autheris.Application.Caching.BoundedCache<string, ObjectPattern> _patterns = new(10_000, comparer: StringComparer.Ordinal);
+    // bounded per-user memo (5,000 users x 100 tables would otherwise grow to hundreds of MB); a miss re-resolves.
+    private readonly Autheris.Application.State.Caching.BoundedCache<VirtualFilterMemoKey, MandatoryFilterOutcome> _memo = new(50_000);
+    private readonly Autheris.Application.State.Caching.BoundedCache<string, ObjectPattern> _patterns = new(10_000, comparer: StringComparer.Ordinal);
     private readonly ITableMetadataRepository? _catalog;
     private readonly SqlDataSourceOptions? _dataSources;
     private long _memoGeneration = -1;
@@ -553,7 +553,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         }
         catch (TargetPatternEvaluationException ex)
         {
-            // SEC-7/SEC-8 (F-GOV-14): a pattern that cannot be evaluated never means "binding does not apply".
+            //  (F-GOV-14): a pattern that cannot be evaluated never means "binding does not apply".
             return MandatoryFilterOutcome.Deny(
                 $"{VirtualFilterErrorCodes.PatternEvaluationFailed}: the target pattern of the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.InnerException?.GetType().Name}).");
         }

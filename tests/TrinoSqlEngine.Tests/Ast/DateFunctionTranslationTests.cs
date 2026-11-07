@@ -23,7 +23,6 @@ public sealed class DateFunctionTranslationTests
     [InlineData(TargetSqlDialect.Sqlite, "datetime(CURRENT_TIMESTAMP, '-1 day')")]
     [InlineData(TargetSqlDialect.Oracle, "(CURRENT_TIMESTAMP + NUMTODSINTERVAL(-1, 'DAY'))")]
     [InlineData(TargetSqlDialect.DuckDb, "(CURRENT_TIMESTAMP + INTERVAL '-1 day')")]
-    [InlineData(TargetSqlDialect.Snowflake, "DATEADD(day, -1, CURRENT_TIMESTAMP)")]
     [InlineData(TargetSqlDialect.Ansi, "(CURRENT_TIMESTAMP - INTERVAL '1' DAY)")]
     public void DateAdd_Day(TargetSqlDialect dialect, string expected)
     {
@@ -60,7 +59,6 @@ public sealed class DateFunctionTranslationTests
     [InlineData(TargetSqlDialect.Oracle, "day", "TRUNC(\"TS\", 'DD')")]
     [InlineData(TargetSqlDialect.Oracle, "week", "TRUNC(\"TS\", 'IW')")]
     [InlineData(TargetSqlDialect.DuckDb, "day", "DATE_TRUNC('day', \"ts\")")]
-    [InlineData(TargetSqlDialect.Snowflake, "month", "DATE_TRUNC('month', \"TS\")")]
     public void DateTrunc(TargetSqlDialect dialect, string unit, string expected)
     {
         Assert.Contains(expected, Generate($"date_trunc('{unit}', ts)", dialect));

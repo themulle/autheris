@@ -159,7 +159,6 @@ public sealed record EnvoyFilterExportOptions
     public string AuthzPath { get; init; } = "/api/v1/envoy/check";
     public int TimeoutMs { get; init; } = 250;
     public bool FailOpen { get; init; } = false;
-    public IReadOnlyList<string> PathPrefixes { get; init; } = new[] { "/api/", "/graphql" };
     public string WasmPluginTag { get; init; } = "v1.0.0";
     public string? WasmPluginUrl { get; init; }
 }

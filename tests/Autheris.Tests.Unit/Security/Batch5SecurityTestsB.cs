@@ -16,17 +16,17 @@ using Autheris.Api.Hosting;
 using Autheris.Api.Security;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.DataCatalog.Interfaces;
-using Autheris.Application.DataCatalog.Models;
-using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Models;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Events.Services;
 using Autheris.Application.Federation.Interfaces;
 using Autheris.Application.Federation.Services;
 using Autheris.Application.Identity;
-using Autheris.Application.Interfaces;
-using Autheris.Application.OpenMetadata.Interfaces;
-using Autheris.Application.OpenMetadata.Models;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
+using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Streaming.Interfaces;
@@ -321,9 +321,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
     [Fact]
     public async Task DataCatalogSync_CrossTenantOverwrite_Prevented()
     {
-        var clientFactory = Substitute.For<IDataCatalogClientFactory>();
         var client = Substitute.For<IDataCatalogClient>();
-        clientFactory.GetActiveClient().Returns(client);
         client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
 
         var tableId = new TableIdentifier("finance", "dbo", "invoices");
@@ -347,7 +345,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         var options = Options.Create(new GatewayOptions());
 
         var syncService = new DataCatalogSyncService(
-            clientFactory,
+            client,
             metadataRepo,
             epochService,
             options,

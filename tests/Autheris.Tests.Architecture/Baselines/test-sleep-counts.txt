@@ -17,7 +17,7 @@ tests/Autheris.Tests.Simulation/ApiFuzz/CapturedHost.cs|1
 tests/Autheris.Tests.Simulation/ApiFuzz/SimApiHostProcess.cs|1
 tests/Autheris.Tests.Simulation/Meta/FuzzHarnessTests.cs|1
 tests/Autheris.Tests.Simulation/Meta/SimHostShutdownTests.cs|1
-tests/Autheris.Tests.Unit/Auditing/AuditGroupCommitSinkTests.cs|1
+tests/Autheris.Tests.Unit/Audit/AuditGroupCommitSinkTests.cs|1
 tests/Autheris.Tests.Unit/Caching/SingleFlightKeySetCacheTests.cs|1
 tests/Autheris.Tests.Unit/Caching/TableCacheCatalogTests.cs|1
 tests/Autheris.Tests.Unit/Caching/TableCacheManagerTests.cs|1
