@@ -8,7 +8,7 @@ Reduce the top-level folders of `src/Autheris.Application` to <= 32 at Stage 2 e
 ## 2. Preconditions and dependencies
 - Merged first: WP-SIMPL-07 (ratchet + allow-list), WP-SIMPL-17 (-4 folders), WP-SIMPL-18 (borderline deletions), WP-SIMPL-12 (deletes `Integrations`, `Workflows/ItsmWorkflowDispatcher.cs`, `Interfaces/IItsm*`), WP-SIMPL-15 (deletes `Diagnostics/Shadowing`), WP-SIMPL-16 (Flight files only: `Serialization/ArrowFlightSqlServer.cs`, `IArrowFlightSqlServer.cs`; no folder removed).
 - Coordinated (not in parallel, whichever merges second rebases): WP-SIMPL-42 (`FinOps` -> new `Usage` folder, net 0 folders), WP-SIMPL-39 (`Procedures` kept as is), WP-SIMPL-40 (`Docs` kept as is), WP-SIMPL-43. `Mesh` (OD-21), `Procedures`, `Docs` (OD-18) and `OData` (core, OD-24) stay top-level folders.
-- Any new top-level folder added by WP-SIMPL-38..47 other than WP-SIMPL-42 `Usage` (which replaces `FinOps`) must be placed under an existing folder; otherwise the <= 32 ratchet fails.
+- Any new top-level folder added by WP-SIMPL-38..48 other than WP-SIMPL-42 `Usage` (which replaces `FinOps`) must be placed under an existing folder; otherwise the <= 32 ratchet fails.
 - Merge groups (section 5) are independent of each other and may be done in any order, but serially (they all touch the allow-list and DI snapshots).
 - Must merge before module extraction WPs that move these namespaces (WP-SIMPL-29 events, WP-SIMPL-27/28) only where they touch the same folders; Events is left untouched here.
 
@@ -74,5 +74,5 @@ Src ~0 net (moves, ~1,500 using lines touched); tests ~+15 (one new test). 3 per
 ## Decisions taken in this spec
 1. Merged folders become subfolders of the target (`Observability/Telemetry`), not flattened, except `Data` which is flattened into `DataSources` (same domain, no collisions).
 2. `Interfaces` distribution: only Audit and Lineage interfaces go to owners; the rest to `Common/Interfaces` to limit churn.
-3. Arithmetic (under OD-18/20/21/24): 42 folders after WP-12/15/17/18, minus 11 here (group 1: -2, group 2: -2, group 3: -2, group 4: -3 +1, group 5: -1, group 6: -1, group 7: -1) = 31, one folder of slack below 32; no additional merges needed. Any new top-level folder from WP-38..47 must be placed under an existing folder (WP-42 `Usage` replaces `FinOps`, net 0). If WP-12/15/17/18 are not merged first, the count would be 32-35 and this WP must wait.
+3. Arithmetic (under OD-18/20/21/24): 42 folders after WP-12/15/17/18, minus 11 here (group 1: -2, group 2: -2, group 3: -2, group 4: -3 +1, group 5: -1, group 6: -1, group 7: -1) = 31, one folder of slack below 32; no additional merges needed. Any new top-level folder from WP-38..48 must be placed under an existing folder (WP-42 `Usage` replaces `FinOps`, net 0). If WP-12/15/17/18 are not merged first, the count would be 32-35 and this WP must wait.
 4. `Performance/IncrementalDelivery` goes to Observability per plan; namespace keeps only `IncrementalDelivery` as sub-part.

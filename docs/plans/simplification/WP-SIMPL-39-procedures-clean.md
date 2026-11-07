@@ -1,6 +1,8 @@
 # WP-SIMPL-39 Governed stored procedures: clean core design
 Status: Ready for implementation
-Parent: [plan](../2026-11-05-plan-project-simplification.md) (WP added by OD-18; replaces WP-SIMPL-18 PR D) | [PRD OD-18](../2026-11-05-req-project-simplification.md) | Issues: #491 (procedures part) | Advisory: GHSA-92vp-663x-pp52 (transport gate) | Owner decisions: OD-18, OD-25, OD-12, OD-17, OD-29, OD-30 | Security conditions: SEC-SIMPL-01, 02, 03, 21, 23, 24, 25, 30, 31, 32, 57, 60, 72; SEC-PROC-01..05 (sec plan section 11.2); ADR-018
+Parent: [plan](../2026-11-05-plan-project-simplification.md) (WP added by OD-18; replaces WP-SIMPL-18 PR D) | [PRD OD-18](../2026-11-05-req-project-simplification.md) | Issues: #491 (procedures part) | Advisory: GHSA-92vp-663x-pp52 (transport gate) | Owner decisions: OD-18, OD-25, OD-12, OD-17, OD-29, OD-30, OD-44 | Security conditions: SEC-SIMPL-01, 02, 03, 21, 23, 24, 25, 30, 31, 32, 57, 60, 72; SEC-PROC-01..05 (sec plan section 11.2); ADR-018
+
+> **Changed by OD-44 (2026-11-06):** stored procedures become data products with their own product owner after the feature freeze ([WP-SIMPL-49](WP-SIMPL-49-data-products.md)), including write procedures. This WP therefore keeps `ProcedureMode` and the YAML key `mode` and keeps rejecting `mode: write` at load and at execution (step 4 below), so WP-SIMPL-49 can enable write procedures without re-adding the model. The directory loader, the consent lookup on the governed table set and `RowScopeKey` stay as cleaned here; WP-SIMPL-49 replaces them later.
 
 > **Changed by OD-25 (2026-11-05):** source catalog validation of procedures is removed by [WP-SIMPL-44](WP-SIMPL-44-no-source-metadata-reads.md) PR 3 (`StoredProcedureCatalogValidator` and the YAML key `validation` are deleted; procedures are declared only). This WP does not extend `StoredProcedureCatalogValidator` and does not require `validation: declared`; steps 3 and 5, section 6 and D3 below are already adjusted.
 
@@ -9,7 +11,7 @@ Governed stored procedures (`/api/v1/procedures/{name}`, the per-procedure OpenA
 - The 19 procedure source files shrink from 5,442 to <= 4,850 lines (at least -590 net); procedure-specific lines in other `src` files shrink from 182 to <= 120.
 - `SqlEndpoints:Procedures:Enabled=false` (default) removes every procedure surface: routes 404, no MCP tool, no catalog entries, no services, no directory read.
 - Every catalog source of the procedure (data source, every referenced table, result table) passes the transport gate before any database call.
-- Calls are read-only on the database side for both supported dialects; per-dialect tests run against real engines.
+- Calls carry no Autheris-side transaction or read-only enforcement (OD-44); permission class (`Execute` or `ExecuteWrite`) follows the declared mode.
 
 ## 2. Preconditions and dependencies
 - None blocking. Runs in Stage 1/2 alongside the security lane (README of `docs/plans/simplification/`).
@@ -25,14 +27,14 @@ Governed stored procedures (`/api/v1/procedures/{name}`, the per-procedure OpenA
 ### In scope
 - Kill switch completion for #491: DI, routes, MCP tool listing and execution, catalog/MCP dataset listing and OpenAPI link all follow `SqlEndpoints:Procedures:Enabled`.
 - Transport gate on all catalog sources of a procedure (data source, referenced tables, result table) on REST and MCP.
-- Read-only enforcement in the database transaction for SQL Server and PostgreSQL; `mode: write` removed from the model.
+- No Autheris-side read-only enforcement (OD-44: the declaration only decides the permission class; database rights are the operator's limit); `mode: write` stays in the model and stays rejected (enabled later by WP-SIMPL-49, OD-44).
 - Dialect admission: SQL Server and PostgreSQL accepted; Oracle and Databricks fail startup or definition load with a fixed message.
 - One definition format: `*.proc.yaml` / `*.proc.yml` only; the SQL-header format (`*.proc.sql`), YAML key aliases and `allow_dynamic_sql` are removed with fail-fast behaviour.
 - Removal of duplication and unused code: `ProcedureYamlGenerator`, the file-system watcher, five copies of the visible-procedure enumeration, two copies of the governed table set, the `TryResolveDialect` wrapper, the Oracle/Databricks invoker branches.
 - Consent, masking, row-scope and audit parity tests across REST and MCP; parameter binding and size-limit tests; per-dialect integration tests.
 - Architecture baselines updated (only shrink), minimal accuracy edits to ADR-018 and `docs/features/f-sql-02-governed-stored-procedures.md`.
 ### Out of scope
-- Write procedures (any form), Oracle or Databricks procedure support (needs a parity matrix and Phase 3 note, SEC-SIMPL-57).
+- Executing write procedures (WP-SIMPL-49, OD-44), Oracle or Databricks procedure support (needs a parity matrix and Phase 3 note, SEC-SIMPL-57).
 - Moving procedures into a module (Decision D9).
 - Renaming the configuration section (WP-SIMPL-32 owns config renames).
 - Changes to consent, masking or row-scope algorithms themselves; only their reuse is tested.
@@ -56,8 +58,8 @@ Governed stored procedures (`/api/v1/procedures/{name}`, the per-procedure OpenA
 ## 5. Implementation steps (TDD order; each step: red test first, then code)
 1. **Kill switch (PR 1).** Tests `ProcedureKillSwitchTests` red. In `GatewaySqlEngineServiceExtensions.cs:105-117` wrap all procedure registrations in `if (gatewayOptions.SqlEndpoints.Procedures.Enabled)`. Consumers already take nullable optional services, so with the switch off they receive `null`. Add `bool ProceduresEnabled { get; }` to `IReadPathSwitches` (`src/Autheris.Application/Mcp/Interfaces/IReadPathSwitches.cs`) and its implementation; `McpDatasetTools.Definitions(switches)` (`:163`) skips `call_procedure` when it is false; `McpToolExecutionHandler` answers `call_procedure` with the existing unknown-tool error when the switch is off (never `NOT_AVAILABLE`, which reveals the feature). OpenAPI (`GatewayCoreServiceExtensions.cs:51`) and `McpDatasetCatalog.cs:1117` already follow the switch; keep.
 2. **Transport gate on all sources (PR 1).** In `GovernedProcedureExecutionService.ExecuteAsync` replace the single call at `:174-178` with one `await _transportGate.EnsureCatalogSourcesAsync(sources, ct)` where `sources` = the definition source (`ConnectionName` or `DataSource`) plus, for each entry of `visibility.Decisions`, `Meta.SourceName` (fallback to the parsed `TableIdentifier.Domain` when empty; never skip). It stays before the row-scope resolver and the invoker. `DescribeProcedureDatasetAsync` (`McpDatasetCatalog.cs:627`) calls the same gate for the procedure's sources. The gate audits the denial itself; REST maps it to 403 (`ProcedureEndpointRoutes.cs:387-389`), MCP to `TRANSPORT_NOT_ALLOWED` (`McpToolExecutionHandler.cs:113-117`).
-3. **Read-only in the database (PR 1).** `MssqlProcedureInvoker.ExecuteReadAsync`: SQL Server begins a transaction after the SESSION_CONTEXT batch and before the call (`connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct)`), sets `cmd.Transaction`, never commits (existing `finally` disposes = rollback). PostgreSQL executes `SET TRANSACTION READ ONLY` on the existing transaction before the call. `StoredProcedureCatalogValidator` is not changed (deleted by WP-SIMPL-44 PR 3, OD-25).
-4. **Remove write mode (PR 3).** Delete `ProcedureMode` and `ProcedureDefinition.Mode` (`ProcedureModels.cs`). `ParseYaml`: key `mode` accepts only `read` (absent = read); `write` throws `FormatException("Write procedures are not supported.")`. Delete guard 1a, the MCP read-only-token branch (`McpToolExecutionHandler.cs:553-556`), the `Mode` filters in `CatalogDiscoveryService`/`McpDatasetCatalog`, the `mode` field of `HandleList` and the audit field `mode`.
+3. **No transaction enforcement (PR 1; OD-44, replaces the read-only transaction).** The invoker adds no never-committed transaction and no `SET TRANSACTION READ ONLY`; procedures with their own transaction control run as declared. The permission class follows the declared mode (WP-SIMPL-49). Existing SESSION_CONTEXT initialization stays. `StoredProcedureCatalogValidator` is not changed (deleted by WP-SIMPL-44 PR 3, OD-25).
+4. **Keep write mode rejected (PR 3; OD-44).** Keep `ProcedureMode` and `ProcedureDefinition.Mode`. `ParseYaml`: key `mode` accepts `read` and `write` (absent = read); the loader rejects `write` with the fixed message `"Write procedures are enabled with data products (WP-SIMPL-49)."` (replacing "not supported yet (phase 2)"). Keep guard 1a, the MCP read-only-token branch (`McpToolExecutionHandler.cs:553-556`) and the `Mode` filters in `CatalogDiscoveryService`/`McpDatasetCatalog`; they become the hooks WP-SIMPL-49 uses.
 5. **Dialect admission (PR 2).** New `src/Autheris.Api/Extensions/DependencyInjection/StartupChecks/ProcedureStartupChecks.cs` (pattern of `StorageStartupChecks.cs`), active only when the switch is on: resolve the dialect of `ConnectionName` and every `AllowedDataSources` entry with `DataSourceProvider.TryResolveDialect`; anything other than `SqlServer` or `PostgreSql` fails host start with `"Stored procedure endpoints support SQL Server and PostgreSQL only (data source '{name}')."`; a missing connection fails the same way. `ProcedureConnectionProvider`: keep the per-definition checks, add `PostgreSql` requires the table-valued-function kind (no catalog validation; WP-SIMPL-44 removes it for all dialects); delete `TryResolveDialect` and switch `DbSessionContextInitializer.cs:19` and `MssqlProcedureInvoker.cs:64` to `DataSourceProvider.TryResolveDialect`. Delete the Oracle and Databricks branches in the invoker (`:119`, `:127`, `:131`) and rename the class `MssqlProcedureInvoker` -> `ProcedureInvoker` (file rename; update `CutoverArchitectureTests.cs:402` and DI snapshots).
 6. **One definition format (PR 3).** Delete `ProcedureDefinitionParser.Parse`, `HeaderRegex`, `StripTrailingComment` and SQL-only branches; keep shared helpers (`ParseParameter`, `Sanitize`, `RequireIdentifier`, `RejectReservedNames`, row-scope and error-code parsing). Delete YAML properties `TimeoutSeconds`, `RequiredRoles`, `ContextBindings`, `AllowDynamicSql` and `ProcedureDefinition.AllowDynamicSql`; the strict deserializer then rejects these keys (the validator is not touched; WP-SIMPL-44 deletes it). Loader: pattern `*.proc.yaml` and `*.proc.yml`; if any `*.proc.sql` exists in the directory, `LoadFromDirectory` throws `InvalidOperationException("SQL-header procedure declarations (*.proc.sql) are no longer supported; convert them to *.proc.yaml.")` and the host start fails (`ProcedureRegistrationService` runs it at start; make the first load synchronous in `StartAsync` so the exception stops the host).
 7. **Single visibility path (PR 4).** Add `src/Autheris.Application/Procedures/Interfaces/IProcedureCatalog.cs`:
@@ -78,7 +80,7 @@ Governed stored procedures (`/api/v1/procedures/{name}`, the per-procedure OpenA
 - `Procedures/ProcedureTransportGateTests`: [S] theory `Execute_SourceNotAllowed_DeniedBeforeInvoke(sourceKind)` over every catalog source kind of step 2; [S] `Execute_NullGate_FailsClosed`; `Execute_AllSourcesAllowed_Invokes`; [S] `Rest_TransportDenied_Returns403_FixedText`; [S] `Mcp_TransportDenied_ReturnsTransportNotAllowed`; [S] `McpDescribe_TransportDenied_NotDescribed`. Each asserts the scripted invoker and row-scope resolver were not called. Names stay neutral (SEC-SIMPL-01).
 - `Security/AdvisoryRegressionTests` [S]: `Ghsa_92vp_pp52_regression` (procedures cases; details: private advisory).
 - `Procedures/ProcedureAccessTests` [S]: `Execute_goes_through_access_decision_point` (SEC-PROC-04; added once WP-SIMPL-46 step 4 has merged).
-- `Procedures/ProcedureReadOnlyTests`: [S] `Parse_ModeWrite_Rejected`; `Parse_ModeAbsentOrRead_Accepted`; [S] `Invoker_SqlServer_CallInsideTransaction_NeverCommitted`; [S] `Invoker_PostgreSql_SetsTransactionReadOnlyBeforeCall`.
+- `Procedures/ProcedureReadOnlyTests`: [S] `Parse_ModeWrite_Rejected`; `Parse_ModeAbsentOrRead_Accepted`; `Invoker_adds_no_transaction_or_readonly_flag`.
 - `Procedures/ProcedureDialectAdmissionTests`: [S] `Startup_ConnectionOracle_FailsHostStart`; [S] `Startup_AllowedDataSourceDatabricks_FailsHostStart`; [S] `Startup_MissingConnection_FailsHostStart`; `Startup_SqlServerAndPostgreSql_Accepted`; `Startup_Disabled_NoCheck`; `Load_PostgreSqlProcedureKind_Rejected`.
 - `Procedures/ProcedureDefinitionModelTests`: [S] `Startup_ProcSqlFilePresent_FailsHostStart`; [S] theory `Parse_RemovedKey_Rejected(timeout_seconds|required_roles|context_bindings|allow_dynamic_sql)`; [S] `Parse_UnknownKey_Rejected`; `Parse_CanonicalDefinition_AllFieldsMapped`; `Revalidation_RescansDirectory_PicksUpNewAndRemovedFiles`; [S] `Config_EnableHotReloadKey_FailsFast` (SEC-SIMPL-31).
 - `Procedures/ProcedureCatalogTests`: `ListVisible_OmitsInactiveInvisibleAndFailedEvaluation`; [S] `FindVisible_UnknownAndInvisible_ReturnSameNull`; [S] `GovernedTables_ExecutorAndGuardrail_UseSameSet`; `GovernedTables_NonActive_ResultTableOnly`.
@@ -87,7 +89,7 @@ Governed stored procedures (`/api/v1/procedures/{name}`, the per-procedure OpenA
 - `tests/Autheris.Tests.Architecture/ProcedureArchitectureTests`: `OnlyProcedureCatalog_EnumeratesProcedureRegistry` (no type outside `Application/Procedures` calls `IProcedureRegistry.GetAll`); `NoOracleOrDatabricksBranchInProcedureInvoker`.
 - Integration (`tests/Autheris.Tests.Integration`, real engines via Testcontainers, shared servers in `SharedDatabaseServers.cs`): `ProcedureSqlServerIntegrationTests`: `SecurityPolicy_FiltersByReadOnlySessionContext`; `SessionContext_NotOverwritableByProcedure`; `DmlInsideProcedure_RolledBack`; `ResultColumnSources_DriveMasking`. `ProcedurePostgreSqlIntegrationTests`: `RlsPolicy_FiltersByTransactionLocalSettings`; `WriteInsideFunction_FailsReadOnlyTransaction`; `DeclaredOutputs_ContractEnforced`.
 - Tests to change: convert the 35 `ProcedureDefinitionParser.Parse(` call sites to YAML through a new helper `tests/Autheris.Tests.Unit/Procedures/TestProcedureYaml.cs` (`static ProcedureDefinition Definition(string yaml)`); this includes `tests/Autheris.Tests.SqlCompilerGate/Parity/ParityConsumers.cs` and `PostgreSqlRowScopeContractTests.cs`. `ArchitectureAndCleanCodeTests.DiContainer_ResolvesISqlSecurityValidatorAndIProcedureYamlGenerator` -> rename `DiContainer_ResolvesISqlSecurityValidator`. Read-only-token tests in `ReadOnlyTokenProcedureRouteTests` keep the read path; their write-procedure case becomes `Parse_ModeWrite_Rejected`.
-- Tests to delete (coverage-map row "feature deleted (WP-SIMPL-39)", SEC-SIMPL-03/60): SQL-header syntax tests in `ProcedureEndpointTests`, `PureYamlProcedureGovernanceTests.ProcedureYamlGenerator_GeneratesValidYaml_MatchingParser`, write-mode execution tests, watcher tests. A deleted security test either maps to a new test above or to "feature deleted".
+- Tests to delete (coverage-map row "feature deleted (WP-SIMPL-39)", SEC-SIMPL-03/60): SQL-header syntax tests in `ProcedureEndpointTests`, `PureYamlProcedureGovernanceTests.ProcedureYamlGenerator_GeneratesValidYaml_MatchingParser`, watcher tests (write-mode rejection tests stay). A deleted security test either maps to a new test above or to "feature deleted".
 
 ## 7. Verification commands
 ```bash
@@ -98,7 +100,7 @@ dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj
 dotnet test tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj -c Release --no-build --filter "FullyQualifiedName~Procedure"
 git ls-files src | grep -i procedur | xargs wc -l | tail -1                     # <= 4850
 git grep -n -i 'procedur' -- src | grep -v -i '/Procedures/\|ProcedureEndpointRoutes\|ProcedureModels' | wc -l   # <= 120
-git grep -n 'ProcedureMode\|ProcedureYamlGenerator\|AllowDynamicSql\|TimeoutSeconds\b' -- src             # no hits
+git grep -n 'ProcedureYamlGenerator\|AllowDynamicSql\|TimeoutSeconds\b' -- src                           # no hits (ProcedureMode stays, OD-44)
 git grep -n 'FileSystemWatcher' -- src/Autheris.Application/Procedures                                     # no hits
 git grep -n 'DatabaseDialect\.\(Oracle\|Databricks\)' -- src/Autheris.Application/Procedures               # no hits
 git grep -n 'proc\.sql' -- src                                                                             # only the fail-fast message
@@ -109,8 +111,8 @@ One build at a time; integration tests need the container runtime (podman host o
 ## 8. Acceptance criteria
 - [ ] Switch off: all four procedure routes 404 for admin and anonymous; `call_procedure` absent from tools/list and answered as unknown tool; no procedure service in the DI snapshot; catalog and MCP datasets list no procedure.
 - [ ] Switch on: a source of any referenced table or of the result table that is not allowed for the ingress transport yields 403 (REST) / `TRANSPORT_NOT_ALLOWED` (MCP) and no database call.
-- [ ] `mode: write`, `*.proc.sql`, removed YAML keys and `EnableHotReload` fail with fixed messages; Oracle or Databricks procedure sources fail host start.
-- [ ] SQL Server calls run in a never-committed transaction; PostgreSQL calls in a read-only transaction; both proven by integration tests against real engines.
+- [ ] `mode: write` is rejected with the WP-SIMPL-49 message; `*.proc.sql`, removed YAML keys and `EnableHotReload` fail with fixed messages; Oracle or Databricks procedure sources fail host start.
+- [ ] The invoker adds no transaction or read-only flag; a procedure with its own COMMIT runs on both dialects (integration tests against real engines).
 - [ ] REST and MCP return identical masking, row scope, not-found shape and audit-before-data behaviour (parity tests green).
 - [ ] Procedure source lines <= 4,850 and procedure lines elsewhere in `src` <= 120 (commands in section 7); `source-size-ceilings.txt` only shrinks.
 - [ ] Security test count not lower than before, except rows mapped "feature deleted (WP-SIMPL-39)" in the coverage map.
@@ -118,9 +120,9 @@ One build at a time; integration tests need the container runtime (podman host o
 - [ ] `AdvisoryRegressionTests.Ghsa_92vp_pp52_regression` (procedures cases) and the tests of sec plan section 11.2, row 39, green; `StoredProcedureCatalogValidator` is not extended by any PR of this WP (OD-25).
 
 ## 9. PR slicing (<= 400 net added src lines each; deletions unlimited)
-1. PR 1 `fix(procedures): kill switch, transport gate on all sources, read-only transaction` - steps 1-3 and their tests (~+145 src). Links #491 and GHSA-92vp-663x-pp52 (transport gate), id and neutral title only.
+1. PR 1 `fix(procedures): kill switch, transport gate on all sources` - steps 1-3 and their tests (~+100 src). Links #491 and GHSA-92vp-663x-pp52 (transport gate), id and neutral title only.
 2. PR 2 `refactor(procedures): closed dialect set` - step 5, `ProcedureDialectAdmissionTests`, both integration test classes (~+90/-60 src).
-3. PR 3 `refactor(procedures): YAML-only definitions, no write mode` - steps 4 and 6, test conversion helper and conversions (~+40/-330 src).
+3. PR 3 `refactor(procedures): YAML-only definitions, write mode kept rejected` - steps 4 and 6, test conversion helper and conversions (~+40/-330 src).
 4. PR 4 `refactor(procedures): single visibility path, remove unused code` - steps 7-10 (~+110/-480 src), LOC report in the description.
 Order 1 -> 2 -> 3 -> 4; PR 2 and PR 3 may swap.
 
@@ -131,14 +133,14 @@ Order 1 -> 2 -> 3 -> 4; PR 2 and PR 3 may swap.
 - Do NOT: extend `StoredProcedureCatalogValidator` or require a `validation` key (OD-25, WP-SIMPL-44); weaken or reorder visibility (404) before availability (503) before leases (429); move the transport gate after any database call; add a fallback dialect or an `rls: none` path outside Development; add a new config key or an alias for `Enabled`; put advisory details in code, tests, commits or PR text; delete a security test without a coverage-map row; let `IProcedureCatalog` return different answers for unknown and hidden procedures; touch consent, masking or row-scope algorithms.
 
 ## 11. Estimate
-- `src`: about +290 / -950 lines (net about -660). Tests: about +950 / -700 (net about +250, mostly integration and parity tests).
+- `src`: about +290 / -910 lines (net about -620; the write-mode model and guards stay per OD-44). Tests: about +950 / -700 (net about +250, mostly integration and parity tests).
 - Effort: about 7 person-days (PR 1: 1.5, PR 2: 2, PR 3: 2, PR 4: 1.5).
 
 ## Decisions taken in this spec
 - D1 (WP-SIMPL-18 PR D removed): WP-SIMPL-18 no longer deletes procedures. Its PR D (delete `Application/Procedures`, routes, DI, consumer entries, guard the `Procedures` section) is withdrawn per OD-18; its preparatory step (inline `ProcedureConnectionProvider.TryResolveDialect`) is done here in step 5. WP-SIMPL-18 keeps all procedure rows in the architecture baselines.
 - D2 Kill switch key: the existing `SqlEndpoints:Procedures:Enabled` (default `false`) is the `Procedures:Enabled` switch of #491; no new or alias key (an unknown key fails fast anyway).
 - D3 Dialects: SQL Server is the reference (SECURITY POLICY as defense in depth, read-only SESSION_CONTEXT). PostgreSQL is supported with table-valued functions only, transaction-local `set_config` and a read-only transaction. Source catalog validation is removed for all dialects by WP-SIMPL-44 (OD-25); procedures are declared only. Oracle and Databricks are rejected at startup: no procedure security context path and no parity tests; adding them later needs a parity matrix and Phase 3 note (SEC-SIMPL-57).
-- D4 Read-only is the only mode: `ProcedureMode` is removed; DB-side enforcement by never-committed (SQL Server) or read-only (PostgreSQL) transactions plus the EXECUTE-only login of ADR-018.
+- D4 (revised by OD-44) Read-only is the only executable mode in this WP: `ProcedureMode` stays, `write` is rejected until WP-SIMPL-49 enables write procedures; no Autheris-side transaction enforcement (OD-44); the EXECUTE-only login of ADR-018 is the operator's database-side limit.
 - D5 One definition model: YAML (YamlDotNet stays core) with one spelling per field (`timeout`, `roles`, `context`); `allow_dynamic_sql` removed (the key is rejected by the strict deserializer).
 - D6 Hot reload: the watcher is replaced by a directory re-scan on each revalidation tick (one code path for add, change, delete; multi-replica safe).
 - D7 `ProcedureYamlGenerator` is deleted (no production caller); a generator, if wanted, belongs in tooling outside the gateway.

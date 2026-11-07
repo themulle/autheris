@@ -1,8 +1,10 @@
 # WP-SIMPL-41 Authorized data discovery (replaces OpenSchema)
 Status: Ready for implementation
-Parent: [plan](../2026-11-05-plan-project-simplification.md#4-work-packages) | Related: [WP-SIMPL-40](WP-SIMPL-40-docs-ingestion-clean.md) (document storage/upload), [WP-SIMPL-39](WP-SIMPL-39-procedures-clean.md) | Issues: #500 (untrusted catalog text, alignment) | Owner decisions: OD-19 (binding, 2026-11-05, with the owner clarifications of the same day recorded in section 12), OD-22 (core access model), OD-4 (catalog search incl. semantic search is core), OD-18 (procedures and docs ingestion stay in core), OD-30 (single decision point), OD-32 (access profiles), OD-37 (dev portal deleted) | Security conditions: SEC-DISC-01..16 (former SEC-SIMPL-99..114, binding per the sec plan section 11.2; listed in section 13)
+Parent: [plan](../2026-11-05-plan-project-simplification.md#4-work-packages) | Related: [WP-SIMPL-40](WP-SIMPL-40-docs-ingestion-clean.md) (document storage/upload), [WP-SIMPL-39](WP-SIMPL-39-procedures-clean.md) | Issues: #500 (untrusted catalog text, alignment) | Owner decisions: OD-40, OD-41 (2026-11-06), OD-19 (binding, 2026-11-05, with the owner clarifications of the same day recorded in section 12), OD-22 (core access model), OD-4 (catalog search incl. semantic search is core), OD-18 (procedures and docs ingestion stay in core), OD-30 (single decision point), OD-32 (access profiles), OD-37 (dev portal deleted) | Security conditions: SEC-DISC-01..16 (former SEC-SIMPL-99..114, binding per the sec plan section 11.2; listed in section 13)
 
 > **Changed by OD-30, OD-32, OD-37 (2026-11-05):** discovery takes the caller's access state only from `IAccessDecisionPoint.DecideManyAsync(..., Discover, Discovery)` of [WP-SIMPL-46](WP-SIMPL-46-unified-authorization-model.md); there is no second decision path (step 5). The consent request REST route is owned by [WP-SIMPL-47](WP-SIMPL-47-external-catalog-and-consent-api.md); discovery links to it (step 9). The dev portal is deleted by WP-SIMPL-16 (OD-37). Sections 1-13 below already reflect these decisions.
+
+> **Changed by OD-40, OD-41 (2026-11-06):** pattern grants cover objects created later, so such objects show `Granted` without a new request; a column whose state differs per row (`ColumnAccessLevel.RowDependent`, overlapping grants with different masking, [WP-SIMPL-48](WP-SIMPL-48-row-policies-dynamic-coverage.md) step 4) is shown as `Masked` with `ClearInSomeRows = true` (step 5, D-48g).
 
 ## 1. Goal and outcome
 Every authenticated user of a tenant, and every AI agent or MCP client acting for such a user, can find out which data objects (tables, views, governed stored procedures) exist in the tenant, what they contain (descriptions, columns with descriptions, PII/sensitivity flags, uploaded statistics and pseudonymised samples), who the data owner is, what the caller's own access state is, and can request access (table consent plus optional clear access per PII column) from that owner. Only objects and columns that a data owner or administrator explicitly hid are omitted, without an existence oracle. Discovery never returns row data from a source system. The anonymous `OpenSchema` flag is deleted, and every route that branched on it requires authentication.
@@ -97,7 +99,8 @@ Measurable outcome: `git grep -n "OpenSchema\|IsOpenSchemaAllowed" -- src` retur
    public enum DiscoveryColumnState { NoAccess, Masked, Clear }
    public sealed record DiscoveryOwner(string DisplayName, string? Email);   // never Sid/AdAccount
    public sealed record DiscoveryColumn(string Name, string? DisplayName, string DataType, string? Description,
-       bool Pii, bool ClearAccessRequiresSeparateApproval, DiscoveryColumnState State, DiscoveryColumnStatistics? Statistics);
+       bool Pii, bool ClearAccessRequiresSeparateApproval, DiscoveryColumnState State, DiscoveryColumnStatistics? Statistics,
+       bool ClearInSomeRows = false);   // OD-41: true only for a RowDependent column shown as Masked
    public sealed record DiscoveryObject(DiscoveryObjectKind Kind, string Domain, string Schema, string Name, string? DisplayName,
        string? Description, string Sensitivity, IReadOnlyList<string> Tags, IReadOnlyList<DiscoveryOwner> Owners,
        DiscoveryAccessState Access, DiscoveryRowScope? RowScope, IReadOnlyList<DiscoveryColumn> Columns,
@@ -134,7 +137,7 @@ Measurable outcome: `git grep -n "OpenSchema\|IsOpenSchemaAllowed" -- src` retur
    - Access state comes only from the decision point (OD-30, R8). Per page, `DiscoveryService` calls `IAccessDecisionPoint.DecideManyAsync(subject, objects, AccessOperation.Discover, AccessTransport.Discovery)` once. The subject carries the caller's effective groups (token plus SCIM, WP-SIMPL-43), so user, group, materialized access-profile, owner and deny grants are all reflected. There is no discovery-side consent, group, profile or column resolution and no call to `ConsentResolutionService`, `GranteeMatcher` or the grant store for the allow decision.
    - `DiscoveryAccessMapper` (static, pure) maps each `TableAccessDecision` to `(Access, RowScope, per-column State)`:
      - Decision allowed: `Granted`; `RowScope = RowRestricted` when the decision carries a row predicate (from grants or narrowing), else `Full`. The predicate, its values and other subjects' filters are never returned.
-     - Column state: decision column level `Clear` -> `Clear`, `Mask` -> `Masked`, `Deny` (incl. hidden or denied column) -> `NoAccess`. Not allowed: every column `NoAccess`.
+     - Column state: decision column level `Clear` -> `Clear`, `Mask` -> `Masked`, `RowDependent` (OD-41) -> `Masked` with `ClearInSomeRows = true`, `Deny` (incl. hidden or denied column) -> `NoAccess`. Not allowed: every column `NoAccess`.
      - `Pii = column.IsSensitive || CatalogPiiDetector.IsPii(column.ColumnName, column.IsSensitive)` is a display flag only; `ClearAccessRequiresSeparateApproval = Pii`.
      - Not allowed: `Requested` when the caller has a pending request for the table (statuses as in `:50-56`), `Expired` when no request is pending and a grant record of the caller on the table expired within 90 days, else `None`. These two lookups are status information from the request/grant store, never an allow decision.
 
@@ -284,6 +287,7 @@ Unit tests go in `tests/Autheris.Tests.Unit` (folders as named); integration tes
    - [S] `RowRestricted_ResponseContainsNoPredicateOrValues` (serialized DTO contains no filter text or values from the grant).
    - `PiiColumn_DefaultMasked_ClearOnlyWithClearRule`.
    - `DeniedColumn_ListedAsNoAccess_NotOmitted`.
+   - [S] `RowDependentColumn_ShownMasked_WithClearInSomeRows` (OD-41; never shown as `Clear`).
    - [S] `GroupGrant_FromScimGroup_ShowsGranted`.
    - [S] `GroupTableDeny_ShowsNoAccess`.
    - [S] `MaterializedProfileGrant_ShowsGrantedWithRecordedMasking`.
