@@ -268,4 +268,59 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         var entries = await repository.QueryAuditLogsAsync(limit: 5000);
         entries.Count(e => e.EventType == AuditEventTypes.TableQuery).ShouldBe(writers * perWriter);
     }
+
+    [Fact]
+    public async Task RecordAuditInCallerTransaction_RolledBack_LeavesNoRowAndKeepsTheChainVerifiable()
+    {
+        // PostgreSQL accepts a caller transaction by design (the chain tail advances only on commit); the SQLite "foreign transaction is rejected" rule does not apply.
+        await using var conn = new Npgsql.NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        var before = Scalar("SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES");
+
+        await _repository.RecordAuditEventAsync(NewAudit(1), tx);
+        await tx.RollbackAsync();
+        _repository.OnTransactionRolledBack(tx);
+
+        Scalar("SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES").ShouldBe(before);
+        await _repository.RecordAuditEventAsync(NewAudit(2));
+        (await _repository.VerifyAuditHashChainAsync()).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task MetadataReader_WithSnapshotBeforeACommit_DoesNotServeStaleMetadataAfterwards()
+    {
+        var table = new TableIdentifier("sales", "dbo", "cache_race");
+        Table Entity(string description) => new()
+        {
+            SourceType = "sql",
+            SourceName = "sales",
+            SchemaName = "dbo",
+            TableName = "cache_race",
+            DisplayName = "Cache race",
+            Description = description,
+            DataSourceType = DataSourceType.Sql
+        };
+        await _repository.UpsertTableMetadataAsync(new TableMetadata { Identifier = table, Table = Entity("old"), Columns = [] });
+        _repository.InvalidateMetadataCacheForTesting();
+
+        // Make the next metadata read stall after it loaded its snapshot and before it is cached.
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _repository.AfterMetadataSnapshotForTesting = async _ =>
+        {
+            _repository.AfterMetadataSnapshotForTesting = null;
+            reached.SetResult();
+            await release.Task;
+        };
+        var staleReader = Task.Run(() => _repository.GetTableMetadataAsync(table));
+        await reached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // A commit (which bumps the table epoch) happens while the reader still holds the old snapshot.
+        await _repository.UpsertTableMetadataAsync(new TableMetadata { Identifier = table, Table = Entity("new"), Columns = [] });
+        release.SetResult();
+        (await staleReader)!.Table.Description.ShouldBe("old", "the stalled reader legitimately saw the old snapshot");
+
+        (await _repository.GetTableMetadataAsync(table))!.Table.Description.ShouldBe("new", "a cached stale snapshot must be refused by the epoch check");
+    }
 }

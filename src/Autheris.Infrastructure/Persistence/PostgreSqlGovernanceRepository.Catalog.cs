@@ -258,6 +258,11 @@ RETURNING structure_version, content_version;";
             };
             result.ValidateRequiredFilterColumns();
 
+            if (AfterMetadataSnapshotForTesting is { } hook)
+            {
+                await hook(ct).ConfigureAwait(false);
+            }
+
             if (loadedEpoch.HasValue)
             {
                 _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks, loadedEpoch.Value);

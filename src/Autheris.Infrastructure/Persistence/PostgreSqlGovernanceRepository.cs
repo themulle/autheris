@@ -47,6 +47,12 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
     private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();
 
     internal void InvalidateMetadataCacheForTesting() => _metadataCache.Clear();
+
+    /// <summary>Test seam: a positive key-table probe is cached per instance; this models a fresh instance.</summary>
+    internal void ResetKeyTableProbeForTesting() => _keyTables.Reset();
+
+    /// <summary>Test seam: runs after a metadata read loaded its snapshot and before the result is cached.</summary>
+    internal Func<CancellationToken, Task>? AfterMetadataSnapshotForTesting { get; set; }
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private readonly SemaphoreSlim _auditLock = new(1, 1);
     private volatile bool _isAuditPipelineFaulted = false;

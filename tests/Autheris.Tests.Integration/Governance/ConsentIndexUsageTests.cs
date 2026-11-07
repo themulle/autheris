@@ -42,4 +42,37 @@ public sealed class ConsentIndexUsageTests : IDisposable
             position = at + column.Length;
         }
     }
+
+    [Fact]
+    public async Task SubjectConsentQuery_WithTenant_NeverReturnsAnotherTenantsConsents()
+    {
+        // WP-SC-01 / SEC-SC-02: behavioural replacement of the former SQLite tenant-predicate check.
+        var table = new Autheris.Domain.Common.TableIdentifier("sales", "dbo", "tenant_iso");
+        var meta = await _repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = table,
+            Table = new Autheris.Domain.Model.Table { SourceType = "sql", SourceName = "sales", SchemaName = "dbo", TableName = "tenant_iso", DisplayName = "tenant_iso" },
+            Columns = [new Autheris.Domain.Model.TableColumn { ColumnName = "a", DataType = "integer" }]
+        });
+        var subject = new Autheris.Domain.Common.Sid("S-1-5-21-TENANT-ISO");
+        var now = TimeProvider.System.GetUtcNow();
+        foreach (var tenant in new[] { "tenant-a", "tenant-b" })
+        {
+            await _repo.CreateConsentAsync(new Autheris.Domain.Model.Consent
+            {
+                TenantId = new Autheris.Domain.Common.TenantId(tenant),
+                TableId = meta.Table.Id,
+                TableIdentifier = table,
+                Effect = Autheris.Domain.Model.ConsentEffect.Allow,
+                GranteeType = Autheris.Domain.Model.GranteeType.User,
+                GranteeSid = subject,
+                ValidFrom = now.AddMinutes(-5),
+                ValidTo = now.AddDays(1)
+            });
+        }
+
+        var forA = await _repo.GetActiveConsentsForSubjectsAsync([subject], table, now, new Autheris.Domain.Common.TenantId("tenant-a"));
+
+        forA.ShouldHaveSingleItem().TenantId.Value.ShouldBe("tenant-a");
+    }
 }
