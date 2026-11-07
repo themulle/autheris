@@ -21,7 +21,7 @@ Replace the global writer role (`WebSql.DmlWriterRoles`) plus read consent with 
 
 ## 3. Scope
 ### In scope
-- Domain model `WriteRule` (operation, columns, row scope, optional row filter as WP-SIMPL-48 row-scope entries or simple column filters, optional per-statement row cap) on grant records (`Consent`) and as template content on `AccessProfile`; governance schema step `NNNN_write_grants` (next free forward-only migration step at merge time, per the frozen v1.5.0 base policy; PostgreSQL and SQL Server, plus SQLite while it still exists).
+- Domain model `WriteRule` (operation, columns, row scope, optional row filter as WP-SIMPL-48 row-scope entries or simple column filters, optional per-statement row cap) on grant records (`Consent`) and as template content on `AccessProfile`; governance schema step `NNNN_write_grants` (next free forward-only migration step at merge time, per the frozen v1.5.0 base policy; PostgreSQL and SQL Server only, OD-1).
 - Consent workflow: write rules in consent requests, data-owner approval, revocation, expiry (same lifecycle and validity as read grants; validity bounds per WP-SIMPL-47).
 - `IWriteGrantEvaluator` (core, no Casbin), invoked by the decision point as the write grant step, replacing both `CanWriteTableAsync` overloads and the writer-role block in `GovernedSqlRewriter`.
 - Engine: `DmlWritePermit` in `GovernancePolicy`; column-level checks in `SecureAssignments` / `ResolveInsertColumns`; masked, denied and PII columns writable only when named by a write rule; write-protected columns; INSERT check option for consent IN-list row filters; DELETE behind a disabled-by-default switch; MERGE rejected.
@@ -53,7 +53,7 @@ Replace the global writer role (`WebSql.DmlWriterRoles`) plus read consent with 
 - Token scope: `TokenAccessScope.IsReadOnly` / `HasScope` (`src/Autheris.Domain/Security/TokenAccessScope.cs:24`); no write scope exists.
 - Consent model: `Consent` (`src/Autheris.Domain/Model/ConsentModels.cs:76`, `GranteeType`, `GranteeSid`, `RoleName`, `ColumnRules`, `RowFilters`, validity, revocation), `ConsentColumnRule.AccessLevel` (`ColumnAccessLevel { Deny, Mask, Clear }`), `ConsentRequest` (`src/Autheris.Domain/Model/GovernanceModels.cs:33`), `IConsentRequestService.SubmitAsync` (`src/Autheris.Application/ConsentRequests/IConsentRequestService.cs`). Grantee matching `src/Autheris.Application/Policy/GranteeMatcher.cs`. Access profiles: `AccessProfile` (`src/Autheris.Domain/Model/AccessProfile.cs:7`, wildcard `TargetTables`), `AccessProfileAssignment` (`AccessProfileSubjectType { User, Group, Role }`, `ApprovedBy`).
 - Idempotency: `IIdempotencyStore.GetAsync/SetIfNotExistsAsync` (`src/Autheris.Application/Interfaces/IIdempotencyStore.cs`), Redis and in-memory implementations in `src/Autheris.Infrastructure/Idempotency/`.
-- Governance migrations: forward-only steps `src/Autheris.Infrastructure/Persistence/Migrations/Steps/{postgresql,sqlserver,sqlite}/`, last step `0005_catalog_min_group_size`.
+- Governance migrations: forward-only steps `src/Autheris.Infrastructure/Persistence/Migrations/Steps/{postgresql,sqlserver}/` (the `sqlite/` tree is removed by WP-SIMPL-11, OD-1), last step `0005_catalog_min_group_size`.
 - `DmlWriterRoles` referenced in 13 test files and in `docs/configuration-guide.md`, `docs/endpoints-and-testing.md`, `docs/features/f-data-02-governed-websql.md`, `docs/features/f-dialect-02-ast-sql-compiler.md`.
 
 ## 5. Implementation steps (TDD: write the section-6 tests of each step first)
