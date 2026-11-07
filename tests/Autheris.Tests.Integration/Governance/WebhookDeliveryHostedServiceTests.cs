@@ -18,6 +18,7 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -55,7 +56,7 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns(environment);
         var policy = new WebhookRetryPolicy(webhooks, _clock, () => 1.0);
-        var client = new WebhookDeliveryClient(
+        var client = WebhookDeliveryHostedServiceTestExtensions.NewClient(
             new HttpClient(_handler), options, policy, _clientLogger, env, _clock, validator ?? ((_, _, _) => Task.CompletedTask));
         var services = new ServiceCollection().AddSingleton<Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore>(_ceStore).BuildServiceProvider();
         _service = new WebhookDeliveryHostedService(
@@ -356,7 +357,7 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var policy = new WebhookRetryPolicy(options.Value.Webhooks, _clock, () => 1.0);
-        var client = new WebhookDeliveryClient(new HttpClient(_handler), options, policy, new WebhookCapturingLogger<WebhookDeliveryClient>(), env, _clock, (_, _, _) => Task.CompletedTask);
+        var client = WebhookDeliveryHostedServiceTestExtensions.NewClient(new HttpClient(_handler), options, policy, new WebhookCapturingLogger<WebhookDeliveryClient>(), env, _clock, (_, _, _) => Task.CompletedTask);
         var services = new ServiceCollection().AddSingleton(throwing).BuildServiceProvider();
         var service = new WebhookDeliveryHostedService(Outbox, client, new WebhookSubscriptionResolver(options, services), policy, options, _logger, _clock);
         await Outbox.EnqueueAsync(Msg("bad", "ce-1", source: WebhookSubscriptionSource.CloudEvent, owner: "tenant-A"));
@@ -426,6 +427,9 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
         _clock.Advance(TimeSpan.FromSeconds(2));
         await WaitUntilAsync(() => _handler.Calls.Count == 1);
 
+        // The delivery is acknowledged in the outbox after the HTTP call returns; the database write is asynchronous, so wait for it before stopping.
+        await WaitHelper.WaitUntil(async () => await Outbox.CountPendingAsync() == 0, TimeSpan.FromSeconds(10), "The delivered event was not completed in the outbox.");
+
         await _service.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
         _clock.TimerCount.ShouldBe(0);
         (await Outbox.CountPendingAsync()).ShouldBe(0);
@@ -435,4 +439,36 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
     {
         await WaitHelper.WaitUntil(condition, TimeSpan.FromSeconds(10), "Condition not reached.");
     }
+}
+
+/// <summary>
+/// Test access to the internal members of the webhook delivery types (the Application assembly exposes internals to the unit tests
+/// only; reflection keeps that allow-list unchanged).
+/// </summary>
+internal static class WebhookDeliveryHostedServiceTestExtensions
+{
+    private const System.Reflection.BindingFlags Any = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+
+    public static Task<int> RunOnceAsync(this WebhookDeliveryHostedService service, string leaseOwner, CancellationToken ct) =>
+        Call<int>(service, "RunOnceAsync", leaseOwner, ct);
+
+    public static Task<int> PurgeAsync(this WebhookDeliveryHostedService service, CancellationToken ct) =>
+        Call<int>(service, "PurgeAsync", ct);
+
+    public static Task HousekeepingAsync(this WebhookDeliveryHostedService service, CancellationToken ct) =>
+        Call(service, "HousekeepingAsync", ct);
+
+    public static WebhookDeliveryClient NewClient(
+        HttpClient http, IOptions<GatewayOptions> options, WebhookRetryPolicy policy, ILogger<WebhookDeliveryClient> logger,
+        IHostEnvironment env, TimeProvider time, Func<Uri, bool, CancellationToken, Task> validator) =>
+        (WebhookDeliveryClient)typeof(WebhookDeliveryClient)
+            .GetConstructors(Any)
+            .Single(c => c.GetParameters().Length == 7)
+            .Invoke([http, options, policy, logger, env, time, validator]);
+
+    private static Task Call(object target, string name, params object[] args) =>
+        (Task)target.GetType().GetMethod(name, Any)!.Invoke(target, args)!;
+
+    private static Task<T> Call<T>(object target, string name, params object[] args) =>
+        (Task<T>)target.GetType().GetMethod(name, Any)!.Invoke(target, args)!;
 }
