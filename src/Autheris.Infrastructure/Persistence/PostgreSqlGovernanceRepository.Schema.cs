@@ -288,7 +288,7 @@ public partial class PostgreSqlGovernanceRepository
                                     VALUES (@id, 'finance', 'dbo', 'finance_items', 1, @now)
                                     ON CONFLICT DO NOTHING;";
                 cmd.Parameters.AddWithValue("@id", childTableId);
-                cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
+                cmd.Parameters.AddWithValue("@now", TimeProvider.System.GetUtcNow().ToString("O"));
                 cmd.ExecuteNonQuery();
             }
 

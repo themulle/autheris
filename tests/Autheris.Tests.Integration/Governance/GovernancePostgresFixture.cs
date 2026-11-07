@@ -93,7 +93,8 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
         {
             Database = dbName,
             MaxPoolSize = 10,
-            ConnectionIdleLifetime = 5
+            ConnectionIdleLifetime = 10,
+            ConnectionPruningInterval = 5
         }.ConnectionString;
     }
 
