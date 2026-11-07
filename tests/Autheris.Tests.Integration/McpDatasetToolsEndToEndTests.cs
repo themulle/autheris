@@ -63,6 +63,7 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
 
     public void Dispose()
     {
+        _factory.Dispose();
         SqliteConnection.ClearAllPools();
         try { File.Delete(_dbPath); } catch { /* best effort */ }
     }

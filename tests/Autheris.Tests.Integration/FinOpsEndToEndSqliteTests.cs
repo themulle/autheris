@@ -63,6 +63,7 @@ INSERT INTO fin_cranes VALUES (1,'LTM-1100'),(2,'LR-1600');";
 
     public void Dispose()
     {
+        _factory.Dispose();
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
     }

@@ -21,52 +21,67 @@ using Shouldly;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed class ODataWriteRejectionTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejectionTests.Fixture>
 {
     private static readonly TableIdentifier ItemsTable = new("erp", "main", "items");
     private static readonly Sid WriterSid = new("S-1-5-21-ODATA-WRITER");
     private const string Tenant = "erp";
 
-    private readonly WebApplicationFactory<Program> _factory;
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"odata-write-reject-{Guid.NewGuid():N}.db");
-    private readonly SourceConnectionCounter _connectionCounter = new();
-    private bool _seeded;
+    private readonly Fixture _fixture;
+    private WebApplicationFactory<Program> _factory => _fixture.Factory;
+    private SourceConnectionCounter _connectionCounter => _fixture.ConnectionCounter;
 
-    public ODataWriteRejectionTests(WebApplicationFactory<Program> factory)
+    public ODataWriteRejectionTests(Fixture fixture)
     {
-        SeedDatabase(_dbPath);
-
-        var counter = _connectionCounter;
-        var dbPath = _dbPath;
-
-        _factory = factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Tenant);
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-odata-write-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-            builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "Sqlite");
-            builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={dbPath}");
-            builder.UseSetting("Gateway:OData:Enabled", "true");
-            builder.UseSetting("Gateway:Rebac:Enabled", "false");
-            builder.ConfigureServices(services =>
-            {
-                var original = services.Single(d => d.ServiceType == typeof(ISqlConnectionFactory));
-                services.Remove(original);
-                services.AddSingleton<ISqlConnectionFactory>(sp =>
-                    new CountingSqlConnectionFactory(
-                        (ISqlConnectionFactory)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
-                        counter,
-                        dbPath));
-            });
-        });
+        _fixture = fixture;
     }
 
-    public void Dispose()
+    public sealed class Fixture : IDisposable
     {
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch (IOException) { }
+        private readonly WebApplicationFactory<Program> _root = new();
+        private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"odata-write-reject-{Guid.NewGuid():N}.db");
+        public WebApplicationFactory<Program> Factory { get; }
+        internal SourceConnectionCounter ConnectionCounter { get; } = new();
+        public bool Seeded { get; set; }
+
+        public Fixture()
+        {
+            SeedDatabase(_dbPath);
+
+            var counter = ConnectionCounter;
+            var dbPath = _dbPath;
+
+            Factory = _root.WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Tenant);
+                builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
+                builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
+                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-odata-write-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "Sqlite");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={dbPath}");
+                builder.UseSetting("Gateway:OData:Enabled", "true");
+                builder.UseSetting("Gateway:Rebac:Enabled", "false");
+                builder.ConfigureServices(services =>
+                {
+                    var original = services.Single(d => d.ServiceType == typeof(ISqlConnectionFactory));
+                    services.Remove(original);
+                    services.AddSingleton<ISqlConnectionFactory>(sp =>
+                        new CountingSqlConnectionFactory(
+                            (ISqlConnectionFactory)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
+                            counter,
+                            dbPath));
+                });
+            });
+        }
+
+        public void Dispose()
+        {
+            Factory.Dispose();
+            _root.Dispose();
+            SqliteConnection.ClearAllPools();
+            try { File.Delete(_dbPath); } catch (IOException) { }
+        }
     }
 
     private static void SeedDatabase(string path)
@@ -80,7 +95,7 @@ public sealed class ODataWriteRejectionTests : IClassFixture<WebApplicationFacto
 
     private async Task EnsureSeededAsync()
     {
-        if (_seeded)
+        if (_fixture.Seeded)
         {
             return;
         }
@@ -124,7 +139,7 @@ public sealed class ODataWriteRejectionTests : IClassFixture<WebApplicationFacto
                 .ToList()
         });
 
-        _seeded = true;
+        _fixture.Seeded = true;
     }
 
     private HttpClient CreateClient()
@@ -218,7 +233,7 @@ public sealed class ODataWriteRejectionTests : IClassFixture<WebApplicationFacto
         _connectionCounter.Count.ShouldBe(beforeConnections, "An OData $batch containing a write must be rejected as a whole without touching the data source.");
     }
 
-    private sealed class SourceConnectionCounter
+    internal sealed class SourceConnectionCounter
     {
         private int _count;
         public int Count => Volatile.Read(ref _count);

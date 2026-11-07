@@ -40,6 +40,8 @@ public sealed class ReleaseSurfaceTests : IClassFixture<WebApplicationFactory<Pr
 
     public void Dispose()
     {
+        _factory.Dispose();
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         try { if (System.IO.File.Exists(_tempDbPath)) System.IO.File.Delete(_tempDbPath); } catch { }
         try { if (System.IO.File.Exists(_tempAnchorPath)) System.IO.File.Delete(_tempAnchorPath); } catch { }
     }
