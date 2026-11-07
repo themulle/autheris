@@ -132,7 +132,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             var checkpoint = unsigned with { Signature = sig };
 
             // Save to external store and repo
-            store.SavePurgeCheckpoint(checkpoint);
             await repo.SavePurgeCheckpointAsync(checkpoint);
 
             // Execute purge batch
@@ -166,7 +165,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             plan1.ShouldNotBeNull();
             var cp1Unsigned = new AuditPurgeCheckpoint(plan1.Value.FirstSurvivingSequence, plan1.Value.SurvivingPrevHash, plan1.Value.PurgeCount, threshold1, DateTimeOffset.UtcNow, string.Empty, null);
             var cp1 = cp1Unsigned with { Signature = AuditChainEngine.ComputePurgeCheckpointSignature(hmacKey, cp1Unsigned) };
-            store.SavePurgeCheckpoint(cp1);
             await repo.SavePurgeCheckpointAsync(cp1);
             await repo.ExecutePurgeBatchAsync(plan1.Value.MaxEligibleSequence, 100);
 
@@ -179,7 +177,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             plan2.Value.FirstSurvivingSequence.ShouldBe(11);
             var cp2Unsigned = new AuditPurgeCheckpoint(plan2.Value.FirstSurvivingSequence, plan2.Value.SurvivingPrevHash, plan2.Value.PurgeCount, threshold2, DateTimeOffset.UtcNow, string.Empty, null);
             var cp2 = cp2Unsigned with { Signature = AuditChainEngine.ComputePurgeCheckpointSignature(hmacKey, cp2Unsigned) };
-            store.SavePurgeCheckpoint(cp2);
             await repo.SavePurgeCheckpointAsync(cp2);
             await repo.ExecutePurgeBatchAsync(plan2.Value.MaxEligibleSequence, 100);
 
@@ -204,7 +201,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             var hmacKey = ((IAuditPurgeKeyProvider)repo).GetAuditHmacKey()!;
             var unsigned = new AuditPurgeCheckpoint(plan!.Value.FirstSurvivingSequence, plan.Value.SurvivingPrevHash, plan.Value.PurgeCount, thresholdUtc, DateTimeOffset.UtcNow, string.Empty, null);
             var checkpoint = unsigned with { Signature = AuditChainEngine.ComputePurgeCheckpointSignature(hmacKey, unsigned) };
-            store.SavePurgeCheckpoint(checkpoint);
             await repo.SavePurgeCheckpointAsync(checkpoint);
             await repo.ExecutePurgeBatchAsync(plan.Value.MaxEligibleSequence, 100);
 
@@ -234,7 +230,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             var hmacKey = ((IAuditPurgeKeyProvider)repo).GetAuditHmacKey()!;
             var unsigned = new AuditPurgeCheckpoint(plan!.Value.FirstSurvivingSequence, plan.Value.SurvivingPrevHash, plan.Value.PurgeCount, thresholdUtc, DateTimeOffset.UtcNow, string.Empty, null);
             var checkpoint = unsigned with { Signature = AuditChainEngine.ComputePurgeCheckpointSignature(hmacKey, unsigned) };
-            store.SavePurgeCheckpoint(checkpoint);
             await repo.SavePurgeCheckpointAsync(checkpoint);
             await repo.ExecutePurgeBatchAsync(plan.Value.MaxEligibleSequence, 100);
 
@@ -272,7 +267,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
                 "BAD_TAMPERED_HMAC_SIGNATURE_HEX",
                 null);
 
-            store.SavePurgeCheckpoint(badCheckpoint);
             await repo.SavePurgeCheckpointAsync(badCheckpoint);
             await repo.ExecutePurgeBatchAsync(plan.Value.MaxEligibleSequence, 100);
 

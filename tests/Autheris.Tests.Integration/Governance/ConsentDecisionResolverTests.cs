@@ -92,7 +92,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     {
         using var cmd = _repository.RawConnection().CreateCommand();
         cmd.CommandText = @"
-            INSERT OR IGNORE INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator');
+            INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator') ON CONFLICT DO NOTHING;
             INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
             SELECT @m, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';";
         cmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());

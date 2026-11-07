@@ -59,7 +59,6 @@
     <Compile Include="..\Autheris.Tests.Unit\Cdc\CdcStreamStoreContractTests.cs" Link="Cdc\CdcStreamStoreContractTests.cs" />
     <Compile Include="..\Autheris.Tests.Unit\DefaultTenantCaller.cs" Link="DefaultTenantCaller.cs" />
     <Compile Include="..\Autheris.Tests.Unit\ConsentRequests\DecisionTestSupport.cs" Link="ConsentRequests\DecisionTestSupport.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\TestSupport\CatalogVisibilityTestFactory.cs" Link="TestSupport\CatalogVisibilityTestFactory.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Webhooks\WebhookTestSupport.cs" Link="Webhooks\WebhookTestSupport.cs" />
   </ItemGroup>
 
