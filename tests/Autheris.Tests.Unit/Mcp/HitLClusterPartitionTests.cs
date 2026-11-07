@@ -179,7 +179,7 @@ public sealed class HitLClusterPartitionTests
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-05")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-05")]
     public async Task Ticket_signature_is_not_valid_broadcast_signature()
     {
         var (service, callback, ticket) = SetupServiceWithBroadcast();
@@ -196,7 +196,7 @@ public sealed class HitLClusterPartitionTests
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-05")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-05")]
     public async Task Broadcast_issued_before_ticket_creation_is_rejected()
     {
         var (service, callback, ticket) = SetupServiceWithBroadcast();

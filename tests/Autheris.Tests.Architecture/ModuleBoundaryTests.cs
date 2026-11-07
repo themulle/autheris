@@ -18,7 +18,7 @@ public sealed partial class ModuleBoundaryTests
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-02")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-02")]
     public void No_null_policy_service_in_production_construction()
     {
         var repoRoot = RepositoryScan.RepoRoot;

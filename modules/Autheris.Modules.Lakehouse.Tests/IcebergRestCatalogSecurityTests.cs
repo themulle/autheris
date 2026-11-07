@@ -98,7 +98,7 @@ public sealed class IcebergRestCatalogSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-02")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-02")]
     public void Federation_service_requires_decision_point()
     {
         var ex = Should.Throw<ArgumentNullException>(() =>

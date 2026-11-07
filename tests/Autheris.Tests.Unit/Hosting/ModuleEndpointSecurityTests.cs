@@ -184,7 +184,7 @@ public sealed class ModuleEndpointSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-04")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-04")]
     public void Audit_details_exclude_query_string()
     {
         var pathWithoutQuery = "/api/resource";
@@ -196,7 +196,7 @@ public sealed class ModuleEndpointSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-04")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-04")]
     public void Audit_target_is_length_capped()
     {
         var longTarget = "/" + new string('y', 2048);

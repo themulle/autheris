@@ -441,7 +441,7 @@ public sealed class ModuleLoaderSecurityTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-01")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-01")]
     public void Workspace_path_outside_development_fails_startup()
     {
         var options = new Autheris.Domain.Options.GatewayOptions();
@@ -456,7 +456,7 @@ public sealed class ModuleLoaderSecurityTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-01")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-01")]
     public void Workspace_module_symlink_outside_root_is_rejected()
     {
         var wsDir = Path.Combine(_tempRoot, "ws");
@@ -488,7 +488,7 @@ public sealed class ModuleLoaderSecurityTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-01")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-01")]
     public void Workspace_load_logs_unsigned_warning()
     {
         var wsDir = Path.Combine(_tempRoot, "ws_warn");

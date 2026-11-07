@@ -35,7 +35,7 @@ public sealed class CasbinEnforcementServiceTests
     [Theory]
     [MemberData(nameof(UnknownIpTestData))]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-03")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-03")]
     public async Task Unknown_client_ip_with_ip_rule_denies(IPAddress? clientIp)
     {
         using var service = new CasbinEnforcementService();
@@ -50,7 +50,7 @@ public sealed class CasbinEnforcementServiceTests
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-03")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-03")]
     public async Task Unknown_client_ip_without_ip_rule_is_unaffected()
     {
         using var service = new CasbinEnforcementService();

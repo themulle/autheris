@@ -15,7 +15,7 @@ public sealed partial class AuditDetailsArchitectureTests
 
     [Fact]
     [Trait("Category", "Security")]
-    [Trait("SecurityCondition", "SEC-50-04")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-04")]
     public void No_interpolated_audit_details_json()
     {
         var productionFiles = RepositoryScan.ProductionFiles
