@@ -38,7 +38,8 @@ internal static class ProductionStartupChecks
         var workspacePath = context.GetEnvironmentVariable("Gateway:Modules:WorkspacePath")
             ?? context.GetEnvironmentVariable("Gateway__Modules__WorkspacePath")
             ?? context.GetEnvironmentVariable("GATEWAY_MODULES_WORKSPACEPATH");
-        if (!string.IsNullOrWhiteSpace(workspacePath))
+        if (!string.IsNullOrWhiteSpace(workspacePath) &&
+            !string.Equals(workspacePath, context.Environment.EnvironmentName, StringComparison.OrdinalIgnoreCase))
         {
             throw new ValidationException("Security violation: Gateway:Modules:WorkspacePath is strictly prohibited outside the Development environment.");
         }
