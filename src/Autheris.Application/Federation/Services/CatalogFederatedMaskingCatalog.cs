@@ -24,7 +24,7 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
     private readonly ITableMetadataRepository _repository;
     private readonly IOptions<GatewayOptions> _options;
     private readonly TimeProvider _time;
-    private readonly ConcurrentDictionary<string, (IReadOnlyDictionary<string, MaskingRule> Map, DateTimeOffset LoadedAt)> _cache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (IReadOnlyDictionary<string, MaskingRule> Map, DateTimeOffset LoadedAt, Autheris.Application.Catalog.CatalogVersion Version)> _cache = new(StringComparer.Ordinal);
 
     public CatalogFederatedMaskingCatalog(ITableMetadataRepository repository, IOptions<GatewayOptions> options, TimeProvider? time = null)
     {
@@ -50,7 +50,9 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
     {
         var ttl = TimeSpan.FromSeconds(Math.Max(0, _options.Value.Federation.CatalogMaskingCacheSeconds));
         var now = _time.GetUtcNow();
-        if (_cache.TryGetValue(tenant.Value, out var entry) && now - entry.LoadedAt < ttl)
+        // Every catalog write (so every masking rule write) bumps the persisted catalog version: a changed version drops the cached map.
+        var version = await _repository.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+        if (_cache.TryGetValue(tenant.Value, out var entry) && now - entry.LoadedAt < ttl && entry.Version == version)
         {
             return entry.Map;
         }
@@ -59,8 +61,9 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
         var map = new Dictionary<string, MaskingRule>(StringComparer.Ordinal);
         foreach (var table in tables)
         {
-            // GHSA-7pjw: only the caller tenant's own tables contribute; another tenant's (weaker) rule never applies.
-            if (!string.Equals(table.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase))
+            // GHSA-7pjw: a table owned by another tenant never contributes (its weaker rule must not apply). A table without a recorded owner
+            // still contributes: masking more is the safe side, and the catalog repositories do not persist the owner yet.
+            if (!string.IsNullOrWhiteSpace(table.OwnerTenantId) && !string.Equals(table.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -86,7 +89,7 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
             }
         }
 
-        _cache[tenant.Value] = (map, now);
+        _cache[tenant.Value] = (map, now, version);
         return map;
     }
 }

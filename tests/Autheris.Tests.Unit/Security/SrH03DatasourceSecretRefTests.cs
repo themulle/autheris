@@ -125,7 +125,7 @@ public sealed class SrH03DatasourceSecretRefTests
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "ConnectionStrings:Default"));
 
-        await Should.ThrowAsync<ArgumentException>(() => service.RegisterDatasourceAsync(request, "S-1-5-21-1-500"));
+        await Should.ThrowAsync<ArgumentException>(() => service.RegisterDatasourceAsync(request, "S-1-5-21-1-500", isClusterAdmin: true));
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class SrH03DatasourceSecretRefTests
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "vault://datasources/telemetry/crane/auth_secret"));
 
-        var result = await service.RegisterDatasourceAsync(request, "S-1-5-21-1-500");
+        var result = await service.RegisterDatasourceAsync(request, "S-1-5-21-1-500", isClusterAdmin: true);
         result.SecretRef.ShouldBe("vault://datasources/telemetry/crane/auth_secret");
     }
 

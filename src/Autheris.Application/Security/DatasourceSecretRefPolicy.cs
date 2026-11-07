@@ -67,9 +67,43 @@ public static class DatasourceSecretRefPolicy
         }
     }
 
-    /// <summary>GHSA-v5c2: an existing secret is never silently replaced by a registration.</summary>
-    public static void ThrowIfExists(string secretRef, bool exists)
+    /// <summary>GHSA-v5c2: the domain is the caller's own tenant unless the caller is a canonical ClusterAdmin.</summary>
+    public static void RequireOwnDomain(string domain, string? tenant, bool isClusterAdmin)
     {
+        if (!isClusterAdmin && !string.Equals(domain.Trim(), tenant, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException("The datasource domain must be the caller's own tenant.");
+        }
+    }
+
+    /// <summary>Builds the tenant-bound server-managed ref <c>datasource:{domain}:{tenant}:{name}:auth_secret</c> and refuses an existing one.</summary>
+    public static string NewAuthSecretRef(Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider provider, string domain, string? tenant, string name)
+    {
+        var secretRef = $"{DomainPrefix(domain.ToLowerInvariant())}{(tenant ?? Autheris.Domain.Common.TenantId.Platform.Value).ToLowerInvariant()}:{name.ToLowerInvariant()}:auth_secret";
+        ThrowIfExists(provider, secretRef);
+        return secretRef;
+    }
+
+    /// <summary>
+    /// GHSA-v5c2: the single fail-closed place that refuses to replace an existing secret. Only a definite "not found" counts as absent;
+    /// any other provider failure is treated as existing. The check-then-set gap is accepted (no atomic set-if-absent in the provider).
+    /// </summary>
+    public static void ThrowIfExists(Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider provider, string secretRef)
+    {
+        bool exists;
+        try
+        {
+            exists = provider.GetSecretBytes(secretRef) is { Length: > 0 };
+        }
+        catch (System.Collections.Generic.KeyNotFoundException)
+        {
+            exists = false;
+        }
+        catch (Exception)
+        {
+            exists = true;
+        }
+
         if (exists)
         {
             throw new ArgumentException("An existing secret reference is never overwritten.", nameof(secretRef));

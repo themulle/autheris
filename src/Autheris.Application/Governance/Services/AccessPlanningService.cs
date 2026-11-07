@@ -736,11 +736,13 @@ public class AccessPlanningService : IAccessPlanningService
         AdminRegisterDatasourceRequest request,
         string adminSid,
         string? tenantId = null,
+        bool isClusterAdmin = false,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
 
+        DatasourceSecretRefPolicy.RequireOwnDomain(request.Domain, NormalizeTenant(tenantId), isClusterAdmin);
         var datasourceId = $"{request.Domain.ToLowerInvariant()}.{request.Name.ToLowerInvariant()}";
         string? secretRef = null;
         var vaultPrefix = $"vault://datasources/{request.Domain.ToLowerInvariant()}/";
@@ -757,7 +759,7 @@ public class AccessPlanningService : IAccessPlanningService
                     "Inline datasource secrets require a writable IKeyVaultSecretProvider; supply Auth.SecretRef instead.");
             }
 
-            secretRef = $"{DatasourceSecretRefPolicy.DomainPrefix(request.Domain.ToLowerInvariant())}{request.Name.ToLowerInvariant()}:auth_secret";
+            secretRef = DatasourceSecretRefPolicy.NewAuthSecretRef(_secretProvider, request.Domain, NormalizeTenant(tenantId), request.Name);
             try
             {
                 _secretProvider.SetSecret(secretRef, Encoding.UTF8.GetBytes(request.Auth.Secret));

@@ -74,6 +74,10 @@ public sealed class AdvisoryRegressionTests
     [InlineData("secret_namespace_is_bound_to_the_tenant")]
     [InlineData("foreign_tenant_secret_ref_is_rejected")]
     [InlineData("existing_secret_is_never_overwritten")]
+    [InlineData("throwing_provider_denies_the_write")]
+    [InlineData("mcp_registration_is_tenant_bound")]
+    [InlineData("mcp_registration_refuses_existing_secret")]
+    [InlineData("ingestion_refuses_existing_secret")]
     public async Task Ghsa_v5c2_cc86_regression(string bullet)
     {
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
@@ -105,16 +109,51 @@ public sealed class AdvisoryRegressionTests
                 await Should.ThrowAsync<ArgumentException>(() => Discovery(secrets, ingestion).RegisterDatasourceAsync(foreign, Ctx()));
                 secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
                 break;
-            default:
+            case "existing_secret_is_never_overwritten":
                 secrets.GetSecretBytes("datasource:telemetry:tenant-a:crane:secret").Returns([9, 9, 9]);
                 await Should.ThrowAsync<ArgumentException>(() => Discovery(secrets, ingestion).RegisterDatasourceAsync(request, Ctx()));
                 secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
                 break;
+            case "throwing_provider_denies_the_write":
+                secrets.GetSecretBytes(Arg.Any<string>()).Returns<byte[]>(_ => throw new InvalidOperationException("backend unavailable"));
+                await Should.ThrowAsync<ArgumentException>(() => Discovery(secrets, ingestion).RegisterDatasourceAsync(request, Ctx()));
+                secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
+                break;
+            case "mcp_registration_is_tenant_bound":
+                var planning = new AccessPlanningService(Substitute.For<IAuditLogRepository>(), Substitute.For<ITableMetadataRepository>(),
+                    Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
+                var mcp = new AdminRegisterDatasourceRequest("crane", "telemetry", Auth: new DatasourceAuthDto("apiKey", Secret: "s"));
+                await Should.ThrowAsync<UnauthorizedAccessException>(() => planning.RegisterDatasourceAsync(mcp, "admin", "tenant-a"));
+                var registered = await planning.RegisterDatasourceAsync(mcp, "admin", "tenant-a", isClusterAdmin: true);
+                registered.SecretRef.ShouldBe("datasource:telemetry:tenant-a:crane:auth_secret");
+                break;
+            case "mcp_registration_refuses_existing_secret":
+                secrets.GetSecretBytes("datasource:telemetry:tenant-a:crane:auth_secret").Returns([9]);
+                var existing = new AccessPlanningService(Substitute.For<IAuditLogRepository>(), Substitute.For<ITableMetadataRepository>(),
+                    Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
+                await Should.ThrowAsync<ArgumentException>(() => existing.RegisterDatasourceAsync(
+                    new AdminRegisterDatasourceRequest("crane", "telemetry", Auth: new DatasourceAuthDto("apiKey", Secret: "s")), "admin", "tenant-a", isClusterAdmin: true));
+                secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
+                break;
+            case "ingestion_refuses_existing_secret":
+                secrets.GetSecretBytes(default!).ReturnsForAnyArgs([9]);
+                var direct = new OpenApiIngestionService(Substitute.For<ITableMetadataRepository>(), NullLogger<OpenApiIngestionService>.Instance, secretProvider: secrets);
+                foreach (var (type, scheme) in new[] { ("apiKey", (string?)null), ("http", "bearer"), ("oauth2", null) })
+                {
+                    var auth = new DatasourceAuthDto(type, Scheme: scheme, Value: "v", ClientSecret: "v", SecretRef: "datasource:telemetry:tenant-a:crane:secret");
+                    await Should.ThrowAsync<ArgumentException>(() => direct.IngestOpenApiJsonAsync(Spec, "telemetry", defaultBaseUrl: null, auth: auth, dryRun: false));
+                }
+
+                secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(bullet), bullet, "Unknown regression case.");
         }
     }
 
     [Theory]
     [InlineData("datasource_test_is_confined_to_the_caller_tenant")]
+    [InlineData("tenant_confined_caller_skips_the_global_connections_preflight")]
     [InlineData("state_change_on_foreign_tenant_table_is_refused")]
     [InlineData("state_change_on_missing_table_is_not_found_and_unaudited")]
     public async Task Ghsa_9229_wvm9_regression(string bullet)
@@ -122,7 +161,8 @@ public sealed class AdvisoryRegressionTests
         var repo = Substitute.For<ITableMetadataRepository>();
         if (bullet.StartsWith("datasource_test", StringComparison.Ordinal))
         {
-            repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new[] { Table("tenant-b") });
+            // The pre-flight case has no catalog table at all: only the operator-configured connection could match, and a confined caller never reaches it.
+            repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(bullet.Contains("preflight", StringComparison.Ordinal) ? Array.Empty<TableMetadata>() : new[] { Table("tenant-b") });
             var factory = Substitute.For<ISqlConnectionFactory>();
             var gateway = new GatewayOptions { DataSources = new SqlDataSourceOptions() };
             gateway.DataSources.Connections["src_b"] = new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "Server=h;Database=d;" };
@@ -154,6 +194,7 @@ public sealed class AdvisoryRegressionTests
     [InlineData("other_tenant_rule_never_applies")]
     [InlineData("strictest_rule_wins_in_any_order")]
     [InlineData("rule_change_invalidates_the_cache")]
+    [InlineData("rule_write_through_the_repository_invalidates_the_cache")]
     public async Task Ghsa_7pjw_hvff_regression(string bullet)
     {
         static TableMetadata WithRule(string owner, string name, string ruleType) => Table(owner, name) with
@@ -161,6 +202,27 @@ public sealed class AdvisoryRegressionTests
             Columns = [new TableColumn { ColumnName = "pin" }],
             ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["pin"] = new MaskingRule { RuleType = ruleType } }
         };
+
+        if (bullet.StartsWith("rule_write", StringComparison.Ordinal))
+        {
+            using var real = Autheris.Tests.Unit.GovernanceStoreFactory.CreateSqlite(Substitute.For<Autheris.Application.Common.Interfaces.IEpochValidationService>());
+            var tableId = Guid.NewGuid();
+            TableMetadata Stored(string ruleType) => new()
+            {
+                Identifier = new TableIdentifier("src_a", "dbo", "orders"),
+                Table = new Table { Id = tableId, SourceName = "src_a", SchemaName = "dbo", TableName = "orders", DisplayName = "orders", IsActive = true },
+                OwnerTenantId = "tenant-a",
+                Columns = [new TableColumn { ColumnName = "pin", DataType = "TEXT" }],
+                ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["pin"] = new MaskingRule { RuleType = ruleType } }
+            };
+
+            var live = new CatalogFederatedMaskingCatalog(real, Options.Create(new GatewayOptions()));
+            await real.UpsertTableMetadataAsync(Stored("MASK_EMAIL"));
+            (await live.GetClassificationsAsync(TenantA))["pin"].RuleType.ShouldBe("MASK_EMAIL");
+            await real.UpsertTableMetadataAsync(Stored("NULLIFY"));
+            (await live.GetClassificationsAsync(TenantA))["pin"].RuleType.ShouldBe("NULLIFY");
+            return;
+        }
 
         var repo = Substitute.For<ITableMetadataRepository>();
         var catalog = new CatalogFederatedMaskingCatalog(repo, Options.Create(new GatewayOptions()));
