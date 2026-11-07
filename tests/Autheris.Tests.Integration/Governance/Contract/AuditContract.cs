@@ -317,9 +317,9 @@ public abstract class AuditContract : GovernanceContractBase
         (await Store.AuditLogs.VerifyAuditHashChainAsync()).Should().BeTrue();
         (await store2.AuditLogs.VerifyAuditHashChainAsync()).Should().BeTrue();
 
-        var page = await Store.AuditLogs.QueryAuditLogPageAsync(new AuditLogPageQuery(Store.TenantA, PageSize: 50));
+        var entries = await Store.AuditLogs.GetAuditLogEntriesAsync(limit: 50, tenantId: Store.TenantA);
         var byInsert = orderedIds
-            .Select(id => page.Items.Single(e => e.Id == id))
+            .Select(id => entries.Single(e => e.Id == id))
             .ToList();
 
         for (int i = 1; i < byInsert.Count; i++)

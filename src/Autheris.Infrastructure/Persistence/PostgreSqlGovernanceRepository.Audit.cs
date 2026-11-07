@@ -38,14 +38,14 @@ public partial class PostgreSqlGovernanceRepository
             SelectMaxEligibleSeqSql: "SELECT MAX(seq) FROM AUDIT_LOG_ENTRIES WHERE seq < @survivingSeq");
 
         public static string GetAuditLogEntries(bool withTenant) =>
-            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
                             FROM AUDIT_LOG_ENTRIES
                             {(withTenant ? " WHERE tenant_id = @tenantId" : "")}
                             ORDER BY rowid DESC
                             LIMIT @lim";
 
         public static string FormatQueryAuditLogs(string whereSql) =>
-            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id
+            $@"SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq
                             FROM AUDIT_LOG_ENTRIES
                             {whereSql}
                             ORDER BY rowid DESC

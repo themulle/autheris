@@ -51,7 +51,8 @@ internal static class AuditSqlCore
         DetailsJson = reader.GetString(o + 8),
         PrevHash = reader.GetString(o + 9),
         EntryHash = reader.GetString(o + 10),
-        TenantId = StoredTenant.ParseAudit(reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11))
+        TenantId = StoredTenant.ParseAudit(reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11)),
+        ChainSequence = reader.FieldCount > o + 12 && !reader.IsDBNull(o + 12) ? reader.GetInt64(o + 12) : null
     };
 
     public static AuditPurgeCheckpoint ReadPurgeCheckpoint(DbDataReader reader, int o = 0) => new(
@@ -463,6 +464,7 @@ internal static class AuditSqlCore
         {
             long? seq = reader.IsDBNull(1) ? null : reader.GetInt64(1);
             var entry = ReadAuditEntry(reader, 2);
+            entry.ChainSequence = seq;
             list.Add(new AuditChainRecord(reader.GetInt64(0), seq, entry));
         }
 
