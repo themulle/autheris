@@ -1,75 +1,140 @@
 # WP-SIMPL-51 WebSQL client contract: cost and quota, typed columns, syntax positions, paging
-Status: Draft (Phases 1-2 in this spec; Phase 3 security review pending before implementation)
+Status: Draft (Phase 3 security review pending)
 Parent: [plan](../2026-11-05-plan-project-simplification.md) | Issues: [#527](https://github.com/themulle/autheris/issues/527), [#528](https://github.com/themulle/autheris/issues/528), [#529](https://github.com/themulle/autheris/issues/529), [#533](https://github.com/themulle/autheris/issues/533) (all opened 2026-11-05, v1.7.0 observations) | Related: #530 and #558 (closed, error-code fixes), WP-SIMPL-45 (WebSQL write path), WP-SIMPL-42 (usage accounting) | Freeze: feature work, runs under `freeze-exception` like WP-SIMPL-38..48 or after the freeze (see D-51e)
 
 ## 1. Goal and outcome
-`POST /api/v1/sql` becomes a client contract that SQL-editor and BI-style clients can build on without re-implementing gateway policy: expensive statements are priced and limited per caller like GraphQL (#527), every output column carries a type and a mask flag (#528), syntax errors carry a position and the common trailing semicolon and comments are accepted (#529), and a plain statement can be paged without the client rewriting it (#533). Rights, masks, row filters, cost, quota and audit apply unchanged to every page.
+`POST /api/v1/sql` becomes a client contract that SQL-editor and BI-style clients can build on without re-implementing gateway policy: expensive statements are priced and limited per caller from the same budget as GraphQL (#527), every output column carries a type, a nullability and a mask flag (#528), syntax errors carry a position and a trailing semicolon and comments are accepted (#529), and a plain ordered statement can be paged without the client rewriting it (#533). Rights, masks, row filters, cost, quota and audit apply unchanged to every page.
 
 ## 2. Preconditions and dependencies
-- WP-SIMPL-45 PR 4-6 (WebSQL write path) merged first; this WP touches the same endpoint (`WebSqlEndpoints.*`) and must not conflict with the write pipeline.
-- WP-SIMPL-42 (usage accounting per user and AD group) supplies the per-caller identity for quota keys if merged; otherwise the quota key is SID plus tenant (as GraphQL today).
-- No dependency on WP-SIMPL-50.
+- PR 1 (I3) and PR 3 (quota extraction) have no dependency. PR 2 (I2) touches `WebSqlEndpoints.Execution.cs` and the executor result path: after WP-SIMPL-45 PR 4. PR 4 and PR 5 touch `GovernedSqlExecutor`, `GovernedSqlRewriter` and `WebSqlOptions`: after WP-SIMPL-45 PR 5 (audit sequence, budgets) and PR 6.
+- WP-SIMPL-42 is optional: the quota key is `ClientQuotaContext.SubjectId` (tenant, SID, scope) as for GraphQL today; when WP-SIMPL-42 is merged, the `IConsumerUsageRecorder` deny records of 5.4 carry its group attribution without code changes here.
+- No dependency on WP-SIMPL-50 (edited in parallel; no shared files).
 
 ## 3. Scope
 ### In scope
-**I1 Cost estimate and per-caller quota (#527)**
-- Extract the quota part of `CostAndQuotaMiddleware` (`src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs`, uses `IRateLimiterService`) into a transport-neutral `IQueryCostQuota` in Application; GraphQL and WebSQL both call it (no second implementation).
-- Static cost estimate from the governed AST before execution: relations, joins without join predicate (cross joins), set operations, missing `LIMIT`, estimated rows from catalog statistics when present. Above `Gateway:WebSql:MaxStatementCost` the statement is rejected before it reaches the source.
-- Per-caller quota (SID, tenant, scope) on cost units per window and on execution seconds consumed (measured, charged after execution), so repeated statements that hit `SQL_TIMEOUT` are throttled.
-- Rejection returns 429 `QUERY_COST_QUOTA_EXCEEDED` (same code as GraphQL) with `Retry-After`; over-cost single statement returns 400 `QUERY_COST_EXCEEDED`. Both are audited as DENY with the computed cost.
-**I2 Column types and mask flags (#528)**
-- Response `columns` becomes an array of objects: `{ "name", "type", "nullable", "masked" }`. `type` is the gateway's logical type (catalog type for column references, inferred type for expressions, `unknown` otherwise); `masked` is true when the caller's effective column access for the output column is not `Clear` (source: the masked-column set `TreeSqlCompiler` already computes for GraphQL `extensions.maskedFields`).
-- Breaking change to the response shape (allowed, no production yet); Arrow and Parquet export keep their own schema and are unchanged.
-**I3 Syntax error position and statement terminators (#529)**
-- `SQL_SYNTAX_ERROR` problem details carry `line` and `column` of the first syntax error from the ANTLR error listener (`FastSqlEngine.SyntaxError`), never the offending token text or any statement fragment.
-- One trailing `;` (with optional whitespace or comments after it) is accepted and dropped before governance; more than one statement stays rejected with detail "single statement expected". Comments are accepted (hidden channel) and are not forwarded to the source.
-**I4 Paging without rewriting the statement (#533)**
-- Request option `page: { "size": n }` and a continuation token: a truncated response returns `next` (opaque); the client sends `{ "sql", "parameters", "next" }` to get the next page. No client-supplied raw offset.
-- The gateway applies `OFFSET … FETCH NEXT … ROWS ONLY` on the governed AST when rendering for the source (grammar and dialect rendering already exist in `SqlBase.g4`); the user's text is unchanged and is what the audit records, plus page number and offset.
-- Stable order: paging requires a deterministic top-level `ORDER BY`; without it the first page is served and `next` is omitted with `pagingUnavailable: "order_by_required"` (D-51b).
-- The token is HMAC-protected and binds statement hash, parameter hash, SID, tenant, offset, page size and expiry; a token presented by another principal, for another statement or after expiry is rejected (400 `SQL_PAGING_TOKEN_INVALID`).
-- Limits: `size` <= `MaxAllowedRows`; total offset <= `Gateway:WebSql:MaxPagingOffset` (analogous to `GraphQL:MaxAllowedOffset`); cost and quota are checked per page (D-51c).
-- GraphQL: same mechanism for a root field without `first`/`offset` in the text, via a gateway-reserved request extension; implemented in the same PR only if the shared paging service fits the PR size limit, otherwise a follow-up PR in this WP.
+- **I1 (#527)**: static cost estimate of every client SQL statement (WebSQL JSON, Parquet, Trino sync and async, cross-source) before execution; per-statement ceiling; reservation and settlement against the caller's existing cost bucket (`IRateLimiterService`), shared with GraphQL through one extracted service; measured execution seconds charged at settlement.
+- **I2 (#528)**: `columns` becomes `[{ "name", "type", "nullable", "masked" }]`.
+- **I3 (#529)**: `SQL_SYNTAX_ERROR` problem details gain `line` and `column`; one trailing `;` is accepted; comments are accepted on the client SQL path and reach neither the source nor the audit text.
+- **I4 (#533)**: request `page`, response `next` (HMAC-bound continuation token), OFFSET injected on the governed AST.
 ### Out of scope
-- Server-side cursors or snapshots across pages (D-51b).
-- Cost-based optimizer statistics collection; I1 uses only statistics already in the catalog.
-- Changing Arrow/Parquet export endpoints.
+- Server-side cursors or snapshots (D-51b); `EXPLAIN` round trips (D-51a).
+- GraphQL paging extension (dropped, D-51j); Trino `errorLocation` (follow-up, D-51k); Arrow export endpoints.
 
-## 4. Current state (verified 2026-11-07 on main 5bbb0576)
-- `WebSqlEndpoints.cs:49` maps `POST /api/v1/sql`; `WebSqlEndpoints.Execution.cs` ~194-270 writes `columns` as a string array (`SqlResultColumns.UniqueNames`), `rowCount` and `truncated` (`RowLimitedDataReader.HasMoreRows`).
-- `CostAndQuotaMiddleware` and `QueryCostAnalyzerRule` exist only in `Autheris.GraphQL`; WebSQL is bounded only by timeout, row cap and resource groups (`QueryGovernorOptions`).
-- `GovernedSqlErrorCodes.SyntaxError = "SQL_SYNTAX_ERROR"` with fixed message "Invalid SQL syntax." (`GovernedSqlException.cs:15`, `:77`); the ANTLR listener receives line and column but they are dropped.
-- `SqlRowLimit.Effective` applies `DefaultMaxRows` only without an explicit `LIMIT`.
+## 4. Current state (verified 2026-11-07 on `origin/main` 5bbb0576)
+- `WebSqlEndpoints.cs:24` `WebSqlRequestDto(Sql, Parameters, DataSource)`; `:49/:56/:63` map `/api/v1/sql`, `/api/sql`, `/v1/statement` to one handler `HandleWebSqlRequest` (`Execution.cs:40`). Trino route and `wait_timeout` go to `IWebSqlStatementManager` (`Execution.cs:136-165`); Parquet to `HandleParquetWebSqlRequestAsync` (`:304`). JSON is streamed lazily: `columns` as strings from `SqlResultColumns.UniqueNames` (`:213-220`), then `rows`, then `rowCount` and `truncated` (`RowLimitedDataReader.HasMoreRows`, `:259`, `:276-277`).
+- Errors: `WriteWebSqlErrorAsync` (`Governance.cs:28`) -> `SqlCompilerErrorMapper.TryMap` -> `SqlErrorResponse.WriteAsync` (fixed message, optional `limit` extension). `SqlErrorMapping(Status, Code, Title, Limit)` (`SqlCompilerErrorMapper.cs:23`); `ParseCanceledException`/`RecognitionException` -> 400 `SQL_SYNTAX_ERROR` (`:116`). `ApiErrorCodes` registers every `GovernedSqlErrorCodes` constant by reflection (`ApiErrorCodes.cs:167-173`).
+- Parse: `GovernedSqlRewriter.AnalysisTokenOptions` (`:49-53`, `Analyze`), `CompileRequestFactory.TokenGuards` (`:59-72`, `Compile`) and `FederatedDuckDbExecutionService.AnalysisTokenOptions` (`:42`) all set `RejectComments = true`: comments are rejected today (the draft assumed "accepted"). Grammar `singleStatement: statement EOF` (`SqlBase.g4:31`); `SEMICOLON` is a token (`:1474`), so `SELECT 1;` fails. Comments and whitespace are hidden-channel (`:1556-1565`). `ThrowingErrorListener` (`FastSqlEngine.cs:17-29`) throws `ParseCanceledException("line L:C: msg")`; the position survives only as text and the mapper drops it. `SyntaxErrorNegativeCache` stores the message only (`Parsing/SyntaxErrorNegativeCache.cs:22`). Nested block comments are always rejected (`FastSqlEngine.cs:528-535`).
+- Audit text: `CompiledSqlAuditDigester.Anonymize` -> `AstSecurityVisitor.RedactSqlLiterals` (`AstSecurityVisitor.Support.cs:271`) keeps every hidden token, including comment text.
+- Row cap: `SqlRowLimit.Effective`; rewriter `:650-654` computes `deliveredRowLimit` and `enforcedMaxRows = max + 1` (probe row); `AstSecurityVisitor.Select.cs:111-123` clamps or injects the root `PaginationClause(Offset, Limit)`. Every generator already renders `PaginationClause.Offset` (`PostgreSqlDialectGenerator:336`, `SqlServerDialectGenerator:643`, `OracleDialectGenerator:531`, `DatabricksDialectGenerator:76`, `DuckDbDialectGenerator` in `AnalyticalDialectGenerators.cs:336`).
+- Masks in WebSQL are `MaskExpression` projections of the secured table source (`AstSecurityVisitor.Tables.cs:97-101`); lineage helper `ExpressionReferencesMaskedColumn` (`MaskGuards.AggregateAndDerived.cs:394`). `TreeSqlCompiler.CollectMaskedColumns` serves the GraphQL tree path only and is not usable for WebSQL (draft corrected). `SELECT *` expands to visible catalog columns (`EnforceCatalogProjection = true`). `SqlResultColumns.Describe` and `TrinoColumnTypes.Map` already type results for the Trino protocol.
+- Cost: `CostAndQuotaMiddleware` (GraphQL only): `IClientTierResolver.ResolveAsync` -> `ClientQuotaContext(SubjectId, Tier, Policy, Scope)`; over-cost -> 400 `QUERY_COST_QUOTA_EXCEEDED`; `ReserveCostQuotaAsync` denied -> 429 `RATE_LIMIT_EXCEEDED` with `Retry-After`; `SettleCostQuotaAsync(reserved, actual)` in `finally`; failure fee `max(BaseCost, FailureFee)`. Weights: `QueryCostOptions` (`Gateway:QueryCost`: `BaseCost 1`, `RowCostFactor 0.5`, `FailureFee 1`); the SQL dry-run analysis has its own formula (`QueryAnalysisService.Sql.cs:371-376`, `QueryAnalysisOptions`: `CostPerJoin 25`, `CostPerSubqueryDepth 30`, `UnboundedScanPenalty 50`). WebSQL is bounded only by timeout, row cap, `ResourceGroupMiddleware` concurrency and `QueryGovernorOptions` connection limits. `TableMetadata.EstimatedRowCount` exists (`TableModels.cs:419`).
+- GraphQL offsets: `GraphQlOptions.MaxAllowedOffset` `[Range(0, 10000)] = 10000`, enforced in `GatewayExecutionService.cs:164`, `GovernedTreeQueryService.cs:272`, `Query.Catalog.cs:37` (`INVALID_OFFSET`); GraphQL already pages with `first`/`offset` and keyset connections.
+- Keys: `CompiledSqlAuditDigester` resolves the audit key (`GovernanceDb:AuditHmacKeyVaultRef`, else HKDF of `DataMasking:HmacSecretKeyVaultRef`) with no ephemeral fallback outside Development/Test (`:119-164`); every WebSQL statement already requires it. `KeysetCursorEncoder` (BulkStream key, per-process fallback) and `AccessPlanningService.ResolveSigningKey` (HKDF of a secret ref) are the existing token patterns.
+- Audit: `GovernedSqlExecutor.cs:343-367` writes `WebSqlQuery` ALLOW (`originalSql` redacted, `originalSqlHash`, `dataSource`, compiled fields) before the connection opens; `:274-320` writes `WebSqlQueryDenied` / `WebSqlDmlRejected` for audited rejections.
 
-## 5. Implementation steps
-1. Phase 3 security review of this spec (I1 quota bypass, I2 mask-flag information leak, I3 no statement echo, I4 token binding and offset abuse); conditions appended here.
-2. PR 1: I3 (smallest, independent).
-3. PR 2: I2.
-4. PR 3: I1 (shared `IQueryCostQuota`, GraphQL switched to it with unchanged behaviour, WebSQL wired).
-5. PR 4: I4 for WebSQL; PR 5: I4 for GraphQL if not in PR 4.
-6. Close #527, #528, #529, #533 with the merging PRs.
+## 5. Design
+### 5.1 I3 syntax position, terminator, comments (PR 1)
+1. `src/TrinoSqlEngine/SqlSyntaxErrorException.cs` (new): `public sealed class SqlSyntaxErrorException : ParseCanceledException { public int Line { get; } public int Column { get; } }` (both 1-based; column = `charPositionInLine + 1`). Thrown by both `ThrowingErrorListener.SyntaxError` overloads and by every token-position throw in `EnsureTokensAreSafe`. Timeout and capacity rejections stay plain `ParseCanceledException` (no position). `SyntaxErrorNegativeCache.Entry` gains `int Line, int Column` and rethrows a `SqlSyntaxErrorException`.
+2. `SqlTokenSecurityOptions.AllowTrailingStatementTerminator` (bool, default false; part of record equality, so of the negative-cache key). In `FastSqlEngine.ParseOnCurrentThread`, after `tokens.Fill()` and before `EnsureTokensAreSafe`: when set and the last default-channel token before EOF is `SEMICOLON`, move that one token to the hidden channel. Only the last one: `SELECT 1;;` and `SELECT 1; SELECT 2` stay `SQL_SYNTAX_ERROR`, positioned at the second `;` or the second `SELECT`.
+3. `src/Autheris.Application/Sql/Policy/ClientSqlTokenPolicy.cs` (new): `static SqlTokenSecurityOptions Analysis` and `Compile(TargetSqlDialect)`, used by `GovernedSqlRewriter` (`:49`), `CompileRequestFactory` (`:59`) and `FederatedDuckDbExecutionService` (`:42`); identical to today's options except `RejectComments = false`, `AllowTrailingStatementTerminator = true`. OLAP staging, `SqlSecurityValidator` fragments and policy predicates keep `RejectComments = true`. Nested block comments stay rejected.
+4. Audit: `RedactSqlLiterals` emits one space for `SIMPLE_COMMENT`/`BRACKETED_COMMENT` tokens (comment text would bypass literal redaction).
+5. Error body: `SqlErrorMapping` gains `int? Line = null, int? Column = null`, filled by `TryMap` for `SqlSyntaxErrorException`; `SqlErrorResponse.WriteAsync` adds extension members `line`, `column` when set. Example: `{"type":"...","title":"Invalid SQL syntax.","status":400,"code":"SQL_SYNTAX_ERROR","line":3,"column":14,"traceId":"..."}`. Never the ANTLR message, token text or a fragment.
 
-## 6. Tests
-- Security (`[Trait("Category","Security")]`): `WebSqlCostTests.Cross_join_over_max_cost_is_rejected_before_execution`, `Repeated_timeouts_exhaust_quota`, `Quota_is_per_caller_and_tenant`; `WebSqlColumnsTests.Masked_column_is_flagged`, `Mask_flag_does_not_reveal_columns_hidden_by_policy`; `WebSqlSyntaxTests.Error_position_contains_no_statement_text`, `Multiple_statements_still_rejected`, `Comments_are_not_forwarded_to_source`; `WebSqlPagingTests.Token_from_other_principal_is_rejected`, `Token_for_other_statement_is_rejected`, `Expired_token_is_rejected`, `Row_filter_and_mask_apply_on_every_page`, `Offset_above_max_is_rejected`, `Audit_records_user_statement_and_page`.
-- Functional: `Trailing_semicolon_is_accepted`, `Column_types_from_catalog_and_expressions`, `Paging_without_order_by_returns_first_page_without_next`, `GraphQL_quota_behaviour_unchanged_after_extraction`.
+### 5.2 I2 typed columns and mask flags (PR 2)
+1. `SqlResultColumn` gains `bool? AllowDbNull = null` (from `DbColumn.AllowDBNull` in `Describe`).
+2. `CompiledSql` gains `public ImmutableArray<bool> OutputColumnMasks { get; internal init; }` (one entry per root output column, cached with the template). `AstSecurityVisitor` sets it after the root select is secured: per root select item (after `*` expansion) `true` when `ExpressionReferencesMaskedColumn` finds a `MaskExpression` in its lineage through derived tables, CTEs and set operations (masked in any branch = masked). Empty for DML.
+3. Federated: `FederatedDuckDbExecutionService` computes the same array on the root DuckDB statement via `IsMaskedByName` over `SourceSubtreeModel.MaskedColumns`.
+4. Row writer becomes `Func<DbDataReader, GovernedResultInfo, CancellationToken, Task>` with `public sealed record GovernedResultInfo(IReadOnlyList<SqlResultColumn> Columns, ImmutableArray<bool> MaskedColumns)` (`Autheris.Application.Sql`). Callers: `WebSqlEndpoints.Execution.cs:198, :333`, `TableStreamEndpoints.cs:362, :483` (ignore it), `GovernedSqlExecutionService.cs:139, :144`. Mask array length != `FieldCount` -> `SQL_COMPILER_INVARIANT` 500 (fail closed).
+5. JSON: `{"name":"email","type":"varchar","nullable":true,"masked":true}`; `type` = `TrinoColumnTypes.Map(column, []).Name` (delivered type; for a masked column the mask output type), `nullable` = `AllowDbNull ?? true`. Same for `format=arrays`; empty result keeps `"columns":[]`; OpenAPI spec updated; Parquet unchanged. Breaking, no compatibility flag (no production).
+
+### 5.3 I1 shared quota service (PR 3)
+`src/Autheris.Application/Common/Quota/IQueryCostQuota.cs` (new):
+```csharp
+public enum QueryCostOutcome { Admitted, OverCost, QuotaExhausted, Unmetered }
+public sealed record QueryCostRequest(ClaimsPrincipal Principal, string? ApiKey, string? ClientIp, int EstimatedCost, int TransportMaxCost, bool CapByTierMaxCostPerQuery);
+public sealed record QueryCostAdmission(QueryCostOutcome Outcome, string SubjectId, ClientQuotaPolicy Policy, int ReservedCost, int MaxAllowedCost, int RetryAfterSeconds, string? Scope);
+public interface IQueryCostQuota
+{
+    Task<QueryCostAdmission> AdmitAsync(QueryCostRequest request, CancellationToken ct);
+    Task<CostQuotaResult?> SettleAsync(QueryCostAdmission admission, int actualCost, CancellationToken ct); // null unless Admitted
+}
+```
+`QueryCostQuota` (singleton) takes over tier resolution, the ceiling `maxAllowed = CapByTier ? min(policy.MaxCostPerQuery, TransportMaxCost) : TransportMaxCost`, further capped at `policy.MaxTokensCapacity` (a never-admissible statement is `OverCost`, not an endless 429), reservation and settlement. `Unmetered` when `IsRateLimitingDisabled` (ceiling still applies). GraphQL keeps its cost calculation, error shaping, headers and `extensions.cost` (`CapByTier = true`, `TransportMaxCost = EffectiveGatewayMaxCost`). `SettleCostQuotaAsync` must debit `actual - reserved` even into a negative balance (verify `InMemoryRateLimiterService` and `RedisRateLimiterService`; fix here if clamped).
+
+### 5.4 I1 SQL cost estimate and gate (PR 4)
+1. `SqlQueryMetadata` gains init properties `CrossJoinCount` (CROSS joins, comma joins, joins whose `ON` is a constant), `SetOperationCount`, `HasRootOrderBy`, `HasRootOffset` (set by `SqlQueryAnalyzer`).
+2. `src/Autheris.Application/Sql/Cost/SqlStatementCostEstimator.cs` (new, static, pure):
+   `C_est = BaseCost + ceil(RowCostFactor * R) + CostPerJoin * (J - X) + CrossJoinCost * k * X + CostPerSubqueryDepth * D + SetOperationCost * U + (bounded ? 0 : UnboundedScanPenalty) + ceil(O / OffsetRowsPerCostUnit)`
+   R = rows delivered at most (`SqlRowLimit.Effective(explicitLimit)` or page size); J = `JoinCount`; X = `CrossJoinCount`; k = 1 when both relations of the cross join have `EstimatedRowCount <= 1000`, else 4 (unknown = large); D = `MaxSubqueryDepth`; U = `SetOperationCount`; bounded = explicit root LIMIT/FETCH or paged; O = page offset. Saturating, clamped to `[1, int.MaxValue]`. DML (WP-SIMPL-45): `BaseCost + DmlStatementCost + ceil(RowCostFactor * effective MaxAffectedRows)`: never free, never paged. `QueryAnalysisService.Sql.cs:371-376` switches to the estimator, so dry-run analysis reports what WebSQL enforces (its field term is dropped).
+   Example: no LIMIT, 1000-row cap, one join: `1 + 500 + 25 + 50 = 576`.
+3. Actual cost at settlement: `BaseCost + ceil(RowCostFactor * rowsDelivered) + ceil(ExecutionSecondCost * elapsedSeconds)` (DML: affected rows); on failure, timeout or abort `max(failureFee, that value)`. Elapsed runs from command start to reader close, timeouts included.
+4. Options `WebSqlOptions.Cost` (`Gateway:WebSql:Cost`, `[Range]` validated at start): `Enabled` true; `MaxStatementCost` 2000 `[1, 1_000_000]`; `CrossJoinCost` 250 `[0, 100_000]`; `SetOperationCost` 25 `[0, 10_000]`; `OffsetRowsPerCostUnit` 100 `[1, 1_000_000]`; `ExecutionSecondCost` 10 `[0, 10_000]`; `DmlStatementCost` 50 `[0, 100_000]`. Other weights come only from `QueryCostOptions` / `QueryAnalysisOptions`. `Enabled = false` fails the start outside Development.
+5. Gate: in `GovernedSqlExecutor` after the rewrite and before the ALLOW audit or the DML intent audit, and in `FederatedDuckDbExecutionService` after its `Analyze`, for `Transport is WebSql or Trino && !PlannedTableRead`: `AdmitAsync(new(user, null, null, C_est, MaxStatementCost, CapByTierMaxCostPerQuery: false))`, settle in `finally`. Quota key `ClientQuotaContext.SubjectId`; window and capacity are the caller's tier bucket, shared with GraphQL.
+6. Errors (new `GovernedSqlErrorCodes`, auto-registered): `QueryCostExceeded = "QUERY_COST_QUOTA_EXCEEDED"` -> 400, fixed message "The statement cost exceeds the allowed limit. Add a LIMIT, a filter or fewer joins.", extensions `estimatedCost`, `maxAllowedCost`; `RateLimitExceeded = "RATE_LIMIT_EXCEEDED"` -> 429 with `Retry-After` and `retryAfterSeconds`. Exceptions `SqlCostExceededException`, `SqlQuotaExhaustedException(int retryAfterSeconds)` mapped in `SqlCompilerErrorMapper`; the Trino route returns its standard error with the same code.
+7. Audit: ALLOW `WebSqlQuery` gains `cost: { estimated, maxAllowed, tier }`; denies write `WebSqlQueryDenied` (DML `WebSqlDmlRejected`) with `reason` = code and `estimatedCost`; `IConsumerUsageRecorder` records `DenyCost` / `DenyRateLimit` like GraphQL. The JSON body ends with `"cost":{"estimated":576,"actual":12}` only when `policy.ExposeCostExtensions`.
+
+### 5.5 I4 paging (PR 5)
+1. Request: `WebSqlRequestDto(..., WebSqlPageRequest? Page = null, string? Next = null)`, `public sealed record WebSqlPageRequest(int? Size)`. First page `{"sql":"SELECT id, email FROM crm.customers ORDER BY id","page":{"size":500}}`; next `{"sql":"<same text>","parameters":{...same...},"next":"eyJ2Ijox...Q.kM3x..."}` (`page` optional; if present its size must equal the token size).
+2. Response: `{"columns":[...],"rows":[...],"rowCount":500,"truncated":true,"page":{"number":1,"offset":0,"size":500},"next":"eyJ2Ijox..."}`; the last page has no `next`. If paging is impossible, page 1 is served with the normal row cap, no `next`, and `"pagingUnavailable":"order_by_required" | "statement_has_limit" | "federated" | "offset_limit"`.
+3. Endpoint validation: paging only on JSON `POST /api/v1/sql` and `/api/sql` without `wait_timeout`; Trino route or Parquet -> 400 `SQL_PAGING_UNSUPPORTED` (new code); `page.size` in `[1, SqlRowLimit.For(WebSql).MaxAllowedRows]` else 400 `BAD_REQUEST`; `next` longer than 512 chars -> `SQL_PAGING_TOKEN_INVALID` before decoding.
+4. `IWebSqlPageTokenCodec` (`src/Autheris.Application/Sql/Paging/WebSqlPageTokenCodec.cs`, singleton): token = `base64url(payload) "." base64url(HMAC-SHA256(K, "autheris-wsql-page/v1" || payload || binding))`, payload `{"v":1,"o":<offset>,"n":<size>,"p":<page>,"exp":<unix s>}`. `binding` = SHA-256 of the exact UTF-8 statement, SHA-256 of canonical parameter JSON (sorted names, typed values), caller identity (`EndpointSecurity.GetCallerIdentity`), tenant, requested data source, transport; never in the payload. K = HKDF-SHA256 of the audit key `CompiledSqlAuditDigester` resolves, info `autheris/websql-page-token/v1` (new `DerivePurposeKey(string info)`): no new secret, same on every node, no ephemeral fallback outside Development/Test. Checks: fixed-time MAC, `v == 1`, `exp > now`, `o <= MaxOffset`, `n` within limits. Every failure -> 400 `SQL_PAGING_TOKEN_INVALID` (new code, one fixed message) plus `WebSqlQueryDenied` audit with `reason` only.
+5. Options `WebSqlOptions.Paging` (`Gateway:WebSql:Paging`): `Enabled` true; `MaxOffset` 10_000 `[0, 1_000_000]` (like `GraphQL:MaxAllowedOffset`); `TokenLifetimeMinutes` 15 `[1, 1440]`. A next offset above `MaxOffset` -> no `next`, `offset_limit`.
+6. Governed AST: `GovernedSqlQueryRequest` gains `SqlPageWindow? Page` (`public sealed record SqlPageWindow(long Offset, int Size, int Number)`) with `RowLimit = new SqlRowLimit(Size, Size)`. Rewriter: DML -> `SQL_PAGING_UNSUPPORTED`; `!HasRootOrderBy`, root LIMIT/FETCH/OFFSET or federated -> page 1 runs unpaged with `pagingUnavailable`, page > 1 -> `SQL_PAGING_TOKEN_INVALID`. Otherwise `CompileRequest.EnforcedOffset` -> `AstSecurityVisitorOptions.EnforcedOffset`, and `AstSecurityVisitor.Select.cs:111-123` sets the root `PaginationClause(Offset: literal when > 0, Limit: size + 1)` (existing probe row; offset bound like the row cap and part of the template key). Rendering: PostgreSQL `ORDER BY .. LIMIT n+1 OFFSET o`; SQL Server and Oracle `ORDER BY .. OFFSET o ROWS FETCH NEXT n+1 ROWS ONLY`; Databricks and DuckDB `ORDER BY .. LIMIT n+1 OFFSET o`.
+7. Row filters, masks, KeySets, cost and quota run per page (D-51c; R = size, O = offset). Audit `WebSqlQuery` gains `page: { number, offset, size }`; `originalSql` stays the client text.
+
+## 6. Tests (red first; S = `[Trait("Category","Security")]`)
+- `tests/Autheris.Tests.Unit/TrinoSqlEngine/FastSqlEngineSyntaxPositionTests.cs`: `SyntaxError_CarriesLineAndColumn` (`SELECT\n  FROM` -> 2/3); `NegativeCacheHit_KeepsPosition`; `TrailingSemicolon_Accepted_WhenAllowed`; `TrailingSemicolonThenComment_Accepted`; `TrailingSemicolon_Rejected_WhenNotAllowed`; S `TwoSemicolons_Rejected_AtSecond`; S `SecondStatement_Rejected_AtSecondStatement`.
+- `tests/Autheris.Tests.Unit/Sql/Errors/SqlCompilerErrorMapperTests.cs` (extend): S `SyntaxError_Body_HasPosition_AndNoStatementText` (body contains no token of the statement and no ANTLR text).
+- `tests/Autheris.Tests.Unit/Security/WebSqlCommentPolicyTests.cs` S: `Comments_Accepted_ForClientSql`; `Comments_NotForwardedToSource_AllDialects` (`CompiledSql.Sql` has no `--` or `/*` for PG, MSSQL, Oracle, Databricks, DuckDB); `NestedBlockComment_StillRejected`; `CommentCannotHideSecondStatement` (`SELECT 1 /* x */ ; DROP TABLE t` rejected); `FragmentValidator_StillRejectsComments`.
+- `tests/Autheris.Tests.Unit/Sql/CompiledSqlAuditDigesterTests.cs` (extend) S: `Anonymize_DropsCommentText`.
+- `tests/Autheris.Tests.Unit/Sql/WebSqlOutputMaskTests.cs`: S `MaskedColumn_IsFlagged`; S `ExpressionOverMaskedColumn_IsFlagged`; S `MaskedInOneUnionBranch_IsFlagged`; S `MaskedThroughCteAndDerivedTable_IsFlagged`; S `HiddenColumn_NotInOutput_NoFlagRevealsIt`; S `MaskedColumnType_IsDeliveredType`; S `MaskArrayLengthMismatch_FailsClosed`; `ClearColumn_NotFlagged`; `Federated_MaskedColumn_IsFlagged`.
+- `tests/Autheris.Tests.Unit/Api/WebSqlColumnsContractTests.cs`: `Columns_HaveNameTypeNullableMasked`; `ArraysFormat_SameColumnObjects`; `EmptyResult_EmptyColumns`.
+- `tests/Autheris.Tests.Unit/Quota/QueryCostQuotaTests.cs`: `GraphQl_BehaviourUnchanged_AfterExtraction` (same 400/429, headers, settlement); S `NeverAdmissible_IsOverCost_Not429`; S `Settle_DebitsAboveReservation`; `RateLimitingDisabled_Unmetered_CeilingApplies`.
+- `tests/Autheris.Tests.Unit/Sql/SqlStatementCostEstimatorTests.cs`: `DefaultStatement_Is576`; `CrossJoin_LargeOrUnknown_WeightsFour`; `CrossJoin_SmallDimension_WeightsOne`; `ConstantOn_CountsAsCrossJoin`; `SetOperations_Add`; `Offset_AddsCost`; `Saturates_AtIntMax`; `Dml_NeverZero`; `Analysis_And_Enforcement_SameNumber`.
+- `tests/Autheris.Tests.Unit/Security/WebSqlCostQuotaTests.cs` S: `OverCost_RejectedBeforeSourceConnection` (fake factory never opened); `QuotaExhausted_429_WithRetryAfter`; `RepeatedTimeouts_ExhaustQuota` (fake clock, 4 x 30 s); `Quota_IsPerCallerAndTenant`; `Quota_SharedWithGraphQl`; `TrinoRoute_And_Parquet_AreMetered`; `CrossSource_IsMetered`; `PlannedTableRead_NotDoubleCharged`; `Deny_IsAudited_WithEstimatedCost`; `Dml_GatedBeforeIntentAudit_AndCharged`.
+- `tests/Autheris.Tests.Unit/Security/WebSqlPagingTokenTests.cs` S: `OtherPrincipal_Rejected`; `OtherTenant_Rejected`; `OtherStatement_Rejected` (one whitespace changed); `OtherParameters_Rejected`; `OtherDataSource_Rejected`; `Expired_Rejected`; `TamperedOffset_Rejected`; `Oversized_RejectedBeforeDecode`; `Payload_RevealsNoStatementOrCaller`; `AllFailures_SameCodeAndMessage`; `InvalidToken_IsAudited`.
+- `tests/Autheris.Tests.Unit/Sql/WebSqlPagingTests.cs`: S `RowFilterAndMask_ApplyOnEveryPage`; S `OffsetAboveMax_NoNext`; S `Dml_WithPage_Unsupported`; S `Audit_RecordsUserStatementAndPage`; S `CostAndQuota_CheckedPerPage`; `WithoutOrderBy_FirstPageWithoutNext`; `RootLimit_PagingUnavailable`; `Federated_PagingUnavailable`; `LastPage_HasNoNext`; `TrinoRoute_WithPage_Unsupported`; `OffsetRendering_GoldenPerDialect` (5 dialects).
 
 ## 7. Verification commands
 - `dotnet build Autheris.sln`
-- `dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj --filter "FullyQualifiedName~WebSql"`
+- `dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj --filter "FullyQualifiedName~WebSql|FullyQualifiedName~QueryCost|FullyQualifiedName~SyntaxPosition|FullyQualifiedName~SqlCompilerErrorMapper|FullyQualifiedName~CostEstimator"`
 - `dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj --filter "Category=Security"`
 
 ## 8. Acceptance criteria
-- [ ] #527: an over-cost statement is rejected before execution; repeated expensive statements are throttled per caller with `QUERY_COST_QUOTA_EXCEEDED`; GraphQL and WebSQL share one quota implementation.
-- [ ] #528: every output column has `name`, `type`, `nullable`, `masked`; masked values are distinguishable from real nulls.
-- [ ] #529: syntax errors carry line and column and no statement text; a trailing `;` and comments are accepted.
-- [ ] #533: a client pages a plain ordered statement through `next` tokens without changing its text; policies, cost, quota and audit apply per page; tokens are bound to principal, statement and expiry.
+- [ ] #527: an over-cost statement is rejected (400) before any source connection; repeated expensive or timing-out statements are throttled per caller (429, `Retry-After`); GraphQL and WebSQL share `IQueryCostQuota` and one bucket; analysis and enforcement report the same estimate.
+- [ ] #528: every output column has `name`, `type`, `nullable`, `masked`; flags follow mask lineage; nothing about hidden columns is revealed.
+- [ ] #529: syntax errors carry `line` and `column` and no statement text; one trailing `;` and comments are accepted; comments reach neither source nor audit.
+- [ ] #533: an ordered statement pages via `next` without text changes; policies, cost, quota and audit apply per page; tokens bind statement, parameters, caller, tenant, data source, transport and expiry.
 
-## 9. Decisions (defaults taken; owner may change)
-- D-51a: cost estimate is static (AST plus existing catalog statistics) plus measured execution seconds charged to the quota; no `EXPLAIN` round trip to the source.
-- D-51b: paging requires a top-level `ORDER BY`; the gateway does not append a table key and keeps no snapshot or server cursor (consistency like `first`/`offset` today).
-- D-51c: cost and quota are checked per page, not once per result.
-- D-51d: paging uses an opaque HMAC-bound continuation token only; no client-supplied raw offset.
-- D-51e: the WP is feature work under the freeze; it runs as `freeze-exception` after WP-SIMPL-45 because the issues report missing gateway policy (#527) on a core transport (OD-3), not convenience only.
+## 9. PR slicing (<= 400 net added src lines each)
+1. PR 1 I3, ~170 src: `SqlSyntaxErrorException.cs`, `FastSqlEngine.cs`, `SqlTokenSecurityOptions.cs`, `SyntaxErrorNegativeCache.cs`, `ClientSqlTokenPolicy.cs`, `GovernedSqlRewriter.cs`, `CompileRequestFactory.cs`, `FederatedDuckDbExecutionService.cs`, `AstSecurityVisitor.Support.cs`, `SqlCompilerErrorMapper.cs`, `SqlErrorResponse.cs`. No dependency.
+2. PR 2 I2, ~330 src: `CompiledSql.cs`, `AstSecurityVisitor.Select.cs`, `MaskGuards.AggregateAndDerived.cs`, `SqlResultColumns.cs`, `IGovernedSqlExecutionService.cs`, `GovernedSqlExecutor.cs`, `GovernedSqlExecutionService.cs`, `FederatedDuckDbExecutionService.cs`, `WebSqlEndpoints.Execution.cs`, `WebSqlEndpoints.Governance.cs` (OpenAPI), `TableStreamEndpoints.cs`. After WP-SIMPL-45 PR 4.
+3. PR 3 I1a, ~150 net src: `IQueryCostQuota.cs`, `QueryCostQuota.cs`, `CostAndQuotaMiddleware.cs` (shrinks), DI registration, settle fix if needed. No dependency.
+4. PR 4 I1b, ~380 src: `ISqlQueryAnalyzer.cs`, `SqlQueryAnalyzer.cs`, `SqlStatementCostEstimator.cs`, `RestApiOptions.cs` (`WebSqlCostOptions`), `GovernedSqlException.cs` (codes), new exceptions, `SqlCompilerErrorMapper.cs`, `GovernedSqlExecutor.cs`, `FederatedDuckDbExecutionService.cs`, `QueryAnalysisService.Sql.cs`, startup check. After PR 3 and WP-SIMPL-45 PR 5.
+5. PR 5 I4, ~370 src: `WebSqlPageTokenCodec.cs`, `CompiledSqlAuditDigester.cs`, `WebSqlEndpoints.cs`, `WebSqlEndpoints.Execution.cs`, `IGovernedSqlExecutionService.cs`, `GovernedSqlRewriter.cs`, `CompileRequest.cs`, `CompileRequestFactory.cs`, `AstSecurityVisitorOptions.cs`, `AstSecurityVisitor.Select.cs`, `GovernedSqlExecutor.cs`, `RestApiOptions.cs` (`WebSqlPagingOptions`). After PR 2 and PR 4.
+Close #529 with PR 1, #528 with PR 2, #527 with PR 4, #533 with PR 5.
 
-## 10. Estimate
-About 8 pd: Phase 3 0.5, I3 1, I2 1.5, I1 2.5, I4 2.5 (WebSQL and GraphQL). Net lines about +900 (new shared quota service, paging service, tests), partly offset by moving GraphQL quota code.
+## 10. Threat notes for Phase 3
+- Quota bypass: the gate sits in the executors, not the endpoint, so JSON, Parquet, Trino sync/async and cross-source are metered; `PlannedTableRead` is excluded only because the planning transport prices it and it is never client-settable; one bucket across transports. Policy-denied statements are not charged (bounded by `PostAuthSid` rate limiting and the parse budget): reviewer to confirm.
+- Mask-flag leak: flags exist only for delivered columns; hidden columns never appear (star = visible set, explicit reference = `SQL_POLICY_DENIED`); `type` is the delivered type, so a masked column's catalog type is not revealed; flags expose no more than the masked values and GraphQL `maskedFields` already do.
+- No statement echo: only integer `line`/`column`; fixed message; ANTLR text stays in the server log.
+- Token replay and binding: replay by the same caller within the lifetime only re-reads a page and is charged again; any change of statement, parameters, caller, tenant, source or transport fails the MAC; key from the audit key chain, no per-process fallback in production.
+- Offset DoS: `MaxOffset`, offset cost term, per-page quota, timeout and resource groups; no raw client offset.
+- Comment smuggling: comments are hidden-channel and never emitted (SQL is regenerated from the AST); nested block comments rejected; terminator handling looks at default-channel tokens only, so a comment cannot hide a second statement; comment text is removed from audit details.
+
+## 11. Decisions (defaults taken; owner may change)
+- D-51a: static estimate (AST plus `EstimatedRowCount`) plus measured execution seconds at settlement; no `EXPLAIN`. Kept; statistics only weight cross joins.
+- D-51b: paging requires a root `ORDER BY`; no appended key, no snapshot. Kept.
+- D-51c: cost and quota per page. Kept.
+- D-51d: opaque HMAC-bound token only, no raw offset. Kept.
+- D-51e: `freeze-exception` after WP-SIMPL-45. Kept.
+- D-51f (code-forced): codes follow GraphQL as implemented: over-cost 400 `QUERY_COST_QUOTA_EXCEEDED`, exhausted bucket 429 `RATE_LIMIT_EXCEEDED` (the draft had them swapped).
+- D-51g: page-token key = HKDF of the existing audit key (no new secret) instead of a dedicated `SigningKeyRef`.
+- D-51h (code-forced): comments are rejected today; they become accepted on the client SQL path only; other parsers stay strict.
+- D-51i: the WebSQL per-statement ceiling is `WebSql:Cost:MaxStatementCost`, not the tier `MaxCostPerQuery` (GraphQL-shaped; Standard 250 would reject a default 1000-row statement); the tier still governs the shared bucket.
+- D-51j (code-forced): GraphQL paging part dropped; GraphQL already has `first`/`offset` and keyset connections.
+- D-51k: Trino `errorLocation` out of scope (follow-up issue).
+- D-51l: statements with their own root LIMIT/FETCH/OFFSET are not paged (`statement_has_limit`); `type` is the delivered reader type, not a catalog or inferred type (code-forced: it is the only type known before rows stream).
+
+## 12. Estimate
+About 8 pd (unchanged): Phase 3 0.5, PR 1 1, PR 2 2, PR 3 1, PR 4 1.5, PR 5 2. About 1,400 net src lines in five PRs plus about 1,500 test lines (GraphQL paging removed; mask lineage and cost wiring larger than drafted).
