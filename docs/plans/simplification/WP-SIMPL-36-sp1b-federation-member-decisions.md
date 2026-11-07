@@ -33,3 +33,18 @@ Commit: `fix(security): resolve GHSA-7ccv-hfgq-5qwm (federation column access ch
 ## Owner questions (default taken)
 - OQ-1: accept loss of pushdown for column-constrained tables instead of a per-member decision model in this fix? Default: yes (minimal fail-closed, SEC-SIMPL-94 satisfied).
 - OQ-2: align explain output with the eligibility rule? Default: no in this fix; follow-up issue.
+
+## Binding conditions (Phase 3)
+Verdict: APPROVED WITH CONDITIONS. The design covers every item of the fix list (per-member deny/mask for wildcard and explicit references, name clash, audit flag via part A) and satisfies SEC-SIMPL-94 / OD-15. OQ-1 and OQ-2 defaults are agreed (OQ-2 follow-up issue must be filed).
+- C-1: `IsPushdownEligible` returns false (never throws, never true by default) for a null decision, null or unavailable `Metadata`, and any unknown or non-enumerated access level; every branch defaults to "not eligible".
+- C-2: Eligibility additionally requires `Metadata.ColumnMasks`-equivalent catalog state to be clear independent of the column list: `ColumnMaskingRules.Count == 0` and `ScopeClearance` not restricting, because `IsCatalogSensitive` also keys on masking rules whose column is absent from `Columns`.
+- C-3: The partitioner predicate is evaluated for every named table, including the first and a would-be root; the default `null` predicate must not be reachable from `CrossSourcePlanner` (planner always passes it).
+- C-4: The compiler guard (decision 5) must throw before any SQL text for the subtree is generated, and the message must not contain column names or mask values.
+- C-5: The single-table fallback must keep refusing filters, joins and window references on masked or denied columns (`IsMaskedOrDenied`); the rewritten `T_SEC_DATA123_02/_03` tests must keep their refusal assertions unchanged.
+- C-6: The OQ-2 follow-up (explain shows a subtree that execution does not push down) must expose no column or decision detail beyond what explain shows today.
+Extra mandatory tests (`[Trait("Category","Security")]`):
+- `FederatedSubtree_IsPushdownEligible_DefaultsToFalse_ForMissingDecisionEmptyCatalogOrUnknownLevel`
+- `FederatedSubtree_CatalogMaskingRuleForColumnAbsentFromColumnList_NotEligible`
+- `FederatedSubtree_ScopeRestrictedClearance_NotEligible`
+- `FederatedSubtree_Compile_RejectsIneligibleRoot` (root, not only non-root member)
+- `FederatedSubtree_FallbackSingleTable_FilterOnMaskedMemberColumn_StillRefused`
