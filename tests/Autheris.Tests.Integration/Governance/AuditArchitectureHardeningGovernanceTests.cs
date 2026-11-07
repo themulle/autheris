@@ -51,7 +51,6 @@ public sealed class AuditArchitectureHardeningGovernanceTests : IDisposable
     [Fact]
     public async Task AU04_PostgreSqlRepository_EnrolledTransaction_Commit_PersistsEntryAndChainsCorrectly()
     {
-        var dbPath = Path.Combine(_testDir, "enrolled_tx_commit.db");
         var wormPath = Path.Combine(_testDir, "worm_commit");
         var anchorPath = Path.Combine(_testDir, "anchor_commit.json");
 
@@ -88,7 +87,6 @@ public sealed class AuditArchitectureHardeningGovernanceTests : IDisposable
     [Fact]
     public async Task AU04_PostgreSqlRepository_EnrolledTransaction_Rollback_RestoresPointerAndPreservesChain()
     {
-        var dbPath = Path.Combine(_testDir, "enrolled_tx_rollback.db");
         var wormPath = Path.Combine(_testDir, "worm_rollback");
         var anchorPath = Path.Combine(_testDir, "anchor_rollback.json");
 
