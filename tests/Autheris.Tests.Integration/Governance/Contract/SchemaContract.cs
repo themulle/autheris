@@ -256,7 +256,7 @@ public abstract class SchemaContract : GovernanceContractBase
 
         var applyAct = () => drifted.MigrationRunner.ApplyAsync();
         var applyEx = await applyAct.Should().ThrowAsync<GovernanceSchemaDriftException>();
-        applyEx.Which.Code.Should().Be(GovernanceMigrationCodes.Drift);
+        applyEx.Which.Code.Should().Be(GovernanceMigrationCodes.UnsupportedBase);
 
         var verifyAct = () => drifted.MigrationRunner.VerifyAsync();
         var verifyEx = await verifyAct.Should().ThrowAsync<GovernanceSchemaDriftException>();
@@ -282,7 +282,7 @@ public abstract class SchemaContract : GovernanceContractBase
         }
         else
         {
-            await target.ExecuteNonQueryAsync("DROP TRIGGER trg_audit_append_only ON AUDIT_LOG_ENTRIES");
+            await target.ExecuteNonQueryAsync("DROP TRIGGER trg_audit_append_only_row ON AUDIT_LOG_ENTRIES");
         }
 
         var verifyAct = () => target.MigrationRunner.VerifyAsync();

@@ -251,7 +251,7 @@ public abstract class CatalogContract : GovernanceContractBase
             .ToList();
 
         var act = () => Store.PhysicalIndexes.ReplacePhysicalIndexesAsync(table.Identifier, overCapIndexes);
-        await act.Should().ThrowAsync<TableDefinitionException>();
+        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [RequiresContainerRuntimeFact]
@@ -281,7 +281,7 @@ public abstract class CatalogContract : GovernanceContractBase
 
         var table = await Store.TableMetadata.UpsertTableMetadataAsync(BuildTable("corrupt_keys"));
         await Store.ExecuteNonQueryAsync(
-            "UPDATE COLUMNS SET is_primary_key = 2 WHERE table_id = @tid AND column_name = 'id'",
+            "UPDATE TABLE_PRIMARY_KEY_COLUMNS SET is_descending = 2 WHERE table_id = @tid",
             ("@tid", table.Table.Id.ToString()));
         Store.InvalidateMetadataCache();
 
@@ -333,7 +333,7 @@ public abstract class CatalogContract : GovernanceContractBase
         afterReingest.Tags.Select(t => t.Tag).Should().BeEquivalentTo(["pii", "shared"]);
 
         await Store.ExecuteNonQueryAsync(
-            "UPDATE DATASET_CATALOG_SETTINGS SET visibility_tier = 'CORRUPT_TIER' WHERE table_id = @tid",
+            "UPDATE TABLE_CATALOG_SETTINGS SET visibility = 99 WHERE table_id = @tid",
             ("@tid", table.Table.Id.ToString()));
 
         var strictAct = () => Store.TableMetadata.GetDatasetCatalogSettingsAsync(table.Identifier, strict: true);

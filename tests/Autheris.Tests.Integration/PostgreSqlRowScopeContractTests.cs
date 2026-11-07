@@ -68,7 +68,7 @@ INSERT INTO md.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     }
 
     private SqlProcedureRowScopeResolver Resolver() => new(
-        new SqlConnectionFactory(),
+        new SqlConnectionFactory(new DevelopmentEnvironment()),
         Options.Create(new GatewayOptions
         {
             DataSources = new SqlDataSourceOptions

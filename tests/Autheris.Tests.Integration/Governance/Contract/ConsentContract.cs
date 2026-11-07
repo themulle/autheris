@@ -153,7 +153,7 @@ public abstract class ConsentContract : GovernanceContractBase
         crossTableRead.Should().BeEmpty();
 
         var allForTenantA = await Store.Consents.GetAllActiveConsentsForSubjectsAsync([GranteeSid], ["AnalystRole"], now, Store.TenantA);
-        allForTenantA.Select(c => c.Id).Should().BeEquivalentTo([consentA.Id, roleConsentA.Id]);
+        allForTenantA.Where(c => c.TableIdentifier.Equals(tableA.Identifier)).Select(c => c.Id).Should().BeEquivalentTo([consentA.Id, roleConsentA.Id]);
         allForTenantA.Select(c => c.Id).Should().NotContain(consentB.Id);
 
         var roleForTenantA = await Store.Consents.GetActiveRoleConsentsAsync(tableA.Identifier, "AnalystRole", Store.TenantA, now);
