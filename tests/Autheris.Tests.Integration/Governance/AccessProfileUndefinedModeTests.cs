@@ -1,5 +1,4 @@
-namespace Autheris.Tests.Unit.AccessProfiles;
-
+namespace Autheris.Tests.Integration.Governance;
 using System;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
@@ -13,7 +12,7 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class AccessProfileUndefinedModeTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
 
     public void Dispose() => _repo.Dispose();
 

@@ -1,6 +1,7 @@
 using Autheris.Tests.Common;
-namespace Autheris.Tests.Unit.Webhooks;
+namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Unit.Webhooks;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -26,7 +27,7 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
 {
     private static readonly DateTimeOffset Start = DateTimeOffset.Parse("2026-10-14T12:00:00Z");
 
-    private readonly SqliteGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
     private readonly WebhookCapturingHandler _handler = new();
     private readonly WebhookManualTime _clock = new(Start);
     private readonly WebhookCapturingLogger<WebhookDeliveryHostedService> _logger = new();
@@ -37,11 +38,11 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
 
     public WebhookDeliveryHostedServiceTests()
     {
-        _repo = GovernanceStoreFactory.CreateSqlite(
+        _repo = GovernanceTestDatabase.CreateRepository(
             Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions
             {
-                GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=wh_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", SeedDemoData = false }
+                GovernanceDb = new GovernanceDbOptions { SeedDemoData = false }
             }));
         Build(new WebhooksOptions());
     }

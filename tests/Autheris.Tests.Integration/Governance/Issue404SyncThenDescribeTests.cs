@@ -1,5 +1,4 @@
-namespace Autheris.Tests.Unit.Catalog;
-
+namespace Autheris.Tests.Integration.Governance;
 using Autheris.Application.Audit;
 using Autheris.Application.DataSources.Services;
 using Autheris.Application.Catalog.Interfaces;
@@ -26,7 +25,7 @@ using TargetSqlDialect = TrinoSqlEngine.TargetSqlDialect;
 public sealed class Issue404SyncThenDescribeTests : IDisposable
 {
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
-    private readonly SqliteGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
     private readonly IEpochValidationService _epoch = Substitute.For<IEpochValidationService>();
     private readonly IDataCatalogClient _client = Substitute.For<IDataCatalogClient>();
     private readonly IPhysicalKeyCatalog _physical = Substitute.For<IPhysicalKeyCatalog>();
@@ -36,9 +35,9 @@ public sealed class Issue404SyncThenDescribeTests : IDisposable
     {
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=t24_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", JournalMode = "DELETE" }
+            GovernanceDb = new GovernanceDbOptions { }
         });
-        _repo = GovernanceStoreFactory.CreateSqlite(_epoch, options);
+        _repo = GovernanceTestDatabase.CreateRepository(_epoch, options);
         _client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
         _client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new List<CatalogTableAsset>
         {

@@ -13,8 +13,9 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.ConsentRequests;
+namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Unit.ConsentRequests;
 /// <summary>
 /// WP-0 (PLAN-GOV-113) through the direct approve/reject resolvers on SQLite: W-1..W-5, W-8, W-11..W-14.
 /// The three-engine status guard (W-6, W-7, W-9) lives in <see cref="ConsentDecisionStatusGuardContractBase"/>.
@@ -26,7 +27,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     private static readonly TableIdentifier Table = new("finance", "dbo", "finance_table_1");
     private static readonly TableIdentifier FourEyesTable = new("finance", "dbo", "finance_table_5");
 
-    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
     private readonly Mutation _mutation = new();
 
     public void Dispose() => _repository.Dispose();

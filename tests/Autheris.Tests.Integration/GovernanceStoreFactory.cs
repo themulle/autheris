@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration;
 
+using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
@@ -16,7 +17,10 @@ internal static class GovernanceStoreFactory
     public static PostgreSqlGovernanceRepository CreatePostgreSql(
         IEpochValidationService epochValidationService,
         IOptions<GatewayOptions> options,
-        IHostEnvironment? environment = null)
+        IHostEnvironment? environment = null,
+        IAuditChainAnchorStore? auditAnchorStore = null,
+        Microsoft.Extensions.Logging.ILogger<PostgreSqlGovernanceRepository>? logger = null,
+        Autheris.Application.Common.Interfaces.IEventBus? eventBus = null)
     {
         var env = environment ?? DefaultEnvironment();
         var secrets = NSubstitute.Substitute.For<IKeyVaultSecretProvider>();
@@ -25,8 +29,10 @@ internal static class GovernanceStoreFactory
             options,
             env,
             secrets,
-            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
-            NSubstitute.Substitute.For<ICallerContextProvider>());
+            auditAnchorStore ?? AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
+            NSubstitute.Substitute.For<ICallerContextProvider>(),
+            logger,
+            eventBus);
         try
         {
             new PostgreSqlGovernanceMigrationRunner(repository, options).RunAsync().GetAwaiter().GetResult();

@@ -109,4 +109,49 @@ public sealed class CdcWatermarkPostgreSqlContractTests : IAsyncLifetime
 
         (await repository.GetAsync(Source, "d", "s", "t", default)).ShouldBe(200);
     }
+
+    [Fact]
+    public async Task NewerFencingToken_TakesOver_AndFencesTheOldOwner()
+    {
+        if (!_available) return;
+        await using var repository = NewRepository();
+        await repository.TryAdvanceAsync(Source, "d", "s", "t", 10, 5, default);
+
+        (await repository.TryAdvanceAsync(Source, "d", "s", "t", 20, 6, default)).ShouldBeTrue();
+        (await repository.TryAdvanceAsync(Source, "d", "s", "t", 30, 5, default)).ShouldBeFalse();
+
+        (await repository.GetAsync(Source, "d", "s", "t", default)).ShouldBe(20);
+    }
+
+    [Fact]
+    public async Task Tables_AreIndependent()
+    {
+        if (!_available) return;
+        await using var repository = NewRepository();
+        await repository.TryAdvanceAsync(Source, "d", "s", "a", 7, 1, default);
+
+        (await repository.GetAsync(Source, "d", "s", "b", default)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Store_AfterClusterStateRestart_NewLeaseTokenCanStillCommit()
+    {
+        if (!_available) return;
+        var table = new Autheris.Domain.Common.TableIdentifier("finance", "dbo", "invoices");
+        var time = TimeProvider.System;
+        await using var repository = NewRepository();
+        var store = new Autheris.Infrastructure.Streaming.GovernanceDbMssqlWatermarkStore(
+            repository, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Infrastructure.Streaming.GovernanceDbMssqlWatermarkStore>.Instance);
+
+        var before = new Autheris.Application.State.InMemoryClusterStateProvider(time);
+        await using (var lease = await before.TryAcquireLeaseAsync("cdc:mssql:poll", TimeSpan.FromSeconds(30)))
+        {
+            (await store.TryAdvanceWatermarkAsync(table, 10, lease!.Token)).ShouldBeTrue();
+        }
+
+        var restarted = new Autheris.Application.State.InMemoryClusterStateProvider(time); // fence counters were lost
+        await using var after = await restarted.TryAcquireLeaseAsync("cdc:mssql:poll", TimeSpan.FromSeconds(30));
+
+        (await store.TryAdvanceWatermarkAsync(table, 20, after!.Token)).ShouldBeTrue();
+    }
 }

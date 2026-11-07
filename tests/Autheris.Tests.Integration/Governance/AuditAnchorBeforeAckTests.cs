@@ -7,18 +7,17 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Audit;
-
+namespace Autheris.Tests.Integration.Governance;
 /// <summary>WP-PF-04 / SEC-SC-08: Tier-A audit batches are acknowledged only after commit AND anchor; the HMAC chain stays intact.</summary>
 [Trait("Category", "Security")]
 public sealed class AuditAnchorBeforeAckTests : IDisposable
 {
     private readonly SwitchableAnchorStore _anchors = new();
-    private readonly Autheris.Infrastructure.Persistence.SqliteGovernanceRepository _repo;
+    private readonly Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository _repo;
 
     public AuditAnchorBeforeAckTests()
     {
-        _repo = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), auditAnchorStore: _anchors);
+        _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), auditAnchorStore: _anchors);
     }
 
     public void Dispose() => _repo.Dispose();

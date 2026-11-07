@@ -8,10 +8,9 @@ using Autheris.Infrastructure.Persistence;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Persistence.DialectSql;
-
+namespace Autheris.Tests.Integration.Governance;
 /// <summary>
-/// DEF-02/03/04 (SQLite runtime; the PostgreSQL and SQL Server variants are in the Integration project): one revoke behaviour for all entry
+/// DEF-02/03/04 (PostgreSQL runtime; the PostgreSQL and SQL Server variants are in the Integration project): one revoke behaviour for all entry
 /// points: fail-closed tenant resolution with a refusal audit, one decision literal, approver check inside the transaction.
 /// </summary>
 public sealed class ConsentRevokeUnificationTests : IDisposable
@@ -20,7 +19,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
     private static readonly Sid Admin = new("S-1-5-21-ADMIN");
     private static readonly Guid SyncMarker = Guid.Parse("00000000-0000-0000-0000-0000000000a1");
 
-    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
     private readonly TableIdentifier _table = new("Sales", "Crm", "Orders_" + Guid.NewGuid().ToString("N")[..6]);
     private Guid _tableId;
 
@@ -57,8 +56,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
 
     private async Task ExecAsync(string sql, params (string Name, object Value)[] parameters)
     {
-        await using var conn = await _repo.Connections.OpenAsync(CancellationToken.None);
-        await using var cmd = conn.CreateCommand();
+        await using var cmd = _repo.RawConnection().CreateCommand();
         cmd.CommandText = sql;
         foreach (var (name, value) in parameters)
         {
@@ -80,15 +78,14 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
 
     private async Task MarkSystemConsentAsync(Guid consentId)
     {
-        await ExecAsync("PRAGMA foreign_keys = OFF;");
+        await ExecAsync("SET session_replication_role = replica;");
         await ExecAsync("UPDATE CONSENTS SET consent_request_id = @r WHERE id = @id", ("@r", SyncMarker.ToString()), ("@id", consentId.ToString()));
     }
 
     // GetConsentByIdAsync maps the tenant and would itself throw on a planted invalid value, so the flag is read raw.
     private async Task<bool> IsRevokedAsync(Guid consentId)
     {
-        await using var conn = await _repo.Connections.OpenAsync(CancellationToken.None);
-        await using var cmd = conn.CreateCommand();
+        await using var cmd = _repo.RawConnection().CreateCommand();
         cmd.CommandText = "SELECT is_revoked FROM CONSENTS WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", consentId.ToString());
         return Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
@@ -109,7 +106,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
     [MemberData(nameof(EntryPointsAndInvalidTenants))]
     public async Task Revoke_Invalid_Tenant_Value_Fails_Closed_All_Dialects(string entry, string rawTenant)
     {
-        // DEF-T-01 / DEF-SC-01..03 (SQLite): no silent default, no raw value echo, nothing revoked, one refusal audit row.
+        // DEF-T-01 / DEF-SC-01..03 (PostgreSQL): no silent default, no raw value echo, nothing revoked, one refusal audit row.
         await EnsureTableAsync();
         var consent = await CreateConsentAsync();
         await PlantTenantAsync(consent.Id, rawTenant);
@@ -198,7 +195,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
     [InlineData("RevokeSystemConsentAsync")]
     public async Task Revoke_Audit_Decision_Literal_Is_Identical_Across_Dialects(string entry)
     {
-        // DEF-T-02 / DEF-SC-07 (SQLite runtime; the IL check over all dialects is in the Architecture project).
+        // DEF-T-02 / DEF-SC-07 (PostgreSQL runtime; the IL check over all dialects is in the Architecture project).
         await EnsureTableAsync();
         var consent = await CreateConsentAsync();
         if (entry == "RevokeSystemConsentAsync")
@@ -258,7 +255,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
     [InlineData("ReplaceConsentsAsync")]
     public async Task Revoke_Unauthorized_Approver_Leaves_No_State_Change_All_Dialects(string entry)
     {
-        // DEF-T-08 (SQLite).
+        // DEF-T-08 (PostgreSQL).
         await EnsureTableAsync();
         var consent = await CreateConsentAsync();
         var epochBefore = await _repo.GetTableEpochAsync(_table);
@@ -272,7 +269,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task ReplaceConsents_Sqlite_Evicts_MetadataCache()
+    public async Task ReplaceConsents_PostgreSql_Evicts_MetadataCache()
     {
         // DEF-01 / DEF-T-09: ReplaceConsentsAsync evicts the cached table metadata like PG/MSSQL (applied on commit).
         await EnsureTableAsync();

@@ -5,10 +5,9 @@ using Autheris.Infrastructure.Persistence;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Persistence.DialectSql;
-
+namespace Autheris.Tests.Integration.Governance;
 /// <summary>
-/// ARCH-MNT-22 runtime security pins of the revoke path on SQLite (the PostgreSQL and SQL Server variants run in the Integration contract
+/// ARCH-MNT-22 runtime security pins of the revoke path on PostgreSQL (the PostgreSQL and SQL Server variants run in the Integration contract
 /// tests of CI, which need containers): the refactored statement-level core must keep authorisation, atomicity and the row-locked revoke by id.
 /// </summary>
 public sealed class ConsentGrantDialectSecurityTests : IDisposable
@@ -17,7 +16,7 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
     private static readonly TenantId TenantB = new("tenant-b");
     private static readonly Sid Admin = new("S-1-5-21-ADMIN");
 
-    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
     private readonly TableIdentifier _table = new("Sales", "Crm", "Orders_" + Guid.NewGuid().ToString("N")[..6]);
     private Guid _tableId;
 
@@ -25,10 +24,9 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
 
     private async Task EnsureTableAsync()
     {
-        await using (var conn = await _repo.Connections.OpenAsync(CancellationToken.None))
-        await using (var cmd = conn.CreateCommand())
+        await using (var cmd = _repo.RawConnection().CreateCommand())
         {
-            cmd.CommandText = @"INSERT OR IGNORE INTO ROLES (id, role_name, description) VALUES ('role-admin', 'GovernanceAdmin', 'test');
+            cmd.CommandText = @"INSERT INTO ROLES (id, role_name, description) VALUES ('role-admin', 'GovernanceAdmin', 'test') ON CONFLICT DO NOTHING;
                                 INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid) VALUES (@id, 'role-admin', 'User', @sid);";
             cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
             cmd.Parameters.AddWithValue("@sid", Admin.Value);
@@ -56,7 +54,7 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
     [Fact]
     public async Task Revoke_Unauthorized_NonGrantee_Throws_And_Writes_No_Change()
     {
-        // ARCH-MNT-22-T-04 (SQLite).
+        // ARCH-MNT-22-T-04 (PostgreSQL).
         await EnsureTableAsync();
         var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", TenantA));
         var epochBefore = await _repo.GetTableEpochAsync(_table);
@@ -74,7 +72,7 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
     [Fact]
     public async Task Revoke_ById_Cannot_Revoke_Other_Tenant_Consent()
     {
-        // ARCH-MNT-22-T-05 (SQLite): the revoke-by-id exemption (SC-04 a) touches exactly the addressed row; the other tenant's consent stays active,
+        // ARCH-MNT-22-T-05 (PostgreSQL): the revoke-by-id exemption (SC-04 a) touches exactly the addressed row; the other tenant's consent stays active,
         // and the audit entry carries the tenant read from the addressed (locked) row.
         await EnsureTableAsync();
         var mine = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice", TenantA));

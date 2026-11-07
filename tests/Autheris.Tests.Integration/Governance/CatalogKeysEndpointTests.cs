@@ -1,5 +1,4 @@
-namespace Autheris.Tests.Unit.Catalog;
-
+namespace Autheris.Tests.Integration.Governance;
 using System.Text.Json;
 using System.Globalization;
 using System.Security.Claims;
@@ -29,16 +28,16 @@ using Xunit;
 public sealed class CatalogKeysEndpointTests : IDisposable
 {
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
-    private readonly SqliteGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
     private readonly AuditWriter _audit;
 
     public CatalogKeysEndpointTests()
     {
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=keysep_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", JournalMode = "DELETE" }
+            GovernanceDb = new GovernanceDbOptions { }
         });
-        _repo = Autheris.Tests.Unit.GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options);
+        _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), options);
         _audit = new AuditWriter(_repo, NullLogger<AuditWriter>.Instance);
     }
 

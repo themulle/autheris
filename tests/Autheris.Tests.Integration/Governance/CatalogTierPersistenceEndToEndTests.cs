@@ -1,5 +1,4 @@
-namespace Autheris.Tests.Unit.Catalog;
-
+namespace Autheris.Tests.Integration.Governance;
 using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
@@ -29,7 +28,7 @@ public sealed class CatalogTierPersistenceEndToEndTests : IDisposable
     private static readonly TableIdentifier Hidden = new("shared", "public", "hidden_t");
     private static readonly TableIdentifier Summary = new("shared", "public", "summary_t");
     private static readonly TableIdentifier Full = new("shared", "public", "full_t");
-    private readonly SqliteGovernanceRepository _repo = Autheris.Tests.Unit.GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
 
     private static readonly IOptions<GatewayOptions> Shared = Options.Create(new GatewayOptions
     {
@@ -95,9 +94,8 @@ public sealed class CatalogTierPersistenceEndToEndTests : IDisposable
     {
         await SeedAsync(Full, DatasetVisibility.Full);
         var meta = (await _repo.GetTableMetadataAsync(Full))!;
-        await using (var connection = await _repo.Connections.OpenAsync(CancellationToken.None))
+        await using (var cmd = _repo.RawConnection().CreateCommand())
         {
-            await using var cmd = connection.CreateCommand();
             cmd.CommandText = $"UPDATE TABLE_CATALOG_SETTINGS SET visibility = 7 WHERE table_id = '{meta.Table.Id}'";
             await cmd.ExecuteNonQueryAsync();
         }

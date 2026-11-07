@@ -7,14 +7,13 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Audit;
-
+namespace Autheris.Tests.Integration.Governance;
 /// <summary>WP-SC-10 / SEC-SC-16: keyset cursor over the audit chain on the SQLite governance store.</summary>
 [Trait("Category", "Security")]
 public sealed class AuditCursorQueryTests : IDisposable
 {
-    private readonly Autheris.Infrastructure.Persistence.SqliteGovernanceRepository _repo =
-        GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>());
+    private readonly Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository _repo =
+        GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
 
     public void Dispose() => _repo.Dispose();
 
