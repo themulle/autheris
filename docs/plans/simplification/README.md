@@ -34,7 +34,7 @@ Each spec has the same structure: goal, preconditions, scope, verified current s
 | 3 | Core authorization 4 | [26](WP-SIMPL-26-pilot-module-odata.md) OData core hardening (OD-24) | WP-46 merged; must merge before WP-29 |
 | 3 | Persistence lane | [42](WP-SIMPL-42-usage-accounting-users-groups.md) usage accounting (replaces FinOps) | PR-1 any time; PR-2+ after WP-11, WP-19, WP-20a-20d; PR-3b after WP-46 PR 1 (grant id on the decision record); PR-7 after WP-37 |
 | 3 | Review remediation | [50](WP-SIMPL-50-review-remediation-v1-7-1.md) v1.7.1..HEAD code and security review findings (module fallback and host hardening, ABAC fail-open and row filter, CODEOWNERS, audit serialization, HitL broadcast binding, leftovers) | WP-25 and WP-27 merged; PR A is a release blocker and goes first |
-| 3 | Feature (WebSQL) | [51](WP-SIMPL-51-websql-client-contract.md) WebSQL client contract: cost and quota, typed columns, syntax positions, paging (#527, #528, #529, #533) | PR 1 and PR 3 any time; PR 2 after WP-45 PR 4, PR 4 after WP-45 PR 5 (Phase 3 approved, SEC-51-01..17) |
+| 3 | Feature (WebSQL) | [51](WP-SIMPL-51-websql-client-contract.md) WebSQL client contract: cost and quota, typed columns, syntax positions, paging (#527, #528, #529, #533) | PR 1 and PR 3 any time; PR 2 after WP-45 PR 4, PR 4 after WP-45 PR 5 (Phase 3 approved, SEC-51-01..22) |
 | 5 | After the feature freeze (Stage 3 exit) | [49](WP-SIMPL-49-data-products.md) data products: materialized and live views, stored procedures with their own product owner (OD-44) | WP-46, 47, 48, 41, 42, 44, 21, 20 merged; not under `freeze-exception` |
 
 `[WF]` = changes GitHub workflows; approved by the owner in the defined bundles (OD-17).
