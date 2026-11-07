@@ -29,6 +29,9 @@ public sealed class RowLimitedDataReader : DbDataReader, IDbColumnSchemaGenerato
     /// <summary>True when the result had more rows than the limit (the probe row existed).</summary>
     public bool HasMoreRows { get; private set; }
 
+    /// <summary>Rows delivered to the caller so far.</summary>
+    public long DeliveredRows => _delivered;
+
     public override bool Read()
     {
         if (!CanRead())

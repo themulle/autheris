@@ -21,6 +21,8 @@ using Autheris.Application.DataSources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Emit;
 
 /// <summary>
 /// Thread-safe in-memory statement manager implementing the Trino REST client query lifecycle
@@ -159,6 +161,52 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         string statementId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{counter:00000}_{RandomNumberGenerator.GetHexString(32, lowercase: true)}";
         var sessionCts = new CancellationTokenSource();
         var sw = Stopwatch.StartNew();
+
+        if (!request.PlannedTableRead && request.Admission == null && (_gatewayOptions?.WebSql?.Cost?.Enabled ?? true))
+        {
+            using var admitScope = _scopeFactory.CreateScope();
+            var costQuota = admitScope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();
+            var sqlEngine = admitScope.ServiceProvider.GetService<ISqlEngine>();
+            if (costQuota != null && sqlEngine != null)
+            {
+                var meta = sqlEngine.Analyze(request.Sql.AsMemory());
+                var rowLimit = request.RowLimit ?? SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions());
+                var costOpts = _gatewayOptions?.QueryCost ?? new QueryCostOptions();
+                var analysisOpts = new Autheris.Application.Governance.Analysis.QueryAnalysisOptions();
+                var webSqlCost = _gatewayOptions?.WebSql?.Cost ?? new WebSqlCostOptions();
+
+                int cEst = Autheris.Application.Sql.Cost.SqlStatementCostEstimator.EstimateCost(
+                    meta,
+                    rowLimit,
+                    costOpts,
+                    analysisOpts,
+                    webSqlCost,
+                    pageOffset: request.PageOffset ?? 0,
+                    isPaged: request.IsPaged,
+                    maxAffectedRows: _gatewayOptions?.WebSql?.MaxAffectedRows ?? 1000);
+
+                var admission = await costQuota.AdmitAsync(
+                    new Autheris.Application.Common.Quota.QueryCostRequest(
+                        Principal: user,
+                        ApiKey: null,
+                        ClientIp: null,
+                        EstimatedCost: cEst,
+                        TransportMaxCost: webSqlCost.MaxStatementCost,
+                        CapByTierMaxCostPerQuery: false),
+                    ct).ConfigureAwait(false);
+
+                if (admission.Outcome == Autheris.Application.Common.Quota.QueryCostOutcome.OverCost)
+                {
+                    throw new SqlCostExceededException(cEst, admission.MaxAllowedCost);
+                }
+                if (admission.Outcome == Autheris.Application.Common.Quota.QueryCostOutcome.QuotaExhausted)
+                {
+                    throw new SqlQuotaExhaustedException(admission.RetryAfterSeconds);
+                }
+
+                request = request with { Admission = admission };
+            }
+        }
 
         var sources = new SourceHolder();
         var executionTask = Task.Run(async () =>

@@ -66,9 +66,20 @@ public static class GovernedSqlErrorCodes
     // Issue #132: AST rejection of client three-part/four-part physical database names.
     public const string InvalidIdentifierQualification = "INVALID_IDENTIFIER_QUALIFICATION";
 
+    public const string QueryCostExceeded = "QUERY_COST_QUOTA_EXCEEDED";
+    public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
+    public const string ServiceUnavailable = "SERVICE_UNAVAILABLE";
+    public const string PagingUnsupported = "SQL_PAGING_UNSUPPORTED";
+    public const string PagingTokenInvalid = "SQL_PAGING_TOKEN_INVALID";
+
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
     {
+        QueryCostExceeded => "The statement cost exceeds the allowed limit. Add a LIMIT, a filter or fewer joins.",
+        RateLimitExceeded => "Query cost quota exhausted.",
+        ServiceUnavailable => "The service is temporarily unavailable.",
+        PagingUnsupported => "Statement paging is not supported for this request.",
+        PagingTokenInvalid => "The paging token is invalid or expired.",
         ConstraintViolation => "The statement violated a data constraint.",
         DataError => "The statement contained a value that could not be stored or converted.",
         CheckOptionViolation => "The statement wrote a row that the row policy does not permit.",
@@ -162,4 +173,36 @@ public sealed class RequiredFilterColumnMissingException : GovernedSqlException
 
     public RequiredFilterColumnMissingException(string message)
         : base(GovernedSqlErrorCodes.RequiredFilterColumnMissing, TargetSqlDialect.PostgreSql) { }
+}
+
+public class SqlCostExceededException : Exception
+{
+    public int EstimatedCost { get; }
+    public int MaxAllowedCost { get; }
+
+    public SqlCostExceededException(int estimatedCost, int maxAllowedCost)
+        : base(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.QueryCostExceeded))
+    {
+        EstimatedCost = estimatedCost;
+        MaxAllowedCost = maxAllowedCost;
+    }
+}
+
+public class SqlQuotaExhaustedException : Exception
+{
+    public int RetryAfterSeconds { get; }
+
+    public SqlQuotaExhaustedException(int retryAfterSeconds)
+        : base(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RateLimitExceeded))
+    {
+        RetryAfterSeconds = retryAfterSeconds;
+    }
+}
+
+public class SqlQuotaUnavailableException : Exception
+{
+    public SqlQuotaUnavailableException()
+        : base(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.ServiceUnavailable))
+    {
+    }
 }

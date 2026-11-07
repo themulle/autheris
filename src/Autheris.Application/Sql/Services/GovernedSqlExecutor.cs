@@ -75,8 +75,10 @@ public sealed partial class GovernedSqlExecutor
         IDbSessionContextInitializer? sessionInitializer = null,
         IKeyVaultSecretProvider? secretProvider = null,
         CompiledSqlAuditDigester? auditDigester = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null)
     {
+        _costQuota = costQuota;
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
@@ -273,6 +275,7 @@ public sealed partial class GovernedSqlExecutor
         }
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
+            await ChargeFailureFeeOnDenialAsync(user).ConfigureAwait(false);
             string auditDs = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
             // only the gateway's own policy messages are stored; an engine exception is reduced to its stable code.
             // L-4: the same holds for the engine errors that the error mapper owns (unsupported construct, reserved identifier, syntax
@@ -297,6 +300,12 @@ public sealed partial class GovernedSqlExecutor
                         _ => reason
                     })
                     .WithField("error", reason);
+                try
+                {
+                    var meta = FastSqlEngine.Default.Analyze(request.Sql.AsMemory());
+                    deniedDetails.WithField("estimatedCost", CalculateEstimatedCost(request, meta));
+                }
+                catch { }
                 if (dmlContext.HasRecursiveCte)
                 {
                     deniedDetails.WithField("recursiveCte", true);   // 09
@@ -341,6 +350,8 @@ public sealed partial class GovernedSqlExecutor
         // Issue #447 C1: the resolved source of the rewrite, before the ALLOW audit record and before any connection exists.
         await _transportGate.EnsureCatalogSourceAsync(dsName, ct).ConfigureAwait(false);
 
+        var admission = await AdmitCostAsync(request, user, rewrite.Metadata, ct).ConfigureAwait(false);
+
         if (!dmlContext.IsDml)
         {
             var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
@@ -352,6 +363,15 @@ public sealed partial class GovernedSqlExecutor
                 ["dataSource"] = dsName,
                 ["virtual_filters"] = rewrite.VirtualFilters
             };
+            if (admission != null)
+            {
+                fields["cost"] = new Dictionary<string, object?>
+                {
+                    ["estimated"] = admission.ReservedCost,
+                    ["maxAllowed"] = admission.MaxAllowedCost,
+                    ["tier"] = admission.Policy.Tier.ToString()
+                };
+            }
             AddCallerAttributeAuditFields(fields, rewrite, compiled);
             AddCompiledAuditFields(fields, compiled, clientValues);
             AddKeySetAuditFields(fields, rewrite);
@@ -366,6 +386,12 @@ public sealed partial class GovernedSqlExecutor
                 DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
             }, ct).ConfigureAwait(false);
         }
+
+        var executionSw = Stopwatch.StartNew();
+        long deliveredOrAffectedRows = 0;
+        bool executionFailed = false;
+        try
+        {
 
         var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
 
@@ -481,6 +507,7 @@ public sealed partial class GovernedSqlExecutor
                         TimeSpan.FromSeconds(commandTimeout),
                         () => CompiledSqlBinders.CheckedExecutorFor(binderDialect).ExecuteInTransactionAsync(checkedTx, compiled, clientValues, limits, ct),
                         ct).ConfigureAwait(false);
+                    deliveredOrAffectedRows = affectedRows;
                 }
                 catch (Exception dmlEx)
                 {
@@ -528,7 +555,9 @@ public sealed partial class GovernedSqlExecutor
                     {
                         if (rewrite.DeliveredRowLimit > 0)
                         {
-                            await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), ct).ConfigureAwait(false);
+                            var limitedReader = new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit);
+                            await rowWriter(limitedReader, ct).ConfigureAwait(false);
+                            deliveredOrAffectedRows = limitedReader.DeliveredRows;
                         }
                         else
                         {
@@ -617,6 +646,17 @@ public sealed partial class GovernedSqlExecutor
                     lease.Dispose();
                 }
             }
+        }
+        }
+        catch
+        {
+            executionFailed = true;
+            throw;
+        }
+        finally
+        {
+            executionSw.Stop();
+            await SettleCostAsync(admission, deliveredOrAffectedRows, executionSw.Elapsed.TotalSeconds, executionFailed).ConfigureAwait(false);
         }
     }
 
@@ -897,77 +937,5 @@ public sealed partial class GovernedSqlExecutor
             ["padded_count"] = o.PaddedCount,
             ["age_seconds"] = o.AgeSeconds
         }).ToList();
-    }
-
-    private async Task RecordDmlAuditAsync(
-        TenantId tenantId,
-        ClaimsPrincipal user,
-        string dsName,
-        DmlAuditContext dmlContext,
-        string eventType,
-        string decision,
-        CompiledSql? compiled,
-        int? affectedRows,
-        string? reason,
-        bool synthetic,
-        string? originalSql = null)
-    {
-        var fields = new Dictionary<string, object?>
-        {
-            ["statementType"] = dmlContext.StatementType?.ToString(),
-            ["tables"] = dmlContext.Tables,
-            ["dataSource"] = dsName,
-            ["affectedRows"] = affectedRows,
-            ["maxAffectedRows"] = _options.Value.WebSql.MaxAffectedRows,
-            ["reason"] = reason,
-            ["synthetic"] = synthetic
-        };
-        if (compiled is null && dmlContext.HasRecursiveCte)
-        {
-            fields["recursiveCte"] = true;   // a rejection before the compile still carries the flag
-        }
-
-        if (compiled is not null)
-        {
-            AddCompiledAuditFields(fields, compiled);
-        }
-        else if (originalSql is not null)
-        {
-            // A statement rejected before it compiled has no digest; the hash of its (literal-free) original text identifies it.
-            fields["originalSqlHash"] = _digester.Anonymize(originalSql).OriginalSqlHash;
-        }
-
-        await _auditWriter.RecordAsync(new AuditLogEntry
-        {
-            TenantId = tenantId,
-            EventType = eventType,
-            ActorSid = user.GetUserSid() ?? new Sid("anonymous"),
-            TargetTable = string.Join(",", dmlContext.Tables),
-            Decision = decision,
-            TraceId = TraceContextResolver.GetCurrentTraceId(),
-            DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
-            // M-1: a DML audit never takes the request token. The statement may already be committed; a client that disconnects must not
-            // leave it without its audit record.
-        }, CancellationToken.None).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// The audit of a DML that is already committed. An audit failure here is never a request failure (the client would retry and
-    /// duplicate the write): it is logged as Critical and counted for the operators.
-    /// </summary>
-    private async Task RecordCommittedDmlAuditAsync(
-        TenantId tenantId, ClaimsPrincipal user, string dsName, DmlAuditContext dmlContext, CompiledSql compiled, int affectedRows)
-    {
-        try
-        {
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlExecuted, "ALLOW", compiled, affectedRows, reason: null, synthetic: false).ConfigureAwait(false);
-        }
-        catch (Exception auditEx)
-        {
-            GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
-            _logger?.LogCritical(auditEx,
-                "WebSQL DML on data source {DataSource} is committed but its audit record could not be written. TraceId={TraceId}",
-                dsName, Activity.Current?.TraceId.ToString());
-        }
     }
 }

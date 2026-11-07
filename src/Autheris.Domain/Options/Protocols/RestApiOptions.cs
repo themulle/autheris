@@ -112,6 +112,34 @@ public sealed class WebSqlOptions
     /// Heterogeneous Cross-Source / Federation Join options (DuckDB in-process engine).
     /// </summary>
     public CrossSourceOptions CrossSource { get; init; } = new();
+
+    /// <summary>Cost estimation, quota admission and settlement options for WebSQL statements.</summary>
+    public WebSqlCostOptions Cost { get; init; } = new();
+}
+
+public sealed class WebSqlCostOptions
+{
+    public const string SectionName = "Cost";
+
+    public bool Enabled { get; init; } = true;
+
+    [Range(1, 1_000_000)]
+    public int MaxStatementCost { get; init; } = 2000;
+
+    [Range(0, 100_000)]
+    public int CrossJoinCost { get; init; } = 250;
+
+    [Range(0, 10_000)]
+    public int SetOperationCost { get; init; } = 25;
+
+    [Range(1, 1_000_000)]
+    public int OffsetRowsPerCostUnit { get; init; } = 100;
+
+    [Range(0, 10_000)]
+    public int ExecutionSecondCost { get; init; } = 10;
+
+    [Range(0, 100_000)]
+    public int DmlStatementCost { get; init; } = 50;
 }
 
 public sealed class CrossSourceOptions

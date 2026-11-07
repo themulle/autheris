@@ -103,6 +103,9 @@ public static class SqlCompilerErrorMapper
 
     private static readonly Func<Exception, SqlErrorMapping?>[] Rules =
     [
+        e => e is SqlCostExceededException ? Of(400, GovernedSqlErrorCodes.QueryCostExceeded) : null,
+        e => e is SqlQuotaExhaustedException ? Of(429, GovernedSqlErrorCodes.RateLimitExceeded) : null,
+        e => e is SqlQuotaUnavailableException ? Of(503, GovernedSqlErrorCodes.ServiceUnavailable) : null,
         // Issue #447: a transport denial keeps its own code and the fixed text (no source name); the row precedes every
         // SecurityException row, which would otherwise turn it into SQL_POLICY_DENIED / SQL_POLICY_VIOLATION and hide the cause.
         e => e is TransportNotAllowedException

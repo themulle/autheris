@@ -70,6 +70,10 @@ public sealed record GovernedSqlQueryRequest(
     /// #398: byte budget for the string cells of a buffered read (planned aggregations with text group keys). Internal; never from client input.
     /// </summary>
     internal ResultByteBudget? ResultByteBudget { get; init; }
+
+    internal Autheris.Application.Common.Quota.QueryCostAdmission? Admission { get; init; }
+    public int? PageOffset { get; init; }
+    public bool IsPaged { get; init; }
 }
 
 public sealed record GovernedSqlResult(
