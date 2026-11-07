@@ -67,9 +67,26 @@ public static class DatasourceSecretRefPolicy
         }
     }
 
-    /// <summary>GHSA-v5c2: an existing secret is never silently replaced by a registration.</summary>
-    public static void ThrowIfExists(string secretRef, bool exists)
+    /// <summary>
+    /// GHSA-v5c2: the single fail-closed place that refuses to replace an existing secret. Only a definite "not found" counts as absent;
+    /// any other provider failure is treated as existing. The check-then-set gap is accepted (no atomic set-if-absent in the provider).
+    /// </summary>
+    public static void ThrowIfExists(Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider provider, string secretRef)
     {
+        bool exists;
+        try
+        {
+            exists = provider.GetSecretBytes(secretRef) is { Length: > 0 };
+        }
+        catch (System.Collections.Generic.KeyNotFoundException)
+        {
+            exists = false;
+        }
+        catch (Exception)
+        {
+            exists = true;
+        }
+
         if (exists)
         {
             throw new ArgumentException("An existing secret reference is never overwritten.", nameof(secretRef));

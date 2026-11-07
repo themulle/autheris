@@ -215,7 +215,7 @@ public sealed class AccessPlanStoreTests
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", Secret: "plain-secret"));
 
-        await Should.ThrowAsync<InvalidOperationException>(() => service.RegisterDatasourceAsync(request, Admin));
+        await Should.ThrowAsync<InvalidOperationException>(() => service.RegisterDatasourceAsync(request, Admin, isClusterAdmin: true));
     }
 
     [Fact]
@@ -226,10 +226,10 @@ public sealed class AccessPlanStoreTests
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", Secret: "plain-secret"));
 
-        var result = await service.RegisterDatasourceAsync(request, Admin);
+        var result = await service.RegisterDatasourceAsync(request, Admin, isClusterAdmin: true);
 
-        result.SecretRef.ShouldBe("datasource:telemetry:crane:auth_secret");
-        provider.Received(1).SetSecret("datasource:telemetry:crane:auth_secret", Arg.Any<byte[]>());
+        result.SecretRef.ShouldBe("datasource:telemetry:_platform:crane:auth_secret");
+        provider.Received(1).SetSecret("datasource:telemetry:_platform:crane:auth_secret", Arg.Any<byte[]>());
     }
 
     private sealed class MutableTimeProvider : TimeProvider

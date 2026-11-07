@@ -93,6 +93,7 @@ public interface IAccessPlanningService
         AdminRegisterDatasourceRequest request,
         string adminSid,
         string? tenantId = null,
+        bool isClusterAdmin = false,
         CancellationToken ct = default);
 
     /// <summary>

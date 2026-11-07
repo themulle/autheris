@@ -255,15 +255,15 @@ public sealed class AdminMcpTwoPhaseTests
             DryRun: false);
 
         // Act
-        var result = await service.RegisterDatasourceAsync(request, AdminSid);
+        var result = await service.RegisterDatasourceAsync(request, AdminSid, isClusterAdmin: true);
 
         // Assert
         result.ShouldNotBeNull();
         result.Status.ShouldBe("inactive"); // SEC M-30 Inactive on creation
         result.IsConfigured.ShouldBeTrue();
         result.SecretRef.ShouldNotBeNullOrWhiteSpace();
-        result.SecretRef.ShouldBe("datasource:finance:sap_erp:auth_secret");
-        secretProvider.Received(1).SetSecret("datasource:finance:sap_erp:auth_secret", Arg.Any<byte[]>());
+        result.SecretRef.ShouldBe("datasource:finance:_platform:sap_erp:auth_secret");
+        secretProvider.Received(1).SetSecret("datasource:finance:_platform:sap_erp:auth_secret", Arg.Any<byte[]>());
 
         // Cleartext secret MUST NEVER be returned in result
         result.ToString().ShouldNotContain(cleartextSecret);

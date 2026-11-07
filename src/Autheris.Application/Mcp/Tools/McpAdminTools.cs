@@ -300,7 +300,7 @@ public static class McpAdminTools
                     return pending;
                 }
 
-                var result = await planningService.RegisterDatasourceAsync(req, adminSid, sessionContext.TenantId, ct).ConfigureAwait(false);
+                var result = await planningService.RegisterDatasourceAsync(req, adminSid, sessionContext.TenantId, isClusterAdmin: true, ct: ct).ConfigureAwait(false);
                 return new McpToolCallResult(true, JsonSerializer.Serialize(result, JsonOptions));
             }
 

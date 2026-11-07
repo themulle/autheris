@@ -736,10 +736,17 @@ public class AccessPlanningService : IAccessPlanningService
         AdminRegisterDatasourceRequest request,
         string adminSid,
         string? tenantId = null,
+        bool isClusterAdmin = false,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
+
+        // GHSA-v5c2: the domain is the caller's own tenant unless the caller is a canonical ClusterAdmin.
+        if (!isClusterAdmin && !string.Equals(request.Domain.Trim(), NormalizeTenant(tenantId), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException("The datasource domain must be the caller's own tenant.");
+        }
 
         var datasourceId = $"{request.Domain.ToLowerInvariant()}.{request.Name.ToLowerInvariant()}";
         string? secretRef = null;
@@ -757,7 +764,8 @@ public class AccessPlanningService : IAccessPlanningService
                     "Inline datasource secrets require a writable IKeyVaultSecretProvider; supply Auth.SecretRef instead.");
             }
 
-            secretRef = $"{DatasourceSecretRefPolicy.DomainPrefix(request.Domain.ToLowerInvariant())}{request.Name.ToLowerInvariant()}:auth_secret";
+            secretRef = $"{DatasourceSecretRefPolicy.DomainPrefix(request.Domain.ToLowerInvariant())}{(NormalizeTenant(tenantId) ?? TenantId.Platform.Value).ToLowerInvariant()}:{request.Name.ToLowerInvariant()}:auth_secret";
+            DatasourceSecretRefPolicy.ThrowIfExists(_secretProvider, secretRef);
             try
             {
                 _secretProvider.SetSecret(secretRef, Encoding.UTF8.GetBytes(request.Auth.Secret));
