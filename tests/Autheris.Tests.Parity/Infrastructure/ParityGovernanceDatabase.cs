@@ -15,7 +15,8 @@ public static class ParityGovernanceDatabase
     /// <summary>Creates a new empty database on the shared server and returns its connection string.</summary>
     public static async Task<string> CreateAsync()
     {
-        var server = await Server.Value;
+        var server = await Server.Value.ConfigureAwait(false);
+        // The identifier is generated here (fixed prefix plus a GUID), never user input.
         var name = "parity_gov_" + Guid.NewGuid().ToString("N");
         await using (var admin = new NpgsqlConnection(server))
         {

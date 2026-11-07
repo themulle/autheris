@@ -48,10 +48,10 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
             }
             else
             {
-                _adminConnectionString = await SharedDatabaseServers.PostgreSqlServerAsync();
+                _adminConnectionString = await SharedDatabaseServers.PostgreSqlServerAsync().ConfigureAwait(false);
             }
 
-            await InitializeTemplateDatabaseAsync();
+            await InitializeTemplateDatabaseAsync().ConfigureAwait(false);
             IsAvailable = true;
         }
         catch (Exception ex)
@@ -68,17 +68,18 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
             throw new InvalidOperationException("PostgreSQL governance fixture is not available.");
         }
 
+        // Identifiers are generated and sanitized (letters, digits, underscore), never user input.
         var dbName = GovernancePostgresDatabaseName.Sanitize(name);
-        await CloneGate.WaitAsync();
+        await CloneGate.WaitAsync().ConfigureAwait(false);
         try
         {
             await using (var admin = new NpgsqlConnection(_adminConnectionString))
             {
-                await admin.OpenAsync();
-                await TerminateBackendsAsync(admin, TemplateDatabaseName);
+                await admin.OpenAsync().ConfigureAwait(false);
+                await TerminateBackendsAsync(admin, TemplateDatabaseName).ConfigureAwait(false);
                 await using var create = admin.CreateCommand();
                 create.CommandText = $"CREATE DATABASE \"{dbName}\" TEMPLATE \"{TemplateDatabaseName}\"";
-                await create.ExecuteNonQueryAsync();
+                await create.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
         }
         finally
@@ -103,10 +104,10 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
         {
             NpgsqlConnection.ClearAllPools();
             await using var admin = new NpgsqlConnection(_adminConnectionString);
-            await admin.OpenAsync();
+            await admin.OpenAsync().ConfigureAwait(false);
             await using var drop = admin.CreateCommand();
             drop.CommandText = $"DROP DATABASE IF EXISTS \"{TemplateDatabaseName}\" WITH (FORCE)";
-            await drop.ExecuteNonQueryAsync();
+            await drop.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -118,18 +119,18 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
     {
         await using (var admin = new NpgsqlConnection(_adminConnectionString))
         {
-            await admin.OpenAsync();
-            await TerminateBackendsAsync(admin, TemplateDatabaseName);
+            await admin.OpenAsync().ConfigureAwait(false);
+            await TerminateBackendsAsync(admin, TemplateDatabaseName).ConfigureAwait(false);
             await using (var drop = admin.CreateCommand())
             {
                 drop.CommandText = $"DROP DATABASE IF EXISTS \"{TemplateDatabaseName}\" WITH (FORCE)";
-                await drop.ExecuteNonQueryAsync();
+                await drop.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
             await using (var create = admin.CreateCommand())
             {
                 create.CommandText = $"CREATE DATABASE \"{TemplateDatabaseName}\"";
-                await create.ExecuteNonQueryAsync();
+                await create.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
         }
 
@@ -164,7 +165,7 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
             new StubCallerContextProvider()))
         {
             var runner = new PostgreSqlGovernanceMigrationRunner(repository, options, environment: env);
-            await runner.RunAsync();
+            await runner.RunAsync().ConfigureAwait(false);
         }
 
         NpgsqlConnection.ClearPool(new NpgsqlConnection(templateConnectionString));
@@ -176,7 +177,7 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
         cmd.CommandText =
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = @db AND pid <> pg_backend_pid()";
         cmd.Parameters.AddWithValue("db", databaseName);
-        await cmd.ExecuteNonQueryAsync();
+        await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
     private sealed class StubHostEnvironment(string environmentName) : IHostEnvironment

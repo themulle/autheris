@@ -12,25 +12,26 @@ using Microsoft.AspNetCore.Hosting;
 /// </summary>
 internal static class GovernanceTestDatabase
 {
-    private static readonly ConcurrentDictionary<string, string> Stable = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, Lazy<string>> Stable = new(StringComparer.Ordinal);
 
-    private static readonly Lazy<Task<GovernancePostgresFixture>> Shared = new(StartAsync);
+    private static readonly Lazy<Task<GovernancePostgresFixture>> Shared = new(() => Task.Run(StartAsync));
 
     /// <summary>Clones the migrated template into a new database and returns its connection string.</summary>
     public static async Task<string> CreateAsync(string name)
     {
-        var fixture = await Shared.Value;
-        return await fixture.CreateDatabaseAsync(name);
+        var fixture = await Shared.Value.ConfigureAwait(false);
+        return await fixture.CreateDatabaseAsync(name).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Returns the same cloned database for the same <paramref name="key"/> (for tests that start several hosts against one
     /// governance database, formerly keyed by the SQLite file path).
     /// </summary>
-    public static string CreateStable(string key) => Stable.GetOrAdd(key, static k => Create("stable_" + System.IO.Path.GetFileNameWithoutExtension(k)));
+    public static string CreateStable(string key) =>
+        Stable.GetOrAdd(key, static k => new Lazy<string>(() => Create("stable_" + System.IO.Path.GetFileNameWithoutExtension(k)))).Value;
 
     /// <summary>Synchronous variant for host configuration callbacks.</summary>
-    public static string Create(string name) => CreateAsync(name).GetAwaiter().GetResult();
+    public static string Create(string name) => Task.Run(() => CreateAsync(name)).GetAwaiter().GetResult();
 
     /// <summary>Points the web host at a fresh cloned PostgreSQL governance database.</summary>
     public static void Apply(IWebHostBuilder builder, string name)
@@ -42,7 +43,7 @@ internal static class GovernanceTestDatabase
     private static async Task<GovernancePostgresFixture> StartAsync()
     {
         var fixture = new GovernancePostgresFixture();
-        await fixture.InitializeAsync();
+        await fixture.InitializeAsync().ConfigureAwait(false);
         return fixture;
     }
 }
