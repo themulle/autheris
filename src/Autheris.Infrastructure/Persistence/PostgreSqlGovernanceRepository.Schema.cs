@@ -248,7 +248,8 @@ public partial class PostgreSqlGovernanceRepository
                             using var maskCmd = conn.CreateCommand();
                             maskCmd.Transaction = trans;
                             maskCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
-                                                   VALUES (@id, @cid, 'REGEX', '', '', 'key-2026-q1')
+                                                   SELECT @id, @cid, 'REGEX', '', '', 'key-2026-q1'
+                                                   WHERE NOT EXISTS (SELECT 1 FROM COLUMN_MASKING_RULES WHERE table_column_id = @cid)
                                                    ON CONFLICT DO NOTHING;";
                             maskCmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
                             maskCmd.Parameters.AddWithValue("@cid", colId);
@@ -335,7 +336,8 @@ public partial class PostgreSqlGovernanceRepository
                     using var mcmd = conn.CreateCommand();
                     mcmd.Transaction = trans;
                     mcmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
-                                         VALUES (@id, @cid, 'REDACT', '', '[CONFIDENTIAL NOTE]', 'key-2026-q1')
+                                         SELECT @id, @cid, 'REDACT', '', '[CONFIDENTIAL NOTE]', 'key-2026-q1'
+                                         WHERE NOT EXISTS (SELECT 1 FROM COLUMN_MASKING_RULES WHERE table_column_id = @cid)
                                          ON CONFLICT DO NOTHING;";
                     mcmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
                     mcmd.Parameters.AddWithValue("@cid", colId);
