@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// RDF-S5: the demo root fields <c>finance</c> and <c>hr</c> were removed. Selecting them answers a GraphQL validation error
@@ -134,8 +135,8 @@ public sealed class DemoRootFieldsRemovedIntegrationTests : IDisposable
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
             b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
             b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={_dbFile}");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(_dbFile));
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             if (trustedDocumentsOnly)

@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// The MCP endpoint speaks the current protocol through the official SDK: a standard MCP client connects, receives the
@@ -44,8 +45,8 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
                 b.UseSetting("Gateway:Authentication:Adfs:Authority", Authority);
                 b.UseSetting("Gateway:Authentication:Adfs:Audience", "api://autheris");
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-                b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-                b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-McpSdk-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Mcp:Enabled", "true");
                 b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
                 // The enabled Adfs scheme needs an explicit realm of its kind (no implicit realm exists).
@@ -206,7 +207,7 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
             {
                 b.UseEnvironment("Production");
                 b.UseSetting("Gateway:Hosting:AllowedHosts:0", "localhost");
-                b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={tempDb}");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(tempDb));
                 b.UseSetting("Gateway:Audit:ChainAnchorPath", tempAnchor);
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKey", "0123456789012345678901234567890123456789");

@@ -24,6 +24,7 @@ using NSubstitute;
 using Npgsql;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// D-1 / R-SQL-3: Integration test for WebSQL SELECT against PostgreSQL (Testcontainers).
@@ -97,8 +98,8 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
         {
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-pgtx-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("PostgreSqlWebSqlTransactionTests"));
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "finance");
             builder.UseSetting("Gateway:DataSources:Connections:finance:Provider", "PostgreSql");

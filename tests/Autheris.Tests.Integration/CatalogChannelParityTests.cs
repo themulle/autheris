@@ -18,6 +18,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// WP-0 (PLAN-GOV-111 M-12, T-W0-5, T-W0-6): the REST catalog and the MCP tools show a consent-less caller nothing, a consented caller only the
@@ -74,8 +75,8 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-CatalogParity-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("HostFixture"));
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
             if (tenancyMode == "Single")

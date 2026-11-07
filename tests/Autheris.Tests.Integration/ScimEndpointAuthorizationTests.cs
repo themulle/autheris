@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 [Trait("Category", "Security")]
 public sealed class ScimEndpointAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>
@@ -20,8 +21,8 @@ public sealed class ScimEndpointAuthorizationTests : IClassFixture<WebApplicatio
     {
         _factory = factory.WithWebHostBuilder(builder =>
         {
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("ScimEndpointAuthorizationTests"));
             builder.ConfigureServices(services =>
             {
                 services.PostConfigure<Autheris.Domain.Options.Security.IdentityRealmsOptions>(options =>

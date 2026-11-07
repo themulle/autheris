@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Issue #282 (AC-5): an empty governance catalog and a configured PostgreSQL data source; the dbt sync registers the tables
@@ -43,8 +44,8 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
     private WebApplicationFactory<Program> CreateHost() => new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
     {
         builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-        builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-        builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-dbt282-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+        builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+        builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("DbtSyncCatalogRegistrationPostgreSqlTests"));
         builder.UseSetting("Gateway:DataSources:Connections:warehouse:Provider", "PostgreSql");
         builder.UseSetting("Gateway:DataSources:Connections:warehouse:ConnectionString", _fixture.ConnectionString);
         builder.UseSetting("Gateway:DataSources:Connections:warehouse:DefaultSchema", "public");

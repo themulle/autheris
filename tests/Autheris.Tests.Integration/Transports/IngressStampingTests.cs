@@ -26,6 +26,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 using Autheris.Api.Endpoints;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Issue #447 WP-2a..f: every transport lane stamps its ingress from endpoint metadata only (SEC-ATR-02), and the background
@@ -56,8 +57,8 @@ public sealed class IngressStampingTests : IClassFixture<IngressStampingTests.Fi
             {
                 builder.UseEnvironment("Development");
                 builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-                builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{nameof(IngressStampingTests)}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "500");
                 builder.UseSetting("Gateway:WebSql:Enabled", "true");
                 builder.UseSetting("Gateway:OData:Enabled", "true");

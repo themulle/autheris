@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Integration.Governance;
 
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
@@ -13,7 +14,6 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Npgsql;
-using Testcontainers.PostgreSql;
 using Xunit;
 
 [CollectionDefinition(Name)]
@@ -23,19 +23,19 @@ public sealed class GovernancePostgresCollection : ICollectionFixture<Governance
 }
 
 /// <summary>
-/// Shared PostgreSQL Testcontainers fixture that runs <see cref="PostgreSqlGovernanceMigrationRunner"/> once into
+/// PostgreSQL governance fixture on the shared test server (<see cref="SharedDatabaseServers"/>) that runs <see cref="PostgreSqlGovernanceMigrationRunner"/> once into
 /// <c>autheris_template</c> and clones isolated per-test-class databases via <c>CREATE DATABASE ... TEMPLATE autheris_template</c>.
 /// </summary>
 public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostgresFixture
 {
-    public const string PinnedPostgresImage = "postgres:16-alpine";
+    private static readonly SemaphoreSlim CloneGate = new(1, 1);
 
-    private PostgreSqlContainer? _ownedContainer;
+    private readonly string _templateDatabaseName = GovernancePostgresDatabaseName.DefaultTemplateName + "_" + Guid.NewGuid().ToString("N")[..8];
     private string _adminConnectionString = string.Empty;
 
     public bool IsAvailable { get; private set; }
 
-    public string TemplateDatabaseName => GovernancePostgresDatabaseName.DefaultTemplateName;
+    public string TemplateDatabaseName => _templateDatabaseName;
 
     public async Task InitializeAsync()
     {
@@ -48,13 +48,7 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
             }
             else
             {
-                bool reuse = !string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
-                _ownedContainer = new PostgreSqlBuilder(PinnedPostgresImage)
-                    .WithReuse(reuse)
-                    .WithLabel("autheris.tests", "governance-postgresql-template")
-                    .Build();
-                await _ownedContainer.StartAsync();
-                _adminConnectionString = _ownedContainer.GetConnectionString();
+                _adminConnectionString = await SharedDatabaseServers.PostgreSqlServerAsync();
             }
 
             await InitializeTemplateDatabaseAsync();
@@ -75,13 +69,21 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
         }
 
         var dbName = GovernancePostgresDatabaseName.Sanitize(name);
-        await using (var admin = new NpgsqlConnection(_adminConnectionString))
+        await CloneGate.WaitAsync();
+        try
         {
-            await admin.OpenAsync();
-            await TerminateBackendsAsync(admin, TemplateDatabaseName);
-            await using var create = admin.CreateCommand();
-            create.CommandText = $"CREATE DATABASE \"{dbName}\" TEMPLATE \"{TemplateDatabaseName}\"";
-            await create.ExecuteNonQueryAsync();
+            await using (var admin = new NpgsqlConnection(_adminConnectionString))
+            {
+                await admin.OpenAsync();
+                await TerminateBackendsAsync(admin, TemplateDatabaseName);
+                await using var create = admin.CreateCommand();
+                create.CommandText = $"CREATE DATABASE \"{dbName}\" TEMPLATE \"{TemplateDatabaseName}\"";
+                await create.ExecuteNonQueryAsync();
+            }
+        }
+        finally
+        {
+            CloneGate.Release();
         }
 
         return new NpgsqlConnectionStringBuilder(_adminConnectionString)
@@ -92,10 +94,23 @@ public sealed class GovernancePostgresFixture : IAsyncLifetime, IGovernancePostg
 
     public async Task DisposeAsync()
     {
-        NpgsqlConnection.ClearAllPools();
-        if (_ownedContainer is not null)
+        if (!IsAvailable)
         {
-            await _ownedContainer.DisposeAsync();
+            return;
+        }
+
+        try
+        {
+            NpgsqlConnection.ClearAllPools();
+            await using var admin = new NpgsqlConnection(_adminConnectionString);
+            await admin.OpenAsync();
+            await using var drop = admin.CreateCommand();
+            drop.CommandText = $"DROP DATABASE IF EXISTS \"{TemplateDatabaseName}\" WITH (FORCE)";
+            await drop.ExecuteNonQueryAsync();
+        }
+        catch (Exception)
+        {
+            // Best effort: the shared server is removed at process exit anyway.
         }
     }
 
