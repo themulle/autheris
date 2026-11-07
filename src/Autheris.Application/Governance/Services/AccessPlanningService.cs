@@ -812,6 +812,7 @@ public class AccessPlanningService : IAccessPlanningService
         AdminSetDatasetStateRequest request,
         string adminSid,
         string? tenantId = null,
+        TenantId? restrictToTenant = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -827,20 +828,17 @@ public class AccessPlanningService : IAccessPlanningService
         var tableId = ParseTableIdentifier(request.DatasetId);
         var existing = await _tableRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
 
-        string previousState = existing?.Table.IsActive == false ? "inactive" : "active";
-
-        if (existing != null)
+        // GHSA-9229: a missing table, or one owned by another tenant than the confined caller, is "not found" (no write, no audit).
+        if (existing == null ||
+            (restrictToTenant is { } owner && !string.Equals(existing.OwnerTenantId, owner.Value, StringComparison.OrdinalIgnoreCase)))
         {
-            bool isActive = string.Equals(newState, "active", StringComparison.OrdinalIgnoreCase);
-            var updated = existing with
-            {
-                Table = existing.Table with
-                {
-                    IsActive = isActive
-                }
-            };
-            await _tableRepo.UpsertTableMetadataAsync(updated, ct).ConfigureAwait(false);
+            return new AdminSetDatasetStateResult(request.DatasetId, "unknown", newState, false);
         }
+
+        string previousState = existing.Table.IsActive == false ? "inactive" : "active";
+
+        var isActive = string.Equals(newState, "active", StringComparison.OrdinalIgnoreCase);
+        await _tableRepo.UpsertTableMetadataAsync(existing with { Table = existing.Table with { IsActive = isActive } }, ct).ConfigureAwait(false);
 
         var auditEntry = new AuditLogEntry
         {

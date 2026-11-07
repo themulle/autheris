@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Federation.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
@@ -32,6 +33,19 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
         _time = time ?? TimeProvider.System;
     }
 
+    /// <summary>Drops the cached classifications (one tenant, or all when null) so a masking rule change applies immediately.</summary>
+    public void Invalidate(TenantId? tenant = null)
+    {
+        if (tenant is { } t)
+        {
+            _cache.TryRemove(t.Value, out _);
+        }
+        else
+        {
+            _cache.Clear();
+        }
+    }
+
     public async ValueTask<IReadOnlyDictionary<string, MaskingRule>> GetClassificationsAsync(TenantId tenant, CancellationToken ct = default)
     {
         var ttl = TimeSpan.FromSeconds(Math.Max(0, _options.Value.Federation.CatalogMaskingCacheSeconds));
@@ -45,6 +59,12 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
         var map = new Dictionary<string, MaskingRule>(StringComparer.Ordinal);
         foreach (var table in tables)
         {
+            // GHSA-7pjw: only the caller tenant's own tables contribute; another tenant's (weaker) rule never applies.
+            if (!string.Equals(table.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             foreach (var column in table.Columns)
             {
                 var hasRule = table.ColumnMaskingRules.TryGetValue(column.ColumnName, out var rule);
@@ -56,14 +76,12 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
                 var key = FederatedFieldName.Normalize(column.ColumnName);
                 if (key.Length == 0) continue;
 
-                // A concrete masking rule wins over the generic redaction of a sensitive-only column.
-                if (hasRule && rule != null)
+                // The same column name on several tables resolves to the strictest rule, whatever the load order.
+                var candidate = hasRule && rule != null ? rule : RedactRule;
+                if (!map.TryGetValue(key, out var current) ||
+                    CatalogGovernanceRatchet.MaskingRuleStrength(candidate) > CatalogGovernanceRatchet.MaskingRuleStrength(current))
                 {
-                    map[key] = rule;
-                }
-                else
-                {
-                    map.TryAdd(key, RedactRule);
+                    map[key] = candidate;
                 }
             }
         }

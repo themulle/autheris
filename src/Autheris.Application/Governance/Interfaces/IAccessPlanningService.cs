@@ -102,6 +102,7 @@ public interface IAccessPlanningService
         AdminSetDatasetStateRequest request,
         string adminSid,
         string? tenantId = null,
+        TenantId? restrictToTenant = null,
         CancellationToken ct = default);
 
     /// <summary>

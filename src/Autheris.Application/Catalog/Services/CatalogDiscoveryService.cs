@@ -731,6 +731,18 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
     private static readonly char[] TokenSeparators = [' ', '\t', '\r', '\n', ',', ';', '.', '(', ')', '"', '\'', '/', '\\', '-', '_', ':'];
 
+    private bool SecretExists(string secretRef)
+    {
+        try
+        {
+            return _secretProvider!.GetSecretBytes(secretRef) is { Length: > 0 };
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     public async Task<DatasourceRegistrationResult> RegisterDatasourceAsync(DatasourceRegistrationRequest request, RequestContext context, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -784,7 +796,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         }
 
         // SR-H-03: a client-supplied SecretRef is never trusted as vault key; it must lie inside the datasource's own namespace.
-        var secretNamespace = $"{DatasourceSecretRefPolicy.DomainPrefix(request.Domain)}{request.Name.ToLowerInvariant()}:";
+        // GHSA-v5c2: the namespace carries the owning tenant, so a ref can never address another tenant's secret.
+        var secretNamespace = $"{DatasourceSecretRefPolicy.DomainPrefix(request.Domain)}{context.TenantId.Value.ToLowerInvariant()}:{request.Name.ToLowerInvariant()}:";
         DatasourceSecretRefPolicy.ValidateClientRef(request.Auth?.SecretRef, secretNamespace);
 
         var isConfigured = request.Auth != null &&
@@ -800,6 +813,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             if (!string.IsNullOrEmpty(rawSecret))
             {
                 var secretRef = request.Auth.SecretRef ?? $"{secretNamespace}secret";
+                DatasourceSecretRefPolicy.ThrowIfExists(secretRef, SecretExists(secretRef));
+
                 _secretProvider.SetSecret(secretRef, System.Text.Encoding.UTF8.GetBytes(rawSecret));
                 effectiveAuth = request.Auth with { SecretRef = secretRef, Value = null, ClientSecret = null };
             }

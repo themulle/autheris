@@ -67,6 +67,15 @@ public static class DatasourceSecretRefPolicy
         }
     }
 
+    /// <summary>GHSA-v5c2: an existing secret is never silently replaced by a registration.</summary>
+    public static void ThrowIfExists(string secretRef, bool exists)
+    {
+        if (exists)
+        {
+            throw new ArgumentException("An existing secret reference is never overwritten.", nameof(secretRef));
+        }
+    }
+
     private static bool HasControlOrTraversal(string value)
     {
         foreach (var c in value)

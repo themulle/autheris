@@ -233,10 +233,15 @@ public static class CatalogApiEndpoints
             {
                 return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The datasource identifier is invalid.", httpContext);
             }
+            if (ResolveTenantRestriction(httpContext, out var restrictToTenant) is { } denied)
+            {
+                return denied;
+            }
+
             try
             {
                 var effectiveRequest = request ?? new DatasourceTestRequest();
-                var result = await testingService.TestDatasourceAsync(id, effectiveRequest, httpContext.User, ct);
+                var result = await testingService.TestDatasourceAsync(id, effectiveRequest, httpContext.User, restrictToTenant, ct);
                 return Results.Ok(result);
             }
             catch (System.Collections.Generic.KeyNotFoundException)
@@ -466,19 +471,11 @@ public static class CatalogApiEndpoints
         CancellationToken ct)
         => Autheris.Application.Governance.Services.DatasetIdResolver.ResolveActiveAsync(id, metadataRepository, ct);
 
-    internal static async Task<IResult> RefreshDatasourcePhysicalKeysHandler(
-        string id,
-        PhysicalKeyRefreshRequest? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] IPhysicalKeyRefreshService refreshService,
-        HttpContext httpContext,
-        CancellationToken ct)
+    /// <summary>Resolves the tenant a governance admin is confined to (null for global scope); returns a denial result when the tenant cannot be resolved.</summary>
+    private static IResult? ResolveTenantRestriction(HttpContext httpContext, out TenantId? restrictToTenant)
     {
-        if (httpContext.User.GetUserSid() is not { } actorSid)
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
-
-        var gatewayOptions = (httpContext.RequestServices.GetService(typeof(IOptions<GatewayOptions>)) as IOptions<GatewayOptions>)?.Value ?? new GatewayOptions();
+        restrictToTenant = null;
+        var gatewayOptions = (httpContext.RequestServices?.GetService(typeof(IOptions<GatewayOptions>)) as IOptions<GatewayOptions>)?.Value ?? new GatewayOptions();
         var defaultTenant = TenantResolver.EffectiveDefaultOf(gatewayOptions.Tenancy);
         var scope = CallerScopeResolver.Resolve(httpContext.User, defaultTenant);
 
@@ -493,9 +490,29 @@ public static class CatalogApiEndpoints
                     httpContext);
         }
 
-        TenantId? restrictToTenant = scope == CallerScope.Tenant
+        restrictToTenant = scope == CallerScope.Tenant
             ? CallerScopeResolver.ResolutionOf(httpContext.User, defaultTenant).Tenant
             : null;
+
+        return null;
+    }
+
+    internal static async Task<IResult> RefreshDatasourcePhysicalKeysHandler(
+        string id,
+        PhysicalKeyRefreshRequest? request,
+        [Microsoft.AspNetCore.Mvc.FromServices] IPhysicalKeyRefreshService refreshService,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        if (httpContext.User.GetUserSid() is not { } actorSid)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (ResolveTenantRestriction(httpContext, out var restrictToTenant) is { } denied)
+        {
+            return denied;
+        }
 
         if (string.IsNullOrWhiteSpace(id) || !DatasourceTestingService.IsValidDatasourceId(id))
         {
@@ -875,9 +892,14 @@ public static class CatalogApiEndpoints
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The state is required.", httpContext);
         }
 
+        if (ResolveTenantRestriction(httpContext, out var restrictToTenant) is { } denied)
+        {
+            return denied;
+        }
+
         var adminSid = httpContext.User.GetUserSid()?.Value ?? httpContext.User.Identity?.Name ?? "system-admin";
         var planningRequest = new AdminSetDatasetStateRequest(id, request.State, request.Reason);
-        var result = await accessPlanningService.SetDatasetStateAsync(planningRequest, adminSid, EndpointSecurity.GetRequestTenant(httpContext).Value, ct);
+        var result = await accessPlanningService.SetDatasetStateAsync(planningRequest, adminSid, EndpointSecurity.GetRequestTenant(httpContext).Value, restrictToTenant, ct);
         if (!result.Success)
         {
             return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The dataset was not found.", httpContext);
@@ -898,6 +920,14 @@ public static class CatalogApiEndpoints
         }
 
         var context = CreateRequestContext(httpContext);
+
+        // GHSA-v5c2: the domain must be the caller's own tenant unless the caller is a canonical ClusterAdmin.
+        if (!EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User) &&
+            !string.Equals(request.Domain.Trim(), context.TenantId.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiProblems.Forbidden(httpContext: httpContext);
+        }
+
         try
         {
             var result = await discoveryService.RegisterDatasourceAsync(request, context, ct);

@@ -98,7 +98,7 @@ public sealed class SrH03DatasourceSecretRefTests
         var result = await service.RegisterDatasourceAsync(request, Ctx());
 
         result.Success.ShouldBeTrue();
-        secrets.Received().SetSecret("datasource:telemetry:crane:secret", Arg.Any<byte[]>());
+        secrets.Received().SetSecret("datasource:telemetry:tenant-a:crane:secret", Arg.Any<byte[]>());
     }
 
     [Theory]

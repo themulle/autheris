@@ -168,7 +168,9 @@ public sealed class ConsentDecisionDenialRecorder : IConsentDecisionDenialRecord
     {
         try
         {
-            var actor = principal?.GetUserSid()?.Value;
+            // Attribution only (never a grant or consent match): an app-only caller is recorded under its application id.
+            var actor = principal?.GetUserSid()?.Value
+                ?? principal?.FindFirst("appid")?.Value ?? principal?.FindFirst("client_id")?.Value ?? principal?.FindFirst("azp")?.Value;
             var principalKey = string.IsNullOrWhiteSpace(actor) ? "anonymous" : actor;
             var key = string.Concat(tenantId.Value, "|", principalKey); // per tenant: one tenant's denials never mask another tenant's
             var minute = _time.GetUtcNow().ToUnixTimeSeconds() / 60;

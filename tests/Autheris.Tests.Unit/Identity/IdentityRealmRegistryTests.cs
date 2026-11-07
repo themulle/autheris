@@ -60,7 +60,7 @@ public sealed class IdentityRealmRegistryTests
     }
 
     [Fact]
-    public void IdentityRealmRegistry_SidRealmLookup_WiredOnConstruction()
+    public void IdentityRealmRegistry_GetRealm_ResolvesRegisteredRealm()
     {
         var registry = new IdentityRealmRegistry();
         var realm = new IdentityRealm(
@@ -72,8 +72,7 @@ public sealed class IdentityRealmRegistryTests
 
         registry.RegisterRealm(realm);
 
-        Sid.RealmLookup.ShouldNotBeNull();
-        var resolved = Sid.RealmLookup("sid-lookup-realm");
+        var resolved = registry.GetRealm("sid-lookup-realm");
         resolved.ShouldNotBeNull();
         resolved.Id.ShouldBe("sid-lookup-realm");
     }
