@@ -742,12 +742,7 @@ public class AccessPlanningService : IAccessPlanningService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(adminSid);
 
-        // GHSA-v5c2: the domain is the caller's own tenant unless the caller is a canonical ClusterAdmin.
-        if (!isClusterAdmin && !string.Equals(request.Domain.Trim(), NormalizeTenant(tenantId), StringComparison.OrdinalIgnoreCase))
-        {
-            throw new UnauthorizedAccessException("The datasource domain must be the caller's own tenant.");
-        }
-
+        DatasourceSecretRefPolicy.RequireOwnDomain(request.Domain, NormalizeTenant(tenantId), isClusterAdmin);
         var datasourceId = $"{request.Domain.ToLowerInvariant()}.{request.Name.ToLowerInvariant()}";
         string? secretRef = null;
         var vaultPrefix = $"vault://datasources/{request.Domain.ToLowerInvariant()}/";
@@ -764,8 +759,7 @@ public class AccessPlanningService : IAccessPlanningService
                     "Inline datasource secrets require a writable IKeyVaultSecretProvider; supply Auth.SecretRef instead.");
             }
 
-            secretRef = $"{DatasourceSecretRefPolicy.DomainPrefix(request.Domain.ToLowerInvariant())}{(NormalizeTenant(tenantId) ?? TenantId.Platform.Value).ToLowerInvariant()}:{request.Name.ToLowerInvariant()}:auth_secret";
-            DatasourceSecretRefPolicy.ThrowIfExists(_secretProvider, secretRef);
+            secretRef = DatasourceSecretRefPolicy.NewAuthSecretRef(_secretProvider, request.Domain, NormalizeTenant(tenantId), request.Name);
             try
             {
                 _secretProvider.SetSecret(secretRef, Encoding.UTF8.GetBytes(request.Auth.Secret));
