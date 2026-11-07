@@ -97,9 +97,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 CollectDerivedMaskedSources(node.Body, derived);
                 EnsureNoDerivedMaskedColumnReferencesInPredicate(derived, node.OrderBy, "ORDER BY");
             }
-            catch (SecurityException ex) when (ex is not MaskedColumnPredicateException && ex.Message.StartsWith("Masked column '", StringComparison.Ordinal))
+            catch (SecurityException ex) when (ex.Message.StartsWith("Masked column '", StringComparison.Ordinal))
             {
-                throw new MaskedColumnPredicateException(ex.Message);
+                ex.Data["FILTER_ON_MASKED_COLUMN"] = true;
+                throw;
             }
         }
 
@@ -172,9 +173,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 CheckJoinConditions(node.From, tables);
                 CheckDerivedJoinConditions(node.From, derived);
             }
-            catch (SecurityException ex) when (ex is not MaskedColumnPredicateException && ex.Message.StartsWith("Masked column '", StringComparison.Ordinal))
+            catch (SecurityException ex) when (ex.Message.StartsWith("Masked column '", StringComparison.Ordinal))
             {
-                throw new MaskedColumnPredicateException(ex.Message);
+                ex.Data["FILTER_ON_MASKED_COLUMN"] = true;
+                throw;
             }
         }
 

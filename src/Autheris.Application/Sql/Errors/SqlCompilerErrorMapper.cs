@@ -149,6 +149,7 @@ public static class SqlCompilerErrorMapper
         e => e is SetOperationDegreeMismatchException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
         e => e is MaskedAggregationException ? Of(403, GovernedSqlErrorCodes.AggregationOnMaskedColumn) : null,
         e => e is MaskedColumnPredicateException or FilterOnMaskedColumnException or WebSqlPolicyException { Code: GovernedSqlErrorCodes.FilterOnMaskedColumn }
+            || (e is SecurityException sec && sec.Data.Contains(GovernedSqlErrorCodes.FilterOnMaskedColumn))
             ? Of(403, GovernedSqlErrorCodes.FilterOnMaskedColumn)
             : null,
         e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.EndpointDisabled } ? Of(403, GovernedSqlErrorCodes.EndpointDisabled) : null,
