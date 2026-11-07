@@ -11,7 +11,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit;
+namespace Autheris.Tests.Integration.Governance;
 
 public class InfrastructureTests : IDisposable
 {
@@ -19,14 +19,14 @@ public class InfrastructureTests : IDisposable
     private readonly EpochValidationService _epochService;
     private readonly IMemoryCache _memoryCache;
     private readonly ConsentCacheService _cacheService;
-    private readonly SqliteGovernanceRepository _repository;
+    private readonly PostgreSqlGovernanceRepository _repository;
 
     public InfrastructureTests()
     {
         _epochService = new EpochValidationService(eventBus: _eventBus);
         _memoryCache = new MemoryCache(new MemoryCacheOptions());
         _cacheService = new ConsentCacheService(_memoryCache, _epochService, _eventBus);
-        _repository = GovernanceStoreFactory.CreateSqlite(_epochService);
+        _repository = GovernanceTestDatabase.CreateRepository(_epochService);
     }
 
     [Fact]
@@ -129,18 +129,12 @@ public class InfrastructureTests : IDisposable
     [Fact]
     public async Task AuditLog_WhenRepositoryRestarted_MaintainsContinuousHashChainWithoutResettingToGenesis()
     {
-        var dbName = $"Data Source=audit_restart_test_{Guid.NewGuid():N}.db";
-        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = dbName }
-        });
-
         var actorSid = new Sid("S-1-5-21-AUDIT-RESTART");
 
-        try
         {
             // 1. Initial Repository Instance
-            using (var repo1 = GovernanceStoreFactory.CreateSqlite(_epochService, options))
+            string dbName;
+            using (var repo1 = GovernanceTestDatabase.CreateRepository(_epochService, out dbName))
             {
                 await repo1.RecordAuditEventAsync(new AuditLogEntry
                 {
@@ -163,7 +157,7 @@ public class InfrastructureTests : IDisposable
             }
 
             // 2. Second Repository Instance (simulates process restart pointing to existing DB)
-            using (var repo2 = GovernanceStoreFactory.CreateSqlite(_epochService, options))
+            using (var repo2 = GovernanceTestDatabase.CreateRepositoryOn(dbName, _epochService))
             {
                 await repo2.RecordAuditEventAsync(new AuditLogEntry
                 {
@@ -181,14 +175,6 @@ public class InfrastructureTests : IDisposable
 
                 var isValid = await repo2.VerifyAuditHashChainAsync();
                 isValid.ShouldBeTrue("Audit hash chain must remain continuous across process restarts and not reset to GENESIS.");
-            }
-        }
-        finally
-        {
-            var fileName = dbName.Replace("Data Source=", "");
-            if (System.IO.File.Exists(fileName))
-            {
-                System.IO.File.Delete(fileName);
             }
         }
     }
@@ -303,7 +289,7 @@ public class InfrastructureTests : IDisposable
         });
 
         // Simulate reboot: new repository instance on same database
-        using var newRepo = GovernanceStoreFactory.CreateSqlite(_epochService);
+        using var newRepo = GovernanceTestDatabase.CreateRepository(_epochService);
 
         // Record subsequent event
         await newRepo.RecordAuditEventAsync(new AuditLogEntry
@@ -341,13 +327,11 @@ public class InfrastructureTests : IDisposable
         });
 
         // Tamper with the Entry Id directly in the database
-        using (var cmd = _repository.RawConnection().CreateCommand())
-        {
-            cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET id = @tamperedId WHERE id = @originalId";
-            cmd.Parameters.AddWithValue("@tamperedId", Guid.NewGuid().ToString());
-            cmd.Parameters.AddWithValue("@originalId", originalId.ToString());
-            await cmd.ExecuteNonQueryAsync();
-        }
+        GovernanceTestDatabase.ExecuteRaw(
+            GovernanceTestDatabase.ConnectionStringOf(_repository),
+            "UPDATE AUDIT_LOG_ENTRIES SET id = @tamperedId WHERE id = @originalId",
+            bypassAppendOnlyTriggers: true,
+            parameters: [("tamperedId", Guid.NewGuid().ToString()), ("originalId", originalId.ToString())]);
 
         // Verification must fail because Id is cryptographically bound into the hash chain
         var isChainValid = await _repository.VerifyAuditHashChainAsync();
@@ -426,6 +410,12 @@ public class InfrastructureTests : IDisposable
         loadedFilter.AdditionalHops[0].TableAlias.ShouldBe("ao");
     }
 
+    private void DeletePolicyEpoch(TableIdentifier table) =>
+        GovernanceTestDatabase.ExecuteRaw(
+            GovernanceTestDatabase.ConnectionStringOf(_repository),
+            "DELETE FROM POLICY_EPOCHS WHERE lower(domain) = lower(@domain) AND lower(schema_name) = lower(@schema) AND lower(table_name) = lower(@table)",
+            parameters: [("domain", table.Domain), ("schema", table.Schema), ("table", table.TableName)]);
+
     [Fact]
     public async Task IncrementTableEpoch_WhenNoRowInPolicyEpochs_InsertsInitialEpochAndIncrements()
     {
@@ -436,7 +426,7 @@ public class InfrastructureTests : IDisposable
         meta.ShouldNotBeNull();
 
         // Delete epoch row to simulate table added without initial epoch record
-        await _repository.DeletePolicyEpochForTableAsync(table);
+        DeletePolicyEpoch(table);
 
         var consent = await _repository.CreateConsentAsync(new Consent
         {
@@ -451,7 +441,7 @@ public class InfrastructureTests : IDisposable
         });
 
         // Still delete epoch to test Revoke
-        await _repository.DeletePolicyEpochForTableAsync(table);
+        DeletePolicyEpoch(table);
         var epochBefore = await _repository.GetTableEpochAsync(table);
         epochBefore.ShouldBe(1L);
 

@@ -1,5 +1,6 @@
-namespace Autheris.Tests.Unit.Identity.Attributes;
+namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Unit.Identity.Attributes;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -29,9 +30,9 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
 {
     private const string Tenant = "tenant_a";
 
-    private readonly SqliteGovernanceRepository _store = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _store = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=cae_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+        Options.Create(new GatewayOptions()));
 
     private readonly CallerAttributeAdministrationService _service;
     private readonly CallerAttributeRegistry _registry;

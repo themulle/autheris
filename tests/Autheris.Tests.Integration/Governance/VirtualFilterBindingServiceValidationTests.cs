@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.VirtualFilters;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.IO;
@@ -32,11 +32,11 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
 
     // The direct dbt governance import runs as the calling user in the caller's tenant (the tenant of DavidProfile / DavidFilter).
     private static readonly DbtGovernanceImportCaller ImportCaller =
-        new(new VirtualFilterActor(new Sid("S-1-5-21-LWE-GOVADMIN"), IsSync: false), VirtualFilterModelTests.DavidProfile().TenantId);
+        new(new VirtualFilterActor(new Sid("S-1-5-21-LWE-GOVADMIN"), IsSync: false), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile().TenantId);
 
-    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vfb_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+        Options.Create(new GatewayOptions()));
 
     private readonly VirtualFilterAdministrationService _service;
 
@@ -45,8 +45,8 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
         var catalog = Substitute.For<ITableMetadataRepository>();
         catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
         {
-            MandatoryRowFilterResolverTests.Table("conf", "client", "client_id", "crane_serial_number"),
-            MandatoryRowFilterResolverTests.Table("md", "crane", "serial_number", "is_delivered")
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
         });
         var options = Options.Create(new GatewayOptions
         {
@@ -59,14 +59,14 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
 
     private static VirtualFilterAccessProfile ProfileWith(Func<FilterBinding, FilterBinding> change)
     {
-        var profile = VirtualFilterModelTests.DavidProfile();
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile();
         return profile with { Bindings = profile.Bindings.Select(change).ToList() };
     }
 
     [Fact]
     public async Task SaveProfile_WithAnExplicitKeyBudgetAboveTheGatewayLimit_IsRejectedForAnyCaller()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), DbtActor);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
 
         var ex = await Should.ThrowAsync<VirtualFilterBindingException>(() =>
             _service.SaveProfileAsync(ProfileWith(b => b with { MaxPushdownKeys = 51 }), DbtActor));
@@ -78,7 +78,7 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
     [Fact]
     public async Task SaveProfile_WithAFormatNoEndpointCanSatisfy_IsRejectedForAnyCaller()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), DbtActor);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
 
         var ex = await Should.ThrowAsync<VirtualFilterBindingException>(() =>
             _service.SaveProfileAsync(ProfileWith(b => b with { PushdownFormat = PushdownParameterFormat.ODataIn }), DbtActor));
@@ -90,9 +90,9 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
     [Fact]
     public async Task SaveProfile_WithTheModelDefaultBudget_IsNotCheckedAgainstALowGatewayLimit()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), DbtActor);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
 
-        await _service.SaveProfileAsync(VirtualFilterModelTests.DavidProfile(), DbtActor);
+        await _service.SaveProfileAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile(), DbtActor);
 
         (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem()
             .Bindings.ShouldHaveSingleItem().MaxPushdownKeys.ShouldBe(FilterBinding.DefaultMaxPushdownKeys);
@@ -102,9 +102,9 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
     public async Task ApplySync_WithAnInvalidBinding_IsRejectedAndStoresNothing()
     {
         var request = new VirtualFilterSyncRequest(
-            VirtualFilterModelTests.DavidProfile().TenantId,
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile().TenantId,
             new ManagedBy("governance/access", "c1"),
-            [VirtualFilterModelTests.DavidFilter()],
+            [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()],
             [ProfileWith(b => b with { MaxPushdownKeys = 51 })]);
 
         await Should.ThrowAsync<VirtualFilterBindingException>(() => _service.ApplySyncAsync(request, DbtActor));
@@ -116,7 +116,7 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
     [Fact]
     public async Task DbtImport_ThroughTheService_SavesAProfileWithDefaultBindingOptions_UnderALowGatewayLimit()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), DbtActor);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
         var dbt = new DbtMetadataIngestionService(
             Substitute.For<IDbtProposalRepository>(),
             Substitute.For<ITableMetadataRepository>(),
@@ -144,12 +144,12 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
     [Fact]
     public async Task DbtImport_SavesTheProfileAsTheCallingUser_SoTheApprovalWorkflowApplies()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), DbtActor);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
         var catalog = Substitute.For<ITableMetadataRepository>();
         catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
         {
-            MandatoryRowFilterResolverTests.Table("conf", "client", "client_id", "crane_serial_number"),
-            MandatoryRowFilterResolverTests.Table("md", "crane", "serial_number", "is_delivered")
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
         });
         var approvalService = new VirtualFilterAdministrationService(
             _repository,

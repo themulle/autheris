@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.VirtualFilters;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -16,13 +16,13 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Virtual filters, phase 2: storage contract (SQLite; PostgreSQL in the integration tests).</summary>
-public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
+public sealed class PostgreSqlVirtualFilterRepositoryTests : IDisposable
 {
     private static readonly TenantId Tenant = new("tenant_lwe");
 
-    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vf_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+        Options.Create(new GatewayOptions()));
 
     private IVirtualFilterRepository Repository => _repository;
 
@@ -31,7 +31,7 @@ public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
     [Fact]
     public async Task Filter_RoundTrips_WithItsDefinitionAndHash()
     {
-        var filter = VirtualFilterModelTests.DavidFilter() with
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with
         {
             ValidToColumn = "crane.date_of_delivery",
             Supersedes = ["alter_filter"],
@@ -55,7 +55,7 @@ public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
     [Fact]
     public async Task Profile_RoundTrips_WithItsBindings()
     {
-        var profile = VirtualFilterModelTests.DavidProfile() with
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile() with
         {
             Bindings =
             [
@@ -80,9 +80,9 @@ public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
     [Fact]
     public async Task SavingTheSameName_ReplacesIt_PerTenant()
     {
-        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter()] });
-        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter() with { Id = Guid.NewGuid(), ValidToColumn = "crane.date_of_delivery" }] });
-        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter() with { Id = Guid.NewGuid(), TenantId = new TenantId("other") }] });
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()] });
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with { Id = Guid.NewGuid(), ValidToColumn = "crane.date_of_delivery" }] });
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with { Id = Guid.NewGuid(), TenantId = new TenantId("other") }] });
 
         var filters = (await Repository.LoadSnapshotAsync()).Filters;
         filters.Count.ShouldBe(2);
@@ -96,8 +96,8 @@ public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
 
         await Repository.ApplyAsync(new VirtualFilterChangeSet
         {
-            SaveFilters = [VirtualFilterModelTests.DavidFilter(), VirtualFilterModelTests.DavidFilter("zweiter_filter")],
-            SaveProfiles = [VirtualFilterModelTests.DavidProfile()]
+            SaveFilters = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("zweiter_filter")],
+            SaveProfiles = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile()]
         });
         (await Repository.GetGenerationAsync()).ShouldBe(start + 1);
 
@@ -111,9 +111,9 @@ public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
     [Fact]
     public async Task AFailingChangeSet_WritesNothing()
     {
-        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter()] });
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()] });
         var start = await Repository.GetGenerationAsync();
-        var duplicateId = VirtualFilterModelTests.DavidFilter("zweiter_filter") with { Id = Guid.NewGuid() };
+        var duplicateId = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("zweiter_filter") with { Id = Guid.NewGuid() };
 
         // the second filter reuses the primary key of the first one with another name -> constraint violation
         await Should.ThrowAsync<Exception>(() => Repository.ApplyAsync(new VirtualFilterChangeSet
@@ -138,15 +138,15 @@ public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
     public async Task Apply_StaleGeneration_ThrowsConflict()
     {
         // PERS-13: a change computed from an older snapshot is refused and nothing is written.
-        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter()] });
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()] });
         var stale = (await Repository.LoadSnapshotAsync()).Generation;
-        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter() with { Id = Guid.NewGuid(), ValidToColumn = "crane.date_of_delivery" }] });
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with { Id = Guid.NewGuid(), ValidToColumn = "crane.date_of_delivery" }] });
         var before = await Repository.LoadSnapshotAsync();
 
         await Should.ThrowAsync<VirtualFilterConflictException>(() => Repository.ApplyAsync(new VirtualFilterChangeSet
         {
             ExpectedGeneration = stale,
-            DeleteFilters = [(Tenant, VirtualFilterModelTests.DavidFilter().Name)]
+            DeleteFilters = [(Tenant, Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter().Name)]
         }));
 
         var after = await Repository.LoadSnapshotAsync();
@@ -157,13 +157,13 @@ public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
     [Fact]
     public async Task Apply_CurrentGeneration_SucceedsAndIncrementsOnce()
     {
-        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter()] });
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()] });
         var current = await Repository.LoadSnapshotAsync();
 
         await Repository.ApplyAsync(new VirtualFilterChangeSet
         {
             ExpectedGeneration = current.Generation,
-            DeleteFilters = [(Tenant, VirtualFilterModelTests.DavidFilter().Name)]
+            DeleteFilters = [(Tenant, Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter().Name)]
         });
 
         var after = await Repository.LoadSnapshotAsync();
@@ -174,7 +174,7 @@ public sealed class SqliteVirtualFilterRepositoryTests : IDisposable
     [Fact]
     public async Task ConcurrentApproveAndSave_SecondFails_ApprovedDefinitionKept()
     {
-        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [VirtualFilterModelTests.DavidFilter()] });
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()] });
         var read = await Repository.LoadSnapshotAsync();
         var original = read.Filters.Single();
 

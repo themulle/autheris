@@ -94,16 +94,18 @@ public static class GovernanceStoreFactory
     public static PostgreSqlGovernanceRepository CreateUnmigratedPostgreSql(
         IEpochValidationService epochValidationService,
         IOptions<GatewayOptions> options,
-        IHostEnvironment? environment = null)
+        IHostEnvironment? environment = null,
+        IKeyVaultSecretProvider? secretProvider = null,
+        IAuditChainAnchorStore? auditAnchorStore = null)
     {
         var env = environment ?? DefaultEnvironment();
-        var secrets = Substitute.For<IKeyVaultSecretProvider>();
+        var secrets = secretProvider ?? Substitute.For<IKeyVaultSecretProvider>();
         return new PostgreSqlGovernanceRepository(
             epochValidationService,
             options,
             env,
             secrets,
-            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
+            auditAnchorStore ?? AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
             Substitute.For<ICallerContextProvider>());
     }
 

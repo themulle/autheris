@@ -12,38 +12,22 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit;
+namespace Autheris.Tests.Integration.Governance;
 
 public class ConcurrencyAndAuditReplicationTests : IDisposable
 {
     private readonly EpochValidationService _epochService;
-    private readonly SqliteGovernanceRepository _repository;
-    private readonly List<string> _tempFiles = new();
+    private readonly PostgreSqlGovernanceRepository _repository;
 
     public ConcurrencyAndAuditReplicationTests()
     {
         _epochService = new EpochValidationService();
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                ConnectionString = $"Data Source=concurrency_audit_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
-            }
-        });
-        _repository = GovernanceStoreFactory.CreateSqlite(_epochService, options);
+        _repository = GovernanceTestDatabase.CreateRepository(_epochService);
     }
 
     public void Dispose()
     {
         _repository.Dispose();
-        // SEC H-17: file databases get an external audit chain anchor next to them.
-        foreach (var file in _tempFiles.SelectMany(f => new[] { f, f + ".audit-anchor.json" }).ToList())
-        {
-            if (File.Exists(file))
-            {
-                try { File.Delete(file); } catch { /* best effort */ }
-            }
-        }
     }
 
     #region High-Concurrency Stress Tests
@@ -125,16 +109,9 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
     [Fact]
     public async Task AuditLog_AcrossThreeConsecutiveInstances_MaintainsUnbrokenChain()
     {
-        var dbFile = $"audit_multi_inst_{Guid.NewGuid():N}.db";
-        _tempFiles.Add(dbFile);
-        var connStr = $"Data Source={dbFile}";
-        var opts = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = connStr }
-        });
-
         // Instance 1: records events 1..5
-        using (var inst1 = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
+        string connStr;
+        using (var inst1 = GovernanceTestDatabase.CreateRepository(_epochService, out connStr))
         {
             for (int i = 1; i <= 5; i++)
             {
@@ -151,7 +128,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         }
 
         // Instance 2: records events 6..10
-        using (var inst2 = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
+        using (var inst2 = GovernanceTestDatabase.CreateRepositoryOn(connStr, _epochService))
         {
             for (int i = 6; i <= 10; i++)
             {
@@ -168,7 +145,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         }
 
         // Instance 3: records event 11, then verifies all 11 events
-        using (var inst3 = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
+        using (var inst3 = GovernanceTestDatabase.CreateRepositoryOn(connStr, _epochService))
         {
             await inst3.RecordAuditEventAsync(new AuditLogEntry
             {
@@ -191,16 +168,8 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
     [Fact]
     public async Task AuditLog_TamperDetection_DetectsPayloadAlteringAtAnyPosition()
     {
-        var dbFile = $"audit_tamper_test_{Guid.NewGuid():N}.db";
-        _tempFiles.Add(dbFile);
-        var connStr = $"Data Source={dbFile}";
-        var opts = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = connStr }
-        });
-
         Guid middleEventId = Guid.Empty;
-        using (var repo = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
+        using (var repo = GovernanceTestDatabase.CreateRepository(_epochService, out var connStr))
         {
             // Seed 5 events
             for (int i = 1; i <= 5; i++)
@@ -225,12 +194,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
             initiallyValid.ShouldBeTrue();
 
             // 1. Tamper with DetailsJson of middle event
-            using (var cmd = repo.RawConnection().CreateCommand())
-            {
-                cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET details_json = '{\"tampered\": true}' WHERE id = @id";
-                cmd.Parameters.AddWithValue("@id", middleEventId.ToString());
-                await cmd.ExecuteNonQueryAsync();
-            }
+            GovernanceTestDatabase.ExecuteRaw(connStr, "UPDATE AUDIT_LOG_ENTRIES SET details_json = '{\"tampered\": true}' WHERE id = @id", bypassAppendOnlyTriggers: true, parameters: [("id", middleEventId.ToString())]);
 
             // Verification must immediately catch this!
             var isTamperDetected = await repo.VerifyAuditHashChainAsync();
@@ -241,16 +205,8 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
     [Fact]
     public async Task AuditLog_DeletionOfMiddleEntry_BreaksHashChain()
     {
-        var dbFile = $"audit_delete_test_{Guid.NewGuid():N}.db";
-        _tempFiles.Add(dbFile);
-        var connStr = $"Data Source={dbFile}";
-        var opts = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = connStr }
-        });
-
         Guid middleEventId = Guid.Empty;
-        using (var repo = GovernanceStoreFactory.CreateSqlite(_epochService, opts))
+        using (var repo = GovernanceTestDatabase.CreateRepository(_epochService, out var connStr))
         {
             for (int i = 1; i <= 5; i++)
             {
@@ -270,12 +226,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
             }
 
             // Delete the 3rd event directly
-            using (var cmd = repo.RawConnection().CreateCommand())
-            {
-                cmd.CommandText = "DELETE FROM AUDIT_LOG_ENTRIES WHERE id = @id";
-                cmd.Parameters.AddWithValue("@id", middleEventId.ToString());
-                await cmd.ExecuteNonQueryAsync();
-            }
+            GovernanceTestDatabase.ExecuteRaw(connStr, "DELETE FROM AUDIT_LOG_ENTRIES WHERE id = @id", bypassAppendOnlyTriggers: true, parameters: [("id", middleEventId.ToString())]);
 
             // The chain is now broken because entry 4's PrevHash matches the deleted entry 3's EntryHash, not entry 2's EntryHash
             var isValid = await repo.VerifyAuditHashChainAsync();

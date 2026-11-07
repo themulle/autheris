@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.VirtualFilters;
+namespace Autheris.Tests.Integration.Governance;
 
 using Autheris.Tests.Unit.TestDoubles;
 using System;
@@ -31,9 +31,9 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
 {
     private const string Tenant = "tenant_lwe";
 
-    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vfe_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+        Options.Create(new GatewayOptions()));
 
     private readonly VirtualFilterAdministrationService _service;
 
@@ -158,7 +158,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     [Fact]
     public async Task ManagedRow_Returns409()
     {
-        await _service.ApplySyncAsync(new VirtualFilterSyncRequest(new TenantId(Tenant), new ManagedBy("governance/access", "c1"), [VirtualFilterModelTests.DavidFilter()], []),
+        await _service.ApplySyncAsync(new VirtualFilterSyncRequest(new TenantId(Tenant), new ManagedBy("governance/access", "c1"), [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()], []),
             new VirtualFilterActor(new Sid("S-1-5-21-TALOS"), IsSync: true));
         var context = Context(Tenant, DavidFilterBody(), "FilterAdmin");
 
@@ -180,8 +180,8 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     [Fact]
     public async Task List_ShowsOnlyTheCallersTenant()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), new VirtualFilterActor(new Sid("S-1-5-21-A"), false));
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter() with { TenantId = new TenantId("other") }, new VirtualFilterActor(new Sid("S-1-5-21-A"), false));
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), new VirtualFilterActor(new Sid("S-1-5-21-A"), false));
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with { TenantId = new TenantId("other") }, new VirtualFilterActor(new Sid("S-1-5-21-A"), false));
         var context = Context(Tenant, null, "GovernanceAdmin");
 
         await StatusAsync(await VirtualFilterEndpoints.ListAsync(context, _service), context);
@@ -278,7 +278,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     [Fact]
     public async Task ConfigSyncStatus_ReturnsMetadataAndCounts()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), new VirtualFilterActor(new Sid("S-1-5-21-A"), false));
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), new VirtualFilterActor(new Sid("S-1-5-21-A"), false));
         var context = Context(Tenant, null, "GovernanceAdmin");
 
         var result = await VirtualFilterEndpoints.ConfigSyncStatusAsync(context, _service);

@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Common.Interfaces;
@@ -20,11 +21,11 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit;
+namespace Autheris.Tests.Integration.Governance;
 
 public class DataPathSecurityTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repository;
+    private readonly PostgreSqlGovernanceRepository _repository;
     private readonly ConsentResolutionService _resolutionService;
     private readonly ConsentCacheService _cacheService;
     private readonly ColumnMaskingProvider _maskingProvider;
@@ -35,7 +36,7 @@ public class DataPathSecurityTests : IDisposable
     public DataPathSecurityTests()
     {
         var epochService = new EpochValidationService();
-        _repository = GovernanceStoreFactory.CreateSqlite(epochService);
+        _repository = GovernanceTestDatabase.CreateRepository(epochService);
         _resolutionService = new ConsentResolutionService();
         var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
         var eventBus = new Autheris.Infrastructure.Messaging.InProcessChannelEventBus();

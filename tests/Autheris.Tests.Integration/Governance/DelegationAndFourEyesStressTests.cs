@@ -11,24 +11,18 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit;
+namespace Autheris.Tests.Integration.Governance;
 
 public class DelegationAndFourEyesStressTests : IDisposable
 {
     private readonly EpochValidationService _epochService;
-    private readonly SqliteGovernanceRepository _repository;
+    private readonly PostgreSqlGovernanceRepository _repository;
 
     public DelegationAndFourEyesStressTests()
     {
         _epochService = new EpochValidationService();
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                ConnectionString = $"Data Source=delegation_4eyes_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
-            }
-        });
-        _repository = GovernanceStoreFactory.CreateSqlite(_epochService, options);
+        var options = Options.Create(new GatewayOptions());
+        _repository = GovernanceTestDatabase.CreateRepository(_epochService, options);
     }
 
     public void Dispose()

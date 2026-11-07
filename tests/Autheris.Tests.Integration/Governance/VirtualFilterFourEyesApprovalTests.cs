@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.VirtualFilters;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -31,9 +31,9 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     private static readonly VirtualFilterActor CreatorActor = new(Creator, IsSync: false);
     private static readonly VirtualFilterActor SupervisorActor = new(Supervisor, IsSync: false);
 
-    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vfa_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+        Options.Create(new GatewayOptions()));
 
     private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
     private readonly VirtualFilterAdministrationService _adminService;
@@ -56,8 +56,8 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     {
         var catalog = Substitute.For<ITableMetadataRepository>();
         catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([
-            MandatoryRowFilterResolverTests.Table("conf", "client", "client_id", "crane_serial_number"),
-            MandatoryRowFilterResolverTests.Table("md", "crane", "serial_number", "is_delivered")
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
         ]);
 
         var options = Options.Create(new GatewayOptions
@@ -88,7 +88,7 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     [Trait("Category", "Security")]
     public async Task ApproveFilter_WithoutHash_Rejected()
     {
-        await _adminService.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_nohash"), CreatorActor);
+        await _adminService.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_nohash"), CreatorActor);
 
         await Should.ThrowAsync<ArgumentException>(() => _adminService.ApproveFilterAsync(Tenant, "filter_nohash", SupervisorActor, expectedHash: null!));
         await Should.ThrowAsync<ArgumentException>(() => _adminService.ApproveFilterAsync(Tenant, "filter_nohash", SupervisorActor, expectedHash: " "));
@@ -100,8 +100,8 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     [Trait("Category", "Security")]
     public async Task ApproveProfile_WithoutHash_Rejected()
     {
-        await _adminService.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_pnh"), new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
-        await _adminService.SaveProfileAsync(VirtualFilterModelTests.DavidProfile("profile_nohash", "filter_pnh"), CreatorActor);
+        await _adminService.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_pnh"), new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
+        await _adminService.SaveProfileAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile("profile_nohash", "filter_pnh"), CreatorActor);
 
         await Should.ThrowAsync<ArgumentException>(() => _adminService.ApproveProfileAsync(Tenant, "profile_nohash", SupervisorActor, expectedHash: ""));
     }
@@ -110,7 +110,7 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     [Trait("Category", "Security")]
     public async Task ApproveFilter_DraftChangedAfterReview_Conflict()
     {
-        var filter = VirtualFilterModelTests.DavidFilter("filter_toctou");
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_toctou");
         await _adminService.SaveFilterAsync(filter, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
         await _adminService.SaveFilterAsync(filter with { KeyColumns = ["client.client_id"] }, CreatorActor);
         var reviewed = VirtualFilterAdministrationService.PendingHash((await _repository.LoadSnapshotAsync()).Filters.Single(f => f.Name == "filter_toctou"));
@@ -125,8 +125,8 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     [Trait("Category", "Security")]
     public async Task ApproveProfile_DraftChangedAfterReview_Conflict()
     {
-        await _adminService.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_ptoctou"), new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
-        var profile = VirtualFilterModelTests.DavidProfile("profile_toctou", "filter_ptoctou");
+        await _adminService.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_ptoctou"), new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile("profile_toctou", "filter_ptoctou");
         await _adminService.SaveProfileAsync(profile, CreatorActor);
         var reviewed = VirtualFilterAdministrationService.PendingHash((await _repository.LoadSnapshotAsync()).Profiles.Single(p => p.Name == "profile_toctou"));
 
@@ -140,7 +140,7 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     [Trait("Category", "Security")]
     public async Task ApproveFilter_HashCaseDiffers_Conflict()
     {
-        await _adminService.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_case"), CreatorActor);
+        await _adminService.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_case"), CreatorActor);
         var hash = VirtualFilterAdministrationService.PendingHash((await _repository.LoadSnapshotAsync()).Filters.Single(f => f.Name == "filter_case"));
 
         await Should.ThrowAsync<VirtualFilterConflictException>(() => ApproveFilterAsync("filter_case", SupervisorActor, expectedHash: hash.ToUpperInvariant()));
@@ -156,16 +156,16 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     public async Task FilterUpdate_WhileRequireApproval_KeepsActiveVersionInResolver_UntilSupervisorApprove()
     {
         // 1. Initial filter created & approved
-        var filter = VirtualFilterModelTests.DavidFilter("filter_v1");
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_v1");
         var savedInitial = await _adminService.SaveFilterAsync(filter, CreatorActor);
         savedInitial.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
 
         // Make active via sync actor
-        var initialProfile = VirtualFilterModelTests.DavidProfile("david", "filter_v1");
+        var initialProfile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile("david", "filter_v1");
         await _adminService.SaveFilterAsync(filter, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
         await _adminService.SaveProfileAsync(initialProfile, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
 
-        var targetTable = MandatoryRowFilterResolverTests.Table("conf", "client", "client_id", "crane_serial_number");
+        var targetTable = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number");
         var outcomeBefore = await _resolver.ResolveAsync(Query(targetTable));
         outcomeBefore.IsDenied.ShouldBeFalse();
         outcomeBefore.AppliedFilters.ShouldContain("filter_v1");
@@ -222,15 +222,15 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     public async Task FilterDelete_WhileRequireApproval_MarksPendingDeletion_AndResolverStillAppliesActive_UntilSupervisorApprove()
     {
         // 1. Setup active filter and profile
-        var filter = VirtualFilterModelTests.DavidFilter("filter_del");
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_del");
         await _adminService.SaveFilterAsync(filter, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
 
         // Additional filter so profile remains valid
-        var filterOther = VirtualFilterModelTests.DavidFilter("filter_other");
+        var filterOther = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_other");
         await _adminService.SaveFilterAsync(filterOther, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
 
         // Profile binding filter_del
-        var profile = VirtualFilterModelTests.DavidProfile("david_del", "filter_del");
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile("david_del", "filter_del");
         await _adminService.SaveProfileAsync(profile, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
 
         // Switch binding to filter_other so filter_del can be deleted
@@ -263,11 +263,11 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     public async Task ProfileUpdate_WhileRequireApproval_KeepsActiveVersionInResolver_UntilSupervisorApprove()
     {
         // 1. Setup active filter
-        var filter = VirtualFilterModelTests.DavidFilter("filter_prof");
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_prof");
         await _adminService.SaveFilterAsync(filter, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
 
         // 2. Setup active profile (Uncovered: Deny)
-        var profile = VirtualFilterModelTests.DavidProfile("david_p", "filter_prof");
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile("david_p", "filter_prof");
         await _adminService.SaveProfileAsync(profile, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
 
         // 3. Creator submits profile update changing Uncovered to Skip
@@ -302,7 +302,7 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     [Fact]
     public async Task ApproveFilter_WithoutPendingChanges_ThrowsInvalidOperation()
     {
-        var filter = VirtualFilterModelTests.DavidFilter("filter_clean");
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_clean");
         await _adminService.SaveFilterAsync(filter, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
 
         // Has no pending changes
@@ -314,7 +314,7 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     public async Task SG_03_EditorCannotSelfApprove_AfterModifyingPendingFilter()
     {
         // 1. Alice (Creator) creates a pending filter
-        var filter = VirtualFilterModelTests.DavidFilter("filter_sg03");
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_sg03");
         var savedAlice = await _adminService.SaveFilterAsync(filter, CreatorActor);
         savedAlice.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
 
@@ -353,11 +353,11 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     public async Task SG_03_EditorCannotSelfApprove_AfterModifyingPendingProfile()
     {
         // 1. Setup filter so profile can bind it
-        var filter = VirtualFilterModelTests.DavidFilter("filter_sg03_p");
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_sg03_p");
         await _adminService.SaveFilterAsync(filter, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
 
         // 2. Alice creates pending profile
-        var profile = VirtualFilterModelTests.DavidProfile("profile_sg03", "filter_sg03_p");
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile("profile_sg03", "filter_sg03_p");
         var savedAlice = await _adminService.SaveProfileAsync(profile, CreatorActor);
         savedAlice.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
 

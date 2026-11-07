@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.VirtualFilters;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Linq;
@@ -26,9 +26,9 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     private static readonly VirtualFilterActor Admin = new(new Sid("S-1-5-21-ADMIN"), IsSync: false);
     private static readonly VirtualFilterActor Sync = new(new Sid("S-1-5-21-TALOS"), IsSync: true);
 
-    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vfs_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+        Options.Create(new GatewayOptions()));
 
     private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
     private readonly VirtualFilterAdministrationService _service;
@@ -38,8 +38,8 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         var catalog = Substitute.For<ITableMetadataRepository>();
         catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
         {
-            MandatoryRowFilterResolverTests.Table("conf", "client", "client_id", "crane_serial_number"),
-            MandatoryRowFilterResolverTests.Table("md", "crane", "serial_number", "is_delivered")
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
         });
         _service = new VirtualFilterAdministrationService(_repository, _audit,
             Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { MaxRemovals = 2 } }), catalog: catalog);
@@ -53,8 +53,8 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public async Task CreateFilterAndProfile_AreStoredAndAudited()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), Admin);
-        await _service.SaveProfileAsync(VirtualFilterModelTests.DavidProfile(), Admin);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), Admin);
+        await _service.SaveProfileAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile(), Admin);
 
         var snapshot = await _repository.LoadSnapshotAsync();
         snapshot.Filters.ShouldHaveSingleItem();
@@ -66,7 +66,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public async Task UpdateFilter_IsAuditedWithHashBeforeAndAfter()
     {
-        var original = VirtualFilterModelTests.DavidFilter();
+        var original = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter();
         await _service.SaveFilterAsync(original, Admin);
         var changed = original with { ValidToColumn = "crane.date_of_delivery" };
 
@@ -82,29 +82,29 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public async Task InvalidFilter_IsRejectedWithoutWriting()
     {
-        await Should.ThrowAsync<ArgumentException>(() => _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("Bad-Name"), Admin));
+        await Should.ThrowAsync<ArgumentException>(() => _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("Bad-Name"), Admin));
         (await _repository.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Profile_BindingAnUnknownFilter_IsRejected()
     {
-        await Should.ThrowAsync<ArgumentException>(() => _service.SaveProfileAsync(VirtualFilterModelTests.DavidProfile(), Admin));
+        await Should.ThrowAsync<ArgumentException>(() => _service.SaveProfileAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile(), Admin));
     }
 
     [Fact]
     public async Task Profile_BindingAFilterOfAnotherTenant_IsRejected()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter() with { TenantId = new TenantId("other") }, Admin);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with { TenantId = new TenantId("other") }, Admin);
 
-        await Should.ThrowAsync<ArgumentException>(() => _service.SaveProfileAsync(VirtualFilterModelTests.DavidProfile(), Admin));
+        await Should.ThrowAsync<ArgumentException>(() => _service.SaveProfileAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile(), Admin));
     }
 
     [Fact]
     public async Task BoundFilter_CannotBeDeleted()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), Admin);
-        await _service.SaveProfileAsync(VirtualFilterModelTests.DavidProfile(), Admin);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), Admin);
+        await _service.SaveProfileAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile(), Admin);
 
         var ex = await Should.ThrowAsync<VirtualFilterConflictException>(() => _service.DeleteFilterAsync(Tenant, "nicht_ausgelieferte_krane", Admin));
         ex.Message.ShouldContain("david");
@@ -113,33 +113,33 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public async Task Supersedes_UnknownFilterOrCycle_IsRejected()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_a"), Admin);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_a"), Admin);
         await Should.ThrowAsync<ArgumentException>(() =>
-            _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_b") with { Supersedes = ["gibt_es_nicht"] }, Admin));
+            _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_b") with { Supersedes = ["gibt_es_nicht"] }, Admin));
 
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_b") with { Supersedes = ["filter_a"] }, Admin);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_b") with { Supersedes = ["filter_a"] }, Admin);
         var ex = await Should.ThrowAsync<ArgumentException>(() =>
-            _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("filter_a") with { Supersedes = ["filter_b"] }, Admin));
+            _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_a") with { Supersedes = ["filter_b"] }, Admin));
         ex.Message.ShouldContain("cycle");
     }
 
     [Fact]
     public async Task ManagedRows_AreLocked_OutsideTheSync()
     {
-        await _service.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter(), VirtualFilterModelTests.DavidProfile()), Sync);
+        await _service.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile()), Sync);
 
         await Should.ThrowAsync<ManagedResourceLockedException>(() =>
-            _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter() with { ValidToColumn = "crane.date_of_delivery" }, Admin));
+            _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with { ValidToColumn = "crane.date_of_delivery" }, Admin));
         await Should.ThrowAsync<ManagedResourceLockedException>(() => _service.DeleteProfileAsync(Tenant, "david", Admin));
         await Should.ThrowAsync<ManagedResourceLockedException>(() =>
-            _service.SaveProfileAsync(VirtualFilterModelTests.DavidProfile() with { Uncovered = UncoveredPolicy.Skip }, Admin));
+            _service.SaveProfileAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile() with { Uncovered = UncoveredPolicy.Skip }, Admin));
     }
 
     [Fact]
     public async Task OnlyTheSync_MayCreateManagedRows()
     {
         await Should.ThrowAsync<ManagedResourceLockedException>(() =>
-            _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter() with { ManagedBy = new ManagedBy("x.yaml", "c1") }, Admin));
+            _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with { ManagedBy = new ManagedBy("x.yaml", "c1") }, Admin));
     }
 
     // ------------------------------------------------------------------ sync
@@ -153,7 +153,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public async Task SyncPlan_ListsCreates_ThenApplyCreatesInOneGenerationAndAudits()
     {
-        var request = Desired("c1", VirtualFilterModelTests.DavidFilter(), VirtualFilterModelTests.DavidProfile());
+        var request = Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile());
         var start = await _repository.GetGenerationAsync();
 
         var plan = await _service.PlanSyncAsync(request);
@@ -168,14 +168,14 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         snapshot.Filters.Single().ManagedBy.ShouldBe(new ManagedBy("governance/access", "c1"));
         snapshot.Profiles.Single().ManagedBy.ShouldNotBeNull();
         await AuditedAsync("VIRTUAL_FILTER_SYNC_APPLIED");
-        (await _service.PlanSyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter(), VirtualFilterModelTests.DavidProfile()))).HasChanges.ShouldBeFalse();
+        (await _service.PlanSyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile()))).HasChanges.ShouldBeFalse();
     }
 
     [Fact]
     public async Task SyncPlan_ListsUpdatesAndDeletes_ApplyRemovesWhatTheFilesNoLongerContain()
     {
-        await _service.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter(), VirtualFilterModelTests.DavidFilter("zweiter_filter"), VirtualFilterModelTests.DavidProfile()), Sync);
-        var next = Desired("c2", VirtualFilterModelTests.DavidFilter() with { ValidToColumn = "crane.date_of_delivery" }, VirtualFilterModelTests.DavidProfile());
+        await _service.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("zweiter_filter"), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile()), Sync);
+        var next = Desired("c2", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with { ValidToColumn = "crane.date_of_delivery" }, Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile());
 
         var plan = await _service.PlanSyncAsync(next);
         plan.UpdateFilters.ShouldBe(["nicht_ausgelieferte_krane"]);
@@ -190,7 +190,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public async Task SyncPlan_ReportsDrift_AndApplyRepairsIt()
     {
-        await _service.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter()), Sync);
+        await _service.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()), Sync);
         // A direct write to the database (outside Autheris) leaves a stored hash that does not match the definition.
         using (var cmd = _repository.RawConnection().CreateCommand())
         {
@@ -198,22 +198,22 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
             cmd.ExecuteNonQuery().ShouldBe(1);
         }
 
-        var plan = await _service.PlanSyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter()));
+        var plan = await _service.PlanSyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()));
         plan.DriftedFilters.ShouldBe(["nicht_ausgelieferte_krane"]);
         plan.UpdateFilters.ShouldBe(["nicht_ausgelieferte_krane"]);
 
-        await _service.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter()), Sync);
-        (await _service.PlanSyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter()))).DriftedFilters.ShouldBeEmpty();
+        await _service.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()), Sync);
+        (await _service.PlanSyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()))).DriftedFilters.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Sync_DoesNotTouchUnmanagedRows_ButRejectsNameClashes()
     {
-        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter("handgepflegt"), Admin);
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("handgepflegt"), Admin);
 
-        (await _service.PlanSyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter()))).DeleteFilters.ShouldBeEmpty();
+        (await _service.PlanSyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()))).DeleteFilters.ShouldBeEmpty();
         await Should.ThrowAsync<VirtualFilterConflictException>(() =>
-            _service.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter("handgepflegt")), Sync));
+            _service.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("handgepflegt")), Sync));
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         var start = await _repository.GetGenerationAsync();
 
         await Should.ThrowAsync<ArgumentException>(() =>
-            _service.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter(), VirtualFilterModelTests.DavidProfile("david", "gibt_es_nicht")), Sync));
+            _service.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile("david", "gibt_es_nicht")), Sync));
 
         (await _repository.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
         (await _repository.GetGenerationAsync()).ShouldBe(start);
@@ -232,14 +232,14 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     public async Task ApplySync_RequiresTheSyncActor()
     {
         await Should.ThrowAsync<ManagedResourceLockedException>(() =>
-            _service.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter()), Admin));
+            _service.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()), Admin));
     }
 
     [Fact]
     public async Task RemovingMoreBindingsThanAllowed_NeedsForce()
     {
-        var filters = Enumerable.Range(1, 4).Select(i => VirtualFilterModelTests.DavidFilter($"filter_{i}")).ToArray();
-        var profile = VirtualFilterModelTests.DavidProfile("david", filters.Select(f => f.Name).ToArray()) with
+        var filters = Enumerable.Range(1, 4).Select(i => Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter($"filter_{i}")).ToArray();
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile("david", filters.Select(f => f.Name).ToArray()) with
         {
             Bindings = filters.Select(f => new FilterBinding { FilterName = f.Name }).ToList()
         };
@@ -259,7 +259,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public async Task RemovingAllBindings_NeedsForce_EvenBelowTheLimit()
     {
-        await _service.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter(), VirtualFilterModelTests.DavidProfile()), Sync);
+        await _service.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile()), Sync);
 
         var plan = await _service.PlanSyncAsync(Desired("c2"));   // an accidentally emptied folder
         plan.RemovedBindings.ShouldBe(1);
@@ -270,8 +270,8 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public async Task SlidingWindow_SalamiSlicing_AccumulatesRemovalsAndRequiresForce()
     {
-        var filters = Enumerable.Range(1, 5).Select(i => VirtualFilterModelTests.DavidFilter($"filter_{i}")).ToArray();
-        var profile = VirtualFilterModelTests.DavidProfile("david", filters.Select(f => f.Name).ToArray()) with
+        var filters = Enumerable.Range(1, 5).Select(i => Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter($"filter_{i}")).ToArray();
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile("david", filters.Select(f => f.Name).ToArray()) with
         {
             Bindings = filters.Select(f => new FilterBinding { FilterName = f.Name }).ToList()
         };
@@ -300,7 +300,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Trait("Category", "Security")]
     public async Task ChangedFilterDefinitions_CountAsRelaxationsTowardsMaxRemovals_VF10()
     {
-        var filters = Enumerable.Range(1, 3).Select(i => VirtualFilterModelTests.DavidFilter($"filter_{i}")).ToArray();
+        var filters = Enumerable.Range(1, 3).Select(i => Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter($"filter_{i}")).ToArray();
         await _service.ApplySyncAsync(Desired("c1", [.. filters]), Sync);
 
         // Three changed definitions (3 relaxations > limit 2) need force although nothing was removed.
@@ -316,7 +316,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     public async Task WeakeningUncoveredPolicy_CountsAsRelaxationTowardsMaxRemovals()
     {
         // Setup 3 profiles with Uncovered = Deny
-        var filter = VirtualFilterModelTests.DavidFilter("filter_1");
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("filter_1");
         var profiles = Enumerable.Range(1, 3).Select(i => new VirtualFilterAccessProfile
         {
             TenantId = Tenant,
@@ -376,7 +376,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         var creatorActor = new VirtualFilterActor(new Sid("S-1-5-21-CREATOR"), IsSync: false);
         var approverActor = new VirtualFilterActor(new Sid("S-1-5-21-APPROVER"), IsSync: false);
 
-        var filter = VirtualFilterModelTests.DavidFilter();
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter();
         var saved = await serviceWithApproval.SaveFilterAsync(filter, creatorActor);
         saved.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
         saved.ApprovedBy.ShouldBeNull();
@@ -397,7 +397,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         var serviceWithApproval = new VirtualFilterAdministrationService(_repository, _audit,
             Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }));
 
-        var result = await serviceWithApproval.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter()), Sync);
+        var result = await serviceWithApproval.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()), Sync);
         result.ShouldNotBeNull();
         (await _repository.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem();
     }
@@ -405,7 +405,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public async Task SaveFilter_StructuredFilter_ReferencingUnknownCatalogTable_IsRejected()
     {
-        var filter = VirtualFilterModelTests.DavidFilter() with
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with
         {
             Structured = new StructuredFilterDefinition
             {
@@ -426,8 +426,8 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         var catalog = Substitute.For<ITableMetadataRepository>();
         catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
         {
-            MandatoryRowFilterResolverTests.Table("conf", "client", "client_id", "crane_serial_number"),
-            MandatoryRowFilterResolverTests.Table("md", "crane", "serial_number", "is_delivered")
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
         });
 
         // Allowlist only permits conf.client, not md.crane
@@ -441,7 +441,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
             }), catalog: catalog);
 
         // DavidFilter joins md.crane
-        var filter = VirtualFilterModelTests.DavidFilter();
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter();
 
         var ex = await Should.ThrowAsync<ArgumentException>(() => serviceWithAllowlist.SaveFilterAsync(filter, Admin));
         ex.Message.ShouldContain("not in the allowed reference tables list");
@@ -450,7 +450,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     [Fact]
     public void StructuredFilter_WithReservedAutherisTargetAlias_IsRejectedDuringValidation()
     {
-        var filter = VirtualFilterModelTests.DavidFilter() with
+        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter() with
         {
             Structured = new StructuredFilterDefinition
             {

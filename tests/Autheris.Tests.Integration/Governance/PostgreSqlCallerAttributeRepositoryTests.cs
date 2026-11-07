@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Identity.Attributes;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -16,22 +16,21 @@ using Shouldly;
 using Xunit;
 
 /// <summary>PLAN-GOV-129 WP-1: storage contract of the caller attribute registry (SQLite; PostgreSQL and SQL Server in the integration tests). BC-129-10: the repository guards the four-eyes steps itself.</summary>
-public sealed class SqliteCallerAttributeRepositoryTests : IDisposable
+public sealed class PostgreSqlCallerAttributeRepositoryTests : IDisposable
 {
     private static readonly TenantId Tenant = new("tenant_a");
     private static readonly DateTimeOffset Now = new(2026, 10, 17, 8, 0, 0, TimeSpan.Zero);
 
-    private readonly SqliteGovernanceRepository _store = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _store = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=ca_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+        Options.Create(new GatewayOptions()));
 
     private ICallerAttributeRepository Repo => _store;
 
     public void Dispose() => _store.Dispose();
 
-    internal static CallerAttributeDefinition Definition(string name = "cost_center", string description = "v1", TenantId? tenant = null) => new(
-        Guid.NewGuid(), tenant ?? Tenant, name, CallerAttributeType.Text, CallerAttributeCardinality.List, 50, 60,
-        new CallerAttributeProviderBinding("claims", new Dictionary<string, string> { ["claim"] = "department" }), description, FilterApprovalStatus.PendingApproval);
+    private static CallerAttributeDefinition Definition(string name = "cost_center", string description = "v1", TenantId? tenant = null) =>
+        Autheris.Tests.Unit.Identity.Attributes.CallerAttributeTestSupport.Definition(name, description, tenant);
 
     [Fact]
     public async Task NewDefinition_IsStoredPending_AndRoundTrips()

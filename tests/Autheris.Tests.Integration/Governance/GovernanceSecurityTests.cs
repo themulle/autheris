@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit;
 using System.Security.Claims;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Common.Interfaces;
@@ -13,17 +14,17 @@ using Microsoft.AspNetCore.Http;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit;
+namespace Autheris.Tests.Integration.Governance;
 
 public class GovernanceSecurityTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repository;
+    private readonly PostgreSqlGovernanceRepository _repository;
     private readonly Mutation _mutation;
 
     public GovernanceSecurityTests()
     {
         var epochService = new EpochValidationService();
-        _repository = GovernanceStoreFactory.CreateSqlite(epochService);
+        _repository = GovernanceTestDatabase.CreateRepository(epochService);
         _mutation = new Mutation();
     }
 
@@ -607,7 +608,7 @@ public class GovernanceSecurityTests : IDisposable
     }
 
     [Fact]
-    public void SqliteGovernanceRepository_InProductionWithoutKeyVaultSecret_ThrowsInvalidOperationException()
+    public void PostgreSqlGovernanceRepository_InProductionWithoutKeyVaultSecret_ThrowsInvalidOperationException()
     {
         var epochService = new EpochValidationService();
         var prodEnv = new DummyHostEnvironment("Production");
@@ -615,13 +616,15 @@ public class GovernanceSecurityTests : IDisposable
         {
             GovernanceDb = new Autheris.Domain.Options.GovernanceDbOptions
             {
-                ConnectionString = "Data Source=test_prod.db;Mode=ReadWriteCreate;"
+                ConnectionString = "Host=localhost;Database=unused;Username=u;Password=p;SSL Mode=VerifyFull"
             }
         });
 
         Should.Throw<InvalidOperationException>(() =>
         {
-            using var repo = GovernanceStoreFactory.CreateSqlite(epochService, opts, prodEnv, secretProvider: null);
+            using var repo = new Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository(
+                epochService, opts, prodEnv, Substitute.For<Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider>(),
+                Substitute.For<Autheris.Application.Audit.IAuditChainAnchorStore>(), Substitute.For<Autheris.Application.Common.Interfaces.ICallerContextProvider>());
         });
     }
 

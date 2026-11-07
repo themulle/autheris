@@ -52,12 +52,7 @@ public sealed class MandatoryRowFilterResolverTests
         Bindings = bindings
     };
 
-    internal static TableMetadata Table(string schema, string table, params string[] columns) => new()
-    {
-        Identifier = new TableIdentifier("lwetem_prod", schema, table),
-        Table = new Table { SourceName = "lwetem_prod", SchemaName = schema, TableName = table, SourceType = "SqlServer" },
-        Columns = columns.Select(c => new TableColumn { ColumnName = c }).ToList()
-    };
+    internal static TableMetadata Table(string schema, string table, params string[] columns) => VirtualFilterTestData.Table(schema, table, columns);
 
     private static MandatoryRowFilterResolver Resolver(VirtualFilterSnapshot snapshot) =>
         new(new FixedSnapshot(snapshot), new PlaceholderPredicates());

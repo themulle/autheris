@@ -45,11 +45,11 @@ public sealed class SecretKeyLengthRDep1Tests
         // The reference "kv-ref-42" contains neither "hmac" nor "audit"; the provider-side name check would not apply.
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:", AuditHmacKeyVaultRef = "kv-ref-42" }
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = "Host=localhost;Database=unused;Username=u;Password=p;SSL Mode=VerifyFull", AuditHmacKeyVaultRef = "kv-ref-42" }
         });
 
         var ex = Should.Throw<InvalidOperationException>(() =>
-            GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, Env(Environments.Production), Provider("short-key"), auditAnchorStore: Substitute.For<Autheris.Application.Audit.IAuditChainAnchorStore>()));
+            GovernanceStoreFactory.CreateUnmigratedPostgreSql(Substitute.For<IEpochValidationService>(), options, Env(Environments.Production), Provider("short-key"), Substitute.For<Autheris.Application.Audit.IAuditChainAnchorStore>()));
 
         ex.Message.ShouldContain("32");
     }

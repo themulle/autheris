@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Security;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -22,7 +22,6 @@ using Autheris.Infrastructure.Persistence;
 using HotChocolate;
 using HotChocolate.Execution;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -32,27 +31,17 @@ using Xunit;
 
 public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repository;
+    private readonly PostgreSqlGovernanceRepository _repository;
     private readonly IEventBus _eventBus;
     private readonly string _connectionString;
 
     public Issue270GovernanceSecurityVerificationTests()
     {
         _eventBus = Substitute.For<IEventBus>();
-        _connectionString = $"Data Source=issue270_sec_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                ConnectionString = _connectionString,
-                JournalMode = "DELETE"
-            }
-        });
-
-        _repository = GovernanceStoreFactory.CreateSqlite(
+        _repository = GovernanceTestDatabase.CreateRepository(
             Substitute.For<IEpochValidationService>(),
-            options,
-            logger: NullLogger<SqliteGovernanceRepository>.Instance,
+            out _connectionString,
+            logger: NullLogger<PostgreSqlGovernanceRepository>.Instance,
             eventBus: _eventBus);
     }
 
@@ -77,7 +66,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         await _repository.UpsertTableMetadataAsync(meta);
 
         // 2. Corrupt the masking rule directly in the database (e.g. empty rule_type)
-        using (var rawConn = new SqliteConnection(_connectionString))
+        using (var rawConn = new Npgsql.NpgsqlConnection(_connectionString))
         {
             await rawConn.OpenAsync();
             using var cmd = rawConn.CreateCommand();
@@ -92,7 +81,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
             insertCorruptCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
                                             VALUES (@id, @colId, '', NULL, NULL, NULL)";
             insertCorruptCmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
-            insertCorruptCmd.Parameters.AddWithValue("@colId", colId);
+            insertCorruptCmd.Parameters.AddWithValue("@colId", colId!);
             await insertCorruptCmd.ExecuteNonQueryAsync();
         }
 
@@ -323,7 +312,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         // Audit persistence files to ensure batch queries in GetAllTablesAsync do not interpolate identifiers
         var repoFiles = new[]
         {
-            "src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Catalog.cs",
+            "src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.cs",
             "src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.cs",
             "src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Catalog.cs"
         };
