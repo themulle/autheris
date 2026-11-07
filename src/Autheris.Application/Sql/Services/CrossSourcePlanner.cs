@@ -263,7 +263,9 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         }
 
         // Issue #123: AST Subtree Graph Partitioning
-        var partitionResult = SubtreeGraphPartitioner.Partition(statement, tables, options.MaxTablesPerSubtree);
+        var partitionResult = SubtreeGraphPartitioner.Partition(
+            statement, tables, options.MaxTablesPerSubtree,
+            t => SubtreeCompiler.IsPushdownEligible(t, RequireDecision(decisions, t)));
         var subtreePlans = new List<SubtreeExecutionPlan>();
 
         var singleIds = new HashSet<TableIdentifier>(partitionResult.RemainingSingleTables.Select(DecisionKey));
