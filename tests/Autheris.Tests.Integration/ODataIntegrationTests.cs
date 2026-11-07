@@ -43,6 +43,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
 
     public void Dispose()
     {
+        _factory.Dispose();
         SqliteConnection.ClearAllPools();
         try { File.Delete(_dataDbPath); } catch (IOException) { }
     }
