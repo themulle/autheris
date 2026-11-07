@@ -147,7 +147,8 @@ public abstract class ConsentContract : GovernanceContractBase
             NewConsent(tableB.Identifier, Store.TenantB, granteeType: GranteeType.Role, roleName: "AnalystRole"));
 
         var bySubjectA = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], tableA.Identifier, now, Store.TenantA);
-        bySubjectA.Select(c => c.Id).Should().ContainSingle().Which.Should().Be(consentA.Id);
+        bySubjectA.Where(c => c.GranteeType == GranteeType.User).Select(c => c.Id).Should().ContainSingle().Which.Should().Be(consentA.Id);
+        bySubjectA.Select(c => c.Id).Should().BeEquivalentTo([consentA.Id, roleConsentA.Id]);
 
         var crossTableRead = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], tableB.Identifier, now, Store.TenantA);
         crossTableRead.Should().BeEmpty();

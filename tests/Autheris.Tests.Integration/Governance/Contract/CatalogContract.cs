@@ -281,7 +281,7 @@ public abstract class CatalogContract : GovernanceContractBase
 
         var table = await Store.TableMetadata.UpsertTableMetadataAsync(BuildTable("corrupt_keys"));
         await Store.ExecuteNonQueryAsync(
-            "UPDATE TABLE_PRIMARY_KEY_COLUMNS SET is_descending = 2 WHERE table_id = @tid",
+            "UPDATE TABLE_PRIMARY_KEY_COLUMNS SET key_ordinal = 2 WHERE table_id = @tid",
             ("@tid", table.Table.Id.ToString()));
         Store.InvalidateMetadataCache();
 
