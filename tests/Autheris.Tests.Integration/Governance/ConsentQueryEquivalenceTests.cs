@@ -6,7 +6,7 @@ using Autheris.Infrastructure.Persistence;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// WP-SC-01 / SEC-SC-01: the indexed consent query returns exactly what the former in-memory subject filter returned
@@ -20,7 +20,7 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
     private static readonly TenantId TenantA = new("tenant-a");
     private static readonly TenantId TenantB = new("tenant-b");
 
-    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
     private readonly TableIdentifier _table = new("Sales", "Crm", "Orders_" + Guid.NewGuid().ToString("N")[..6]);
     private readonly TableIdentifier _other = new("Sales", "Crm", "Other_" + Guid.NewGuid().ToString("N")[..6]);
     private readonly List<Consent> _seeded = [];

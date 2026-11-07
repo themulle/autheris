@@ -272,6 +272,47 @@ public abstract class GovernanceUpgradeTestsBase
         await RunAsync(cs, GovernanceMigrationMode.Verify);
     });
 
+    private const string InsertTableSql = "INSERT INTO tables (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t', 'sql', 'd', 's', 't', 't', 'NORMAL', 0, 1)";
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I404-SC-10")]
+    public Task Step0004_Rerun_IsIdempotent_GuardSkips() => WithDbAsync(async db =>
+    {
+        // Ported from the former SQLite upgrade tests (WP-SIMPL-11): re-running step 0004 must not drop or recreate data.
+        var cs = db.ConnectionString;
+        await RunAsync(cs, GovernanceMigrationMode.Apply, stepVersionCap: 4);
+        await ExecAsync(cs, InsertTableSql);
+        await ExecAsync(cs, "INSERT INTO table_physical_indexes (id, table_id, index_ordinal) VALUES ('i1', 't', 1)");
+        await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version = 4");
+
+        await RunAsync(cs, GovernanceMigrationMode.Apply, stepVersionCap: 4);
+
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 4")).ShouldBe(1);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM table_physical_indexes")).ShouldBe(1, "the guard skipped the statements, no data loss");
+    });
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "I404-SC-10")]
+    public Task Step0004_CheckConstraints_RejectInvalidOrdinal_AndCascadeRemovesPhysicalRows() => WithDbAsync(async db =>
+    {
+        // Ported from the former SQLite upgrade tests (WP-SIMPL-11).
+        var cs = db.ConnectionString;
+        await RunAsync(cs, GovernanceMigrationMode.Apply);
+        await ExecAsync(cs, InsertTableSql);
+        await ExecAsync(cs, "INSERT INTO table_physical_indexes (id, table_id, index_ordinal) VALUES ('i', 't', 1)");
+        await Should.ThrowAsync<Exception>(() => ExecAsync(cs, "INSERT INTO table_physical_indexes (id, table_id, index_ordinal) VALUES ('i0', 't', 0)"));
+        await Should.ThrowAsync<Exception>(() => ExecAsync(cs, "INSERT INTO table_physical_indexes (id, table_id, index_ordinal) VALUES ('ix', 'no-such-table', 2)"), "the foreign key refuses an unknown table");
+        await Should.ThrowAsync<Exception>(() => ExecAsync(cs, "INSERT INTO table_physical_index_columns (index_id, column_ordinal, table_column_id) VALUES ('i', 0, 'c')"));
+        await ExecAsync(cs, "INSERT INTO table_physical_index_columns (index_id, column_ordinal, table_column_id) VALUES ('i', 1, 'c')");
+        await Should.ThrowAsync<Exception>(() => ExecAsync(cs, "INSERT INTO table_physical_index_columns (index_id, column_ordinal, table_column_id) VALUES ('i', 2, 'c')"), "a column is listed once per index");
+
+        await ExecAsync(cs, "DELETE FROM tables WHERE id = 't'");
+        (await CountAsync(cs, "SELECT COUNT(*) FROM table_physical_indexes")).ShouldBe(0, "the cascade removes the physical rows with the table");
+        (await CountAsync(cs, "SELECT COUNT(*) FROM table_physical_index_columns")).ShouldBe(0);
+    });
+
     private static string InsertRequestSql(string id, string tenantLiteral) =>
         "INSERT INTO consent_requests (id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref, business_justification, status, requested_at, requested_valid_to, tenant_id) " +
         $"VALUES ('{id}', 't', 'S-1', 'Role', 'R', 'j', 'Pending', '2026-01-01', '2026-02-01', {tenantLiteral})";

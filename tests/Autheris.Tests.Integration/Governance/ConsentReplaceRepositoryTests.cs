@@ -7,9 +7,9 @@ using Autheris.Infrastructure.Persistence;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
-/// <summary>WP-SC-02 (repository part, SEC-SC-03): role-grantee lookup and the atomic revoke-and-create with a single epoch bump (SQLite).</summary>
+/// <summary>WP-SC-02 (repository part, SEC-SC-03): role-grantee lookup and the atomic revoke-and-create with a single epoch bump (PostgreSQL).</summary>
 [Trait("Category", "Security")]
 public sealed class ConsentReplaceRepositoryTests : IDisposable
 {
@@ -17,7 +17,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
     private static readonly TenantId TenantB = new("tenant-b");
     private static readonly Sid Admin = new("S-1-5-21-ADMIN");
 
-    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
     private readonly TableIdentifier _table = new("Sales", "Crm", "Orders_" + Guid.NewGuid().ToString("N")[..6]);
     private Guid _tableId;
 
@@ -39,9 +39,9 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
 
     private async Task GrantGovernanceAdminAsync(Sid sid)
     {
-        await using var conn = await _repo.Connections.OpenAsync(CancellationToken.None);
+        var conn = _repo.RawConnection();
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"INSERT OR IGNORE INTO ROLES (id, role_name, description) VALUES ('role-admin', 'GovernanceAdmin', 'test');
+        cmd.CommandText = @"INSERT INTO ROLES (id, role_name, description) VALUES ('role-admin', 'GovernanceAdmin', 'test') ON CONFLICT DO NOTHING;
                             INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid) VALUES (@id, 'role-admin', 'User', @sid);";
         cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
         cmd.Parameters.AddWithValue("@sid", sid.Value);

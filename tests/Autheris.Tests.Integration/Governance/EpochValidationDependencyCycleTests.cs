@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Threading.Tasks;
@@ -20,15 +20,15 @@ using Xunit;
 public sealed class EpochValidationDependencyCycleTests
 {
     [Fact]
-    public async Task SqliteProvider_ResolvesEpochServiceAndRepository_WithoutDeadlock()
+    public async Task PostgreSqlProvider_ResolvesEpochServiceAndRepository_WithoutDeadlock()
     {
         var services = new ServiceCollection();
         var options = new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                Provider = "Sqlite",
-                ConnectionString = $"Data Source=epoch_cycle_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
+                Provider = "PostgreSql",
+                ConnectionString = GovernanceTestDatabase.Create("epoch_cycle_" + Guid.NewGuid().ToString("N")[..8])
             }
         };
         var env = Substitute.For<IHostEnvironment>();

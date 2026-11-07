@@ -23,107 +23,11 @@ public sealed class GovernanceStoreReadinessTests
         GovernanceDb = new GovernanceDbOptions { ConnectionString = connectionString, SeedDemoData = false }
     };
 
-    private static string NewMemoryConnectionString() => $"Data Source=ready_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-
-    private static SqliteGovernanceRepository NewRawSqlite(string? connectionString = null) =>
-        GovernanceStoreFactory.CreateUnmigratedSqlite(Substitute.For<IEpochValidationService>(), Options.Create(Gateway(connectionString ?? NewMemoryConnectionString())));
-
     private static IHostEnvironment TestEnvironment()
     {
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Test");
         return env;
-    }
-
-    public static TheoryData<string> SqliteOperations() => new()
-    {
-        "GetTableMetadata",
-        "GetConsentRequest",
-        "ApproveConsentRequestStep",
-        "LoadSnapshot",
-        "TenantTryGet",
-        "RecordAuditTierA",
-        "RecordAuditTierB",
-        "WebhookOutboxClaim",
-        "WebhookOutboxCount",
-        "CdcWatermarkGet",
-        "CdcWatermarkAdvance",
-    };
-
-    private static Task Invoke(SqliteGovernanceRepository repository, string operation) => operation switch
-    {
-        "GetTableMetadata" => repository.GetTableMetadataAsync(new TableIdentifier("default", "public", "orders")),
-        "GetConsentRequest" => repository.GetConsentRequestAsync(Guid.NewGuid()),
-        "ApproveConsentRequestStep" => repository.ApproveConsentRequestStepAsync(Guid.NewGuid(), new Sid("S-1-5-21-APPROVER")),
-        "LoadSnapshot" => repository.LoadSnapshotAsync(),
-        "TenantTryGet" => repository.TryGetAsync(Autheris.Tests.Common.TestTenants.Default, CancellationToken.None).AsTask(),
-        "RecordAuditTierA" => repository.RecordAuditEventAsync(new AuditLogEntry { TenantId = Autheris.Tests.Common.TestTenants.Default, EventType = "ADMIN_ACTION", ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" }),
-        "RecordAuditTierB" => repository.RecordAuditEventAsync(new AuditLogEntry { TenantId = Autheris.Tests.Common.TestTenants.Default, EventType = AuditEventTypes.TableQuery, ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" }),
-        "WebhookOutboxClaim" => ((Autheris.Application.Webhooks.IWebhookOutbox)repository).ClaimBatchAsync(5, DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1), "worker"),
-        "WebhookOutboxCount" => ((Autheris.Application.Webhooks.IWebhookOutbox)repository).CountPendingAsync(),
-        "CdcWatermarkGet" => ((ICdcWatermarkRepository)repository).GetAsync("cdc", "d", "s", "t"),
-        "CdcWatermarkAdvance" => ((ICdcWatermarkRepository)repository).TryAdvanceAsync("cdc", "d", "s", "t", 1, 1),
-        _ => throw new ArgumentOutOfRangeException(nameof(operation)),
-    };
-
-    [Theory]
-    [MemberData(nameof(SqliteOperations))]
-    public async Task Sqlite_Repository_UsedBeforeInitialize_ThrowsNotReady(string operation)
-    {
-        using var repository = NewRawSqlite();
-
-        await Should.ThrowAsync<GovernanceStoreNotReadyException>(() => Invoke(repository, operation));
-    }
-
-    [Fact]
-    public async Task Sqlite_TierBAuditBeforeInitialize_IsRejectedNotQueued()
-    {
-        using var repository = NewRawSqlite();
-
-        await Should.ThrowAsync<GovernanceStoreNotReadyException>(() => Invoke(repository, "RecordAuditTierB"));
-    }
-
-    [Fact]
-    public async Task Sqlite_PingBeforeInitialize_ReturnsFalse_AndDoesNotInitialize()
-    {
-        using var repository = NewRawSqlite();
-
-        (await repository.PingAsync()).ShouldBeFalse();
-
-        await Should.ThrowAsync<GovernanceStoreNotReadyException>(() => Invoke(repository, "GetTableMetadata"));
-    }
-
-    [Fact]
-    public async Task Sqlite_AfterMigrationAndInitialize_IsReady()
-    {
-        var cs = NewMemoryConnectionString();
-        using var repository = NewRawSqlite(cs);
-        await new SqliteGovernanceMigrationRunner(repository, Options.Create(Gateway(cs))).RunAsync();
-        await repository.InitializeAsync();
-
-        (await repository.PingAsync()).ShouldBeTrue();
-        (await repository.GetConsentRequestAsync(Guid.NewGuid())).ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task Sqlite_MigrationRunner_WorksBeforeInitialize()
-    {
-        var cs = NewMemoryConnectionString();
-        using var repository = NewRawSqlite(cs);
-
-        await Should.NotThrowAsync(() => new SqliteGovernanceMigrationRunner(repository, Options.Create(Gateway(cs))).RunAsync());
-    }
-
-    [Fact]
-    public async Task Sqlite_FailedInitialize_StaysNotReady()
-    {
-        // The schema was never migrated: initialization fails (no AUDIT_LOG_ENTRIES table) and the store must stay closed.
-        using var repository = NewRawSqlite();
-
-        await Should.ThrowAsync<Exception>(() => repository.InitializeAsync());
-
-        await Should.ThrowAsync<GovernanceStoreNotReadyException>(() => Invoke(repository, "GetTableMetadata"));
-        (await repository.PingAsync()).ShouldBeFalse();
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -60,7 +60,7 @@ public sealed class Pol8ScheduledDenyConsentTests
         // can compute a TTL bounded by the DENY start time while still resolving active access correctly.
         var eventBus = new InProcessChannelEventBus();
         var epochService = new EpochValidationService(eventBus: eventBus);
-        var repo = GovernanceStoreFactory.CreateSqlite(epochService);
+        var repo = GovernanceTestDatabase.CreateRepository(epochService);
 
         var table = new TableIdentifier("finance", "dbo", "finance_table_1");
         var meta = await repo.GetTableMetadataAsync(table);

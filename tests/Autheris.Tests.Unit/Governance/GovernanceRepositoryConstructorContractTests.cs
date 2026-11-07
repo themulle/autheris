@@ -56,27 +56,21 @@ public sealed class GovernanceRepositoryConstructorContractTests
         var secrets = nullParameter == "secrets" ? null! : Substitute.For<IKeyVaultSecretProvider>();
         var store = nullParameter == "anchor" ? null! : anchor ?? new InMemoryAuditChainAnchorStore();
         var caller = nullParameter == "caller" ? null! : Substitute.For<ICallerContextProvider>();
-        var statePaths = nullParameter == "statePaths" ? null! : GovernanceStoreFactory.DefaultStatePaths(Env(environmentName));
         return backend switch
         {
             "PostgreSql" => new PostgreSqlGovernanceRepository(epoch, options, env, secrets, store, caller),
             "SqlServer" => new SqlServerGovernanceRepository(epoch, options, env, secrets, store, caller),
-            _ => new SqliteGovernanceRepository(epoch, options, env, secrets, store, caller, statePaths),
+            _ => throw new ArgumentOutOfRangeException(nameof(backend)),
         };
     }
 
     public static TheoryData<string, string> NullCases()
     {
         var data = new TheoryData<string, string>();
-        foreach (var backend in new[] { "Sqlite", "PostgreSql", "SqlServer" })
+        foreach (var backend in new[] { "PostgreSql", "SqlServer" })
         {
-            foreach (var parameter in new[] { "epoch", "options", "environment", "secrets", "anchor", "caller", "statePaths" })
+            foreach (var parameter in new[] { "epoch", "options", "environment", "secrets", "anchor", "caller" })
             {
-                if (parameter == "statePaths" && backend != "Sqlite")
-                {
-                    continue;
-                }
-
                 data.Add(backend, parameter);
             }
         }
@@ -92,7 +86,6 @@ public sealed class GovernanceRepositoryConstructorContractTests
     }
 
     [Theory]
-    [InlineData("Sqlite")]
     [InlineData("PostgreSql")]
     [InlineData("SqlServer")]
     public void Constructor_WithAllDependencies_Succeeds(string backend)
@@ -152,20 +145,9 @@ public sealed class GovernanceRepositoryConstructorContractTests
         store.ShouldBeOfType<InMemoryAuditChainAnchorStore>();
     }
 
-    [Fact]
-    public void AnchorFactory_SqliteFileDatabase_DefaultsNextToTheDatabase()
-    {
-        var options = Gateway("Sqlite", "Data Source=/tmp/autheris-anchor-test/gov.db");
-
-        var store = AuditChainAnchorStoreFactory.CreateForGovernance(options, Env("Test"), Substitute.For<IKeyVaultSecretProvider>(), null, null);
-
-        store.ShouldBeOfType<FileAuditChainAnchorStore>().FilePath.ShouldBe("/tmp/autheris-anchor-test/gov.db.audit-anchor.json");
-    }
-
     [Theory]
     [InlineData("PostgreSql", typeof(InMemoryAuditChainAnchorStore))]
     [InlineData("SqlServer", typeof(InMemoryAuditChainAnchorStore))]
-    [InlineData("Sqlite", typeof(InMemoryAuditChainAnchorStore))]
     public void AddAutherisGovernance_RegistersAnchorStore_PerProvider(string provider, Type expected)
     {
         var options = Gateway(provider);
@@ -180,22 +162,5 @@ public sealed class GovernanceRepositoryConstructorContractTests
         services.Any(d => d.ServiceType == typeof(IAuditChainAnchorStore)).ShouldBeTrue();
         using var sp = services.BuildServiceProvider();
         sp.GetRequiredService<IAuditChainAnchorStore>().ShouldBeOfType(expected);
-    }
-
-    [Fact]
-    public void AddAutherisGovernance_SqliteFileDatabase_RegistersFileAnchorNextToDatabase()
-    {
-        var options = Gateway("Sqlite", "Data Source=/tmp/autheris-anchor-test/reg.db");
-        var services = new ServiceCollection();
-        services.AddSingleton(Env("Test"));
-        services.AddSingleton(Options.Create(options));
-        services.AddLogging();
-        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
-
-        services.AddAutherisGovernance(options);
-
-        using var sp = services.BuildServiceProvider();
-        sp.GetRequiredService<IAuditChainAnchorStore>().ShouldBeOfType<FileAuditChainAnchorStore>()
-            .FilePath.ShouldBe("/tmp/autheris-anchor-test/reg.db.audit-anchor.json");
     }
 }

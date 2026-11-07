@@ -8,20 +8,16 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 /// <summary>Issue #94 (M4): the key tables are probed once per repository, and the key rows of all tables are read in batches.</summary>
 public sealed class CatalogKeyDefinitionBatchReadTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
 
     public CatalogKeyDefinitionBatchReadTests()
     {
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=keybatch_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", JournalMode = "DELETE" }
-        });
-        _repo = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options);
+        _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
     }
 
     public void Dispose() => _repo.Dispose();
@@ -61,7 +57,7 @@ public sealed class CatalogKeyDefinitionBatchReadTests : IDisposable
         padded.AddRange(Enumerable.Range(0, CatalogKeyDefinitionStore.BatchChunkSize).Select(_ => Guid.NewGuid()));
         padded.Add(ids[2]);
 
-        var rows = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.Sqlite, padded, CancellationToken.None);
+        var rows = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, padded, CancellationToken.None);
 
         rows[ids[0]].PrimaryKey.Select(r => r.Ordinal).ShouldBe([1, 2]);
         rows[ids[0]].Indexes.ShouldHaveSingleItem().Name.ShouldBe("ux");
@@ -95,10 +91,10 @@ public sealed class CatalogKeyDefinitionBatchReadTests : IDisposable
         var probe = new CatalogKeyDefinitionStore.KeyTableProbe();
         probe.Present.ShouldBeFalse();
 
-        (await CatalogKeyDefinitionStore.TablesExistAsync(_repo.RawConnection(), null, CatalogKeyDefinitionStore.Sqlite, CancellationToken.None, probe)).ShouldBeTrue();
+        (await CatalogKeyDefinitionStore.TablesExistAsync(_repo.RawConnection(), null, CatalogKeyDefinitionStore.PostgreSql, CancellationToken.None, probe)).ShouldBeTrue();
 
         probe.Present.ShouldBeTrue();
         // A cached positive result must not touch the connection again.
-        (await CatalogKeyDefinitionStore.TablesExistAsync(null!, null, CatalogKeyDefinitionStore.Sqlite, CancellationToken.None, probe)).ShouldBeTrue();
+        (await CatalogKeyDefinitionStore.TablesExistAsync(null!, null, CatalogKeyDefinitionStore.PostgreSql, CancellationToken.None, probe)).ShouldBeTrue();
     }
 }

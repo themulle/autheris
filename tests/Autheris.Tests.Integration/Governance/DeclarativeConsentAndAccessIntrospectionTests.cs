@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,7 +23,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Wave 2 Governance Tests:
@@ -265,19 +266,11 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
     }
 
     [Fact]
-    public async Task Issue34_SqliteGovernanceRepository_GetRequestsByRequesterSidAsync_FiltersByStatus()
+    public async Task Issue34_PostgreSqlGovernanceRepository_GetRequestsByRequesterSidAsync_FiltersByStatus()
     {
         // Arrange
         var epochService = Substitute.For<IEpochValidationService>();
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                ConnectionString = $"Data Source=governance_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
-            }
-        });
-
-        var repo = GovernanceStoreFactory.CreateSqlite(epochService, options, logger: NullLogger<SqliteGovernanceRepository>.Instance);
+        var repo = GovernanceTestDatabase.CreateRepository(epochService, logger: NullLogger<PostgreSqlGovernanceRepository>.Instance);
 
         var requesterSid = new Sid("S-1-5-21-REQUESTER-1");
         var tableIdentifier = new TableIdentifier("default", "sales", "invoices");

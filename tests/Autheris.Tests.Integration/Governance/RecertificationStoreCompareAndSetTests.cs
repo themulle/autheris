@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Governance.Recertification;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Threading.Tasks;
@@ -10,12 +10,12 @@ using Autheris.Infrastructure.Persistence;
 using Shouldly;
 using Xunit;
 
-/// <summary>GOV-02 / PERS-12: the decision update is a compare-and-set on the stored decision (SQLite).</summary>
+/// <summary>GOV-02 / PERS-12: the decision update is a compare-and-set on the stored decision (PostgreSQL).</summary>
 [Trait("Category", "Security")]
 public sealed class RecertificationStoreCompareAndSetTests : IDisposable
 {
     private static readonly TenantId Tenant = new("tenant-1");
-    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
 
     public void Dispose() => _repo.Dispose();
 

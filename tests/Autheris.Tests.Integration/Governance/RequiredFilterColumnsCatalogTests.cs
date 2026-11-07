@@ -6,28 +6,23 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 public sealed class RequiredFilterColumnsCatalogTests : IDisposable
 {
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
-    private readonly SqliteGovernanceRepository _repo;
-    private readonly string _cs;
+    private readonly PostgreSqlGovernanceRepository _repo;
+    private string _cs = string.Empty;
 
     public RequiredFilterColumnsCatalogTests()
     {
-        _cs = $"Data Source=reqfil_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = _cs, JournalMode = "DELETE" }
-        });
-        _repo = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options);
+        _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), out var connectionString);
+        _cs = connectionString;
     }
 
     public void Dispose() => _repo.Dispose();
@@ -54,7 +49,7 @@ public sealed class RequiredFilterColumnsCatalogTests : IDisposable
     }
 
     [Fact]
-    public async Task RequiredFilterColumns_RoundTrip_Sqlite_StoresAndLoads()
+    public async Task RequiredFilterColumns_RoundTrip_PostgreSql_StoresAndLoads()
     {
         var meta = Meta(Orders, ["tenant_id", "order_id"]);
         await _repo.UpsertTableMetadataAsync(meta);
@@ -97,7 +92,7 @@ public sealed class RequiredFilterColumnsCatalogTests : IDisposable
         await _repo.UpsertTableMetadataAsync(meta);
 
         // Corrupt the json in the database directly
-        using (var rawConn = new SqliteConnection(_cs))
+        using (var rawConn = new Npgsql.NpgsqlConnection(_cs))
         {
             await rawConn.OpenAsync();
             using var cmd = rawConn.CreateCommand();
@@ -108,9 +103,9 @@ public sealed class RequiredFilterColumnsCatalogTests : IDisposable
         // Create a new repository instance against the same database to ensure cache-free read
         var freshOptions = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = _cs, JournalMode = "DELETE" }
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _cs }
         });
-        using var freshRepo = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), freshOptions);
+        using var freshRepo = GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), freshOptions);
         await Should.ThrowAsync<JsonException>(() => freshRepo.GetTableMetadataAsync(Orders));
     }
 

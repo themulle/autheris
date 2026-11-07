@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Threading;
@@ -8,7 +8,6 @@ using Autheris.Domain.Model;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Messaging;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using Xunit;
 
@@ -21,7 +20,7 @@ public sealed class Pol12ApprovalAuditFailClosedTests
         // If audit recording fails, the approval step and request status update must NOT be committed to the database.
         var eventBus = new InProcessChannelEventBus();
         var epochService = new EpochValidationService(eventBus: eventBus);
-        var repo = GovernanceStoreFactory.CreateSqlite(epochService);
+        var repo = GovernanceTestDatabase.CreateRepository(epochService);
 
         var table = new TableIdentifier("finance", "dbo", "finance_table_1");
         var meta = await repo.GetTableMetadataAsync(table);
@@ -46,7 +45,7 @@ public sealed class Pol12ApprovalAuditFailClosedTests
         // Break the audit table to simulate an unrecoverable audit write failure
         using (var cmd = repo.RawConnection().CreateCommand())
         {
-            cmd.CommandText = "DROP TABLE AUDIT_LOG_ENTRIES;";
+            cmd.CommandText = "DROP TABLE AUDIT_LOG_ENTRIES CASCADE;";
             cmd.ExecuteNonQuery();
         }
 

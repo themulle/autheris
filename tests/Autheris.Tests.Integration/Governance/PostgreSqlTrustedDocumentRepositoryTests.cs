@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Governance.TrustedDocuments;
+namespace Autheris.Tests.Integration.Governance;
 
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Interfaces;
@@ -11,7 +11,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Issue #281 WP1: storage contract of the app-scoped trusted documents (SQLite; PostgreSql and SqlServer in the integration tests).</summary>
-public sealed class SqliteTrustedDocumentRepositoryTests : IDisposable
+public sealed class PostgreSqlTrustedDocumentRepositoryTests : IDisposable
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 23, 8, 0, 0, TimeSpan.Zero);
     private static readonly string H1 = new('a', 64);
@@ -19,9 +19,8 @@ public sealed class SqliteTrustedDocumentRepositoryTests : IDisposable
     private static readonly string H3 = new('c', 64);
     private static readonly string[] Origins = ["https://app.example.com"];
 
-    private readonly SqliteGovernanceRepository _store = GovernanceStoreFactory.CreateSqlite(
-        Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=td_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+    private readonly PostgreSqlGovernanceRepository _store = GovernanceTestDatabase.CreateRepository(
+        Substitute.For<IEpochValidationService>());
 
     private ITrustedDocumentRepository Repo => _store;
 

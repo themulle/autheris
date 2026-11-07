@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -19,25 +19,15 @@ using Xunit;
 
 public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repository;
+    private readonly PostgreSqlGovernanceRepository _repository;
     private readonly IEventBus _eventBus;
 
     public Issue270GovernanceBatchHydrationTests()
     {
         _eventBus = Substitute.For<IEventBus>();
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                ConnectionString = $"Data Source=issue270_batch_{Guid.NewGuid():N};Mode=Memory;Cache=Shared",
-                JournalMode = "DELETE"
-            }
-        });
-
-        _repository = GovernanceStoreFactory.CreateSqlite(
+        _repository = GovernanceTestDatabase.CreateRepository(
             Substitute.For<IEpochValidationService>(),
-            options,
-            logger: NullLogger<SqliteGovernanceRepository>.Instance,
+            logger: NullLogger<PostgreSqlGovernanceRepository>.Instance,
             eventBus: _eventBus);
     }
 
@@ -56,7 +46,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Table = new Table
             {
                 IsActive = true,
-                SourceType = "Sqlite",
+                SourceType = "PostgreSql",
                 DataSourceType = DataSourceType.Sql,
                 DisplayName = "Accounts"
             },
@@ -99,7 +89,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Table = new Table
             {
                 IsActive = true,
-                SourceType = "Sqlite",
+                SourceType = "PostgreSql",
                 DataSourceType = DataSourceType.Sql,
                 DisplayName = "Transactions"
             },
@@ -150,7 +140,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Table = new Table
             {
                 IsActive = true,
-                SourceType = "Sqlite",
+                SourceType = "PostgreSql",
                 DataSourceType = DataSourceType.Sql,
                 DisplayName = "Payments"
             },
@@ -194,7 +184,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Table = new Table
             {
                 IsActive = true,
-                SourceType = "Sqlite",
+                SourceType = "PostgreSql",
                 DataSourceType = DataSourceType.Sql,
                 DisplayName = "Invoices",
                 Description = "Initial description"
@@ -217,7 +207,7 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
             Table = new Table
             {
                 IsActive = true,
-                SourceType = "Sqlite",
+                SourceType = "PostgreSql",
                 DataSourceType = DataSourceType.Sql,
                 DisplayName = "Invoices",
                 Description = "Updated business description"
@@ -250,12 +240,12 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
         var dict4 = new Dictionary<string, MaskingRule> { ["col"] = rule4 };
         var dict5 = new Dictionary<string, MaskingRule> { ["col"] = rule5 };
 
-        SqliteGovernanceRepository.HasMaskingRulesChanged(empty, empty).ShouldBeFalse();
-        SqliteGovernanceRepository.HasMaskingRulesChanged(dict1, dict2).ShouldBeFalse();
-        SqliteGovernanceRepository.HasMaskingRulesChanged(dict1, empty).ShouldBeTrue();
-        SqliteGovernanceRepository.HasMaskingRulesChanged(empty, dict1).ShouldBeTrue();
-        SqliteGovernanceRepository.HasMaskingRulesChanged(dict1, dict3).ShouldBeTrue();
-        SqliteGovernanceRepository.HasMaskingRulesChanged(dict1, dict4).ShouldBeTrue();
-        SqliteGovernanceRepository.HasMaskingRulesChanged(dict1, dict5).ShouldBeTrue();
+        CatalogSqlCore.HasMaskingRulesChanged(empty, empty).ShouldBeFalse();
+        CatalogSqlCore.HasMaskingRulesChanged(dict1, dict2).ShouldBeFalse();
+        CatalogSqlCore.HasMaskingRulesChanged(dict1, empty).ShouldBeTrue();
+        CatalogSqlCore.HasMaskingRulesChanged(empty, dict1).ShouldBeTrue();
+        CatalogSqlCore.HasMaskingRulesChanged(dict1, dict3).ShouldBeTrue();
+        CatalogSqlCore.HasMaskingRulesChanged(dict1, dict4).ShouldBeTrue();
+        CatalogSqlCore.HasMaskingRulesChanged(dict1, dict5).ShouldBeTrue();
     }
 }
