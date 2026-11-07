@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -23,8 +24,8 @@ internal static class ConfigurationReferenceGenerator
         @"(?:^|[a-z])(Password|Secret|ApiKey|Key|Token|ConnectionString|Credential|PrivateKey)$",
         RegexOptions.Compiled);
 
-    private static readonly Dictionary<string, XDocument?> AssemblyXmlDocs = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<Type, string> SourceFileCache = new();
+    private static readonly ConcurrentDictionary<string, XDocument?> AssemblyXmlDocs = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<Type, string> SourceFileCache = new();
 
     public sealed record OptionRow(
         string Key,
@@ -486,28 +487,22 @@ internal static class ConfigurationReferenceGenerator
         }
 
         var xmlPath = Path.ChangeExtension(assembly.Location, ".xml");
-        if (AssemblyXmlDocs.TryGetValue(xmlPath, out var doc))
+        return AssemblyXmlDocs.GetOrAdd(xmlPath, p =>
         {
-            return doc;
-        }
-
-        if (File.Exists(xmlPath))
-        {
-            try
+            if (File.Exists(p))
             {
-                doc = XDocument.Load(xmlPath);
-                AssemblyXmlDocs[xmlPath] = doc;
-                return doc;
+                try
+                {
+                    return XDocument.Load(p);
+                }
+                catch
+                {
+                    return null;
+                }
             }
-            catch
-            {
-                AssemblyXmlDocs[xmlPath] = null;
-                return null;
-            }
-        }
 
-        AssemblyXmlDocs[xmlPath] = null;
-        return null;
+            return null;
+        });
     }
 
     private static string FindSourceFile(Type type)
