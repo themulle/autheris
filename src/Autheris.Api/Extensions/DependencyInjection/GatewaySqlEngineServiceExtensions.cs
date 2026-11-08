@@ -103,18 +103,19 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddSingleton<Autheris.Application.Federation.IFederationGate, Autheris.Application.Federation.FederationGate>();
         services.AddScoped<IFederatedQueryExecutionService, FederatedDuckDbExecutionService>();
 
-        // F-SQL-02: governed stored procedure endpoints (SQL Server, read-only in phase 1)
-        services.AddSingleton<IProcedureRegistry, InMemoryProcedureRegistry>();
-        services.AddSingleton<ProcedureDefinitionLoader>();
-        services.AddSingleton<ProcedureConnectionProvider>();
-        services.AddScoped<StoredProcedureCatalogValidator>();
-        services.AddSingleton<IProcedureInvoker, MssqlProcedureInvoker>();
-        services.AddSingleton<IProcedureRowScopeResolver, SqlProcedureRowScopeResolver>();
-        services.AddSingleton<ProcedureDenialAuditLimiter>();
-        services.AddScoped<IProcedureExecutionService, GovernedProcedureExecutionService>();
-        services.AddSingleton<IProcedureYamlGenerator, ProcedureYamlGenerator>();
+        // F-SQL-02: governed stored procedure endpoints (SQL Server, read-only in phase 1). with the kill switch off
+        // (default) no procedure service exists at all; consumers take them as optional and see null.
         if (gatewayOptions.SqlEndpoints.Procedures.Enabled)
         {
+            services.AddSingleton<IProcedureRegistry, InMemoryProcedureRegistry>();
+            services.AddSingleton<ProcedureDefinitionLoader>();
+            services.AddSingleton<ProcedureConnectionProvider>();
+            services.AddScoped<StoredProcedureCatalogValidator>();
+            services.AddSingleton<IProcedureInvoker, MssqlProcedureInvoker>();
+            services.AddSingleton<IProcedureRowScopeResolver, SqlProcedureRowScopeResolver>();
+            services.AddSingleton<ProcedureDenialAuditLimiter>();
+            services.AddScoped<IProcedureExecutionService, GovernedProcedureExecutionService>();
+            services.AddSingleton<IProcedureYamlGenerator, ProcedureYamlGenerator>();
             services.AddHostedService<ProcedureRegistrationService>();
         }
 

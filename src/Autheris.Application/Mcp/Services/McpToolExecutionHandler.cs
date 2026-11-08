@@ -505,6 +505,14 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         TenantId tenantId,
         CancellationToken ct)
     {
+        // without the procedure services (kill switch off) the tool is answered like an unknown one, before any
+        // argument is looked at; never NOT_AVAILABLE, which would reveal the feature.
+        if (_procedureRegistry == null || _procedureExecutionService == null)
+        {
+            return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "NOT_FOUND",
+                $"Tool '{McpDatasetTools.CallProcedure}' is not registered or allowed.");
+        }
+
         // Same parsing as the guardrail's ABAC and four-eyes targets, so the checked procedure is the one that runs.
         var procName = McpDatasetTools.ProcedureNameArgument(root.GetRawText());
         if (procName == null)
@@ -535,11 +543,6 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             maxRows = Math.Clamp(mr, 1, 1000);
         }
         rawInputs["limit"] = maxRows;
-
-        if (_procedureRegistry == null || _procedureExecutionService == null)
-        {
-            return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "NOT_AVAILABLE", "Procedure execution service is not configured.");
-        }
 
         bool isReadOnlyCaller = userPrincipal.IsReadOnly() || sessionContext.IsReadOnly;
         if (_procedureRegistry.TryGet(procName, out var reg) && reg != null)
