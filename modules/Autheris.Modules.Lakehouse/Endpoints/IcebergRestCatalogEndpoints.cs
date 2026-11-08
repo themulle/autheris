@@ -24,16 +24,19 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public static class IcebergRestCatalogEndpoints
 {
+    /// <summary>Route prefix of the catalog; Iceberg clients use it (plus the catalog prefix) as their catalog base URI.</summary>
+    internal const string RoutePrefix = "/modules/lakehouse/iceberg/v1";
+
     public static void MapEndpoints(IModuleEndpointRegistrar endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
-        var group = endpoints.MapGroup("/v1");
+        var group = endpoints.MapGroup(RoutePrefix);
         MapGroupRoutes(group);
     }
 
-    public static IEndpointRouteBuilder MapIcebergRestCatalogEndpoints(this IEndpointRouteBuilder app)
+    internal static IEndpointRouteBuilder MapIcebergRestCatalogEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/v1")
+        var group = app.MapGroup(RoutePrefix)
             .RequireAuthorization();
         MapGroupRoutes(group);
         return app;

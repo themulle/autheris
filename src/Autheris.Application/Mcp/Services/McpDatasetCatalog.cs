@@ -1132,7 +1132,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         if (o.Lakehouse.Enabled)
         {
-            endpoints.Add(new("Iceberg REST Catalog", "GET", "/v1/namespaces", "Apache Iceberg REST Catalog protocol endpoint."));
+            endpoints.Add(new("Iceberg REST Catalog", "GET", "/modules/lakehouse/iceberg/v1/{prefix}/namespaces", "Apache Iceberg REST Catalog protocol endpoint."));
         }
 
         return endpoints;

@@ -14,18 +14,23 @@ using Autheris.Application.Plugins;
 using Autheris.Application.Plugins.Auth;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
+using Autheris.Application.State;
 using Autheris.Domain.Interfaces;
 using Autheris.Infrastructure.Modules.Trust;
 using Autheris.Modules.Abstractions;
-using HotChocolate.Execution.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Builder;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Represents a verified and activated module loaded by <see cref="ModuleLoader"/>.
@@ -63,24 +68,10 @@ public sealed class ModuleLoadResult
         ArgumentNullException.ThrowIfNull(endpoints);
         foreach (var module in Modules)
         {
+            var before = ModuleEndpointRegistrar.CaptureEndpointSnapshot(endpoints);
             var registrar = new ModuleEndpointRegistrar(endpoints, module.Id);
             module.Instance.MapEndpoints(registrar);
-            ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, module.Id);
-        }
-    }
-
-    /// <summary>
-    /// Registers GraphQL type extensions for all loaded modules implementing <see cref="IAutherisGraphQLModule"/>.
-    /// </summary>
-    public void ConfigureGraphQL(IRequestExecutorBuilder? graphqlBuilder = null)
-    {
-        foreach (var module in Modules)
-        {
-            if (module.Instance is IAutherisGraphQLModule gqlModule)
-            {
-                var registrar = new ModuleGraphQLRegistrar(module.Id, graphqlBuilder);
-                gqlModule.ConfigureGraphQL(registrar);
-            }
+            ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, module.Id, before);
         }
     }
 }
@@ -102,41 +93,6 @@ public sealed class ModuleLoader
     public const string WorkspacePathConfigKey = "Gateway:Modules:WorkspacePath";
     public const string MinVersionsConfigKey = "Gateway:Modules:MinVersions";
     public const string RevokedKeyIdsConfigKey = "Gateway:Modules:RevokedKeyIds";
-
-    private static readonly Type[] ProtectedServiceTypes =
-    [
-        typeof(IAuditWriter),
-        typeof(IAuditLogRepository),
-        typeof(IAuthorizationHandler),
-        typeof(IAuthorizationPolicyProvider),
-        typeof(IAuthorizationService),
-        typeof(IAuthorizationEvaluator),
-        typeof(IClaimsTransformation),
-        typeof(IAuthenticationSchemeProvider),
-        typeof(IAuthenticationHandlerProvider),
-        typeof(IAuthenticationService),
-        typeof(IPolicyEnforcementService),
-        typeof(IColumnMaskingProvider),
-        typeof(IAuthPluginHost),
-        typeof(IPluginRoleProvider),
-        typeof(IPluginCallerAttributeProvider),
-        typeof(IPluginAuthorizationHook),
-        typeof(IPluginManager),
-        typeof(ICallerContextProvider),
-        typeof(ITenantRegistry),
-        typeof(ISqlConnectionFactory),
-    ];
-
-    private static readonly string[] ProtectedConfigPrefixes =
-    [
-        "Gateway:Authentication",
-        "Gateway:Authorization",
-        "Gateway:Audit",
-        "Gateway:Modules",
-        "Gateway:Plugins",
-        "Gateway:GovernanceDb",
-        "Gateway:DataSources",
-    ];
 
     private readonly ECDsa? _publicKeyOverride;
     private readonly IReadOnlyDictionary<string, ECDsa>? _keyringOverride;
@@ -228,14 +184,10 @@ public sealed class ModuleLoader
         IServiceCollection services,
         IConfiguration configuration,
         IHostEnvironment environment,
-        IGovernanceConnectionFactory? connectionFactory = null,
         ILogger<ModuleLoader>? logger = null)
     {
         var loader = new ModuleLoader(logger: logger);
-        var hostContext = connectionFactory is not null
-            ? new ModuleHostContext(TimeProvider.System, ResolveHostVersion(), connectionFactory)
-            : null;
-        return loader.LoadAndConfigureServices(services, configuration, environment, hostContext);
+        return loader.LoadAndConfigureServices(services, configuration, environment);
     }
 
     /// <summary>
@@ -278,10 +230,7 @@ public sealed class ModuleLoader
             return new ModuleLoadResult([]);
         }
 
-        var effectiveHostContext = hostContext ?? new ModuleHostContext(
-            TimeProvider.System,
-            _hostVersion,
-            new GovernanceConnectionFactory(new Autheris.Domain.Options.GovernanceDbOptions()));
+        var effectiveHostContext = hostContext ?? new ModuleHostContext(TimeProvider.System, _hostVersion);
 
         string? workspacePath = configuration[WorkspacePathConfigKey];
         if (!string.IsNullOrWhiteSpace(workspacePath))
@@ -469,7 +418,7 @@ public sealed class ModuleLoader
             }
 
             var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
-            var protectedSnapshot = CaptureProtectedServicesSnapshot(services);
+            var protectedSnapshot = ModuleSecurityGuards.CaptureProtectedServicesSnapshot(services);
 
             try
             {
@@ -480,7 +429,7 @@ public sealed class ModuleLoader
                 throw new ModuleLoadException(moduleId, $"ConfigureServices failed: {ex.Message}", ex);
             }
 
-            VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
+            ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
 
             _logger.LogInformation("Loaded signed module '{ModuleId}' v{Version} (keyId: {KeyId}).", moduleId, manifest.Version, manifest.KeyId);
             _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, true);
@@ -695,6 +644,14 @@ public sealed class ModuleLoader
         IReadOnlyList<string> declaredSections,
         IConfiguration rootConfiguration)
     {
+        var ownSection = ModuleSecurityGuards.OwnConfigSection(moduleId);
+        if (ModuleSecurityGuards.IsHostConfigSection(ownSection))
+        {
+            throw new ModuleLoadException(
+                moduleId,
+                $"Module '{moduleId}' collides with the host configuration section '{ownSection}'.");
+        }
+
         var entries = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         if (declaredSections is not null)
         {
@@ -705,16 +662,7 @@ public sealed class ModuleLoader
                     continue;
                 }
 
-                foreach (var protectedPrefix in ProtectedConfigPrefixes)
-                {
-                    if (string.Equals(sectionPath, protectedPrefix, StringComparison.OrdinalIgnoreCase) ||
-                        sectionPath.StartsWith(protectedPrefix + ":", StringComparison.OrdinalIgnoreCase))
-                    {
-                        throw new ModuleLoadException(
-                            moduleId,
-                            $"Module '{moduleId}' cannot claim protected host configuration section '{sectionPath}'.");
-                    }
-                }
+                ModuleSecurityGuards.ValidateConfigClaim(moduleId, sectionPath);
 
                 var section = rootConfiguration.GetSection(sectionPath);
                 foreach (var kv in section.AsEnumerable(makePathsRelative: false))
@@ -730,67 +678,6 @@ public sealed class ModuleLoader
         return new ConfigurationBuilder()
             .AddInMemoryCollection(entries)
             .Build();
-    }
-
-    private static List<ServiceDescriptor> CaptureProtectedServicesSnapshot(IServiceCollection services) =>
-        services.Where(d => IsProtectedServiceType(d.ServiceType)).ToList();
-
-    private static void VerifyProtectedServicesUnchanged(
-        string moduleId,
-        IServiceCollection services,
-        List<ServiceDescriptor> beforeSnapshot)
-    {
-        var afterSnapshot = services.Where(d => IsProtectedServiceType(d.ServiceType)).ToList();
-        if (beforeSnapshot.Count != afterSnapshot.Count)
-        {
-            var diffDescriptor = afterSnapshot.FirstOrDefault(d => !beforeSnapshot.Contains(d))
-                ?? beforeSnapshot.FirstOrDefault(d => !afterSnapshot.Contains(d));
-            var diffType = diffDescriptor?.ServiceType
-                ?? afterSnapshot.FirstOrDefault()?.ServiceType
-                ?? beforeSnapshot.FirstOrDefault()?.ServiceType;
-
-            throw new ModuleLoadException(
-                moduleId,
-                $"Module '{moduleId}' attempted to add or remove protected host security service '{diffType?.FullName ?? "unknown"}'.");
-        }
-
-        for (int i = 0; i < beforeSnapshot.Count; i++)
-        {
-            if (!ReferenceEquals(beforeSnapshot[i], afterSnapshot[i]))
-            {
-                throw new ModuleLoadException(
-                    moduleId,
-                    $"Module '{moduleId}' attempted to replace protected host security service '{afterSnapshot[i].ServiceType.FullName}'.");
-            }
-        }
-    }
-
-    private static bool IsProtectedServiceType(Type serviceType)
-    {
-        if (ProtectedServiceTypes.Contains(serviceType))
-        {
-            return true;
-        }
-
-        var ns = serviceType.Namespace ?? string.Empty;
-        if (ns.StartsWith("Microsoft.AspNetCore.Authorization", StringComparison.Ordinal) ||
-            ns.StartsWith("Microsoft.AspNetCore.Authentication", StringComparison.Ordinal) ||
-            ns.StartsWith("Autheris.Application.Audit", StringComparison.Ordinal) ||
-            ns.StartsWith("Autheris.Application.Plugins.Auth", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        var name = serviceType.Name;
-        if (name.Contains("ColumnMask", StringComparison.Ordinal) ||
-            name.Contains("Masking", StringComparison.Ordinal) ||
-            name.Contains("AccessDecision", StringComparison.Ordinal) ||
-            name.Contains("AuditWriter", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return false;
     }
 
     private bool TryLoadWorkspaceModules(
@@ -919,7 +806,7 @@ public sealed class ModuleLoader
             }
 
             var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
-            var protectedSnapshot = CaptureProtectedServicesSnapshot(services);
+            var protectedSnapshot = ModuleSecurityGuards.CaptureProtectedServicesSnapshot(services);
 
             try
             {
@@ -930,7 +817,7 @@ public sealed class ModuleLoader
                 throw new ModuleLoadException(moduleId, $"ConfigureServices failed: {ex.Message}", ex);
             }
 
-            VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
+            ModuleSecurityGuards.VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
 
             _logger.LogWarning("Module '{ModuleId}' loaded from workspace path (unsigned)", moduleId);
             _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, false);

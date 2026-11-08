@@ -18,7 +18,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Modules.Trust;
 using Autheris.Modules.Abstractions;
-using HotChocolate.Types;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -101,17 +100,17 @@ public sealed class SampleValidModule : IAutherisModule
 {
     public string Id => "sample";
 
-    public IReadOnlyList<string> ConfigurationSections => ["Gateway:SampleModule"];
+    public IReadOnlyList<string> ConfigurationSections => ["Gateway:Sample"];
 
     public void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host)
     {
-        var endpoint = moduleConfiguration["Gateway:SampleModule:Endpoint"];
+        var endpoint = moduleConfiguration["Gateway:Sample:Endpoint"];
         services.AddSingleton<ISampleModuleMarker>(new SampleModuleMarker(Id, endpoint));
     }
 
     public void MapEndpoints(IModuleEndpointRegistrar endpoints)
     {
-        var group = endpoints.MapGroup("/api/v1/sample");
+        var group = endpoints.MapGroup("/modules/sample");
         group.MapGet("/ping", () => Results.Ok(new { status = "pong" }));
         group.MapGet("/admin", () => Results.Ok(new { status = "admin-ok" }))
             .RequireAuthorization(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute { Roles = "GovernanceAdmin" });
@@ -209,32 +208,86 @@ public sealed class AllowAnonymousEndpointModule : IAutherisModule
 
     public void MapEndpoints(IModuleEndpointRegistrar endpoints)
     {
-        var group = endpoints.MapGroup("/api/v1/anon");
+        var group = endpoints.MapGroup("/modules/anon-mod");
         group.MapGet("/open", () => "open").AllowAnonymous();
     }
 }
 
-[ExtendObjectType("Query")]
-public sealed class UnprotectedGraphQLExtension
+public abstract class EvilServiceModuleBase(string id) : IAutherisModule
 {
-    public string GetSecretData() => "unprotected";
-}
-
-[ExtendObjectType("Query")]
-[HotChocolate.Authorization.Authorize]
-public sealed class ProtectedGraphQLExtension
-{
-    public string GetGovernedData() => "protected";
-}
-
-public sealed class UnprotectedGraphQLModule : IAutherisModule, IAutherisGraphQLModule
-{
-    public string Id => "gql-unprotected";
-    public IReadOnlyList<string> ConfigurationSections => [];
-    public void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) { }
+    public string Id => id;
+    public virtual IReadOnlyList<string> ConfigurationSections => [];
+    public abstract void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host);
     public void MapEndpoints(IModuleEndpointRegistrar endpoints) { }
-    public void ConfigureGraphQL(IModuleGraphQLRegistrar graphql) =>
-        graphql.AddTypeExtension(typeof(UnprotectedGraphQLExtension));
+}
+
+public sealed class StartupFilterAddingModule() : EvilServiceModuleBase("evil-startup")
+{
+    private sealed class NoopStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => next;
+    }
+
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, NoopStartupFilter>();
+}
+
+public sealed class HostedServiceAddingModule() : EvilServiceModuleBase("evil-hosted")
+{
+    private sealed class NoopHostedService : Microsoft.Extensions.Hosting.IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostedService, NoopHostedService>();
+}
+
+public sealed class AuthorizationOptionsConfiguringModule() : EvilServiceModuleBase("evil-authz-options")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.Configure<AuthorizationOptions>(options => options.InvokeHandlersAfterFailure = false);
+}
+
+public sealed class JwtOptionsPostConfiguringModule() : EvilServiceModuleBase("evil-jwt-options")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.PostConfigure<Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions>(options => options.RequireHttpsMetadata = false);
+}
+
+public sealed class ClientIpResolverReplacingModule() : EvilServiceModuleBase("evil-client-ip")
+{
+    private sealed class FixedClientIpResolver : IClientIpResolver
+    {
+        public System.Net.IPAddress ResolveClientIp() => System.Net.IPAddress.Loopback;
+    }
+
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.AddSingleton<IClientIpResolver, FixedClientIpResolver>();
+}
+
+public sealed class DataProtectionConfiguringModule() : EvilServiceModuleBase("evil-data-protection")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.Configure<Microsoft.AspNetCore.DataProtection.DataProtectionOptions>(options => options.ApplicationDiscriminator = "x");
+}
+
+public sealed class ForeignSectionClaimingModule() : EvilServiceModuleBase("claim-foreign")
+{
+    public override IReadOnlyList<string> ConfigurationSections => ["ConnectionStrings"];
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) { }
+}
+
+public sealed class ForeignGatewaySectionClaimingModule() : EvilServiceModuleBase("claim-gateway")
+{
+    public override IReadOnlyList<string> ConfigurationSections => ["Gateway:Caching"];
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) { }
+}
+
+public sealed class CoreSectionIdModule() : EvilServiceModuleBase("caching")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) { }
 }
 
 internal static class ModulePackageBuilder

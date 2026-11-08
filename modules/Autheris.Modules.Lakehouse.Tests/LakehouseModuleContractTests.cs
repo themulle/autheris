@@ -29,6 +29,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -127,7 +128,7 @@ public sealed class LakehouseModuleContractTests
                 RequestServices = app.ServiceProvider,
                 User = new ClaimsPrincipal(new ClaimsIdentity())
             };
-            context.Request.Path = "/v1/tenant-a/namespaces";
+            context.Request.Path = "/modules/lakehouse/iceberg/v1/tenant-a/namespaces";
             context.Request.Method = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.FirstOrDefault() ?? HttpMethods.Get;
             context.Response.Body = new MemoryStream();
             context.SetEndpoint(endpoint);
@@ -135,6 +136,80 @@ public sealed class LakehouseModuleContractTests
             await endpoint.RequestDelegate!(context);
             context.Response.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
         }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-08")]
+    public async Task Module_routes_require_authentication()
+    {
+        using var app = new ContractEndpointRouteBuilder();
+        new LakehouseModule().MapEndpoints(new ModuleEndpointRegistrar(app, "lakehouse"));
+        ModuleEndpointRegistrar.VerifyModuleEndpoints(app, "lakehouse");
+
+        var endpoints = app.DataSources
+            .SelectMany(ds => ds.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Where(e => e.Metadata.GetMetadata<ModuleEndpointMetadata>()?.ModuleId == "lakehouse")
+            .ToList();
+        endpoints.ShouldNotBeEmpty();
+
+        foreach (var endpoint in endpoints)
+        {
+            endpoint.RoutePattern.RawText.ShouldNotBeNull().ShouldStartWith("/modules/lakehouse/");
+
+            var context = new DefaultHttpContext
+            {
+                RequestServices = app.ServiceProvider,
+                User = new ClaimsPrincipal(new ClaimsIdentity())
+            };
+            context.Request.Method = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.FirstOrDefault() ?? HttpMethods.Get;
+            context.Response.Body = new MemoryStream();
+            context.SetEndpoint(endpoint);
+
+            await endpoint.RequestDelegate!(context);
+            context.Response.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-08")]
+    public async Task Legacy_iceberg_route_returns_404()
+    {
+        var catalog = NSubstitute.Substitute.For<IIcebergRestCatalogFederationService>();
+        using var host = await new HostBuilder()
+            .ConfigureWebHost(web => web
+                .UseTestServer()
+                .ConfigureServices(services =>
+                {
+                    services.AddRouting();
+                    services.AddLogging();
+                    services.AddAuthorization();
+                    services.AddSingleton(catalog);
+                })
+                .Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints =>
+                        new LakehouseModule().MapEndpoints(new ModuleEndpointRegistrar(endpoints, "lakehouse")));
+                }))
+            .StartAsync();
+
+        var client = host.GetTestClient();
+
+        foreach (var path in new[]
+                 {
+                     "/v1/tenant-a/namespaces",
+                     "/v1/tenant-a/namespaces/raw/tables",
+                     "/v1/tenant-a/namespaces/raw/tables/orders",
+                 })
+        {
+            var response = await client.GetAsync(path);
+            response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        }
+
+        NSubstitute.SubstituteExtensions.ReceivedCalls(catalog).ShouldBeEmpty();
     }
 
     [Fact]
