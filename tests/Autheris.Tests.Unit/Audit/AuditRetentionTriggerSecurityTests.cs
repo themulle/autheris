@@ -21,7 +21,6 @@ namespace Autheris.Tests.Unit.Audit;
 public sealed class AuditRetentionTriggerSecurityTests
 {
     [Theory]
-    [InlineData("sqlite")]
     [InlineData("postgresql")]
     [InlineData("sqlserver")]
     public void EmbeddedShape_AllDialects_ContainsAuditPurgeCheckpoints(string dialect)
@@ -36,24 +35,5 @@ public sealed class AuditRetentionTriggerSecurityTests
         colNames.ShouldContain("purged_through_utc");
         colNames.ShouldContain("created_at");
         colNames.ShouldContain("signature");
-    }
-
-    [Fact]
-    public async Task Sqlite_BaselineSchema_AppliesPurgeCheckpointsTable()
-    {
-        var cs = $"Data Source=shape_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = cs, SeedDemoData = false }
-        });
-
-        using var repository = GovernanceStoreFactory.CreateUnmigratedSqlite(Substitute.For<IEpochValidationService>(), options);
-        await using var connection = await repository.Connections.OpenAsync(CancellationToken.None);
-        new SqliteBaselineSchema(connection, null).Apply();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM AUDIT_PURGE_CHECKPOINTS";
-        var count = Convert.ToInt64(await cmd.ExecuteScalarAsync(CancellationToken.None));
-        count.ShouldBe(0);
     }
 }

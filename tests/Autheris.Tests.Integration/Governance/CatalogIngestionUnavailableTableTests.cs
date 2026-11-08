@@ -1,5 +1,4 @@
-namespace Autheris.Tests.Unit.Catalog;
-
+namespace Autheris.Tests.Integration.Governance;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Audit;
 using System.Text;
@@ -29,15 +28,15 @@ using Xunit;
 /// </summary>
 public sealed class CatalogIngestionUnavailableTableTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
 
     public CatalogIngestionUnavailableTableTests()
     {
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=unavail_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", JournalMode = "DELETE" }
+            GovernanceDb = new GovernanceDbOptions { }
         });
-        _repo = Autheris.Tests.Unit.GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options);
+        _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), options);
     }
 
     public void Dispose() => _repo.Dispose();

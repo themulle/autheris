@@ -1,5 +1,4 @@
-namespace Autheris.Tests.Unit.Catalog;
-
+namespace Autheris.Tests.Integration.Governance;
 using System.Security.Claims;
 using System.Text;
 using Autheris.Api.Endpoints;
@@ -26,16 +25,16 @@ public sealed class Issue390DeclarationPathTests : IDisposable
     private const KeyColumnDirection Asc = KeyColumnDirection.Ascending;
     private const KeyColumnDirection Desc = KeyColumnDirection.Descending;
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
-    private readonly SqliteGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
     private readonly AuditWriter _audit;
 
     public Issue390DeclarationPathTests()
     {
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=i390decl_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", JournalMode = "DELETE" }
+            GovernanceDb = new GovernanceDbOptions { }
         });
-        _repo = Autheris.Tests.Unit.GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options);
+        _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), options);
         _audit = new AuditWriter(_repo, NullLogger<AuditWriter>.Instance);
     }
 

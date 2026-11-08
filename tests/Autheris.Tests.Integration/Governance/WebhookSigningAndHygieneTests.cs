@@ -1,5 +1,6 @@
-namespace Autheris.Tests.Unit.Webhooks;
+namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Unit.Webhooks;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -28,11 +29,11 @@ public sealed class WebhookSigningAndHygieneTests : IDisposable
     private const string UrlToken = "URLTOKEN-9f3a";
     private const string HeaderValue = "HEADER-VALUE-77c1";
 
-    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
         Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=wh_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", SeedDemoData = false }
+            GovernanceDb = new GovernanceDbOptions { SeedDemoData = false }
         }));
 
     public void Dispose() => _repo.Dispose();
@@ -100,7 +101,7 @@ public sealed class WebhookSigningAndHygieneTests : IDisposable
         raw.ShouldNotContain("receiver.internal");
         raw.ShouldNotContain("ce.example.com");
         using var cmd = _repo.RawConnection().CreateCommand();
-        cmd.CommandText = "SELECT group_concat(name) FROM pragma_table_info('WEBHOOK_OUTBOX')";
+        cmd.CommandText = "SELECT string_agg(column_name, ',') FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'webhook_outbox'";
         var columns = (string)cmd.ExecuteScalar()!;
         columns.ShouldNotContain("url");
         columns.ShouldNotContain("secret");

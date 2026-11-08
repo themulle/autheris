@@ -1,5 +1,4 @@
-namespace Autheris.Tests.Unit.Catalog;
-
+namespace Autheris.Tests.Integration.Governance;
 using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
@@ -29,7 +28,7 @@ public sealed class CatalogTierPersistenceEndToEndTests : IDisposable
     private static readonly TableIdentifier Hidden = new("shared", "public", "hidden_t");
     private static readonly TableIdentifier Summary = new("shared", "public", "summary_t");
     private static readonly TableIdentifier Full = new("shared", "public", "full_t");
-    private readonly SqliteGovernanceRepository _repo = Autheris.Tests.Unit.GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
 
     private static readonly IOptions<GatewayOptions> Shared = Options.Create(new GatewayOptions
     {
@@ -59,7 +58,14 @@ public sealed class CatalogTierPersistenceEndToEndTests : IDisposable
                 Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
         return new McpDatasetCatalog(_repo, consents, Substitute.For<IGatewayExecutionService>(), options: Shared,
-            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_repo, consents, Shared.Value));
+            visibilityService: Visibility(consents));
+    }
+
+    private Autheris.Application.Catalog.Services.CatalogVisibilityService Visibility(IConsentRepository consents)
+    {
+        var rebac = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>();
+        rebac.IsEnabled.Returns(false);
+        return new(_repo, consents, Shared, rebac, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Catalog.Services.CatalogVisibilityService>.Instance);
     }
 
     [Fact]
@@ -82,7 +88,6 @@ public sealed class CatalogTierPersistenceEndToEndTests : IDisposable
                 Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
         var all = await _repo.GetAllTablesAsync();
-        (await McpCatalogVisibility.VisibleTablesAsync(all, user, consents, Shared.Value, CancellationToken.None)).ShouldBeEmpty();
         (await CatalogVisibility.VisibleTablesAsync(all, user, new TenantId("tenant-a"), consents, null, TenancyShape.Multi.Owner(), Shared.Value.Catalog.SharedTables)).ShouldBeEmpty();
 
         await _repo.SetDatasetVisibilityAsync(Full, DatasetVisibility.Hidden, Admin);
@@ -95,9 +100,8 @@ public sealed class CatalogTierPersistenceEndToEndTests : IDisposable
     {
         await SeedAsync(Full, DatasetVisibility.Full);
         var meta = (await _repo.GetTableMetadataAsync(Full))!;
-        await using (var connection = await _repo.Connections.OpenAsync(CancellationToken.None))
+        await using (var cmd = _repo.RawConnection().CreateCommand())
         {
-            await using var cmd = connection.CreateCommand();
             cmd.CommandText = $"UPDATE TABLE_CATALOG_SETTINGS SET visibility = 7 WHERE table_id = '{meta.Table.Id}'";
             await cmd.ExecuteNonQueryAsync();
         }

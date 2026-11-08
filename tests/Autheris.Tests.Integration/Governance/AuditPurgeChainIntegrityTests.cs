@@ -9,15 +9,13 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Audit;
-
+namespace Autheris.Tests.Integration.Governance;
 /// <summary>
 /// SEC-AUD161-02: Cryptographic continuity and verification tests across unpurged,
 /// single-purged, and multi-purged audit logs, including tamper and deletion detection.
@@ -26,13 +24,12 @@ namespace Autheris.Tests.Unit.Audit;
 public sealed class AuditPurgeChainIntegrityTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "autheris-purge-chain-" + Guid.NewGuid().ToString("N"));
-    private readonly string _dbFile;
+    private string _connectionString = string.Empty;
     private readonly string _anchorFile;
 
     public AuditPurgeChainIntegrityTests()
     {
         Directory.CreateDirectory(_dir);
-        _dbFile = Path.Combine(_dir, "audit.db");
         _anchorFile = Path.Combine(_dir, "audit.anchor.json");
     }
 
@@ -47,11 +44,11 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
         }
     }
 
-    private (SqliteGovernanceRepository Repo, FileAuditChainAnchorStore Store) CreateRepository()
+    private (PostgreSqlGovernanceRepository Repo, FileAuditChainAnchorStore Store) CreateRepository()
     {
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source={_dbFile}", SeedDemoData = false },
+            GovernanceDb = new GovernanceDbOptions { SeedDemoData = false },
             Audit = new AuditOptions { ChainAnchorPath = _anchorFile }
         });
 
@@ -59,8 +56,9 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
         env.EnvironmentName.Returns("Test");
 
         var store = new FileAuditChainAnchorStore(_anchorFile);
-        var repo = GovernanceStoreFactory.CreateSqlite(
+        var repo = GovernanceTestDatabase.CreateRepository(
             new EpochValidationService(),
+            out _connectionString,
             options,
             env,
             auditAnchorStore: store);
@@ -134,7 +132,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             var checkpoint = unsigned with { Signature = sig };
 
             // Save to external store and repo
-            store.SavePurgeCheckpoint(checkpoint);
             await repo.SavePurgeCheckpointAsync(checkpoint);
 
             // Execute purge batch
@@ -168,7 +165,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             plan1.ShouldNotBeNull();
             var cp1Unsigned = new AuditPurgeCheckpoint(plan1.Value.FirstSurvivingSequence, plan1.Value.SurvivingPrevHash, plan1.Value.PurgeCount, threshold1, DateTimeOffset.UtcNow, string.Empty, null);
             var cp1 = cp1Unsigned with { Signature = AuditChainEngine.ComputePurgeCheckpointSignature(hmacKey, cp1Unsigned) };
-            store.SavePurgeCheckpoint(cp1);
             await repo.SavePurgeCheckpointAsync(cp1);
             await repo.ExecutePurgeBatchAsync(plan1.Value.MaxEligibleSequence, 100);
 
@@ -181,7 +177,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             plan2.Value.FirstSurvivingSequence.ShouldBe(11);
             var cp2Unsigned = new AuditPurgeCheckpoint(plan2.Value.FirstSurvivingSequence, plan2.Value.SurvivingPrevHash, plan2.Value.PurgeCount, threshold2, DateTimeOffset.UtcNow, string.Empty, null);
             var cp2 = cp2Unsigned with { Signature = AuditChainEngine.ComputePurgeCheckpointSignature(hmacKey, cp2Unsigned) };
-            store.SavePurgeCheckpoint(cp2);
             await repo.SavePurgeCheckpointAsync(cp2);
             await repo.ExecutePurgeBatchAsync(plan2.Value.MaxEligibleSequence, 100);
 
@@ -206,18 +201,11 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             var hmacKey = ((IAuditPurgeKeyProvider)repo).GetAuditHmacKey()!;
             var unsigned = new AuditPurgeCheckpoint(plan!.Value.FirstSurvivingSequence, plan.Value.SurvivingPrevHash, plan.Value.PurgeCount, thresholdUtc, DateTimeOffset.UtcNow, string.Empty, null);
             var checkpoint = unsigned with { Signature = AuditChainEngine.ComputePurgeCheckpointSignature(hmacKey, unsigned) };
-            store.SavePurgeCheckpoint(checkpoint);
             await repo.SavePurgeCheckpointAsync(checkpoint);
             await repo.ExecutePurgeBatchAsync(plan.Value.MaxEligibleSequence, 100);
 
             // Tamper entry at seq 7
-            using (var conn = new SqliteConnection($"Data Source={_dbFile}"))
-            {
-                conn.Open();
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET decision = 'DENY' WHERE seq = 7";
-                cmd.ExecuteNonQuery();
-            }
+            GovernanceTestDatabase.ExecuteRaw(_connectionString, "UPDATE AUDIT_LOG_ENTRIES SET decision = 'DENY' WHERE seq = 7", bypassAppendOnlyTriggers: true);
 
             var verified = await repo.VerifyAuditHashChainAsync();
             verified.ShouldBeFalse("Tampered post-purge entry must fail chain verification.");
@@ -242,18 +230,11 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
             var hmacKey = ((IAuditPurgeKeyProvider)repo).GetAuditHmacKey()!;
             var unsigned = new AuditPurgeCheckpoint(plan!.Value.FirstSurvivingSequence, plan.Value.SurvivingPrevHash, plan.Value.PurgeCount, thresholdUtc, DateTimeOffset.UtcNow, string.Empty, null);
             var checkpoint = unsigned with { Signature = AuditChainEngine.ComputePurgeCheckpointSignature(hmacKey, unsigned) };
-            store.SavePurgeCheckpoint(checkpoint);
             await repo.SavePurgeCheckpointAsync(checkpoint);
             await repo.ExecutePurgeBatchAsync(plan.Value.MaxEligibleSequence, 100);
 
             // Unauthorized deletion of seq 8 creating a gap
-            using (var conn = new SqliteConnection($"Data Source={_dbFile}"))
-            {
-                conn.Open();
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = "DELETE FROM AUDIT_LOG_ENTRIES WHERE seq = 8";
-                cmd.ExecuteNonQuery();
-            }
+            GovernanceTestDatabase.ExecuteRaw(_connectionString, "DELETE FROM AUDIT_LOG_ENTRIES WHERE seq = 8", bypassAppendOnlyTriggers: true);
 
             var verified = await repo.VerifyAuditHashChainAsync();
             verified.ShouldBeFalse("Sequence hole post-purge must fail chain verification.");
@@ -286,7 +267,6 @@ public sealed class AuditPurgeChainIntegrityTests : IDisposable
                 "BAD_TAMPERED_HMAC_SIGNATURE_HEX",
                 null);
 
-            store.SavePurgeCheckpoint(badCheckpoint);
             await repo.SavePurgeCheckpointAsync(badCheckpoint);
             await repo.ExecutePurgeBatchAsync(plan.Value.MaxEligibleSequence, 100);
 

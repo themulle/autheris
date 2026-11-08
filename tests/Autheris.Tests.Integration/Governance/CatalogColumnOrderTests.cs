@@ -1,5 +1,4 @@
-namespace Autheris.Tests.Unit.Catalog;
-
+namespace Autheris.Tests.Integration.Governance;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -19,7 +18,7 @@ public sealed class CatalogColumnOrderTests : IDisposable
 {
     private static readonly string[] Registered = ["id", "zeta", "serial_number", "alpha", "tonnage", "crane_type"];
     private static readonly TableIdentifier Id = new("default", "main", "cranes");
-    private readonly SqliteGovernanceRepository _repo = Autheris.Tests.Unit.GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
 
     public void Dispose() => _repo.Dispose();
 

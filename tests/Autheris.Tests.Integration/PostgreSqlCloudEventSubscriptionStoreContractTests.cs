@@ -2,6 +2,11 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Threading.Tasks;
+using Xunit;
+using Shouldly;
+using Npgsql;
+using System.Linq;
+using System.Collections.Generic;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Domain.Options;
@@ -56,5 +61,43 @@ public sealed class PostgreSqlCloudEventSubscriptionStoreContractTests : CloudEv
         });
         var repo = Track(GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env));
         return Task.FromResult<ICloudEventSubscriptionStore?>(repo);
+    }
+
+    [Fact]
+    public async Task MalformedJsonRow_IsSkipped_OtherRowsStillLoad()
+    {
+        var store = await OpenAsync();
+        if (store is null)
+        {
+            return;
+        }
+
+        await store.RegisterSubscriptionAsync(Sub("good"), Quota);
+        await using (var conn = new NpgsqlConnection(_db!.ConnectionString))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "INSERT INTO CLOUDEVENT_SUBSCRIPTIONS (id, tenant_id, target_url, filter_table, filter_operations, is_enabled, created_ms) VALUES ('bad','tenant-a','https://e.test','*','{not json',TRUE,1)";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var list = await store.ListSubscriptionsAsync("tenant-a");
+
+        list.Select(x => x.Id).ShouldBe(["good"]);
+    }
+
+    [Fact]
+    public async Task OutOfBoundsRolesOrHeaders_AreRejected()
+    {
+        var store = await OpenAsync();
+        if (store is null)
+        {
+            return;
+        }
+
+        await Should.ThrowAsync<ArgumentException>(async () => await store.RegisterSubscriptionAsync(
+            Sub("r") with { CreatedByRoles = Enumerable.Range(0, 300).Select(i => "r" + i).ToList() }, Quota));
+        await Should.ThrowAsync<ArgumentException>(async () => await store.RegisterSubscriptionAsync(
+            Sub("h") with { CustomHeaders = new Dictionary<string, string> { ["X"] = new string('v', 40000) } }, Quota));
     }
 }

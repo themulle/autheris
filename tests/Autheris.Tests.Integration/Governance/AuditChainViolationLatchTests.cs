@@ -12,8 +12,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Audit;
-
+namespace Autheris.Tests.Integration.Governance;
 /// <summary>SR-L-08 / decision G-5: a detected audit chain violation latches and is applied per <see cref="AuditChainViolationPolicy"/>.</summary>
 [Trait("Category", "Security")]
 public sealed class AuditChainViolationLatchTests : IDisposable
@@ -33,17 +32,17 @@ public sealed class AuditChainViolationLatchTests : IDisposable
         }
     }
 
-    private SqliteGovernanceRepository CreateRepo(AuditChainViolationPolicy? policy)
+    private PostgreSqlGovernanceRepository CreateRepo(AuditChainViolationPolicy? policy, out string connectionString)
     {
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Test");
-        var db = Path.Combine(_dir, $"audit_{Guid.NewGuid():N}.db");
+        var db = $"audit_{Guid.NewGuid():N}.db";
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source={db}", SeedDemoData = false },
-            Audit = new AuditOptions { ChainAnchorPath = Path.Combine(_dir, Path.GetFileName(db) + ".anchor.json"), OnChainViolation = policy }
+            GovernanceDb = new GovernanceDbOptions { SeedDemoData = false },
+            Audit = new AuditOptions { ChainAnchorPath = Path.Combine(_dir, db + ".anchor.json"), OnChainViolation = policy }
         });
-        return GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options, env);
+        return GovernanceTestDatabase.CreateRepository(new EpochValidationService(), out connectionString, options, env);
     }
 
     private static AuditLogEntry TierA(int i) => new()
@@ -69,15 +68,11 @@ public sealed class AuditChainViolationLatchTests : IDisposable
     };
 
     /// <summary>Writes a few events, tampers with the first row and lets the verifier latch the violation.</summary>
-    private static async Task LatchViolationAsync(SqliteGovernanceRepository repo)
+    private static async Task LatchViolationAsync(PostgreSqlGovernanceRepository repo, string connectionString)
     {
         await repo.RecordAuditEventAsync(TierA(1));
         await repo.RecordAuditEventAsync(TierA(2));
-        using (var cmd = repo.RawConnection().CreateCommand())
-        {
-            cmd.CommandText = "UPDATE AUDIT_LOG_ENTRIES SET details_json = '{\"tampered\":true}' WHERE rowid = 1";
-            await cmd.ExecuteNonQueryAsync();
-        }
+        GovernanceTestDatabase.ExecuteRaw(connectionString, "UPDATE AUDIT_LOG_ENTRIES SET details_json = '{\"tampered\":true}' WHERE rowid = (SELECT MIN(rowid) FROM AUDIT_LOG_ENTRIES)", bypassAppendOnlyTriggers: true);
 
         (await repo.VerifyAuditHashChainAsync()).ShouldBeFalse();
         repo.IsAuditPipelineFaulted.ShouldBeTrue();
@@ -86,8 +81,8 @@ public sealed class AuditChainViolationLatchTests : IDisposable
     [Fact]
     public async Task TierB_AfterViolationFlagged_AndSuccessfulBatch_StillRejected()
     {
-        using var repo = CreateRepo(AuditChainViolationPolicy.DenyDataAccess);
-        await LatchViolationAsync(repo);
+        using var repo = CreateRepo(AuditChainViolationPolicy.DenyDataAccess, out var cs);
+        await LatchViolationAsync(repo, cs);
 
         // A successful Tier-A write (the batch writer path that used to reset the fault flag) must not re-enable query admission.
         await repo.RecordAuditEventAsync(TierA(3));
@@ -100,8 +95,8 @@ public sealed class AuditChainViolationLatchTests : IDisposable
     [Fact]
     public async Task OnChainViolation_DenyDataAccess_MarksTierA_AndWritesOneFaultEvent()
     {
-        using var repo = CreateRepo(AuditChainViolationPolicy.DenyDataAccess);
-        await LatchViolationAsync(repo);
+        using var repo = CreateRepo(AuditChainViolationPolicy.DenyDataAccess, out var cs);
+        await LatchViolationAsync(repo, cs);
 
         await repo.RecordAuditEventAsync(TierA(3));
         await repo.RecordAuditEventAsync(TierA(4));
@@ -121,8 +116,8 @@ public sealed class AuditChainViolationLatchTests : IDisposable
     [Fact]
     public async Task OnChainViolation_DenyAll_RejectsTierA()
     {
-        using var repo = CreateRepo(AuditChainViolationPolicy.DenyAll);
-        await LatchViolationAsync(repo);
+        using var repo = CreateRepo(AuditChainViolationPolicy.DenyAll, out var cs);
+        await LatchViolationAsync(repo, cs);
 
         await Should.ThrowAsync<AuditUnavailableException>(() => repo.RecordAuditEventAsync(TierA(3)));
         await Should.ThrowAsync<AuditUnavailableException>(() => repo.RecordAuditEventAsync(TierB(1)));
@@ -131,8 +126,8 @@ public sealed class AuditChainViolationLatchTests : IDisposable
     [Fact]
     public async Task OnChainViolation_AlertOnly_AllowsQueries()
     {
-        using var repo = CreateRepo(AuditChainViolationPolicy.AlertOnly);
-        await LatchViolationAsync(repo);
+        using var repo = CreateRepo(AuditChainViolationPolicy.AlertOnly, out var cs);
+        await LatchViolationAsync(repo, cs);
 
         await Should.NotThrowAsync(() => repo.RecordAuditEventAsync(TierB(1)));
         await Should.NotThrowAsync(() => repo.RecordAuditEventAsync(TierA(3)));
