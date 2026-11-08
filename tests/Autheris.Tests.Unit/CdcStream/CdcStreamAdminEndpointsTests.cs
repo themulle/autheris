@@ -125,7 +125,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
     public async Task List_ReturnsStreamsAndKekCounts_WithoutPayloadOrKeys()
     {
         _keys.Keys.Add(new CdcWrappedKey(Id, "d1", CdcKeyPurpose.Payload, "k1", [1, 2, 3], DateTimeOffset.UnixEpoch, null));
-        var result = await CdcStreamAdminEndpoints.ListAsync(Ctx("GovernanceAdmin"), Service(), default);
+        var result = await CdcStreamAdminEndpoints.ListAsync(Ctx("ClusterAdmin"), Service(), default);
         Status(result).ShouldBe(200);
         var json = JsonSerializer.Serialize(((IValueHttpResult)result).Value);
         json.ShouldContain(Id.Value);
@@ -139,7 +139,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
     [Fact]
     public async Task Resync_RestartsAndAudits_WithAllowListedDetails()
     {
-        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, false, null, Ctx("GovernanceAdmin"), Service(), Audit(), default);
+        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, false, null, Ctx("ClusterAdmin"), Service(), Audit(), default);
         Status(result).ShouldBe(200);
         await _restarter.Received(1).RestartAsync(Id, Arg.Any<CancellationToken>());
         await _auditRepo.Received(1).RecordAuditEventAsync(
@@ -155,7 +155,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
     {
         var store = Substitute.For<ICdcStreamStore>();
         var service = new CdcStreamAdminService(store, _keys, _keyring, _restarter);
-        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, confirm, Ctx("GovernanceAdmin"), service, Audit(), default);
+        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, confirm, Ctx("ClusterAdmin"), service, Audit(), default);
         Status(result).ShouldBe(400);
         await store.DidNotReceiveWithAnyArgs().DiscardUnreadableAsync(default, default!, default);
         await _restarter.DidNotReceiveWithAnyArgs().RestartAsync(default, default);
@@ -173,7 +173,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
         store.DiscardUnreadableAsync(Id, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>()).Returns(5);
         var service = new CdcStreamAdminService(store, _keys, _keyring, _restarter);
 
-        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, Id.Value, Ctx("GovernanceAdmin"), service, Audit(), default);
+        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, Id.Value, Ctx("ClusterAdmin"), service, Audit(), default);
 
         Status(result).ShouldBe(200);
         await store.Received(1).DiscardUnreadableAsync(Id, Arg.Is<IReadOnlyCollection<string>>(ids => ids.Count == 1 && ids.Contains("lost")), Arg.Any<CancellationToken>());
@@ -189,18 +189,18 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
     [InlineData("")]
     public async Task UnknownOrMalformedStream_Is404_AndSameForRotate(string id)
     {
-        Status(await CdcStreamAdminEndpoints.ResyncAsync(id, false, null, Ctx("GovernanceAdmin"), Service(), Audit(), default)).ShouldBe(404);
-        Status(await CdcStreamAdminEndpoints.RotateImageKeyAsync(id, Ctx("GovernanceAdmin"), Service(), Audit(), default)).ShouldBe(404);
+        Status(await CdcStreamAdminEndpoints.ResyncAsync(id, false, null, Ctx("ClusterAdmin"), Service(), Audit(), default)).ShouldBe(404);
+        Status(await CdcStreamAdminEndpoints.RotateImageKeyAsync(id, Ctx("ClusterAdmin"), Service(), Audit(), default)).ShouldBe(404);
     }
 
     [Fact]
     public async Task Resync_WithoutRestarterOrWhenRestartFails_Is503()
     {
         var noRestarter = new CdcStreamAdminService(_store, _keys, _keyring, null);
-        Status(await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, false, null, Ctx("GovernanceAdmin"), noRestarter, Audit(), default)).ShouldBe(503);
+        Status(await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, false, null, Ctx("ClusterAdmin"), noRestarter, Audit(), default)).ShouldBe(503);
 
         _restarter.RestartAsync(Id, Arg.Any<CancellationToken>()).Returns(false);
-        Status(await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, false, null, Ctx("GovernanceAdmin"), Service(), Audit(), default)).ShouldBe(503);
+        Status(await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, false, null, Ctx("ClusterAdmin"), Service(), Audit(), default)).ShouldBe(503);
         await _auditRepo.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);
     }
 
@@ -214,7 +214,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
         var store = Substitute.For<ICdcStreamStore>();
         store.GetStreamAsync(Id, Arg.Any<CancellationToken>()).Returns(_store.Descriptor);
 
-        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, Id.Value, Ctx("GovernanceAdmin"), DiscardService(store), Audit(), default);
+        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, Id.Value, Ctx("ClusterAdmin"), DiscardService(store), Audit(), default);
 
         Status(result).ShouldBe(503);
         JsonSerializer.Serialize(((IValueHttpResult)result).Value).ShouldContain("CDC_KEY_UNAVAILABLE");
@@ -236,7 +236,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
         var store = Substitute.For<ICdcStreamStore>();
         store.GetStreamAsync(Id, Arg.Any<CancellationToken>()).Returns(_store.Descriptor);
 
-        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, Id.Value, Ctx("GovernanceAdmin"), DiscardService(store), Audit(), default);
+        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, Id.Value, Ctx("ClusterAdmin"), DiscardService(store), Audit(), default);
 
         var body = JsonSerializer.Serialize(((IValueHttpResult)result).Value);
         var audit = (string)_auditRepo.ReceivedCalls().Select(c => c.GetArguments()[0]).OfType<AuditLogEntry>().Single().DetailsJson!;
@@ -254,7 +254,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
         var store = Substitute.For<ICdcStreamStore>();
         var service = new CdcStreamAdminService(store, keyStore, _keyring, _restarter);
 
-        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, "fedcba9876543210fedcba9876543210", Ctx("GovernanceAdmin"), service, Audit(), default);
+        var result = await CdcStreamAdminEndpoints.ResyncAsync(Id.Value, true, "fedcba9876543210fedcba9876543210", Ctx("ClusterAdmin"), service, Audit(), default);
 
         Status(result).ShouldBe(400);
         await keyStore.DidNotReceiveWithAnyArgs().GetKeysAsync(default, default);
@@ -279,7 +279,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
     {
         _auditRepo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new InvalidOperationException("down")));
         await Should.ThrowAsync<AuditUnavailableException>(() =>
-            CdcStreamAdminEndpoints.ResyncAsync(Id.Value, false, null, Ctx("GovernanceAdmin"), Service(), Audit(), default));
+            CdcStreamAdminEndpoints.ResyncAsync(Id.Value, false, null, Ctx("ClusterAdmin"), Service(), Audit(), default));
     }
 
     [Theory]

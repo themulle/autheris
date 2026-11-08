@@ -41,7 +41,7 @@ public static partial class ODataEndpoints
     /// successful result are returned as Apache Parquet; error results stay OData JSON.
     /// </summary>
     internal static bool IsOpenApiAdmin(ClaimsPrincipal? user)
-        => EndpointSecurity.IsCanonicalClusterAdmin(user) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
+        => EndpointSecurity.IsCanonicalClusterAdmin(user);
 
     private const string SwaggerUiVersion = "5.33.2";
 
