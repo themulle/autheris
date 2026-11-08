@@ -38,17 +38,19 @@ Vollständige, reproduzierbare Last- und Latenz-Benchmark-Umgebung für das Proj
                         [ GqlGateway.Api (.NET 10) ]
                    ┌─────────────────┼─────────────────┐
                    ▼                 ▼                 ▼
-          [ PostgreSQL DB ]     [ Redis 7 ]    [ SQLite Governance DB ]
-          (200k+ Invoices &     (Rate Limiter,  (Policies, Data Owners,
-           Line Items)           Consent Cache,  Consents & Row Filters)
+          [ PostgreSQL DB ]     [ Redis 7 ]
+          (Invoices, Line Items (Rate Limiter,
+           & Governance Store)   Consent Cache,
                                  Idempotency)
 ```
 
 ### Enthaltene Services in der `podman-compose.yaml`
-1. **`gqlgateway-api`**: Multi-Stage Build (`Containerfile`) mit .NET 10 Runtime auf Port 5050. Startet in gehärteter Production-Konfiguration: ForwardAuth aktiv, TestAuthHandler deaktiviert, Token-Bucket Rate Limiter aktiv, Postgres-, SQLite-, SQL Server- und Redis-Anbindung sowie dynamisch aktivierte Extensions.
+1. **`gqlgateway-api`**: Multi-Stage Build (`Containerfile`) mit .NET 10 Runtime auf Port 5050. Startet in gehärteter Production-Konfiguration: ForwardAuth aktiv, TestAuthHandler deaktiviert, Token-Bucket Rate Limiter aktiv, Postgres-, SQL Server- und Redis-Anbindung sowie dynamisch aktivierte Extensions.
 2. **`postgres`**: Enterprise-RDBMS für Invoices & Line Items (Domain `finance`). Seeding mit konfigurierbaren Zeilenmengen (Standard: 200.000 Zeilen) inkl. sensibler Daten (`email`, `iban`, `salary`).
 3. **`sqlserver`**: Azure SQL Edge Engine (`mcr.microsoft.com/azure-sql-edge:1.0.7`) für CRM Sales Orders (Domain `crm`). Leichtgewichtige MS SQL Server-Engine (~500 MB RAM) zur Validierung von T-SQL-Dialekten (`ORDER BY ... OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`) und sensiblen E-Mail-Maskierungen.
-4. **`governance-seed`**: Init-Container (`Containerfile`), der die SQLite-Governance-DB (`/data/governance.db`), die SQLite-HR-Datenbank (`/data/hr.db`, 5.000 Mitarbeiter) und den Lakehouse Table-Katalog initialisiert, inkl. Rollen, Gruppen, Data-Ownern, Masking-Regeln und RLS-Row-Filtern.
+4. **Governance-Store**: Der `postgres`-Service hostet auch den Governance-Store (`Gateway__GovernanceDb__*`, Provider `PostgreSql`). Die Demo-Daten (Rollen, Data-Owner, Masking-Regeln, RLS-Row-Filter) legt gateway-seitig `SeedDemoData=true` an (`SEED_DEMO_DATA`, Standard `true` im Compose-Stack); es gibt keinen separaten Seed-Container mehr.
+
+   > ASPNETCORE_ENVIRONMENT=Development disables production TLS, auth and secret enforcement (ConnectionTlsPolicy, SR-L-02). Never copy this block into a shared, staging or production deployment; use PostgreSQL with SSL Mode=VerifyFull instead. Alle Ports binden standardmäßig an `127.0.0.1` (`BIND_ADDR`).
 5. **`redis`**: Cache-Store für `ConsentCacheService` (Epoch Invalidation Pub/Sub), `RedisRateLimiterService` (Token-Bucket Lua-Scripts), `RedisIdempotencyStore` und EventBus.
 6. **`minio` & `lakehouse-seed`**: MinIO S3 Object Storage (`minio/minio`) und Ingestion-Container zur Bereitstellung von **Apache Iceberg v2** Metadaten (`v2.metadata.json`), Manifest-Listen und Parquet-Dateien für die Lakehouse-Extension.
 7. **`azurite`**: Offizieller Microsoft Azure Storage Emulator (`mcr.microsoft.com/azure-storage/azurite`) zur Bereitstellung von Azure Blob Storage / ADLS Gen2 für den Lakehouse-Konnektor.
@@ -56,7 +58,7 @@ Vollständige, reproduzierbare Last- und Latenz-Benchmark-Umgebung für das Proj
    - **OpenMetadata Catalog Governance**: **OpenMetadata** (REST v1 & Realtime-Webhooks) sowie automatisierte DSGVO Art. 9 Tag-Erkennung.
    - **dbt Integration**: Streaming-Auslieferung von `manifest.json`, Model Contract Enforcement & Breaking-Change CI Gate (`/api/extensions/dbt/validate-contract`), Governance Proposal Lifecycle und Exposures Publishing (`/api/extensions/dbt/exposures`).
 9. **`reverse-proxy`**: Nginx ForwardAuth Gateway auf Host-Port 8082. Injiziert `X-Forwarded-Secret` und leitet Benutzeridentitäten (`X-Forwarded-User`, `X-Forwarded-Roles`, `X-Forwarded-Groups`) unter echten Netzwerkbedingungen an das Gateway weiter.
-10. **`load-generator`**: k6-Container mit parametrisierbarem Lastprofil (Ramp-up → Steady State → Ramp-down) und dynamischem Query-Mix (PostgreSQL + SQLite + SQL Server + Apache Iceberg Lakehouse).
+10. **`load-generator`**: k6-Container mit parametrisierbarem Lastprofil (Ramp-up → Steady State → Ramp-down) und dynamischem Query-Mix (PostgreSQL + SQL Server + Apache Iceberg Lakehouse).
 11. **`prometheus` & `grafana`**: Automatisches Scraping von Gateway-Metriken (`/metrics`) und vorkonfiguriertes Grafana-Dashboard (`http://localhost:3000`).
 
 ---
@@ -67,11 +69,11 @@ Um Ressourcen auf Entwicklungsrechnern und CI/CD-Runnern zu schonen, stehen **6 
 
 | Szenario | Flag (`-Scenario` / `--scenario`) | Enthaltene Container / Extensions | Geschätzter RAM-Bedarf | Primärer Testfokus |
 | :--- | :--- | :--- | :---: | :--- |
-| **`minimal`** | `-Scenario minimal` | Postgres, Redis, Governance-Seed, Gateway, Reverse-Proxy | **~1.5 GB** | Kern-RLS, Consent-Cache, Token Bucket Rate Limiter, Invoices & HR, OData v4 |
+| **`minimal`** | `-Scenario minimal` | Postgres, Redis, Gateway, Reverse-Proxy | **~1.5 GB** | Kern-RLS, Consent-Cache, Token Bucket Rate Limiter, Invoices, OData v4 |
 | **`lakehouse`**| `-Scenario lakehouse`| Minimal + MinIO + Lakehouse-Seed (Iceberg S3) | **~1.8 GB** | Apache Iceberg v2 Scans, Vectorized Partition Pruning, S3 SigV4 Streaming |
 | **`azure`** | `-Scenario azure` | Minimal + Azurite + Mock-Extensions (Azure Blob Storage) | **~1.7 GB** | Apache Iceberg v2 auf Azure Blob Storage / ADLS Gen2 |
 | **`enterprise`**| `-Scenario enterprise`| Minimal + Mock-Extensions (OpenMetadata, dbt) | **~1.8 GB** | OpenMetadata Sync & Webhooks, dbt Contracts |
-| **`relational`**| `-Scenario relational`| Minimal + Azure SQL Edge (`sqlserver`) | **~2.0 GB** | 3-Way Cross-Database Queries (PostgreSQL + SQLite + MS SQL Server) |
+| **`relational`**| `-Scenario relational`| Minimal + Azure SQL Edge (`sqlserver`) | **~2.0 GB** | Cross-Database Queries (PostgreSQL + MS SQL Server) |
 | **`openmetadata-real`**| `-Scenario openmetadata-real`| Minimal + Echter OpenMetadata Server + OpenSearch Cluster | **~4.5 GB** | Echter OpenMetadata 1.5 Server Stack inkl. Web-UI (`http://localhost:8585`) |
 | **`full`** *(Default)* | `-Scenario full` | **Alle Container**: Minimal + SQL Server + MinIO + Mock-Extensions + Monitoring | **~3.5 GB** | Vollständiger E2E-Benchmark aller relationalen Quellen, Extensions und Dashboards |
 
@@ -156,10 +158,9 @@ Die Umgebung wurde speziell für **Podman** entwickelt und beachtet alle Eigenhe
 1. **Rootless Betrieb**: Alle Container laufen ohne Root-Rechte mit dedizierten Benutzer-IDs (`appuser:10001` in `gqlgateway-api`).
 2. **SELinux-Volume-Labels**:
    - `:Z` für private Volumes (`postgres-data`, `prometheus-data`, read-only SQL scripts).
-   - `:z` für geteilte Volumes zwischen Containern (`governance-data` zwischen `governance-seed` und `gqlgateway-api`).
 3. **Keine `privileged: true`-Direktiven**: Maximale Sicherheit im Zero-Trust-Modus.
 4. **Healthcheck-Ketten**:
-   - `gqlgateway-api` wartet auf gesunde `postgres`-, `redis`- und `governance-seed`-Container.
+   - `gqlgateway-api` wartet auf gesunde `postgres`- und `redis`-Container.
    - `reverse-proxy` wartet auf gesunden `gqlgateway-api`-Dienst.
    - `load-generator` startet erst, wenn der Reverse-Proxy vollständig betriebsbereit ist.
 

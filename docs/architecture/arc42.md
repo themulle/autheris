@@ -13,7 +13,7 @@ The GraphQL Enterprise Gateway acts as a centralized, secure data access layer a
 1. **Security & Zero Trust**: Strict least-privilege, tamper-evident audit logging (SHA-256 hash chaining), out-of-process credential protection.
 2. **Performance & Low Latency**: P99 consent resolution latency < 15ms via two-tier caching (L1 MemoryCache + L2 Redis) with policy epoch invalidation.
 3. **High Availability & Zero-Downtime**: Seamless rolling deployments with a 6-phase graceful drain protocol and dual-probe Kubernetes health checks (`/health/live`, `/health/ready`).
-4. **Developer Experience**: Zero-external-dependency local development via in-memory SQLite governance catalog and test authentication simulation.
+4. **Developer Experience**: Local development against a PostgreSQL governance store (compose stack) with demo data and test authentication simulation.
 
 ### 1.3 Stakeholders
 - **Data Owners**: Define security policies, approve or reject access requests, delegate authority.
@@ -48,7 +48,7 @@ flowchart TD
     AD[Active Directory / Kerberos / Entra ID] -.->|Direct Bearer / Kerberos / Basic| Gateway
 
     Gateway <-->|Redis PubSub & Distributed State| Redis[(Redis Cluster)]
-    Gateway -->|Read/Write Governance Catalog| GovDB[(Governance Database / SQLite / SQL Server)]
+    Gateway -->|Read/Write Governance Catalog| GovDB[(Governance Database / PostgreSQL / SQL Server)]
     Gateway -->|Parameterized Dynamic SQL with RLS Pushdown| TargetDB1[(Finance DB - SQL Server)]
     Gateway -->|Parameterized Dynamic SQL with RLS Pushdown| TargetDB2[(HR DB - PostgreSQL)]
     Gateway -->|Parameterized Dynamic SQL with RLS Pushdown| TargetDB3[(Analytics DB - SQLite)]
@@ -128,7 +128,7 @@ classDiagram
     }
 
     namespace Infrastructure {
-        class SqliteGovernanceRepository
+        class PostgreSqlGovernanceRepository
         class SqlConnectionFactory
         class ConsentCacheService
         class RedisEventBus
@@ -144,7 +144,7 @@ classDiagram
     }
 
     IGatewayExecutionService <|.. GatewayExecutionService
-    IGovernanceRepository <|.. SqliteGovernanceRepository
+    IGovernanceRepository <|.. PostgreSqlGovernanceRepository
     ISqlConnectionFactory <|.. SqlConnectionFactory
 ```
 

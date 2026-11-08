@@ -20,4 +20,28 @@ public sealed class ShippedGovernanceProviderTests
             .ShouldBeTrue("the shipped config must carry an empty ConnectionString so startup fails closed until it is supplied");
         connectionString.GetString().ShouldBeNullOrEmpty();
     }
+
+    [Fact]
+    public void Default_governance_provider_is_PostgreSql_in_helm_values()
+    {
+        var values = File.ReadAllLines(Path.Combine(RepositoryScan.RepoRoot, "deploy/helm/autheris/values.yaml"));
+        var index = Array.FindIndex(values, l => l.TrimStart().StartsWith("governanceDb:", StringComparison.Ordinal));
+        index.ShouldBeGreaterThanOrEqualTo(0);
+
+        var provider = values.Skip(index + 1).Take(8).FirstOrDefault(l => l.TrimStart().StartsWith("provider:", StringComparison.Ordinal));
+        provider.ShouldNotBeNull();
+        provider.Split(':', 2)[1].Trim().Trim('"').ShouldBe("PostgreSql");
+    }
+
+    [Fact]
+    public void Default_governance_provider_is_PostgreSql_in_podman_compose()
+    {
+        var compose = File.ReadAllLines(Path.Combine(RepositoryScan.RepoRoot, "deploy/podman-compose.yaml"));
+        var provider = compose.FirstOrDefault(l => l.TrimStart().StartsWith("Gateway__GovernanceDb__Provider:", StringComparison.Ordinal));
+        provider.ShouldNotBeNull("the compose gateway must set the governance provider explicitly");
+        provider.Split(':', 2)[1].Trim().Trim('"').ShouldBe("PostgreSql");
+
+        compose.Any(l => l.TrimStart().StartsWith("postgres:", StringComparison.Ordinal)).ShouldBeTrue();
+        compose.Any(l => l.Contains("governance-seed", StringComparison.OrdinalIgnoreCase)).ShouldBeFalse();
+    }
 }

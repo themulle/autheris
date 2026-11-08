@@ -120,3 +120,12 @@ SQLite is no longer supported as a governance or metadata store. The gateway fai
   }
 }
 ```
+
+### Deploy artifacts and demo data
+
+- The benchmark compose stack (`deploy/podman-compose.yaml`) uses the `postgres` service as governance store (`Gateway__GovernanceDb__*`, database `governancedb`). The password comes only from the untracked `.env` (`GQL_PG_PASSWORD`); compose refuses to start without it. The gateway service waits for the healthy `postgres` service.
+- The former `governance-seed` container (SQLite governance database and SQLite HR demo database) is removed. Demo governance data is created by the gateway itself with `Gateway__GovernanceDb__SeedDemoData=true` (`SEED_DEMO_DATA`, default `true` in the compose stack). The benchmark has no SQLite `hr` data source any more; the cross-database k6 query reads PostgreSQL (and SQL Server with the `relational` scenario).
+- The compose postgres has no TLS, so the benchmark stack runs the gateway with `ASPNETCORE_ENVIRONMENT=Development`; outside Development the governance connection must use `SSL Mode=VerifyFull` (or `VerifyCA`). Do not reuse the compose stack on a shared host.
+- Helm: `gateway.governanceDb.existingSecret` is required (the chart fails to render without it); there is no SQLite branch in `governance-migration-job.yaml`.
+- `deploy/scripts/smoke-compose.sh` starts the stack with a random database password, polls `/health/ready` for up to 120 s and tears the stack down.
+- There is no data migration tool from a SQLite governance file. Re-create governance data through the Admin API or seed PostgreSQL; the unsupported migration script `tools/migrations/upgrade_governance_v1_1_to_v1_2.sql` was removed.

@@ -1,7 +1,5 @@
 {{- if .Values.governanceMigrationJob.enabled }}
-{{- if eq (lower .Values.gateway.governanceDb.provider) "sqlite" }}
-{{- fail "governanceMigrationJob.enabled is not supported for the sqlite provider: the database file is local to the application pod." }}
-{{- end }}
+{{- $governanceSecret := required "gateway.governanceDb.existingSecret is required (secret holding the governance connection string)" .Values.gateway.governanceDb.existingSecret }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -67,7 +65,7 @@ spec:
             - name: Gateway__GovernanceDb__MigrationConnectionString
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.gateway.governanceDb.existingSecret }}
+                  name: {{ $governanceSecret }}
                   key: {{ .Values.governanceMigrationJob.migrationConnectionStringSecretKey }}
             {{- end }}
           envFrom:

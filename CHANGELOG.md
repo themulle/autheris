@@ -7,10 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### BREAKING
-- None yet.
+- An unsupported governance provider fails startup: `Gateway:GovernanceDb:Provider` accepts only `PostgreSql` (default) and `SqlServer`; `Sqlite` and SQLite connection strings are rejected in every environment, and an empty connection string fails startup. There is no migration tool from SQLite governance files. The deploy stack (compose, Helm, benchmark) uses PostgreSQL and the `governance-seed` container is removed. See [Governance store migration](docs/operations/migration-simplification.md#3-governance-store-migration-postgresql-and-sql-server).
 
 ### Removed
-- None yet.
+- SQLite governance store (repositories, migration runner, baseline, steps), the `governance-seed` compose container and `tools/migrations/upgrade_governance_v1_1_to_v1_2.sql`. SQLite stays supported as a data source.
 
 ### Moved to modules
 - None yet.
