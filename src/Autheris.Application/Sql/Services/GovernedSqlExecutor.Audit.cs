@@ -3,118 +3,20 @@ namespace Autheris.Application.Sql.Services;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Security.Claims;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Common;
-using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security;
-using Autheris.Application.Sql;
-using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Internal;
-using Autheris.Application.Sql.ListParameters;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
-using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 using TrinoSqlEngine.Ast.Emit;
 
 public sealed partial class GovernedSqlExecutor
 {
-    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
-    private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
-
-    private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues)
-    {
-        SortedDictionary<string, int>? lists = null;
-        foreach (var slot in compiled.Parameters)
-        {
-            if (slot is { Origin: ParameterOrigin.ClientNamed, ListCount: { } count, SourceName: { } name })
-            {
-                (lists ??= new SortedDictionary<string, int>(StringComparer.Ordinal))[name] = count;
-            }
-        }
-
-        if (lists is not null)
-        {
-            fields["list_params"] = lists;
-        }
-
-        if (clientValues is not null)
-        {
-            SortedSet<string>? empty = null;
-            foreach (var (name, value) in clientValues)
-            {
-                if (value is ClientListValue { Count: 0 } && AuditListNameRegex().IsMatch(name))
-                {
-                    (empty ??= new SortedSet<string>(StringComparer.Ordinal)).Add(name.ToLowerInvariant());
-                }
-            }
-
-            if (empty is not null)
-            {
-                fields["list_params_empty"] = empty.ToArray();
-            }
-        }
-    }
-
-    private static void AddCallerAttributeAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite, CompiledSql compiled)
-    {
-        if (rewrite.CallerAttributes is not { Count: > 0 } attributes)
-        {
-            return;
-        }
-
-        fields["caller_attributes"] = attributes.ToDictionary(
-            p => p.Key,
-            p => p.Value.Select(a => new Dictionary<string, object?> { ["id"] = a.Id, ["outcome"] = a.Outcome, ["reason"] = a.Reason }).ToList(),
-            StringComparer.OrdinalIgnoreCase);
-        fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
-    }
-
-    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues = null)
-    {
-        fields["compiler_version"] = compiled.CompilerVersion;
-        fields["dialect"] = compiled.Dialect.ToString();
-        fields["bind_count"] = compiled.Parameters.Length;
-        if (compiled.HasRecursiveCte)
-        {
-            fields["recursiveCte"] = true;
-        }
-
-        AddListAuditField(fields, compiled, clientValues);
-        fields["sql.compiled_digest"] = _digester.Compute(compiled);
-        if (_options.Value.Audit.StoreCompiledSql)
-        {
-            fields["compiledSql"] = compiled.Sql;
-        }
-    }
-
-    private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
-    {
-        if (rewrite.KeySets is not { Count: > 0 } outcomes)
-        {
-            return;
-        }
-
-        fields["row_filter_key_sets"] = outcomes.Select(o => new Dictionary<string, object?>
-        {
-            ["table"] = o.Table,
-            ["rule_id"] = o.RuleId,
-            ["source"] = o.Source.ToString(),
-            ["strategy_source"] = o.StrategySource.ToString(),
-            ["outcome"] = o.Outcome.ToString(),
-            ["reason"] = o.Reason?.ToString(),
-            ["key_count"] = o.KeyCount,
-            ["padded_count"] = o.PaddedCount,
-            ["age_seconds"] = o.AgeSeconds
-        }).ToList();
-    }
-
     private async Task RecordDmlAuditAsync(
         TenantId tenantId,
         ClaimsPrincipal user,
@@ -140,7 +42,7 @@ public sealed partial class GovernedSqlExecutor
         };
         if (compiled is null && dmlContext.HasRecursiveCte)
         {
-            fields["recursiveCte"] = true;
+            fields["recursiveCte"] = true;   // a rejection before the compile still carries the flag
         }
 
         if (compiled is not null)
@@ -149,6 +51,7 @@ public sealed partial class GovernedSqlExecutor
         }
         else if (originalSql is not null)
         {
+            // A statement rejected before it compiled has no digest; the hash of its (literal-free) original text identifies it.
             fields["originalSqlHash"] = _digester.Anonymize(originalSql).OriginalSqlHash;
         }
 
@@ -160,10 +63,16 @@ public sealed partial class GovernedSqlExecutor
             TargetTable = string.Join(",", dmlContext.Tables),
             Decision = decision,
             TraceId = TraceContextResolver.GetCurrentTraceId(),
-            DetailsJson = JsonSerializer.Serialize(fields)
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
+            // M-1: a DML audit never takes the request token. The statement may already be committed; a client that disconnects must not
+            // leave it without its audit record.
         }, CancellationToken.None).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// The audit of a DML that is already committed. An audit failure here is never a request failure (the client would retry and
+    /// duplicate the write): it is logged as Critical and counted for the operators.
+    /// </summary>
     private async Task RecordCommittedDmlAuditAsync(
         TenantId tenantId, ClaimsPrincipal user, string dsName, DmlAuditContext dmlContext, CompiledSql compiled, int affectedRows)
     {

@@ -826,4 +826,105 @@ public sealed partial class GovernedSqlExecutor
             throw new ClientListException(GovernedSqlErrorCodes.ListParamPosition);
         }
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
+    private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
+
+    private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues)
+    {
+        SortedDictionary<string, int>? lists = null;
+        foreach (var slot in compiled.Parameters)
+        {
+            if (slot is { Origin: ParameterOrigin.ClientNamed, ListCount: { } count, SourceName: { } name })
+            {
+                (lists ??= new SortedDictionary<string, int>(StringComparer.Ordinal))[name] = count;
+            }
+        }
+
+        if (lists is not null)
+        {
+            fields["list_params"] = lists;
+        }
+
+        // An empty list expands to nothing, so it has no slot above: its trace is the name only (no values), limited to plain identifiers.
+        if (clientValues is not null)
+        {
+            SortedSet<string>? empty = null;
+            foreach (var (name, value) in clientValues)
+            {
+                if (value is ClientListValue { Count: 0 } && AuditListNameRegex().IsMatch(name))
+                {
+                    (empty ??= new SortedSet<string>(StringComparer.Ordinal)).Add(name.ToLowerInvariant());
+                }
+            }
+
+            if (empty is not null)
+            {
+                fields["list_params_empty"] = empty.ToArray();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 129 (A-11, BC-129-15): the caller attributes of the statement per table as registry id, outcome and reason code, and the number of caller
+    /// attribute binds. Absent when no attribute took part; never a name of unregistered input, a subject key or a value.
+    /// </summary>
+    private static void AddCallerAttributeAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite, CompiledSql compiled)
+    {
+        if (rewrite.CallerAttributes is not { Count: > 0 } attributes)
+        {
+            return;
+        }
+
+        fields["caller_attributes"] = attributes.ToDictionary(
+            p => p.Key,
+            p => p.Value.Select(a => new Dictionary<string, object?> { ["id"] = a.Id, ["outcome"] = a.Outcome, ["reason"] = a.Reason }).ToList(),
+            StringComparer.OrdinalIgnoreCase);
+        fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
+    }
+
+    /// <summary>X1.2 / compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>
+    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues = null)
+    {
+        fields["compiler_version"] = compiled.CompilerVersion;
+        fields["dialect"] = compiled.Dialect.ToString();
+        fields["bind_count"] = compiled.Parameters.Length;
+        if (compiled.HasRecursiveCte)
+        {
+            fields["recursiveCte"] = true;   // written only for recursive statements (also on a template cache hit)
+        }
+
+        AddListAuditField(fields, compiled, clientValues);
+        fields["sql.compiled_digest"] = _digester.Compute(compiled);
+        if (_options.Value.Audit.StoreCompiledSql)
+        {
+            fields["compiledSql"] = compiled.Sql;
+        }
+    }
+
+    /// <summary>
+    /// Issue #107 (A-14): the key-set outcome per site with reason and counts; never key values or a hash of them. Absent when no site
+    /// used or tried the strategy, so a statement without opt-in is audited exactly as before.
+    /// </summary>
+    private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
+    {
+        if (rewrite.KeySets is not { Count: > 0 } outcomes)
+        {
+            return;
+        }
+
+        fields["row_filter_key_sets"] = outcomes.Select(o => new Dictionary<string, object?>
+        {
+            ["table"] = o.Table,
+            ["rule_id"] = o.RuleId,
+            ["source"] = o.Source.ToString(),
+            ["strategy_source"] = o.StrategySource.ToString(),
+            ["outcome"] = o.Outcome.ToString(),
+            ["reason"] = o.Reason?.ToString(),
+            ["key_count"] = o.KeyCount,
+            ["padded_count"] = o.PaddedCount,
+            ["age_seconds"] = o.AgeSeconds
+        }).ToList();
+    }
+
 }
