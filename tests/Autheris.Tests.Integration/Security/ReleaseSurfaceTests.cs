@@ -36,6 +36,10 @@ public sealed class ReleaseSurfaceTests : IClassFixture<WebApplicationFactory<Pr
             builder.UseSetting("Gateway:Audit:ChainAnchorPath", _tempAnchorPath);
             builder.UseSetting("Gateway:RestApi:BulkStream:SigningKey", "0123456789012345678901234567890123456789");
             builder.UseSetting("Gateway:DuckDbOlap:MemoryBudgetBytes", "2147483648");
+            // Mode=Direct requires one enabled direct scheme outside Development.
+            builder.UseSetting("Gateway:Authentication:Adfs:Enabled", "true");
+            builder.UseSetting("Gateway:Authentication:Adfs:Authority", "https://adfs.example.test/adfs");
+            builder.UseSetting("Gateway:Authentication:Adfs:Audience", "api://autheris");
         });
     }
 
