@@ -30,6 +30,12 @@ internal sealed class McpAccessHints(IReadPathSwitches? switches, bool mcpEnable
             parts.Add("describe_dataset returns the GraphQL field, the filter and sort types and an example query for each dataset.");
         }
 
+        if (!mcpEnabled)
+        {
+            // REST catalog without MCP: no tool is named, the mapped GraphQL route is still truthful.
+            parts.Add("Query data with GraphQL: POST the query to the GraphQL endpoint.");
+        }
+
         if (parts.Count > 0)
         {
             parts.Add("The other endpoints are listed for clients that need a specific protocol.");

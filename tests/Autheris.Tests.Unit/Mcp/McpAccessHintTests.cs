@@ -20,7 +20,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>WP-SIMPL-53 PR 2 (#579): every hint surface names only what the startup switches leave enabled.</summary>
+/// <summary>Every hint surface names only what the startup switches leave enabled.</summary>
 public sealed class McpAccessHintTests
 {
     private static readonly TableIdentifier Orders = new("sales", "public", "orders");
@@ -190,6 +190,23 @@ public sealed class McpAccessHintTests
         var switches = ReadPathSwitches.From(o);
         (await SurfacesAsync(o, switches))["Guidance"].ShouldNotContain("query_graphql");
         switches.IsToolEnabled("query_graphql").ShouldBeFalse();
+
+        // Execution is enforced independently of the hints: the registry has no such tool to find or call.
+        var registry = new McpToolRegistry(Options.Create(o), switches: switches);
+        registry.FindTool("query_graphql").ShouldBeNull();
+        registry.GetAvailableTools().ShouldNotContain(t => t.Name == "query_graphql");
+    }
+
+    [Fact]
+    public async Task Mcp_off_keeps_a_tool_free_GraphQL_sentence_for_REST_catalog()
+    {
+        var o = Opts();
+        var off = new GatewayOptions { Mcp = new McpOptions { Enabled = false }, WebSql = o.WebSql, DuckDbOlap = o.DuckDbOlap };
+        var all = await SurfacesAsync(off);
+        all["Guidance"].ShouldContain("GraphQL endpoint");
+        all["Guidance"].ShouldNotContain("query_graphql");
+        all["Guidance"].ShouldNotContain("describe_dataset");
+        all["Endpoints"].ShouldNotContain("query_graphql");
     }
 
     [Trait("Category", "Security")]
