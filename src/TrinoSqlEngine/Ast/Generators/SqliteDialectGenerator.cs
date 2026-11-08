@@ -429,7 +429,7 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
             builder.Append(" OFFSET ");
             if (pagination.Offset is PageOffsetParameterExpression)
             {
-                // The server-injected page slot (WP-SIMPL-51 D-51n) binds through the shared structural-integer path like the other dialects.
+                // The server-injected page slot binds through the shared structural-integer path like the other dialects.
                 GenerateStructuralInteger(pagination.Offset, ref builder, context);
             }
             else
