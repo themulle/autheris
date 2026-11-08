@@ -152,7 +152,7 @@ internal static class AuthenticationStartupChecks
             throw new ValidationException("Security violation: Outside Development, EntraId requires Audience or ClientId, plus TenantId (issuer), to be configured.");
         }
 
-        // GHSA-hw85-rqjh-cwxx: Refuse an empty allowlist outside Development
+        // GHSA-hw85-rqjh-cwxx: client allowlist startup check
         if (options.Authentication.EntraId.Enabled && options.Authentication.EntraId.AllowedClientIds.Count == 0)
         {
             throw new ValidationException("Security violation: Outside Development, EntraId requires AllowedClientIds to be configured with at least one authorized client ID.");

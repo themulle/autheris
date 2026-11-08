@@ -57,13 +57,13 @@ using Xunit;
 
 /// <summary>
 /// Security unit tests for Batch 5 advisories (Group B):
-/// 1. GHSA-xpw9-4m63-69pf: Federation masking startup check & scalar recursion
-/// 2. GHSA-95f9-ffc7-vw2c: Catalog search restricted table continuous scores scrubbing
-/// 3. GHSA-jfrx-2mgc-pfh5: OpenMetadata and DataCatalog cross-tenant overwrite prevention
-/// 4. GHSA-547h-29x4-m4ch: dbt sync min_group_size / non_personal requires table owner standing
-/// 5. GHSA-hw85-rqjh-cwxx: Entra token policy & Enterprise claims client ID allowlist enforcement
-/// 6. GHSA-wvwx-q6jg-44wv: CDC webhook locked/inactive subject dropping & restricted scope rejection
-/// 7. GHSA-4qx8-fv2p-q8r2: WORM directory anchor store signer requirement & sequence gap detection
+/// 1. GHSA-xpw9-4m63-69pf
+/// 2. GHSA-95f9-ffc7-vw2c
+/// 3. GHSA-jfrx-2mgc-pfh5
+/// 4. GHSA-547h-29x4-m4ch
+/// 5. GHSA-hw85-rqjh-cwxx
+/// 6. GHSA-wvwx-q6jg-44wv
+/// 7. GHSA-4qx8-fv2p-q8r2
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class Batch5SecurityTestsB : IDisposable
@@ -101,11 +101,17 @@ public sealed class Batch5SecurityTestsB : IDisposable
     }
 
     // =========================================================================
-    // 1. GHSA-xpw9-4m63-69pf: Federation Masking
+    // 1. GHSA-xpw9-4m63-69pf
     // =========================================================================
 
     [Fact]
-    public void Federation_Masker_Missing_Fails_Startup_When_Masking_Enabled()
+    public void Ghsa_xpw9_69pf_regression()
+    {
+        Case_xpw9_69pf_1();
+        Case_xpw9_69pf_2();
+    }
+
+    private void Case_xpw9_69pf_1()
     {
         var options = new GatewayOptions
         {
@@ -148,8 +154,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         Should.NotThrow(() => FederationMaskingStartupCheck.Validate(options, servicesWithMasker));
     }
 
-    [Fact]
-    public void Federation_Masker_Recurses_Into_Json_Scalar()
+    private void Case_xpw9_69pf_2()
     {
         var maskingProvider = Substitute.For<IColumnMaskingProvider>();
         maskingProvider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>())
@@ -194,11 +199,11 @@ public sealed class Batch5SecurityTestsB : IDisposable
     }
 
     // =========================================================================
-    // 2. GHSA-95f9-ffc7-vw2c: Catalog Search Restricted Table Scores Scrubbed
+    // 2. GHSA-95f9-ffc7-vw2c
     // =========================================================================
 
     [Fact]
-    public void CatalogSearch_RestrictedTable_ScoresBucketed_AndBm25Scrubbed()
+    public void Ghsa_95f9_vw2c_regression()
     {
         var tableId = new TableIdentifier("sales", "public", "customers");
 
@@ -263,11 +268,17 @@ public sealed class Batch5SecurityTestsB : IDisposable
     }
 
     // =========================================================================
-    // 3. GHSA-jfrx-2mgc-pfh5: Cross-Tenant Overwrite Prevention
+    // 3. GHSA-jfrx-2mgc-pfh5
     // =========================================================================
 
     [Fact]
-    public async Task OpenMetadataSync_CrossTenantOverwrite_Prevented()
+    public async Task Ghsa_jfrx_pfh5_regression()
+    {
+        await Case_jfrx_pfh5_1();
+        await Case_jfrx_pfh5_2();
+    }
+
+    private async Task Case_jfrx_pfh5_1()
     {
         var client = Substitute.For<IOpenMetadataClient>();
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
@@ -318,8 +329,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         await metadataRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
     }
 
-    [Fact]
-    public async Task DataCatalogSync_CrossTenantOverwrite_Prevented()
+    private async Task Case_jfrx_pfh5_2()
     {
         var client = Substitute.For<IDataCatalogClient>();
         client.ProviderType.Returns(DataCatalogProviderType.OpenMetadata);
@@ -365,11 +375,11 @@ public sealed class Batch5SecurityTestsB : IDisposable
     }
 
     // =========================================================================
-    // 4. GHSA-547h-29x4-m4ch: dbt Ingestion Table Owner Standing
+    // 4. GHSA-547h-29x4-m4ch
     // =========================================================================
 
     [Fact]
-    public async Task DbtSync_NonPersonal_RequiresTableOwnerStanding()
+    public async Task Ghsa_547h_m4ch_regression()
     {
         var tableId = new TableIdentifier("postgres", "public", "stg_orders");
         var stored = new TableMetadata
@@ -479,11 +489,17 @@ public sealed class Batch5SecurityTestsB : IDisposable
     }
 
     // =========================================================================
-    // 5. GHSA-hw85-rqjh-cwxx: Entra Token Policy & Realm Allowed Clients
+    // 5. GHSA-hw85-rqjh-cwxx
     // =========================================================================
 
     [Fact]
-    public void EntraTokenPolicy_DelegatedToken_UnlistedClientId_Rejected()
+    public async Task Ghsa_hw85_cwxx_regression()
+    {
+        Case_hw85_cwxx_1();
+        await Case_hw85_cwxx_2();
+    }
+
+    private void Case_hw85_cwxx_1()
     {
         var delegatedToken = new ClaimsPrincipal(new ClaimsIdentity(
             [
@@ -505,8 +521,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         error.ShouldContain("not in the list of allowed clients");
     }
 
-    [Fact]
-    public async Task EnterpriseClaims_UnlistedRealmClient_Rejected()
+    private async Task Case_hw85_cwxx_2()
     {
         var realm = new IdentityRealm(
             "realm-entra",
@@ -554,7 +569,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
     }
 
     // =========================================================================
-    // 6. GHSA-wvwx-q6jg-44wv: CDC Webhook Security
+    // 6. GHSA-wvwx-q6jg-44wv
     // =========================================================================
 
     private sealed class FakeOutbox : IWebhookOutbox
@@ -584,7 +599,13 @@ public sealed class Batch5SecurityTestsB : IDisposable
     }
 
     [Fact]
-    public async Task CdcWebhook_LockedOrInactiveSubject_Dropped()
+    public async Task Ghsa_wvwx_44wv_regression()
+    {
+        await Case_wvwx_44wv_1();
+        await Case_wvwx_44wv_2();
+    }
+
+    private async Task Case_wvwx_44wv_1()
     {
         var now = new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero);
         var time = new FakeTimeProvider(now);
@@ -654,8 +675,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         outbox.Rows.Count.ShouldBe(1);
     }
 
-    [Fact]
-    public async Task CdcWebhook_RestrictedScope_CaptureRejected()
+    private async Task Case_wvwx_44wv_2()
     {
         var restrictedPolicy = RestrictedScopePolicy.FromOptions(new RestrictedScopeOptions
         {
@@ -706,11 +726,17 @@ public sealed class Batch5SecurityTestsB : IDisposable
     }
 
     // =========================================================================
-    // 7. GHSA-4qx8-fv2p-q8r2: WORM Anchor Store Signer & Sequence Gap
+    // 7. GHSA-4qx8-fv2p-q8r2
     // =========================================================================
 
     [Fact]
-    public void WormAnchorStore_MissingSigner_Rejected()
+    public void Ghsa_4qx8_q8r2_regression()
+    {
+        Case_4qx8_q8r2_1();
+        Case_4qx8_q8r2_2();
+    }
+
+    private void Case_4qx8_q8r2_1()
     {
         var primary = new InMemoryAuditChainAnchorStore();
         var wormDir = CreateTempDirectory("worm_store_signer");
@@ -731,8 +757,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
             AuditChainAnchorStoreFactory.Create(options, primary, secrets: null, signer: signer, logger: null));
     }
 
-    [Fact]
-    public void WormAnchorStore_SequenceGap_Invalid()
+    private void Case_4qx8_q8r2_2()
     {
         var wormDir = CreateTempDirectory("worm_sequence_gap");
         var store = new WormDirectoryAuditChainAnchorStore(wormDir);

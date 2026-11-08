@@ -176,7 +176,7 @@ public static class AnalyticsEndpoints
         }
         catch (TableNotFoundException ex)
         {
-            // GHSA-jcpx-6m27-2m97: unify table existence oracle (missing/inactive vs denied) to 403 ACCESS_DENIED
+            // GHSA-jcpx-6m27-2m97: uniform access-denied response
             SafeErrorResults.LogFailure(httpContext, ex, ApiErrorCodes.AccessDenied);
             return SafeErrorResults.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access to the requested aggregation was denied by governance policy.", httpContext);
         }

@@ -378,7 +378,7 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
             }
             else if (previous!.Sequence - anchor.Sequence > 1)
             {
-                // GHSA-4qx8-fv2p-q8r2: Sequence gap detected between consecutive anchors in the WORM directory
+                // GHSA-4qx8-fv2p-q8r2: anchor sequence validation
                 _logger?.LogCritical("CRITICAL: WORM audit anchor sequence gap detected between {Newer} and {Older}. Possible deleted span.", previous.Sequence, anchor.Sequence);
                 return Invalid;
             }

@@ -398,7 +398,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                 );
             }
 
-            // Step-Up 2FA Validation (RFC 6238 TOTP, ADR-05, R-62, GHSA-wg8p-wfw5-qvgj)
+            // Step-Up 2FA Validation (RFC 6238 TOTP, ADR-05, R-62)
             var isTotpEnforced = _options.Value.HitLStepUp.RequireTotp2Fa;
             var enrolledSecret = _totpSecretStore != null
                 ? await _totpSecretStore.GetSecretAsync(approver.ApproverSid, ct).ConfigureAwait(false)

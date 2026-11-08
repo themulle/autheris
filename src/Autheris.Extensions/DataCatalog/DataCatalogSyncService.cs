@@ -106,7 +106,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             }
             else if (existing != null && !string.IsNullOrEmpty(existing.OwnerTenantId))
             {
-                // GHSA-jfrx-2mgc-pfh5: In a global run, prevent cross-tenant overwrite if the external asset declares a different tenant
+                // GHSA-jfrx-2mgc-pfh5: tenant scoping of synced assets
                 if (tableAsset.CustomProperties.TryGetValue("tenant_id", out var assetTenant) &&
                     !string.IsNullOrWhiteSpace(assetTenant) &&
                     !string.Equals(existing.OwnerTenantId, assetTenant, StringComparison.OrdinalIgnoreCase))
