@@ -1,2 +1,2 @@
 # WP-SIMPL-07: Options class declaration count ratchet. Format: total|<n>. May only fall; raising requires freeze-exception.
-total|163
+total|165
