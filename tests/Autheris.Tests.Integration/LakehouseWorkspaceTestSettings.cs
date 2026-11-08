@@ -2,7 +2,7 @@ namespace Autheris.Tests.Integration;
 
 /// <summary>
 /// Test hosts load the lakehouse module from the in-repo build output through the Development-only
-/// <c>Gateway:Modules:WorkspacePath</c> (SEC-50: no implicit workspace fallback).
+/// <c>Gateway:Modules:WorkspacePath</c> (WP-SIMPL-50: no implicit workspace fallback).
 /// </summary>
 internal static class LakehouseWorkspaceTestSettings
 {
