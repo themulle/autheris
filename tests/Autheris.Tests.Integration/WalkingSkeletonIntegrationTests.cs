@@ -447,6 +447,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
     {
         using var customFactory = _factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("Gateway:Authentication:Mode", "Upstream");
             builder.UseSetting("Gateway:Authentication:ForwardAuth:Enabled", "true");
             builder.UseSetting("Gateway:Authentication:ForwardAuth:RequireTrustedProxy", "true");
             builder.UseSetting("Gateway:Authentication:ForwardAuth:TrustedProxies:0", "127.0.0.1");
@@ -469,7 +470,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         json.GetProperty("authenticated").GetBoolean().ShouldBeTrue();
         json.GetProperty("user").GetString().ShouldBe("traefik_k8s_user");
-        json.GetProperty("sid").GetString().ShouldBe("S-1-5-21-FORWARD-USR-TRAEFIK_K8S_USER");
+        json.GetProperty("sid").GetString().ShouldBe("S-1-5-21-FORWARD-USR-traefik_k8s_user");
     }
 }
 

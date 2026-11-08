@@ -197,7 +197,6 @@ public static partial class GatewayServiceCollectionExtensions
         // 2. Traefik / Kubernetes Ingress ForwardAuth
         authBuilder.AddScheme<AuthenticationSchemeOptions, ForwardAuthAuthenticationHandler>(
             GatewayAuthSchemes.ForwardAuth, _ => { });
-        services.AddHostedService<ForwardAuthSecretStartupValidator>();
     }
 
     private static void ConfigureNegotiateAndDevAuth(
@@ -356,112 +355,8 @@ public static partial class GatewayServiceCollectionExtensions
         // 5. Smart Dynamic Policy Scheme: Route requests based on Authorization header or ForwardAuth
         authBuilder.AddPolicyScheme(GatewayAuthSchemes.DefaultScheme, "Gateway Smart Authentication", options =>
         {
-            options.ForwardDefaultSelector = context =>
-            {
-                var authHeader = context.Request.Headers.Authorization.ToString();
-
-                // 1. Explicit Authorization headers have top priority (prevents ForwardAuth Header-Preemption DoS)
-                // the opaque SCIM secret is not a JWT; route it to the Scim scheme so valid provisioning calls are authenticated
-                // before the unauthenticated-bearer IP budget and do not produce JwtBearer failures.
-                if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && GatewayAuthSchemes.IsScimPath(context.Request.Path))
-                {
-                    return GatewayAuthSchemes.Scim;
-                }
-
-                if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-                {
-                    return GatewayAuthSchemes.SelectJwtScheme(authHeader["Bearer ".Length..], gatewayOptions);
-                }
-
-                if (authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (gatewayOptions.Authentication.RequireKerberosOnly)
-                    {
-                        return gatewayOptions.Authentication.IsKerberosConfigured
-                            ? NegotiateDefaults.AuthenticationScheme
-                            : GatewayAuthSchemes.JwtBearer;
-                    }
-                    if (gatewayOptions.Authentication.BasicAuth.Enabled)
-                    {
-                        return GatewayAuthSchemes.Basic;
-                    }
-                    return gatewayOptions.Authentication.IsKerberosConfigured
-                        ? NegotiateDefaults.AuthenticationScheme
-                        : GatewayAuthSchemes.JwtBearer;
-                }
-
-                if (authHeader.StartsWith("Negotiate ", StringComparison.OrdinalIgnoreCase))
-                {
-                    return gatewayOptions.Authentication.IsKerberosConfigured
-                        ? NegotiateDefaults.AuthenticationScheme
-                        : GatewayAuthSchemes.JwtBearer;
-                }
-
-                if (!gatewayOptions.Authentication.RequireKerberosOnly &&
-                    authHeader.StartsWith("NTLM ", StringComparison.OrdinalIgnoreCase))
-                {
-                    return gatewayOptions.Authentication.IsKerberosConfigured
-                        ? NegotiateDefaults.AuthenticationScheme
-                        : GatewayAuthSchemes.JwtBearer;
-                }
-
-                // 2. ForwardAuth (Traefik / Kubernetes Ingress) when enabled and proxy headers are present
-                if (gatewayOptions.Authentication.ForwardAuth.Enabled)
-                {
-                    var fwdUserHeader = string.IsNullOrWhiteSpace(gatewayOptions.Authentication.ForwardAuth.UserHeader)
-                        ? "X-Forwarded-User"
-                        : gatewayOptions.Authentication.ForwardAuth.UserHeader;
-
-                    if (context.Request.Headers.ContainsKey(fwdUserHeader) ||
-                        context.Request.Headers.ContainsKey("X-Forwarded-User") ||
-                        context.Request.Headers.ContainsKey("X-Auth-Request-User") ||
-                        context.Request.Headers.ContainsKey("X-Forwarded-Preferred-Username"))
-                    {
-                        return GatewayAuthSchemes.ForwardAuth;
-                    }
-                }
-
-                // 2b. F-AUTH-DX: session cookie (explicit Authorization headers above always win)
-                if (isBasicSessionAllowed && context.Request.Cookies.ContainsKey(basicSessionCookieName))
-                {
-                    return BasicAuthSession.SchemeName;
-                }
-
-                // 3. Development Test Auth Simulation or Insecure Anonymous Access
-#if AUTHERIS_TEST_AUTH
-                if (isDevAuthAllowed)
-                {
-                    if (context.Request.Headers.ContainsKey("X-Test-User-Sid") ||
-                        context.Request.Headers.ContainsKey("X-Test-AppId") ||
-                        gatewayOptions.IsAnonymousAccessAllowed)
-                    {
-                        return TestAuthHandler.SchemeName;
-                    }
-                }
-#endif
-
-                var isHtml = context.Request.Headers.Accept.Any(a => a != null && a.Contains("text/html", StringComparison.OrdinalIgnoreCase));
-                if (isHtml && gatewayOptions.Authentication.BasicAuth.Enabled)
-                {
-                    // Browser request: Prefer Basic challenge when enabled so browser opens native dialog
-                    return GatewayAuthSchemes.Basic;
-                }
-
-                // 4. Fallback challenge when unauthenticated
-                if (gatewayOptions.Authentication.BasicAuth.Enabled &&
-                    !gatewayOptions.Authentication.RequireKerberosOnly &&
-                    string.IsNullOrWhiteSpace(authHeader))
-                {
-                    return GatewayAuthSchemes.Basic;
-                }
-
-                if (gatewayOptions.Authentication.IsKerberosConfigured)
-                {
-                    return NegotiateDefaults.AuthenticationScheme;
-                }
-
-                return GatewayAuthSchemes.JwtBearer;
-            };
+            options.ForwardDefaultSelector = context => GatewayAuthSchemeSelector.Select(
+                context, gatewayOptions, isBasicSessionAllowed, basicSessionCookieName, isDevAuthAllowed);
         });
     }
 
