@@ -24,7 +24,7 @@ public sealed class FederatedMaskingCatalogRuleWriteTests : IDisposable
     public void Dispose() => _handle.Repository.Dispose();
 
     [Fact]
-    public async Task Ghsa_7pjw_hvff_regression_rule_write_through_the_repository_invalidates_the_cache()
+    public async Task Ghsa_7pjw_hvff_regression()
     {
         var real = _handle.Repository;
         var tableId = Guid.NewGuid();
