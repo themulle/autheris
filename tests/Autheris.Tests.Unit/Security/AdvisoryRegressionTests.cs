@@ -39,7 +39,7 @@ using Xunit;
 /// The bullets that need per-member column decisions inside the subtree planner are tracked by WP-SIMPL-21 / the Sql lane.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class AdvisoryRegressionTests
+public sealed partial class AdvisoryRegressionTests
 {
     private const string Spec = """{"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{"/a":{"get":{"summary":"x"}}},"components":{"schemas":{"A":{"type":"object","properties":{"id":{"type":"string"}}}}}}""";
 
