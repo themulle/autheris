@@ -18,6 +18,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 public sealed class ODataInteropTests : IClassFixture<ODataInteropTests.Fixture>
 {
@@ -50,8 +51,8 @@ public sealed class ODataInteropTests : IClassFixture<ODataInteropTests.Fixture>
                 builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Tenant);
                 builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
                 builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
-                builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-odata-interop-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "Sqlite");
                 builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={dbPath}");
                 builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "erp");

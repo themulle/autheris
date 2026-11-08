@@ -18,6 +18,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// End-to-End: HTTP -> ASP.NET-Pipeline (CSRF, Auth, Governance) -> Governed SQL / Endpoints -> echte SQLite-Datei.
@@ -64,8 +65,8 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
                 b.UseEnvironment("Development");
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-                b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-                b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-EndToEndSqliteTests-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
                 b.UseSetting("Gateway:OpenSchema", "true");
                 b.UseSetting("Gateway:Rebac:Enabled", "false");

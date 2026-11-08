@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>Issue #427 (CAT427-SC-04): the refresh physical keys endpoint is admin only.</summary>
 [Trait("Category", "Security")]
@@ -22,8 +23,8 @@ public sealed class PhysicalKeyRefreshEndpointAuthIntegrationTests : IClassFixtu
         {
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("PhysicalKeyRefreshEndpointAuthIntegrationTests"));
         });
     }
 

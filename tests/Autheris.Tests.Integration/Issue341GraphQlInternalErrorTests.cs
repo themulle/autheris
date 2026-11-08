@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Issue #341: valid but argument-light GraphQL requests answered INTERNAL_SERVER_ERROR. The host mirrors the sim API host (SQLite data
@@ -224,8 +225,8 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
             b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
             b.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={dbFile}");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(dbFile));
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", bypassConsent ? "true" : "false");
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:OpenSchema", "true");

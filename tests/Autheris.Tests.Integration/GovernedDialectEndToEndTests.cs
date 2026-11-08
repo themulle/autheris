@@ -21,6 +21,7 @@ using Npgsql;
 using Shouldly;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// WP-X1 (M-7): the governed WebSQL pipeline end to end on every admitted dialect, through the real DI container
@@ -61,8 +62,8 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
         {
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-x1e2e-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GovernedDialectEndToEndBase"));
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", Source);
             builder.UseSetting("Gateway:WebSql:AllowDml", "true");

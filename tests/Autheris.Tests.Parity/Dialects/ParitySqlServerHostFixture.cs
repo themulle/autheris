@@ -30,12 +30,14 @@ public sealed class ParitySqlServerHostFixture : IAsyncLifetime, IParityHost
 
     private MsSqlContainer? _container;
     private string _workDir = string.Empty;
+    private string _govConnectionString = string.Empty;
     private WebApplicationFactory<Program>? _factory;
 
     public async Task InitializeAsync()
     {
         ParityRunGuard.EnsureEnabled();
         _workDir = Path.Combine(Path.GetTempPath(), "autheris-parity-mssql-" + Guid.NewGuid().ToString("N"));
+        _govConnectionString = await ParityGovernanceDatabase.CreateAsync();
         Directory.CreateDirectory(_workDir);
         _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").WithPassword(NewPassword()).Build();
         try
@@ -82,7 +84,7 @@ public sealed class ParitySqlServerHostFixture : IAsyncLifetime, IParityHost
 
     private WebApplicationFactory<Program> NewHost(string connectionString) => new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
     {
-        ParityHostSettings.Apply(b, Path.Combine(_workDir, "gov.db"));
+        ParityHostSettings.Apply(b, _govConnectionString);
         b.UseSetting("Gateway:DataSources:Connections:default:Provider", "SqlServer");
         b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", connectionString);
         b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", Schema);

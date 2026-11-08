@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Oracle.ManagedDataAccess.Client;
 using Testcontainers.Oracle;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>All Oracle integration classes share one container (WP-X0z): the Oracle Free image is heavy.</summary>
 [CollectionDefinition(Name)]
@@ -159,8 +160,8 @@ internal static class OracleGatewayHost
         {
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{tag}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("OracleGatewayHost"));
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", Source);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", "Oracle");

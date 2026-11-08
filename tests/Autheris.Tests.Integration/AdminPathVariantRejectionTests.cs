@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// SEC-281-6-C5: the ingress deny rule is defense in depth only; the application must reject unauthenticated and non-admin
@@ -26,8 +27,8 @@ public sealed class AdminPathVariantRejectionTests : IClassFixture<WebApplicatio
             // The routes are mapped only while app-scoped trusted documents are enabled; without this every path would 404 vacuously.
             builder.UseSetting("Gateway:GraphQL:AppScopedTrustedDocuments:Enabled", "true");
             builder.UseSetting("Gateway:GraphQL:PersistedQueriesOnly", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("AdminPathVariantRejectionTests"));
         });
     }
 

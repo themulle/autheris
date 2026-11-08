@@ -15,7 +15,7 @@ public sealed class ParityHostCollection : ICollectionFixture<ParityHostFixture>
 }
 
 /// <summary>
-/// One in-process API host per run (D-7): test auth, SQLite governance file, SQLite data source <c>default</c> seeded by
+/// One in-process API host per run (D-7): test auth, PostgreSQL governance database, SQLite data source <c>default</c> seeded by
 /// <see cref="ParitySeed"/> and a second source <c>second</c>. The catalog is registered by a first host so the GraphQL schema
 /// (built at start-up) contains the tables. Test auth is enabled only here (SEC-PAR-03).
 /// </summary>
@@ -24,7 +24,7 @@ public sealed class ParityHostFixture : IAsyncLifetime, IParityHost
     private string _workDir = string.Empty;
     private string _dataPath = string.Empty;
     private string _secondPath = string.Empty;
-    private string _govPath = string.Empty;
+    private string _govConnectionString = string.Empty;
     private WebApplicationFactory<Program>? _factory;
 
     public string DataPath => _dataPath;
@@ -36,7 +36,7 @@ public sealed class ParityHostFixture : IAsyncLifetime, IParityHost
         Directory.CreateDirectory(_workDir);
         _dataPath = Path.Combine(_workDir, "data.db");
         _secondPath = Path.Combine(_workDir, "second.db");
-        _govPath = Path.Combine(_workDir, "gov.db");
+        _govConnectionString = await ParityGovernanceDatabase.CreateAsync();
         ParitySeed.Create(_dataPath);
         ParitySeed.Create(_secondPath, ParitySeed.SecondSales);
 
@@ -73,7 +73,7 @@ public sealed class ParityHostFixture : IAsyncLifetime, IParityHost
 
     private WebApplicationFactory<Program> NewHost() => new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
     {
-        ParityHostSettings.Apply(b, _govPath);
+        ParityHostSettings.Apply(b, _govConnectionString);
         b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
         b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataPath}");
         b.UseSetting("Gateway:DataSources:Connections:second:Provider", "Sqlite");

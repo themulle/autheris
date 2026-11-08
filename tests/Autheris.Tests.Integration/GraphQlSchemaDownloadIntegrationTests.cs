@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// R-GQL-6: with introspection disabled, the SDL must not be downloadable via GET /graphql?sdl or /graphql/schema.graphql.
@@ -18,8 +19,8 @@ public sealed class GraphQlSchemaDownloadIntegrationTests : IClassFixture<WebApp
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GraphQlSchemaDownloadIntegrationTests"));
             builder.UseSetting("Gateway:GraphQL:EnableIntrospection", "false");
         });
     }

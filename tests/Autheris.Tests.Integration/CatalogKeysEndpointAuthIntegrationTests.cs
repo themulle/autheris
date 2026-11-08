@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>Issue #94 (SEC-94-05): the keys endpoint is admin only, over real requests on both routes.</summary>
 public sealed class CatalogKeysEndpointAuthIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
@@ -20,8 +21,8 @@ public sealed class CatalogKeysEndpointAuthIntegrationTests : IClassFixture<WebA
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("CatalogKeysEndpointAuthIntegrationTests"));
         });
     }
 

@@ -34,7 +34,8 @@ WHERE is_active = 1";
        c.display_name, c.texts_json
 FROM TABLE_COLUMNS c
 LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-WHERE c.table_id = @tableId";
+WHERE c.table_id = @tableId
+ORDER BY c.ctid"; // TABLE_COLUMNS has no ordinal/serial/timestamp (id is a GUID): heap order is the only registration order until an ordinal column is added by a new migration step (follow-up); the natural-key unique index would otherwise return the columns by name
 
         public const string SelectActiveBatchTableColumnsSql = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
        m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
@@ -43,7 +44,8 @@ WHERE c.table_id = @tableId";
 FROM TABLE_COLUMNS c
 LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 INNER JOIN TABLES t ON c.table_id = t.id
-WHERE t.is_active = 1";
+WHERE t.is_active = 1
+ORDER BY c.ctid"; // registration (heap) order, see SelectTableColumnsSql
 
         public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type FROM TABLES
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
