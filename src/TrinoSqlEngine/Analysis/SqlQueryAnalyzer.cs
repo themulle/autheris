@@ -655,7 +655,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         if (ids != null && ids.Length == 1)
         {
             string key = SqlIdentifierHelper.FoldIdentifierForScope(ids[0].GetText());
-            if (_cteScopeStack.Peek().Contains(key) || _completedCteStats.ContainsKey(key))
+            if (_cteScopeStack.Peek().Contains(key))
             {
                 if (_cteStack.Count > 0)
                 {

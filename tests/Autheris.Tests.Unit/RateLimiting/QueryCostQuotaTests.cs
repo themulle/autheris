@@ -260,7 +260,7 @@ public sealed class QueryCostQuotaTests : IDisposable
     [Fact]
     public async Task RateLimitingDisabled_Unmetered_CeilingApplies()
     {
-        // Disabled -> Unmetered, over-ceiling still OverCost (SEC-51-10)
+        // Disabled -> Unmetered, over-ceiling still OverCost (quota requirement 51-10)
         var tierResolver = Substitute.For<IClientTierResolver>();
         var rateLimiter = Substitute.For<IRateLimiterService>();
         var gatewayOptions = Options.Create(new GatewayOptions
@@ -313,7 +313,7 @@ public sealed class QueryCostQuotaTests : IDisposable
     [Trait("Category", "Security")]
     public async Task ReservationThrows_NeverUnmetered()
     {
-        // Limiter throws -> AdmitAsync throws, never Unmetered (SEC-51-10)
+        // Limiter throws -> AdmitAsync throws, never Unmetered (quota requirement 51-10)
         var tierResolver = Substitute.For<IClientTierResolver>();
         var rateLimiter = Substitute.For<IRateLimiterService>();
         var gatewayOptions = Options.Create(new GatewayOptions());
@@ -352,7 +352,7 @@ public sealed class QueryCostQuotaTests : IDisposable
     [Trait("Category", "Security")]
     public async Task ChargeFailureFee_DebitsWithoutReservationCheck()
     {
-        // Empty bucket -> debit of max(BaseCost, FailureFee) applied without reservation check (SEC-51-11)
+        // Empty bucket -> debit of max(BaseCost, FailureFee) applied without reservation check (quota requirement 51-11)
         var tierResolver = Substitute.For<IClientTierResolver>();
         var inMemoryLimiter = new InMemoryRateLimiterService();
         var gatewayOptions = Options.Create(new GatewayOptions
