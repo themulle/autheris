@@ -46,6 +46,9 @@ public class AuditEndpointCoverageTests : IClassFixture<WebApplicationFactory<Pr
         ["DELETE /api/v1/jobs/{jobId}"] =
             "AsyncQueryJobManager.CancelJobAsync writes ASYNC_JOB_CANCELLED; IDOR attempts record ASYNC_JOB_ACCESS_DENIED; " +
             "other failures are finalized by AccessAuditMiddleware.",
+        ["POST /api/v1/catalog/datasources/{id}/test"] =
+            "DatasourceTestingService writes DATASOURCE_TEST_REQUESTED and DATASOURCE_TESTED fail-closed around the probe; " +
+            "denials, failures and exceptions are finalized by AccessAuditMiddleware.",
         ["POST /api/admin/tokens/revoke"] =
             "TokenRevocationEndpoints writes the TOKEN_REVOKED record itself after revocation; " +
             "403/401/errors are finalized by AccessAuditMiddleware.",

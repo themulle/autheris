@@ -110,8 +110,22 @@ public sealed class DmlWriteAheadAuditTests
             options: GovernedSqlExecutorX1Tests.Gateway("PostgreSql", maxAffectedRows: 2),
             auditSink: (e, _) => e.EventType == AuditEventTypes.WebSqlDmlRejected ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
 
+        long failures = 0;
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Name == "autheris_dml_audit_failed_total")
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, _, _) => Interlocked.Add(ref failures, value));
+        listener.Start();
+
         await Should.ThrowAsync<DmlAffectedRowsLimitException>(() => GovernedSqlExecutorX1Tests.ExecuteAsync(h, compiled, dml: GovernedSqlExecutorX1Tests.Dml()));
 
         h.Connection.Transactions.ShouldHaveSingleItem().Rollbacks.ShouldBe(1);
+        Interlocked.Read(ref failures).ShouldBe(1);
+        h.Log.Entries.ShouldContain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Critical);
     }
 }

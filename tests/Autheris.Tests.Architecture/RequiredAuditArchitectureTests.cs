@@ -33,12 +33,12 @@ public sealed partial class RequiredAuditArchitectureTests
     ];
 
     /// <summary>Literal fixed set (type, owning method, callee); no wildcard and no partial match.</summary>
-    private static readonly HashSet<(string Type, string Method, string Callee)> Baseline =
-    [
-        ("GovernedSqlExecutor", "ExecuteRewrittenAsync", "IAuditWriter.RecordAsync"),
-        ("GovernedSqlExecutor", "ExecuteRewrittenAsync", "IAuditWriter.RecordBestEffortAsync"),
-        ("GovernedSqlExecutor", "ExecuteCoreAsync", "IAuditWriter.RecordAsync")
-    ];
+    private static readonly Dictionary<(string Type, string Method, string Callee), int> Baseline = new()
+    {
+        [("GovernedSqlExecutor", "ExecuteRewrittenAsync", "IAuditWriter.RecordAsync")] = 1,
+        [("GovernedSqlExecutor", "ExecuteRewrittenAsync", "IAuditWriter.RecordBestEffortAsync")] = 1,
+        [("GovernedSqlExecutor", "ExecuteCoreAsync", "IAuditWriter.RecordAsync")] = 1
+    };
 
     [GeneratedRegex(@"^<(?<name>[^>]+)>")]
     private static partial Regex GeneratedName();
@@ -99,7 +99,15 @@ public sealed partial class RequiredAuditArchitectureTests
                         next += 2;
                     }
 
-                    var discarded = next < instructions.Count && instructions[next].OpCode == OpCodes.Pop;
+                    // A result stored to a local is only an await when the next instructions take the awaiter of that local (the
+                    // ConfigureAwait struct shape: stloc, ldloca, GetAwaiter); any other stored task is never awaited here.
+                    var stored = next < instructions.Count
+                        && instructions[next].OpCode.Code is Code.Stloc or Code.Stloc_S or Code.Stloc_0 or Code.Stloc_1 or Code.Stloc_2 or Code.Stloc_3;
+                    var awaitedFromLocal = stored
+                        && next + 2 < instructions.Count
+                        && instructions[next + 1].OpCode.Code is Code.Ldloca or Code.Ldloca_S
+                        && instructions[next + 2].Operand is MethodReference { Name: "GetAwaiter" };
+                    var discarded = next < instructions.Count && (instructions[next].OpCode == OpCodes.Pop || (stored && !awaitedFromLocal));
                     var simple = declaring[(declaring.LastIndexOf('.') + 1)..] + "." + callee.Name;
                     yield return new Call(root.Name, OwningMethod(method), simple, discarded);
                 }
@@ -117,7 +125,7 @@ public sealed partial class RequiredAuditArchitectureTests
     {
         var offenders = Scan()
             .Where(c => c.Callee == "IAuditLogRepository.RecordAuditEventAsync"
-                || (c.Callee is "IAuditWriter.RecordAsync" or "IAuditWriter.RecordBestEffortAsync" && !Baseline.Contains((c.Type, c.Method, c.Callee))))
+                || (c.Callee is "IAuditWriter.RecordAsync" or "IAuditWriter.RecordBestEffortAsync" && !Baseline.ContainsKey((c.Type, c.Method, c.Callee))))
             .Select(c => $"{c.Type}.{c.Method} -> {c.Callee}")
             .Distinct()
             .ToList();
@@ -128,10 +136,14 @@ public sealed partial class RequiredAuditArchitectureTests
     [Fact]
     public void Allowlist_is_exact_and_not_larger_than_baseline()
     {
-        Baseline.Count.ShouldBeLessThanOrEqualTo(BaselineCount);
-        var present = Scan().Select(c => (c.Type, c.Method, c.Callee)).ToHashSet();
+        Baseline.Values.Sum().ShouldBeLessThanOrEqualTo(BaselineCount);
+        var present = Scan()
+            .Where(c => c.Callee is "IAuditWriter.RecordAsync" or "IAuditWriter.RecordBestEffortAsync")
+            .GroupBy(c => (c.Type, c.Method, c.Callee))
+            .ToDictionary(g => g.Key, g => g.Count());
 
-        Baseline.Where(entry => !present.Contains(entry)).ShouldBeEmpty("Remove allowlist entries that no longer exist and lower BaselineCount.");
+        // Equality: an extra call in an allowlisted method fails, and so does an entry that no longer exists (lower BaselineCount then).
+        present.OrderBy(p => p.Key).ShouldBe(Baseline.OrderBy(p => p.Key));
     }
 
     [Fact]
@@ -146,7 +158,7 @@ public sealed partial class RequiredAuditArchitectureTests
         // The detector must flag the discard shapes in a known fixture, otherwise the rule above proves nothing.
         var flagged = AuditCalls(Resolve(typeof(FireAndForgetFixture))).Where(c => c.FireAndForget).Select(c => c.Method).Distinct().ToList();
 
-        flagged.ShouldBe([nameof(FireAndForgetFixture.Discarded), nameof(FireAndForgetFixture.DiscardedWithConfigureAwait), nameof(FireAndForgetFixture.DiscardedTaskRun)], ignoreOrder: true);
+        flagged.ShouldBe([nameof(FireAndForgetFixture.Discarded), nameof(FireAndForgetFixture.DiscardedWithConfigureAwait), nameof(FireAndForgetFixture.DiscardedTaskRun), nameof(FireAndForgetFixture.StoredNeverAwaited)], ignoreOrder: true);
         AuditCalls(Resolve(typeof(FireAndForgetFixture))).Where(c => c.Method == nameof(FireAndForgetFixture.Awaited)).ShouldAllBe(c => !c.FireAndForget);
     }
 
@@ -157,6 +169,12 @@ public sealed partial class RequiredAuditArchitectureTests
         public void DiscardedWithConfigureAwait() => _ = repository.RecordAuditEventAsync(null!).ConfigureAwait(false);
 
         public void DiscardedTaskRun() => _ = Task.Run(() => 1);
+
+        public void StoredNeverAwaited()
+        {
+            var task = writer.RecordRequiredAsync(null!);
+            GC.KeepAlive(task);
+        }
 
         public async Task Awaited() => await writer.RecordRequiredAsync(null!).ConfigureAwait(false);
     }
