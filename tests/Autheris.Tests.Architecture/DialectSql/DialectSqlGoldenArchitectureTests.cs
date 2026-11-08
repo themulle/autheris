@@ -86,6 +86,7 @@ public sealed class DialectSqlGoldenArchitectureTests
             golden.Methods.ContainsKey(root).ShouldBeTrue($"{dialect}.{area}: golden lacks method '{root}'");
             if (area != "ConsentGrants")
             {
+                // See SEC_A20_11_ConsentGrantSql_members_and_both_revoke_target_forms_are_in_the_golden for the moved ConsentGrants roots.
                 // Moved ConsentGrants roots delegate to the static cores, whose strings are pinned in the golden set.
                 golden.Methods[root].ShouldNotBeEmpty($"{dialect}.{area}: method '{root}' has no fragments, the extractor would not notice a change");
             }
@@ -132,7 +133,7 @@ public sealed class DialectSqlGoldenArchitectureTests
         // Allow-list (a): the revoke select under the row lock and the revoke update, both id-keyed. The active-role query takes its
         // tenant predicate as a separate optional fragment (" AND c.tenant_id = @tenantId", asserted by TenantScopedStatements_...).
         // The unified repository holds both engines' lock-clause variants, so the id-keyed revoke select appears once per variant.
-        var (total, byId, update, active) = dialect == "SqlServer" ? (6, 3, 1, 2) : (5, 3, 1, 1);
+        var (total, byId, update, active) = (4, 2, 1, 1); // two lock-clause variants of the id-keyed select
         withoutTenant.Count(f => f.Contains("c.id = @id", StringComparison.Ordinal)).ShouldBe(byId);
         withoutTenant.Count(f => f.Contains("UPDATE CONSENTS SET is_revoked = 1", StringComparison.Ordinal)).ShouldBe(update);
         withoutTenant.Count(f => f.Contains("c.is_revoked = 0", StringComparison.Ordinal)).ShouldBe(active);
@@ -269,5 +270,24 @@ public sealed class DialectSqlGoldenArchitectureTests
         var instructions = Instructions(dialect, "ReplaceConsentsAsync", parameterCount: 7).ToList();
         // The unified repository's InvalidateTableEpochAsync evicts the cached table metadata first and then invalidates the epoch.
         instructions.Any(i => i.Operand is MethodReference { Name: "InvalidateTableEpochAsync" or "InvalidateEpochAsync" }).ShouldBeTrue();
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [MemberData(nameof(DialectNames))]
+    public void SEC_A20_11_ConsentGrantSql_members_and_both_revoke_target_forms_are_in_the_golden(string dialect)
+    {
+        // Every string of GovernanceRepository.ConsentGrantSql is pinned by the golden set, and the union holds both lock-clause forms.
+        var holder = DialectSqlFragmentExtractor.UnifiedRepositoryType().NestedTypes.Single(t => t.Name == "ConsentGrantSql");
+        var strings = holder.Methods.Where(m => m.HasBody).SelectMany(m => m.Body.Instructions)
+            .Where(i => i.OpCode.Code == Code.Ldstr).Select(i => (string)i.Operand)
+            .Concat(holder.Fields.Where(f => f.HasConstant && f.Constant is string).Select(f => (string)f.Constant))
+            .Where(x => x.Length > 0).Distinct().ToList();
+        strings.ShouldNotBeEmpty();
+
+        var golden = LoadGolden(dialect, "ConsentGrants").Set;
+        strings.Where(x => !golden.Contains(x)).ShouldBeEmpty();
+        golden.ShouldContain(f => f.Contains("FOR UPDATE OF c", StringComparison.Ordinal));
+        golden.ShouldContain(f => f.Contains("WITH (UPDLOCK", StringComparison.Ordinal));
     }
 }

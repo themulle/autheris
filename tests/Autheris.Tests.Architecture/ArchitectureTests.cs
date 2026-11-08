@@ -327,35 +327,64 @@ public class ArchitectureTests
     [Trait("Category", "Security")]
     public void Governance_repository_logs_only_through_executor()
     {
-        // SEC-SIMPL-25: logger calls in GovernanceRepository*.cs live only in allowlisted members.
+        // SEC-SIMPL-25: logger calls in GovernanceRepository*.cs live only in these members, with exactly these call counts.
         var persistenceDir = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Infrastructure", "Persistence");
         var files = Directory.GetFiles(persistenceDir, "GovernanceRepository*.cs", SearchOption.AllDirectories);
         files.ShouldNotBeEmpty();
-        // member -> reason
-        var allowed = new Dictionary<string, string>
+        var allowed = new Dictionary<string, int>
         {
-            ["ExecuteReaderAsync"] = "executor",
-            ["ExecuteNonQueryAsync"] = "executor",
-            ["ExecuteScalarAsync"] = "executor",
-            ["LogExecutionFailure"] = "executor failure sink (type and code only)",
-            ["RecordTenantRefusalAuditAsync"] = "logs only a constant code and an opaque consent id",
+            ["GovernanceRepository.cs|ExecuteReaderAsync"] = 1,
+            ["GovernanceRepository.cs|ExecuteNonQueryAsync"] = 1,
+            ["GovernanceRepository.cs|ExecuteScalarAsync"] = 1,
+            ["GovernanceRepository.cs|LogExecutionFailure"] = 1,
+            ["GovernanceRepository.ConsentGrants.cs|RecordTenantRefusalAuditAsync"] = 1,
         };
 
-        var offenders = new List<string>();
-        foreach (var file in files)
-        {
-            var root = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(File.ReadAllText(file)).GetRoot();
-            foreach (var inv in root.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>())
-            {
-                var text = inv.Expression.ToString();
-                if (Regex.IsMatch(text, @"\b_?logger\b") && !allowed.ContainsKey(GovernanceSqlConstructionScanner.MemberOf(inv)))
-                {
-                    offenders.Add($"{Path.GetFileName(file)}:{inv.GetLocation().GetLineSpan().StartLinePosition.Line + 1}");
-                }
-            }
-        }
+        var actual = files.SelectMany(f => GovernanceSqlConstructionScanner.LoggerCalls(Path.GetFileName(f), File.ReadAllText(f)))
+            .GroupBy(c => $"{c.File}|{c.Member}").ToDictionary(g => g.Key, g => g.Count());
+        actual.OrderBy(k => k.Key).ShouldBe(allowed.OrderBy(k => k.Key), "SEC-SIMPL-25: governance repository logs only through the executor.");
+    }
 
-        offenders.ShouldBeEmpty("SEC-SIMPL-25: governance repository logs only through the executor.");
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Logger_scanner_flags_planted_logger_call()
+    {
+        // SEC-SIMPL-25 negative control: conditional-access and plain member calls are both seen.
+        var calls = GovernanceSqlConstructionScanner.LoggerCalls("S.cs", "class C { void M() { _logger?.LogError(\"x\"); logger.LogInformation(\"y\"); other.Log(); } }");
+        calls.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_A20_10_Tenant_refusal_log_carries_only_constant_code_and_consent_id()
+    {
+        // SEC-A20-10: the single allowlisted log call outside the executor passes only the template, the constant code and the opaque consent id.
+        var file = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Infrastructure", "Persistence", "GovernanceRepository.ConsentGrants.cs");
+        var call = GovernanceSqlConstructionScanner.LoggerCalls("GovernanceRepository.ConsentGrants.cs", File.ReadAllText(file)).Single(c => c.Member == "RecordTenantRefusalAuditAsync");
+        call.Arguments.ShouldBe(["\"Consent tenant integrity refusal {Code} for consent {ConsentId}.\"", "ConsentTenantIntegrityException.Code", "refusal.ConsentId"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_A20_09_Tenantless_consent_overloads_used_only_from_allowlisted_files()
+    {
+        // SEC-A20-09: the tenant-less (cross-tenant) overloads have exactly these src callers (the dialect facades forwarding to the unified repository; the attribute-validating wrapper passes tenantId: null to the fail-closed typed overload); every other caller passes a tenant.
+        var expected = new[]
+        {
+            "src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs|GetActiveConsentsForSubjectsAsync|1",
+            "src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs|GetAllActiveConsentsForSubjectsAsync|1",
+            "src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Consent.cs|GetActiveConsentsForSubjectsAsync|1",
+            "src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Consent.cs|GetAllActiveConsentsForSubjectsAsync|1",
+        };
+
+        var actual = RepositoryScan.ProductionFiles
+            .SelectMany(f => GovernanceSqlConstructionScanner.TenantlessConsentCalls(f.RelativePath, f.Text))
+            .GroupBy(c => $"{c.File}|{c.Method}").Select(g => $"{g.Key}|{g.Count()}").OrderBy(x => x, StringComparer.Ordinal).ToList();
+        actual.ShouldBe(expected.OrderBy(x => x, StringComparer.Ordinal).ToList());
+
+        // negative control
+        GovernanceSqlConstructionScanner.TenantlessConsentCalls("X.cs", "class C { void M() { r.GetActiveConsentsForSubjectsAsync(s, t, now, ct); r.GetAllActiveConsentsForSubjectsAsync(s, roles, now, tenantId, ct); r.GetActiveConsentsForSubjectsAsync(s, t, now); } }")
+            .Count.ShouldBe(2);
     }
 
     /// <summary>Mutation check of 12.1 #7: a dummy Sqlite governance type is flagged, the data-source guards are not.</summary>

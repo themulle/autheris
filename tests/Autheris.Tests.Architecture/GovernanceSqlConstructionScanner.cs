@@ -77,4 +77,60 @@ internal static class GovernanceSqlConstructionScanner
             FieldDeclarationSyntax f => f.Declaration.Variables[0].Identifier.ValueText,
             _ => null,
         }).FirstOrDefault(n => n is not null) ?? "<type>";
+
+    internal sealed record LoggerCall(string File, string Member, IReadOnlyList<string> Arguments);
+
+    internal sealed record ConsentCall(string File, string Method);
+
+    /// <summary>Invocations on a receiver named <c>_logger</c>/<c>logger</c>, including conditional access (<c>_logger?.LogX</c>).</summary>
+    public static List<LoggerCall> LoggerCalls(string fileName, string source)
+    {
+        var result = new List<LoggerCall>();
+        foreach (var inv in CSharpSyntaxTree.ParseText(source).GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            var receiver = inv.Expression is MemberAccessExpressionSyntax m ? m.Expression
+                : inv.Parent is ConditionalAccessExpressionSyntax c ? c.Expression : null;
+            if (receiver is IdentifierNameSyntax { Identifier.ValueText: "_logger" or "logger" })
+            {
+                result.Add(new LoggerCall(fileName, MemberOf(inv), inv.ArgumentList.Arguments.Select(a => a.Expression.ToString()).ToList()));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Calls of the tenant-less consent overloads (no tenant argument): 3 positional args, or 4 with a cancellation token last.</summary>
+    public static List<ConsentCall> TenantlessConsentCalls(string file, string source)
+    {
+        var result = new List<ConsentCall>();
+        foreach (var inv in CSharpSyntaxTree.ParseText(source).GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            var name = inv.Expression switch
+            {
+                MemberAccessExpressionSyntax m => m.Name.Identifier.ValueText,
+                MemberBindingExpressionSyntax b => b.Name.Identifier.ValueText,
+                IdentifierNameSyntax i => i.Identifier.ValueText,
+                _ => null,
+            };
+            if (name is not ("GetActiveConsentsForSubjectsAsync" or "GetAllActiveConsentsForSubjectsAsync"))
+            {
+                continue;
+            }
+
+            var args = inv.ArgumentList.Arguments;
+            if (args.Any(a => a.NameColon?.Name.Identifier.ValueText == "tenantId"))
+            {
+                continue;
+            }
+
+            var last = args.Count == 4 ? args[3].Expression.ToString() : "";
+            var tenantless = args.Count <= 3 || (args.Count == 4 && Regex.IsMatch(last, @"^(ct|token|cancellationToken|cancel\w*|CancellationToken\.\w+)$", RegexOptions.IgnoreCase));
+            if (tenantless)
+            {
+                result.Add(new ConsentCall(file, name));
+            }
+        }
+
+        return result;
+    }
 }

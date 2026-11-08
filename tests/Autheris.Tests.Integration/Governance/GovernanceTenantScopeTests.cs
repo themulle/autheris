@@ -106,8 +106,9 @@ public sealed class GovernanceTenantScopeTests
         }
 
         dir.ShouldNotBeNull();
-        var ddl = File.ReadAllText(Path.Combine(dir.FullName, "src", "Autheris.Infrastructure", "Persistence", "Migrations", "PostgreSqlBaselineSchema.cs"));
-        var tenantTables = Regex.Matches(ddl, @"CREATE TABLE (?:IF NOT EXISTS )?""?(\w+)""?\s*\((.*?)\n\s*\);", RegexOptions.Singleline | RegexOptions.IgnoreCase)
+        string Schema(string file) => File.ReadAllText(Path.Combine(dir.FullName, "src", "Autheris.Infrastructure", "Persistence", "Migrations", file));
+        var tenantTables = new[] { Schema("PostgreSqlBaselineSchema.cs"), Schema("SqlServerBaselineSchema.cs") }
+            .SelectMany(ddl => Regex.Matches(ddl, @"CREATE TABLE (?:IF NOT EXISTS )?(?:dbo\.)?""?(\w+)""?\s*\((.*?)\n\s*\);", RegexOptions.Singleline | RegexOptions.IgnoreCase))
             .Where(m => Regex.IsMatch(m.Groups[2].Value, @"\btenant_id\b", RegexOptions.IgnoreCase))
             .Select(m => m.Groups[1].Value.ToUpperInvariant())
             .ToList();

@@ -20,36 +20,6 @@ public partial class PostgreSqlGovernanceRepository
         set => _governanceRepository.ConsentStatusUpdateSeam = value;
     }
 
-    internal static class ConsentGrantSql
-    {
-        public static string ActiveRoleConsents(bool withTenant) => @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
-                                       c.is_revoked, c.tenant_id
-                                FROM CONSENTS c
-                                JOIN TABLES t ON c.table_id = t.id
-                                WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                  AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
-                                  AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
-
-        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
-                                FROM CONSENTS c 
-                                JOIN TABLES t ON c.table_id = t.id
-                                WHERE c.id = @id
-                                FOR UPDATE OF c";
-    }
-
-    internal static class ConsentSql
-    {
-        public const string FindTableIdSql = GovernanceRepository.ConsentSql.FindTableIdSql;
-        public const string SelectExpiringConsentsSql = GovernanceRepository.ConsentSql.SelectExpiringConsentsSql;
-        public const string SelectConsentRequestByIdSql = GovernanceRepository.ConsentSql.SelectConsentRequestByIdSql;
-        public const string SelectPendingRequestsForApproverSql = GovernanceRepository.ConsentSql.SelectPendingRequestsForApproverSql;
-        public const string CountConfiguredOwnersSql = GovernanceRepository.ConsentSql.CountConfiguredOwnersSql;
-        public const string SelectRequestIdByTicketSql = GovernanceRepository.ConsentSql.SelectRequestIdByTicketSql;
-        public const string SelectRequestIdByTicketAndTenantSql = GovernanceRepository.ConsentSql.SelectRequestIdByTicketAndTenantSql;
-        public const string UpdateSystemRevokeSql = GovernanceRepository.ConsentSql.UpdateSystemRevokeSql;
-    }
-
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
     {
         ThrowIfNotReady();
