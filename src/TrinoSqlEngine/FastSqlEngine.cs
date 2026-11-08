@@ -20,12 +20,12 @@ public sealed class ThrowingErrorListener : BaseErrorListener, IAntlrErrorListen
 
     public override void SyntaxError(TextWriter output, IRecognizer recognizer, IToken offendingSymbol, int line, int charPositionInLine, string msg, RecognitionException e)
     {
-        throw new ParseCanceledException($"line {line}:{charPositionInLine}: {msg}", e);
+        throw new SqlSyntaxErrorException(line, charPositionInLine + 1, $"line {line}:{charPositionInLine}: {msg}", e);
     }
 
     public void SyntaxError(TextWriter output, IRecognizer recognizer, int offendingSymbol, int line, int charPositionInLine, string msg, RecognitionException e)
     {
-        throw new ParseCanceledException($"line {line}:{charPositionInLine}: {msg}", e);
+        throw new SqlSyntaxErrorException(line, charPositionInLine + 1, $"line {line}:{charPositionInLine}: {msg}", e);
     }
 }
 
@@ -362,13 +362,17 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
     private void ThrowIfKnownSyntaxError(ReadOnlyMemory<char> sql, int ruleKind, SqlTokenSecurityOptions options)
     {
         var cache = Volatile.Read(ref _syntaxErrors);
-        if (cache is not null && cache.TryGet(sql.Span, ruleKind, options, LimitsFingerprint(), out var message))
+        if (cache is not null && cache.TryGet(sql.Span, ruleKind, options, LimitsFingerprint(), out var cached))
         {
-            throw new ParseCanceledException(message);
+            if (cached.Line > 0 && cached.Column > 0)
+            {
+                throw new SqlSyntaxErrorException(cached.Line, cached.Column, cached.Message);
+            }
+            throw new ParseCanceledException(cached.Message);
         }
     }
 
-    private void RememberSyntaxError(ReadOnlyMemory<char> sql, int ruleKind, SqlTokenSecurityOptions options, string message)
+    private void RememberSyntaxError(ReadOnlyMemory<char> sql, int ruleKind, SqlTokenSecurityOptions options, string message, int line = 0, int column = 0)
     {
         if (SyntaxErrorCacheTtl <= TimeSpan.Zero || SyntaxErrorCacheMaxEntries <= 0)
         {
@@ -376,7 +380,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
         }
 
         LazyInitializer.EnsureInitialized(ref _syntaxErrors, static () => new SyntaxErrorNegativeCache())
-            .Add(sql.Span, ruleKind, options, LimitsFingerprint(), message, SyntaxErrorCacheTtl, SyntaxErrorCacheMaxEntries);
+            .Add(sql.Span, ruleKind, options, LimitsFingerprint(), message, line, column, SyntaxErrorCacheTtl, SyntaxErrorCacheMaxEntries);
     }
 
     private static int RemainingMilliseconds(TimeSpan budget, long startTimestamp)
@@ -422,6 +426,27 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
         tokens.Fill();
         var allTokens = tokens.GetTokens();
 
+        if (tokenOptions.AllowTrailingStatementTerminator)
+        {
+            for (int i = allTokens.Count - 1; i >= 0; i--)
+            {
+                var tok = allTokens[i];
+                if (tok.Type == SqlBaseLexer.Eof)
+                {
+                    continue;
+                }
+                if (tok.Channel == TokenConstants.DefaultChannel)
+                {
+                    if (tok.Type == SqlBaseLexer.SEMICOLON && tok is IWritableToken writable)
+                    {
+                        writable.Channel = TokenConstants.HiddenChannel;
+                        tokens.Reset();
+                    }
+                    break;
+                }
+            }
+        }
+
         // SEC P-03: token security checks always run, independent of MaxNestingDepth.
         EnsureTokensAreSafe(allTokens, sql.Span, tokenOptions, cancellation);
         EnsureNestingDepthWithinLimit(allTokens, sql.Span, cancellation);
@@ -448,7 +473,13 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                     var message = offending is null
                         ? "Parsing failed: mismatched input."
                         : $"line {offending.Line}:{offending.Column}: mismatched input '{offending.Text}'";
-                    RememberSyntaxError(sql, ruleKind, tokenOptions, message);
+                    int line = offending?.Line ?? (sllFailure is SqlSyntaxErrorException syn ? syn.Line : 0);
+                    int col = offending is not null ? offending.Column + 1 : (sllFailure is SqlSyntaxErrorException syn2 ? syn2.Column : 0);
+                    RememberSyntaxError(sql, ruleKind, tokenOptions, message, line, col);
+                    if (line > 0 && col > 0)
+                    {
+                        throw new SqlSyntaxErrorException(line, col, message, mismatch);
+                    }
                     throw new ParseCanceledException(message, mismatch);
                 }
 
@@ -475,7 +506,9 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                 }
                 catch (ParseCanceledException llFailure) when (!cancellation.IsCanceled && llFailure.InnerException is not TimeoutException)
                 {
-                    RememberSyntaxError(sql, ruleKind, tokenOptions, llFailure.Message);
+                    int line = llFailure is SqlSyntaxErrorException syn ? syn.Line : 0;
+                    int col = llFailure is SqlSyntaxErrorException syn2 ? syn2.Column : 0;
+                    RememberSyntaxError(sql, ruleKind, tokenOptions, llFailure.Message, line, col);
                     throw;
                 }
             }
@@ -535,14 +568,16 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                 string? commentText = token.Text;
                 if (commentText != null && commentText.Length > 4 && commentText.IndexOf("/*", 2, StringComparison.Ordinal) >= 0)
                 {
-                    throw new ParseCanceledException(
+                    throw new SqlSyntaxErrorException(
+                        token.Line, token.Column + 1,
                         $"line {token.Line}:{token.Column}: Nested block comments ('/* ... /* ... */') are strictly prohibited due to dialect lexer differentials.");
                 }
             }
 
             if (options.RejectComments && (type == SqlBaseLexer.SIMPLE_COMMENT || type == SqlBaseLexer.BRACKETED_COMMENT))
             {
-                throw new ParseCanceledException(
+                throw new SqlSyntaxErrorException(
+                    token.Line, token.Column + 1,
                     $"line {token.Line}:{token.Column}: SQL comments are not permitted in governed execution.");
             }
 
@@ -557,7 +592,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                 && !CompilerHooks.IsDisabled(SecurityControl.VariableSubstitution)
                 )
             {
-                throw new ParseCanceledException(
+                throw new SqlSyntaxErrorException(
+                    token.Line, token.Column + 1,
                     $"line {token.Line}:{token.Column}: Variable substitution sequences ('${{') are not permitted.");
             }
 
@@ -574,7 +610,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                 if (lastNonWsToken != null && lastNonWsToken.Type == SqlBaseLexer.IDENTIFIER &&
                     string.Equals(lastNonWsToken.Text, "E", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new ParseCanceledException(
+                    throw new SqlSyntaxErrorException(
+                        token.Line, token.Column + 1,
                         $"line {token.Line}:{token.Column}: Escaped string literal type constructors (E'...') are not permitted due to dialect lexer differentials.");
                 }
             }
@@ -582,7 +619,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             // SQL-1: UESCAPE changes literal decoding on PostgreSQL in a way the gateway does not model.
             if (options.RejectEscapedStringLiterals && type == SqlBaseLexer.UESCAPE)
             {
-                throw new ParseCanceledException(
+                throw new SqlSyntaxErrorException(
+                    token.Line, token.Column + 1,
                     $"line {token.Line}:{token.Column}: UESCAPE is not permitted due to dialect lexer differentials.");
             }
 
@@ -591,7 +629,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             {
                 if (text.SequenceEqual("[") || text.SequenceEqual("]"))
                 {
-                    throw new ParseCanceledException(
+                    throw new SqlSyntaxErrorException(
+                        token.Line, token.Column + 1,
                         $"line {token.Line}:{token.Column}: Square brackets are not permitted for this SQL dialect due to dialect lexer differentials.");
                 }
 
@@ -609,7 +648,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             // SQ-02: Dollar quoting ($$...$$)
             if (options.RejectDollarQuoting && type == SqlBaseLexer.DOLLAR_STRING)
             {
-                throw new ParseCanceledException(
+                throw new SqlSyntaxErrorException(
+                    token.Line, token.Column + 1,
                     $"line {token.Line}:{token.Column}: Dollar-quoted strings ($$...$$) are not permitted.");
             }
 
@@ -625,7 +665,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                 {
                     if (text[ci] > 127)
                     {
-                        throw new ParseCanceledException(
+                        throw new SqlSyntaxErrorException(
+                            token.Line, token.Column + 1,
                             $"line {token.Line}:{token.Column}: Non-ASCII characters outside string literals ('{text.ToString()}') are not permitted.");
                     }
                 }
@@ -639,7 +680,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
                     char c = text[ci];
                     if (c == '.' || char.IsControl(c))
                     {
-                        throw new ParseCanceledException(
+                        throw new SqlSyntaxErrorException(
+                            token.Line, token.Column + 1,
                             $"line {token.Line}:{token.Column}: Dots inside quoted identifiers ({text.ToString()}) are not permitted.");
                     }
                 }
@@ -667,7 +709,8 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
             {
                 if (lastNonWsToken != null && lastNonWsToken.Type == SqlBaseLexer.FOR)
                 {
-                    throw new ParseCanceledException(
+                    throw new SqlSyntaxErrorException(
+                        token.Line, token.Column + 1,
                         $"line {token.Line}:{token.Column}: Time-travel queries (FOR TIMESTAMP/VERSION AS OF) are not permitted.");
                 }
             }

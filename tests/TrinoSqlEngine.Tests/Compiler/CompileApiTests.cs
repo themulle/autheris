@@ -416,7 +416,8 @@ public class CompileApiTests
             [nameof(CompileRequest.ClientLists)] = baseRequest with { ClientLists = ClientListHarness.Shapes(("ids", 3)) },
             [nameof(CompileRequest.TimeZoneConversionAvailable)] = baseRequest with { TimeZoneConversionAvailable = true },
             [nameof(CompileRequest.AllowRecursiveCte)] = baseRequest with { AllowRecursiveCte = true },
-            [nameof(CompileRequest.MaxRecursionDepth)] = baseRequest with { MaxRecursionDepth = 7 }
+            [nameof(CompileRequest.MaxRecursionDepth)] = baseRequest with { MaxRecursionDepth = 7 },
+            [nameof(CompileRequest.BindPageOffset)] = baseRequest with { BindPageOffset = true }
         };
 
         // Every property of CompileRequest except the policy must be covered above.

@@ -15,15 +15,11 @@ public readonly record struct Sid(string Value) : IEquatable<Sid>
     public override int GetHashCode() =>
         StringComparer.OrdinalIgnoreCase.GetHashCode(Value ?? string.Empty);
 
-    public static Func<string, Autheris.Domain.Identity.IdentityRealm?>? RealmLookup
-    {
-        get => ClaimsPrincipalExtensions.RealmLookup;
-        set => ClaimsPrincipalExtensions.RealmLookup = value;
-    }
 }
 
 public static class ClaimsPrincipalExtensions
 {
+    /// <summary>Resolves the immutable user subject id; application identifiers (appid, client_id, azp) are never used, an absent subject yields null (deny).</summary>
     public static Sid? GetUserSid(this System.Security.Claims.ClaimsPrincipal? principal)
     {
         if (principal == null) return null;
@@ -36,10 +32,7 @@ public static class ClaimsPrincipalExtensions
             ?? principal.FindFirst("oid")?.Value
             ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
             ?? principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-            ?? principal.FindFirst("sub")?.Value
-            ?? principal.FindFirst("appid")?.Value
-            ?? principal.FindFirst("client_id")?.Value
-            ?? principal.FindFirst("azp")?.Value;
+            ?? principal.FindFirst("sub")?.Value;
 
         return string.IsNullOrWhiteSpace(sidStr) ? (Sid?)null : new Sid(sidStr);
     }
@@ -168,8 +161,6 @@ public static class ClaimsPrincipalExtensions
             .Select(c => c.Value)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
-
-    public static Func<string, Autheris.Domain.Identity.IdentityRealm?>? RealmLookup { get; set; }
 
     /// <summary>
     /// DT-A-3: the tenant of the principal, read from its claims only (the claims transformation stamped the resolved tenant: claim, realm

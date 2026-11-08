@@ -176,7 +176,22 @@ public static partial class WebSqlEndpoints
             ["type"] = "object",
             ["properties"] = new Dictionary<string, object>
             {
-                ["columns"] = new Dictionary<string, object> { ["type"] = "array", ["items"] = new Dictionary<string, object> { ["type"] = "string" } },
+                ["columns"] = new Dictionary<string, object>
+                {
+                    ["type"] = "array",
+                    ["items"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new Dictionary<string, object>
+                        {
+                            ["name"] = new Dictionary<string, object> { ["type"] = "string" },
+                            ["type"] = new Dictionary<string, object> { ["type"] = "string" },
+                            ["nullable"] = new Dictionary<string, object> { ["type"] = "boolean" },
+                            ["masked"] = new Dictionary<string, object> { ["type"] = "boolean" }
+                        },
+                        ["required"] = new[] { "name", "type", "nullable", "masked" }
+                    }
+                },
                 ["rows"] = new Dictionary<string, object>
                 {
                     ["type"] = "array",

@@ -2,6 +2,7 @@ namespace TrinoSqlEngine.Ast.Visitors;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Security;
 using TrinoSqlEngine.Ast.Nodes;
@@ -37,6 +38,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
             _cteScopeStack.Push(new HashSet<string>(_cteScopeStack.Peek(), CteScopeComparer));
             _cteMaskedColumns.Push(new Dictionary<string, HashSet<string>>(_cteMaskedColumns.Peek(), CteScopeComparer));
+            _cteMasksStack.Push(new Dictionary<string, ImmutableArray<bool>>(_cteMasksStack.Peek(), CteScopeComparer));
             var ctes = new List<CommonTableExpression>();
             foreach (var cte in node.With.Ctes)
             {
@@ -73,6 +75,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 _cteScopeStack.Peek().Add(cteKey);
                 if (cteMaskedCols.Count > 0)
                     _cteMaskedColumns.Peek()[cteKey] = cteMaskedCols;
+                _cteMasksStack.Peek()[cteKey] = ComputeRootOutputColumnMasks(cteQuery.Body);
 
                 // CR-ADG-01 / INV-11: on the typed path the definition is emitted as the delimited scope key, so the gateway's
                 // CTE decision and the database's name binding cannot diverge (Oracle upper-cases unquoted names, SQL Server
@@ -111,7 +114,13 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (isRootRead && _options.EnforcedMaxRows > 0 && !_rootLimitHandled)
         {
             _rootLimitHandled = true;
-            if (pagination != null)
+            if (_options.BindPageOffset)
+            {
+                pagination = new PaginationClause(
+                    Offset: new PageOffsetParameterExpression(),
+                    Limit: new LiteralExpression(_options.EnforcedMaxRows, LiteralType.Integer));
+            }
+            else if (pagination != null)
             {
                 var clampedLimit = ClampLimit(pagination.Limit, _options.EnforcedMaxRows);
                 // M-22: WITH TIES can return more rows than the limit, so it is downgraded to ONLY under an enforced cap.
@@ -123,10 +132,16 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             }
         }
 
+        if (isRootRead)
+        {
+            OutputColumnMasks = ComputeRootOutputColumnMasks(body);
+        }
+
         if (node.With != null)
         {
             _cteScopeStack.Pop();
             _cteMaskedColumns.Pop();
+            _cteMasksStack.Pop();
         }
 
         _subqueryDepth--;
@@ -209,5 +224,135 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             }
         }
         return new LiteralExpression(maxRows, LiteralType.Integer);
+    }
+
+    private ImmutableArray<bool> ComputeRootOutputColumnMasks(QueryBody? body)
+    {
+        if (body == null)
+            return ImmutableArray<bool>.Empty;
+
+        switch (body)
+        {
+            case SetOperationQuery so:
+            {
+                var left = ComputeRootOutputColumnMasks(so.Left);
+                var right = ComputeRootOutputColumnMasks(so.Right);
+                int len = Math.Max(left.Length, right.Length);
+                var builder = ImmutableArray.CreateBuilder<bool>(len);
+                for (int i = 0; i < len; i++)
+                {
+                    bool l = i < left.Length ? left[i] : true;
+                    bool r = i < right.Length ? right[i] : true;
+                    builder.Add(l || r);
+                }
+                return builder.MoveToImmutable();
+            }
+            case TableQueryBody tq:
+            {
+                if (IsCte(tq.TableName))
+                {
+                    string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(tq.TableName.Parts[0]);
+                    if (_cteMasksStack.Count > 0 && _cteMasksStack.Peek().TryGetValue(cteKey, out var cteMasks))
+                        return cteMasks;
+                    return ImmutableArray.Create(true);
+                }
+                var cols = ColumnsOf(tq.TableName.NormalizedName);
+                if (cols != null)
+                {
+                    var b = ImmutableArray.CreateBuilder<bool>(cols.Count);
+                    foreach (var col in cols)
+                        b.Add(_options.MaskedColumns.HasMask(tq.TableName.NormalizedName, col));
+                    return b.MoveToImmutable();
+                }
+                return ImmutableArray.Create(true);
+            }
+            case QuerySpecification qs:
+            {
+                var builder = ImmutableArray.CreateBuilder<bool>();
+                var tables = new List<(string TableName, string? Alias)>();
+                CollectTableSources(qs.From, tables);
+                var derived = new List<(string SourceName, string? Alias, HashSet<string> MaskedColumns)>();
+                CollectDerivedMaskedSources(qs.From, derived);
+
+                foreach (var proj in qs.Projections)
+                {
+                    if (proj is WildcardSelectItem wc)
+                    {
+                        ExpandWildcardMasks(qs.From, wc.Qualifier, builder);
+                    }
+                    else if (proj is ColumnSelectItem csi)
+                    {
+                        builder.Add(ExpressionReferencesMaskedColumn(csi.Expression, tables, derived));
+                    }
+                    else
+                    {
+                        builder.Add(true);
+                    }
+                }
+                return builder.ToImmutable();
+            }
+            default:
+                return ImmutableArray<bool>.Empty;
+        }
+    }
+
+    private void ExpandWildcardMasks(TableSource? from, SqlQualifiedName? qualifier, ImmutableArray<bool>.Builder builder)
+    {
+        if (from == null) return;
+        switch (from)
+        {
+            case JoinedTableSource joined:
+                ExpandWildcardMasks(joined.Left, qualifier, builder);
+                ExpandWildcardMasks(joined.Right, qualifier, builder);
+                break;
+            case NamedTableSource named:
+                if (MatchesWildcardQualifier(qualifier, named.Name.NormalizedName, named.Alias?.Value))
+                {
+                    if (IsCte(named.Name))
+                    {
+                        string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(named.Name.Parts[0]);
+                        if (_cteMasksStack.Count > 0 && _cteMasksStack.Peek().TryGetValue(cteKey, out var cteMasks))
+                        {
+                            builder.AddRange(cteMasks);
+                        }
+                        else
+                        {
+                            builder.Add(true);
+                        }
+                    }
+                    else
+                    {
+                        var cols = ColumnsOf(named.Name.NormalizedName);
+                        if (cols != null)
+                        {
+                            foreach (var col in cols)
+                            {
+                                builder.Add(_options.MaskedColumns.HasMask(named.Name.NormalizedName, col));
+                            }
+                        }
+                        else
+                        {
+                            builder.Add(true);
+                        }
+                    }
+                }
+                break;
+            case SubqueryTableSource subquery:
+                string alias = subquery.Alias?.Value ?? "<subquery>";
+                if (MatchesWildcardQualifier(qualifier, alias, subquery.Alias?.Value))
+                {
+                    var subMasks = ComputeRootOutputColumnMasks(subquery.Subquery.Body);
+                    builder.AddRange(subMasks);
+                }
+                break;
+            case LateralTableSource lateral:
+                string latAlias = lateral.Alias?.Value ?? "<lateral>";
+                if (MatchesWildcardQualifier(qualifier, latAlias, lateral.Alias?.Value))
+                {
+                    var latMasks = ComputeRootOutputColumnMasks(lateral.Subquery.Body);
+                    builder.AddRange(latMasks);
+                }
+                break;
+        }
     }
 }

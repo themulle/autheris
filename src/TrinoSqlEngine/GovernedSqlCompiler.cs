@@ -135,7 +135,7 @@ internal sealed class GovernedSqlCompiler
         if (template is not null && TryRehydrate(template, typed))
         {
             _cache.CountHit();
-            return template.Rebind(typed.PolicyValues);
+            return template.Rebind(typed.PolicyValues, request.PageOffset, request.MaxAllowedOffset);
         }
 
         _cache.CountMiss();
@@ -211,10 +211,11 @@ internal sealed class GovernedSqlCompiler
         // 6. typed security injection; user literals first learn the catalog type of the column they are compared with (16 item 2)
         Pass("inject");
         var typedLiterals = (SqlStatement)new LiteralColumnTypeAnnotator(policy.Catalog) { CancellationToken = token }.Visit(simplified);
-        var secured = (SqlStatement)new AstSecurityVisitor(BuildOptions(request, typed), typed)
+        var visitor = new AstSecurityVisitor(BuildOptions(request, typed), typed)
         {
             CancellationToken = token
-        }.Visit(typedLiterals);
+        };
+        var secured = (SqlStatement)visitor.Visit(typedLiterals);
         CheckBudget(request, clock, token);
 
         secured = CompilerHooks.Current.InterceptInjected(secured);
@@ -242,7 +243,12 @@ internal sealed class GovernedSqlCompiler
         var compiled = (generator is SqlDialectGeneratorBase capabilityAware
                 ? capabilityAware.Generate(secured, parameterSource, caps, token, timeZoneCallsValidated: timeZoneCallsValidated, maxRecursionDepth: request.MaxRecursionDepth)
                 : generator.Generate(secured, parameterSource, token))
-            with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
+            with
+            {
+                AppliedPredicates = applied,
+                ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured),
+                OutputColumnMasks = visitor.OutputColumnMasks
+            };
 
         // 10. output budget
         // The marker text of the lists that were actually expanded is not policy expansion: it is subtracted from the
@@ -257,7 +263,12 @@ internal sealed class GovernedSqlCompiler
         CheckBudget(request, clock, token);
 
         // 11. only verified output is cached, value-free
-        _cache.Add(CompiledSqlTemplate.From(keyMaterial, compiled, typed.Dependencies), keyHash);
+        var templateToCache = CompiledSqlTemplate.From(keyMaterial, compiled, typed.Dependencies);
+        _cache.Add(templateToCache, keyHash);
+        if (request.BindPageOffset)
+        {
+            return templateToCache.Rebind(typed.PolicyValues, request.PageOffset, request.MaxAllowedOffset);
+        }
         return compiled;
     }
 
@@ -388,6 +399,7 @@ internal sealed class GovernedSqlCompiler
             TablesWithMaskedColumns = CaseInsensitive(request.Policy.TablesWithMaskedColumns),
             EnforcedMaxRows = request.EnforcedMaxRows,
             AllowRecursiveCte = request.AllowRecursiveCte,
+            BindPageOffset = request.BindPageOffset,
             TablesWithConsentRowFilter = CaseInsensitive(request.Policy.TablesWithConsentRowFilter),
             RejectMaskedColumnsInPredicates = true,
             // DML guards of the request (DmlGuardOptions.Strict by default); the coverage verifier proves what they require.

@@ -57,6 +57,8 @@ internal static class ConformanceAstFixtures
             new Dictionary<string, PolicyValue> { ["k"] = new(new byte[] { 1, 2 }, SqlParameterType.Binary), ["o"] = new(new byte[] { 3, 4 }, SqlParameterType.Binary) }),
         ["mask-constant"] = () => Case(Select(new MaskExpression(MaskKind.Constant, Col("email"), new MaskArguments(Constant: P("m", SqlParameterType.String)), "varchar(200)")),
             new Dictionary<string, PolicyValue> { ["m"] = new("const", SqlParameterType.String) }),
+        // Server-only: AstSecurityVisitor injects the page-offset slot when CompileRequest.BindPageOffset is set (WP-SIMPL-51 D-51n).
+        ["page-offset"] = () => Case(Select(Col("a")) with { Pagination = new PaginationClause(Offset: new PageOffsetParameterExpression(), Limit: new LiteralExpression(10, LiteralType.Integer)) }),
         ["mask-geojitter"] = () => Case(Select(new MaskExpression(MaskKind.GeoJitter, Col("lat"), new MaskArguments(Decimals: 2), "double"))),
     };
 }

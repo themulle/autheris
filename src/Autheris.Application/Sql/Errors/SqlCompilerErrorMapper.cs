@@ -20,7 +20,7 @@ using TrinoSqlEngine.Governance;
 /// The result of <see cref="SqlCompilerErrorMapper.TryMap"/>: HTTP status, stable code and the fixed client message. <c>Limit</c> is
 /// the <see cref="SqlLimitKind"/> name of a limit error and never a count.
 /// </summary>
-public readonly record struct SqlErrorMapping(int Status, string Code, string Title, string? Limit = null);
+public readonly record struct SqlErrorMapping(int Status, string Code, string Title, string? Limit = null, int? Line = null, int? Column = null);
 
 /// <summary>
 /// WP-X0a (plan section 28.4.3): the one mapping of compiler and execution errors to a status, a stable code
@@ -64,6 +64,17 @@ public static class SqlCompilerErrorMapper
             {
                 if (rule(current) is { } found)
                 {
+                    if (found.Code == GovernedSqlErrorCodes.SyntaxError)
+                    {
+                        for (var (c, d) = (exception, 0); c is not null && d < MaxDepth; c = c.InnerException, d++)
+                        {
+                            if (c is SqlSyntaxErrorException syn)
+                            {
+                                found = found with { Line = syn.Line, Column = syn.Column };
+                                break;
+                            }
+                        }
+                    }
                     mapping = found;
                     return true;
                 }
@@ -103,6 +114,11 @@ public static class SqlCompilerErrorMapper
 
     private static readonly Func<Exception, SqlErrorMapping?>[] Rules =
     [
+        e => e is SqlCostExceededException ? Of(400, GovernedSqlErrorCodes.QueryCostExceeded) : null,
+        e => e is SqlQuotaExhaustedException ? Of(429, GovernedSqlErrorCodes.RateLimitExceeded) : null,
+        e => e is SqlQuotaUnavailableException ? Of(503, GovernedSqlErrorCodes.ServiceUnavailable) : null,
+        e => e is SqlPagingUnsupportedException ? Of(400, GovernedSqlErrorCodes.PagingUnsupported) : null,
+        e => e is SqlPagingTokenInvalidException ? Of(400, GovernedSqlErrorCodes.PagingTokenInvalid) : null,
         // Issue #447: a transport denial keeps its own code and the fixed text (no source name); the row precedes every
         // SecurityException row, which would otherwise turn it into SQL_POLICY_DENIED / SQL_POLICY_VIOLATION and hide the cause.
         e => e is TransportNotAllowedException
@@ -113,7 +129,12 @@ public static class SqlCompilerErrorMapper
         e => e is ParseCanceledException { InnerException: TimeoutException } ? Of(422, GovernedSqlErrorCodes.LimitExceeded, nameof(SqlLimitKind.CompileTime)) : null,
         // #296: matched by type only, before the generic syntax row. Any other ParseCanceledException stays a syntax error.
         e => e is LiteralTokenRejectedException ? Of(400, GovernedSqlErrorCodes.LiteralNotPermitted) : null,
-        e => e is ParseCanceledException or RecognitionException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
+        e => e switch
+        {
+            SqlSyntaxErrorException syn => new SqlErrorMapping(400, GovernedSqlErrorCodes.SyntaxError, GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.SyntaxError), Line: syn.Line, Column: syn.Column),
+            ParseCanceledException or RecognitionException => Of(400, GovernedSqlErrorCodes.SyntaxError),
+            _ => null
+        },
         // #310: a caller mistake (an aggregate over a type it does not accept), not a policy refusal.
         e => e is AggregateTypeInvalidException ? Of(400, GovernedSqlErrorCodes.AggregationInvalidFunctionForType) : null,
         e => e is MissingClientParameterException ? Of(400, GovernedSqlErrorCodes.ParameterMissing) : null,
@@ -176,6 +197,11 @@ public static class SqlCompilerErrorMapper
 
     private static SqlErrorMapping? MapGoverned(string code) => code switch
     {
+        GovernedSqlErrorCodes.QueryCostExceeded => Of(400, code),
+        GovernedSqlErrorCodes.RateLimitExceeded => Of(429, code),
+        GovernedSqlErrorCodes.ServiceUnavailable => Of(503, code),
+        GovernedSqlErrorCodes.PagingUnsupported => Of(400, code),
+        GovernedSqlErrorCodes.PagingTokenInvalid => Of(400, code),
         GovernedSqlErrorCodes.RequiredFilterColumnMissing => Of(400, code),
         GovernedSqlErrorCodes.InvalidIdentifierQualification => Of(400, code),
         GovernedSqlErrorCodes.CheckOptionViolation => Of(403, code),

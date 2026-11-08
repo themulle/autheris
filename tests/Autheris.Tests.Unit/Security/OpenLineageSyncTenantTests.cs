@@ -38,30 +38,22 @@ public sealed class OpenLineageSyncTenantTests
 
         const string boundTenant = "tenant-from-realm";
         var realm = new IdentityRealm("realm-1", IdentityRealmKind.EntraWorkforce, TenantBindingSpecification.Fixed(new TenantId(boundTenant)));
-        Sid.RealmLookup = r => r == "realm-1" ? realm : null;
 
-        try
-        {
-            var context = new DefaultHttpContext();
-            context.User = DefaultTenantCaller.StampRealm(realm, new ClaimsIdentity([
-                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"),
-                new Claim(ClaimTypes.Role, "GovernanceAdmin"),
-                new Claim("autheris:realm", "realm-1"),
-                new Claim("tenant_id", "ignored-tenant-claim")
-            ], "TestAuth"));
+        var context = new DefaultHttpContext();
+        context.User = DefaultTenantCaller.StampRealm(realm, new ClaimsIdentity([
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"),
+            new Claim(ClaimTypes.Role, "GovernanceAdmin"),
+            new Claim("autheris:realm", "realm-1"),
+            new Claim("tenant_id", "ignored-tenant-claim")
+        ], "TestAuth"));
 
-            var result = await GovernanceEndpoints.SyncOpenLineageAsync(client, context, CancellationToken.None);
-            var status = await GetStatusCodeAsync(result, context);
-            status.ShouldBe(StatusCodes.Status200OK);
+        var result = await GovernanceEndpoints.SyncOpenLineageAsync(client, context, CancellationToken.None);
+        var status = await GetStatusCodeAsync(result, context);
+        status.ShouldBe(StatusCodes.Status200OK);
 
-            await client.Received(1).PushLineageGraphAsync(
-                Arg.Is<TenantId>(t => t.Value == boundTenant),
-                Arg.Any<CancellationToken>());
-        }
-        finally
-        {
-            Sid.RealmLookup = null;
-        }
+        await client.Received(1).PushLineageGraphAsync(
+            Arg.Is<TenantId>(t => t.Value == boundTenant),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

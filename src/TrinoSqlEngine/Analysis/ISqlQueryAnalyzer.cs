@@ -24,6 +24,10 @@ public readonly record struct TableAccessTarget(
 
 public readonly record struct JoinColumnReference(string? TableOrAlias, string ColumnName);
 public readonly record struct FilterColumnReference(string? TableOrAlias, string ColumnName);
+public readonly record struct CrossJoinTarget(
+    string? LeftTableOrAlias,
+    string? RightTableOrAlias,
+    bool IsUnknownCardinality = false);
 
 public sealed record SqlQueryMetadata(
     SqlStatementType StatementType,
@@ -55,6 +59,12 @@ public sealed record SqlQueryMetadata(
     /// <see cref="ReferencedTables"/> (unchanged for other consumers); callers reject the statement before any existence-dependent answer.
     /// </summary>
     public bool HasNonRecursiveSelfReference { get; init; }
+
+    public int CrossJoinCount { get; init; }
+    public int SetOperationCount { get; init; }
+    public bool HasRootOrderBy { get; init; }
+    public bool HasRootOffset { get; init; }
+    public IReadOnlyList<CrossJoinTarget>? CrossJoins { get; init; }
 }
 
 public interface ISqlQueryAnalyzer
