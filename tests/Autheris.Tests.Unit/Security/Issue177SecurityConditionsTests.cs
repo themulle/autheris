@@ -173,7 +173,7 @@ public sealed class Issue177SecurityConditionsTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task T_SEC_GOV177_03_DebitAdjustment_AllowsNegativeBalance_NoUnderflowToMax()
+    public async Task T_SEC_GOV177_03_DebitAdjustment_ClampedAtZero_NoNegativeUnderflow()
     {
         // Debit adjustments allow negative balances to prevent unmetered over-quota execution.
         var limiter = new Autheris.Infrastructure.RateLimiting.InMemoryRateLimiterService();
