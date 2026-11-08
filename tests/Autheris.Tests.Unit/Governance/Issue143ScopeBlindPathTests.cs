@@ -93,11 +93,20 @@ public sealed class Issue143ScopeBlindPathTests
                 return real.ResolveAccess(ci.ArgAt<Sid>(0), ci.ArgAt<IReadOnlySet<Sid>>(1), ci.ArgAt<IReadOnlySet<string>>(2), ci.ArgAt<TableIdentifier>(3),
                     ci.ArgAt<IReadOnlyList<Consent>>(4), ci.ArgAt<DatabaseDialect>(5), ci.ArgAt<IReadOnlySet<Sid>?>(6), ci.ArgAt<IReadOnlySet<string>?>(7));
             });
+        var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
+        var adp = new AccessDecisionPoint(
+            options,
+            Substitute.For<IPolicyEnforcementService>(),
+            consentService: recording,
+            consentRepo: repo,
+            metadataRepo: metadataRepo);
         return new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(), metadataRepo,
-            Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }),
+            options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, recording, repo);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+            adp,
+            consentRepo: repo);
     }
 
     private static Task LoadAsync(IcebergRestCatalogFederationService service, ClaimsPrincipal principal) =>

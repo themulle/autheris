@@ -369,4 +369,39 @@ public sealed class ModuleLoaderTests : IDisposable
         File.WriteAllText(Path.Combine(moduleDir, "module.json"), ModulePackageBuilder.SerializeManifestJson(manifest));
         return moduleDir;
     }
+
+    [Fact]
+    public void Loaded_module_emits_startup_event()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateSignedSampleModuleDirectory(key);
+
+        var services = new ServiceCollection();
+        var config = BuildEnabledConfig("sample");
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Production };
+
+        var testLogger = new TestModuleLoaderLogger();
+        var loader = new ModuleLoader(publicKeyOverride: key, isDirectoryWritableOverride: _ => false, logger: testLogger);
+        var result = loader.LoadAndConfigureServices(services, config, env);
+
+        result.LoadedModuleIds.ShouldBe(["sample"]);
+        testLogger.Logs.ShouldContain(l => l.LogLevel == Microsoft.Extensions.Logging.LogLevel.Information && l.Message.Contains("ModuleLoaded") && l.Message.Contains("sample"));
+    }
+
+    private sealed class TestModuleLoaderLogger : Microsoft.Extensions.Logging.ILogger<ModuleLoader>
+    {
+        public readonly List<(Microsoft.Extensions.Logging.LogLevel LogLevel, string Message)> Logs = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Logs.Add((logLevel, formatter(state, exception)));
+        }
+    }
 }

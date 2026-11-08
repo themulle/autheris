@@ -146,7 +146,8 @@ public sealed partial class TableAccessPolicy
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
         _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
-        _policyEnforcementService = policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService));
+        ArgumentNullException.ThrowIfNull(policyEnforcementService);
+        _policyEnforcementService = policyEnforcementService;
         _rebacEvaluator = rebacEvaluator ?? throw new ArgumentNullException(nameof(rebacEvaluator));
         _clientIpResolver = clientIpResolver;
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -393,7 +394,7 @@ public sealed partial class TableAccessPolicy
             return decision;
         }
 
-        if (!consentBypassed && _policyEnforcementService != null && _policyEnforcementService.HasPolicies(query.Tenant))
+        if (!consentBypassed && _policyEnforcementService.HasPolicies(query.Tenant))
         {
             var policyDecision = await _policyEnforcementService.EvaluatePolicyAsync(BuildEvaluationContext(query), ct).ConfigureAwait(false);
             if (!policyDecision.IsAllowed)
@@ -493,7 +494,7 @@ public sealed partial class TableAccessPolicy
 
         if (!isClusterAdmin && !hasDmlWriterRole)
         {
-            if (_policyEnforcementService == null || !_policyEnforcementService.HasPolicies(tenant))
+            if (!_policyEnforcementService.HasPolicies(tenant))
             {
                 return false;
             }
