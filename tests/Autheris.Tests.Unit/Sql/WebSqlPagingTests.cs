@@ -354,7 +354,7 @@ public sealed class WebSqlPagingTests
         var tenant = new TenantId("tenant-1");
 
         var request = new GovernedSqlQueryRequest(
-            "SELECT id FROM crm.customers ORDER BY id",
+            "SELECT id, name FROM crm.customers ORDER BY id",
             Page: new SqlPageWindow(80, 50, 2));
 
         var result = await service.ExecuteQueryBufferedAsync(request, user, tenant);
