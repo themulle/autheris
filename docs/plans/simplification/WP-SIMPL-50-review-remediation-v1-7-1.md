@@ -1,5 +1,5 @@
 # WP-SIMPL-50 Remediation of the v1.7.1..HEAD code and security reviews
-Status: Ready for implementation (Phase 3 approved; owner confirmed all defaults 2026-11-07; implementation not started, waits for an explicit owner go)
+Status: In implementation (Phase 3 approved; owner confirmed all defaults 2026-11-07). PR A merged (#565); PR B1a (B1, B2, B3, C5, C6) Phase 5 approved, in CI; next B1b, B2, B3, B5, B6, C.
 Parent: [plan](../2026-11-05-plan-project-simplification.md) | Sources: (1) code review of `v1.7.1..HEAD` (30 commits, 2026-11-07), three read-only sampled reviews; (2) security review of `v1.7.1..5bbb0576` (2026-11-07), four read-only slices (module host and startup, authorization and identity, SQL and data plane, extensions/egress/secrets) | Code verified: `origin/main` 8fc7a66b (2026-11-07; the only commit after 5bbb0576 touches none of the files below) | Security conditions: SEC-AZ-04 (fail closed), SEC-PROD-01 (no new anonymous routes); module items follow the WP-SIMPL-25 trust conditions
 
 ## 1. Goal and outcome

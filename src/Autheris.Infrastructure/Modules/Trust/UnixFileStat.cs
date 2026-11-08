@@ -83,7 +83,7 @@ public static partial class UnixFileStat
     }
 
     /// <summary>Returns the numeric owner of the path itself (links are not followed), or <see langword="null"/> when unknown.</summary>
-    public static uint? TryGetOwnerUid(string path) => TryStat(path, followLinks: false)is { Failed: false } i ? i.Uid : null;
+    public static uint? TryGetOwnerUid(string path) => TryStat(path, followLinks: false) is { Failed: false } i ? i.Uid : null;
 
     /// <summary>Returns the effective user id of the process, or <see langword="null"/> when unavailable.</summary>
     public static uint? TryGetEffectiveUid()
