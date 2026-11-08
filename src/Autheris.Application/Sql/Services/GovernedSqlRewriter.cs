@@ -46,11 +46,7 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 {
-    private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = new()
-    {
-        RejectComments = true, RejectBackslashInStrings = true, RejectEscapedStringLiterals = true,
-        RejectNonAsciiIdentifiers = true, RejectDotsInQuotedIdentifiers = true, RejectTimeTravelQueries = true, RejectReservedIdentifiers = true
-    };
+    private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = ClientSqlTokenPolicy.Analysis;
 
     private const string InternalParameterPrefix = GovernedSqlExecutionService.InternalParameterPrefix;
 
@@ -146,7 +142,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         SqlRowLimit? rowLimit = null,
         bool probeExtraRow = false,
         bool plannedTableRead = false,
-        ClientListShapes? clientLists = null)
+        ClientListShapes? clientLists = null,
+        SqlPageWindow? page = null)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -653,6 +650,47 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         long deliveredRowLimit = probeExtraRow && !isDml && maxRows > 0 ? maxRows : 0;
         long enforcedMaxRows = deliveredRowLimit > 0 && maxRows < long.MaxValue ? maxRows + 1 : maxRows;
 
+        string? pagingUnavailable = null;
+        bool bindPageOffset = false;
+        long? pageOffsetVal = null;
+        long maxOffset = webSqlOptions.Paging?.MaxOffset ?? 10_000;
+
+        if (page != null)
+        {
+            if (isDml || metadata.StatementType != SqlStatementType.Select)
+            {
+                throw new SqlPagingUnsupportedException();
+            }
+
+            if (distinctCatalogs.Count > 1)
+            {
+                pagingUnavailable = "federated";
+            }
+            else if (metadata.HasRootOffset || metadata.HasExplicitLimit)
+            {
+                pagingUnavailable = "statement_has_limit";
+            }
+            else if (!metadata.HasRootOrderBy)
+            {
+                pagingUnavailable = "order_by_required";
+            }
+
+            if (pagingUnavailable != null)
+            {
+                if (page.Offset > 0)
+                {
+                    throw new SqlPagingTokenInvalidException();
+                }
+            }
+            else
+            {
+                bindPageOffset = true;
+                pageOffsetVal = page.Offset;
+                enforcedMaxRows = page.Size + 1;
+                deliveredRowLimit = page.Size;
+            }
+        }
+
         if (!targetDatabaseDialect.HasValue || !SqlDialectMapper.IsExecutable(targetDatabaseDialect.Value))
         {
             throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedDialectMessage);
@@ -689,7 +727,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             };
 
         var assembly = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: false), ct).ConfigureAwait(false);
-        var request = CreateCompileRequest(assembly.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists);
+        var request = CreateCompileRequest(assembly.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, bindPageOffset, pageOffsetVal, maxOffset);
 
         // -------------------------------------------------------------
         // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
@@ -711,7 +749,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             // The retry starts from the original decisions and the unsubstituted predicates (never from the first assembly's provider), with the
             // stage disabled: no epoch read, cache lookup or key query, same token and deadline. Its failure is not retried.
             var retried = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: true), ct).ConfigureAwait(false);
-            request = CreateCompileRequest(retried.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists);
+            request = CreateCompileRequest(retried.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, bindPageOffset, pageOffsetVal, maxOffset);
             compiled = CompileStatement(rawSql, request, mayRetry: false, ct);
         }
 
@@ -725,7 +763,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             LogKeySets(assembly.KeySets);
         }
 
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset);
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();
@@ -770,7 +808,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         bool isDml,
         long enforcedMaxRows,
         IReadOnlySet<string> allowedFunctions,
-        ClientListShapes? clientLists)
+        ClientListShapes? clientLists,
+        bool bindPageOffset = false,
+        long? pageOffset = null,
+        long maxOffset = 1_000_000)
     {
         // a table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
         // is denied here with the same exception as every other "table not usable" cause, before the compiler could answer differently.
@@ -785,7 +826,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists,
             timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false,
-            translateDateFunctions: true);
+            translateDateFunctions: true,
+            bindPageOffset: bindPageOffset,
+            pageOffset: pageOffset,
+            maxOffset: maxOffset);
     }
 
     private CompiledSql CompileStatement(string rawSql, CompileRequest request, bool mayRetry, CancellationToken ct)

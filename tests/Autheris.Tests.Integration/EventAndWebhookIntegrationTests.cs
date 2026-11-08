@@ -105,6 +105,15 @@ public sealed class EventAndWebhookIntegrationTests : IClassFixture<WebApplicati
         var planResult = await planningService.PlanAccessAsync(planReq, "admin-1");
         planResult.ShouldNotBeNull();
 
+        // A state change on a table that does not exist is "not found" (no write, no event): seed the table first.
+        var tables = scope.ServiceProvider.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
+        await tables.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Identifier = new Autheris.Domain.Common.TableIdentifier("crm", "public", "customers"),
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "crm", SchemaName = "public", TableName = "customers", DisplayName = "customers", IsActive = true },
+            Columns = [new TableColumn { ColumnName = "email", DataType = "TEXT" }]
+        });
+
         // Act 2: Set Dataset State
         var stateReq = new AdminSetDatasetStateRequest(
             DatasetId: "crm.customers",

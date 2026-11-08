@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
 using System.IO;
@@ -174,13 +175,15 @@ public sealed class WebSqlLimitAndTruncatedTests
         };
 
         var sqlService = Substitute.For<IGovernedSqlExecutionService>();
-        sqlService.ExecuteGovernedQueryAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<Func<DbDataReader, CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+        sqlService.ExecuteGovernedQueryAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<Func<DbDataReader, GovernedResultInfo, CancellationToken, Task>>(), Arg.Any<CancellationToken>())
             .Returns(async callInfo =>
             {
-                var writer = callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>();
+                var writer = callInfo.Arg<Func<DbDataReader, GovernedResultInfo, CancellationToken, Task>>();
                 // The governed service delivers the limit (100) and reads one probe row beyond it.
                 using var reader = CreateDataTableReader(101);
-                await writer(new RowLimitedDataReader(reader, 100), CancellationToken.None);
+                var limitedReader = new RowLimitedDataReader(reader, 100);
+                var info = new GovernedResultInfo(SqlResultColumns.Describe(limitedReader), ImmutableArray<bool>.Empty);
+                await writer(limitedReader, info, CancellationToken.None);
             });
 
         await WebSqlEndpoints.HandleWebSqlRequest(context, sqlService, Options.Create(options), NullLoggerFactory.Instance);
@@ -205,12 +208,14 @@ public sealed class WebSqlLimitAndTruncatedTests
         var options = new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 1000 } };
 
         var sqlService = Substitute.For<IGovernedSqlExecutionService>();
-        sqlService.ExecuteGovernedQueryAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<Func<DbDataReader, CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+        sqlService.ExecuteGovernedQueryAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<Func<DbDataReader, GovernedResultInfo, CancellationToken, Task>>(), Arg.Any<CancellationToken>())
             .Returns(async callInfo =>
             {
-                var writer = callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>();
+                var writer = callInfo.Arg<Func<DbDataReader, GovernedResultInfo, CancellationToken, Task>>();
                 using var reader = CreateDataTableReader(100);
-                await writer(new RowLimitedDataReader(reader, 100), CancellationToken.None);
+                var limitedReader = new RowLimitedDataReader(reader, 100);
+                var info = new GovernedResultInfo(SqlResultColumns.Describe(limitedReader), ImmutableArray<bool>.Empty);
+                await writer(limitedReader, info, CancellationToken.None);
             });
 
         await WebSqlEndpoints.HandleWebSqlRequest(context, sqlService, Options.Create(options), NullLoggerFactory.Instance);
@@ -237,12 +242,13 @@ public sealed class WebSqlLimitAndTruncatedTests
         };
 
         var sqlService = Substitute.For<IGovernedSqlExecutionService>();
-        sqlService.ExecuteGovernedQueryAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<Func<DbDataReader, CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+        sqlService.ExecuteGovernedQueryAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<Func<DbDataReader, GovernedResultInfo, CancellationToken, Task>>(), Arg.Any<CancellationToken>())
             .Returns(async callInfo =>
             {
-                var writer = callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>();
+                var writer = callInfo.Arg<Func<DbDataReader, GovernedResultInfo, CancellationToken, Task>>();
                 using var reader = CreateDataTableReader(5);
-                await writer(reader, CancellationToken.None);
+                var info = new GovernedResultInfo(SqlResultColumns.Describe(reader), ImmutableArray<bool>.Empty);
+                await writer(reader, info, CancellationToken.None);
             });
 
         await WebSqlEndpoints.HandleWebSqlRequest(context, sqlService, Options.Create(options), NullLoggerFactory.Instance);

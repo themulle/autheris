@@ -93,6 +93,7 @@ public interface IAccessPlanningService
         AdminRegisterDatasourceRequest request,
         string adminSid,
         string? tenantId = null,
+        bool isClusterAdmin = false,
         CancellationToken ct = default);
 
     /// <summary>
@@ -102,6 +103,7 @@ public interface IAccessPlanningService
         AdminSetDatasetStateRequest request,
         string adminSid,
         string? tenantId = null,
+        TenantId? restrictToTenant = null,
         CancellationToken ct = default);
 
     /// <summary>

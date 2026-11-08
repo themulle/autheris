@@ -86,7 +86,7 @@ public sealed class ErrorBodyMigrationEndpointTests
     public async Task Migrated_Error_Bodies_Do_Not_Echo_Exception_Or_Input_Catalog_SetDatasetState_ServiceMessage()
     {
         var service = Substitute.For<IAccessPlanningService>();
-        service.SetDatasetStateAsync(default!, default!, default!, default).ReturnsForAnyArgs(new AdminSetDatasetStateResult("a.b.c", "Active", "Active", false, Canary));
+        service.SetDatasetStateAsync(default!, default!, default!, default, default).ReturnsForAnyArgs(new AdminSetDatasetStateResult("a.b.c", "Active", "Active", false, Canary));
 
         var r = await ExecAsync(await CatalogApiEndpoints.SetDatasetStateHandler("a.b.c", new AdminSetDatasetStateDto("Active"), service, NewContext(), default));
 

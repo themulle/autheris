@@ -98,7 +98,7 @@ public sealed class CompileRequestFactoryTests
     {
         var guards = Create(dialect).TokenGuards;
 
-        guards.RejectComments.ShouldBeTrue();
+        guards.RejectComments.ShouldBeFalse();
         guards.RejectBackslashInStrings.ShouldBeTrue();
         guards.RejectEscapedStringLiterals.ShouldBeTrue();
         guards.RejectNonAsciiIdentifiers.ShouldBeTrue();

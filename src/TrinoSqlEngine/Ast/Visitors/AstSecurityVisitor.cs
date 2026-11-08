@@ -3,6 +3,7 @@ namespace TrinoSqlEngine.Ast.Visitors;
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Linq;
 using System.Security;
@@ -31,6 +32,12 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     private readonly AstSecurityVisitorOptions _options;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
     private readonly Stack<Dictionary<string, HashSet<string>>> _cteMaskedColumns = new();
+    private readonly Stack<Dictionary<string, ImmutableArray<bool>>> _cteMasksStack = new();
+
+    /// <summary>
+    /// Output column mask flags for each root output column of a SELECT query.
+    /// </summary>
+    public ImmutableArray<bool> OutputColumnMasks { get; private set; } = ImmutableArray<bool>.Empty;
 
     /// <summary>CTE names are compared by ordinal bytes: a delimited physical name that differs in case is not the CTE (INV-11).</summary>
     private static StringComparer CteScopeComparer =>
@@ -57,6 +64,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         _typed = typedPolicy;
         _cteScopeStack.Push(new HashSet<string>(CteScopeComparer));
         _cteMaskedColumns.Push(new Dictionary<string, HashSet<string>>(CteScopeComparer));
+        _cteMasksStack.Push(new Dictionary<string, ImmutableArray<bool>>(CteScopeComparer));
     }
 
     private SecurityScope CurrentScope =>

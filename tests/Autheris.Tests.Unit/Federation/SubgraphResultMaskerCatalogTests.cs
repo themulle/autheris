@@ -184,6 +184,7 @@ public sealed class SubgraphResultMaskerCatalogTests
         var repo = Substitute.For<ITableMetadataRepository>();
         var table = new TableMetadata
         {
+            OwnerTenantId = "tenant-a",
             Columns =
             [
                 new TableColumn { ColumnName = "loyalty_code", IsSensitive = true },
