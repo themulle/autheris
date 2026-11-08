@@ -46,8 +46,7 @@ public sealed partial class GovernedSqlExecutor
         SqlQueryMetadata? metadata,
         CancellationToken ct)
     {
-        bool isMeteredTransport = string.Equals(request.Transport, "WebSql", StringComparison.OrdinalIgnoreCase) ||
-                                  string.Equals(request.Transport, "Trino", StringComparison.OrdinalIgnoreCase);
+        bool isMeteredTransport = SqlTransports.IsCostMetered(request.Transport);
 
         if (!isMeteredTransport || request.PlannedTableRead)
         {

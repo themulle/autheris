@@ -26,6 +26,22 @@ public static class SqlTransports
     /// <summary>The in-memory DuckDB OLAP endpoint (<c>POST /api/v1/olap/query</c>). Never part of the default allowed list.</summary>
     public const string Olap = "Olap";
 
+    /// <summary>The Parquet export route; metered like WebSQL client SQL.</summary>
+    public const string Parquet = "Parquet";
+
+    /// <summary>
+    /// SEC-51-12 (fail-closed): the server-stamped transports priced by their own pipeline; every other value
+    /// (null, empty, unknown, WebSql, Trino, Parquet) is metered by the statement cost gate.
+    /// </summary>
+    public static bool IsCostMetered(string? transport) =>
+        string.IsNullOrWhiteSpace(transport)
+        || !(string.Equals(transport, Rest, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, Mcp, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, ArrowExport, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, SqlEndpoints, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, AsyncJob, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, Olap, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>
     /// Issue #447: the federation transport name of a server-stamped ingress;<c>null</c> for an unset ingress.
     /// GraphQL and OData read through the planner like REST, so they are judged as <see cref="Rest"/>.
