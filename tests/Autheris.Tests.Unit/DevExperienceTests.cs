@@ -37,7 +37,7 @@ public sealed class DevExperienceTests
                 Session = new BasicAuthSessionOptions { Enabled = session, AllowedEnvironments = ["Development"] },
                 Users =
                 [
-                    new BasicAuthUserConfig { Username = "owner", Password = password, Sid = "S-1-5-21-DATAOWNER-1", Roles = ["DataOwner"] },
+                    new BasicAuthUserConfig { Username = "owner", Password = password, Sid = "S-1-5-21-1000-1000-1000-1001", Roles = ["DataOwner"] },
                     new BasicAuthUserConfig { Username = "analyst-b", Password = "$pbkdf2$600000$x", TenantId = "tenant-b", Roles = ["Analyst"] }
                 ]
             }
@@ -77,7 +77,7 @@ public sealed class DevExperienceTests
         var personas = DevEndpoints.ListPersonas(CreateOptions());
 
         personas.Count.ShouldBe(2);
-        personas[0].Sid.ShouldBe("S-1-5-21-DATAOWNER-1");
+        personas[0].Sid.ShouldBe("S-1-5-21-1000-1000-1000-1001");
         personas[0].LoginUrl.ShouldBe("/api/dev/login/owner");
         personas[1].Sid.ShouldBe("S-1-5-21-BASIC-ANALYST-B");
         personas[1].Tenant.ShouldBe("tenant-b");

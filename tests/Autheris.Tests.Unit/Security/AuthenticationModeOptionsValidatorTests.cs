@@ -113,6 +113,7 @@ public sealed class AuthenticationModeOptionsValidatorTests
 
         Failure(options).ShouldContain("Mode=Direct requires at least one enabled scheme");
         Failure(options, "Development").ShouldBeEmpty();
+        Failure(new GatewayOptions { Authentication = new AuthenticationOptions { Mode = AuthenticationMode.Direct, EnableTestAuthHandler = true } }).ShouldBeEmpty();
     }
 
     [Fact]
