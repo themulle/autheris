@@ -42,7 +42,16 @@ internal static class GatewayAuthSchemeSelector
         if (forwardAuth.Enabled && mode == AuthenticationMode.Both)
         {
             var headers = context.Request.Headers;
-            var hasIdentityHeader = forwardAuth.GetIdentityHeaderNames().Any(headers.ContainsKey);
+            var hasIdentityHeader = false;
+            foreach (var name in forwardAuth.IdentityHeaderNames)
+            {
+                if (headers.ContainsKey(name))
+                {
+                    hasIdentityHeader = true;
+                    break;
+                }
+            }
+
             if (hasIdentityHeader && !string.IsNullOrWhiteSpace(authHeader))
             {
                 context.Items[RejectReasonItemKey] = AmbiguousIdentityReason;

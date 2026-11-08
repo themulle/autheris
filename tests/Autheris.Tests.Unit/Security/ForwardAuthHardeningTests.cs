@@ -199,4 +199,20 @@ public sealed class ForwardAuthHardeningTests
         result.Succeeded.ShouldBeTrue();
         result.Principal!.GetUserSid()?.Value.ShouldBe("S-1-5-21-FORWARD-USR-alice");
     }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-02c")]
+    public async Task Upstream_principal_carries_no_authorization_derived_claim()
+    {
+        var (result, _) = await RunAsync(Forward(), h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["Authorization"] = "Bearer token-marker-value";
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Principal!.Claims.Select(c => c.Value).ShouldAllBe(v => !v.Contains("token-marker-value"));
+        result.Principal.Claims.ShouldNotContain(c => c.Type == "access_token" || c.Type == "authorization");
+        result.Principal.GetUserSid()?.Value.ShouldBe("S-1-5-21-FORWARD-USR-alice");
+    }
 }

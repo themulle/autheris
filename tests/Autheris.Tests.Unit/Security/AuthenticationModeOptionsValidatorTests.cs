@@ -163,4 +163,10 @@ public sealed class AuthenticationModeOptionsValidatorTests
         Failure(Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, RolesHeader = " " }))
             .ShouldContain("ForwardAuth:RolesHeader must not be empty");
     }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-02b")]
+    public void Duplicate_header_names_fail_startup() =>
+        Failure(Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, GroupsHeader = "x-forwarded-roles" }))
+            .ShouldContain("duplicates another ForwardAuth header name");
 }

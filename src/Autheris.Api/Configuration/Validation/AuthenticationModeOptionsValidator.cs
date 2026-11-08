@@ -93,6 +93,15 @@ public sealed class AuthenticationModeOptionsValidator(
             failures.Add($"Security violation: Gateway:Authentication:ForwardAuth:{key} must not be empty or whitespace.");
         }
 
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in names.Append((Key: "UserSidHeader", Value: fwd.UserSidHeader)).Where(n => !string.IsNullOrWhiteSpace(n.Value)))
+        {
+            if (!seen.Add(value!))
+            {
+                failures.Add($"Security violation: Gateway:Authentication:ForwardAuth:{key} duplicates another ForwardAuth header name; every header name must be distinct.");
+            }
+        }
+
         if (fwd.UserSidHeader is not null && string.IsNullOrWhiteSpace(fwd.UserSidHeader))
         {
             failures.Add("Security violation: Gateway:Authentication:ForwardAuth:UserSidHeader must not be whitespace.");

@@ -1,6 +1,12 @@
 namespace Autheris.Api.Security;
 
 using System.Text.Encodings.Web;
+using System.Text.Json;
+using Autheris.Application.Audit;
+using Autheris.Domain.Audit;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
+using Microsoft.Extensions.DependencyInjection;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
@@ -22,15 +28,15 @@ public sealed class RejectAuthenticationHandler : AuthenticationHandler<Authenti
         {
             // Fixed reason code only: no header value reaches the audit record, the log or the response.
             Logger.LogWarning("Authentication rejected: {Reason}.", code);
-            if (Context.RequestServices.GetService(typeof(Autheris.Application.Audit.IAuditWriter)) is Autheris.Application.Audit.IAuditWriter audit)
+            if (Context.RequestServices.GetService<IAuditWriter>() is { } audit)
             {
-                await audit.RecordBestEffortAsync(new Autheris.Domain.Model.AuditLogEntry
+                await audit.RecordBestEffortAsync(new AuditLogEntry
                 {
-                    TenantId = Autheris.Domain.Common.TenantId.Platform,
-                    EventType = Autheris.Domain.Audit.AuditEventTypes.AuthFailed,
+                    TenantId = TenantId.Platform,
+                    EventType = AuditEventTypes.AuthFailed,
                     Decision = "DENY",
                     TraceId = Context.TraceIdentifier,
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = code })
+                    DetailsJson = JsonSerializer.Serialize(new { reason = code })
                 }, Context.RequestAborted).ConfigureAwait(false);
             }
 

@@ -140,7 +140,9 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             }
 
             var actualBytes = Encoding.UTF8.GetBytes(actualSecretStr);
-            var hashExpected = SHA256.HashData(expectedBytes);
+            var hashExpected = forwardAuthOptions.SharedSecretDigest is { } digest && ReferenceEquals(expectedBytes, _precomputedSharedSecretBytes)
+                ? digest
+                : SHA256.HashData(expectedBytes);
             var hashActual = SHA256.HashData(actualBytes);
 
             if (!CryptographicOperations.FixedTimeEquals(hashExpected, hashActual))
@@ -252,6 +254,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             claims.Add(new Claim("tid", tenant));
         }
 
+        var hasRole = false;
         // Extract Roles (comma or semicolon separated; count and total length are bounded)
         var rolesHeader = !string.IsNullOrWhiteSpace(forwardAuthOptions.RolesHeader)
             ? forwardAuthOptions.RolesHeader
@@ -271,7 +274,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
                 return Task.FromResult(AuthenticateResult.Fail("ForwardAuth roles header too long."));
             }
 
-            var allowedRoles = new HashSet<string>(forwardAuthOptions.GetEffectiveAllowedRoles(), StringComparer.OrdinalIgnoreCase);
+            var allowedRoles = forwardAuthOptions.AllowedRoleSet;
             var roles = rolesRaw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (roles.Length > MaxRoles)
             {
@@ -314,11 +317,12 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
                 }
 
                 claims.Add(new Claim(ClaimTypes.Role, r));
+                hasRole = true;
             }
         }
 
         // Map default enterprise user role if none assigned
-        if (!claims.Any(c => c.Type == ClaimTypes.Role))
+        if (!hasRole)
         {
             claims.Add(new Claim(ClaimTypes.Role, "GatewayUser"));
         }
@@ -333,14 +337,10 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
     private const int MaxRolesHeaderLength = 2048;
     private const int MaxRoles = 32;
 
-    private static readonly System.Diagnostics.Metrics.Counter<long> RoleDiscardedTotal =
-        new System.Diagnostics.Metrics.Meter("Autheris.Core").CreateCounter<long>(
-            "autheris_forwardauth_role_discarded_total", description: "ForwardAuth header roles discarded, by fixed reason.");
-
     // The log line and the counter carry a fixed reason only, never the role value.
     private void DiscardRole(string reason)
     {
-        RoleDiscardedTotal.Add(1, new KeyValuePair<string, object?>("reason", reason));
+        AuthMetrics.ForwardAuthRoleDiscarded.Add(1, new KeyValuePair<string, object?>("reason", reason));
         Logger.LogWarning("ForwardAuth: discarded a header role ({Reason}).", reason);
     }
 

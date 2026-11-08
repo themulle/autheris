@@ -3,7 +3,10 @@ namespace Autheris.Api.Middleware;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Autheris.Api.Security;
+using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// SEC C-1 Edge Stripping: Strips any client-supplied <c>x-autheris-*</c> headers from untrusted clients
@@ -12,19 +15,15 @@ using Microsoft.AspNetCore.Http;
 /// </summary>
 public sealed class EdgeHeaderStrippingMiddleware
 {
-    private static readonly System.Diagnostics.Metrics.Counter<long> StrippedTotal =
-        new System.Diagnostics.Metrics.Meter("Autheris.Core").CreateCounter<long>(
-            "autheris_auth_identity_headers_stripped_total", description: "ForwardAuth identity headers removed from Direct-mode requests.");
-
     private readonly RequestDelegate _next;
     private readonly string[] _directModeHeaders;
 
-    public EdgeHeaderStrippingMiddleware(RequestDelegate next, Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions> options)
+    public EdgeHeaderStrippingMiddleware(RequestDelegate next, IOptions<GatewayOptions> options)
     {
         _next = next ?? throw new ArgumentNullException(nameof(next));
-        var auth = options?.Value.Authentication ?? new Autheris.Domain.Options.AuthenticationOptions();
-        _directModeHeaders = auth.EffectiveMode == Autheris.Domain.Options.AuthenticationMode.Direct
-            ? [.. auth.ForwardAuth.GetIdentityHeaderNames().Append(auth.ForwardAuth.SharedSecretHeader).Where(h => !string.IsNullOrWhiteSpace(h)).Distinct(StringComparer.OrdinalIgnoreCase)]
+        var auth = options?.Value.Authentication ?? new AuthenticationOptions();
+        _directModeHeaders = auth.EffectiveMode == AuthenticationMode.Direct
+            ? [.. auth.ForwardAuth.IdentityHeaderNames.Append(auth.ForwardAuth.SharedSecretHeader).Where(h => !string.IsNullOrWhiteSpace(h)).Distinct(StringComparer.OrdinalIgnoreCase)]
             : [];
     }
 
@@ -44,7 +43,7 @@ public sealed class EdgeHeaderStrippingMiddleware
         {
             if (context.Request.Headers.Remove(h))
             {
-                StrippedTotal.Add(1);
+                AuthMetrics.IdentityHeadersStripped.Add(1);
             }
         }
 

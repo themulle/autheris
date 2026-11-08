@@ -85,9 +85,21 @@ public sealed class ForwardAuthOptions
     /// <summary>The effective upstream SID trust: the new key, else the legacy alias, else false.</summary>
     public bool IsUpstreamSidTrusted => TrustUpstreamSids ?? TrustUpstreamGroupSids ?? false;
 
-    /// <summary>Configured, non-blank identity header names (user, email, groups, roles, tenant, user SID); computed from options only.</summary>
-    public IEnumerable<string> GetIdentityHeaderNames() =>
-        new[] { UserHeader, EmailHeader, GroupsHeader, RolesHeader, TenantHeader, UserSidHeader }.Where(h => !string.IsNullOrWhiteSpace(h))!;
+    private string[]? _identityHeaderNames;
+    private HashSet<string>? _allowedRoleSet;
+    private byte[]? _sharedSecretDigest;
+
+    /// <summary>Configured, non-blank identity header names (user, email, groups, roles, tenant, user SID); computed once from options only.</summary>
+    public IReadOnlyList<string> IdentityHeaderNames => _identityHeaderNames ??=
+        [.. new[] { UserHeader, EmailHeader, GroupsHeader, RolesHeader, TenantHeader, UserSidHeader }.Where(h => !string.IsNullOrWhiteSpace(h))!];
+
+    /// <summary>The effective allowed roles as a case-insensitive set, built once.</summary>
+    public IReadOnlySet<string> AllowedRoleSet => _allowedRoleSet ??= new HashSet<string>(GetEffectiveAllowedRoles(), StringComparer.OrdinalIgnoreCase);
+
+    // SHA-256 of the plain shared secret (UTF-8), computed once; null when no plain secret is configured.
+    public byte[]? SharedSecretDigest => string.IsNullOrWhiteSpace(SharedSecret)
+        ? null
+        : _sharedSecretDigest ??= System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(SharedSecret));
 
     /// <summary>
     /// SEC H-1: When true, the proxy-asserted tenant header (X-Forwarded-Tenant) is honored, provided it is in AllowedTenantIds.

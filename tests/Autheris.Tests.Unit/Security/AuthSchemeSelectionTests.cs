@@ -166,8 +166,8 @@ public sealed class AuthSchemeSelectionTests
     {
         var forward = new ForwardAuthOptions { Enabled = true, UserHeader = "X-U", EmailHeader = "X-E", GroupsHeader = "X-G", RolesHeader = "X-R", TenantHeader = "X-T", UserSidHeader = "X-S" };
 
-        forward.GetIdentityHeaderNames().ShouldBe(["X-U", "X-E", "X-G", "X-R", "X-T", "X-S"]);
-        new ForwardAuthOptions { UserSidHeader = null, EmailHeader = " " }.GetIdentityHeaderNames().ShouldBe(["X-Forwarded-User", "X-Forwarded-Groups", "X-Forwarded-Roles", "X-Forwarded-Tenant"]);
+        forward.IdentityHeaderNames.ShouldBe(["X-U", "X-E", "X-G", "X-R", "X-T", "X-S"]);
+        new ForwardAuthOptions { UserSidHeader = null, EmailHeader = " " }.IdentityHeaderNames.ShouldBe(["X-Forwarded-User", "X-Forwarded-Groups", "X-Forwarded-Roles", "X-Forwarded-Tenant"]);
     }
 
     [Theory]
