@@ -256,18 +256,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             {
                 throw new WebSqlPolicyException("This token only permits read access; DML statements are rejected.");
             }
-
-            var writerRoles = webSqlOptions.DmlWriterRoles;
-            bool isWriter = writerRoles != null && writerRoles.Any(r => !string.IsNullOrWhiteSpace(r) && user.IsInRole(r));
-            if (!isWriter)
-            {
-                isWriter = writerRoles != null && user.GetUserRoles().Overlaps(writerRoles.Where(r => !string.IsNullOrWhiteSpace(r)));
-            }
-
-            if (!isWriter)
-            {
-                throw new WebSqlPolicyException("WebSQL DML requires an authorized writer role (WebSql.DmlWriterRoles). Consent and ABAC policies only grant read access.");
-            }
         }
 
         if (metadata.ReferencedTables.Count == 0)
@@ -312,6 +300,18 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             ["gql.action"] = isDml ? "write" : "read",
             ["action"] = isDml ? "write" : "read"
         };
+
+        async Task<TableAccessDecision> DecideTableAsync(TableMetadata tableMeta, TableIdentifier resolvedId, List<string> colList) =>
+            consentBypassed && (_consentRepository == null || _consentResolution == null)
+                ? WithTypedMasks(
+                    await WithVirtualFiltersAsync(
+                        TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
+                        new MandatoryFilterQuery(userSid, groupSids, roles, tenantId, tableMeta),
+                        ct).ConfigureAwait(false),
+                    tableMeta, tenantId)
+                : await AccessPolicy().DecideAsync(
+                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
+                    ct).ConfigureAwait(false);
 
         var distinctCatalogs = metadata.ReferencedTables
             .Where(t => !string.IsNullOrWhiteSpace(t.Catalog))
@@ -518,31 +518,12 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 throw SqlDataSourceResolver.TableDenied(target);
             }
 
-            var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
-                ? WithTypedMasks(
-                    await WithVirtualFiltersAsync(
-                        TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
-                        new MandatoryFilterQuery(userSid, groupSids, roles, tenantId, tableMeta),
-                        ct).ConfigureAwait(false),
-                    tableMeta, tenantId)
-                : await AccessPolicy().DecideAsync(
-                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
-                    ct).ConfigureAwait(false);
+            var decision = await DecideTableAsync(tableMeta, resolvedId, colList).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
             {
                 _logger?.LogWarning("WebSQL access to table {Table} denied: {Reasons}", target.FullName, string.Join("; ", decision.DeniedReasons));
                 throw SqlDataSourceResolver.TableDenied(target);
-            }
-
-            if (isDml)
-            {
-                var canWrite = await AccessPolicy().CanWriteTableAsync(user, tenantId, tableMeta, ct: ct).ConfigureAwait(false);
-                if (!canWrite)
-                {
-                    _logger?.LogWarning("WebSQL DML write access to table {Table} denied.", target.FullName);
-                    throw SqlDataSourceResolver.TableDenied(target);
-                }
             }
 
             string? tenantColumn = TableMetadata.RequireTenantColumnOrThrow(
@@ -556,6 +537,22 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                     throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {target.FullName} is not a plain identifier; the query is refused (fail-closed).");
                 }
 
+            }
+
+            if (isDml)
+            {
+                // Check order of the DML block: dependency set, then the write decision (deny-all), which stays the last check.
+                if (await IsRowPolicyDependencyAsync(resolvedId, effectiveDataSourceName, DecideTableAsync, ct).ConfigureAwait(false))
+                {
+                    _logger?.LogWarning("WebSQL DML target {Table} is read by a row policy and is refused.", target.FullName);
+                    throw new WebSqlPolicyException("WebSQL DML on a table that a row policy reads is not permitted.", GovernedSqlErrorCodes.PolicyViolation);
+                }
+
+                if (!await AccessPolicy().CanWriteTableAsync(user, tenantId, tableMeta, ct: ct).ConfigureAwait(false))
+                {
+                    _logger?.LogWarning("WebSQL DML write access to table {Table} denied.", target.FullName);
+                    throw SqlDataSourceResolver.TableDenied(target);
+                }
             }
 
             if (decision.AppliedVirtualFilters is { Count: > 0 } applied)
@@ -913,6 +910,27 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     /// </summary>
     private TableAccessDecision WithTypedMasks(TableAccessDecision decision, TableMetadata metadata, TenantId tenantId) =>
         _typedPolicies is null ? decision : decision with { ColumnMasks = _typedPolicies.MaskPolicies.ForDecision(decision, metadata, tenantId) };
+
+    /// <summary>True when a row policy that the caller is subject to reads <paramref name="target"/> (the policies are the caller's decisions over the catalog).</summary>
+    private async Task<bool> IsRowPolicyDependencyAsync(
+        TableIdentifier target,
+        string dataSource,
+        Func<TableMetadata, TableIdentifier, List<string>, Task<TableAccessDecision>> decide,
+        CancellationToken ct)
+    {
+        var tables = await _tableRepository!.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var policies = new List<IRowPolicy?>();
+        foreach (var table in tables.Where(t => t.Columns.Count > 0 && t.Table.IsActive))
+        {
+            var decision = await decide(table, table.Identifier, table.Columns.Select(c => c.ColumnName).ToList()).ConfigureAwait(false);
+            if (decision.IsAllowed)
+            {
+                policies.Add(decision.RowPolicy);
+            }
+        }
+
+        return DmlPolicyDependencyGuard.IsReadByRowPolicy(policies, target, dataSource);
+    }
 
     internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository!, _consentResolution!,
