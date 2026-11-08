@@ -81,7 +81,7 @@ dotnet test tests/TrinoSqlEngine.Tests/TrinoSqlEngine.Tests.csproj
 
 ### 2.3 Integration Test Configuration & Personas
 - **Test Framework:** xUnit, Shouldly, NSubstitute, and FsCheck.
-- **In-Memory Governance Catalog:** Tests run against isolated, in-memory SQLite instances (`Data Source=gov-{Guid};Mode=Memory;Cache=Shared`) with automatic schema seeding.
+- **Governance Catalog:** Integration tests run against an isolated PostgreSQL database cloned from a template database (Testcontainers) with automatic schema seeding.
 - **Identity Impersonation:** In `Development` mode, tests use `TestAuthHandler` via headers:
   - `X-Test-User-Sid: S-1-5-21-..."`
   - `X-Test-Roles: GovernanceAdmin,DataOwner`

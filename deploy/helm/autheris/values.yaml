@@ -172,7 +172,9 @@ gateway:
 
   # Governance Database Configuration
   governanceDb:
+    # Supported governance providers: PostgreSql, SqlServer. Any other value fails startup.
     provider: "PostgreSql"
+    # Required: the secret that holds the governance connection string (never put a literal password into values).
     existingSecret: "autheris-db-secrets"
     connectionStringSecretKey: "connectionString"
   
@@ -200,7 +202,7 @@ gateway:
 # "Autheris.Api --migrate-governance" (always applies, whatever Migrations:Mode says) before the new application pods roll out;
 # databases from v1.5.0 upgrade automatically, older ones fail with GOVERNANCE_SCHEMA_UNSUPPORTED_BASE.
 # When enabled, the application runs with Migrations:Mode=Verify. The job needs the same secrets as the application
-# (governance connection string, audit and masking keys); it does not run for the SQLite provider.
+# (governance connection string, audit and masking keys).
 governanceMigrationJob:
   enabled: false
   # Optional secret key (in gateway.governanceDb.existingSecret) with a DDL-capable connection string for the migration only

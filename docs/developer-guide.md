@@ -22,7 +22,7 @@ This guide helps engineers run the gateway locally with zero external dependenci
 
 - **.NET SDK**: 10.0 or higher (`net10.0`)
 - **IDE**: Visual Studio 2026, VS Code with C# Dev Kit, or JetBrains Rider
-- **No external services required**: the gateway ships an in-memory SQLite governance catalog, demo data and configured test users, so it runs completely without Docker, SQL Server or Redis.
+- **One external service required**: the governance store is PostgreSQL (or SQL Server). Start it with the compose stack or a local PostgreSQL container and set `Gateway:GovernanceDb:ConnectionString`; demo data (`GovernanceDb:SeedDemoData`) and configured test users need nothing else (no Redis, no SQL Server).
 - **WSL**: if many integration tests fail with an inotify limit error, run them with `DOTNET_USE_POLLING_FILE_WATCHER=true`.
 
 ---
@@ -262,7 +262,7 @@ During early development or when onboarding third-party webhooks (e.g. ServiceNo
 The codebase follows **Clean Architecture**:
 - `Autheris.Domain`: pure business rules, entities, options and domain calculation services. No dependencies on external libraries or frameworks.
 - `Autheris.Application`: core execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`), data source executors and repository contracts.
-- `Autheris.Infrastructure`: ADO.NET SQL persistence (`SqliteGovernanceRepository`), Redis messaging (`RedisEventBus`), rate limiters, idempotency stores and claims transformation.
+- `Autheris.Infrastructure`: ADO.NET SQL persistence (`PostgreSqlGovernanceRepository`, `SqlServerGovernanceRepository`), Redis messaging (`RedisEventBus`), rate limiters, idempotency stores and claims transformation.
 - `Autheris.GraphQL`: Hot Chocolate schema configuration, dynamic types, queries, mutations and subscriptions.
 - `Autheris.Api`: ASP.NET Core host, authentication handlers (`BasicAuthenticationHandler`, `ForwardAuthAuthenticationHandler`), `Dev` configuration and endpoints, rate limiting middleware, health probes and graceful drain.
 
