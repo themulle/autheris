@@ -631,7 +631,7 @@ public class SecurityRemediationTests
         var strict = env.Request(guards: SqlTokenSecurityOptions.Strict);
 
         engine.Compile("SELECT id FROM orders".AsMemory(), strict, CancellationToken.None);
-        Assert.Throws<ParseCanceledException>(() => engine.Compile("SELECT id FROM orders -- c".AsMemory(), strict, CancellationToken.None));
+        Assert.ThrowsAny<ParseCanceledException>(() => engine.Compile("SELECT id FROM orders -- c".AsMemory(), strict, CancellationToken.None));
 
         Assert.False(engine.RejectComments);
         Assert.False(engine.RejectBackslashInStrings);
@@ -690,7 +690,7 @@ public class SecurityRemediationTests
     public void R4_P04_TokenGuards_RejectDollarQuotingForSqlServer()
     {
         Assert.True(SqlTokenSecurityOptions.ForDialect(TargetSqlDialect.SqlServer).RejectDollarQuoting);
-        Assert.Throws<ParseCanceledException>(() => Env(TargetSqlDialect.SqlServer).Compile("SELECT $$x$$ FROM orders"));
+        Assert.ThrowsAny<ParseCanceledException>(() => Env(TargetSqlDialect.SqlServer).Compile("SELECT $$x$$ FROM orders"));
     }
 
     // ---------------------------------------------------------------- P-06 / SQ-11 / SQ-13
@@ -716,7 +716,7 @@ public class SecurityRemediationTests
     [InlineData("SELECT id FROM orders /* hidden */", "SQL comments are not permitted")]
     public void R4_P06_CompileWithStrictGuards_RejectsDifferentialSyntax(string sql, string expectedMessage)
     {
-        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
+        var ex = Assert.ThrowsAny<ParseCanceledException>(() => Env().Compile(sql));
 
         Assert.Contains(expectedMessage, ex.Message);
     }

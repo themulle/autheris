@@ -205,6 +205,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
 
                 if (!dryRun && !string.IsNullOrEmpty(auth.Value) && _secretProvider != null)
                 {
+                    DatasourceSecretRefPolicy.ThrowIfExists(_secretProvider, apiKeySecretName);
                     _secretProvider.SetSecret(apiKeySecretName, System.Text.Encoding.UTF8.GetBytes(auth.Value));
                 }
             }
@@ -218,6 +219,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 var secretVal = auth.Value ?? auth.ClientSecret;
                 if (!dryRun && !string.IsNullOrEmpty(secretVal) && _secretProvider != null)
                 {
+                    DatasourceSecretRefPolicy.ThrowIfExists(_secretProvider, apiKeySecretName);
                     _secretProvider.SetSecret(apiKeySecretName, System.Text.Encoding.UTF8.GetBytes(secretVal));
                 }
             }
@@ -229,6 +231,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 var secretVal = auth.ClientSecret ?? auth.Value;
                 if (!dryRun && !string.IsNullOrEmpty(secretVal) && _secretProvider != null)
                 {
+                    DatasourceSecretRefPolicy.ThrowIfExists(_secretProvider, apiKeySecretName);
                     _secretProvider.SetSecret(apiKeySecretName, System.Text.Encoding.UTF8.GetBytes(secretVal));
                 }
             }

@@ -177,15 +177,11 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
         var planner = new CrossSourcePlanner(Engine);
         var plan = planner.Plan(sql, metadata, tables, decisions, new CrossSourceOptions { Enabled = true }, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.User, Autheris.Tests.Unit.TestDoubles.PlannerTestIdentity.Tenant);
 
-        var pgStaging = plan.StagingRequests.Single(r => r.StagingName == "s0");
-        pgStaging.Subtree.ShouldNotBeNull();
-
-        // Subtree execution plan tracks masked columns
-        pgStaging.Subtree!.MaskedColumns.ShouldContain("ssn");
-
-        // Synthetic table metadata retains column masking rules for DuckDB stage
-        pgStaging.Subtree.SyntheticMetadata.ColumnMaskingRules.ContainsKey("ssn").ShouldBeTrue();
-        pgStaging.Subtree.SyntheticMetadata.ColumnMaskingRules["ssn"].RuleType.ShouldBe("REDACT");
+        // The masked member is not pushed down: it is staged on its own with its own decision and masking.
+        plan.StagingRequests.Where(r => r.Subtree != null)
+            .SelectMany(r => r.Subtree!.MemberTables)
+            .ShouldNotContain(t => t.Metadata.Identifier == custMeta.Identifier);
+        plan.StagingRequests.Any(r => r.Subtree == null && r.Metadata.Identifier == custMeta.Identifier).ShouldBeTrue();
     }
 
     /// <summary>

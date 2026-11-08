@@ -19,13 +19,13 @@ internal sealed class SyntaxErrorNegativeCache
 
     private readonly record struct Key(int TextHash, int RuleKind, int OptionsHash);
 
-    private sealed record Entry(string Sql, SqlTokenSecurityOptions Options, int Limits, string Message, long ExpiresAtTicks);
+    private sealed record Entry(string Sql, SqlTokenSecurityOptions Options, int Limits, string Message, int Line, int Column, long ExpiresAtTicks);
 
     public int Count => _entries.Count;
 
-    public bool TryGet(ReadOnlySpan<char> sql, int ruleKind, SqlTokenSecurityOptions options, int limits, out string message)
+    public bool TryGet(ReadOnlySpan<char> sql, int ruleKind, SqlTokenSecurityOptions options, int limits, out (string Message, int Line, int Column) result)
     {
-        message = string.Empty;
+        result = default;
         if (_entries.IsEmpty || sql.Length > MaxCachedSqlLength)
         {
             return false;
@@ -48,11 +48,11 @@ internal sealed class SyntaxErrorNegativeCache
             return false;
         }
 
-        message = entry.Message;
+        result = (entry.Message, entry.Line, entry.Column);
         return true;
     }
 
-    public void Add(ReadOnlySpan<char> sql, int ruleKind, SqlTokenSecurityOptions options, int limits, string message, TimeSpan ttl, int maxEntries)
+    public void Add(ReadOnlySpan<char> sql, int ruleKind, SqlTokenSecurityOptions options, int limits, string message, int line, int column, TimeSpan ttl, int maxEntries)
     {
         if (ttl <= TimeSpan.Zero || maxEntries <= 0 || sql.Length > MaxCachedSqlLength)
         {
@@ -74,7 +74,7 @@ internal sealed class SyntaxErrorNegativeCache
         }
 
         var key = new Key(string.GetHashCode(sql), ruleKind, options.GetHashCode());
-        _entries[key] = new Entry(sql.ToString(), options, limits, message, now + (long)ttl.TotalMilliseconds);
+        _entries[key] = new Entry(sql.ToString(), options, limits, message, line, column, now + (long)ttl.TotalMilliseconds);
     }
 
     public void Clear() => _entries.Clear();

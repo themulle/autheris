@@ -326,7 +326,9 @@ public class RestMcpHitlAndWebhookSecurityTests
             "tenant-a",
             ["Reader"],
             new Claim("client_id", "shared-app"),
-            new Claim("appid", "shared-app"));
+            new Claim("appid", "shared-app"),
+            new Claim("idtyp", "app"),
+            new Claim("oid", "app-oid"));
 
         var caller = McpEndpoints.ResolveCaller(context, allowOpenMcp: false);
 

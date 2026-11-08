@@ -76,6 +76,39 @@ public static class SubtreeCompiler
         }
     }
 
+    /// <summary>
+    /// True only when every column of the table is Clear for its own decision, so the table may join a same-source subtree.
+    /// Every branch defaults to "not eligible"; this never throws.
+    /// </summary>
+    internal static bool IsPushdownEligible(ResolvedSourceTable? table, TableAccessDecision? decision)
+    {
+        if (table?.Metadata is not { } metadata || decision is null || !decision.IsAllowed || !decision.HasUnconstrainedColumnAllow
+            || decision.ScopeClearance is not null || metadata.ColumnMaskingRules.Count != 0
+            || decision.ColumnMasks is { MaskedColumns.Count: > 0 })
+        {
+            return false;
+        }
+
+        foreach (var level in decision.ColumnAccess.Values)
+        {
+            if (level != ColumnAccessLevel.Clear)
+            {
+                return false;
+            }
+        }
+
+        foreach (var column in metadata.Columns)
+        {
+            if (decision.GetEffectiveColumnAccess(column.ColumnName, metadata) != ColumnAccessLevel.Clear)
+            {
+                return false;
+            }
+        }
+
+        // An explicit column entry without a catalog column list cannot be verified.
+        return metadata.Columns.Count > 0 || decision.ColumnAccess.Count == 0;
+    }
+
     public static SubtreeExecutionPlan Compile(
         SourceSubtree subtree,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
@@ -108,6 +141,13 @@ public static class SubtreeCompiler
                     $"Zero-Trust Violation: Access denied to table '{member.Target.FullName}'. Denied reasons: {string.Join("; ", dec.DeniedReasons)}");
             }
             memberDecisions[member.Metadata.Identifier] = dec;
+            // Defense in depth: fails before any SQL text is generated; the message carries no column or mask detail.
+            if (!IsPushdownEligible(member, dec))
+            {
+                throw new GatewaySecurityException(
+                    $"Table '{member.Target.FullName}' has column restrictions and cannot be part of a pushed-down subtree.",
+                    GovernedSqlErrorCodes.PolicyDenied);
+            }
         }
 
         // 2. Validate function allowlists for target dialect (V-4)

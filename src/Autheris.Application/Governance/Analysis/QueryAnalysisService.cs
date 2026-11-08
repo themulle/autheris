@@ -414,7 +414,10 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             }
         }
 
-        var maxAllowedCost = _analysisOptions.MaxAllowedCost > 0 ? _analysisOptions.MaxAllowedCost : 500;
+        bool hasSql = queries.Any(q => !string.IsNullOrEmpty(q.SqlQuery) || q.SqlEndpoint != null || q.StoredProcedure != null);
+        var maxAllowedCost = hasSql
+            ? (_gatewayOptions.WebSql?.Cost?.MaxStatementCost > 0 ? _gatewayOptions.WebSql.Cost.MaxStatementCost : 2000)
+            : (_analysisOptions.MaxAllowedCost > 0 ? _analysisOptions.MaxAllowedCost : 500);
         CallerBucketState? bucketState = null;
         if (_clientTierResolver != null && effectivePrincipal != null)
         {

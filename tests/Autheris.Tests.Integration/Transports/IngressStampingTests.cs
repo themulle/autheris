@@ -57,6 +57,10 @@ public sealed class IngressStampingTests : IClassFixture<IngressStampingTests.Fi
             {
                 builder.UseEnvironment("Development");
                 builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                // WP-SIMPL-51: the shared per-principal cost bucket meters every WebSQL/Trino statement; these tests run many statements
+                // (or a recursive CTE priced above the default Standard capacity) as one principal, so the Standard tier gets ample capacity.
+                builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "1000000");
+                builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:TokenRefillRatePerSecond", "100000");
                 builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "500");
