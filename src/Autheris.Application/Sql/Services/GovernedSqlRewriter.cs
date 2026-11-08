@@ -313,6 +313,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                     new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
                     ct).ConfigureAwait(false);
 
+        DmlDependencyScan? dependencyScan = null;
+
         var distinctCatalogs = metadata.ReferencedTables
             .Where(t => !string.IsNullOrWhiteSpace(t.Catalog))
             .Select(t => t.Catalog!)
@@ -542,7 +544,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             if (isDml)
             {
                 // Check order of the DML block: dependency set, then the write decision (deny-all), which stays the last check.
-                if (await IsRowPolicyDependencyAsync(resolvedId, effectiveDataSourceName, DecideTableAsync, ct).ConfigureAwait(false))
+                dependencyScan ??= new DmlDependencyScan(_tableRepository!, DecideTableAsync, effectiveDataSourceName);
+                if (await dependencyScan.IsReadAsync(resolvedId, ct).ConfigureAwait(false))
                 {
                     _logger?.LogWarning("WebSQL DML target {Table} is read by a row policy and is refused.", target.FullName);
                     throw new WebSqlPolicyException("WebSQL DML on a table that a row policy reads is not permitted.", GovernedSqlErrorCodes.PolicyViolation);
@@ -910,27 +913,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     /// </summary>
     private TableAccessDecision WithTypedMasks(TableAccessDecision decision, TableMetadata metadata, TenantId tenantId) =>
         _typedPolicies is null ? decision : decision with { ColumnMasks = _typedPolicies.MaskPolicies.ForDecision(decision, metadata, tenantId) };
-
-    /// <summary>True when a row policy that the caller is subject to reads <paramref name="target"/> (the policies are the caller's decisions over the catalog).</summary>
-    private async Task<bool> IsRowPolicyDependencyAsync(
-        TableIdentifier target,
-        string dataSource,
-        Func<TableMetadata, TableIdentifier, List<string>, Task<TableAccessDecision>> decide,
-        CancellationToken ct)
-    {
-        var tables = await _tableRepository!.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var policies = new List<IRowPolicy?>();
-        foreach (var table in tables.Where(t => t.Columns.Count > 0 && t.Table.IsActive))
-        {
-            var decision = await decide(table, table.Identifier, table.Columns.Select(c => c.ColumnName).ToList()).ConfigureAwait(false);
-            if (decision.IsAllowed)
-            {
-                policies.Add(decision.RowPolicy);
-            }
-        }
-
-        return DmlPolicyDependencyGuard.IsReadByRowPolicy(policies, target, dataSource);
-    }
 
     internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository!, _consentResolution!,

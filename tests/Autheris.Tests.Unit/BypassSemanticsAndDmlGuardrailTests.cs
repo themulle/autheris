@@ -422,7 +422,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             ],
             "Test"));
 
-    internal static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000, bool permissiveWrite = true, bool withDependency = false)
+    internal static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000, bool permissiveWrite = true, bool withDependency = false, bool columnlessHolder = false, bool plainTable = false, bool requireTenantColumn = false)
     {
         if (permissiveWrite)
         {
@@ -443,6 +443,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             },
             DataSources = new SqlDataSourceOptions
             {
+                RequireTenantColumn = requireTenantColumn,
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["default"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = fixture.ConnectionString }
@@ -469,11 +470,25 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             Table = new Table { TableName = "consents", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]
         };
-        var known = withDependency ? new[] { orders, consents } : new[] { orders };
+        // columnlessHolder: an active catalog table without columns whose row policy reads `main.consents`; plainTable: a table without a tenant column.
+        var holder = new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "main", "holder"),
+            Table = new Table { TableName = "holder", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Columns = []
+        };
+        var plain = new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "main", "plain"),
+            Table = new Table { TableName = "plain", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+        var known = withDependency || columnlessHolder ? new[] { orders, consents } : plainTable ? new[] { orders, plain } : new[] { orders };
+        TableMetadata[] catalog = columnlessHolder ? [.. known, holder] : known;
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(known.FirstOrDefault(t => t.Identifier.Equals(ci.Arg<TableIdentifier>()))));
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(known));
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(catalog));
 
         var consentRepository = Substitute.For<IConsentRepository>();
         consentRepository.GetActiveConsentsForSubjectsAsync(
@@ -499,7 +514,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                     new Dictionary<string, ColumnAccessLevel>(),
                     null,
                     hasUnconstrainedColumnAllow: true);
-                return withDependency && ci.ArgAt<TableIdentifier>(3).Equals(orders.Identifier)
+                return (columnlessHolder ? ci.ArgAt<TableIdentifier>(3).Equals(holder.Identifier) : withDependency && ci.ArgAt<TableIdentifier>(3).Equals(orders.Identifier))
                     ? allowed with { RowPolicy = Autheris.Tests.Unit.GraphQL.SecuredTreeHarness.ExistsPolicy() }
                     : allowed;
             });

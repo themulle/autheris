@@ -41,7 +41,7 @@ public sealed class DmlWriteDecisionArchitectureTests
     {
         var text = Source("src/Autheris.Application/Sql/Services/GovernedSqlRewriter.cs");
         var tenantColumn = text.IndexOf("RequireTenantColumnOrThrow(", StringComparison.Ordinal);
-        var dependency = text.IndexOf("IsRowPolicyDependencyAsync(", StringComparison.Ordinal);
+        var dependency = text.IndexOf("dependencyScan.IsReadAsync(", StringComparison.Ordinal);
         var write = text.IndexOf("CanWriteTableAsync(", StringComparison.Ordinal);
 
         tenantColumn.ShouldBeGreaterThan(0);
@@ -54,7 +54,9 @@ public sealed class DmlWriteDecisionArchitectureTests
     {
         Source("src/Autheris.Application/Policy/DmlWriteDecisionTestSeam.cs").ShouldContain("internal static class DmlWriteDecisionTestSeam");
 
-        var users = Directory.EnumerateFiles(Path.Combine(Root(), "src"), "*.cs", SearchOption.AllDirectories)
+        var users = new[] { "src", "benchmarks", Path.Combine("tests", "Autheris.Tests.SqlCompilerGate") }
+            .Where(d => Directory.Exists(Path.Combine(Root(), d)))
+            .SelectMany(d => Directory.EnumerateFiles(Path.Combine(Root(), d), "*.cs", SearchOption.AllDirectories))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && File.ReadAllText(f).Contains("DmlWriteDecisionTestSeam", StringComparison.Ordinal))
             .Select(f => Path.GetFileName(f))
             .Order(StringComparer.Ordinal)

@@ -79,4 +79,26 @@ public sealed class WebSqlDmlGuardTests
         DmlPolicyDependencyGuard.IsReadByRowPolicy(policies, new TableIdentifier("default", "main", "orders"), "default").ShouldBeFalse();
         DmlPolicyDependencyGuard.IsReadByRowPolicy([null], new TableIdentifier("default", "main", "consents"), "default").ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task SEC_36_SP3a_Dependency_held_by_a_table_without_columns_is_still_refused()
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: true, columnlessHolder: true);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => Run(service, Principal("WebSqlWriter"), "DELETE FROM consents WHERE id = 1"));
+
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.PolicyViolation);
+    }
+
+    [Fact]
+    public async Task SEC_36_ORDER_01_Tenant_column_refusal_wins_over_the_write_denial()
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: false, plainTable: true, requireTenantColumn: true);
+
+        var ex = await Should.ThrowAsync<System.Exception>(() => Run(service, Principal("WebSqlWriter"), "DELETE FROM plain WHERE id = 1"));
+
+        ex.ShouldNotBeOfType<WebSqlTableDeniedException>();
+    }
 }
