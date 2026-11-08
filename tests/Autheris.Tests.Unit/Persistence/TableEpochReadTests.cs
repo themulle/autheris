@@ -32,14 +32,14 @@ public sealed class TableEpochReadTests
     {
         var id = Guid.NewGuid();
         await using var conn = Open(id, 1);
-        (await PostgreSqlGovernanceRepository.ReadTableEpochAsync(conn, id, default)).ShouldBe(1);
-        (await PostgreSqlGovernanceRepository.ReadAllTableEpochsAsync(conn, default))[id].ShouldBe(1);
+        (await GovernanceRepository.ReadTableEpochAsync(conn, id, default)).ShouldBe(1);
+        (await GovernanceRepository.ReadAllTableEpochsAsync(conn, default))[id].ShouldBe(1);
 
         await using var bump = conn.CreateCommand();
         bump.CommandText = "UPDATE POLICY_EPOCHS SET epoch = 2";
         bump.ExecuteNonQuery();
-        (await PostgreSqlGovernanceRepository.ReadTableEpochAsync(conn, id, default)).ShouldBe(2);
-        (await PostgreSqlGovernanceRepository.ReadTableEpochAsync(conn, Guid.NewGuid(), default)).ShouldBe(-1);
+        (await GovernanceRepository.ReadTableEpochAsync(conn, id, default)).ShouldBe(2);
+        (await GovernanceRepository.ReadTableEpochAsync(conn, Guid.NewGuid(), default)).ShouldBe(-1);
     }
 
     [Fact]
@@ -47,12 +47,12 @@ public sealed class TableEpochReadTests
     {
         var id = Guid.NewGuid();
         await using var conn = Open(id, 1);
-        (await SqlServerGovernanceRepository.ReadTableEpochAsync(conn, id, default)).ShouldBe(1);
-        (await SqlServerGovernanceRepository.ReadAllTableEpochsAsync(conn, default))[id].ShouldBe(1);
+        (await GovernanceRepository.ReadTableEpochAsync(conn, id, default)).ShouldBe(1);
+        (await GovernanceRepository.ReadAllTableEpochsAsync(conn, default))[id].ShouldBe(1);
 
         await using var bump = conn.CreateCommand();
         bump.CommandText = "UPDATE POLICY_EPOCHS SET epoch = 2";
         bump.ExecuteNonQuery();
-        (await SqlServerGovernanceRepository.ReadTableEpochAsync(conn, id, default)).ShouldBe(2);
+        (await GovernanceRepository.ReadTableEpochAsync(conn, id, default)).ShouldBe(2);
     }
 }

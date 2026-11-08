@@ -2,7 +2,10 @@ using System;
 using Autheris.Application.Governance.Paging;
 using System.Linq;
 using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Dialects;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -50,5 +53,18 @@ public sealed class GovernanceRepositoryBoundsTests
     {
         // SEC-SIMPL-23: the consent-grants hydration IN list stays at 500 ids per statement.
         ConsentSqlCore.ConsentHydrateBatchSize.ShouldBe(500);
+    }
+
+    [Fact]
+    public void Catalog_metadata_cache_stays_bounded()
+    {
+        // SEC-SIMPL-23: a large catalog must not grow the metadata cache without limit (capacity unchanged at 20,000 entries).
+        var repo = new GovernanceRepository(Substitute.For<IGovernanceSqlDialect>());
+        for (var i = 0; i < 20_500; i++)
+        {
+            repo.MetadataCache.Set("k" + i, (null, 0L, 0L));
+        }
+
+        repo.MetadataCache.Count.ShouldBeLessThanOrEqualTo(20_000);
     }
 }

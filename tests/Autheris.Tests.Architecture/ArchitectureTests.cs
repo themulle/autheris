@@ -333,6 +333,7 @@ public class ArchitectureTests
         files.ShouldNotBeEmpty();
         var allowed = new Dictionary<string, int>
         {
+            ["GovernanceRepository.Catalog.cs|LogCatalogNotice"] = 1, // constant notice text only: no exception object, no parameter value
             ["GovernanceRepository.cs|ExecuteReaderAsync"] = 1,
             ["GovernanceRepository.cs|ExecuteNonQueryAsync"] = 1,
             ["GovernanceRepository.cs|ExecuteScalarAsync"] = 1,
