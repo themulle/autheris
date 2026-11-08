@@ -48,25 +48,37 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     // Without it HotChocolate would open a fresh scope with no ingress, which the transport gate denies.
     private readonly IServiceProvider? _services;
 
-    // WP-SIMPL-53: Mcp:MaxResultRows is re-read per call; without options the default cap applies (never unbounded).
-    private readonly IOptionsMonitor<GatewayOptions>? _options;
+    // Mcp:MaxResultRows is re-read per call; a value <= 0 falls back to the default cap (never unbounded).
+    private readonly IOptionsMonitor<GatewayOptions> _options;
 
-    private int RowCap() => McpRowCap.ResolveCap(_options?.CurrentValue.Mcp.MaxResultRows ?? McpRowCap.DefaultCap);
+    // tool and numbers only, never row values. No audit entry records a cut, so the debug log is the trace.
+    private string Capped(string toolName, string original, string trimmed)
+    {
+        if (!ReferenceEquals(original, trimmed))
+        {
+            var cap = RowCap();
+            _logger.LogDebug("MCP tool '{ToolName}' result was cut to the row cap {RowCap}.", toolName, cap);
+        }
+
+        return trimmed;
+    }
+
+    private int RowCap() => McpRowCap.ResolveCap(_options.CurrentValue.Mcp.MaxResultRows);
 
     public GatewayMcpQueryExecutor(
         IRequestExecutorProvider executorProvider,
         IGatewayExecutionService gatewayExecutionService,
         ILogger<GatewayMcpQueryExecutor> logger,
+        IOptionsMonitor<GatewayOptions> gatewayOptions,
         IPreFlightQuerySimulator? querySimulator = null,
         IMcpProvenanceEnricher? provenanceEnricher = null,
         IPersistedToolValidator? persistedToolValidator = null,
         IMcpDatasetCatalog? datasetCatalog = null,
         IMcpToolExecutionHandler? toolExecutionHandler = null,
-        IServiceProvider? services = null,
-        IOptionsMonitor<GatewayOptions>? gatewayOptions = null)
+        IServiceProvider? services = null)
     {
         _services = services;
-        _options = gatewayOptions;
+        _options = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
         _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -125,7 +137,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             }
         }
 
-        // SEC-53-02: a bad client row limit is rejected before any tool runs.
+        // a bad client row limit is rejected before any tool runs.
         if (McpRowCap.LimitArgument(tool.Name) is { } limitArgument
             && !McpRowCap.TryReadLimit(variables.GetValueOrDefault(limitArgument), out _))
         {
@@ -152,7 +164,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             try
             {
                 var handled = await _toolExecutionHandler.ExecuteToolAsync(tool, argumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
-                return McpRowCap.TrimRows(handled, RowCap());
+                return Capped(tool.Name, handled, McpRowCap.TrimRows(handled, RowCap()));
             }
             catch (Exception ex) when (ex is not OperationCanceledException && SqlCompilerErrorMapper.TryMap(ex, out _))
             {
@@ -333,7 +345,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
             var serialized = JsonSerializer.Serialize(result, CamelCaseJsonOptions);
             return tool.Name.Equals(McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase)
-                ? McpRowCap.TrimRows(serialized, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows))
+                ? Capped(tool.Name, serialized, McpRowCap.TrimRows(serialized, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows)))
                 : serialized;
         }
         catch (TableNotFoundException)
@@ -499,7 +511,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Unsupported GraphQL execution result.");
         }
 
-        var json = McpRowCap.TrimGraphQl(FormatOperationResult(result), RowCap());
+        var raw = FormatOperationResult(result);
+        var json = Capped(tool.Name, raw, McpRowCap.TrimGraphQl(raw, RowCap()));
         return result.Errors is null || result.Errors.Count == 0
             ? json
             : CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "GraphQL execution returned errors.", json);

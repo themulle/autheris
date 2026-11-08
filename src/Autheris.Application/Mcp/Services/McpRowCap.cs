@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 /// <summary>
-/// WP-SIMPL-53 (#578): server-side enforcement of <c>Mcp:MaxResultRows</c>. The cap is the smaller of the option and any client
+/// Server-side enforcement of <c>Mcp:MaxResultRows</c>. The cap is the smaller of the option and any client
 /// limit, is applied to the already policy-filtered result and reveals nothing about rows that were cut.
 /// </summary>
 public static class McpRowCap
@@ -17,10 +17,10 @@ public static class McpRowCap
 
     private static readonly JsonSerializerOptions Relaxed = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    /// <summary>SEC-53-03: the option clamped to 1..10000; a misconfigured value (&lt;= 0) means the default, never unbounded.</summary>
+    /// <summary>the option clamped to 1..10000; a misconfigured value (&lt;= 0) means the default, never unbounded.</summary>
     public static int ResolveCap(int option) => option <= 0 ? DefaultCap : Math.Clamp(option, 1, MaxCap);
 
-    /// <summary>SEC-53-01: a client value can lower the cap, never raise it.</summary>
+    /// <summary>a client value can lower the cap, never raise it.</summary>
     public static int Effective(int? requested, int optionCap) => Math.Min(requested ?? optionCap, optionCap);
 
     /// <summary>The argument that carries a client row limit for a tool, or null when the tool has none.</summary>
@@ -33,7 +33,7 @@ public static class McpRowCap
     };
 
     /// <summary>
-    /// SEC-53-02: absent or null means "use the cap". Anything but a positive integer that fits an int (zero, negative, text,
+    /// absent or null means "use the cap". Anything but a positive integer that fits an int (zero, negative, text,
     /// fractions, booleans, overflow) is invalid. <paramref name="value"/> is the parsed argument as the executor stores it.
     /// </summary>
     public static bool TryReadLimit(object? value, out int? limit)
@@ -81,8 +81,14 @@ public static class McpRowCap
                 }
             }
 
+            // continuation properties of the payloads: query_sql "next"/"page" (GovernedSqlResult), query_dataset "hasMore".
             obj.Remove("next");
             obj.Remove("page");
+            if (obj["hasMore"] is not null)
+            {
+                obj["hasMore"] = true;
+            }
+
             Flag(obj, cap);
             return obj.ToJsonString(Relaxed);
         }
@@ -90,7 +96,7 @@ public static class McpRowCap
         return json;
     }
 
-    /// <summary>SEC-53-04: trims every list in the GraphQL <c>data</c> tree (root, nested, aliases, fragments all resolve to lists here).</summary>
+    /// <summary>trims every list in the GraphQL <c>data</c> tree (root, nested, aliases, fragments all resolve to lists here).</summary>
     public static string TrimGraphQl(string json, int cap)
     {
         if (!TryParse(json, out var node) || node is not JsonObject obj || obj["data"] is null)

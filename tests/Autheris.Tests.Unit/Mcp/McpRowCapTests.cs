@@ -15,6 +15,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Mcp;
 using HotChocolate.Execution;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -27,6 +28,7 @@ public sealed class McpRowCapTests
 {
     private const int Cap = 20;
     private const int Produced = 50;
+    private static readonly JsonSerializerOptions CamelCase = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     public sealed class Tag { public string Name { get; set; } = "t"; }
 
@@ -51,7 +53,7 @@ public sealed class McpRowCapTests
             ["next"] = "cursor",
         });
 
-    private static IOptionsMonitor<GatewayOptions> Options(int maxRows)
+    internal static IOptionsMonitor<GatewayOptions> Options(int maxRows)
     {
         var monitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
         monitor.CurrentValue.Returns(new GatewayOptions { Mcp = new McpOptions { MaxResultRows = maxRows } });
@@ -296,4 +298,90 @@ public sealed class McpRowCapTests
     [InlineData(500, 20, 20)]
     public void Effective_is_the_minimum_of_client_and_option(int? requested, int cap, int expected) =>
         McpRowCap.Effective(requested, cap).ShouldBe(expected);
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task No_continuation_property_remains_after_truncation()
+    {
+        // SEC-53-05: the real query_sql payload names its cursor "next" and its page "page"; a cut result must carry neither.
+        var rows = Enumerable.Range(0, Produced).Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i }).ToList();
+        var real = new Autheris.Application.Sql.Interfaces.GovernedSqlResult(
+            "SELECT 1", ["id"], rows, rows.Count, 1, false, null, false,
+            new Autheris.Application.Sql.Interfaces.GovernedSqlPageResponse(1, 0, Produced), "cursor-token", "reason");
+        var json = JsonSerializer.Serialize(real, CamelCase);
+        var f = await CreateAsync();
+        f.Handler.ExecuteToolAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(json);
+
+        var root = await RunAsync(f, "query_sql", ArgsFor("query_sql"));
+
+        root.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        root.TryGetProperty("next", out _).ShouldBeFalse();
+        root.TryGetProperty("page", out _).ShouldBeFalse();
+        root.GetRawText().ShouldNotContain("cursor-token");
+    }
+
+    [Fact]
+    public async Task Cut_is_logged_with_tool_and_cap_only()
+    {
+        var logger = new CapturingLogger();
+        var handler = Substitute.For<IMcpToolExecutionHandler>();
+        handler.CanHandle(Arg.Any<string>()).Returns(true);
+        handler.ExecuteToolAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(RowsJson("rows", Produced, "rowCount"));
+        var executor = new GatewayMcpQueryExecutor(Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
+            logger, Options(Cap), toolExecutionHandler: handler);
+
+        await executor.ExecuteOperationAsync(Tool("query_sql"), ArgsFor("query_sql"), Session());
+
+        logger.Messages.ShouldContain(m => m.Contains("row cap 20") && m.Contains("query_sql"));
+        logger.Messages.ShouldNotContain(m => m.Contains("\"id\""));
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<GatewayMcpQueryExecutor>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
+    }
+
+    [Fact]
+    public async Task Option_value_reaches_the_executor_through_the_real_service_collection()
+    {
+        // Mcp:MaxResultRows=7 bound from configuration must be the cap of the DI-resolved executor.
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Mcp:MaxResultRows"] = "7" }).Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.Configure<GatewayOptions>(config.GetSection("Gateway"));
+        services.AddSingleton(Substitute.For<IRequestExecutorProvider>());
+        services.AddSingleton(Substitute.For<IGatewayExecutionService>());
+        services.AddSingleton(Substitute.For<IMcpDatasetCatalog>());
+        var handler = Substitute.For<IMcpToolExecutionHandler>();
+        handler.CanHandle(Arg.Any<string>()).Returns(true);
+        handler.ExecuteToolAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(RowsJson("rows", Produced, "rowCount"));
+        services.AddSingleton(handler);
+        services.AddScoped<IMcpQueryExecutor, GatewayMcpQueryExecutor>();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var json = await scope.ServiceProvider.GetRequiredService<IMcpQueryExecutor>()
+            .ExecuteOperationAsync(Tool("query_sql"), ArgsFor("query_sql"), Session());
+
+        JsonDocument.Parse(json).RootElement.GetProperty("rows").GetArrayLength().ShouldBe(7);
+    }
+
+    [Fact]
+    public void Executor_requires_options()
+    {
+        Should.Throw<ArgumentNullException>(() => new GatewayMcpQueryExecutor(
+            Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
+            NullLogger<GatewayMcpQueryExecutor>.Instance, null!));
+    }
 }
