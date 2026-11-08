@@ -13,7 +13,6 @@ public sealed class ClaimsNormalizerTests : IDisposable
 {
     public void Dispose()
     {
-        Sid.RealmLookup = null;
     }
 
     [Fact]
@@ -25,7 +24,6 @@ public sealed class ClaimsNormalizerTests : IDisposable
             IdentityRealmKind.Customer,
             TenantBindingSpecification.Fixed(boundTenant));
 
-        Sid.RealmLookup = r => r == "enterprise-realm" ? realm : null;
 
         var identity = new ClaimsIdentity(
         [

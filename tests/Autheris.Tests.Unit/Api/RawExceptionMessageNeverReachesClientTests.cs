@@ -117,7 +117,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     {
         var svc = Substitute.For<ICatalogDiscoveryService>();
         svc.RegisterDatasourceAsync(default!, default!, default).ThrowsAsyncForAnyArgs(new ArgumentException(Sentinel, "secretRef"));
-        var ctx = Ctx(["GovernanceAdmin"]);
+        var ctx = Ctx(["GovernanceAdmin", "ClusterAdmin"]);
 
         var c = await RunAsync(await CatalogApiEndpoints.RegisterDatasourceHandler(new DatasourceRegistrationRequest("n", "d"), svc, ctx, CancellationToken.None), ctx);
 

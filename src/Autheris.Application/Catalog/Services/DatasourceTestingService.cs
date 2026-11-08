@@ -80,6 +80,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         string datasourceId,
         DatasourceTestRequest request,
         ClaimsPrincipal user,
+        TenantId? restrictToTenant = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(datasourceId);
@@ -94,6 +95,12 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
 
         // 1. Resolve Datasource Metadata
         var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        if (restrictToTenant is { } callerTenant)
+        {
+            // GHSA-9229: a tenant-confined caller only ever probes datasources of its own tenant.
+            allTables = allTables.Where(t => string.Equals(t.OwnerTenantId, callerTenant.Value, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
         TableMetadata? matchedTable = null;
 
         foreach (var t in allTables)
@@ -130,7 +137,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         }
 
         // 2. Pre-flight connectivity testing when catalog tables have not yet been populated
-        if (_gateway?.Value.DataSources?.Connections is { } connections)
+        if (restrictToTenant is null && _gateway?.Value.DataSources?.Connections is { } connections)
         {
             DataSourceConnectionOptions? configuredConnection = null;
             if (connections.TryGetValue(datasourceId, out configuredConnection))
