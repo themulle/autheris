@@ -14,6 +14,42 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public static class SecretReferenceResolver
 {
+    /// <summary>
+    /// Returns true when <paramref name="referenceOrValue"/> matches a supported secret reference syntax
+    /// (e.g. kv://, vault://, vault:, keyvault:, azure-keyvault://, file:, datasource:, or Azure Key Vault HTTPS URL).
+    /// Returns false for empty/null strings and plaintext/inline secret values.
+    /// </summary>
+    public static bool IsReference(string? referenceOrValue)
+    {
+        if (string.IsNullOrWhiteSpace(referenceOrValue))
+        {
+            return false;
+        }
+
+        var trimmed = referenceOrValue.Trim();
+
+        if (trimmed.StartsWith("kv://", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("vault://", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("vault:", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("keyvault:", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("azure-keyvault://", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("file:", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("datasource:", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) &&
+            string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+            (uri.Host.EndsWith(".vault.azure.net", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(uri.Host, "vault.azure.net", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     public static string? Resolve(
         IKeyVaultSecretProvider? secretProvider,
         string? referenceOrValue,
