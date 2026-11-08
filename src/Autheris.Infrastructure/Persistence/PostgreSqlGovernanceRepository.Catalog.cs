@@ -881,7 +881,9 @@ RETURNING structure_version, content_version;";
             insertCmd.AddBound("@now", DateTimeOffset.UtcNow.ToString("O"));
 
             var insScalar = await insertCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            return insScalar != null ? Convert.ToInt64(insScalar) : 1L;
+            return insScalar != null
+                ? Convert.ToInt64(insScalar)
+                : throw new InvalidOperationException("Policy epoch cannot be advanced: table is not registered in the catalog.");
         }
     }
 

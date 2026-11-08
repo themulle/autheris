@@ -352,6 +352,41 @@ public abstract class CatalogContract : GovernanceContractBase
     }
 
     [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Epoch_increment_with_missing_policy_epoch_row_advances_and_keys_by_table_id()
+    {
+        if (!Store.IsAvailable) return;
+
+        var table = await Store.TableMetadata.UpsertTableMetadataAsync(BuildTable("epoch_missing_row"));
+        var tableId = table.Table.Id.ToString();
+        var epochBefore = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
+        await Store.ExecuteNonQueryAsync("DELETE FROM POLICY_EPOCHS WHERE table_id = @tid", ("@tid", tableId));
+
+        var first = await Store.PolicyEpochs.IncrementTableEpochAsync(table.Identifier);
+        first.Should().BeGreaterThan(epochBefore);
+        var second = await Store.PolicyEpochs.IncrementTableEpochAsync(table.Identifier);
+        second.Should().BeGreaterThan(first);
+
+        var rows = await Store.ExecuteScalarAsync(
+            "SELECT COUNT(*) FROM POLICY_EPOCHS WHERE LOWER(table_name) = LOWER(@name)", ("@name", table.Identifier.TableName));
+        Convert.ToInt64(rows).Should().Be(1);
+        var keyed = await Store.ExecuteScalarAsync(
+            "SELECT COUNT(*) FROM POLICY_EPOCHS WHERE table_id = @tid", ("@tid", tableId));
+        Convert.ToInt64(keyed).Should().Be(1);
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Epoch_increment_for_unregistered_table_fails_closed()
+    {
+        if (!Store.IsAvailable) return;
+
+        var unknown = new TableIdentifier("catalog", "dbo", "never_registered_" + Guid.NewGuid().ToString("N")[..8]);
+        var act = () => Store.PolicyEpochs.IncrementTableEpochAsync(unknown);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [RequiresContainerRuntimeFact]
     public async Task Physical_indexes_and_policy_epochs_round_trip_atomically()
     {
         if (!Store.IsAvailable) return;
