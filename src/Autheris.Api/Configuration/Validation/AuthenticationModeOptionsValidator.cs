@@ -121,7 +121,8 @@ public sealed class AuthenticationModeOptionsValidator(
     private void ValidateOutsideDevelopment(AuthenticationOptions auth, ForwardAuthOptions fwd, AuthenticationMode mode, List<string> failures)
     {
         var directScheme = auth.EntraId.Enabled || auth.Adfs.Enabled || auth.BasicAuth.Enabled || auth.EnableKerberos;
-        if (mode == AuthenticationMode.Direct && !directScheme)
+        // The test authentication handler counts as a scheme here only; it is rejected outside Development by its own rule.
+        if (mode == AuthenticationMode.Direct && !directScheme && !auth.EnableTestAuthHandler)
         {
             failures.Add("Security violation: Gateway:Authentication:Mode=Direct requires at least one enabled scheme (EntraId, Adfs, BasicAuth or EnableKerberos).");
         }
