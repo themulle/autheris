@@ -271,6 +271,12 @@ public sealed class AdfsAuthOptions
     public string Audience { get; init; } = string.Empty;
     public bool RequireHttpsMetadata { get; init; } = true;
     public string RolesClaimType { get; init; } = "role";
+
+    /// <summary>
+    /// Client application ids (<c>appid</c>, <c>azp</c> or <c>client_id</c> claim) of the AD FS farm that may call the API.
+    /// Required outside Development when AD FS is enabled; a token from any other client is not authenticated.
+    /// </summary>
+    public List<string> AllowedClientIds { get; init; } = [];
 }
 
 /// <summary>
