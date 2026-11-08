@@ -88,7 +88,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         catch (Exception ex)
         {
             sw.Stop();
-            _logger?.LogError(ex, "Execution failed for {FragmentId} after {ElapsedMs}ms", fragmentId, sw.ElapsedMilliseconds);
+            LogExecutionFailure(ex, fragmentId, sw.ElapsedMilliseconds);
             throw;
         }
     }
@@ -112,7 +112,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         catch (Exception ex)
         {
             sw.Stop();
-            _logger?.LogError(ex, "Execution failed for {FragmentId} after {ElapsedMs}ms", fragmentId, sw.ElapsedMilliseconds);
+            LogExecutionFailure(ex, fragmentId, sw.ElapsedMilliseconds);
             throw;
         }
     }
@@ -136,9 +136,16 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         catch (Exception ex)
         {
             sw.Stop();
-            _logger?.LogError(ex, "Execution failed for {FragmentId} after {ElapsedMs}ms", fragmentId, sw.ElapsedMilliseconds);
+            LogExecutionFailure(ex, fragmentId, sw.ElapsedMilliseconds);
             throw;
         }
+    }
+
+    // SEC-SIMPL-25: only exception type and engine error code are logged; never the exception object (Message/Detail may echo values).
+    private void LogExecutionFailure(Exception ex, string fragmentId, long elapsedMs)
+    {
+        string code = ex is Npgsql.PostgresException pg ? pg.SqlState : ex is Microsoft.Data.SqlClient.SqlException sql ? sql.Number.ToString(System.Globalization.CultureInfo.InvariantCulture) : "n/a";
+        _logger?.LogError("Execution failed for {FragmentId} after {ElapsedMs}ms ({ExceptionType}, code {ErrorCode})", fragmentId, elapsedMs, ex.GetType().Name, code);
     }
 
     private void InvalidateTableMetadata(string tableKey)
@@ -160,6 +167,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         await using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
+            // TODO(WP-SIMPL-20b): replace engine-type branch with dialect members once the epoch statements move into the dialect.
             if (_dialect is PostgreSqlGovernanceDialect)
             {
                 cmd.CommandText = @"UPDATE POLICY_EPOCHS
@@ -189,6 +197,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         await using (var insertCmd = conn.CreateCommand())
         {
             insertCmd.Transaction = tx;
+            // TODO(WP-SIMPL-20b): replace engine-type branch with dialect members once the epoch statements move into the dialect.
             if (_dialect is PostgreSqlGovernanceDialect)
             {
                 insertCmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)

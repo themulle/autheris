@@ -9,7 +9,7 @@ public sealed class GovernanceMigrationStepParityTests
 {
     [Fact]
     [Trait("Category", "Security")]
-    public void Migration_steps_in_postgresql_and_sqlserver_have_exact_parity()
+    public void Every_step_exists_for_both_engines()
     {
         var repoRoot = RepositoryScan.RepoRoot;
         var pgStepsDir = Path.Combine(repoRoot, "src", "Autheris.Infrastructure", "Persistence", "Migrations", "Steps", "postgresql");

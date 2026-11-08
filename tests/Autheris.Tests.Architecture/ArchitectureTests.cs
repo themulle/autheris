@@ -289,58 +289,73 @@ public class ArchitectureTests
     [Trait("Category", "Security")]
     public void Governance_sql_is_built_only_from_constants_and_parameters()
     {
-        // SEC-SIMPL-26: scans GovernanceRepository*.cs, AuditSqlCore.cs, *GovernanceDialect.cs for string concatenation/interpolation outside allowlist
+        // SEC-SIMPL-26: Roslyn statement-level scan; every pattern must match at least one existing file.
         var persistenceDir = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Infrastructure", "Persistence");
-        var targetFiles = Directory.GetFiles(persistenceDir, "GovernanceRepository*.cs", SearchOption.AllDirectories)
-            .Concat(Directory.GetFiles(persistenceDir, "AuditSqlCore.cs", SearchOption.AllDirectories))
-            .Concat(Directory.GetFiles(persistenceDir, "*GovernanceDialect.cs", SearchOption.AllDirectories))
-            .ToList();
-
-        targetFiles.ShouldNotBeEmpty("Target files for SEC-SIMPL-26 must exist.");
-
-        var violations = new List<string>();
-
-        foreach (var file in targetFiles)
+        var files = new List<string>();
+        foreach (var pattern in new[] { "GovernanceRepository*.cs", "AuditSqlCore.cs", "*GovernanceDialect.cs" })
         {
-            var fileName = Path.GetFileName(file);
-            var lines = File.ReadAllLines(file);
-            for (int i = 0; i < lines.Length; i++)
+            var matched = Directory.GetFiles(persistenceDir, pattern, SearchOption.AllDirectories);
+            matched.ShouldNotBeEmpty($"SEC-SIMPL-26 scan pattern '{pattern}' matches no file.");
+            files.AddRange(matched);
+        }
+
+        var hits = files.SelectMany(f => GovernanceSqlConstructionScanner.Scan(Path.GetFileName(f), File.ReadAllText(f))).ToList();
+        var allowed = GovernanceSqlAllowlist.Entries;
+        var violations = hits.Where(h => !allowed.ContainsKey((h.File, h.Member))).Select(h => $"{h.File}:{h.Line} [{h.Member}] {h.Rule}").Distinct().ToList();
+        violations.ShouldBeEmpty("SEC-SIMPL-26: Governance SQL must be built only from constants and parameters.");
+
+        var stale = allowed.Keys.Where(k => !hits.Any(h => (h.File, h.Member) == k)).ToList();
+        stale.ShouldBeEmpty("SEC-SIMPL-26: stale allowlist entries must be removed.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Scanner_flags_planted_violation()
+    {
+        // SEC-SIMPL-26 negative control on synthetic snippets.
+        static List<string> Rules(string body) => GovernanceSqlConstructionScanner
+            .Scan("Synthetic.cs", "class C { void M(string x, System.Text.StringBuilder sb) {" + body + "} }").Select(h => h.Rule).ToList();
+
+        Rules("var s = $\"SELECT * FROM T WHERE a = {x}\";").ShouldContain("interpolated-sql");
+        Rules("var s = string.Format(\"SELECT {0}\", x);").ShouldContain("string.Format");
+        Rules("var s = \"SELECT * FROM T WHERE a = \" + x;").ShouldContain("non-constant-concatenation");
+        Rules("sb.Append(x);").ShouldContain("StringBuilder.Append(non-constant)");
+        Rules("var s = \"SELECT 1 \" + \"FROM T\"; sb.Append(\"A\");").ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Governance_repository_logs_only_through_executor()
+    {
+        // SEC-SIMPL-25: logger calls in GovernanceRepository*.cs live only in allowlisted members.
+        var persistenceDir = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Infrastructure", "Persistence");
+        var files = Directory.GetFiles(persistenceDir, "GovernanceRepository*.cs", SearchOption.AllDirectories);
+        files.ShouldNotBeEmpty();
+        // member -> reason
+        var allowed = new Dictionary<string, string>
+        {
+            ["ExecuteReaderAsync"] = "executor",
+            ["ExecuteNonQueryAsync"] = "executor",
+            ["ExecuteScalarAsync"] = "executor",
+            ["LogExecutionFailure"] = "executor failure sink (type and code only)",
+            ["RecordTenantRefusalAuditAsync"] = "logs only a constant code and an opaque consent id",
+        };
+
+        var offenders = new List<string>();
+        foreach (var file in files)
+        {
+            var root = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(File.ReadAllText(file)).GetRoot();
+            foreach (var inv in root.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>())
             {
-                var line = lines[i].Trim();
-                if (line.StartsWith("//", StringComparison.Ordinal) || line.StartsWith("/*", StringComparison.Ordinal) || line.StartsWith('*'))
+                var text = inv.Expression.ToString();
+                if (Regex.IsMatch(text, @"\b_?logger\b") && !allowed.ContainsKey(GovernanceSqlConstructionScanner.MemberOf(inv)))
                 {
-                    continue;
-                }
-
-                // Check CommandText assignments
-                if (line.Contains("CommandText") && line.Contains('='))
-                {
-                    // Allowlisted:
-                    // 1. Literal strings / constants (e.g. cmd.CommandText = "SELECT ..."; or cmd.CommandText = sql;)
-                    // 2. BindIdInClause calls
-                    // 3. ConsentPage safe builder: SelectConsentPagePrefix + where.ToString() + SelectConsentPageSuffix
-                    // 4. sql + " ORDER BY ..."
-                    var withoutLiterals = Regex.Replace(line, @"""[^""]*""", "\"\"");
-                    bool isSafe = line.Contains("BindIdInClause")
-                        || line.Contains("SelectConsentPagePrefix + where.ToString() + SelectConsentPageSuffix")
-                        || line.Contains("sql + \" ORDER BY r.requested_at DESC\"")
-                        || (!line.Contains("$\"") && !withoutLiterals.Contains('+'));
-
-                    if (!isSafe)
-                    {
-                        violations.Add($"{fileName}:{i + 1}: {line}");
-                    }
-                }
-
-                // Check string interpolation on SQL keywords
-                if (line.Contains("$\"") && (line.Contains("SELECT ") || line.Contains("INSERT ") || line.Contains("UPDATE ") || line.Contains("DELETE ")))
-                {
-                    violations.Add($"{fileName}:{i + 1} (interpolated SQL): {line}");
+                    offenders.Add($"{Path.GetFileName(file)}:{inv.GetLocation().GetLineSpan().StartLinePosition.Line + 1}");
                 }
             }
         }
 
-        violations.ShouldBeEmpty("SEC-SIMPL-26: Governance SQL must be built only from constants and parameters.");
+        offenders.ShouldBeEmpty("SEC-SIMPL-25: governance repository logs only through the executor.");
     }
 
     /// <summary>Mutation check of 12.1 #7: a dummy Sqlite governance type is flagged, the data-source guards are not.</summary>

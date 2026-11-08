@@ -29,6 +29,7 @@ public partial class GovernanceRepository
                                   AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
 
         public static string RevokeTarget(IGovernanceSqlDialect dialect) =>
+            // TODO(WP-SIMPL-20d): StartsWith("WITH") engine sniffing goes away when lock clauses live in the dialect.
             dialect.LockRowsForUpdate.StartsWith("WITH", StringComparison.OrdinalIgnoreCase)
                 ? @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
                     FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)
@@ -50,10 +51,7 @@ public partial class GovernanceRepository
         DateTimeOffset atTime,
         CancellationToken ct = default)
     {
-        if (tenantId != null)
-        {
-            TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents));
-        }
+        TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)); // SEC-SIMPL-22: no cross-tenant role read
 
         var sql = ConsentGrantSql.ActiveRoleConsents(tenantId != null);
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);

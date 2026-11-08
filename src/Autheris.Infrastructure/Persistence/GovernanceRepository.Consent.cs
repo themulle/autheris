@@ -98,6 +98,7 @@ public partial class GovernanceRepository
                                           WHERE id = @id AND is_revoked = 0";
     }
 
+    // TODO(WP-SIMPL-20d): StartsWith("WITH") engine sniffing goes away when lock clauses live in the dialect.
     private string BuildLockRowsQuery(string selectColumns, string fromTableAndAlias, string joinsAndWhere, string? lockTargetAlias = null)
     {
         if (_dialect.LockRowsForUpdate.StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
@@ -112,6 +113,7 @@ public partial class GovernanceRepository
     private string SelectExtendTargetSql =>
         BuildLockRowsQuery("t.source_name, t.schema_name, t.table_name, c.tenant_id, c.valid_from", "CONSENTS c", "JOIN TABLES t ON c.table_id = t.id WHERE c.id = @id", "c");
 
+    // TODO(WP-SIMPL-20d): StartsWith("WITH") engine sniffing goes away when lock clauses live in the dialect.
     private string SelectRequestStatusForUpdateSql =>
         _dialect.LockRowsForUpdate.StartsWith("WITH", StringComparison.OrdinalIgnoreCase)
             ? "SELECT status FROM CONSENT_REQUESTS WITH (UPDLOCK, ROWLOCK, HOLDLOCK) WHERE id = @id"
@@ -125,14 +127,19 @@ public partial class GovernanceRepository
         TableIdentifier table,
         DateTimeOffset atTime,
         CancellationToken ct = default) =>
-        GetActiveConsentsForSubjectsAsync(subjects, table, atTime, null, ct);
+        // Explicit cross-tenant read path of the tenant-less interface overload (SEC-SIMPL-22); the tenant overload below fails closed.
+        ActiveForSubjectsCoreAsync(subjects, table, atTime, null, ct);
 
-    public async Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
+    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
+        IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
+        ActiveForSubjectsCoreAsync(subjects, table, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), ct);
+
+    private async Task<IReadOnlyList<Consent>> ActiveForSubjectsCoreAsync(
         IEnumerable<Sid> subjects,
         TableIdentifier table,
         DateTimeOffset atTime,
         TenantId? tenantId,
-        CancellationToken ct = default)
+        CancellationToken ct)
     {
         var subjectEnumerated = subjects.ToList();
         var subjectSet = subjectEnumerated.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -181,14 +188,19 @@ public partial class GovernanceRepository
         IEnumerable<string>? roles = null,
         DateTimeOffset? atTime = null,
         CancellationToken ct = default) =>
-        GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, null, ct);
+        // Explicit cross-tenant read path of the tenant-less interface overload (SEC-SIMPL-22); the tenant overload below fails closed.
+        AllActiveCoreAsync(subjects, roles, atTime, null, ct);
 
-    public async Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
+    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
+        IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
+        AllActiveCoreAsync(subjects, roles, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), ct);
+
+    private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(
         IEnumerable<Sid> subjects,
         IEnumerable<string>? roles,
         DateTimeOffset? atTime,
         TenantId? tenantId,
-        CancellationToken ct = default)
+        CancellationToken ct)
     {
         var effectiveAt = atTime ?? DateTimeOffset.UtcNow;
         var subjectEnumerated = subjects.ToList();
@@ -427,6 +439,7 @@ public partial class GovernanceRepository
     public async Task<(ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table)?> GetRowFilterAsync(
         Guid rowFilterId, CancellationToken ct = default)
     {
+        // TODO(WP-SIMPL-20b): engine-type branch; replace with a dialect member.
         var keyDialect = _dialect is PostgreSqlGovernanceDialect ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         var row = await RowFilterEvaluationStore.ReadRuleAsync(conn, null, keyDialect, rowFilterId, ct).ConfigureAwait(false);
@@ -437,6 +450,7 @@ public partial class GovernanceRepository
         Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
     {
         TenantScope.RequireTenant(tenant, nameof(GovernanceTable.ConsentRowFilters));
+        // TODO(WP-SIMPL-20b): engine-type branch; replace with a dialect member.
         var keyDialect = _dialect is PostgreSqlGovernanceDialect ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
         RowFilterEvaluationChange? change;
         await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))

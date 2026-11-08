@@ -16,10 +16,6 @@ internal sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
 {
     private readonly Func<DbConnection> _connectionFactory;
 
-    public SqlServerGovernanceDialect() : this("Server=localhost;Database=autheris;Trusted_Connection=True;Encrypt=False;")
-    {
-    }
-
     public SqlServerGovernanceDialect(string connectionString)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -42,21 +38,21 @@ internal sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
 
     public string InsertReturning(string column)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(column);
+        GovernanceSqlInput.Identifier(column, nameof(column));
         return "OUTPUT inserted." + Quote(column);
     }
 
     public string JsonValue(string column, string path)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(column);
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        GovernanceSqlInput.Identifier(column, nameof(column));
+        GovernanceSqlInput.Identifier(path, nameof(path));
         return "JSON_VALUE(" + Quote(column) + ", '$." + path + "')";
     }
 
     public string StringAggregate(string expr, string separator)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(expr);
-        return "STRING_AGG(" + expr + ", '" + (separator ?? ",") + "')";
+        GovernanceSqlInput.Identifier(expr, nameof(expr));
+        return "STRING_AGG(" + expr + ", '" + GovernanceSqlInput.Separator(separator) + "')";
     }
 
     public string LimitWithoutOrder(int n)
@@ -180,7 +176,7 @@ internal sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
         }
     }
 
-    private static string Quote(string identifier) => "[" + identifier + "]";
+    private static string Quote(string identifier) => "[" + GovernanceSqlInput.Identifier(identifier, nameof(identifier)) + "]";
 
     private sealed class QuotedIdentifierSqlConnection : DbConnection
     {

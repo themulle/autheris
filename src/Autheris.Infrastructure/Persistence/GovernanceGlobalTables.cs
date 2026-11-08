@@ -6,7 +6,7 @@ using Autheris.Domain.Common;
 
 /// <summary>
 /// Closed allowlist of global (non-tenant-scoped) governance tables (SEC-SIMPL-22).
-/// All tables not listed here are strictly tenant-scoped and require a non-null TenantId.
+/// Only tables WITHOUT a tenant_id column in the baseline schema may be listed. All tables not listed here are strictly tenant-scoped and require a non-null TenantId.
 /// </summary>
 public static class GovernanceGlobalTables
 {
@@ -20,7 +20,6 @@ public static class GovernanceGlobalTables
         "DATA_OWNER_DELEGATIONS", // Data owner delegations
         "ROLES", // Platform role definitions
         "ROLE_MEMBERS", // Role membership assignments
-        "FUNCTIONAL_RIGHT_MAPPINGS", // Right to role mappings
         "POLICY_EPOCHS", // Global policy version epochs
         "AUDIT_LOG_TRUNCATE_GUARD", // Single-row database truncate guard
         "CATALOG_STATE", // Global schema and catalog state tracking
@@ -32,17 +31,11 @@ public static class GovernanceGlobalTables
         "TABLE_TAGS", // Tags for catalog tables
         "TABLE_CATALOG_SETTINGS", // Global catalog configuration settings
         "TABLE_ROW_FILTER_STRATEGIES", // Row filter strategies
-        "TENANT_REGISTRY", // Directory of all registered tenants
-        "IDENTITY_LOCKS", // Concurrency locks for identity operations
-        "SEMANTIC_MANIFESTS", // Global semantic models and manifests
         "TRUSTED_DOCUMENT_APPS", // Registered trusted document applications
         "TRUSTED_DOCUMENT_APP_VERSIONS", // Trusted document app versions
         "TRUSTED_DOCUMENT_APP_ORIGINS", // Allowed origins for trusted apps
         "TRUSTED_DOCUMENT_HASHES", // Pre-approved document query hashes
         "TRUSTED_DOCUMENT_GENERATION", // Generation timestamps for trusted docs
-        "CLOUDEVENT_SUBSCRIPTIONS", // Platform event subscriptions
-        "RECERT_CAMPAIGNS", // Platform-level recertification campaigns
-        "RECERT_ITEMS", // Recertification items
     };
 
     public static IReadOnlySet<string> All => GlobalTables;

@@ -22,3 +22,24 @@ internal interface IGovernanceSqlDialect
     IParameterBudgetProvider ParameterBudget { get; }
     DbConnection CreateConnection();
 }
+
+/// <summary>Strict validation of dialect SQL-fragment inputs (SEC-SIMPL-21).</summary>
+internal static partial class GovernanceSqlInput
+{
+    private static readonly string[] Separators = [",", ", ", ";", "|", " "];
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z0-9_.]+$")]
+    private static partial System.Text.RegularExpressions.Regex Safe();
+
+    public static string Identifier(string value, string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, name);
+        return Safe().IsMatch(value) ? value : throw new ArgumentException("Unsafe SQL identifier or path.", name);
+    }
+
+    public static string Separator(string? separator)
+    {
+        separator ??= ",";
+        return Array.IndexOf(Separators, separator) >= 0 ? separator : throw new ArgumentException("Separator not allowed.", nameof(separator));
+    }
+}

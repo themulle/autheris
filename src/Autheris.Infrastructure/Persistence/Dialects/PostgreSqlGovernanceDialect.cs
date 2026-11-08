@@ -40,21 +40,21 @@ internal sealed class PostgreSqlGovernanceDialect : IGovernanceSqlDialect
 
     public string InsertReturning(string column)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(column);
+        GovernanceSqlInput.Identifier(column, nameof(column));
         return "RETURNING " + Quote(column);
     }
 
     public string JsonValue(string column, string path)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(column);
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        GovernanceSqlInput.Identifier(column, nameof(column));
+        GovernanceSqlInput.Identifier(path, nameof(path));
         return Quote(column) + "->>'" + path + "'";
     }
 
     public string StringAggregate(string expr, string separator)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(expr);
-        return "STRING_AGG(" + expr + ", '" + (separator ?? ",") + "')";
+        GovernanceSqlInput.Identifier(expr, nameof(expr));
+        return "STRING_AGG(" + expr + ", '" + GovernanceSqlInput.Separator(separator) + "')";
     }
 
     public string LimitWithoutOrder(int n)
@@ -136,5 +136,5 @@ internal sealed class PostgreSqlGovernanceDialect : IGovernanceSqlDialect
         return sb.ToString();
     }
 
-    private static string Quote(string identifier) => "\"" + identifier + "\"";
+    private static string Quote(string identifier) => "\"" + GovernanceSqlInput.Identifier(identifier, nameof(identifier)) + "\"";
 }
