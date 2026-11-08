@@ -90,13 +90,15 @@ public static class SubtreeGraphPartitioner
     public static SubtreePartitionResult PartitionSubtrees(
         SqlStatement statement,
         IReadOnlyList<ResolvedSourceTable> tables,
-        int maxTablesPerSubtree = DefaultMaxTablesPerSubtree) =>
-        Partition(statement, tables, maxTablesPerSubtree);
+        int maxTablesPerSubtree = DefaultMaxTablesPerSubtree,
+        Func<ResolvedSourceTable, bool>? isPushdownEligible = null) =>
+        Partition(statement, tables, maxTablesPerSubtree, isPushdownEligible);
 
     public static SubtreePartitionResult Partition(
         SqlStatement statement,
         IReadOnlyList<ResolvedSourceTable> tables,
-        int maxTablesPerSubtree = DefaultMaxTablesPerSubtree)
+        int maxTablesPerSubtree = DefaultMaxTablesPerSubtree,
+        Func<ResolvedSourceTable, bool>? isPushdownEligible = null)
     {
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(tables);
@@ -116,7 +118,7 @@ public static class SubtreeGraphPartitioner
         var clusteredTables = new HashSet<TableIdentifier>();
 
         var fromSource = NormalizeJoinTree(querySpec.From, tableLookup);
-        var topCluster = AnalyzeTableSource(fromSource, tableLookup, maxTablesPerSubtree, finalizedClusters);
+        var topCluster = AnalyzeTableSource(fromSource, tableLookup, maxTablesPerSubtree, finalizedClusters, isPushdownEligible);
         if (topCluster != null && topCluster.IsSql && topCluster.Tables.Count >= 2)
         {
             if (topCluster.Tables.Count > maxTablesPerSubtree)
@@ -163,7 +165,8 @@ public static class SubtreeGraphPartitioner
         TableSource source,
         Dictionary<string, ResolvedSourceTable> tableLookup,
         int maxTables,
-        List<Cluster> finalizedClusters)
+        List<Cluster> finalizedClusters,
+        Func<ResolvedSourceTable, bool>? isPushdownEligible)
     {
         if (source is NamedTableSource named)
         {
@@ -173,7 +176,8 @@ public static class SubtreeGraphPartitioner
                 return new Cluster { Root = named, IsSql = false };
             }
 
-            bool isSql = resolved.Metadata.Table.DataSourceType == DataSourceType.Sql;
+            // An ineligible table (column restrictions) never merges; it is staged on its own with its own decision.
+            bool isSql = resolved.Metadata.Table.DataSourceType == DataSourceType.Sql && (isPushdownEligible?.Invoke(resolved) ?? true);
             var srcName = resolved.Metadata.Table.SourceName ?? resolved.ResolvedIdentifier.Domain;
 
             var c = new Cluster
@@ -189,8 +193,8 @@ public static class SubtreeGraphPartitioner
 
         if (source is JoinedTableSource joined)
         {
-            var left = AnalyzeTableSource(joined.Left, tableLookup, maxTables, finalizedClusters);
-            var right = AnalyzeTableSource(joined.Right, tableLookup, maxTables, finalizedClusters);
+            var left = AnalyzeTableSource(joined.Left, tableLookup, maxTables, finalizedClusters, isPushdownEligible);
+            var right = AnalyzeTableSource(joined.Right, tableLookup, maxTables, finalizedClusters, isPushdownEligible);
 
             bool canMerge = left != null && right != null
                 && left.IsSql && right.IsSql

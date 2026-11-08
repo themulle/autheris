@@ -253,9 +253,25 @@ public sealed class AdvisoryRegressionTests
 
     [Theory]
     [InlineData("audit_reports_actual_masking_path")]
+    [InlineData("non_root_deny_column_never_staged_wildcard")]
+    [InlineData("non_root_deny_column_never_staged_explicit")]
+    [InlineData("name_clash_root_clear_member_masked_stays_masked")]
+    [InlineData("member_mask_applied_per_member")]
     public async Task Ghsa_7ccv_5qwm_regression(string bullet)
     {
-        bullet.ShouldBe("audit_reports_actual_masking_path");
+        if (bullet != "audit_reports_actual_masking_path")
+        {
+            await (bullet switch
+            {
+                "non_root_deny_column_never_staged_wildcard" => FederatedSubtreeColumnDecisionTests.AssertDenyColumnNeverStagedAsync(wildcard: true),
+                "non_root_deny_column_never_staged_explicit" => FederatedSubtreeColumnDecisionTests.AssertDenyColumnNeverStagedAsync(wildcard: false),
+                "name_clash_root_clear_member_masked_stays_masked" => FederatedSubtreeColumnDecisionTests.AssertMemberMaskAppliedPerMemberAsync(nameClash: true),
+                "member_mask_applied_per_member" => FederatedSubtreeColumnDecisionTests.AssertMemberMaskAppliedPerMemberAsync(nameClash: false),
+                _ => throw new ArgumentOutOfRangeException(nameof(bullet))
+            });
+            return;
+        }
+
         var engine = new FastSqlEngine();
         const string sql = "SELECT o.id, oi.item_name FROM pg.public.orders o JOIN pg.public.order_items oi ON o.id = oi.order_id JOIN ms.dbo.shipments s ON o.id = s.id";
         var metadata = engine.Analyze(sql.AsMemory());
