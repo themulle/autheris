@@ -249,7 +249,7 @@ public static partial class WebSqlEndpoints
                 governedRequest,
                 user,
                 tenantId,
-                async (reader, token) =>
+                async (reader, info, token) =>
                 {
                     httpContext.Response.StatusCode = StatusCodes.Status200OK;
                     httpContext.Response.ContentType = "application/json; charset=utf-8";
@@ -266,7 +266,16 @@ public static partial class WebSqlEndpoints
                     w.WriteStartArray("columns");
                     for (int i = 0; i < fieldCount; i++)
                     {
-                        w.WriteStringValue(columnNames[i]);
+                        var col = info.Columns[i];
+                        bool masked = i < info.MaskedColumns.Length && info.MaskedColumns[i];
+                        bool nullable = masked ? true : (col.AllowDbNull ?? true);
+                        string typeName = TrinoColumnTypes.Map(col, Array.Empty<object?>()).Name;
+                        w.WriteStartObject();
+                        w.WriteString("name", columnNames[i]);
+                        w.WriteString("type", typeName);
+                        w.WriteBoolean("nullable", nullable);
+                        w.WriteBoolean("masked", masked);
+                        w.WriteEndObject();
                     }
                     w.WriteEndArray();
 
@@ -404,7 +413,7 @@ public static partial class WebSqlEndpoints
                 governedRequest,
                 user,
                 tenantId,
-                async (reader, token) =>
+                async (reader, _, token) =>
                 {
                     int fieldCount = reader.FieldCount;
                     columnNames = SqlResultColumns.UniqueNames(reader);

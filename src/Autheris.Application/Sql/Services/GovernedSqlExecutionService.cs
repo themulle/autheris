@@ -133,7 +133,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct = default)
     {
         try
@@ -146,6 +146,14 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             await federatedService.ExecuteGovernedQueryAsync(request, user, tenantId, rowWriter, ct).ConfigureAwait(false);
         }
     }
+
+    public Task ExecuteGovernedQueryAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct = default) =>
+        ExecuteGovernedQueryAsync(request, user, tenantId, (reader, _, token) => rowWriter(reader, token), ct);
 
     public async Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
         GovernedSqlQueryRequest request,

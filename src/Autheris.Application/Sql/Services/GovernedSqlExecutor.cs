@@ -2,6 +2,7 @@ namespace Autheris.Application.Sql.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
@@ -103,11 +104,19 @@ public sealed partial class GovernedSqlExecutor
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct = default)
     {
         await ExecuteCoreAsync(request, user, tenantId, rowWriter, ct).ConfigureAwait(false);
     }
+
+    public Task ExecuteGovernedQueryAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct = default) =>
+        ExecuteGovernedQueryAsync(request, user, tenantId, (reader, _, token) => rowWriter(reader, token), ct);
 
     public async Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
         GovernedSqlQueryRequest request,
@@ -133,9 +142,9 @@ public sealed partial class GovernedSqlExecutor
             request,
             user,
             tenantId,
-            async (reader, token) =>
+            async (reader, info, token) =>
             {
-                columnDescriptions = SqlResultColumns.Describe(reader);
+                columnDescriptions = info.Columns;
                 foreach (var column in columnDescriptions)
                 {
                     columns.Add(column.Name);
@@ -208,7 +217,7 @@ public sealed partial class GovernedSqlExecutor
                     request,
                     user,
                     tenantId,
-                    async (reader, token) =>
+                    async (reader, _, token) =>
                     {
                         var columnDescriptions = SqlResultColumns.Describe(reader);
                         var columns = new string[columnDescriptions.Count];
@@ -263,7 +272,7 @@ public sealed partial class GovernedSqlExecutor
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -390,6 +399,17 @@ public sealed partial class GovernedSqlExecutor
         return await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct).ConfigureAwait(false);
     }
 
+    internal Task<string> ExecuteRewrittenAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        GovernedRewrite rewrite,
+        DmlAuditContext dmlContext,
+        IReadOnlyDictionary<string, object?> clientValues,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct) =>
+        ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, (reader, _, token) => rowWriter(reader, token), ct);
+
     /// <summary>
     /// Everything after a successful compile. Separate (and internal) so that the dialect agreement and the fail-closed rules of the
     /// execution half are testable without a rewriter.
@@ -401,7 +421,7 @@ public sealed partial class GovernedSqlExecutor
         GovernedRewrite rewrite,
         DmlAuditContext dmlContext,
         IReadOnlyDictionary<string, object?> clientValues,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct)
     {
         var compiled = rewrite.Compiled;
@@ -474,7 +494,13 @@ public sealed partial class GovernedSqlExecutor
 
             // G-11: only after a successful Compile, and only the compiled text (markers, never a bound value).
             using var syntheticReader = new SyntheticDataTableReader(compiled.Sql);
-            await rowWriter(syntheticReader, ct).ConfigureAwait(false);
+            var synCols = SqlResultColumns.Describe(syntheticReader);
+            var synMasks = compiled.OutputColumnMasks;
+            if (synMasks.IsDefault || synMasks.Length != syntheticReader.FieldCount)
+            {
+                synMasks = ImmutableArray.CreateRange(Enumerable.Repeat(false, syntheticReader.FieldCount));
+            }
+            await rowWriter(syntheticReader, new GovernedResultInfo(synCols, synMasks), ct).ConfigureAwait(false);
             NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated: false);
             return compiled.Sql;
         }
@@ -594,7 +620,7 @@ public sealed partial class GovernedSqlExecutor
 
                 using var emptyTable = new DataTable();
                 using var emptyReader = emptyTable.CreateDataReader();
-                await rowWriter(emptyReader, ct).ConfigureAwait(false);
+                await rowWriter(emptyReader, new GovernedResultInfo(Array.Empty<SqlResultColumn>(), ImmutableArray<bool>.Empty), ct).ConfigureAwait(false);
                 return compiled.Sql;
             }
 
@@ -616,16 +642,23 @@ public sealed partial class GovernedSqlExecutor
                 {
                     await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
                     {
+                        var columns = SqlResultColumns.Describe(reader);
+                        var maskArray = compiled.OutputColumnMasks;
+                        if (maskArray.IsDefault || (reader.FieldCount > 0 && maskArray.Length != reader.FieldCount))
+                        {
+                            throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, compiled.Dialect);
+                        }
+                        var info = new GovernedResultInfo(columns, reader.FieldCount == 0 ? ImmutableArray<bool>.Empty : maskArray);
                         if (rewrite.DeliveredRowLimit > 0)
                         {
                             var limitedReader = new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit);
-                            await rowWriter(limitedReader, ct).ConfigureAwait(false);
+                            await rowWriter(limitedReader, info, ct).ConfigureAwait(false);
                             deliveredOrAffectedRows = limitedReader.DeliveredRows;
                             isTruncated = limitedReader.HasMoreRows;
                         }
                         else
                         {
-                            await rowWriter(reader, ct).ConfigureAwait(false);
+                            await rowWriter(reader, info, ct).ConfigureAwait(false);
                         }
                     }
 

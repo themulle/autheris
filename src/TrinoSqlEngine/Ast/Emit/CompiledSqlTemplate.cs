@@ -43,7 +43,8 @@ public sealed record CompiledSqlTemplate(
     string CompilerVersion,
     ImmutableArray<TableDependency> Dependencies,
     int? ExpectedAffectedRows = null,
-    bool HasRecursiveCte = false)
+    bool HasRecursiveCte = false,
+    ImmutableArray<bool> OutputColumnMasks = default)
 {
     public static CompiledSqlTemplate From(string keyMaterial, CompiledSql compiled, ImmutableArray<TableDependency> dependencies) =>
         new(
@@ -56,7 +57,8 @@ public sealed record CompiledSqlTemplate(
             compiled.CompilerVersion,
             dependencies,
             compiled.ExpectedAffectedRows,
-            compiled.HasRecursiveCte);
+            compiled.HasRecursiveCte,
+            compiled.OutputColumnMasks);
 
     private static ImmutableArray<SqlSlot> ToSlots(ImmutableArray<BoundParameter> parameters)
     {
@@ -132,7 +134,8 @@ public sealed record CompiledSqlTemplate(
         return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion)
         {
             ExpectedAffectedRows = ExpectedAffectedRows,
-            HasRecursiveCte = HasRecursiveCte
+            HasRecursiveCte = HasRecursiveCte,
+            OutputColumnMasks = OutputColumnMasks.IsDefault ? ImmutableArray<bool>.Empty : OutputColumnMasks
         };
     }
 }
