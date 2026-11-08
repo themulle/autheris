@@ -68,7 +68,7 @@ public static partial class GatewayGovernanceServiceExtensions
         // the durable CDC webhook subscription store is a view of the governance repository (only when the feature is on).
         var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
 
-        // one state directory for the SQLite governance database and the audit anchor next to it.
+        // one state directory (Gateway:State:StateDirectory) for the gateway state files.
         services.AddOptions<StateOptions>().BindConfiguration(StateOptions.SectionName).ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<StateOptions>, StateOptionsValidator>();
         services.AddSingleton<IGatewayStatePaths, GatewayStatePaths>();

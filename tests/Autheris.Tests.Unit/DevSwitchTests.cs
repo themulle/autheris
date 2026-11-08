@@ -127,19 +127,6 @@ public sealed class DevSwitchTests
     // ---------- Persistence ----------
 
     [Fact]
-    public void Persist_DoesNotWriteAGovernanceConnectionString_OrCreateTheDirectory()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), "autheris-dev-" + Guid.NewGuid().ToString("N"));
-        var (config, _) = Resolve("Development",
-            ("Gateway:GovernanceDb:ConnectionString", "Host=db;Database=x;Username=u;Password=p"),
-            ("Gateway:Dev:Persist:Enabled", "true"),
-            ("Gateway:Dev:Persist:Directory", dir));
-
-        Directory.Exists(dir).ShouldBeFalse();
-        Bind(config).GovernanceDb.ConnectionString.ShouldBe("Host=db;Database=x;Username=u;Password=p");
-    }
-
-    [Fact]
     public void Persist_Disabled_KeepsConfiguredConnectionString()
     {
         var (config, _) = Resolve("Development",
@@ -199,7 +186,6 @@ public sealed class DevSwitchTests
     private static readonly (string Name, Func<DevOptions> Risky)[] RiskyValues =
     [
         ("Preset", () => new DevOptions { Preset = "Quickstart" }),
-        ("Persist:Enabled", () => new DevOptions { Persist = new DevPersistOptions { Enabled = true } }),
         ("DemoData", () => new DevOptions { DemoData = true }),
         ("TestAuthHandler", () => new DevOptions { TestAuthHandler = true }),
         ("Tooling:BananaCakePop", () => new DevOptions { Tooling = new DevToolingOptions { BananaCakePop = true } }),

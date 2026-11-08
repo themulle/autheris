@@ -27,6 +27,19 @@ public sealed class ProgramGuardOrderTests
         unknownKeys.ShouldBeGreaterThan(guard);
         firstService.ShouldBeGreaterThan(guard, "no service registration may read GovernanceDb before the guard");
 
+        program[..guard].ShouldNotContain("builder.Services.");
+
+        // the anchor assertion runs unconditionally after Build()
+        var build = program.IndexOf("var app = builder.Build();", StringComparison.Ordinal);
+        var assertion = program.IndexOf("GovernanceStartupAssertions.AssertAnchorStoreResolvable(app.Services);", StringComparison.Ordinal);
+        build.ShouldBeGreaterThan(-1);
+        assertion.ShouldBeGreaterThan(build);
+        var lineStart = program.LastIndexOf('\n', assertion) + 1;
+        program[lineStart..].TrimStart().ShouldStartWith("Autheris.Api.Extensions.DependencyInjection.GovernanceStartupAssertions", Case.Sensitive, "the assertion must be a top-level statement");
+        var previousStatement = program[build..lineStart].TrimEnd().Split('\n')[^1].Trim();
+        previousStatement.ShouldNotEndWith("{");
+        previousStatement.ShouldNotStartWith("if");
+
         // no configuration source may be added after the guard call
         program[guard..].ShouldNotContain("builder.Configuration.Add");
     }

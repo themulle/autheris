@@ -27,6 +27,10 @@ public sealed class DevConfigurationPersistTests
         cfg["Gateway:GovernanceDb:ConnectionString"].ShouldBeNullOrEmpty();
         report.Applied.Keys.ShouldNotContain(k => k.EndsWith("GovernanceDb:ConnectionString", StringComparison.OrdinalIgnoreCase));
         Directory.Exists(dir).ShouldBeFalse();
+
+        // the option no longer exists, so the unknown-key guard rejects it instead of silently ignoring it
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(cfg));
+        ex.Message.ShouldContain("Dev:Persist");
     }
 
     private sealed class Env : IHostEnvironment

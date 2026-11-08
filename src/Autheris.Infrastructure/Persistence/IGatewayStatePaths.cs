@@ -46,9 +46,6 @@ public sealed class GatewayStatePaths(IOptions<StateOptions> options, IHostEnvir
             : $"Data Source={GovernanceDatabaseFile}";
     }
 
-    /// <summary>The default audit chain anchor file: next to the governance database.</summary>
-    public static string AuditAnchorFileFor(string governanceDbFile) => governanceDbFile + ".audit-anchor.json";
-
     /// <summary>The configured directory when set, otherwise <paramref name="fallback"/> (used by the Development presets).</summary>
     public static string ResolveDirectory(string? configured, string fallback) =>
         string.IsNullOrWhiteSpace(configured) ? fallback : configured;

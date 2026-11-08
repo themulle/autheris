@@ -80,12 +80,6 @@ public sealed class GatewayStatePathsTests
     }
 
     [Fact]
-    public void AnchorFileFor_IsNextToTheDatabaseFile()
-    {
-        GatewayStatePaths.AuditAnchorFileFor("/var/state/governance.db").ShouldBe("/var/state/governance.db.audit-anchor.json");
-    }
-
-    [Fact]
     public void ExplicitChainAnchorPath_Wins()
     {
         var anchorPath = Path.Combine(Path.GetTempPath(), $"explicit-anchor-{Guid.NewGuid():N}.json");

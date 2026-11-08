@@ -93,7 +93,7 @@ curl -s https://localhost:7214/api/dev/info | jq .dev   # preset, features, acti
 
 ### 2.5 Reset local state
 
-By default the development database is in memory and starts fresh on every run. If you enabled persistence (see 3.3), stop the gateway and run `scripts/dev-reset.sh`.
+The governance database is a PostgreSQL or SQL Server instance configured through `Gateway:GovernanceDb`; reset it with your database tooling.
 
 ---
 
@@ -117,7 +117,7 @@ All development-only behaviour lives in one section, `Gateway:Dev`. Nothing in i
 }
 ```
 
-Environment variables work as usual, for example `Gateway__Dev__Persist__Enabled=true`.
+Environment variables work as usual, for example `Gateway__Dev__Preset=Standard`.
 
 ### 3.1 Switch classes
 
@@ -146,12 +146,10 @@ A preset is a set of concrete values, not hidden logic. What it applied is visib
 | `PersonaLogin` | `true` | A | `GET /api/dev/personas` (users, SIDs, roles, login links; never passwords) and `GET /api/dev/login/{persona}?redirect=/graphql` (one-click login; only same-site paths are followed). |
 | `Info` | `true` | A | `GET /api/dev/info`: preset, resolved features, class B switches, auth schemes, session state, database provider, rate limits, GraphQL flags, active bypasses. No connection strings or passwords. |
 | `DemoData` | preset | A | Seeds the demo catalog (idempotent). Alias of `GovernanceDb.SeedDemoData`. |
-| `Persist:Enabled` / `Persist:Directory` | `false` / `.data` | A | Keeps the governance database in `<Directory>/dev.db`, so approvals and audit data survive restarts. |
 | `TestAuthHandler` | preset | B | Header-based test identities (section 4.1). Alias of `Authentication.EnableTestAuthHandler`. |
 | `Tooling:BananaCakePop` | preset | A | Nitro IDE at `/graphql`. Alias of `GraphQL.EnableBananaCakePop` in Development. |
 | `Tooling:Introspection` | preset | B | GraphQL introspection. Alias of `GraphQL.EnableIntrospection` in Development. |
 
-**Persistence.** `.data/` is git-ignored. Reset with `scripts/dev-reset.sh [dir]` with the gateway stopped. The script removes the database, its WAL files **and** `dev.db.audit-anchor.json`. Deleting only the database leaves an anchor that points to a sequence the new database does not have, and the next start reports an audit chain integrity violation. In a container, map the directory to a named volume and avoid bind mounts on 9p/virtiofs file systems because of SQLite WAL.
 
 ### 3.4 Precedence
 

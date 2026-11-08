@@ -52,6 +52,7 @@ public static partial class GovernanceProviderGuard
                 continue;
             }
 
+            // only the runtime connection string keys count; a migration-only connection string never satisfies the requirement
             if (key is "GovernanceDb:ConnectionString" or "Gateway:GovernanceDb:ConnectionString")
             {
                 hasNonEmptyConnectionString = true;
