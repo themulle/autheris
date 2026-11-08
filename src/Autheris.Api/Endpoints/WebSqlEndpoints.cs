@@ -21,10 +21,14 @@ public static partial class WebSqlEndpoints
     public const string GenericTimeoutMessage = "The SQL statement exceeded the execution time limit. Narrow the query (filter, fewer columns, LIMIT) or contact support with the trace id.";
     public const string GenericServerErrorMessage = "The SQL statement could not be executed. Contact support with the trace id.";
 
+    public sealed record WebSqlPageRequest(int? Size);
+
     public sealed record WebSqlRequestDto(
         string? Sql,
         Dictionary<string, object?>? Parameters,
-        string? DataSource);
+        string? DataSource,
+        WebSqlPageRequest? Page = null,
+        string? Next = null);
 
     public static IEndpointRouteBuilder MapWebSqlEndpoints(this IEndpointRouteBuilder app, GatewayOptions? gatewayOptions = null)
     {

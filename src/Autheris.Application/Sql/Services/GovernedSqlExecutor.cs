@@ -2,6 +2,7 @@ namespace Autheris.Application.Sql.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
@@ -62,6 +63,7 @@ public sealed partial class GovernedSqlExecutor
     private readonly CompiledSqlAuditDigester _digester;
     private readonly IProviderExecutionGuard _executionGuard;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
+    private readonly Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec _pageTokenCodec;
 
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
@@ -75,8 +77,11 @@ public sealed partial class GovernedSqlExecutor
         IDbSessionContextInitializer? sessionInitializer = null,
         IKeyVaultSecretProvider? secretProvider = null,
         CompiledSqlAuditDigester? auditDigester = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null,
+        Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null)
     {
+        _costQuota = costQuota;
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
@@ -92,17 +97,26 @@ public sealed partial class GovernedSqlExecutor
         _digester = auditDigester ?? new CompiledSqlAuditDigester(_options, secretProvider, environment);
         // L-A3: the guard is a required dependency; there is no silent pass-through fallback in the executor.
         _executionGuard = executionGuard ?? throw new ArgumentNullException(nameof(executionGuard));
+        _pageTokenCodec = pageTokenCodec ?? new Autheris.Application.Sql.Paging.WebSqlPageTokenCodec(_digester);
     }
 
     public async Task ExecuteGovernedQueryAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct = default)
     {
         await ExecuteCoreAsync(request, user, tenantId, rowWriter, ct).ConfigureAwait(false);
     }
+
+    public Task ExecuteGovernedQueryAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct = default) =>
+        ExecuteGovernedQueryAsync(request, user, tenantId, (reader, _, token) => rowWriter(reader, token), ct);
 
     public async Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
         GovernedSqlQueryRequest request,
@@ -118,13 +132,19 @@ public sealed partial class GovernedSqlExecutor
         bool isTruncated = false;
         var sw = Stopwatch.StartNew();
 
+        GovernedSqlPageOutcome? pageOutcome = null;
+        if (request.Page != null || request.NextToken != null)
+        {
+            request = request with { OnPageOutcome = outcome => pageOutcome = outcome };
+        }
+
         await ExecuteCoreAsync(
             request,
             user,
             tenantId,
-            async (reader, token) =>
+            async (reader, info, token) =>
             {
-                columnDescriptions = SqlResultColumns.Describe(reader);
+                columnDescriptions = info.Columns;
                 foreach (var column in columnDescriptions)
                 {
                     columns.Add(column.Name);
@@ -150,6 +170,11 @@ public sealed partial class GovernedSqlExecutor
 
         sw.Stop();
 
+        if (pageOutcome?.Page != null && rows.Count > pageOutcome.Page.Size)
+        {
+            rows = rows.Take(pageOutcome.Page.Size).ToList();
+        }
+
         return new GovernedSqlResult(
             OriginalSql: request.Sql,
             Columns: columns.AsReadOnly(),
@@ -158,7 +183,10 @@ public sealed partial class GovernedSqlExecutor
             ElapsedMilliseconds: sw.ElapsedMilliseconds,
             Truncated: isTruncated,
             ColumnDescriptions: columnDescriptions,
-            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled);
+            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled,
+            Page: pageOutcome?.Page,
+            Next: pageOutcome?.NextToken,
+            PagingUnavailable: pageOutcome?.PagingUnavailable);
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(
@@ -189,7 +217,7 @@ public sealed partial class GovernedSqlExecutor
                     request,
                     user,
                     tenantId,
-                    async (reader, token) =>
+                    async (reader, _, token) =>
                     {
                         var columnDescriptions = SqlResultColumns.Describe(reader);
                         var columns = new string[columnDescriptions.Count];
@@ -244,7 +272,7 @@ public sealed partial class GovernedSqlExecutor
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -259,6 +287,46 @@ public sealed partial class GovernedSqlExecutor
         var bindNames = GovernedSqlExecutionService.MergeGatewayParameters(request);
         string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, bindNames, request.GatewayParameters, out var referencedNames);
 
+        if (request.NextToken != null || request.Page != null)
+        {
+            var meta = FastSqlEngine.Default.Analyze(sqlForRewrite.AsMemory());
+            if (meta.StatementType != SqlStatementType.Select)
+            {
+                throw new SqlPagingUnsupportedException();
+            }
+        }
+
+        if (request.NextToken != null)
+        {
+            if (user.GetUserSid() == null)
+            {
+                throw new SqlPagingTokenInvalidException();
+            }
+
+            string sourceId = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
+            string transport = request.Transport ?? "WebSql";
+            long maxOffset = _options.Value.WebSql.Paging?.MaxOffset ?? 10_000;
+            var decoded = _pageTokenCodec.DecodeToken(
+                request.NextToken,
+                request.Sql,
+                request.Parameters,
+                user,
+                tenantId,
+                sourceId,
+                transport,
+                maxOffset);
+
+            if (request.Page != null && request.Page.Size != decoded.Size)
+            {
+                throw new SqlPagingTokenInvalidException();
+            }
+
+            request = request with
+            {
+                Page = new SqlPageWindow(decoded.Offset, decoded.Size, decoded.PageNumber)
+            };
+        }
+
         var dmlContext = new DmlAuditContext();
         GovernedRewrite rewrite;
         IReadOnlyDictionary<string, object?> clientValues;
@@ -269,10 +337,14 @@ public sealed partial class GovernedSqlExecutor
             var referenced = referencedNames as IReadOnlySet<string> ?? new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase);
             clientValues = BuildClientValues(request, referenced);
             var shapes = ClientListParameters.Shapes(clientValues, referenced);
-            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, clientLists: shapes).ConfigureAwait(false);
+            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, clientLists: shapes, page: request.Page).ConfigureAwait(false);
         }
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
+            if (policyEx is not (SqlPagingTokenInvalidException or Antlr4.Runtime.Misc.ParseCanceledException or Antlr4.Runtime.RecognitionException))
+            {
+                await ChargeFailureFeeOnDenialAsync(user).ConfigureAwait(false);
+            }
             string auditDs = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
             // only the gateway's own policy messages are stored; an engine exception is reduced to its stable code.
             // L-4: the same holds for the engine errors that the error mapper owns (unsupported construct, reserved identifier, syntax
@@ -297,6 +369,12 @@ public sealed partial class GovernedSqlExecutor
                         _ => reason
                     })
                     .WithField("error", reason);
+                try
+                {
+                    var meta = FastSqlEngine.Default.Analyze(request.Sql.AsMemory());
+                    deniedDetails.WithField("estimatedCost", CalculateEstimatedCost(request, meta));
+                }
+                catch { }
                 if (dmlContext.HasRecursiveCte)
                 {
                     deniedDetails.WithField("recursiveCte", true);   // 09
@@ -321,6 +399,17 @@ public sealed partial class GovernedSqlExecutor
         return await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct).ConfigureAwait(false);
     }
 
+    internal Task<string> ExecuteRewrittenAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        GovernedRewrite rewrite,
+        DmlAuditContext dmlContext,
+        IReadOnlyDictionary<string, object?> clientValues,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct) =>
+        ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, (reader, _, token) => rowWriter(reader, token), ct);
+
     /// <summary>
     /// Everything after a successful compile. Separate (and internal) so that the dialect agreement and the fail-closed rules of the
     /// execution half are testable without a rewriter.
@@ -332,40 +421,58 @@ public sealed partial class GovernedSqlExecutor
         GovernedRewrite rewrite,
         DmlAuditContext dmlContext,
         IReadOnlyDictionary<string, object?> clientValues,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct)
     {
         var compiled = rewrite.Compiled;
         string dsName = rewrite.DataSourceName;
 
-        // Issue #447 C1: the resolved source of the rewrite, before the ALLOW audit record and before any connection exists.
-        await _transportGate.EnsureCatalogSourceAsync(dsName, ct).ConfigureAwait(false);
+        var admission = request.Admission;
+        var executionSw = Stopwatch.StartNew();
+        long deliveredOrAffectedRows = 0;
+        bool executionFailed = false;
 
-        if (!dmlContext.IsDml)
+        try
         {
-            var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
-            var userSid = user.GetUserSid() ?? new Sid("anonymous");
-            var fields = new Dictionary<string, object?>
+            // Issue #447 C1: the resolved source of the rewrite, before the ALLOW audit record and before any connection exists.
+            await _transportGate.EnsureCatalogSourceAsync(dsName, ct).ConfigureAwait(false);
+
+            admission ??= await AdmitCostAsync(request, user, rewrite.Metadata, ct).ConfigureAwait(false);
+
+            if (!dmlContext.IsDml)
             {
-                ["originalSql"] = redactedOriginalSql,
-                ["originalSqlHash"] = originalSqlHash,
-                ["dataSource"] = dsName,
-                ["virtual_filters"] = rewrite.VirtualFilters
-            };
-            AddCallerAttributeAuditFields(fields, rewrite, compiled);
-            AddCompiledAuditFields(fields, compiled, clientValues);
-            AddKeySetAuditFields(fields, rewrite);
-            await _auditWriter.RecordAsync(new AuditLogEntry
-            {
-                TenantId = tenantId,
-                EventType = AuditEventTypes.WebSqlQuery,
-                ActorSid = userSid,
-                TargetTable = dsName,
-                Decision = "ALLOW",
-                TraceId = TraceContextResolver.GetCurrentTraceId(),
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
-            }, ct).ConfigureAwait(false);
-        }
+                var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
+                var userSid = user.GetUserSid() ?? new Sid("anonymous");
+                var fields = new Dictionary<string, object?>
+                {
+                    ["originalSql"] = redactedOriginalSql,
+                    ["originalSqlHash"] = originalSqlHash,
+                    ["dataSource"] = dsName,
+                    ["virtual_filters"] = rewrite.VirtualFilters
+                };
+                if (admission != null)
+                {
+                    fields["cost"] = new Dictionary<string, object?>
+                    {
+                        ["estimated"] = admission.ReservedCost,
+                        ["maxAllowed"] = admission.MaxAllowedCost,
+                        ["tier"] = admission.Policy.Tier.ToString()
+                    };
+                }
+                AddCallerAttributeAuditFields(fields, rewrite, compiled);
+                AddCompiledAuditFields(fields, compiled, clientValues);
+                AddKeySetAuditFields(fields, rewrite);
+                await _auditWriter.RecordAsync(new AuditLogEntry
+                {
+                    TenantId = tenantId,
+                    EventType = AuditEventTypes.WebSqlQuery,
+                    ActorSid = userSid,
+                    TargetTable = dsName,
+                    Decision = "ALLOW",
+                    TraceId = TraceContextResolver.GetCurrentTraceId(),
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
+                }, ct).ConfigureAwait(false);
+            }
 
         var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
 
@@ -387,7 +494,14 @@ public sealed partial class GovernedSqlExecutor
 
             // G-11: only after a successful Compile, and only the compiled text (markers, never a bound value).
             using var syntheticReader = new SyntheticDataTableReader(compiled.Sql);
-            await rowWriter(syntheticReader, ct).ConfigureAwait(false);
+            var synCols = SqlResultColumns.Describe(syntheticReader);
+            var synMasks = compiled.OutputColumnMasks;
+            if (synMasks.IsDefault || synMasks.Length != syntheticReader.FieldCount)
+            {
+                synMasks = ImmutableArray.CreateRange(Enumerable.Repeat(false, syntheticReader.FieldCount));
+            }
+            await rowWriter(syntheticReader, new GovernedResultInfo(synCols, synMasks), ct).ConfigureAwait(false);
+            NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated: false);
             return compiled.Sql;
         }
 
@@ -481,6 +595,7 @@ public sealed partial class GovernedSqlExecutor
                         TimeSpan.FromSeconds(commandTimeout),
                         () => CompiledSqlBinders.CheckedExecutorFor(binderDialect).ExecuteInTransactionAsync(checkedTx, compiled, clientValues, limits, ct),
                         ct).ConfigureAwait(false);
+                    deliveredOrAffectedRows = affectedRows;
                 }
                 catch (Exception dmlEx)
                 {
@@ -505,7 +620,7 @@ public sealed partial class GovernedSqlExecutor
 
                 using var emptyTable = new DataTable();
                 using var emptyReader = emptyTable.CreateDataReader();
-                await rowWriter(emptyReader, ct).ConfigureAwait(false);
+                await rowWriter(emptyReader, new GovernedResultInfo(Array.Empty<SqlResultColumn>(), ImmutableArray<bool>.Empty), ct).ConfigureAwait(false);
                 return compiled.Sql;
             }
 
@@ -519,6 +634,7 @@ public sealed partial class GovernedSqlExecutor
             binder.Bind(command, compiled, clientValues);
 
             // the execution and the streaming of the rows run under the provider guard (SQLite interrupts at the timeout).
+            bool isTruncated = false;
             await _executionGuard.RunAsync(
                 connection,
                 TimeSpan.FromSeconds(commandTimeout),
@@ -526,13 +642,23 @@ public sealed partial class GovernedSqlExecutor
                 {
                     await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
                     {
+                        var columns = SqlResultColumns.Describe(reader);
+                        var maskArray = compiled.OutputColumnMasks;
+                        if (maskArray.IsDefault || (reader.FieldCount > 0 && maskArray.Length != reader.FieldCount))
+                        {
+                            throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, compiled.Dialect);
+                        }
+                        var info = new GovernedResultInfo(columns, reader.FieldCount == 0 ? ImmutableArray<bool>.Empty : maskArray);
                         if (rewrite.DeliveredRowLimit > 0)
                         {
-                            await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), ct).ConfigureAwait(false);
+                            var limitedReader = new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit);
+                            await rowWriter(limitedReader, info, ct).ConfigureAwait(false);
+                            deliveredOrAffectedRows = limitedReader.DeliveredRows;
+                            isTruncated = limitedReader.HasMoreRows;
                         }
                         else
                         {
-                            await rowWriter(reader, ct).ConfigureAwait(false);
+                            await rowWriter(reader, info, ct).ConfigureAwait(false);
                         }
                     }
 
@@ -545,6 +671,7 @@ public sealed partial class GovernedSqlExecutor
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 txCompleted = true;
             }
+            NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated);
             return compiled.Sql;
         }
         catch (Exception ex)
@@ -617,6 +744,17 @@ public sealed partial class GovernedSqlExecutor
                     lease.Dispose();
                 }
             }
+        }
+        }
+        catch
+        {
+            executionFailed = true;
+            throw;
+        }
+        finally
+        {
+            executionSw.Stop();
+            await SettleCostAsync(admission, deliveredOrAffectedRows, executionSw.Elapsed.TotalSeconds, executionFailed).ConfigureAwait(false);
         }
     }
 
@@ -794,53 +932,47 @@ public sealed partial class GovernedSqlExecutor
         }
     }
 
-    /// <summary>
-    /// 128 (C-4, C-15):<c>list_params</c> = list name to expanded element count. The names come from the compiled statement (the
-    /// binder slots of the SQL's own identifiers, never from a client key) and the counts are the compiled counts; no value. A list that
-    /// expanded to nothing (an empty list) has no slot and is not listed here; <c>list_params_empty</c> names it (names only).
-    /// </summary>
-    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
-    private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
-
-    private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues)
+    private void NotifyPageOutcome(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, GovernedRewrite? rewrite, bool isTruncated)
     {
-        SortedDictionary<string, int>? lists = null;
-        foreach (var slot in compiled.Parameters)
+        if (request.Page == null || request.OnPageOutcome == null)
         {
-            if (slot is { Origin: ParameterOrigin.ClientNamed, ListCount: { } count, SourceName: { } name })
-            {
-                (lists ??= new SortedDictionary<string, int>(StringComparer.Ordinal))[name] = count;
-            }
+            return;
         }
 
-        if (lists is not null)
+        var pageResponse = new GovernedSqlPageResponse(request.Page.Number, request.Page.Offset, request.Page.Size);
+        string? nextToken = null;
+        string? pagingUnavailable = rewrite?.PagingUnavailable;
+        if (pagingUnavailable == null && isTruncated)
         {
-            fields["list_params"] = lists;
-        }
-
-        // An empty list expands to nothing, so it has no slot above: its trace is the name only (no values), limited to plain identifiers.
-        if (clientValues is not null)
-        {
-            SortedSet<string>? empty = null;
-            foreach (var (name, value) in clientValues)
+            long nextOffset = checked(request.Page.Offset + request.Page.Size);
+            long maxOffset = _options.Value.WebSql.Paging?.MaxOffset ?? 10_000;
+            if (nextOffset > maxOffset)
             {
-                if (value is ClientListValue { Count: 0 } && AuditListNameRegex().IsMatch(name))
-                {
-                    (empty ??= new SortedSet<string>(StringComparer.Ordinal)).Add(name.ToLowerInvariant());
-                }
+                pagingUnavailable = "offset_limit";
             }
-
-            if (empty is not null)
+            else if (user.GetUserSid() == null)
             {
-                fields["list_params_empty"] = empty.ToArray();
+                pagingUnavailable = "caller_not_bindable";
+            }
+            else
+            {
+                string sourceId = rewrite?.DataSourceName ?? _options.Value.WebSql.DefaultDataSourceName;
+                nextToken = _pageTokenCodec.EncodeToken(
+                    request.Sql,
+                    request.Parameters,
+                    user,
+                    tenantId,
+                    sourceId,
+                    request.Transport ?? "WebSql",
+                    nextOffset,
+                    request.Page.Size,
+                    request.Page.Number + 1,
+                    TimeSpan.FromMinutes(_options.Value.WebSql.Paging?.TokenLifetimeMinutes ?? 15));
             }
         }
+        request.OnPageOutcome(new GovernedSqlPageOutcome(pageResponse, nextToken, pagingUnavailable));
     }
 
-    /// <summary>
-    /// 129 (A-11, BC-129-15): the caller attributes of the statement per table as registry id, outcome and reason code, and the number of caller
-    /// attribute binds. Absent when no attribute took part; never a name of unregistered input, a subject key or a value.
-    /// </summary>
     private static void AddCallerAttributeAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite, CompiledSql compiled)
     {
         if (rewrite.CallerAttributes is not { Count: > 0 } attributes)
@@ -853,121 +985,5 @@ public sealed partial class GovernedSqlExecutor
             p => p.Value.Select(a => new Dictionary<string, object?> { ["id"] = a.Id, ["outcome"] = a.Outcome, ["reason"] = a.Reason }).ToList(),
             StringComparer.OrdinalIgnoreCase);
         fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
-    }
-
-    /// <summary>X1.2 / compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>
-    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues = null)
-    {
-        fields["compiler_version"] = compiled.CompilerVersion;
-        fields["dialect"] = compiled.Dialect.ToString();
-        fields["bind_count"] = compiled.Parameters.Length;
-        if (compiled.HasRecursiveCte)
-        {
-            fields["recursiveCte"] = true;   // written only for recursive statements (also on a template cache hit)
-        }
-
-        AddListAuditField(fields, compiled, clientValues);
-        fields["sql.compiled_digest"] = _digester.Compute(compiled);
-        if (_options.Value.Audit.StoreCompiledSql)
-        {
-            fields["compiledSql"] = compiled.Sql;
-        }
-    }
-
-    /// <summary>
-    /// Issue #107 (A-14): the key-set outcome per site with reason and counts; never key values or a hash of them. Absent when no site
-    /// used or tried the strategy, so a statement without opt-in is audited exactly as before.
-    /// </summary>
-    private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
-    {
-        if (rewrite.KeySets is not { Count: > 0 } outcomes)
-        {
-            return;
-        }
-
-        fields["row_filter_key_sets"] = outcomes.Select(o => new Dictionary<string, object?>
-        {
-            ["table"] = o.Table,
-            ["rule_id"] = o.RuleId,
-            ["source"] = o.Source.ToString(),
-            ["strategy_source"] = o.StrategySource.ToString(),
-            ["outcome"] = o.Outcome.ToString(),
-            ["reason"] = o.Reason?.ToString(),
-            ["key_count"] = o.KeyCount,
-            ["padded_count"] = o.PaddedCount,
-            ["age_seconds"] = o.AgeSeconds
-        }).ToList();
-    }
-
-    private async Task RecordDmlAuditAsync(
-        TenantId tenantId,
-        ClaimsPrincipal user,
-        string dsName,
-        DmlAuditContext dmlContext,
-        string eventType,
-        string decision,
-        CompiledSql? compiled,
-        int? affectedRows,
-        string? reason,
-        bool synthetic,
-        string? originalSql = null)
-    {
-        var fields = new Dictionary<string, object?>
-        {
-            ["statementType"] = dmlContext.StatementType?.ToString(),
-            ["tables"] = dmlContext.Tables,
-            ["dataSource"] = dsName,
-            ["affectedRows"] = affectedRows,
-            ["maxAffectedRows"] = _options.Value.WebSql.MaxAffectedRows,
-            ["reason"] = reason,
-            ["synthetic"] = synthetic
-        };
-        if (compiled is null && dmlContext.HasRecursiveCte)
-        {
-            fields["recursiveCte"] = true;   // a rejection before the compile still carries the flag
-        }
-
-        if (compiled is not null)
-        {
-            AddCompiledAuditFields(fields, compiled);
-        }
-        else if (originalSql is not null)
-        {
-            // A statement rejected before it compiled has no digest; the hash of its (literal-free) original text identifies it.
-            fields["originalSqlHash"] = _digester.Anonymize(originalSql).OriginalSqlHash;
-        }
-
-        await _auditWriter.RecordAsync(new AuditLogEntry
-        {
-            TenantId = tenantId,
-            EventType = eventType,
-            ActorSid = user.GetUserSid() ?? new Sid("anonymous"),
-            TargetTable = string.Join(",", dmlContext.Tables),
-            Decision = decision,
-            TraceId = TraceContextResolver.GetCurrentTraceId(),
-            DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
-            // M-1: a DML audit never takes the request token. The statement may already be committed; a client that disconnects must not
-            // leave it without its audit record.
-        }, CancellationToken.None).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// The audit of a DML that is already committed. An audit failure here is never a request failure (the client would retry and
-    /// duplicate the write): it is logged as Critical and counted for the operators.
-    /// </summary>
-    private async Task RecordCommittedDmlAuditAsync(
-        TenantId tenantId, ClaimsPrincipal user, string dsName, DmlAuditContext dmlContext, CompiledSql compiled, int affectedRows)
-    {
-        try
-        {
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlExecuted, "ALLOW", compiled, affectedRows, reason: null, synthetic: false).ConfigureAwait(false);
-        }
-        catch (Exception auditEx)
-        {
-            GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
-            _logger?.LogCritical(auditEx,
-                "WebSQL DML on data source {DataSource} is committed but its audit record could not be written. TraceId={TraceId}",
-                dsName, Activity.Current?.TraceId.ToString());
-        }
     }
 }

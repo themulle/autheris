@@ -56,13 +56,14 @@ public static class GovernedSqlExecutionServiceFactory
         GovernancePolicyFactory? policyFactory = null,
         CompiledSqlAuditDigester? auditDigester = null,
         IAuditWriter? auditWriter = null,
-        Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
+        Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null,
+        Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null)
     {
         var rewrite = new GovernedSqlRewriteDependencies(
             policyEnforcement, consentResolution, tableRepository, clientIpResolver, consentRepository, sqlEngine, policyFactory,
             sqlSecurityValidator, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository,
             memoryCache, typedPolicies, timeZoneState);
-        var execution = new GovernedSqlExecutionDependencies(connectionFactory, environment, concurrencyGate, sessionInitializer, secretProvider, auditDigester);
+        var execution = new GovernedSqlExecutionDependencies(connectionFactory, environment, concurrencyGate, sessionInitializer, secretProvider, auditDigester, PageTokenCodec: pageTokenCodec);
         var lazyFederated = federatedExecutionService is null ? null : new Lazy<IFederatedQueryExecutionService>(() => federatedExecutionService);
         return new GovernedSqlExecutionService(options, auditWriter ?? new AuditWriter(auditLogRepository, NullLogger<AuditWriter>.Instance), executionGuard, rewrite, execution, lazyFederated, logger);
     }

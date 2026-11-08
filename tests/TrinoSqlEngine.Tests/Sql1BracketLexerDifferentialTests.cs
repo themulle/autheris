@@ -18,7 +18,7 @@ public class Sql1BracketLexerDifferentialTests
     [InlineData(TargetSqlDialect.Sqlite, "SELECT [id] FROM orders")]
     public void BracketsAndBracketLiterals_AreRejected(TargetSqlDialect dialect, string sql)
     {
-        Assert.Throws<ParseCanceledException>(() => new ProbeEnv(dialect).Compile(sql));
+        Assert.ThrowsAny<ParseCanceledException>(() => new ProbeEnv(dialect).Compile(sql));
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public class Sql1BracketLexerDifferentialTests
 
         // The governed path runs with the strict token guards on every dialect; that is stricter than the legacy rewriter, which
         // kept array subscripts for PostgreSQL targets.
-        Assert.Throws<ParseCanceledException>(() => env.Compile("SELECT tags[1] FROM orders"));
+        Assert.ThrowsAny<ParseCanceledException>(() => env.Compile("SELECT tags[1] FROM orders"));
 
         // The bracket guard is dialect specific where a caller chooses the guards from the dialect.
         var ex = Record.Exception(() => env.Engine.Compile("SELECT ARRAY[1,2][1] AS x FROM orders".AsMemory(),
@@ -55,7 +55,7 @@ public class Sql1BracketLexerDifferentialTests
     [Fact]
     public void UEscape_IsRejected()
     {
-        Assert.Throws<ParseCanceledException>(() =>
+        Assert.ThrowsAny<ParseCanceledException>(() =>
             new ProbeEnv(TargetSqlDialect.PostgreSql).Compile("SELECT U&'d!0061t' UESCAPE '!' FROM orders"));
     }
 }

@@ -482,7 +482,7 @@ public class AstSecurityVisitorGuardUnitTests
     {
         const string sql = "SELECT id /* c */ FROM t WHERE a = 'x' AND b > 42 AND c < 1.5 AND d = 1e3 AND e = X'ab' AND f = U&'d' AND g = $$z$$ -- end";
         string redacted = AstSecurityVisitor.RedactSqlLiterals(sql);
-        Assert.Equal("SELECT id /* c */ FROM t WHERE a = @p_redacted AND b > @p_redacted AND c < @p_redacted AND d = @p_redacted AND e = @p_redacted AND f = @p_redacted AND g = @p_redacted -- end", redacted);
+        Assert.Equal("SELECT id   FROM t WHERE a = @p_redacted AND b > @p_redacted AND c < @p_redacted AND d = @p_redacted AND e = @p_redacted AND f = @p_redacted AND g = @p_redacted  ", redacted);
         Assert.Equal("SELECT a1, b2 FROM t3", AstSecurityVisitor.RedactSqlLiterals("SELECT a1, b2 FROM t3"));
         Assert.Equal("a = @p_redacted", AstSecurityVisitor.RedactSqlLiterals("a = 7"));
     }

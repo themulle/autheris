@@ -7754,6 +7754,28 @@
           "Value": "x"
         }
       ]
+    },
+    {
+      "Id": "ast-016",
+      "Group": "ast",
+      "Sql": "@page-offset",
+      "Outcome": "ok",
+      "Expected": "SELECT \"a\" AS \"r\" FROM \"s\".\"t\" LIMIT ?1 OFFSET ?2",
+      "Parameters": [
+        {
+          "Marker": "?1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "10"
+        },
+        {
+          "Marker": "?2",
+          "Type": "Int64",
+          "Origin": "PageOffset",
+          "ValueType": "null"
+        }
+      ]
     }
   ]
 }

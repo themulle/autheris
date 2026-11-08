@@ -122,7 +122,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
         end
 
         local delta = reserved_cost - actual_cost
-        tokens = math.max(0, math.min(capacity, tokens + delta))
+        tokens = math.min(capacity, tokens + delta)
 
         redis.call('HSET', key, 'tokens', tostring(tokens), 'last_refill', tostring(last_refill))
         redis.call('EXPIRE', key, ttl_seconds)

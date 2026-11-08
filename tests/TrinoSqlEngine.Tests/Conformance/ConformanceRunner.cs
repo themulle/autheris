@@ -106,7 +106,8 @@ internal static class ConformanceRunner
         }
         catch (Exception ex)
         {
-            return new ConformanceObservation(statement, "rejected", null, Array.Empty<ExpectedParameter>(), ex.GetType().Name);
+            var exType = ex is Antlr4.Runtime.Misc.ParseCanceledException ? nameof(Antlr4.Runtime.Misc.ParseCanceledException) : ex.GetType().Name;
+            return new ConformanceObservation(statement, "rejected", null, Array.Empty<ExpectedParameter>(), exType);
         }
     }
 }

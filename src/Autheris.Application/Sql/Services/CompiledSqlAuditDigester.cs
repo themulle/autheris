@@ -62,6 +62,13 @@ public sealed class CompiledSqlAuditDigester
         return HKDF.DeriveKey(HashAlgorithmName.SHA256, masterKey, 32, info: AuditChainInfo);
     }
 
+    /// <summary>Derives a purpose-specific key from the resolved audit key via HKDF-SHA256.</summary>
+    public byte[] DerivePurposeKey(string info)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(info);
+        return HKDF.DeriveKey(HashAlgorithmName.SHA256, ResolveAuditKey(), 32, info: Encoding.UTF8.GetBytes(info));
+    }
+
     /// <summary>
     /// Resolves the audit key now (L-2): a statement that has side effects calls this before it executes, so that a key that cannot be read
     /// fails the statement before any write instead of after its commit. Also the startup check outside Development and Test.

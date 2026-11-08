@@ -14,5 +14,6 @@ public interface IDatasourceTestingService
         string datasourceId,
         DatasourceTestRequest request,
         ClaimsPrincipal user,
+        TenantId? restrictToTenant = null,
         CancellationToken ct = default);
 }
