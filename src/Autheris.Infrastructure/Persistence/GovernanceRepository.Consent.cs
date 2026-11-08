@@ -50,36 +50,22 @@ public partial class GovernanceRepository
                                 WHERE r.requester_sid = @reqSid";
 
         public const string SelectPendingRequestsForApproverSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
-                                       r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-                                       t.source_name, t.schema_name, t.table_name, r.context_json
-                                FROM CONSENT_REQUESTS r
-                                JOIN TABLES t ON r.table_id = t.id
-                                WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
-                                  AND (
-                                      EXISTS (
-                                          SELECT 1
-                                          FROM TABLE_OWNERS tow
-                                          JOIN DATA_OWNERS dow ON tow.data_owner_id = dow.id
-                                          WHERE tow.table_id = r.table_id
-                                            AND (dow.ad_sid = @apprSid OR (@itsmAccount IS NOT NULL AND (LOWER(dow.ad_account) = LOWER(@itsmAccount) OR LOWER(dow.email) = LOWER(@itsmAccount))))
-                                      )
-                                      OR EXISTS (
-                                          SELECT 1
-                                          FROM DATA_OWNER_DELEGATIONS del
-                                          JOIN TABLE_OWNERS tow ON del.data_owner_id = tow.data_owner_id
-                                          WHERE tow.table_id = r.table_id
-                                            AND (del.delegate_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(del.delegate_sid) = LOWER(@itsmAccount)))
-                                            AND del.valid_from <= @now AND @now < del.valid_to
-                                      )
-                                      OR EXISTS (
-                                          SELECT 1
-                                          FROM ROLE_MEMBERS rm
-                                          JOIN ROLES rol ON rm.role_id = rol.id
-                                          WHERE (rol.role_name = 'GovernanceAdmin' OR rol.role_name = 'ClusterAdmin')
-                                            AND (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(rm.member_sid) = LOWER(@itsmAccount)))
-                                      )
-                                  )
-                                ORDER BY r.requested_at ASC";
+                                   r.business_justification, r.status, r.requested_at, r.requested_valid_to,
+                                   t.source_name, t.schema_name, t.table_name, r.context_json
+                            FROM CONSENT_REQUESTS r
+                            JOIN TABLES t ON r.table_id = t.id
+                            WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
+                              AND r.table_id IN (
+                                  SELECT tow.table_id
+                                  FROM TABLE_OWNERS tow
+                                  JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
+                                  WHERE o.ad_sid = @apprSid AND o.is_active = 1
+                                  UNION
+                                  SELECT tow.table_id
+                                  FROM DATA_OWNER_DELEGATIONS del
+                                  JOIN TABLE_OWNERS tow ON del.data_owner_id = tow.data_owner_id
+                                  WHERE del.delegate_sid = @apprSid AND del.valid_from <= @now AND @now < del.valid_to
+                              )";
 
         public const string CountConfiguredOwnersSql = @"SELECT COUNT(*)
                             FROM TABLES t

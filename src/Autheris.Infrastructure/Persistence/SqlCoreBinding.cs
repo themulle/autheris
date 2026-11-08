@@ -34,10 +34,6 @@ internal static class SqlCoreBinding
         {
             parameter.DbType = dbType.Value;
         }
-        else if (value is null or DBNull)
-        {
-            parameter.DbType = DbType.String;
-        }
 
         cmd.Parameters.Add(parameter);
         return parameter;
