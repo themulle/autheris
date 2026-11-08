@@ -46,7 +46,7 @@ public sealed class DatasourceTestingSecurityTests
         return new DatasourceTestingService(
             _metadataRepo,
             Substitute.For<System.Net.Http.IHttpClientFactory>(),
-            _auditRepo,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo),
             secretProvider: null,
             environment: null,
             logger: null,

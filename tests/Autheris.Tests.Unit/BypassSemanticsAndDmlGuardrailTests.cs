@@ -484,7 +484,14 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 hasUnconstrainedColumnAllow: true));
 
         var audit = Substitute.For<IAuditLogRepository>();
-        audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => fixture.AuditEntries.Add(e)), Arg.Any<CancellationToken>())
+        audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e =>
+        {
+            // The write-ahead intent record is covered by DmlWriteAheadAuditTests; these tests assert the outcome record.
+            if (e.EventType != Autheris.Domain.Audit.AuditEventTypes.WebSqlDmlIntent)
+            {
+                fixture.AuditEntries.Add(e);
+            }
+        }), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
         var connectionFactory = Substitute.For<ISqlConnectionFactory>();

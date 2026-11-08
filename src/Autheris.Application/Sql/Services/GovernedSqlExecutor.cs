@@ -524,6 +524,10 @@ public sealed partial class GovernedSqlExecutor
             // L-2: the audit key is resolved before the statement can write. A key that cannot be read fails the statement closed here,
             // not after the commit (a committed write without its audit record).
             _digester.EnsureKey();
+
+            // Write-ahead: the required intent record (statement fingerprint and target tables, no values) exists before any
+            // connection, transaction or statement. A failing audit store refuses the statement.
+            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlIntent, "ALLOW", compiled, affectedRows: null, reason: null, synthetic: false).ConfigureAwait(false);
         }
 
         var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
@@ -609,8 +613,9 @@ public sealed partial class GovernedSqlExecutor
                     }
                     catch (Exception auditEx)
                     {
-                        // The statement's own failure is what the caller must see, not a failure of its audit.
-                        _logger?.LogError(auditEx, "WebSQL DML failure audit could not be written on data source {DataSource}.", dsName);
+                        // The statement's own failure is what the caller must see, not a failure of its audit (the intent record exists).
+                        GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
+                        _logger?.LogCritical(auditEx, "WebSQL DML failure audit could not be written on data source {DataSource}.", dsName);
                     }
 
                     throw;

@@ -45,7 +45,7 @@ public sealed class DatasourceTestingServiceSqlTests
         }
 
         return new DatasourceTestingService(
-            _metadataRepo, Substitute.For<IHttpClientFactory>(), _auditRepo, null, null, null,
+            _metadataRepo, Substitute.For<IHttpClientFactory>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), null, null, null,
             _factory, Options.Create(gateway), new SqlSourceDescriber());
     }
 
@@ -101,7 +101,7 @@ public sealed class DatasourceTestingServiceSqlTests
         result.Diagnostics.ProbeDetails["Category"].ShouldBe("NtlmNegotiation");
         result.Diagnostics.ProbeDetails["NtlmStatus"].ShouldBe("InvalidToken");
         result.Diagnostics.TargetHost.ShouldBe("10.160.2.94");
-        await _auditRepo.Received(1).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+        await _auditRepo.Received(1).RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.DatasourceTested), Arg.Any<CancellationToken>());
     }
 
     [Fact]

@@ -104,3 +104,11 @@ Mandatory tests (all `[Trait("Category","Security")]`, neutral names; no root ca
 - `Sql/WebSqlDmlGuardTests.Multi_table_dml_with_tenantless_table_is_refused`, `Read_only_principal_with_write_scope_is_refused`, `Each_guard_refuses_with_its_own_code_under_permissive_write_stub`.
 - `Api/WebSqlDmlIdempotencyTests.Overlong_or_nonascii_key_is_rejected`, `Key_is_not_reserved_for_unauthorized_or_unscoped_caller`, `Key_is_scoped_per_tenant_and_subject`, `Trino_route_dml_is_refused_without_query_id`.
 - `Mcp/McpQuerySqlDmlTests.Mcp_query_sql_refuses_dml_for_every_caller`.
+
+## 6. Phase 4 changelog
+
+- 2026-11-08 (SP2): D-1 sites 2-5 now take `IAuditWriter` instead of `IAuditLogRepository` in their constructors (DatasourceTestingService, AccessPlanningService, CatalogDiscoveryService); unit test construction sites wrap a repository double with `AuditWriterTestServices.Over`.
+- 2026-11-08 (SP2): the probe resolves the audit tenant with `TenantResolver.Decide` over the claim and `TenantResolver.EffectiveDefaultOf(Gateway:Tenancy)` (no new `ITenantResolver` dependency); an absent claim without a default tenant throws `TenantUnresolvedException`, an invalid claim `TenantClaimInvalidException`. Both map to 403 through the existing handler.
+- 2026-11-08 (SP2): the existing counter `autheris_dml_audit_failed_total` keeps its name (referenced by `docs/features/f-dialect-02-ast-sql-compiler.md`); it is the alertable `audit_dml_completion_missing` signal of SEC-36-SP2-04 and now also counts a lost DML failure record (SEC-36-SP2-05).
+- 2026-11-08 (SP2): `CatalogDiscoveryService.RegisterDatasourceAsync` writes its record before ingestion, so the record no longer carries `CreatedDatasetsCount`.
+- 2026-11-08 (SP2): tracked remainder (SEC-36-SP2-07): the read-path audit calls of `GovernedSqlExecutor` stay on the baseline allowlist of `RequiredAuditArchitectureTests` (`QueryExecutionError` best effort, `WebSqlQuery` and `WebSqlQueryDenied` through `RecordAsync`); the allowlist may only shrink.
