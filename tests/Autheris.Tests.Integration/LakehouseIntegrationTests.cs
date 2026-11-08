@@ -111,6 +111,7 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("LakehouseIntegrationTests"));
             builder.UseSetting("Gateway:Modules:Enabled:0", "lakehouse");
+            LakehouseWorkspaceTestSettings.Apply((k, v) => builder.UseSetting(k, v));
             builder.UseSetting("Gateway:Lakehouse:Enabled", "true");
             builder.UseSetting("Gateway:Lakehouse:Storage:Provider", "Local");
             builder.UseSetting("Gateway:Lakehouse:Storage:LocalBasePath", _testLakehouseDir);
