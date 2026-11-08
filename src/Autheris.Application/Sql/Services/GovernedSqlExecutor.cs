@@ -986,5 +986,4 @@ public sealed partial class GovernedSqlExecutor
             StringComparer.OrdinalIgnoreCase);
         fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
     }
-    }
 }
