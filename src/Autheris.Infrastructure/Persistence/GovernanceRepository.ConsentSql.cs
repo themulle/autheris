@@ -19,7 +19,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 /// Engine-neutral statement execution and row mapping for consent queries, batch hydration, consent insertion, consent requests,
 /// four-eyes approval state reads, guarded status transitions, and ITSM activation (folded from ConsentSqlCore.cs).
 /// </summary>
-// TODO(WP-SIMPL-20d): transitional remnant of the per-engine SQL cores; fold into GovernanceRepository.Consent.
+// Transitional: transitional remnant of the per-engine SQL cores; fold into GovernanceRepository.Consent.
 internal static class ConsentSqlCore
 {
     public const int ConsentHydrateBatchSize = 500;

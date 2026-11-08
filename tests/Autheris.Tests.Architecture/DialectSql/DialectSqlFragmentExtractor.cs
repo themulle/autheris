@@ -51,11 +51,20 @@ internal static class DialectSqlFragmentExtractor
         var repo = module.GetType($"{InfrastructureNamespace}.{dialect}GovernanceRepository")
             ?? throw new InvalidOperationException($"{dialect}GovernanceRepository not found");
 
+        var unified = UnifiedRepositoryType();
         var methods = new List<DialectSqlMethod>();
         var set = new HashSet<string>(StringComparer.Ordinal);
         foreach (var root in area.Roots)
         {
-            var rootMethod = ResolveRoot(repo, root);
+            // Moved aggregates live once in the unified GovernanceRepository (the dialect classes only forward); its strings cover both engines.
+            var owner = unified;
+            var rootMethod = ResolveRoot(unified, root, optionalOverride: true);
+            if (rootMethod is null)
+            {
+                owner = repo;
+                rootMethod = ResolveRoot(repo, root);
+            }
+
             if (rootMethod is null)
             {
                 continue; // optional root (trailing '?') that does not exist in this shape of the code
@@ -63,12 +72,16 @@ internal static class DialectSqlFragmentExtractor
 
             var fragments = new List<string>();
             var transactionCalls = 0;
-            Collect(repo, rootMethod, fragments, ref transactionCalls);
+            Collect(owner, rootMethod, fragments, ref transactionCalls);
+            if (owner == unified)
+            {
+                CollectAreaHelpers(owner, rootMethod, area, fragments, ref transactionCalls);
+            }
             methods.Add(new DialectSqlMethod(root, fragments, transactionCalls));
             set.UnionWith(fragments);
         }
 
-        foreach (var type in AuxiliaryTypes(module, repo, area))
+        foreach (var type in AuxiliaryTypes(module, repo, area).Concat(AuxiliaryTypes(module, unified, area)))
         {
             foreach (var method in AllMethods(type))
             {
@@ -217,10 +230,10 @@ internal static class DialectSqlFragmentExtractor
         }
     }
 
-    private static MethodDefinition? ResolveRoot(TypeDefinition repo, string root)
+    private static MethodDefinition? ResolveRoot(TypeDefinition repo, string root, bool optionalOverride = false)
     {
-        var optional = root.EndsWith('?');
-        if (optional)
+        var optional = optionalOverride || root.EndsWith('?');
+        if (root.EndsWith('?'))
         {
             root = root[..^1];
         }
@@ -267,6 +280,14 @@ internal static class DialectSqlFragmentExtractor
         type.Fields.Concat(type.NestedTypes.SelectMany(AllFields));
 
     private static bool IsCompilerGenerated(TypeReference type) => type.Name.Contains('<', StringComparison.Ordinal);
+
+    public static TypeDefinition UnifiedRepositoryType() =>
+        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
+            .GetType($"{InfrastructureNamespace}.GovernanceRepository");
+
+    /// <summary>The unified repository when it declares <paramref name="method"/> (dialect classes only forward), otherwise the dialect repository.</summary>
+    public static TypeDefinition RepositoryType(string dialect, string method) =>
+        UnifiedRepositoryType().Methods.Any(m => m.Name == method) ? UnifiedRepositoryType() : RepositoryType(dialect);
 
     public static TypeDefinition RepositoryType(string dialect) =>
         CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
@@ -389,6 +410,41 @@ internal static class DialectSqlFragmentExtractor
         }
 
         return false;
+    }
+
+    /// <summary>The unified roots delegate their SQL to the area's static holder/core types (also through private <c>*Sql</c> getters); their strings belong to the root's fragments.</summary>
+    private static void CollectAreaHelpers(TypeDefinition owner, MethodDefinition root, DialectSqlArea area, List<string> fragments, ref int transactionCalls)
+    {
+        var seen = new HashSet<MethodDefinition>();
+        var queue = new Queue<IReadOnlyList<MethodDefinition>>();
+        queue.Enqueue(Bodies(owner, root));
+        while (queue.Count > 0)
+        {
+            foreach (var body in queue.Dequeue())
+            {
+                foreach (var reference in body.Body.Instructions.Select(i => i.Operand).OfType<MethodReference>())
+                {
+                    var definition = reference.Resolve();
+                    if (definition is null || !seen.Add(definition))
+                    {
+                        continue;
+                    }
+
+                    var type = definition.DeclaringType;
+                    if (type.Name == $"{area.TypeName}Sql" || type.Name == $"{area.TypeName}SqlCore")
+                    {
+                        foreach (var helper in Bodies(type, definition))
+                        {
+                            CollectBody(helper, fragments, ref transactionCalls);
+                        }
+                    }
+                    else if (type == owner && definition.Name.StartsWith("get_", StringComparison.Ordinal) && definition.Name.EndsWith("Sql", StringComparison.Ordinal))
+                    {
+                        queue.Enqueue(Bodies(owner, definition));
+                    }
+                }
+            }
+        }
     }
 
     private static void CollectBody(MethodDefinition method, ICollection<string> fragments, ref int transactionCalls)

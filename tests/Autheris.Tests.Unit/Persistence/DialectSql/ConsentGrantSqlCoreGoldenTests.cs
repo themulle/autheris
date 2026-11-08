@@ -19,19 +19,15 @@ public sealed class ConsentGrantSqlCoreGoldenTests
 
     public static TheoryData<string> Dialects() => DialectKit.Names();
 
-    private static string ActiveSql(string dialect, bool withTenant) => dialect switch
-    {
-        "PostgreSql" => PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(withTenant),
-        "SqlServer" => SqlServerGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(withTenant),
-        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
-    };
+    // The unified repository owns the SQL; the dialect only selects the lock-clause variant.
+    private static string ActiveSql(string dialect, bool withTenant) => GovernanceRepository.ConsentGrantSql.ActiveRoleConsents(withTenant);
 
-    private static string RevokeTargetSql(string dialect) => dialect switch
+    private static string RevokeTargetSql(string dialect) => GovernanceRepository.ConsentGrantSql.RevokeTarget(dialect switch
     {
-        "PostgreSql" => PostgreSqlGovernanceRepository.ConsentGrantSql.RevokeTarget,
-        "SqlServer" => SqlServerGovernanceRepository.ConsentGrantSql.RevokeTarget,
+        "PostgreSql" => new Autheris.Infrastructure.Persistence.Dialects.PostgreSqlGovernanceDialect("Host=localhost"),
+        "SqlServer" => (Autheris.Infrastructure.Persistence.Dialects.IGovernanceSqlDialect)new Autheris.Infrastructure.Persistence.Dialects.SqlServerGovernanceDialect("Server=localhost"),
         _ => throw new ArgumentOutOfRangeException(nameof(dialect))
-    };
+    });
 
     private static string ExpectedActiveSql(DialectKit kit, bool withTenant)
     {
@@ -86,7 +82,7 @@ public sealed class ConsentGrantSqlCoreGoldenTests
         conn.Commands[0].TransactionSet.ShouldBeFalse();
         kit.ShouldBindExactly(conn.Commands[0], ("@domain", "Sales"), ("@schema", "Crm"), ("@table", "Orders"), ("@tenantId", "tenant-a"), ("@role", "Analyst"));
 
-        conn.Commands[1].CommandText.ShouldBe(golden.Fragment("RevokeConsentInTransactionAsync", "SELECT t.source_name"));
+        conn.Commands[1].CommandText.ShouldBe(golden.Of("RevokeConsentInTransactionAsync").Single(f => f.Contains("SELECT t.source_name", StringComparison.Ordinal) && f.Contains("UPDLOCK", StringComparison.Ordinal) == (dialect == "SqlServer")));
         conn.Commands[1].TransactionSet.ShouldBeTrue();
         kit.ShouldBindExactly(conn.Commands[1], ("@id", consentId.ToString()));
 
@@ -142,7 +138,7 @@ public sealed class ConsentGrantSqlCoreGoldenTests
         conn.EnqueueReader(ConsentRows(Now.AddDays(-1), Now.AddDays(5), "tenant-a"));
 
         var active = await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(
-            conn, PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(true), Table, "Analyst", Tenant, Now, CancellationToken.None);
+            conn, GovernanceRepository.ConsentGrantSql.ActiveRoleConsents(true), Table, "Analyst", Tenant, Now, CancellationToken.None);
 
         var consent = active.Single();
         consent.TenantId.ShouldBe(Tenant);
@@ -152,13 +148,13 @@ public sealed class ConsentGrantSqlCoreGoldenTests
         using var conn2 = DialectKit.PostgreSql.NewConnection();
         conn2.EnqueueReader(ConsentRows(Now.AddDays(-10), Now.AddDays(-1), "tenant-a"));
         (await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(
-            conn2, PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(false), Table, "Analyst", null, Now, CancellationToken.None)).ShouldBeEmpty();
+            conn2, GovernanceRepository.ConsentGrantSql.ActiveRoleConsents(false), Table, "Analyst", null, Now, CancellationToken.None)).ShouldBeEmpty();
 
         // DT-SC-16: a NULL stored tenant is an integrity error, never the legacy tenant
         using var conn3 = DialectKit.PostgreSql.NewConnection();
         conn3.EnqueueReader(ConsentRows(Now.AddDays(-1), Now.AddDays(5), null));
         await Should.ThrowAsync<Autheris.Domain.Exceptions.StoredTenantIntegrityException>(() => ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(
-            conn3, PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(false), Table, "Analyst", null, Now, CancellationToken.None));
+            conn3, GovernanceRepository.ConsentGrantSql.ActiveRoleConsents(false), Table, "Analyst", null, Now, CancellationToken.None));
     }
 
     [Theory]
@@ -182,7 +178,7 @@ public sealed class ConsentGrantSqlCoreGoldenTests
         rows.Rows.Add("Sales", "Crm", "Orders", "not-a-valid-tenant!", granteeType, granteeSid, isRevoked);
         conn.EnqueueReader(rows);
 
-        var target = await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, PostgreSqlGovernanceRepository.ConsentGrantSql.RevokeTarget, Guid.NewGuid(), Actor, CancellationToken.None);
+        var target = await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, RevokeTargetSql("PostgreSql"), Guid.NewGuid(), Actor, CancellationToken.None);
 
         target.ShouldNotBeNull();
         target.Value.Table.ShouldBe(Table);
@@ -197,7 +193,7 @@ public sealed class ConsentGrantSqlCoreGoldenTests
         using var conn = DialectKit.PostgreSql.NewConnection();
         await using var tx = await conn.BeginTransactionAsync();
 
-        (await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, PostgreSqlGovernanceRepository.ConsentGrantSql.RevokeTarget, Guid.NewGuid(), Actor, CancellationToken.None))
+        (await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, RevokeTargetSql("PostgreSql"), Guid.NewGuid(), Actor, CancellationToken.None))
             .ShouldBeNull();
     }
 

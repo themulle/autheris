@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using Autheris.Domain.Common;
 
 /// <summary>
-/// Closed allowlist of global (non-tenant-scoped) governance tables (SEC-SIMPL-22).
+/// Closed allowlist of global (non-tenant-scoped) governance tables.
 /// Only tables WITHOUT a tenant_id column in the baseline schema may be listed. All tables not listed here are strictly tenant-scoped and require a non-null TenantId.
 /// </summary>
 public static class GovernanceGlobalTables
@@ -48,7 +48,7 @@ public static class GovernanceGlobalTables
 }
 
 /// <summary>
-/// Tenant scope validator and builder (SEC-SIMPL-22).
+/// Tenant scope validator and builder.
 /// Enforces that every tenant-scoped statement receives a non-null, non-empty TenantId.
 /// </summary>
 public static class TenantScope

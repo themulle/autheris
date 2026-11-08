@@ -1,7 +1,7 @@
 namespace Autheris.Infrastructure.Persistence.Dialects;
 
 /// <summary>
-/// Closed allowlist of governance database tables (SEC-SIMPL-21).
+/// Closed allowlist of governance database tables.
 /// All repository SQL commands reference tables through this strongly-typed allowlist.
 /// </summary>
 public enum GovernanceTable

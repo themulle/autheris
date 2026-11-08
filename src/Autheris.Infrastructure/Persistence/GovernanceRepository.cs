@@ -15,9 +15,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Unified governance repository (WP-SIMPL-20, AD-1).
+/// Unified governance repository.
 /// Persists and queries governance metadata across supported engines using <see cref="IGovernanceSqlDialect"/>.
-/// Enforces tenant scoping (SEC-SIMPL-22), safe parameterization (SEC-SIMPL-21), and confidentiality in logging (SEC-SIMPL-25).
+/// Enforces tenant scoping, safe parameterization, and confidentiality in logging.
 /// </summary>
 public partial class GovernanceRepository : IConsentRepository, IConsentApprovalRepository, IConsentDescriptionRepository
 {
@@ -69,7 +69,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     }
 
     /// <summary>
-    /// Executes a reader command, logging fragment-id and duration only (SEC-SIMPL-25).
+    /// Executes a reader command, logging fragment-id and duration only.
     /// Never logs parameter values or full command text with parameters.
     /// </summary>
     internal async Task<DbDataReader> ExecuteReaderAsync(DbCommand command, string fragmentId, CancellationToken ct = default)
@@ -94,7 +94,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     }
 
     /// <summary>
-    /// Executes a non-query command, logging fragment-id and duration only (SEC-SIMPL-25).
+    /// Executes a non-query command, logging fragment-id and duration only.
     /// </summary>
     internal async Task<int> ExecuteNonQueryAsync(DbCommand command, string fragmentId, CancellationToken ct = default)
     {
@@ -118,7 +118,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     }
 
     /// <summary>
-    /// Executes a scalar command, logging fragment-id and duration only (SEC-SIMPL-25).
+    /// Executes a scalar command, logging fragment-id and duration only.
     /// </summary>
     internal async Task<object?> ExecuteScalarAsync(DbCommand command, string fragmentId, CancellationToken ct = default)
     {
@@ -141,7 +141,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         }
     }
 
-    // SEC-SIMPL-25: only exception type and engine error code are logged; never the exception object (Message/Detail may echo values).
+    // Only exception type and engine error code are logged; never the exception object (Message/Detail may echo values).
     private void LogExecutionFailure(Exception ex, string fragmentId, long elapsedMs)
     {
         string code = ex is Npgsql.PostgresException pg ? pg.SqlState : ex is Microsoft.Data.SqlClient.SqlException sql ? sql.Number.ToString(System.Globalization.CultureInfo.InvariantCulture) : "n/a";
@@ -167,7 +167,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         await using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
-            // TODO(WP-SIMPL-20b): replace engine-type branch with dialect members once the epoch statements move into the dialect.
+            // Transitional: replace engine-type branch with dialect members once the epoch statements move into the dialect.
             if (_dialect is PostgreSqlGovernanceDialect)
             {
                 cmd.CommandText = @"UPDATE POLICY_EPOCHS
@@ -197,7 +197,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         await using (var insertCmd = conn.CreateCommand())
         {
             insertCmd.Transaction = tx;
-            // TODO(WP-SIMPL-20b): replace engine-type branch with dialect members once the epoch statements move into the dialect.
+            // Transitional: replace engine-type branch with dialect members once the epoch statements move into the dialect.
             if (_dialect is PostgreSqlGovernanceDialect)
             {
                 insertCmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)

@@ -7,7 +7,7 @@ using Autheris.Domain.Interfaces;
 using Npgsql;
 
 /// <summary>
-/// PostgreSQL implementation of the governance SQL dialect (WP-SIMPL-20).
+/// PostgreSQL implementation of the governance SQL dialect.
 /// </summary>
 internal sealed class PostgreSqlGovernanceDialect : IGovernanceSqlDialect
 {

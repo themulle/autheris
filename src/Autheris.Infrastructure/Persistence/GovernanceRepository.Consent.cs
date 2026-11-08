@@ -98,7 +98,7 @@ public partial class GovernanceRepository
                                           WHERE id = @id AND is_revoked = 0";
     }
 
-    // TODO(WP-SIMPL-20d): StartsWith("WITH") engine sniffing goes away when lock clauses live in the dialect.
+    // Transitional: StartsWith("WITH") engine sniffing goes away when lock clauses live in the dialect.
     private string BuildLockRowsQuery(string selectColumns, string fromTableAndAlias, string joinsAndWhere, string? lockTargetAlias = null)
     {
         if (_dialect.LockRowsForUpdate.StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
@@ -113,7 +113,7 @@ public partial class GovernanceRepository
     private string SelectExtendTargetSql =>
         BuildLockRowsQuery("t.source_name, t.schema_name, t.table_name, c.tenant_id, c.valid_from", "CONSENTS c", "JOIN TABLES t ON c.table_id = t.id WHERE c.id = @id", "c");
 
-    // TODO(WP-SIMPL-20d): StartsWith("WITH") engine sniffing goes away when lock clauses live in the dialect.
+    // Transitional: StartsWith("WITH") engine sniffing goes away when lock clauses live in the dialect.
     private string SelectRequestStatusForUpdateSql =>
         _dialect.LockRowsForUpdate.StartsWith("WITH", StringComparison.OrdinalIgnoreCase)
             ? "SELECT status FROM CONSENT_REQUESTS WITH (UPDLOCK, ROWLOCK, HOLDLOCK) WHERE id = @id"
@@ -127,7 +127,7 @@ public partial class GovernanceRepository
         TableIdentifier table,
         DateTimeOffset atTime,
         CancellationToken ct = default) =>
-        // Explicit cross-tenant read path of the tenant-less interface overload (SEC-SIMPL-22); the tenant overload below fails closed.
+        // Explicit cross-tenant read path of the tenant-less interface overload; the tenant overload below fails closed.
         ActiveForSubjectsCoreAsync(subjects, table, atTime, null, ct);
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
@@ -188,7 +188,7 @@ public partial class GovernanceRepository
         IEnumerable<string>? roles = null,
         DateTimeOffset? atTime = null,
         CancellationToken ct = default) =>
-        // Explicit cross-tenant read path of the tenant-less interface overload (SEC-SIMPL-22); the tenant overload below fails closed.
+        // Explicit cross-tenant read path of the tenant-less interface overload; the tenant overload below fails closed.
         AllActiveCoreAsync(subjects, roles, atTime, null, ct);
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
@@ -202,7 +202,7 @@ public partial class GovernanceRepository
         TenantId? tenantId,
         CancellationToken ct)
     {
-        var effectiveAt = atTime ?? DateTimeOffset.UtcNow;
+        var effectiveAt = atTime ?? TimeProvider.System.GetUtcNow();
         var subjectEnumerated = subjects.ToList();
         var subjectSet = subjectEnumerated.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var roleSet = roles?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -362,7 +362,7 @@ public partial class GovernanceRepository
             TenantScope.RequireTenant(tenant, nameof(GovernanceTable.Consents));
             StoredTenant.RequireWritable(tenant);
 
-            var now = DateTimeOffset.UtcNow;
+            var now = TimeProvider.System.GetUtcNow();
             await ConsentSqlCore.ExecuteSystemRevokeUpdateAsync(
                 conn, tx, ConsentSql.UpdateSystemRevokeSql, consentId, consentRequestId, revokedBySid, now, reason, bindReqId: false, ct).ConfigureAwait(false);
 
@@ -404,7 +404,7 @@ public partial class GovernanceRepository
     public async Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await ConsentSqlCore.ReadExpiringConsentRowsAsync(conn, ConsentSql.SelectExpiringConsentsSql, DateTimeOffset.UtcNow, threshold, maxResults, ct).ConfigureAwait(false);
+        return await ConsentSqlCore.ReadExpiringConsentRowsAsync(conn, ConsentSql.SelectExpiringConsentsSql, TimeProvider.System.GetUtcNow(), threshold, maxResults, ct).ConfigureAwait(false);
     }
 
     public async Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default)
@@ -416,7 +416,7 @@ public partial class GovernanceRepository
         {
             TenantId extendTenant;
             (tableId, extendTenant, _) = await ConsentSqlCore.ReadAndExtendConsentExpiryAsync(
-                conn, tx, SelectExtendTargetSql, consentId, newValidTo, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+                conn, tx, SelectExtendTargetSql, consentId, newValidTo, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
 
             TenantScope.RequireTenant(extendTenant, nameof(GovernanceTable.Consents));
             StoredTenant.RequireWritable(extendTenant);
@@ -439,7 +439,7 @@ public partial class GovernanceRepository
     public async Task<(ConsentRowFilter Filter, ConsentEffect Effect, TenantId Tenant, TableIdentifier Table)?> GetRowFilterAsync(
         Guid rowFilterId, CancellationToken ct = default)
     {
-        // TODO(WP-SIMPL-20b): engine-type branch; replace with a dialect member.
+        // Transitional: engine-type branch; replace with a dialect member.
         var keyDialect = _dialect is PostgreSqlGovernanceDialect ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         var row = await RowFilterEvaluationStore.ReadRuleAsync(conn, null, keyDialect, rowFilterId, ct).ConfigureAwait(false);
@@ -450,7 +450,7 @@ public partial class GovernanceRepository
         Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
     {
         TenantScope.RequireTenant(tenant, nameof(GovernanceTable.ConsentRowFilters));
-        // TODO(WP-SIMPL-20b): engine-type branch; replace with a dialect member.
+        // Transitional: engine-type branch; replace with a dialect member.
         var keyDialect = _dialect is PostgreSqlGovernanceDialect ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
         RowFilterEvaluationChange? change;
         await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
@@ -505,7 +505,7 @@ public partial class GovernanceRepository
     public async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await ConsentSqlCore.GetPendingRequestsForApproverAsync(conn, ConsentSql.SelectPendingRequestsForApproverSql, approverSid, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+        return await ConsentSqlCore.GetPendingRequestsForApproverAsync(conn, ConsentSql.SelectPendingRequestsForApproverSql, approverSid, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
     }
 
     public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
@@ -569,7 +569,7 @@ public partial class GovernanceRepository
             }
 
             int stepNumber = state.NextStepNumber;
-            await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, Guid.NewGuid(), requestId, stepNumber, approverSid, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+            await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, Guid.NewGuid(), requestId, stepNumber, approverSid, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
 
             string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, stepNumber, isExternalItsmApproval, state.Sensitivity);
             await ConsentSqlCore.ApplyGuardedStatusAsync(conn, tx, ConsentStatusUpdateSeam, requestId, newStatus, currentStatus, ct).ConfigureAwait(false);
@@ -632,7 +632,7 @@ public partial class GovernanceRepository
             StepNumber = 1,
             ApproverSid = approverSid,
             Decision = "APPROVED",
-            DecidedAt = DateTimeOffset.UtcNow
+            DecidedAt = TimeProvider.System.GetUtcNow()
         };
         return ExecuteAtomicApprovalWithConsentAsync(requestId, step, consent, consent?.RowFilters ?? Array.Empty<ConsentRowFilter>(), consent?.ColumnRules ?? Array.Empty<ConsentColumnRule>(), ct);
     }
@@ -685,7 +685,7 @@ public partial class GovernanceRepository
                 throw new InvalidOperationException(ConsentApprovalPolicy.FourEyesNotSatisfiedMessage(requestId));
             }
 
-            await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, step.Id, requestId, state.NextStepNumber, step.ApproverSid, step.DecidedAt ?? DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+            await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, step.Id, requestId, state.NextStepNumber, step.ApproverSid, step.DecidedAt ?? TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
             await ConsentSqlCore.ApplyGuardedStatusAsync(conn, tx, ConsentStatusUpdateSeam, requestId, newStatus, currentStatus, ct).ConfigureAwait(false);
 
             req.Status = newStatus;
@@ -767,7 +767,7 @@ public partial class GovernanceRepository
                 throw new Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException(requestId);
             }
 
-            await ConsentSqlCore.InsertRejectedStepAsync(conn, tx, requestId, approverSid, reason, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+            await ConsentSqlCore.InsertRejectedStepAsync(conn, tx, requestId, approverSid, reason, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
             await ConsentSqlCore.ApplyGuardedStatusAsync(conn, tx, ConsentStatusUpdateSeam, requestId, "REJECTED", currentStatus, ct).ConfigureAwait(false);
 
             req.Status = "REJECTED";
@@ -819,7 +819,7 @@ public partial class GovernanceRepository
         StoredTenant.RequireWritable(req.TenantId);
         await EnsureMayMaterializeAsync(req.TenantId, req.TableIdentifier, Array.Empty<ConsentRowFilter>(), ct).ConfigureAwait(false);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = TimeProvider.System.GetUtcNow();
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try

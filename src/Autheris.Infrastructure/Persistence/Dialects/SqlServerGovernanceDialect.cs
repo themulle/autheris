@@ -10,7 +10,7 @@ using Autheris.Domain.Interfaces;
 using Microsoft.Data.SqlClient;
 
 /// <summary>
-/// SQL Server implementation of the governance SQL dialect (WP-SIMPL-20).
+/// SQL Server implementation of the governance SQL dialect.
 /// </summary>
 internal sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
 {
