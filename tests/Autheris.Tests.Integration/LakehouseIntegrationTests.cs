@@ -111,6 +111,7 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("LakehouseIntegrationTests"));
             builder.UseSetting("Gateway:Modules:Enabled:0", "lakehouse");
+            LakehouseWorkspaceTestSettings.Apply((k, v) => builder.UseSetting(k, v));
             builder.UseSetting("Gateway:Lakehouse:Enabled", "true");
             builder.UseSetting("Gateway:Lakehouse:Storage:Provider", "Local");
             builder.UseSetting("Gateway:Lakehouse:Storage:LocalBasePath", _testLakehouseDir);
@@ -140,17 +141,28 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
         using var scope = _factory.Services.CreateScope();
         var sp = scope.ServiceProvider;
 
-        var storageProvider = sp.GetService<ILakehouseStorageProvider>();
-        storageProvider.ShouldNotBeNull();
-
-        var metaReader = sp.GetService<IIcebergMetadataReader>();
-        metaReader.ShouldNotBeNull();
-
-        var pruner = sp.GetService<IIcebergPartitionPruner>();
-        pruner.ShouldNotBeNull();
-
-        var lakehouseExecutor = sp.GetService<ILakehouseDataSourceExecutor>();
-        lakehouseExecutor.ShouldNotBeNull();
+        // The module is loaded into its own AssemblyLoadContext (no base-directory fallback), so its
+        // interfaces are resolved by name from the loaded module assembly, not by the test's own type identity.
+        // Other hosts in the same process load their own copies, so every non-default copy is a candidate.
+        var moduleAssemblies = System.Runtime.Loader.AssemblyLoadContext.All
+            .Where(c => c != System.Runtime.Loader.AssemblyLoadContext.Default)
+            .SelectMany(c => c.Assemblies)
+            .Where(a => a.GetName().Name == "Autheris.Modules.Lakehouse")
+            .ToList();
+        moduleAssemblies.ShouldNotBeEmpty();
+        foreach (var name in new[]
+                 {
+                     "Autheris.Extensions.Lakehouse.Interfaces.ILakehouseStorageProvider",
+                     "Autheris.Extensions.Lakehouse.Interfaces.IIcebergMetadataReader",
+                     "Autheris.Extensions.Lakehouse.Interfaces.IIcebergPartitionPruner",
+                     "Autheris.Extensions.Lakehouse.Interfaces.ILakehouseDataSourceExecutor"
+                 })
+        {
+            moduleAssemblies
+                .Select(a => a.GetType(name, throwOnError: true)!)
+                .Any(t => sp.GetService(t) is not null)
+                .ShouldBeTrue(name);
+        }
 
         var dataExecutors = sp.GetServices<IDataSourceExecutor>().ToList();
         dataExecutors.Any(e => e.SupportedType == DataSourceType.LakehouseIceberg).ShouldBeTrue();

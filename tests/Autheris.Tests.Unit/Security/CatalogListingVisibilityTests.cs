@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Common.Serialization;
+using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -76,14 +77,25 @@ public sealed class CatalogListingVisibilityTests
         return repo;
     }
 
-    private static IcebergRestCatalogFederationService Iceberg(IConsentRepository? consents) => new(
-        Substitute.For<IIcebergMetadataReader>(),
-        Tables(),
-        Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }),
-        NullLogger<IcebergRestCatalogFederationService>.Instance,
-        global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
-        new ConsentResolutionService(),
-        consents);
+    private static IcebergRestCatalogFederationService Iceberg(IConsentRepository? consents)
+    {
+        var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
+        var metaRepo = Tables();
+        var adp = new AccessDecisionPoint(
+            options,
+            Substitute.For<IPolicyEnforcementService>(),
+            consentService: new ConsentResolutionService(),
+            consentRepo: consents,
+            metadataRepo: metaRepo);
+        return new(
+            Substitute.For<IIcebergMetadataReader>(),
+            metaRepo,
+            options,
+            NullLogger<IcebergRestCatalogFederationService>.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+            adp,
+            consents);
+    }
 
     [Fact]
     public async Task Iceberg_ListNamespacesAndTables_ShowOnlyConsentedTables()

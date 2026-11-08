@@ -99,6 +99,7 @@ public sealed class ModuleLoader
     public const string EnabledConfigKey = "Gateway:Modules:Enabled";
     public const string PathConfigKey = "Gateway:Modules:Path";
     public const string AllowUnsignedConfigKey = "Gateway:Modules:AllowUnsignedInDevelopment";
+    public const string WorkspacePathConfigKey = "Gateway:Modules:WorkspacePath";
 
     private static readonly Type[] ProtectedServiceTypes =
     [
@@ -178,9 +179,9 @@ public sealed class ModuleLoader
         IConfiguration configuration,
         IHostEnvironment environment,
         IGovernanceConnectionFactory? connectionFactory = null,
-        ILogger? logger = null)
+        ILogger<ModuleLoader>? logger = null)
     {
-        var loader = new ModuleLoader(logger: logger as ILogger<ModuleLoader>);
+        var loader = new ModuleLoader(logger: logger);
         var hostContext = connectionFactory is not null
             ? new ModuleHostContext(TimeProvider.System, DefaultHostVersion, connectionFactory)
             : null;
@@ -232,15 +233,34 @@ public sealed class ModuleLoader
             _hostVersion,
             new GovernanceConnectionFactory(new Autheris.Domain.Options.GovernanceDbOptions()));
 
-        string fullModulesRoot = Path.GetFullPath(modulesRoot);
-        if (!Directory.Exists(fullModulesRoot))
+        string? workspacePath = configuration[WorkspacePathConfigKey];
+        if (!string.IsNullOrWhiteSpace(workspacePath))
         {
-            if (string.IsNullOrWhiteSpace(configuredModulesRoot) &&
-                TryLoadWorkspaceModules(enabledIds, services, configuration, effectiveHostContext, out var workspaceResult))
+            if (!isDevelopment)
+            {
+                throw new ModuleLoadException(
+                    "host",
+                    $"Configuration key '{WorkspacePathConfigKey}' is not allowed outside the Development environment ({environment.EnvironmentName}).");
+            }
+
+            if (!allowUnsigned)
+            {
+                throw new ModuleLoadException(
+                    "host",
+                    $"Configuration key '{WorkspacePathConfigKey}' requires '{AllowUnsignedConfigKey}' to be true.");
+            }
+
+            if (TryLoadWorkspaceModules(enabledIds, services, configuration, effectiveHostContext, isDevelopment, allowUnsigned, workspacePath, out var workspaceResult))
             {
                 return workspaceResult;
             }
 
+            throw new ModuleLoadException(enabledIds[0], $"Failed to load workspace modules from '{workspacePath}'.");
+        }
+
+        string fullModulesRoot = Path.GetFullPath(modulesRoot);
+        if (!Directory.Exists(fullModulesRoot))
+        {
             throw new ModuleLoadException(enabledIds[0], $"Module root directory '{fullModulesRoot}' does not exist.");
         }
 
@@ -396,6 +416,7 @@ public sealed class ModuleLoader
             VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
 
             _logger.LogInformation("Loaded signed module '{ModuleId}' v{Version} (keyId: {KeyId}).", moduleId, manifest.Version, manifest.KeyId);
+            _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, true);
             loadedModules.Add(new LoadedModuleDescriptor(moduleId, manifest, moduleInstance, alc));
         }
 
@@ -631,11 +652,20 @@ public sealed class ModuleLoader
         IServiceCollection services,
         IConfiguration configuration,
         IModuleHostContext effectiveHostContext,
+        bool isDevelopment,
+        bool allowUnsigned,
+        string workspacePath,
         out ModuleLoadResult result)
     {
         result = new ModuleLoadResult([]);
+        if (!isDevelopment || !allowUnsigned)
+        {
+            throw new ModuleLoadException("host", "Workspace modules require both Development environment and AllowUnsignedInDevelopment=true.");
+        }
+
         var loadedModules = new List<LoadedModuleDescriptor>(enabledIds.Count);
         var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var workspaceRoot = Path.GetFullPath(workspacePath);
 
         foreach (var moduleId in enabledIds)
         {
@@ -648,10 +678,19 @@ public sealed class ModuleLoader
             var pascal = string.Concat(moduleId.Split(['-', '_'], StringSplitOptions.RemoveEmptyEntries)
                 .Select(p => char.ToUpperInvariant(p[0]) + p[1..]));
             var assemblyFileName = $"Autheris.Modules.{pascal}.dll";
-            var moduleDllPath = FindWorkspaceModuleDll(pascal, assemblyFileName, out var moduleBinDir);
+            var moduleDllPath = FindWorkspaceModuleDll(workspaceRoot, pascal, assemblyFileName, out var moduleBinDir);
             if (moduleDllPath is null)
             {
                 return false;
+            }
+
+            try
+            {
+                FileHashVerifier.EnsureNoSymlinkEscape(workspaceRoot, moduleDllPath);
+            }
+            catch (Exception ex)
+            {
+                throw new ModuleLoadException(moduleId, $"Symlink check failed: {ex.Message}", ex);
             }
 
             byte[] dllBytes = File.ReadAllBytes(moduleDllPath);
@@ -702,13 +741,24 @@ public sealed class ModuleLoader
                 .Where(a => !string.Equals(a.GetName().Name, $"Autheris.Modules.{pascal}", StringComparison.OrdinalIgnoreCase));
             alc.EnsureNoHostAssemblyCollisions(hostAssembliesWithoutSelf);
 
-            var baseDirCopy = Path.Combine(AppContext.BaseDirectory, assemblyFileName);
-            Assembly entryAssembly = File.Exists(baseDirCopy)
-                ? AssemblyLoadContext.Default.LoadFromAssemblyPath(baseDirCopy)
-                : alc.LoadEntryAssembly();
+            Assembly entryAssembly = alc.LoadEntryAssembly();
 
-            var entryType = entryAssembly.GetType(manifest.EntryType, throwOnError: false, ignoreCase: false)
-                ?? entryAssembly.GetTypes().FirstOrDefault(t => !t.IsAbstract && !t.IsInterface && typeof(IAutherisModule).IsAssignableFrom(t));
+            var entryType = entryAssembly.GetType(manifest.EntryType, throwOnError: false, ignoreCase: false);
+            if (entryType is null)
+            {
+                Type?[] candidateTypes;
+                try
+                {
+                    candidateTypes = entryAssembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    candidateTypes = ex.Types;
+                }
+
+                entryType = candidateTypes.FirstOrDefault(t => t != null && !t.IsAbstract && !t.IsInterface && typeof(IAutherisModule).IsAssignableFrom(t));
+            }
+
             if (entryType is null)
             {
                 throw new ModuleLoadException(moduleId, $"Entry type '{manifest.EntryType}' was not found in '{assemblyFileName}'.");
@@ -724,8 +774,20 @@ public sealed class ModuleLoader
 
             var scopedConfig = BuildScopedModuleConfiguration(moduleId, moduleInstance.ConfigurationSections, configuration);
             var protectedSnapshot = CaptureProtectedServicesSnapshot(services);
-            moduleInstance.ConfigureServices(services, scopedConfig, effectiveHostContext);
+
+            try
+            {
+                moduleInstance.ConfigureServices(services, scopedConfig, effectiveHostContext);
+            }
+            catch (Exception ex) when (ex is not ModuleLoadException)
+            {
+                throw new ModuleLoadException(moduleId, $"ConfigureServices failed: {ex.Message}", ex);
+            }
+
             VerifyProtectedServicesUnchanged(moduleId, services, protectedSnapshot);
+
+            _logger.LogWarning("Module '{ModuleId}' loaded from workspace path (unsigned)", moduleId);
+            _logger.LogInformation("ModuleLoaded: Id '{ModuleId}', Version '{Version}', KeyId '{KeyId}', Signed '{Signed}'", manifest.Id, manifest.Version, manifest.KeyId, false);
 
             loadedModules.Add(new LoadedModuleDescriptor(moduleId, manifest, moduleInstance, alc));
         }
@@ -735,28 +797,22 @@ public sealed class ModuleLoader
         return true;
     }
 
-    private static string? FindWorkspaceModuleDll(string pascal, string assemblyFileName, out string? moduleBinDir)
+    private static string? FindWorkspaceModuleDll(string workspaceRoot, string pascal, string assemblyFileName, out string? moduleBinDir)
     {
         moduleBinDir = null;
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null)
+        if (!Directory.Exists(workspaceRoot))
         {
-            var repoCandidate = Path.Combine(current.FullName, "modules", $"Autheris.Modules.{pascal}", "bin");
-            if (Directory.Exists(repoCandidate))
-            {
-                var found = Directory.EnumerateFiles(repoCandidate, assemblyFileName, SearchOption.AllDirectories)
-                    .FirstOrDefault();
-                if (found is not null)
-                {
-                    moduleBinDir = Path.GetDirectoryName(found);
-                    return found;
-                }
-            }
-
-            current = current.Parent;
+            return null;
         }
 
-        var localCandidate = Path.Combine(AppContext.BaseDirectory, assemblyFileName);
-        return File.Exists(localCandidate) ? localCandidate : null;
+        var found = Directory.EnumerateFiles(workspaceRoot, assemblyFileName, SearchOption.AllDirectories)
+            .FirstOrDefault();
+        if (found is not null)
+        {
+            moduleBinDir = Path.GetDirectoryName(found);
+            return found;
+        }
+
+        return null;
     }
 }

@@ -154,4 +154,53 @@ public sealed class ModuleEndpointSecurityTests
         registrar.AddTypeExtension(typeof(ProtectedGraphQLExtension));
         registrar.RegisteredTypeExtensions.ShouldContain(typeof(ProtectedGraphQLExtension));
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Audit_details_escape_request_path()
+    {
+        var complexPath = "/api/\"test\"/\\path";
+        var detailsJson = ModuleEndpointRegistrar.BuildModuleAuditDetails("sample", complexPath);
+
+        using var doc = System.Text.Json.JsonDocument.Parse(detailsJson);
+        var root = doc.RootElement;
+        root.EnumerateObject().Count().ShouldBe(2);
+        root.GetProperty("module").GetString().ShouldBe("sample");
+        root.GetProperty("path").GetString().ShouldBe(complexPath);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Audit_details_path_is_length_capped()
+    {
+        var longPath = "/" + new string('x', 2048);
+        var detailsJson = ModuleEndpointRegistrar.BuildModuleAuditDetails("sample", longPath);
+
+        using var doc = System.Text.Json.JsonDocument.Parse(detailsJson);
+        var pathValue = doc.RootElement.GetProperty("path").GetString().ShouldNotBeNull();
+        pathValue.Length.ShouldBeLessThanOrEqualTo(512);
+        pathValue.ShouldBe(longPath[..512]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-04")]
+    public void Audit_details_exclude_query_string()
+    {
+        var pathWithoutQuery = "/api/resource";
+        var detailsJson = ModuleEndpointRegistrar.BuildModuleAuditDetails("sample", pathWithoutQuery);
+
+        detailsJson.ShouldNotContain("?");
+        detailsJson.ShouldNotContain("secret");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-SIMPL-50-04")]
+    public void Audit_target_is_length_capped()
+    {
+        var longTarget = "/" + new string('y', 2048);
+        var cappedTarget = ModuleEndpointRegistrar.CapAuditString(longTarget, 512);
+        cappedTarget.Length.ShouldBeLessThanOrEqualTo(512);
+    }
 }
