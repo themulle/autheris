@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.DataSources;
 using Autheris.Application.Procedures.Interfaces;
@@ -16,6 +18,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Procedures;
 
 /// <summary>SEC-PROC-02: one transport gate call over every source of a procedure call, before any database access.</summary>
+[Collection(TransportGateFallbackCollection.Name)]
 public sealed class ProcedureTransportGateTests
 {
     private const string Header = """
@@ -56,22 +59,26 @@ public sealed class ProcedureTransportGateTests
     {
         public IProcedureInvoker Invoker { get; } = Substitute.For<IProcedureInvoker>();
         public IProcedureRowScopeResolver RowScope { get; } = Substitute.For<IProcedureRowScopeResolver>();
+        public InMemoryProcedureRegistry Registry { get; } = new();
+        public ITableMetadataRepository Tables { get; } = Substitute.For<ITableMetadataRepository>();
+        public IConsentRepository Consents { get; } = Substitute.For<IConsentRepository>();
+        public IAuditLogRepository Audit { get; } = Substitute.For<IAuditLogRepository>();
 
         public GovernedProcedureExecutionService Create(IDataSourceTransportGate? gate, string? definitionSource, string tableSource, string tableDomain = "sales")
         {
-            var registry = new InMemoryProcedureRegistry();
+            var registry = Registry;
             var def = ProcedureDefinitionParser.Parse(Header, "x", false, 60) with { DataSource = definitionSource };
             registry.Register(def);
             registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id"], ["sales.orders"], new Dictionary<string, string>()));
 
-            var tables = Substitute.For<ITableMetadataRepository>();
+            var tables = Tables;
             tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(ci => new TableMetadata
             {
                 Identifier = new TableIdentifier(tableDomain, ci.Arg<TableIdentifier>().Schema, ci.Arg<TableIdentifier>().TableName),
                 Table = new Table { SourceName = tableSource },
                 Columns = [new TableColumn { ColumnName = "order_id" }]
             });
-            var consents = Substitute.For<IConsentRepository>();
+            var consents = Consents;
             consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
                 .Returns(new List<Consent>());
             var resolution = Substitute.For<IConsentResolutionService>();
@@ -79,7 +86,7 @@ public sealed class ProcedureTransportGateTests
                 .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["order_id"] = ColumnAccessLevel.Clear }));
             Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
                 .Returns(new RawProcedureResult(["order_id"], [new object?[] { 1 }], false));
-            var audit = Substitute.For<IAuditLogRepository>();
+            var audit = Audit;
             audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
             return new GovernedProcedureExecutionService(
@@ -146,13 +153,87 @@ public sealed class ProcedureTransportGateTests
     [Trait("Category", "Security")]
     public async Task Execute_NullGate_FailsClosed()
     {
-        // Hand-built services fall back to deny-all in production; the fallback setter is internal and unit tests alone install allow-all.
-        var rig = new Rig();
-        var svc = rig.Create(DenyAllTransportGate.Instance, "ds-ok", "src-ok");
+        // The unit project installs an allow-all fallback; a service built without a gate must resolve to the production
+        // deny-all default. Restore that default for this test only (the collection runs without parallel tests).
+        var previous = TransportGateFallback.Current;
+        TransportGateFallback.Current = DenyAllTransportGate.Instance;
+        try
+        {
+            var rig = new Rig();
+            var svc = rig.Create(null, "ds-ok", "src-ok");
 
-        await rig.AssertDeniedBeforeDatabaseAsync(svc);
-        TransportGateFallback.Current.ShouldNotBeNull();
-        typeof(TransportGateFallback).GetProperty(nameof(TransportGateFallback.Current))!.SetMethod!.IsPublic.ShouldBeFalse();
+            await rig.AssertDeniedBeforeDatabaseAsync(svc);
+        }
+        finally
+        {
+            TransportGateFallback.Current = previous;
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Rest_TransportDenied_Returns403_FixedText()
+    {
+        var rig = new Rig();
+        var svc = rig.Create(new RecordingGate("src-denied"), "ds-ok", "src-denied");
+        var http = new DefaultHttpContext { User = Caller() };
+        http.RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider();
+        http.Response.Body = new MemoryStream();
+        http.Request.Method = "POST";
+        http.Request.Body = new MemoryStream("""{"customer_id":7}"""u8.ToArray());
+        http.Request.ContentLength = 17;
+
+        await Autheris.Api.Endpoints.ProcedureEndpointRoutes.HandlePost("get_orders", http, svc, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+
+        http.Response.StatusCode.ShouldBe(403);
+        http.Response.Body.Position = 0;
+        var text = await new StreamReader(http.Response.Body).ReadToEndAsync();
+        text.ShouldContain("Access to the data source is not allowed over this transport.");
+        text.ShouldNotContain("src-denied");
+        await rig.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
+        rig.RowScope.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Mcp_TransportDenied_ReturnsTransportNotAllowed()
+    {
+        var rig = new Rig();
+        var svc = rig.Create(new RecordingGate("src-denied"), "ds-ok", "src-denied");
+        var handler = new Autheris.Application.Mcp.Services.McpToolExecutionHandler(
+            Substitute.For<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>(),
+            Substitute.For<Autheris.Application.DataSources.Interfaces.IGovernedDataQueryService>(),
+            Substitute.For<Autheris.Application.Catalog.Interfaces.ICatalogDiscoveryService>(),
+            Substitute.For<Autheris.Application.Mcp.Interfaces.IApiDispatcherService>(),
+            Substitute.For<Autheris.Application.Lineage.ILineageGraphStore>(),
+            rig.Tables,
+            procedureRegistry: rig.Registry,
+            procedureExecutionService: svc);
+        var tool = Autheris.Application.Mcp.Services.McpDatasetTools.Definitions().Single(t => t.Name == Autheris.Application.Mcp.Services.McpDatasetTools.CallProcedure);
+        var session = new McpSessionContext("s", "u", Tenant.Value, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+        var result = await handler.ExecuteToolAsync(tool, """{"procedure_name":"get_orders","arguments":{"customer_id":7}}""", session, CancellationToken.None);
+
+        result.ShouldContain(TransportNotAllowedException.Code);
+        result.ShouldNotContain("src-denied");
+        await rig.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
+        rig.RowScope.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task McpDescribe_TransportDenied_NotDescribed()
+    {
+        var rig = new Rig();
+        var svc = rig.Create(new RecordingGate("src-denied"), "ds-ok", "src-denied");
+        var catalog = new Autheris.Application.Mcp.Services.McpDatasetCatalog(
+            rig.Tables, rig.Consents, Substitute.For<Autheris.Application.Common.Interfaces.IGatewayExecutionService>(), rig.Audit,
+            procedureRegistry: rig.Registry, procedureExecutionService: svc, transportGate: new RecordingGate("src-denied"));
+
+        await Should.ThrowAsync<TransportNotAllowedException>(() => catalog.DescribeDatasetAsync(Caller(), "procedure:get_orders", null));
+
+        await rig.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);
+        rig.RowScope.ReceivedCalls().ShouldBeEmpty();
     }
 
     [Fact]
@@ -183,4 +264,10 @@ public sealed class ProcedureTransportGateTests
         gate.Sources.ShouldBe(["ds-ok", "src-ok"], ignoreOrder: true);
         await rig.Invoker.ReceivedWithAnyArgs(1).ExecuteReadAsync(default!, default!, default!, default, default);
     }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class TransportGateFallbackCollection
+{
+    public const string Name = "TransportGateFallback";
 }

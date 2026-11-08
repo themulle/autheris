@@ -1,6 +1,7 @@
 using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Mcp.Services;
+using Autheris.Domain.Common;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -110,5 +111,40 @@ public sealed class ProcedureKillSwitchTests
         result.ShouldContain("is not registered or allowed");
         result.ShouldNotContain("NOT_AVAILABLE");
         result.ShouldNotContain("INVALID_PARAMS");
+    }
+
+    [Fact]
+    public async Task Disabled_CatalogAndMcpDatasets_ListNoProcedures()
+    {
+        // Without procedure services (switch off) the dataset list holds no procedure entry and the REST catalog has no procedure detail.
+        var tables = Autheris.Tests.Unit.Catalog.Wp0.Tables();
+        var consents = Autheris.Tests.Unit.Catalog.Wp0.Consents();
+        var user = Autheris.Tests.Unit.Catalog.Wp0.User("S-1", "tenant-a");
+        var mcp = new McpDatasetCatalog(tables, consents, Substitute.For<Autheris.Application.Common.Interfaces.IGatewayExecutionService>(),
+            Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>(), options: Microsoft.Extensions.Options.Options.Create(new GatewayOptions()));
+        var rest = new Autheris.Application.Catalog.Services.CatalogDiscoveryService(tables, Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>(),
+            Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), null);
+
+        var list = await mcp.ListDatasetsAsync(user, null, null, CancellationToken.None);
+        var detail = await rest.GetDatasetDetailAsync(new Autheris.Domain.Common.TableIdentifier("procedures", "procedure", "get_orders"),
+            new RequestContext(new TenantId("tenant-a"), new Sid("S-1"), Roles: []), CancellationToken.None);
+
+        list.Datasets.ShouldNotContain(d => d.Id.StartsWith("procedure", StringComparison.OrdinalIgnoreCase));
+        list.Endpoints.ShouldNotBeNull();
+        list.Endpoints!.ShouldNotContain(e => e.Url.Contains("/procedures", StringComparison.Ordinal));
+        detail.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Disabled_OpenApiHasNoProcedureLink()
+    {
+        var repo = Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([]));
+        var off = new Autheris.Application.OData.Services.DynamicOpenApiGenerator(repo, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.OData.Services.DynamicOpenApiGenerator>.Instance);
+        var on = new Autheris.Application.OData.Services.DynamicOpenApiGenerator(repo, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.OData.Services.DynamicOpenApiGenerator>.Instance,
+            new OpenApiDocumentOptions { IncludeStoredProcedureSpec = true });
+
+        (await off.GetIndexDocumentAsync()).Apis.ShouldNotContain(a => a.Url.Contains("/procedures/", StringComparison.Ordinal));
+        (await on.GetIndexDocumentAsync()).Apis.ShouldContain(a => a.Url.Contains("/procedures/", StringComparison.Ordinal));
     }
 }
