@@ -79,22 +79,33 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
     internal static EndpointSnapshot CaptureEndpointSnapshot(IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
-        var existing = new HashSet<Endpoint>(ReferenceEqualityComparer.Instance);
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var dataSource in endpoints.DataSources)
         {
             foreach (var endpoint in dataSource.Endpoints)
             {
-                existing.Add(endpoint);
+                var key = SnapshotKey(endpoint);
+                counts[key] = counts.GetValueOrDefault(key) + 1;
             }
         }
 
-        return new EndpointSnapshot(existing);
+        return new EndpointSnapshot(counts);
     }
 
-    /// <summary>Endpoint instances that existed before a module mapped its routes; matched by identity so a module cannot forge membership.</summary>
-    internal sealed class EndpointSnapshot(HashSet<Endpoint> existing)
+    /// <summary>
+    /// Count of pre-existing endpoints per method, raw route and display name. Endpoint instances are rebuilt by the route data sources
+    /// and cannot be compared by identity; every endpoint beyond the pre-existing count for its key must be owned by the module.
+    /// </summary>
+    internal sealed class EndpointSnapshot(Dictionary<string, int> counts)
     {
-        internal HashSet<Endpoint> Existing { get; } = existing;
+        internal Dictionary<string, int> Counts { get; } = counts;
+    }
+
+    private static string SnapshotKey(Endpoint endpoint)
+    {
+        var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+        var route = (endpoint as RouteEndpoint)?.RoutePattern.RawText;
+        return string.Concat(methods is null ? "*" : string.Join(',', methods), " ", route, " ", endpoint.DisplayName);
     }
 
     /// <summary>
@@ -112,13 +123,23 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        var remaining = before is null ? null : new Dictionary<string, int>(before.Counts, StringComparer.Ordinal);
+
         foreach (var dataSource in endpoints.DataSources)
         {
             foreach (var endpoint in dataSource.Endpoints)
             {
-                if (before is not null && expectedModuleId is not null && !before.Existing.Contains(endpoint))
+                if (remaining is not null && expectedModuleId is not null)
                 {
-                    VerifyAddedEndpointOwnership(endpoint, expectedModuleId);
+                    var key = SnapshotKey(endpoint);
+                    if (remaining.TryGetValue(key, out var left) && left > 0)
+                    {
+                        remaining[key] = left - 1;
+                    }
+                    else
+                    {
+                        VerifyAddedEndpointOwnership(endpoint, expectedModuleId);
+                    }
                 }
 
                 var moduleMeta = endpoint.Metadata.GetMetadata<ModuleEndpointMetadata>();
