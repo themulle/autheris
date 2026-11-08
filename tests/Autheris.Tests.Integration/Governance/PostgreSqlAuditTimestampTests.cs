@@ -6,14 +6,14 @@ using Autheris.Infrastructure.Persistence;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
-/// <summary>PERS-01: audit timestamps are stored and compared as UTC strings, whatever offset the caller uses (SQLite).</summary>
+/// <summary>PERS-01: audit timestamps are stored and compared as UTC strings, whatever offset the caller uses (PostgreSQL).</summary>
 [Trait("Category", "Security")]
-public sealed class SqliteAuditTimestampTests : IDisposable
+public sealed class PostgreSqlAuditTimestampTests : IDisposable
 {
     private static readonly TenantId Tenant = new("tenant-a");
-    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
 
     public void Dispose() => _repo.Dispose();
 

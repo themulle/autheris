@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,7 +23,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Wave 2 Governance Tests:
@@ -247,7 +248,12 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
             options: null,
             graphQlMap: null,
             explanationService: explanationService,
-            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tableRepo, consentRepo));
+            visibilityService: new Autheris.Application.Catalog.Services.CatalogVisibilityService(
+                tableRepo,
+                consentRepo,
+                Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = Autheris.Tests.Common.TenancyShapeExtensions.Options(Autheris.Tests.Common.TenancyShape.Multi), Rebac = new Autheris.Domain.Options.RebacOptions { Enabled = false } }),
+                DisabledRebac(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Catalog.Services.CatalogVisibilityService>.Instance));
 
         var user = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "test"));
 
@@ -265,19 +271,11 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
     }
 
     [Fact]
-    public async Task Issue34_SqliteGovernanceRepository_GetRequestsByRequesterSidAsync_FiltersByStatus()
+    public async Task Issue34_PostgreSqlGovernanceRepository_GetRequestsByRequesterSidAsync_FiltersByStatus()
     {
         // Arrange
         var epochService = Substitute.For<IEpochValidationService>();
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                ConnectionString = $"Data Source=governance_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared"
-            }
-        });
-
-        var repo = GovernanceStoreFactory.CreateSqlite(epochService, options, logger: NullLogger<SqliteGovernanceRepository>.Instance);
+        var repo = GovernanceTestDatabase.CreateRepository(epochService, logger: NullLogger<PostgreSqlGovernanceRepository>.Instance);
 
         var requesterSid = new Sid("S-1-5-21-REQUESTER-1");
         var tableIdentifier = new TableIdentifier("default", "sales", "invoices");
@@ -387,5 +385,12 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
         // Assert
         options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("Agent.Read");
         options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("App.Read");
+    }
+
+    private static Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator DisabledRebac()
+    {
+        var evaluator = NSubstitute.Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>();
+        evaluator.IsEnabled.Returns(false);
+        return evaluator;
     }
 }

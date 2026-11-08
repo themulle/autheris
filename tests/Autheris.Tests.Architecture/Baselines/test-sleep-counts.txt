@@ -28,7 +28,6 @@ tests/Autheris.Tests.Unit/Catalog/CatalogVisibilityServiceTests.cs|1
 tests/Autheris.Tests.Unit/CdcStream/CdcStreamCompatFeedTests.cs|2
 tests/Autheris.Tests.Unit/Extensibility/ExtensibilityPipelineFailurePolicyTests.cs|1
 tests/Autheris.Tests.Unit/Governance/CasbinPolicyEpochTests.cs|2
-tests/Autheris.Tests.Unit/Governance/SqliteGovernanceConcurrencyTests.cs|1
 tests/Autheris.Tests.Unit/Governance/TrustedDocuments/TrustedDocumentAppRegistryTests.cs|1
 tests/Autheris.Tests.Unit/GraphQL/CdcSubscriptionGovernorGql34Tests.cs|1
 tests/Autheris.Tests.Unit/Hosting/ClusterPartitionedServiceTests.cs|1

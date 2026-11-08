@@ -21,16 +21,10 @@ tests/Autheris.Tests.Unit/DataApi/Issue390ReadOrderDirectionTests.cs
 tests/Autheris.Tests.Unit/DevExperienceTests.cs
 tests/Autheris.Tests.Unit/Governance/BaselineSchemaShapeParityTests.cs
 tests/Autheris.Tests.Unit/Governance/ConsentRecertificationScanTests.cs
-tests/Autheris.Tests.Unit/Governance/GovernanceSchemaCatalogReaderTests.cs
 tests/Autheris.Tests.Unit/Governance/GovernanceSchemaShapeVerifierTests.cs
-tests/Autheris.Tests.Unit/Governance/GovernanceSchemaVerificationTests.cs
 tests/Autheris.Tests.Unit/Governance/ReadPathSwitchesMetricsAndAnalyzeTests.cs
-tests/Autheris.Tests.Unit/Governance/RequiredFilterColumnsCatalogTests.cs
 tests/Autheris.Tests.Unit/Governance/SqliteConsentDescriptionRepositoryContractTests.cs
 tests/Autheris.Tests.Unit/Governance/SqliteDataOwnerAssignmentRepositoryContractTests.cs
-tests/Autheris.Tests.Unit/Governance/SqliteGovernanceConcurrencyTests.cs
-tests/Autheris.Tests.Unit/Governance/SqliteGovernanceConnectionProviderTests.cs
-tests/Autheris.Tests.Unit/Governance/SqliteGovernanceRepositoryPocTests.cs
 tests/Autheris.Tests.Unit/Governance/SqliteRelationRepositoryContractTests.cs
 tests/Autheris.Tests.Unit/Governance/TrustedDocuments/TrustedDocumentAdminEndpointsTests.cs
 tests/Autheris.Tests.Unit/GraphQL/GovernedTreeQueryServiceTests.cs

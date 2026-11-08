@@ -378,6 +378,148 @@ public abstract class CatalogKeyDefinitionContractTestsBase
         (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyColumns.ShouldBeEmpty();
     }
 
+    // Ported from the former SQLite contract tests (WP-SIMPL-11): the cases that the shared base did not cover yet.
+
+    [Fact]
+    public async Task GetAllTablesAsync_ReturnsDeclaredDefinition_AndReplaceFlagIsAlwaysFalse()
+    {
+        if (!Available) return;
+        var id = await SeedFullAsync();
+        var table = (await Repo.GetAllTablesAsync()).Single(t => t.Identifier.Equals(id));
+        table.PrimaryKeyColumns.ShouldBe(["a", "b"]);
+        table.Indexes.Count.ShouldBe(2);
+        table.ReplaceKeyDefinition.ShouldBeFalse();
+        (await Repo.GetTableMetadataAsync(id))!.ReplaceKeyDefinition.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task UpsertWithoutReplace_KeepsDefinition_EvenWhenIncomingCarriesOtherKey()
+    {
+        if (!Available) return;
+        var id = await SeedFullAsync();
+
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: false, pk: ["c"], indexes: []));
+        InvalidateCache();
+
+        var read = (await Repo.GetTableMetadataAsync(id))!;
+        read.PrimaryKeyColumns.ShouldBe(["a", "b"]);
+        read.Indexes.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task UpsertWithoutReplace_AndNoDefinition_KeepsDefinition()
+    {
+        if (!Available) return;
+        var id = await SeedFullAsync();
+        await Repo.UpsertTableMetadataAsync(Meta(id));
+        InvalidateCache();
+        (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyColumns.ShouldBe(["a", "b"]);
+    }
+
+    [Fact]
+    public async Task UpsertWithReplace_AndEmptyLists_ClearsDefinition()
+    {
+        if (!Available) return;
+        var id = await SeedFullAsync();
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true));
+        InvalidateCache();
+
+        var read = (await Repo.GetTableMetadataAsync(id))!;
+        read.PrimaryKeyColumns.ShouldBeEmpty();
+        read.Indexes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ReplaceTableKeyDefinition_ReReadWithoutFurtherWrite_ReturnsFreshDefinition()
+    {
+        if (!Available) return;
+        var id = NewId();
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a"]));
+        (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyColumns.ShouldBe(["a"]);
+
+        await Repo.ReplaceTableKeyDefinitionAsync(id, ["b"], []);
+
+        (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyColumns.ShouldBe(["b"]);
+    }
+
+    [Fact]
+    public async Task SetRowFilterEvaluation_ReReadWithoutFurtherWrite_ReturnsFreshSettings()
+    {
+        if (!Available) return;
+        var id = NewId();
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a"]));
+        (await Repo.GetTableMetadataAsync(id))!.RowFilterEvaluation.ShouldBeNull();
+
+        await Repo.SetRowFilterEvaluationAsync(id, new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 5), new Sid("S-1-5-21-admin"));
+
+        (await Repo.GetTableMetadataAsync(id))!.RowFilterEvaluation.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task ReplaceTableKeyDefinition_UnknownTable_ReturnsNull()
+    {
+        if (!Available) return;
+        (await Repo.ReplaceTableKeyDefinitionAsync(new TableIdentifier("x", "y", "z"), ["a"], [])).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ReplaceTableKeyDefinition_ValidatesAgainstStoredColumns_AndFailsAtomically()
+    {
+        if (!Available) return;
+        var id = NewId();
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a"]));
+        await Should.ThrowAsync<TableDefinitionException>(() => Repo.ReplaceTableKeyDefinitionAsync(id, ["zzz"], []));
+        InvalidateCache();
+        (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyColumns.ShouldBe(["a"]);
+    }
+
+    [Fact]
+    public async Task ReplacingUpsert_StripsKeyMarkersOfStoredColumnsThatAreNotSupplied()
+    {
+        if (!Available) return;
+        var id = NewId();
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["a", "b"]));
+        // The second upsert supplies only c and d: the stored columns a and b must not keep a stale ordinal.
+        var onlyCd = Meta(id, replace: true, pk: ["c"]) with
+        {
+            Columns = [new TableColumn { ColumnName = "c", DataType = "varchar" }, new TableColumn { ColumnName = "d", DataType = "varchar" }]
+        };
+
+        await Repo.UpsertTableMetadataAsync(onlyCd);
+
+        InvalidateCache();
+        var loaded = (await Repo.GetTableMetadataAsync(id))!;
+        loaded.PrimaryKeyColumns.ShouldBe(["c"]);
+        loaded.Columns.Where(c => c.ColumnName is "a" or "b").ShouldAllBe(c => !c.Meta.ContainsKey("primary_key_ordinal"));
+    }
+
+    [Fact]
+    public async Task Markers_BooleanFlag_ProvideKey()
+    {
+        if (!Available) return;
+        var id = await SeedMarkersAsync(("a", "{\"is_primary_key\":\"true\"}"));
+        (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyColumns.ShouldBe(["a"]);
+    }
+
+    [Fact]
+    public async Task Markers_DuplicateOrdinal_TableUnavailable()
+    {
+        if (!Available) return;
+        var id = await SeedMarkersAsync(("a", "{\"primary_key_ordinal\":\"1\"}"), ("b", "{\"primary_key_ordinal\":\"1\"}"));
+        await Should.ThrowAsync<TableMetadataUnavailableException>(() => Repo.GetTableMetadataAsync(id));
+    }
+
+    [Fact]
+    public async Task Markers_DeclaredRowsWin()
+    {
+        if (!Available) return;
+        var id = NewId();
+        await Repo.UpsertTableMetadataAsync(Meta(id, replace: true, pk: ["c"]));
+        Exec("UPDATE TABLE_COLUMNS SET meta_json = @m WHERE column_name = 'a' AND table_id = @t", ("@m", "{\"primary_key_ordinal\":\"zzz\"}"), ("@t", TableId(id)));
+        InvalidateCache();
+        (await Repo.GetTableMetadataAsync(id))!.PrimaryKeyColumns.ShouldBe(["c"]);
+    }
+
     private static PhysicalIndexDefinition Phys(string[] columns, params KeyColumnDirection[] directions) => new(columns, directions);
 
     [Fact]

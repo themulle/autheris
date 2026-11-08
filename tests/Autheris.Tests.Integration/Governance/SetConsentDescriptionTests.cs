@@ -13,7 +13,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 /// <summary>PLAN-GOV-158-INC1 WP-158-3: <c>setConsentDescription</c> (decisions 7, 8, 11; SEC-GOV158I1-03..06, 13).</summary>
 public sealed class SetConsentDescriptionTests : IDisposable
@@ -22,7 +22,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
     private static readonly TableIdentifier Table = new("finance", "dbo", "finance_table_1");
     private static readonly Sid Alice = new("S-1-5-21-ALICE-SETDESC");
 
-    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
     private readonly Mutation _mutation = new();
     private readonly IDataOwnershipRepository _ownership = Substitute.For<IDataOwnershipRepository>();
     private readonly ServiceProvider _services = DecisionServices.Build();
@@ -70,7 +70,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
 
     private async Task<List<(string EventType, string Details, string Actor)>> AuditRowsAsync()
     {
-        await using var conn = await _repository.Connections.OpenAsync(CancellationToken.None);
+        var conn = _repository.RawConnection();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT event_type, details_json, actor_sid FROM AUDIT_LOG_ENTRIES WHERE event_type = 'CONSENT_DESCRIPTION_CHANGED'";
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -135,7 +135,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
         var revoked = await NewConsentAsync();
         await _repository.RevokeConsentAsync(revoked.Id, Alice, "gone");
         var expired = await NewConsentAsync(validDays: 1);
-        await using (var conn = await _repository.Connections.OpenAsync(CancellationToken.None))
+        var conn = _repository.RawConnection();
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "UPDATE CONSENTS SET valid_to = @t WHERE id = @id";
@@ -267,10 +267,12 @@ public sealed class SetConsentDescriptionTests : IDisposable
     {
         // T-GOV158I1-03: the update and its audit row share one transaction.
         var consent = await NewConsentAsync();
-        await using (var conn = await _repository.Connections.OpenAsync(CancellationToken.None))
+        var conn = _repository.RawConnection();
         {
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "CREATE TRIGGER trg_fail_desc_audit BEFORE INSERT ON AUDIT_LOG_ENTRIES WHEN NEW.event_type = 'CONSENT_DESCRIPTION_CHANGED' BEGIN SELECT RAISE(ABORT, 'forced audit failure'); END";
+            cmd.CommandText = "CREATE FUNCTION trg_fail_desc_audit_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_type = 'CONSENT_DESCRIPTION_CHANGED' THEN RAISE EXCEPTION 'forced audit failure'; END IF; RETURN NEW; END $$";
+            await cmd.ExecuteNonQueryAsync();
+            cmd.CommandText = "CREATE TRIGGER trg_fail_desc_audit BEFORE INSERT ON AUDIT_LOG_ENTRIES FOR EACH ROW EXECUTE FUNCTION trg_fail_desc_audit_fn()";
             await cmd.ExecuteNonQueryAsync();
         }
 

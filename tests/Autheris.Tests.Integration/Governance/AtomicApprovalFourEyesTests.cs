@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 using Autheris.Tests.Common;
 using System;
@@ -27,9 +27,9 @@ public sealed class AtomicApprovalFourEyesTests
     private static readonly Sid Approver2 = new("S-1-5-21-APPROVER-2");
     private static readonly TenantId Tenant = new("tenant-a");
 
-    private static async Task<(SqliteGovernanceRepository Repo, ConsentRequest Request)> CreateRequestAsync(string sensitivity, bool requiresFourEyes)
+    private static async Task<(PostgreSqlGovernanceRepository Repo, ConsentRequest Request)> CreateRequestAsync(string sensitivity, bool requiresFourEyes)
     {
-        var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
+        var repo = GovernanceTestDatabase.CreateRepository(new FakeEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "atomic_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table
         {
@@ -65,11 +65,11 @@ public sealed class AtomicApprovalFourEyesTests
         using (var cmd = repo.RawConnection().CreateCommand())
         {
             cmd.CommandText = @"
-                INSERT OR IGNORE INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator');
-                INSERT OR IGNORE INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m1, id, 'User', 'S-1-5-21-APPROVER-1' FROM ROLES WHERE role_name = 'GovernanceAdmin';
-                INSERT OR IGNORE INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m2, id, 'User', 'S-1-5-21-APPROVER-2' FROM ROLES WHERE role_name = 'GovernanceAdmin';
+                INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator') ON CONFLICT DO NOTHING;
+                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
+                SELECT @m1, id, 'User', 'S-1-5-21-APPROVER-1' FROM ROLES WHERE role_name = 'GovernanceAdmin' ON CONFLICT DO NOTHING;
+                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
+                SELECT @m2, id, 'User', 'S-1-5-21-APPROVER-2' FROM ROLES WHERE role_name = 'GovernanceAdmin' ON CONFLICT DO NOTHING;
             ";
             cmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
             cmd.Parameters.AddWithValue("@m1", Guid.NewGuid().ToString());
@@ -109,7 +109,7 @@ public sealed class AtomicApprovalFourEyesTests
         return (step, consent);
     }
 
-    private static async Task<int> CountRowsAsync(SqliteGovernanceRepository repo, string sql, Guid requestId)
+    private static async Task<int> CountRowsAsync(PostgreSqlGovernanceRepository repo, string sql, Guid requestId)
     {
         using var cmd = repo.RawConnection().CreateCommand();
         cmd.CommandText = sql;
@@ -117,10 +117,10 @@ public sealed class AtomicApprovalFourEyesTests
         return Convert.ToInt32(await cmd.ExecuteScalarAsync());
     }
 
-    private static Task<int> CountStepsAsync(SqliteGovernanceRepository repo, Guid requestId) =>
+    private static Task<int> CountStepsAsync(PostgreSqlGovernanceRepository repo, Guid requestId) =>
         CountRowsAsync(repo, "SELECT COUNT(*) FROM APPROVAL_STEPS WHERE consent_request_id = @id", requestId);
 
-    private static Task<int> CountConsentsAsync(SqliteGovernanceRepository repo, Guid requestId) =>
+    private static Task<int> CountConsentsAsync(PostgreSqlGovernanceRepository repo, Guid requestId) =>
         CountRowsAsync(repo, "SELECT COUNT(*) FROM CONSENTS WHERE consent_request_id = @id", requestId);
 
     [Theory]

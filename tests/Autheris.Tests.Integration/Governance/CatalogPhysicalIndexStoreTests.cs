@@ -8,20 +8,16 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 /// <summary>Issue #404 (WP-404-1): the physical non-unique index store round trip, fail-closed reads and write isolation on SQLite.</summary>
 public sealed class CatalogPhysicalIndexStoreTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
 
     public CatalogPhysicalIndexStoreTests()
     {
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=physidx_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", JournalMode = "DELETE" }
-        });
-        _repo = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options);
+        _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
     }
 
     public void Dispose() => _repo.Dispose();
@@ -152,7 +148,7 @@ public sealed class CatalogPhysicalIndexStoreTests : IDisposable
     public void I404_SC_01_PhysicalIndexTables_HaveNoNameOrTimestampColumn()
     {
         using var cmd = _repo.RawConnection().CreateCommand();
-        cmd.CommandText = "SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_table_info('TABLE_PHYSICAL_INDEXES') UNION ALL SELECT name FROM pragma_table_info('TABLE_PHYSICAL_INDEX_COLUMNS'))";
+        cmd.CommandText = "SELECT string_agg(column_name, ',') FROM information_schema.columns WHERE table_schema = current_schema() AND table_name IN ('table_physical_indexes', 'table_physical_index_columns')";
         var columns = Convert.ToString(cmd.ExecuteScalar())!.Split(',');
         columns.OrderBy(c => c).ShouldBe(["column_ordinal", "id", "index_id", "index_ordinal", "is_descending", "table_column_id", "table_id"]);
     }

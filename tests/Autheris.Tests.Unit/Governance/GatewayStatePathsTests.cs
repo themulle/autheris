@@ -134,31 +134,6 @@ public sealed class GatewayStatePathsTests
         GatewayStatePaths.ResolveDirectory("  ", ".data").ShouldBe(".data");
     }
 
-    [Theory]
-    [InlineData("", null)]
-    [InlineData("  ", null)]
-    [InlineData("bad\0path", null)]
-    [InlineData("./state", "true")]
-    [InlineData("/app", "true")]
-    [InlineData("/app/", "true")]
-    public void StateOptionsValidator_RejectsEmptyAndContainerAppRoot(string directory, string? inContainer)
-    {
-        var validator = NewValidator("Sqlite", inContainer);
-
-        var result = validator.Validate(null, new StateOptions { StateDirectory = directory });
-
-        result.Failed.ShouldBeTrue();
-    }
-
-    [Theory]
-    [InlineData("./state", null)]
-    [InlineData("/app/data", "true")]
-    [InlineData("/var/lib/autheris", "true")]
-    public void StateOptionsValidator_AcceptsUsableDirectories(string directory, string? inContainer)
-    {
-        NewValidator("Sqlite", inContainer).Validate(null, new StateOptions { StateDirectory = directory }).Succeeded.ShouldBeTrue();
-    }
-
     [Fact]
     public void StateOptionsValidator_IsNotEnforcedForServerProviders()
     {
@@ -168,51 +143,4 @@ public sealed class GatewayStatePathsTests
     private static StateOptionsValidator NewValidator(string provider, string? inContainer) =>
         new(Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { Provider = provider } }),
             name => name == "DOTNET_RUNNING_IN_CONTAINER" ? inContainer : null);
-
-    [Theory]
-    [InlineData("Data Source=:memory:")]
-    [InlineData("Data Source=gov_x;Mode=Memory;Cache=Shared")]
-    public void StartupValidator_RejectsEffectiveInMemorySqlite_OutsideDevelopment(string connectionString)
-    {
-        var options = new GatewayOptions
-        {
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" },
-            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = connectionString }
-        };
-
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env("Production"), _ => null));
-
-        ex.Message.ShouldContain("In-memory SQLite");
-    }
-
-    [Fact]
-    public void StartupValidator_AcceptsUnsetConnectionString_OutsideDevelopment_BecauseTheStateFileIsUsed()
-    {
-        var options = new GatewayOptions
-        {
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" },
-            Audit = new AuditOptions { ChainAnchorPath = "/var/state/anchor.json" },
-            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = string.Empty }
-        };
-
-        Should.NotThrow(() => GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env("Production"), _ => null));
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("Data Source=/var/lib/autheris/governance.db")]
-    public void StartupValidator_SqliteWithoutAnAuditAnchor_FailsEarly_OutsideDevelopment(string connectionString)
-    {
-        var options = new GatewayOptions
-        {
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" },
-            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = connectionString }
-        };
-
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env("Production"), _ => null));
-
-        ex.Message.ShouldContain("AU-01/AU-03");
-    }
 }

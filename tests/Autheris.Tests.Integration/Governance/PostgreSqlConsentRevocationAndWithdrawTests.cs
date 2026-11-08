@@ -6,17 +6,17 @@ using Autheris.Infrastructure.Persistence;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 /// <summary>PERS-02 (withdraw does not deadlock on an in-memory database) and PERS-05 (revocation is transactional and never overwritten), SQLite.</summary>
 [Trait("Category", "Security")]
-public sealed class SqliteConsentRevocationAndWithdrawTests : IDisposable
+public sealed class PostgreSqlConsentRevocationAndWithdrawTests : IDisposable
 {
     private static readonly TenantId Tenant = new("tenant-a");
     private static readonly Sid Admin = new("S-1-5-21-ADMIN");
     private static readonly Sid Requester = new("S-1-5-21-REQUESTER");
 
-    private readonly SqliteGovernanceRepository _repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService());
+    private readonly PostgreSqlGovernanceRepository _repo = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
     private readonly TableIdentifier _table = new("Sales", "Crm", "Orders_" + Guid.NewGuid().ToString("N")[..6]);
     private Guid _tableId;
 
@@ -24,11 +24,11 @@ public sealed class SqliteConsentRevocationAndWithdrawTests : IDisposable
 
     private async Task EnsureTableAsync()
     {
-        await using (var conn = await _repo.Connections.OpenAsync(CancellationToken.None))
+        var conn = _repo.RawConnection();
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = @"INSERT OR IGNORE INTO ROLES (id, role_name, description) VALUES ('role-admin', 'GovernanceAdmin', 'test');
-                                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid) VALUES (@id, 'role-admin', 'User', @sid);";
+            cmd.CommandText = @"INSERT INTO ROLES (id, role_name, description) VALUES ('role-admin', 'GovernanceAdmin', 'test') ON CONFLICT DO NOTHING;
+                                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid) SELECT @id, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';";
             cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
             cmd.Parameters.AddWithValue("@sid", Admin.Value);
             await cmd.ExecuteNonQueryAsync();
@@ -140,7 +140,7 @@ public sealed class SqliteConsentRevocationAndWithdrawTests : IDisposable
             RequestedAt = DateTimeOffset.UtcNow, RequestedValidTo = local, TenantId = Tenant
         });
 
-        await using var conn = await _repo.Connections.OpenAsync(CancellationToken.None);
+        var conn = _repo.RawConnection();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT requested_valid_to FROM CONSENT_REQUESTS WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", id.ToString());

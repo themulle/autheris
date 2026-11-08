@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Governance;
+namespace Autheris.Tests.Integration.Governance;
 
 using Autheris.Tests.Common;
 using System;
@@ -13,17 +13,17 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// POL-2 / D-4: Repository tests for SQLite (and ConsentApprovalPolicy contract)
+/// POL-2 / D-4: Repository tests for PostgreSQL (and ConsentApprovalPolicy contract)
 /// ensuring HIGH, RESTRICTED, SECRET and other high sensitivities mandate four-eyes approval
 /// even when requires_four_eyes = false.
 /// </summary>
 public sealed class ConsentFourEyesSensitivityTests
 {
-    private static async Task<(SqliteGovernanceRepository repo, ConsentRequest request)> CreateRequestForTableAsync(
+    private static async Task<(PostgreSqlGovernanceRepository repo, ConsentRequest request)> CreateRequestForTableAsync(
         string sensitivity,
         bool requiresFourEyes = false)
     {
-        var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
+        var repo = GovernanceTestDatabase.CreateRepository(new FakeEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "cust_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table
         {
@@ -60,11 +60,11 @@ public sealed class ConsentFourEyesSensitivityTests
         {
             var adminRoleId = Guid.NewGuid().ToString();
             cmd.CommandText = @"
-                INSERT OR IGNORE INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator');
-                INSERT OR IGNORE INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m1, id, 'User', 'S-1-5-21-APPROVER-1' FROM ROLES WHERE role_name = 'GovernanceAdmin';
-                INSERT OR IGNORE INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m2, id, 'User', 'S-1-5-21-APPROVER-2' FROM ROLES WHERE role_name = 'GovernanceAdmin';
+                INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator') ON CONFLICT DO NOTHING;
+                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
+                SELECT @m1, id, 'User', 'S-1-5-21-APPROVER-1' FROM ROLES WHERE role_name = 'GovernanceAdmin' ON CONFLICT DO NOTHING;
+                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
+                SELECT @m2, id, 'User', 'S-1-5-21-APPROVER-2' FROM ROLES WHERE role_name = 'GovernanceAdmin' ON CONFLICT DO NOTHING;
             ";
             cmd.Parameters.AddWithValue("@rid", adminRoleId);
             cmd.Parameters.AddWithValue("@m1", Guid.NewGuid().ToString());
@@ -84,7 +84,7 @@ public sealed class ConsentFourEyesSensitivityTests
     [InlineData("secret")]
     [InlineData("CONFIDENTIAL")]
     [InlineData("PII")] // Unknown rank >= 3 (fail closed)
-    public async Task Sqlite_HighSensitivityTable_RequiresFourEyesEvenIfRequiresFourEyesIsFalse(string sensitivity)
+    public async Task PostgreSql_HighSensitivityTable_RequiresFourEyesEvenIfRequiresFourEyesIsFalse(string sensitivity)
     {
         var (repo, request) = await CreateRequestForTableAsync(sensitivity, requiresFourEyes: false);
         using (repo)
@@ -114,7 +114,7 @@ public sealed class ConsentFourEyesSensitivityTests
     [InlineData("INTERNAL")]
     [InlineData("NORMAL")]
     [InlineData("MEDIUM")]
-    public async Task Sqlite_LowOrNormalSensitivityTable_SingleApprovalSufficesWhenRequiresFourEyesIsFalse(string sensitivity)
+    public async Task PostgreSql_LowOrNormalSensitivityTable_SingleApprovalSufficesWhenRequiresFourEyesIsFalse(string sensitivity)
     {
         var (repo, request) = await CreateRequestForTableAsync(sensitivity, requiresFourEyes: false);
         using (repo)
@@ -128,7 +128,7 @@ public sealed class ConsentFourEyesSensitivityTests
     }
 
     [Fact]
-    public async Task Sqlite_LowSensitivityTable_WithExplicitRequiresFourEyes_EnforcesSecondApproval()
+    public async Task PostgreSql_LowSensitivityTable_WithExplicitRequiresFourEyes_EnforcesSecondApproval()
     {
         var (repo, request) = await CreateRequestForTableAsync("LOW", requiresFourEyes: true);
         using (repo)
