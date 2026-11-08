@@ -3,6 +3,7 @@ namespace Autheris.Application.Mcp.Services;
 using System;
 using System.Globalization;
 using System.Text;
+using Autheris.Application.Docs.Services;
 
 /// <summary>
 /// Read-side sanitiser for externally authored catalog text that MCP clients (and the LLMs behind them) consume (
@@ -14,7 +15,7 @@ internal static class McpCatalogText
     internal const int MaxDisplayNameLength = 256;
 
     /// <summary>Longest run of consecutive combining marks kept (limits "zalgo" stacks).</summary>
-    private const int MaxConsecutiveMarks = 4;
+    private const int MaxConsecutiveMarks = UntrustedTextRunes.MaxConsecutiveMarks;
 
     /// <summary>
     /// Returns the display name safe for MCP output: whitespace and control characters become one space (before collapsing, so words never
@@ -128,28 +129,9 @@ internal static class McpCatalogText
         return !previousSpace && hasLetterOrDigit;
     }
 
-    private static bool IsMark(Rune rune) =>
-        Rune.GetUnicodeCategory(rune) is UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark;
+    private static bool IsMark(Rune rune) => UntrustedTextRunes.IsMark(rune);
 
-    private static bool IsWordBreak(Rune rune) =>
-        Rune.IsWhiteSpace(rune) || Rune.GetUnicodeCategory(rune) == UnicodeCategory.Control;
+    private static bool IsWordBreak(Rune rune) => UntrustedTextRunes.IsWordBreak(rune);
 
-    private static bool IsInvisible(Rune rune)
-    {
-        // EnumerateRunes maps invalid UTF-16 (lone surrogates) to U+FFFD; it is dropped like any other non-content.
-        if (rune == Rune.ReplacementChar)
-        {
-            return true;
-        }
-
-        var value = rune.Value;
-        if (value is >= 0xFE00 and <= 0xFE0F or >= 0xE0000 and <= 0xE007F or >= 0x2060 and <= 0x2064
-            or 0x180E or 0x00AD or 0x034F or 0x115F or 0x1160 or 0x17B4 or 0x17B5 or 0x2800 or 0x3164 or 0xFFA0)
-        {
-            return true;
-        }
-
-        return Rune.GetUnicodeCategory(rune) is UnicodeCategory.Format or UnicodeCategory.PrivateUse
-            or UnicodeCategory.OtherNotAssigned or UnicodeCategory.Surrogate;
-    }
+    private static bool IsInvisible(Rune rune) => UntrustedTextRunes.IsInvisible(rune);
 }

@@ -60,6 +60,7 @@ State
 Streaming
 Telemetry
 Tenancy
+Usage
 TestDoubles
 TestSupport
 Transports
