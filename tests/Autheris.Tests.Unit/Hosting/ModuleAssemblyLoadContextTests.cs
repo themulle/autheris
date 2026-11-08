@@ -188,7 +188,8 @@ public sealed class ModuleAssemblyLoadContextTests : IDisposable
         handle.ShouldNotBe(IntPtr.Zero);
         NativeLibrary.Free(handle);
 
-        // Tampering with the native library on disk after startup verification must fail closed
+        // The library is loaded from a private copy of the verified bytes, so later changes to the module folder
+        // do not influence what gets loaded.
         var tamperedBytes = (byte[])nativeBytes.Clone();
         tamperedBytes[^1] ^= 0xFF;
         File.WriteAllBytes(nativeFullPath, tamperedBytes);
@@ -196,10 +197,9 @@ public sealed class ModuleAssemblyLoadContextTests : IDisposable
         var loadUnmanagedMethod = typeof(ModuleAssemblyLoadContext)
             .GetMethod("LoadUnmanagedDll", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-        var ex = Should.Throw<TargetInvocationException>(() =>
-            loadUnmanagedMethod.Invoke(alc, ["autheris_native_stub"]));
-        ex.InnerException.ShouldBeOfType<ModuleLoadException>();
-        ((ModuleLoadException)ex.InnerException!).Reason.ShouldContain("integrity check");
+        var reloaded = (IntPtr)loadUnmanagedMethod.Invoke(alc, ["autheris_native_stub"])!;
+        reloaded.ShouldNotBe(IntPtr.Zero);
+        NativeLibrary.Free(reloaded);
     }
 
     [Fact]
@@ -246,5 +246,119 @@ public sealed class ModuleAssemblyLoadContextTests : IDisposable
             });
         var collidingAlc = new ModuleAssemblyLoadContext(collidingImage);
         Should.Throw<ModuleLoadException>(() => collidingAlc.EnsureNoHostAssemblyCollisions([hostParquetAssembly]));
+    }
+
+    private (ModuleAssemblyLoadContext Alc, string RelPath, byte[] Bytes, string NativeRoot) CreateNativeFixture(string? nativeRootName = "native-root")
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var moduleDir = Path.Combine(_tempRoot, "nativemod");
+        Directory.CreateDirectory(moduleDir);
+        var relPath = $"runtimes/{RuntimeInformation.RuntimeIdentifier}/native/libsample.so";
+        var bytes = RandomNumberGenerator.GetBytes(256);
+        var manifest = ModulePackageBuilder.CreateSignedManifest(key);
+        var image = new VerifiedModuleImage(
+            "sample",
+            moduleDir,
+            manifest,
+            new Dictionary<string, byte[]>(StringComparer.Ordinal) { [relPath] = bytes });
+        var nativeRoot = Path.Combine(_tempRoot, nativeRootName ?? "native-root");
+        return (new ModuleAssemblyLoadContext(image, nativeRoot), relPath, bytes, nativeRoot);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Native_library_is_loaded_from_verified_copy()
+    {
+        var (alc, relPath, bytes, nativeRoot) = CreateNativeFixture();
+
+        var copyPath = alc.MaterializeVerifiedNative(relPath, bytes);
+
+        copyPath.ShouldStartWith(nativeRoot + Path.DirectorySeparatorChar);
+        File.ReadAllBytes(copyPath).ShouldBe(bytes);
+        alc.MaterializeVerifiedNative(relPath, bytes).ShouldBe(copyPath);
+        alc.EnsureNativeCopyIntact(copyPath, relPath, bytes);
+        if (!OperatingSystem.IsWindows())
+        {
+            (File.GetUnixFileMode(copyPath) & (UnixFileMode.UserWrite | UnixFileMode.GroupWrite | UnixFileMode.OtherWrite))
+                .ShouldBe((UnixFileMode)0);
+            File.GetUnixFileMode(nativeRoot).ShouldBe(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Native_root_with_foreign_mode_fails()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var (alc, relPath, bytes, nativeRoot) = CreateNativeFixture("foreign-root");
+        Directory.CreateDirectory(nativeRoot);
+        File.SetUnixFileMode(
+            nativeRoot,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute);
+
+        Should.Throw<ModuleLoadException>(() => alc.MaterializeVerifiedNative(relPath, bytes));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Tampered_native_copy_is_rejected()
+    {
+        var (alc, relPath, bytes, _) = CreateNativeFixture("tamper-root");
+        var copyPath = alc.MaterializeVerifiedNative(relPath, bytes);
+
+        if (OperatingSystem.IsWindows())
+        {
+            File.SetAttributes(copyPath, FileAttributes.Normal);
+        }
+        else
+        {
+            File.SetUnixFileMode(copyPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        File.WriteAllBytes(copyPath, RandomNumberGenerator.GetBytes(256));
+
+        Should.Throw<ModuleLoadException>(() => alc.EnsureNativeCopyIntact(copyPath, relPath, bytes));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Similar_prefix_assembly_is_not_delegated()
+    {
+        var (alc, _, _, _) = CreateNativeFixture("prefix-root");
+
+        alc.IsDelegatedToHost("Autheris.ApiX").ShouldBeFalse();
+        alc.IsDelegatedToHost("Autheris.DomainX").ShouldBeFalse();
+        alc.IsDelegatedToHost("Autheris.Application.Extra").ShouldBeFalse();
+        alc.IsDelegatedToHost("Autheris.Domain").ShouldBeTrue();
+        alc.IsDelegatedToHost("Autheris.Modules.Abstractions").ShouldBeTrue();
+        alc.IsDelegatedToHost("System.Runtime").ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Duplicate_simple_name_in_image_is_rejected()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var bytes = ModulePackageBuilder.GetValidModuleDllBytes();
+        var image = new VerifiedModuleImage(
+            "sample",
+            Path.Combine(_tempRoot, "dupmod"),
+            ModulePackageBuilder.CreateSignedManifest(key),
+            new Dictionary<string, byte[]>(StringComparer.Ordinal)
+            {
+                ["Sample.TestModule01.dll"] = bytes,
+                ["lib/Sample.TestModule01.dll"] = bytes,
+            });
+
+        var alc = new ModuleAssemblyLoadContext(image);
+
+        var ex = Should.Throw<ModuleLoadException>(() => alc.EnsureNoHostAssemblyCollisions());
+        ex.Reason.ShouldContain("duplicate", Case.Insensitive);
     }
 }

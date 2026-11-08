@@ -346,7 +346,7 @@ public sealed class ModuleLoaderTests : IDisposable
     private string CreateSignedSampleModuleDirectory(
         ECDsa signingKey,
         string moduleId = "sample",
-        string hostVersion = "1.2.0",
+        string? hostVersion = null,
         string abstractionsVersion = "1.0.0",
         string? keyIdOverride = null,
         string? signatureOverride = null)
