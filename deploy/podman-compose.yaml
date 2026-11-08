@@ -205,8 +205,9 @@ services:
     networks:
       - gateway-bench-net
     environment:
-      # The compose postgres has no TLS. Outside Development the governance connection must use 'SSL Mode=VerifyFull|VerifyCA'
-      # (ConnectionTlsPolicy), so this benchmark-only stack runs in Development. Do not copy this to a shared host.
+      # The compose postgres has no TLS, so this benchmark-only stack runs in Development.
+      # ASPNETCORE_ENVIRONMENT=Development disables production TLS, auth and secret enforcement (ConnectionTlsPolicy, SR-L-02).
+      # Never copy this block into a shared, staging or production deployment; use PostgreSQL with SSL Mode=VerifyFull instead.
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:5050
       # MISC-05: this service has no memory limit, so the OLAP memory budget is set explicitly (fail-closed validator).

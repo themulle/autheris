@@ -7,9 +7,16 @@ namespace Autheris.Tests.Architecture;
 public sealed partial class DeployHygieneTests
 {
     private static readonly string[] Extensions = [".yaml", ".yml", ".json", ".sh", ".ps1", ".py", ".tpl", ".env", ".example"];
+    private static readonly string[] ExtensionlessNames = ["Makefile", "Dockerfile"];
 
-    [GeneratedRegex(@"(?:Password|Pwd)\s*=\s*(?<v>[^;""'\s]+)|POSTGRES_PASSWORD\s*[:=]\s*(?<v>[^\s#]+)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<![\w{])[""']?(?<k>\w*password|pwd)[""']?\s*[:=]\s*[""']?(?<v>[^""'\s;]+)", RegexOptions.IgnoreCase)]
     private static partial Regex PasswordAssignment();
+
+    [GeneratedRegex(@"^[a-z_][a-z0-9_]*$")]
+    private static partial Regex BareIdentifier();
+
+    [GeneratedRegex(@"^CHANGE_ME[A-Za-z0-9_!]*$")]
+    private static partial Regex PlaceholderToken();
 
     [Fact]
     [Trait("Category", "Security")]
@@ -22,7 +29,9 @@ public sealed partial class DeployHygieneTests
         {
             var relative = Path.GetRelativePath(RepositoryScan.RepoRoot, file).Replace('\\', '/');
             if (relative.StartsWith("deploy/results/", StringComparison.Ordinal)
-                || !Extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                || !(Extensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase)
+                     || ExtensionlessNames.Contains(Path.GetFileName(file), StringComparer.OrdinalIgnoreCase)
+                     || Path.GetFileName(file).StartsWith("Containerfile", StringComparison.Ordinal)))
             {
                 continue;
             }
@@ -31,7 +40,7 @@ public sealed partial class DeployHygieneTests
             {
                 foreach (Match match in PasswordAssignment().Matches(line))
                 {
-                    if (!IsReferenceOrPlaceholder(match.Groups["v"].Value))
+                    if (!IsReferenceOrPlaceholder(match.Groups["v"].Value, file))
                     {
                         violations.Add($"{relative}:{number}");
                     }
@@ -42,15 +51,13 @@ public sealed partial class DeployHygieneTests
         violations.ShouldBeEmpty("deploy files must reference secrets via environment/secret references, never literals");
     }
 
-    private static bool IsReferenceOrPlaceholder(string value) =>
-        value.Length == 0
+    private static bool IsReferenceOrPlaceholder(string value, string file) =>
+        (file.EndsWith(".py", StringComparison.OrdinalIgnoreCase) && BareIdentifier().IsMatch(value))
         || value.StartsWith("${", StringComparison.Ordinal)
-        || value.StartsWith("$", StringComparison.Ordinal)
-        || value.StartsWith("{{", StringComparison.Ordinal)
-        || value.StartsWith("<", StringComparison.Ordinal)
+        || (value.StartsWith("{{", StringComparison.Ordinal) && value.EndsWith("}}", StringComparison.Ordinal))
         || value.Contains("$(", StringComparison.Ordinal)
         || value.StartsWith("os.environ", StringComparison.Ordinal)
-        || value.StartsWith("\"${", StringComparison.Ordinal)
-        || value.Contains("OVERRIDDEN_VIA_ENV", StringComparison.Ordinal)
-        || value.StartsWith("CHANGE_ME", StringComparison.Ordinal);
+        || value.StartsWith('$')
+        || PlaceholderToken().IsMatch(value)
+        || value.StartsWith("OVERRIDDEN_VIA_ENV", StringComparison.Ordinal);
 }
