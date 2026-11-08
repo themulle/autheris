@@ -38,6 +38,12 @@
           "System.Threading.RateLimiting": "9.0.18"
         }
       },
+      "Microsoft.Extensions.TimeProvider.Testing": {
+        "type": "Direct",
+        "requested": "[10.11.0, )",
+        "resolved": "10.11.0",
+        "contentHash": "DTivKZ2Du0dJideTTa6vPj/eXKNRu+RxtjBX7NOOUXHBtHx1ehbE+lM+j3/5M3wU6BqzcZqEEyR4+FnPKs2rTA=="
+      },
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
         "requested": "[18.11.0, )",
@@ -1709,8 +1715,7 @@
         "dependencies": {
           "Autheris.Application": "[0.0.0-dev, )",
           "Autheris.Domain": "[0.0.0-dev, )",
-          "Autheris.Modules.Abstractions": "[0.0.0-dev, )",
-          "FastSqlEngine": "[0.0.0-dev, )"
+          "Autheris.Modules.Abstractions": "[0.0.0-dev, )"
         }
       },
       "autheris.tests.common": {

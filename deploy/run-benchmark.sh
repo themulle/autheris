@@ -28,7 +28,7 @@ print_help() {
     echo "  --help                 Show this help message"
     echo ""
     echo "Memory Profiles by Scenario:"
-    echo "  minimal                ~1.5 GB RAM (PostgreSQL + SQLite + Redis + Gateway)"
+    echo "  minimal                ~1.5 GB RAM (PostgreSQL + Redis + Gateway)"
     echo "  lakehouse              ~1.8 GB RAM (Minimal + MinIO Iceberg S3 Storage)"
     echo "  enterprise             ~1.8 GB RAM (Minimal + OpenMetadata / ITSM / dbt Mock)"
     echo "  relational             ~2.0 GB RAM (Minimal + Azure SQL Edge CRM Engine)"
@@ -55,7 +55,7 @@ if [[ "${SCENARIO}" == "core" ]]; then SCENARIO="minimal"; fi
 case "${SCENARIO}" in
     minimal)
         RAM_EST="~1.5 GB"
-        SERVICES="postgres redis governance-seed gqlgateway-api reverse-proxy"
+        SERVICES="postgres redis gqlgateway-api reverse-proxy"
         ENABLE_LAKEHOUSE="false"
         ENABLE_ENTERPRISE="false"
         ENABLE_SQLSERVER="false"
@@ -63,7 +63,7 @@ case "${SCENARIO}" in
         ;;
     lakehouse)
         RAM_EST="~1.8 GB"
-        SERVICES="postgres redis governance-seed minio lakehouse-seed gqlgateway-api reverse-proxy"
+        SERVICES="postgres redis minio lakehouse-seed gqlgateway-api reverse-proxy"
         ENABLE_LAKEHOUSE="true"
         ENABLE_ENTERPRISE="false"
         ENABLE_SQLSERVER="false"
@@ -71,7 +71,7 @@ case "${SCENARIO}" in
         ;;
     enterprise)
         RAM_EST="~1.8 GB"
-        SERVICES="postgres redis governance-seed mock-extensions gqlgateway-api reverse-proxy"
+        SERVICES="postgres redis mock-extensions gqlgateway-api reverse-proxy"
         ENABLE_LAKEHOUSE="false"
         ENABLE_ENTERPRISE="true"
         ENABLE_SQLSERVER="false"
@@ -79,7 +79,7 @@ case "${SCENARIO}" in
         ;;
     azure)
         RAM_EST="~1.7 GB"
-        SERVICES="postgres redis governance-seed azurite mock-extensions gqlgateway-api reverse-proxy"
+        SERVICES="postgres redis azurite mock-extensions gqlgateway-api reverse-proxy"
         ENABLE_LAKEHOUSE="true"
         ENABLE_ENTERPRISE="false"
         ENABLE_SQLSERVER="false"
@@ -87,7 +87,7 @@ case "${SCENARIO}" in
         ;;
     relational)
         RAM_EST="~2.0 GB"
-        SERVICES="postgres redis governance-seed sqlserver gqlgateway-api reverse-proxy"
+        SERVICES="postgres redis sqlserver gqlgateway-api reverse-proxy"
         ENABLE_LAKEHOUSE="false"
         ENABLE_ENTERPRISE="false"
         ENABLE_SQLSERVER="true"
@@ -95,7 +95,7 @@ case "${SCENARIO}" in
         ;;
     openmetadata-real)
         RAM_EST="~4.5 GB"
-        SERVICES="postgres redis governance-seed opensearch openmetadata-server gqlgateway-api reverse-proxy"
+        SERVICES="postgres redis opensearch openmetadata-server gqlgateway-api reverse-proxy"
         ENABLE_LAKEHOUSE="false"
         ENABLE_ENTERPRISE="true"
         ENABLE_SQLSERVER="false"
@@ -105,7 +105,7 @@ case "${SCENARIO}" in
     full|*)
         SCENARIO="full"
         RAM_EST="~3.5 GB"
-        SERVICES="postgres redis governance-seed sqlserver minio lakehouse-seed mock-extensions gqlgateway-api reverse-proxy prometheus grafana"
+        SERVICES="postgres redis sqlserver minio lakehouse-seed mock-extensions gqlgateway-api reverse-proxy prometheus grafana"
         ENABLE_LAKEHOUSE="true"
         ENABLE_ENTERPRISE="true"
         ENABLE_SQLSERVER="true"

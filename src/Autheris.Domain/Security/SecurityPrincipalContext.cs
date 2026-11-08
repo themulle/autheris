@@ -60,7 +60,6 @@ public sealed record SecurityPrincipalContext
     /// looked up in the tenant registry: a header can never register a tenant or mark a collision.
     /// </summary>
     public bool TenantSelectedByHeader { get; init; }
-    public string? BreakGlassJustification { get; init; }
     public System.Net.IPAddress? ClientIp { get; init; }
     public CallerContext? Caller { get; init; }
     public IEnumerable<System.Security.Claims.Claim>? Claims { get; init; }
@@ -167,7 +166,6 @@ public sealed record SecurityPrincipalContext
         System.Security.Claims.ClaimsPrincipal principal,
         TenantId? overrideTenant = null,
         string? authenticationScheme = null,
-        string? breakGlassJustification = null,
         System.Net.IPAddress? clientIp = null,
         CallerContext? caller = null)
     {
@@ -210,7 +208,6 @@ public sealed record SecurityPrincipalContext
             ClusterRoles = clusterRoles,
             AuthenticationScheme = authenticationScheme ?? principal.Identity?.AuthenticationType ?? "Token",
             IsAuthenticated = principal.Identity?.IsAuthenticated ?? true,
-            BreakGlassJustification = breakGlassJustification,
             ClientIp = clientIp,
             Caller = caller,
             Claims = principal.Claims

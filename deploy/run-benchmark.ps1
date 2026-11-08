@@ -157,18 +157,18 @@ $scenarioInfo = switch ($Scenario) {
     "minimal" {
         @{
             RamEstimate = "~1.5 GB"
-            Services = "postgres redis governance-seed gqlgateway-api reverse-proxy"
+            Services = "postgres redis gqlgateway-api reverse-proxy"
             EnableLakehouse = "false"
             EnableEnterprise = "false"
             EnableSqlServer = "false"
             Profiles = ""
-            Description = "Minimal Core (PostgreSQL + SQLite + Redis)"
+            Description = "Minimal Core (PostgreSQL + Redis)"
         }
     }
     "lakehouse" {
         @{
             RamEstimate = "~1.8 GB"
-            Services = "postgres redis governance-seed minio lakehouse-seed gqlgateway-api reverse-proxy"
+            Services = "postgres redis minio lakehouse-seed gqlgateway-api reverse-proxy"
             EnableLakehouse = "true"
             EnableEnterprise = "false"
             EnableSqlServer = "false"
@@ -179,7 +179,7 @@ $scenarioInfo = switch ($Scenario) {
     "enterprise" {
         @{
             RamEstimate = "~1.8 GB"
-            Services = "postgres redis governance-seed mock-extensions gqlgateway-api reverse-proxy"
+            Services = "postgres redis mock-extensions gqlgateway-api reverse-proxy"
             EnableLakehouse = "false"
             EnableEnterprise = "true"
             EnableSqlServer = "false"
@@ -190,7 +190,7 @@ $scenarioInfo = switch ($Scenario) {
     "azure" {
         @{
             RamEstimate = "~1.7 GB"
-            Services = "postgres redis governance-seed azurite mock-extensions gqlgateway-api reverse-proxy"
+            Services = "postgres redis azurite mock-extensions gqlgateway-api reverse-proxy"
             EnableLakehouse = "true"
             EnableEnterprise = "false"
             EnableSqlServer = "false"
@@ -201,18 +201,18 @@ $scenarioInfo = switch ($Scenario) {
     "relational" {
         @{
             RamEstimate = "~2.0 GB"
-            Services = "postgres redis governance-seed sqlserver gqlgateway-api reverse-proxy"
+            Services = "postgres redis sqlserver gqlgateway-api reverse-proxy"
             EnableLakehouse = "false"
             EnableEnterprise = "false"
             EnableSqlServer = "true"
             Profiles = "relational"
-            Description = "Multi-Engine Relational (Postgres + SQLite + Azure SQL Edge)"
+            Description = "Multi-Engine Relational (Postgres + Azure SQL Edge)"
         }
     }
     "openmetadata-real" {
         @{
             RamEstimate = "~4.5 GB"
-            Services = "postgres redis governance-seed opensearch openmetadata-server gqlgateway-api reverse-proxy"
+            Services = "postgres redis opensearch openmetadata-server gqlgateway-api reverse-proxy"
             EnableLakehouse = "false"
             EnableEnterprise = "true"
             EnableSqlServer = "false"
@@ -224,7 +224,7 @@ $scenarioInfo = switch ($Scenario) {
     default { # "full"
         @{
             RamEstimate = "~3.5 GB"
-            Services = "postgres redis governance-seed sqlserver minio lakehouse-seed mock-extensions gqlgateway-api reverse-proxy prometheus grafana"
+            Services = "postgres redis sqlserver minio lakehouse-seed mock-extensions gqlgateway-api reverse-proxy prometheus grafana"
             EnableLakehouse = "true"
             EnableEnterprise = "true"
             EnableSqlServer = "true"

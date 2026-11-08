@@ -21,6 +21,9 @@ namespace Autheris.Sim.ApiHost;
 /// </summary>
 public static class SimApiHostMain
 {
+    /// <summary>Environment variable that carries the connection string of the empty PostgreSQL governance database.</summary>
+    public const string GovernanceConnectionEnvVar = "AUTHERIS_SIM_GOVERNANCE_DB";
+
     public static async Task<int> Main(string[] args)
     {
         // REQ-LB-04: diagnostics go to stderr only (the script prints the host log through its canary scrub, SEC-LB-03).
@@ -75,7 +78,14 @@ public static class SimApiHostMain
 
         Directory.CreateDirectory(dataDir);
         var dataPath = Path.Combine(dataDir, "data.db");
-        var govPath = Path.Combine(dataDir, "gov.db");
+        // The governance store is PostgreSQL only (WP-SIMPL-11): the caller supplies an empty database that the host migrates at startup.
+        var govConnectionString = Environment.GetEnvironmentVariable(GovernanceConnectionEnvVar);
+        if (string.IsNullOrWhiteSpace(govConnectionString))
+        {
+            Console.Error.WriteLine($"sim-api-host: set {GovernanceConnectionEnvVar} to the connection string of an empty PostgreSQL database.");
+            return 2;
+        }
+
         var shutdown = new SimHostShutdown();
         using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; shutdown.Request(); });
         using var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, ctx => { ctx.Cancel = true; shutdown.Request(); });
@@ -103,12 +113,12 @@ public static class SimApiHostMain
             {
                 SimApiSeed.Create(dataPath);
 
-                using (var seeding = NewHost(options, dataPath, govPath))
+                using (var seeding = NewHost(options, dataPath, govConnectionString))
                 {
                     await RegisterCatalogAsync(seeding).ConfigureAwait(false);
                 }
 
-                factory = NewHost(options, dataPath, govPath);
+                factory = NewHost(options, dataPath, govConnectionString);
                 var port = options.Port;
                 factory.UseKestrel(k => k.Listen(IPAddress.Loopback, port));
                 factory.StartServer();
@@ -247,7 +257,7 @@ public static class SimApiHostMain
         }
     }
 
-    private static WebApplicationFactory<Program> NewHost(SimApiHostOptions options, string dataPath, string govPath) =>
+    private static WebApplicationFactory<Program> NewHost(SimApiHostOptions options, string dataPath, string govConnectionString) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             // The solution-relative content root discovery of WebApplicationFactory finds no solution (this project is in none, SEC-SIM-21).
@@ -255,7 +265,7 @@ public static class SimApiHostMain
             // REQ-LB-01/02: no ConsoleLifetime (SimApiHostMain owns the signals) and a bounded host stop. WithWebHostBuilder services win over Program's.
             b.ConfigureServices(s => s.AddSingleton<IHostLifetime, SimHostLifetime>());
             b.UseShutdownTimeout(TimeSpan.FromSeconds(10));
-            ApplySettings(b, govPath);
+            ApplySettings(b, govConnectionString);
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dataPath}");
             b.UseSetting("Gateway:WebSql:Enabled", "true");
@@ -270,7 +280,7 @@ public static class SimApiHostMain
             b.UseSetting("Gateway:WebSql:AllowedDataSources:0", "default");
         });
 
-    private static void ApplySettings(IWebHostBuilder b, string governancePath)
+    private static void ApplySettings(IWebHostBuilder b, string governanceConnectionString)
     {
         b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
         b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
@@ -280,8 +290,8 @@ public static class SimApiHostMain
         b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "5000");
         b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "100000000");
         b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:TokenRefillRatePerSecond", "1000000");
-        b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-        b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={governancePath}");
+        b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+        b.UseSetting("Gateway:GovernanceDb:ConnectionString", governanceConnectionString);
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
         b.UseSetting("Gateway:Rebac:Enabled", "false");
         b.UseSetting("Gateway:OpenSchema", "true");

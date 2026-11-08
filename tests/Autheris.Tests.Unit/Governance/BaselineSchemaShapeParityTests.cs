@@ -4,7 +4,6 @@ using System;
 using System.Linq;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using Xunit;
 
@@ -24,54 +23,8 @@ public sealed class BaselineSchemaShapeParityTests
         "RECERT_ITEMS"
     ];
 
-    [Fact]
-    public void BaselineSchema_Sqlite_ContainsAll10Wave2Tables()
-    {
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-
-        new SqliteBaselineSchema(connection, null).Apply();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table'";
-        using var reader = cmd.ExecuteReader();
-        var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        while (reader.Read())
-        {
-            tables.Add(reader.GetString(0));
-        }
-
-        foreach (var requiredTable in RequiredWave2Tables)
-        {
-            tables.ShouldContain(requiredTable, $"SQLite baseline schema must contain {requiredTable}");
-        }
-    }
-
     private static readonly string[] ConsumerAppTables =
         ["CONSUMER_APP_DAILY", "CONSUMER_APP_ACTOR_DAILY", "CONSUMER_APP_QUERYNAME_DAILY"];
-
-    [Fact]
-    public void BaselineSchema_Sqlite_ContainsConsumerAppTables()
-    {
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-
-        new SqliteBaselineSchema(connection, null).Apply();
-
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table'";
-        using var reader = cmd.ExecuteReader();
-        var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        while (reader.Read())
-        {
-            tables.Add(reader.GetString(0));
-        }
-
-        foreach (var table in ConsumerAppTables)
-        {
-            tables.ShouldContain(table);
-        }
-    }
 
     [Theory]
     [InlineData("postgresql")]

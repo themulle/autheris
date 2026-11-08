@@ -11,7 +11,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -22,37 +21,8 @@ namespace Autheris.Tests.Unit.Audit;
 
 /// <summary>DT-A-9 / DT-SC-04 / DT-SC-16 (WP-DT-2a): no tenant fallback in stored values, writers or audit hashing.</summary>
 [Trait("Category", "Security")]
-public sealed class StoredTenantIntegrityTests : IDisposable
+public sealed class StoredTenantIntegrityTests
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), "autheris-stored-tenant-" + Guid.NewGuid().ToString("N"));
-
-    public StoredTenantIntegrityTests() => Directory.CreateDirectory(_dir);
-
-    public void Dispose()
-    {
-        try
-        {
-            Directory.Delete(_dir, true);
-        }
-        catch (IOException)
-        {
-        }
-    }
-
-    private string Db => Path.Combine(_dir, "gov.db");
-
-    private SqliteGovernanceRepository CreateRepository()
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source={Db}", SeedDemoData = false },
-            Audit = new AuditOptions { ChainAnchorPath = Path.Combine(_dir, "anchor.json") }
-        });
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Test");
-        return GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options, env, auditAnchorStore: new FileAuditChainAnchorStore(Path.Combine(_dir, "anchor.json")));
-    }
-
     private static AuditLogEntry Entry(TenantId tenant) => new()
     {
         Id = Guid.NewGuid(),
@@ -65,15 +35,6 @@ public sealed class StoredTenantIntegrityTests : IDisposable
         DetailsJson = "{}",
         OccurredAt = DateTimeOffset.UtcNow
     };
-
-    private void Exec(string sql)
-    {
-        using var conn = new SqliteConnection($"Data Source={Db}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
-    }
 
     [Theory]
     [InlineData(null)]
@@ -134,43 +95,6 @@ public sealed class StoredTenantIntegrityTests : IDisposable
             new byte[32], 1, "00000000-0000-0000-0000-000000000001", AuditChainEngine.AuditGenesisHash,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), "auth.succeeded", "S-1-5-21-1", "dbo.Users", null, "ALLOW", "trace-1", "{}", "tenant-a");
         hash.ShouldBe("607FFE72122C4B28E1A646F736DAA35F8224A7B2C5C985791182D55D00A16482");
-    }
-
-    [Fact]
-    public async Task DT_SC_04_Sqlite_Audit_Write_Without_Tenant_Throws()
-    {
-        using var repo = CreateRepository();
-        await Should.ThrowAsync<ArgumentException>(() => repo.RecordAuditEventAsync(Entry(default)));
-    }
-
-    [Fact]
-    public async Task DT_SC_04_Sqlite_Consent_Write_Without_Tenant_Throws()
-    {
-        using var repo = CreateRepository();
-        var consent = new Consent { TableId = Guid.NewGuid(), GranteeSid = new Sid("S-1-5-21-1"), TenantId = default };
-        await Should.ThrowAsync<ArgumentException>(() => repo.CreateConsentAsync(consent));
-    }
-
-    [Fact]
-    public async Task DT_SC_16_Sqlite_Audit_Reader_Invalid_Stored_Tenant_Fails_Closed()
-    {
-        using var repo = CreateRepository();
-        await repo.RecordAuditEventAsync(Entry(new TenantId("tenant-a")));
-        await repo.FlushAuditChannelAsync();
-        Exec("UPDATE AUDIT_LOG_ENTRIES SET tenant_id = 'bad value'");
-        var ex = await Should.ThrowAsync<StoredTenantIntegrityException>(() => repo.GetAuditLogEntriesAsync(10));
-        ex.ToString().ShouldNotContain("bad value");
-    }
-
-    [Fact]
-    public async Task DT_SC_16_Sqlite_Chain_Verification_Fails_For_Unparsable_Stored_Tenant()
-    {
-        using var repo = CreateRepository();
-        await repo.RecordAuditEventAsync(Entry(new TenantId("tenant-a")));
-        await repo.FlushAuditChannelAsync();
-        (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
-        Exec("UPDATE AUDIT_LOG_ENTRIES SET tenant_id = 'bad value'");
-        (await repo.VerifyAuditHashChainAsync()).ShouldBeFalse();
     }
 
     [Fact]

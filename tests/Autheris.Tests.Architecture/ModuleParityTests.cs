@@ -24,7 +24,7 @@ public sealed class ModuleParityTests
 
         // WP-SIMPL-27 module contract, governance, and ALC security tests
         "Autheris.Modules.Lakehouse.Tests.LakehouseModuleContractTests.Iceberg_routes_require_authorization",
-        "Autheris.Modules.Lakehouse.Tests.LakehouseModuleContractTests.Iceberg_routes_404_when_absent",
+        "Autheris.Tests.Integration.LakehouseModuleAbsentSecurityTests.Iceberg_routes_404_when_absent",
         "Autheris.Modules.Lakehouse.Tests.LakehouseModuleContractTests.Lakehouse_config_without_module_fails_fast",
         "Autheris.Modules.Lakehouse.Tests.LakehouseModuleContractTests.Delta_executor_enforces_query_gate",
         "Autheris.Modules.Lakehouse.Tests.LakehouseGovernanceTests.Delta_query_applies_row_filter_and_masking",

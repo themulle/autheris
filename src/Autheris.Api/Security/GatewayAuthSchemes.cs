@@ -16,8 +16,6 @@ public static class GatewayAuthSchemes
     /// <summary>separate scheme for AD FS when Entra ID is enabled as well.</summary>
     public const string JwtBearerAdfs = "BearerAdfs";
 
-    public static string RealmJwt(string realmId) => $"BearerRealm_{realmId}";
-
     /// <summary>
     /// chooses the JWT scheme for a bearer token. Only routing: the issuer is read without validation, the selected
     /// scheme validates issuer, audience and signature. Without both IdPs enabled there is a single scheme.

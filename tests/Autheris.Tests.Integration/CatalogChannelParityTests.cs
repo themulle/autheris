@@ -18,6 +18,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// WP-0 (PLAN-GOV-111 M-12, T-W0-5, T-W0-6): the REST catalog and the MCP tools show a consent-less caller nothing, a consented caller only the
@@ -25,19 +26,42 @@ using Xunit;
 /// The test authentication handler issues a tenant claim for every request (the legacy single tenant when no tenant header is sent), so
 /// a request without <c>X-Test-Tenant</c> is a principal without a real tenant claim.
 /// </summary>
-public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelParityTests.HostFixture>
 {
     private const string TenantA = "tenant-a";
     private const string TenantB = "tenant-b";
     private static readonly TableIdentifier OrdersA = new("dom_a", "main", "orders_a");
     private static readonly TableIdentifier InvoicesB = new("dom_b", "main", "invoices_b");
 
-    private readonly WebApplicationFactory<Program> _factory;
-    private bool _seeded;
-
-    public CatalogChannelParityTests(WebApplicationFactory<Program> factory)
+    public sealed class HostFixture : IDisposable
     {
-        _factory = Configure(factory, "Multi");
+        public WebApplicationFactory<Program> Root { get; } = new();
+        public WebApplicationFactory<Program> MultiFactory { get; }
+        public WebApplicationFactory<Program> TierFactory { get; }
+        public bool MultiSeeded { get; set; }
+        public bool TierSeeded { get; set; }
+
+        public HostFixture()
+        {
+            MultiFactory = Configure(Root, "Multi");
+            TierFactory = Configure(Root, "Multi", rebac: false, SummaryT.ToString().ToLowerInvariant(), FullT.ToString().ToLowerInvariant(), HiddenT.ToString().ToLowerInvariant());
+        }
+
+        public void Dispose()
+        {
+            TierFactory.Dispose();
+            MultiFactory.Dispose();
+            Root.Dispose();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        }
+    }
+
+    private readonly HostFixture _fixture;
+    private WebApplicationFactory<Program> _factory => _fixture.MultiFactory;
+
+    public CatalogChannelParityTests(HostFixture fixture)
+    {
+        _fixture = fixture;
     }
 
     private static WebApplicationFactory<Program> Configure(
@@ -51,8 +75,8 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
 
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-CatalogParity-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("HostFixture"));
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
             if (tenancyMode == "Single")
@@ -110,10 +134,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
 
     private async Task<HttpClient> ClientAsync(string sid, string? tenant, string roles, WebApplicationFactory<Program>? factory = null)
     {
-        if (!_seeded && factory == null)
+        if (!_fixture.MultiSeeded && factory == null)
         {
             await SeedAsync(_factory);
-            _seeded = true;
+            _fixture.MultiSeeded = true;
         }
 
         var client = (factory ?? _factory).CreateClient();
@@ -222,7 +246,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
     [Fact]
     public async Task ReBacEnabledWithoutTuples_ConsentedCallerSeesNothing()
     {
-        var rebac = Configure(new WebApplicationFactory<Program>(), "Multi", rebac: true);
+        using var rebac = Configure(_fixture.Root, "Multi", rebac: true);
         await SeedAsync(rebac);
         var client = await ClientAsync("S-A-USER", TenantA, "Reader", rebac);
 
@@ -232,7 +256,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
     [Fact]
     public async Task DefaultTenant_GovernanceAdminWithoutTenantClaim_SeesTheWholeCatalog()
     {
-        var single = Configure(new WebApplicationFactory<Program>(), "Single");
+        using var single = Configure(_fixture.Root, "Single");
         await SeedAsync(single);
         var client = await ClientAsync("S-ADM", null, "GovernanceAdmin", single);
         var list = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets"));
@@ -273,7 +297,18 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
 
     private async Task<(WebApplicationFactory<Program> Factory, HttpClient User)> TierFactoryAsync(string mode = "Multi", string sid = "S-T-USER", string? tenant = TenantB, string roles = "Reader")
     {
-        var factory = Configure(new WebApplicationFactory<Program>(), mode, rebac: false, SummaryT.ToString().ToLowerInvariant(), FullT.ToString().ToLowerInvariant(), HiddenT.ToString().ToLowerInvariant());
+        if (mode == "Multi")
+        {
+            if (!_fixture.TierSeeded)
+            {
+                await SeedTiersAsync(_fixture.TierFactory);
+                _fixture.TierSeeded = true;
+            }
+
+            return (_fixture.TierFactory, await ClientAsync(sid, tenant, roles, _fixture.TierFactory));
+        }
+
+        var factory = Configure(_fixture.Root, mode, rebac: false, SummaryT.ToString().ToLowerInvariant(), FullT.ToString().ToLowerInvariant(), HiddenT.ToString().ToLowerInvariant());
         await SeedTiersAsync(factory);
         return (factory, await ClientAsync(sid, tenant, roles, factory));
     }
@@ -373,10 +408,10 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
     [Fact]
     public async Task ConsentedNonAdmin_OnAHiddenTier_GetsTheGrantedView_OnTheDiscoverySurface()
     {
-        var (factory, client) = await TierFactoryAsync();
+        var (factory, client) = await TierFactoryAsync(sid: "S-T-CONSENTED");
         using (var scope = factory.Services.CreateScope())
         {
-            await ConsentAsync(scope.ServiceProvider.GetRequiredService<IGovernanceRepository>(), HiddenT, "S-T-USER", TenantB, "id");
+            await ConsentAsync(scope.ServiceProvider.GetRequiredService<IGovernanceRepository>(), HiddenT, "S-T-CONSENTED", TenantB, "id");
         }
 
         // Granted view: the consented column only, never the whole table, and never for an unconsented caller.
@@ -417,7 +452,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<WebApplicationFact
     [Fact]
     public async Task DefaultTenant_EveryTableIsTierEligible_ClaimlessUserSeesSummaryAndFull()
     {
-        var single = Configure(new WebApplicationFactory<Program>(), "Single");
+        using var single = Configure(_fixture.Root, "Single");
         await SeedTiersAsync(single);
         var client = await ClientAsync("S-T-USER", null, "Reader", single);
 

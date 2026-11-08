@@ -7559,6 +7559,21 @@
           "Value": "x"
         }
       ]
+    },
+    {
+      "Id": "ast-016",
+      "Group": "ast",
+      "Sql": "@page-offset",
+      "Outcome": "ok",
+      "Expected": "SELECT \"a\" AS \"r\" FROM \"s\".\"t\" OFFSET :p1 ROWS FETCH NEXT 10 ROWS ONLY",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int64",
+          "Origin": "PageOffset",
+          "ValueType": "null"
+        }
+      ]
     }
   ]
 }

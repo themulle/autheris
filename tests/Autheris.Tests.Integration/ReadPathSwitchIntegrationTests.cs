@@ -27,6 +27,7 @@ using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>Shared host set-up of the PLAN-SEC-115 integration tests (SQLite governance store, test auth, MCP on).</summary>
 internal static class ReadPathHost
@@ -36,8 +37,8 @@ internal static class ReadPathHost
         {
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-rps-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("ReadPathHost"));
             b.UseSetting("Gateway:Mcp:Enabled", "true");
             b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
             foreach (var (key, value) in settings) b.UseSetting(key, value);
@@ -418,6 +419,7 @@ public sealed class ReadPathAsyncJobWebSqlOffIntegrationTests : IClassFixture<We
 
     public void Dispose()
     {
+        _factory.Dispose();
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
     }

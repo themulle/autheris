@@ -500,13 +500,13 @@ UPDATE AUDIT_LOG_ENTRIES SET actor_sid = 'S-1-5-21-IMPERSONATED' WHERE id = @id
 -- @id f90fd69de5d6 class=update expected=accept source=tests/Autheris.Tests.Unit/ComprehensiveSecurityAttackVectorTests.cs
 UPDATE AUDIT_LOG_ENTRIES SET decision = 'ALLOW' WHERE id = @id
 
--- @id 7fbf24a35ba1 class=delete expected=accept source=tests/Autheris.Tests.Unit/ConcurrencyAndAuditReplicationTests.cs
+-- @id 7fbf24a35ba1 class=delete expected=accept source=tests/Autheris.Tests.Integration/Governance/ConcurrencyAndAuditReplicationTests.cs
 DELETE FROM AUDIT_LOG_ENTRIES WHERE id = @id
 
--- @id c619c80ca35d class=update expected=accept source=tests/Autheris.Tests.Unit/ConcurrencyAndAuditReplicationTests.cs
+-- @id c619c80ca35d class=update expected=accept source=tests/Autheris.Tests.Integration/Governance/ConcurrencyAndAuditReplicationTests.cs
 UPDATE AUDIT_LOG_ENTRIES SET details_json = '{"tampered": true}' WHERE id = @id
 
--- @id f2fffbc34ebe class=update expected=accept source=tests/Autheris.Tests.Unit/ConcurrencyAndAuditReplicationTests.cs
+-- @id f2fffbc34ebe class=update expected=accept source=tests/Autheris.Tests.Integration/Governance/ConcurrencyAndAuditReplicationTests.cs
 UPDATE DATA_OWNERS
                                 SET display_name = 'Anonymized User', email = 'anonymized@corp.local'
                                 WHERE ad_sid = @sid
@@ -514,11 +514,11 @@ UPDATE DATA_OWNERS
 -- @id 49a2e935f0b5 class=insert expected=accept source=tests/Autheris.Tests.Unit/ConnectorSpiTests.cs
 INSERT INTO orders VALUES ($id, 'tenant-1');
 
--- @id a3c06ef3e81b class=insert expected=accept source=tests/Autheris.Tests.Unit/DelegationAndFourEyesStressTests.cs
+-- @id a3c06ef3e81b class=insert expected=accept source=tests/Autheris.Tests.Integration/Governance/DelegationAndFourEyesStressTests.cs
 INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
                                 VALUES (@id, @tid, @oid, 'DELEGATE');
 
--- @id f6c22eb5309e class=insert expected=accept source=tests/Autheris.Tests.Unit/DelegationAndFourEyesStressTests.cs
+-- @id f6c22eb5309e class=insert expected=accept source=tests/Autheris.Tests.Integration/Governance/DelegationAndFourEyesStressTests.cs
 INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
                                 VALUES (@id, 'S-1-5-21-INACTIVE-OWNER', 'CORP\\inactive', 'Inactive Owner', 'inactive@corp.local', 0);
 
@@ -540,7 +540,7 @@ DELETE FROM logs WHERE created_at < NOW()
 -- @id f9b97fce1bba class=update expected=accept source=tests/Autheris.Tests.Unit/Diagnostics/TrafficShadowingGuardTests.cs
 UPDATE accounts SET balance = balance + 100 WHERE id = 42
 
--- @id ab77efdff603 class=update expected=accept source=tests/Autheris.Tests.Unit/DocumentationSourcePriorityTests.cs
+-- @id ab77efdff603 class=update expected=accept source=tests/Autheris.Tests.Integration/Governance/DocumentationSourcePriorityTests.cs
 UPDATE TABLE_COLUMNS SET meta_json = '{"pii": false}' WHERE column_name = 'email'
 
 -- @id 28c6ea3ebe5d class=insert expected=accept source=tests/Autheris.Tests.Unit/Governance/ConsentFourEyesSensitivityTests.cs
@@ -550,10 +550,10 @@ INSERT OR IGNORE INTO ROLES (id, role_name, description) VALUES (@rid, 'Governan
                 INSERT OR IGNORE INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
                 SELECT @m2, id, 'User', 'S-1-5-21-APPROVER-2' FROM ROLES WHERE role_name = 'GovernanceAdmin';
 
--- @id 15e92c23d5bc class=update expected=accept source=tests/Autheris.Tests.Unit/InfrastructureTests.cs
+-- @id 15e92c23d5bc class=update expected=accept source=tests/Autheris.Tests.Integration/Governance/InfrastructureTests.cs
 UPDATE AUDIT_LOG_ENTRIES SET id = @tamperedId WHERE id = @originalId
 
--- @id dded497113f4 class=delete expected=accept source=tests/Autheris.Tests.Unit/InfrastructureTests.cs
+-- @id dded497113f4 class=delete expected=accept source=tests/Autheris.Tests.Integration/Governance/InfrastructureTests.cs
 DELETE FROM POLICY_EPOCHS WHERE table_name = 'finance_table_1'
 
 -- @id c46b1a15d7b9 class=insert expected=accept source=tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs
@@ -620,10 +620,10 @@ INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, 'tenant_a')
 -- @id 001618967ba7 class=delete expected=accept source=tests/Autheris.Tests.Unit/VirtualFilters/Federation/SqlVirtualFilterKeySetProviderTests.cs
 DELETE FROM client
 
--- @id 5ddaa419c308 class=update expected=accept source=tests/Autheris.Tests.Unit/VirtualFilters/SqliteVirtualFilterBindingFederationTests.cs
+-- @id 5ddaa419c308 class=update expected=accept source=tests/Autheris.Tests.Integration/Governance/PostgreSqlVirtualFilterBindingFederationTests.cs
 UPDATE VIRTUAL_FILTER_ACCESS_PROFILES SET definition_json = replace(definition_json, '"MaxPushdownKeys"', '"CompositeKeys":["a","b"],"MaxPushdownKeys"')
 
--- @id 53fb44436708 class=update expected=accept source=tests/Autheris.Tests.Unit/VirtualFilters/VirtualFilterAdministrationServiceTests.cs
+-- @id 53fb44436708 class=update expected=accept source=tests/Autheris.Tests.Integration/Governance/VirtualFilterAdministrationServiceTests.cs
 UPDATE VIRTUAL_FILTERS SET definition_hash = 'manipuliert' WHERE name = 'nicht_ausgelieferte_krane';
 
 -- @id 957380bee409 class=delete expected=accept source=tests/TrinoSqlEngine.Tests/AnalysisAndMaskingTests.cs

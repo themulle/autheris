@@ -76,43 +76,6 @@ public sealed class ArchitectureAndStartupHardeningTests
         }
     }
 
-    [Fact]
-    public void Startup_SqliteGovernanceProvider_InProduction_LogsExactlyOneWarning()
-    {
-        // AR-08: Startup-Warnung, wenn GovernanceDb:Provider = sqlite außerhalb Development verwendet wird
-        var services = new ServiceCollection();
-        var options = new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                Provider = "Sqlite",
-                ConnectionString = "Data Source=prod-gov.db;Cache=Shared"
-            }
-        };
-
-        var loggerFactory = Substitute.For<ILoggerFactory>();
-        var logger = Substitute.For<ILogger>();
-        logger.IsEnabled(LogLevel.Warning).Returns(true);
-        loggerFactory.CreateLogger(Arg.Any<string>()).Returns(logger);
-
-        services.AddSingleton(loggerFactory);
-        services.AddSingleton(Options.Create(options));
-        services.AddSingleton(Substitute.For<IRlsFilterGenerator>());
-
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
-
-        GatewayServiceCollectionExtensions.AddGatewayInfrastructure(services, options, env);
-
-        // Verify that a warning was logged regarding SQLite in production
-        logger.Received(1).Log(
-            LogLevel.Warning,
-            Arg.Any<EventId>(),
-            Arg.Is<object>(o => o.ToString()!.Contains("SQLite", StringComparison.OrdinalIgnoreCase)),
-            Arg.Any<Exception?>(),
-            Arg.Any<Func<object, Exception?, string>>());
-    }
-
     private static string FindRepoRoot()
     {
         var dir = AppContext.BaseDirectory;

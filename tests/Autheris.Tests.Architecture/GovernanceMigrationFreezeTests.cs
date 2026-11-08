@@ -15,7 +15,7 @@ namespace Autheris.Tests.Architecture;
 [Trait("Category", "Security")]
 public sealed partial class GovernanceMigrationFreezeTests(ITestOutputHelper output)
 {
-    private static readonly string[] Engines = ["sqlite", "postgresql", "sqlserver"];
+    private static readonly string[] Engines = ["postgresql", "sqlserver"];
     private const string Migrations = "src/Autheris.Infrastructure/Persistence/Migrations/";
     private const string BaselineGolden = "tests/Autheris.Tests.Architecture/Golden/GovernanceBaseline/v1.5.0.sha256";
     private const string ImmutabilityScript = ".github/scripts/check-governance-immutability.sh";
@@ -48,7 +48,7 @@ public sealed partial class GovernanceMigrationFreezeTests(ITestOutputHelper out
     {
         var golden = ReadHashGolden();
 
-        golden.Count.ShouldBe(6, "three baseline sources and three v0001 shape snapshots are frozen");
+        golden.Count.ShouldBe(4, "two baseline sources and two v0001 shape snapshots are frozen");
         foreach (var (path, expected) in golden)
         {
             Sha256Lf(Read(path)).ShouldBe(expected, $"{path} is frozen at v1.5.0 (plan D-1); a schema change needs a new migration step, not an edit.");
@@ -83,7 +83,7 @@ public sealed partial class GovernanceMigrationFreezeTests(ITestOutputHelper out
     public void Baseline_Files_ReferenceNoOtherAutherisTypes()
     {
         // The frozen hash stays meaningful only while the baseline files depend on nothing that can change under them.
-        foreach (var engine in new[] { "Sqlite", "PostgreSql", "SqlServer" })
+        foreach (var engine in new[] { "PostgreSql", "SqlServer" })
         {
             var source = Read($"{Migrations}{engine}BaselineSchema.cs");
             source.Split('\n').Where(l => l.TrimStart().StartsWith("using ", StringComparison.Ordinal))
@@ -133,9 +133,8 @@ public sealed partial class GovernanceMigrationFreezeTests(ITestOutputHelper out
     {
         var byEngine = Engines.ToDictionary(e => e, e => StepFiles(e).Where(f => f.EndsWith(".sql", StringComparison.Ordinal)).Select(f => f[..^4]).Order().ToArray());
 
-        byEngine["postgresql"].ShouldBe(byEngine["sqlite"], "step numbers and names must be equal in all dialects");
-        byEngine["sqlserver"].ShouldBe(byEngine["sqlite"], "step numbers and names must be equal in all dialects");
-        byEngine["sqlite"].Select((s, i) => int.Parse(s[..4])).ShouldBe(Enumerable.Range(2, byEngine["sqlite"].Length), "file steps are gap-free from 0002");
+        byEngine["sqlserver"].ShouldBe(byEngine["postgresql"], "step numbers and names must be equal in all dialects");
+        byEngine["postgresql"].Select((s, i) => int.Parse(s[..4])).ShouldBe(Enumerable.Range(2, byEngine["postgresql"].Length), "file steps are gap-free from 0002");
     }
 
     [Fact]
@@ -167,9 +166,9 @@ public sealed partial class GovernanceMigrationFreezeTests(ITestOutputHelper out
         Directory.CreateDirectory(repo);
         try
         {
-            string[] golden = ["tests/Autheris.Tests.Architecture/Golden/GovernanceSteps/checksums.sqlite.txt"];
-            const string step = "src/Autheris.Infrastructure/Persistence/Migrations/Steps/sqlite/0002_a.sql";
-            const string baseline = "src/Autheris.Infrastructure/Persistence/Migrations/SqliteBaselineSchema.cs";
+            string[] golden = ["tests/Autheris.Tests.Architecture/Golden/GovernanceSteps/checksums.postgresql.txt"];
+            const string step = "src/Autheris.Infrastructure/Persistence/Migrations/Steps/postgresql/0002_a.sql";
+            const string baseline = "src/Autheris.Infrastructure/Persistence/Migrations/PostgreSqlBaselineSchema.cs";
             Run(repo, "init", "-q", "-b", "main");
             Run(repo, "config", "user.email", "t@example.org");
             Run(repo, "config", "user.name", "t");
@@ -182,7 +181,7 @@ public sealed partial class GovernanceMigrationFreezeTests(ITestOutputHelper out
             Scenario("append a golden line and add a new step", () =>
             {
                 Write(repo, golden[0], "0001 baseline AAA\n0002 a BBB\n0003 b CCC\n");
-                Write(repo, "src/Autheris.Infrastructure/Persistence/Migrations/Steps/sqlite/0003_b.sql", "CREATE TABLE B (x INT);\n");
+                Write(repo, "src/Autheris.Infrastructure/Persistence/Migrations/Steps/postgresql/0003_b.sql", "CREATE TABLE B (x INT);\n");
             }, expectedExit: 0);
             Scenario("modify a golden line", () => Write(repo, golden[0], "0001 baseline XXX\n0002 a BBB\n"), expectedExit: 1);
             Scenario("delete a golden line", () => Write(repo, golden[0], "0001 baseline AAA\n"), expectedExit: 1);

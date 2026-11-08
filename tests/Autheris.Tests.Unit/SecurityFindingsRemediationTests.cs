@@ -432,64 +432,6 @@ public class SecurityFindingsRemediationTests
     }
 
     [Fact]
-    public async Task SqliteGovernanceRepository_StrictTenantIsolation_DoesNotCrossLeakConsents()
-    {
-        // Finding B1 Verification:
-        // Consents in tenant-alpha MUST NOT be visible when querying tenant-beta or vice-versa.
-        var epochService = Substitute.For<IEpochValidationService>();
-        using var repo = GovernanceStoreFactory.CreateSqlite(epochService);
-
-        var tableId = new TableIdentifier("sales", "dbo", "orders");
-        var metadata = new TableMetadata
-        {
-            Identifier = tableId,
-            Table = new Table
-            {
-                Id = Guid.NewGuid(),
-                SourceName = "sales",
-                SchemaName = "dbo",
-                TableName = "orders",
-                Sensitivity = "CONFIDENTIAL",
-                IsActive = true
-            },
-            Columns =
-            [
-                new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "int" },
-                new TableColumn { Id = Guid.NewGuid(), ColumnName = "amount", DataType = "decimal" }
-            ]
-        };
-        await repo.UpsertTableMetadataAsync(metadata);
-
-        var userSid = new Sid("S-1-5-21-TENANT-USER");
-        var consent = new Consent
-        {
-            Id = Guid.NewGuid(),
-            TableId = metadata.Table.Id,
-            TableIdentifier = tableId,
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = userSid,
-            ValidFrom = DateTimeOffset.UtcNow.AddMinutes(-5),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            TenantId = new TenantId("tenant-alpha")
-        };
-        await repo.CreateConsentAsync(consent);
-
-        // Act & Assert 1: Querying with tenant-alpha returns the consent
-        var alphaConsents = await repo.GetActiveConsentsForSubjectsAsync([userSid], tableId, DateTimeOffset.UtcNow, new TenantId("tenant-alpha"));
-        alphaConsents.Count.ShouldBe(1);
-        alphaConsents[0].TenantId.ShouldBe(new TenantId("tenant-alpha"));
-
-        // Act & Assert 2: Querying with tenant-beta MUST NOT return the consent
-        var betaConsents = await repo.GetActiveConsentsForSubjectsAsync([userSid], tableId, DateTimeOffset.UtcNow, new TenantId("tenant-beta"));
-        betaConsents.Count.ShouldBe(0);
-
-        // Act & Assert 3: Querying all active consents with tenant-beta MUST NOT return the consent
-        var allBetaConsents = await repo.GetAllActiveConsentsForSubjectsAsync([userSid], null, DateTimeOffset.UtcNow, new TenantId("tenant-beta"));
-        allBetaConsents.Count.ShouldBe(0);
-    }
-
-    [Fact]
     public async Task StreamRlsPolicyEnforcer_EmptyCdcTenantId_ReturnsDenied()
     {
         // Finding F-02 Verification:
@@ -818,38 +760,6 @@ public class SecurityFindingsRemediationTests
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
         ex.Message.ShouldContain("SeedDemoData");
-    }
-
-    [Fact]
-    public void SqliteGovernanceRepository_FileDatabase_WithoutDevEnvironment_ThrowsInvalidOperationException()
-    {
-        var tempFile = Path.Combine(Path.GetTempPath(), $"sec_test_{Guid.NewGuid():N}.db");
-        try
-        {
-            var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
-            {
-                GovernanceDb = new GovernanceDbOptions
-                {
-                    ConnectionString = $"Data Source={tempFile}"
-                }
-            });
-
-            var epochMock = Substitute.For<IEpochValidationService>();
-            var env = Substitute.For<IHostEnvironment>();
-            env.EnvironmentName.Returns("Production");
-
-            // No secret provider and non-dev environment -> must throw InvalidOperationException
-            var ex = Should.Throw<InvalidOperationException>(() =>
-                GovernanceStoreFactory.CreateSqlite(epochMock, options, env, secretProvider: null, auditAnchorStore: Substitute.For<IAuditChainAnchorStore>()));
-            ex.Message.ShouldContain("Audit HMAC secret is missing");
-        }
-        finally
-        {
-            if (File.Exists(tempFile))
-            {
-                File.Delete(tempFile);
-            }
-        }
     }
 
     [Fact]

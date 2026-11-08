@@ -427,7 +427,15 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
         if (pagination.Offset != null)
         {
             builder.Append(" OFFSET ");
-            GenerateExpression(pagination.Offset, ref builder, context);
+            if (pagination.Offset is PageOffsetParameterExpression)
+            {
+                // The server-injected page slot binds through the shared structural-integer path like the other dialects.
+                GenerateStructuralInteger(pagination.Offset, ref builder, context);
+            }
+            else
+            {
+                GenerateExpression(pagination.Offset, ref builder, context);
+            }
         }
     }
 }

@@ -17,7 +17,6 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
 
     private static readonly string[] RepositoryTypes =
     [
-        "Autheris.Infrastructure.Persistence.SqliteGovernanceRepository",
         "Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository",
         "Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository"
     ];
@@ -39,7 +38,7 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
     ];
 
     private static ModuleDefinition InfrastructureModule() =>
-        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
+        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
 
     private static ModuleDefinition TestModule() => CecilModuleCache.For(typeof(GovernanceRepositoryConstructorArchitectureTests).Assembly);
 
@@ -95,7 +94,6 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
         method.DeclaringType == repository || method.DeclaringType.DeclaringType == repository;
 
     [Theory]
-    [InlineData("Autheris.Infrastructure.Persistence.SqliteGovernanceRepository")]
     [InlineData("Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository")]
     [InlineData("Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository")]
     public void GovernanceRepositoryConstructor_PerformsNoIo(string typeName)
@@ -170,26 +168,6 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
         public CleanFixture() => Name = "clean";
 
         public string Name { get; }
-    }
-
-    // WP-ARC-B-13: the shared connection is gone; every operation opens its own connection through the provider.
-    [Fact]
-    public void SqliteGovernanceRepository_HasNoSqliteConnectionField()
-    {
-        var module = InfrastructureModule();
-        var repository = module.GetType("Autheris.Infrastructure.Persistence.SqliteGovernanceRepository")!;
-
-        var connectionFields = repository.Fields
-            .Where(f => f.FieldType.FullName == "Microsoft.Data.Sqlite.SqliteConnection")
-            .Select(f => f.Name)
-            .ToList();
-        var connectionProperties = repository.Properties
-            .Where(p => p.PropertyType.FullName == "Microsoft.Data.Sqlite.SqliteConnection")
-            .Select(p => p.Name)
-            .ToList();
-
-        connectionFields.ShouldBeEmpty("a shared SqliteConnection field would bypass the write gate: " + string.Join(", ", connectionFields));
-        connectionProperties.ShouldBeEmpty("a shared SqliteConnection property would bypass the write gate: " + string.Join(", ", connectionProperties));
     }
 
     [Fact]

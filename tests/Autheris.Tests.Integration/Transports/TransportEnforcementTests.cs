@@ -26,6 +26,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Issue #447 WP-3: <c>AllowedTransports</c> is enforced at the five choke points for every ingress. Two SQLite sources: S
@@ -35,82 +36,103 @@ using Xunit;
 /// steps through a reloadable configuration source, so the gate is exercised against the live resolver (REQ-ATR-10).
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class TransportEnforcementTests : IClassFixture<TransportEnforcementTests.Fixture>
 {
     private const string SourceS = "src_s";
     private const string SourceT = "src_t";
     private const string ProfileKey = "Gateway:DataSources:Configuration:Profiles:" + SourceS + ":AllowedTransports";
     private const string SigningKey = "0123456789abcdef0123456789abcdef";
 
-    private readonly string _workDir;
-    private readonly WebApplicationFactory<Program> _factory;
-    private readonly ReloadableConfig _config = new();
-    private readonly ConnectionCounter _connections = new();
+    private readonly Fixture _fixture;
+    private WebApplicationFactory<Program> _factory => _fixture.Factory;
+    private ReloadableConfig _config => _fixture.Config;
+    private ConnectionCounter _connections => _fixture.Connections;
     private static readonly ConcurrentQueue<string> Logs = new();
-    private readonly MeterCounter _metric = new();
-    private bool _seeded;
+    private MeterCounter _metric => _fixture.Metric;
 
-    public TransportEnforcementTests(WebApplicationFactory<Program> factory)
+    public TransportEnforcementTests(Fixture fixture)
     {
-        _workDir = Path.Combine(Path.GetTempPath(), "autheris-atr-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_workDir);
-        var sPath = Path.Combine(_workDir, "s.db");
-        var tPath = Path.Combine(_workDir, "t.db");
-        Seed(sPath, "s_items");
-        Seed(tPath, "t_items");
-
-        var connections = _connections;
-        var config = _config;
-        config.Put(ProfileKey, "All");
-        config.Put("Gateway:DataSources:Configuration:Profiles:" + SourceT + ":AllowedTransports", "All");
-
-        _factory = factory.WithWebHostBuilder(b =>
-        {
-            b.UseSetting("Gateway:Tenancy:DefaultTenantId", "default");
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-atr-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-            b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            b.UseSetting("Gateway:OpenSchema", "true");
-            b.UseSetting("Gateway:Rebac:Enabled", "false");
-            b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":ConnectionString", $"Data Source={sPath}");
-            b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":ConnectionString", $"Data Source={tPath}");
-            b.UseSetting("Gateway:WebSql:Enabled", "true");
-            b.UseSetting("Gateway:WebSql:DefaultDataSourceName", SourceT);
-            b.UseSetting("Gateway:WebSql:AllowedDataSources:0", SourceT);
-            b.UseSetting("Gateway:WebSql:AllowedDataSources:1", SourceS);
-            b.UseSetting("Gateway:OData:Enabled", "true");
-            b.UseSetting("Gateway:Mcp:Enabled", "true");
-            b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-            b.UseSetting("Gateway:Arrow:Enabled", "true");
-            b.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
-            b.UseSetting("Gateway:WebSql:CrossSource:Enabled", "true");
-            b.ConfigureAppConfiguration((_, cfg) => cfg.Add(new ReloadableConfigSource(config)));
-            b.ConfigureServices(services =>
-            {
-                services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(new CapturingLoggerProvider(Logs));
-                // Counts the connections that are opened to S: a denial must leave this at zero.
-                var original = services.Single(d => d.ServiceType == typeof(ISqlConnectionFactory));
-                services.Remove(original);
-                services.AddSingleton<ISqlConnectionFactory>(sp =>
-                    new CountingFactory(
-                        (ISqlConnectionFactory)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
-                        connections,
-                        sPath));
-            });
-        });
-
-        _metric.Start();
+        _fixture = fixture;
     }
 
-    public void Dispose()
+    public sealed class Fixture : IDisposable
     {
-        _metric.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        private readonly WebApplicationFactory<Program> _root = new();
+        private readonly string _workDir;
+        public WebApplicationFactory<Program> Factory { get; }
+        internal ReloadableConfig Config { get; } = new();
+        internal ConnectionCounter Connections { get; } = new();
+        internal MeterCounter Metric { get; } = new();
+        internal bool Seeded { get; set; }
+
+        public Fixture()
+        {
+            _workDir = Path.Combine(Path.GetTempPath(), "autheris-atr-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_workDir);
+            var sPath = Path.Combine(_workDir, "s.db");
+            var tPath = Path.Combine(_workDir, "t.db");
+            Seed(sPath, "s_items");
+            Seed(tPath, "t_items");
+
+            var connections = Connections;
+            var config = Config;
+            config.Put(ProfileKey, "All");
+            config.Put("Gateway:DataSources:Configuration:Profiles:" + SourceT + ":AllowedTransports", "All");
+
+            Factory = _root.WithWebHostBuilder(b =>
+            {
+                b.UseSetting("Gateway:Tenancy:DefaultTenantId", "default");
+                b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                // WP-SIMPL-51: the shared per-principal cost bucket meters every WebSQL/Trino statement; these tests run many statements
+                // (or a recursive CTE priced above the default Standard capacity) as one principal, so the Standard tier gets ample capacity.
+                b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "1000000");
+                b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:TokenRefillRatePerSecond", "100000");
+                b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
+                b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
+                b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
+                b.UseSetting("Gateway:OpenSchema", "true");
+                b.UseSetting("Gateway:Rebac:Enabled", "false");
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":Provider", "Sqlite");
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":ConnectionString", $"Data Source={sPath}");
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":Provider", "Sqlite");
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":ConnectionString", $"Data Source={tPath}");
+                b.UseSetting("Gateway:WebSql:Enabled", "true");
+                b.UseSetting("Gateway:WebSql:DefaultDataSourceName", SourceT);
+                b.UseSetting("Gateway:WebSql:AllowedDataSources:0", SourceT);
+                b.UseSetting("Gateway:WebSql:AllowedDataSources:1", SourceS);
+                b.UseSetting("Gateway:OData:Enabled", "true");
+                b.UseSetting("Gateway:Mcp:Enabled", "true");
+                b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+                b.UseSetting("Gateway:Arrow:Enabled", "true");
+                b.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
+                b.UseSetting("Gateway:WebSql:CrossSource:Enabled", "true");
+                b.ConfigureAppConfiguration((_, cfg) => cfg.Add(new ReloadableConfigSource(config)));
+                b.ConfigureServices(services =>
+                {
+                    services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(new CapturingLoggerProvider(Logs));
+                    // Counts the connections that are opened to S: a denial must leave this at zero.
+                    var original = services.Single(d => d.ServiceType == typeof(ISqlConnectionFactory));
+                    services.Remove(original);
+                    services.AddSingleton<ISqlConnectionFactory>(sp =>
+                        new CountingFactory(
+                            (ISqlConnectionFactory)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
+                            connections,
+                            sPath));
+                });
+            });
+
+            Metric.Start();
+        }
+
+        public void Dispose()
+        {
+            Metric.Dispose();
+            Factory.Dispose();
+            _root.Dispose();
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        }
     }
 
     private static void Seed(string path, string table)
@@ -124,7 +146,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
 
     private async Task EnsureSeededAsync()
     {
-        if (_seeded)
+        if (_fixture.Seeded)
         {
             return;
         }
@@ -153,7 +175,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         using var warm = Client();
         (await warm.SendAsync(WebSql("SELECT id FROM src_s.main.s_items"))).StatusCode.ShouldBe(HttpStatusCode.OK);
         (await warm.SendAsync(WebSql("SELECT id FROM src_t.main.t_items"))).StatusCode.ShouldBe(HttpStatusCode.OK);
-        _seeded = true;
+        _fixture.Seeded = true;
     }
 
     private HttpClient Client()
@@ -786,7 +808,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         }
     }
 
-    private sealed class ReloadableConfig : ConfigurationProvider
+    internal sealed class ReloadableConfig : ConfigurationProvider
     {
         public void Put(string key, string value)
         {
@@ -800,7 +822,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         public IConfigurationProvider Build(IConfigurationBuilder builder) => provider;
     }
 
-    private sealed class ConnectionCounter
+    internal sealed class ConnectionCounter
     {
         private int _toS;
         private int _toT;
@@ -831,7 +853,7 @@ public sealed class TransportEnforcementTests : IClassFixture<WebApplicationFact
         }
     }
 
-    private sealed class MeterCounter : IDisposable
+    internal sealed class MeterCounter : IDisposable
     {
         private readonly MeterListener _listener = new();
         private long _total;

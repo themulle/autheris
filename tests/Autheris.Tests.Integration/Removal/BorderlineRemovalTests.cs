@@ -11,23 +11,16 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 [Trait("Category", "Security")]
-public sealed class BorderlineRemovalTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class BorderlineRemovalTests : IClassFixture<BorderlineRemovalTests.Fixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public BorderlineRemovalTests(WebApplicationFactory<Program> factory)
+    public BorderlineRemovalTests(Fixture fixture)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment("Development");
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GraphQL:PersistedQueriesOnly", "true");
-            builder.UseSetting("Gateway:GraphQL:AppScopedTrustedDocuments:Enabled", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-        });
+        _factory = fixture.Factory;
     }
 
     private HttpClient CreateAdminClient()
@@ -120,5 +113,31 @@ public sealed class BorderlineRemovalTests : IClassFixture<WebApplicationFactory
         using var anon = CreateAnonymousClient();
         var resAnon = await anon.GetAsync("/api/admin/trusted-documents/shop");
         resAnon.StatusCode.ShouldBeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
+    }
+
+    public sealed class Fixture : IDisposable
+    {
+        private readonly WebApplicationFactory<Program> _root = new();
+        public WebApplicationFactory<Program> Factory { get; }
+
+        public Fixture()
+        {
+            Factory = _root.WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Development");
+                builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                builder.UseSetting("Gateway:GraphQL:PersistedQueriesOnly", "true");
+                builder.UseSetting("Gateway:GraphQL:AppScopedTrustedDocuments:Enabled", "true");
+                builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
+            });
+        }
+
+        public void Dispose()
+        {
+            Factory.Dispose();
+            _root.Dispose();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        }
     }
 }

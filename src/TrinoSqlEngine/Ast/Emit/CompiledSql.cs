@@ -7,7 +7,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 
 /// <summary>Origin of a bound value (plan 4.2). It decides how the binder and the plan cache treat the value.</summary>
-public enum ParameterOrigin { ClientNamed, ClientPositional, QueryLiteral, Tenant, Policy, Mask }
+public enum ParameterOrigin { ClientNamed, ClientPositional, QueryLiteral, Tenant, Policy, Mask, PageOffset }
 
 public enum SqlStatementClass { Select, Insert, Update, Delete, Merge }
 
@@ -49,6 +49,11 @@ public sealed record CompiledSql(
     /// the assembly cannot drop the requirement; the binders additionally derive it from the reserved check alias in the SQL.
     /// </summary>
     public int? ExpectedAffectedRows { get; internal init; }
+
+    /// <summary>
+    /// Output column mask flags for each root output column of a SELECT query.
+    /// </summary>
+    public ImmutableArray<bool> OutputColumnMasks { get; internal init; } = ImmutableArray<bool>.Empty;
 
     /// <summary>
     /// Issue #277: true when the emitted statement contains a recursive WITH definition. The cache keeps it, so a template hit

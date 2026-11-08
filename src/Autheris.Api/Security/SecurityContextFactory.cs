@@ -17,8 +17,6 @@ using Microsoft.AspNetCore.Http;
 public static class SecurityContextFactory
 {
     public const string TenantHeaderName = "X-Tenant-ID";
-    public const string JustificationHeaderName = "X-Break-Glass-Justification";
-    public const string JustificationHeaderNameAlt = "X-Justification";
     public const string CallerAppHeaderName = "X-Caller-Application";
     public const string CallerAppHeaderNameAlt = "X-Application-Name";
     public const string CallerVersionHeaderName = "X-Caller-Version";
@@ -74,7 +72,7 @@ public static class SecurityContextFactory
         var claim = TenantClaimReader.Read(user);
         if (claim.Kind == ClaimTenantKind.Invalid)
         {
-            return BuildContext(context, caller, userSid, groupSids, tenantRoles, clusterRoles, null, true, null, false, null);
+            return BuildContext(context, caller, userSid, groupSids, tenantRoles, clusterRoles, null, true, null, false);
         }
 
         TenantId? claimTenant = claim.Kind == ClaimTenantKind.Valid ? (TenantId?)claim.Tenant : null;
@@ -106,18 +104,7 @@ public static class SecurityContextFactory
             source = TenantSourceClaim.Header;
         }
 
-        // 5. Extract Break-Glass Justification
-        string? justification = null;
-        if (context.Request.Headers.TryGetValue(JustificationHeaderName, out var jv) && !string.IsNullOrWhiteSpace(jv))
-        {
-            justification = jv.ToString().Trim();
-        }
-        else if (context.Request.Headers.TryGetValue(JustificationHeaderNameAlt, out var jva) && !string.IsNullOrWhiteSpace(jva))
-        {
-            justification = jva.ToString().Trim();
-        }
-
-        return BuildContext(context, caller, userSid, groupSids, tenantRoles, clusterRoles, finalTenant, false, source, tenantSelectedByHeader, justification);
+        return BuildContext(context, caller, userSid, groupSids, tenantRoles, clusterRoles, finalTenant, false, source, tenantSelectedByHeader);
     }
 
     private static SecurityPrincipalContext BuildContext(
@@ -130,8 +117,7 @@ public static class SecurityContextFactory
         TenantId? tenant,
         bool claimInvalid,
         string? source,
-        bool selectedByHeader,
-        string? justification)
+        bool selectedByHeader)
     {
         var user = context.User;
         // 6. Extract Client IP
@@ -151,7 +137,6 @@ public static class SecurityContextFactory
             AuthenticationScheme = user.Identity?.AuthenticationType ?? "Unknown",
             IsAuthenticated = true,
             TenantSelectedByHeader = selectedByHeader,
-            BreakGlassJustification = justification,
             ClientIp = clientIp,
             Caller = caller
         };

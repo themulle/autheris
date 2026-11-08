@@ -117,6 +117,38 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AccessProfile_TargetTables_And_RowFilterPredicate_RoundTrip()
+    {
+        if (!Available) return;
+        var p = new AccessProfile
+        {
+            ProfileId = Id("p"), Name = Id("name"), TenantId = TenantA, MaskingMode = MaskingPolicyMode.Default,
+            TargetTables = ["tem.*", "conf.*"], RowFilterPredicate = "delivery_status != 'DELIVERED'",
+            CreatedAt = DateTimeOffset.UtcNow, CreatedBy = "admin1", Assignments = TestAssign.Users("alice")
+        };
+        await Repo.UpsertProfileAsync(p);
+
+        var read = await Repo.GetProfileAsync(TenantA, p.ProfileId);
+
+        read.ShouldNotBeNull();
+        read.TargetTables.ShouldBe(["tem.*", "conf.*"], ignoreOrder: true);
+        read.RowFilterPredicate.ShouldBe("delivery_status != 'DELIVERED'");
+    }
+
+    [Fact]
+    public async Task DeleteProfile_RemovesProfile_AndSubjectLookup()
+    {
+        if (!Available) return;
+        var p = await NewProfileAsync(MaskingPolicyMode.Default, legacyUsers: ["S-1-5-21-Delete"]);
+        (await Repo.GetProfilesForSubjectAsync(TenantA, "S-1-5-21-Delete")).Select(x => x.ProfileId).ShouldContain(p.ProfileId);
+
+        (await Repo.DeleteProfileAsync(TenantA, p.ProfileId)).ShouldBeTrue();
+
+        (await Repo.GetProfileAsync(TenantA, p.ProfileId)).ShouldBeNull();
+        (await Repo.GetProfilesForSubjectAsync(TenantA, "S-1-5-21-Delete")).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task SubjectMatch_IsCaseInsensitive_AndTenantScoped()
     {
         if (!Available) return;

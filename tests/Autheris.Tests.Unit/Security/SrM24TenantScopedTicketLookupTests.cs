@@ -13,7 +13,6 @@ public sealed class SrM24TenantScopedTicketLookupTests
     private static readonly Type[] ScopedSignature = [typeof(string), typeof(TenantId), typeof(CancellationToken)];
 
     [Theory]
-    [InlineData(typeof(SqliteGovernanceRepository))]
     [InlineData(typeof(PostgreSqlGovernanceRepository))]
     [InlineData(typeof(SqlServerGovernanceRepository))]
     public void SR_M_24_Provider_Declares_Tenant_Scoped_Ticket_Lookup(Type provider)

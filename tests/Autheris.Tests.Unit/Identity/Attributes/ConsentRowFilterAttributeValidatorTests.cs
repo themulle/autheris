@@ -269,15 +269,4 @@ public sealed class ConsentRowFilterAttributeValidatorTests
 
     // ---- the repositories (shape rules in Consent.Validate: every engine, every writer) -----------------------------------------------------
 
-    [Fact]
-    public async Task ST_129_24_DirectRepository_Create_RefusesTheShapeViolations_OnSqlite()
-    {
-        using var store = GovernanceStoreFactory.CreateSqlite(
-            Substitute.For<IEpochValidationService>(),
-            Microsoft.Extensions.Options.Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=cv_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
-        IConsentRepository repo = store;
-        await Should.ThrowAsync<InvalidOperationException>(() => repo.CreateConsentAsync(ConsentOf(Attr(source: "STATIC")), default));
-        await Should.ThrowAsync<InvalidOperationException>(() => repo.CreateConsentAsync(ConsentOf(Attr(json: "\"x\"")), default));
-        await Should.ThrowAsync<InvalidOperationException>(() => repo.ReplaceConsentsAsync([], [ConsentOf(Attr("LIKE"))], new Sid("S-1"), "r"));
-    }
 }

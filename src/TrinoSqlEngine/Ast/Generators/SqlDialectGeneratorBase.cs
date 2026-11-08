@@ -136,6 +136,12 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// </summary>
     protected void GenerateStructuralInteger(Expression expression, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        if (expression is PageOffsetParameterExpression)
+        {
+            builder.Append(context.BindPageOffset());
+            return;
+        }
+
         if (context.IsBound && BindLiterals && expression is LiteralExpression { Type: LiteralType.Integer, Value: not null } literal)
         {
             AppendInlineInteger(ref builder, Convert.ToInt64(literal.Value, CultureInfo.InvariantCulture), context);

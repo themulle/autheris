@@ -36,8 +36,31 @@ internal static class SqlErrorResponse
             httpContext.Response.Headers.RetryAfter = "5";
         }
 
-        // `limit` carries the limit kind only, never a count; the title is the fixed message of the code (never exception text).
-        var ext = mapped.Limit is null ? null : new Dictionary<string, object?> { ["limit"] = mapped.Limit };
+        // `limit` carries the limit kind only, never a count; `line` and `column` are the 1-based syntax error position; the title is the fixed message of the code (never exception text).
+        Dictionary<string, object?>? ext = null;
+        if (mapped.Limit is not null)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext["limit"] = mapped.Limit;
+        }
+        if (mapped.Line is not null && mapped.Column is not null)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext["line"] = mapped.Line.Value;
+            ext["column"] = mapped.Column.Value;
+        }
+        if (ex is TrinoSqlEngine.Ast.Emit.SqlCostExceededException costEx)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext["estimatedCost"] = costEx.EstimatedCost;
+            ext["maxAllowedCost"] = costEx.MaxAllowedCost;
+        }
+        else if (ex is TrinoSqlEngine.Ast.Emit.SqlQuotaExhaustedException quotaEx)
+        {
+            httpContext.Response.Headers.RetryAfter = quotaEx.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            ext ??= new Dictionary<string, object?>();
+            ext["retryAfterSeconds"] = quotaEx.RetryAfterSeconds;
+        }
         await ApiProblems.WriteAsync(httpContext, mapped.Status, mapped.Code, mapped.Title, ct, ext).ConfigureAwait(false);
     }
 }

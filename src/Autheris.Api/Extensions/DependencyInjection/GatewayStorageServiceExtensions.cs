@@ -64,14 +64,6 @@ public static class GatewayStorageServiceExtensions
             services.AddClusterState(ClusterStateMode.InMemory);
         }
 
-        var isDev = environment?.IsDevelopment() ?? false;
-        if (!isDev && DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.Sqlite))
-        {
-            var loggerFactory = services.FirstOrDefault(d => d.ServiceType == typeof(Microsoft.Extensions.Logging.ILoggerFactory))?.ImplementationInstance as Microsoft.Extensions.Logging.ILoggerFactory;
-            var startupLogger = loggerFactory?.CreateLogger("Autheris.Startup");
-            startupLogger?.LogWarning("AR-08: SQLite governance provider is not recommended for production environments. Consider PostgreSQL or SQL Server.");
-        }
-
         services.AddSingleton<ITableSensitivityLookup>(sp => new TableMetadataSensitivityLookup(
             () => sp.GetService<ITableMetadataRepository>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<TableMetadataSensitivityLookup>>()));

@@ -14,9 +14,8 @@ using Xunit;
 public sealed class Issue404PhysicalIndexWiringTests
 {
     [Fact]
-    public void AllThreeRepositories_ImplementThePort()
+    public void BothRepositories_ImplementThePort()
     {
-        typeof(IPhysicalIndexRepository).IsAssignableFrom(typeof(SqliteGovernanceRepository)).ShouldBeTrue();
         typeof(IPhysicalIndexRepository).IsAssignableFrom(typeof(PostgreSqlGovernanceRepository)).ShouldBeTrue();
         typeof(IPhysicalIndexRepository).IsAssignableFrom(typeof(SqlServerGovernanceRepository)).ShouldBeTrue();
     }
@@ -27,7 +26,7 @@ public sealed class Issue404PhysicalIndexWiringTests
         typeof(DataCatalogSyncService).GetConstructors().Single().GetParameters()
             .ShouldContain(p => p.ParameterType == typeof(IPhysicalIndexRepository));
 
-        foreach (var profile in new[] { "dev-sqlite", "production-like" })
+        foreach (var profile in new[] { "dev", "production-like" })
         {
             var path = Autheris.Tests.Unit.Common.SnapshotFile.SnapshotPath($"composition-{profile}.txt");
             File.ReadAllText(path).ShouldContain("Autheris.Application.Common.Interfaces.IPhysicalIndexRepository Singleton", Case.Sensitive);

@@ -188,7 +188,9 @@ public static class ApiProblems
     {
         "retryAfterSeconds", "maxValidTo", "phase", "sunsetDate", "replacement", "limit", "discardedEvents",
         // NL-SC-32: privacy-budget 429 figures (typed values of the budget decision, caller's own client id only).
-        "clientId", "consumed", "totalBudget"
+        "clientId", "consumed", "totalBudget",
+        // Syntax error position
+        "line", "column"
     };
 
     private static void AddAllowedExtensions(IDictionary<string, object?> target, IEnumerable<KeyValuePair<string, object?>>? source)

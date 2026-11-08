@@ -20,6 +20,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
@@ -41,8 +42,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GovernedWebSqlIntegrationTests"));
             builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}");
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
@@ -55,6 +56,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
 
     public void Dispose()
     {
+        _factory.Dispose();
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
     }
@@ -314,6 +316,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
         {
             builder.UseSetting("Gateway:WebSql:AllowRecursiveCte", "true");
             builder.UseSetting("Gateway:WebSql:MaxRecursionDepth", "100");
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "5000");
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "5000");
         });
 
     private static async Task RegisterOrgAsync(WebApplicationFactory<Program> factory, bool withSsn, Dictionary<string, MaskingRule>? masking = null)

@@ -2,13 +2,16 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using NSubstitute;
+using Shouldly;
 using Xunit;
 
 /// <summary>Issue #388 (WP-388-3) on PostgreSQL: see <see cref="GovernanceUpgradeTestsBase"/>.</summary>
@@ -181,4 +184,130 @@ public sealed class PostgreSqlGovernanceUpgradeTests : GovernanceUpgradeTestsBas
             }
         });
     }
+
+    private PostgreSqlGovernanceMigrationRunner EngineRunner(
+        PostgreSqlGovernanceRepository repository,
+        string cs,
+        int lockTimeoutSeconds = 300,
+        List<string>? log = null,
+        bool production = false,
+        bool? runtimeDdl = null,
+        Func<int, Task>? audit = null,
+        Func<DbConnection, TimeSpan, CancellationToken, Task>? acquireLock = null) =>
+        new(
+            repository,
+            Opts(cs, GovernanceMigrationMode.Apply, false, lockTimeoutSeconds, false),
+            log is null ? null : new CaptureLogger<PostgreSqlGovernanceMigrationRunner>(log))
+        {
+            AdditionalSteps = [ProbeStep()],
+            IsProduction = production,
+            RuntimeLoginRunsDdlOverride = runtimeDdl,
+            RuntimeDdlAuditOverride = audit,
+            AcquireLockOverride = acquireLock
+        };
+
+    private static async Task WithEngineAsync(Func<PostgreSqlGovernanceUpgradeTests, string, PostgreSqlGovernanceRepository, Task> body, PostgreSqlGovernanceUpgradeTests self)
+    {
+        var db = await PostgreSqlTestDatabase.CreateAsync();
+        if (!db.IsAvailable)
+        {
+            return;
+        }
+
+        try
+        {
+            using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(Opts(db.ConnectionString, GovernanceMigrationMode.Apply, false, 300, false));
+            await body(self, db.ConnectionString, repository);
+        }
+        finally
+        {
+            await db.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public Task LockTimeout_ClientTokenFiresFirst_ProviderExceptionIsMappedToLockTimeout() => WithEngineAsync(async (self, cs, repository) =>
+    {
+        // The client driver aborts the command with a provider exception (not an OperationCanceledException) when the client-side token fires first.
+        var runner = self.EngineRunner(repository, cs, lockTimeoutSeconds: 1, acquireLock: async (_, _, token) =>
+        {
+            var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using var registration = token.Register(() => cancelled.TrySetResult());
+            await cancelled.Task;
+            throw new InvalidOperationException("Operation cancelled by user.");
+        });
+
+        var ex = await Should.ThrowAsync<GovernanceSchemaDriftException>(() => runner.RunAsync());
+
+        ex.Code.ShouldBe(GovernanceMigrationCodes.LockTimeout);
+    }, this);
+
+    [Fact]
+    public Task LockAcquisition_DriftExceptionFromProvider_PassesThroughUnchanged() => WithEngineAsync(async (self, cs, repository) =>
+    {
+        var runner = self.EngineRunner(repository, cs, acquireLock: (_, _, _) =>
+            throw new GovernanceSchemaDriftException(GovernanceMigrationCodes.LockFailed, "lock failed"));
+
+        var ex = await Should.ThrowAsync<GovernanceSchemaDriftException>(() => runner.RunAsync());
+
+        ex.Code.ShouldBe(GovernanceMigrationCodes.LockFailed);
+    }, this);
+
+    [Fact]
+    public Task LockAcquisition_CallerCancellation_SurfacesAsOperationCanceled() => WithEngineAsync(async (self, cs, repository) =>
+    {
+        using var cts = new CancellationTokenSource();
+        var runner = self.EngineRunner(repository, cs, acquireLock: async (_, _, token) =>
+        {
+            await cts.CancelAsync();
+            token.ThrowIfCancellationRequested();
+        });
+
+        await Should.ThrowAsync<OperationCanceledException>(() => runner.RunAsync(cts.Token));
+    }, this);
+
+    [Fact]
+    public Task I388_SC_13_Production_Apply_WithoutMigrationConnectionString_WarnsRuntimeDdl_AndAuditsBestEffort() => WithEngineAsync(async (self, cs, repository) =>
+    {
+        var log = new List<string>();
+        var audited = new List<int>();
+        var runner = self.EngineRunner(repository, cs, log: log, production: true, runtimeDdl: true, audit: n => { audited.Add(n); return Task.CompletedTask; });
+
+        await runner.RunAsync();
+
+        log.ShouldContain(m => m.Contains(GovernanceMigrationCodes.RuntimeDdl, StringComparison.Ordinal));
+        audited.ShouldBeEmpty("the audit event waits until the audit store is ready");
+        await runner.EmitPendingAuditAsync();
+        audited.Count.ShouldBe(1);
+        await runner.EmitPendingAuditAsync();
+        audited.Count.ShouldBe(1);
+    }, this);
+
+    [Fact]
+    public Task I388_SC_13_AuditFailure_IsSwallowed_AndNoWarningOutsideProductionOrWithMigrationLogin() => WithEngineAsync(async (self, cs, repository) =>
+    {
+        var runner = self.EngineRunner(repository, cs, production: true, runtimeDdl: true, audit: _ => throw new InvalidOperationException("boom"));
+        await runner.RunAsync();
+        await runner.EmitPendingAuditAsync(); // swallowed: must not throw
+
+        foreach (var (production, runtimeDdl) in new[] { (false, true), (true, false) })
+        {
+            var db2 = await PostgreSqlTestDatabase.CreateAsync();
+            try
+            {
+                using var repo2 = GovernanceSchemaTestSupport.UnmigratedPostgreSql(Opts(db2.ConnectionString, GovernanceMigrationMode.Apply, false, 300, false));
+                var log = new List<string>();
+                var audited = new List<int>();
+                var other = self.EngineRunner(repo2, db2.ConnectionString, log: log, production: production, runtimeDdl: runtimeDdl, audit: n => { audited.Add(n); return Task.CompletedTask; });
+                await other.RunAsync();
+                await other.EmitPendingAuditAsync();
+                log.ShouldNotContain(m => m.Contains(GovernanceMigrationCodes.RuntimeDdl, StringComparison.Ordinal));
+                audited.ShouldBeEmpty();
+            }
+            finally
+            {
+                await db2.DisposeAsync();
+            }
+        }
+    }, this);
 }

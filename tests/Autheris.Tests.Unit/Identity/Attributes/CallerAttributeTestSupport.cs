@@ -14,6 +14,10 @@ internal static class CallerAttributeTestSupport
     internal const string TrustedIssuer = "https://login.example/tenant/v2.0";
     internal const string Bearer = "AuthenticationTypes.Federation";
     internal static readonly TenantId Tenant = new("tenant_a");
+
+    internal static CallerAttributeDefinition Definition(string name = "cost_center", string description = "v1", TenantId? tenant = null) => new(
+        Guid.NewGuid(), tenant ?? Tenant, name, CallerAttributeType.Text, CallerAttributeCardinality.List, 50, 60,
+        new CallerAttributeProviderBinding("claims", new Dictionary<string, string> { ["claim"] = "department" }), description, FilterApprovalStatus.PendingApproval);
     internal static readonly string UserOid = "11111111-1111-1111-1111-111111111111";
     internal static readonly string OtherOid = "22222222-2222-2222-2222-222222222222";
 

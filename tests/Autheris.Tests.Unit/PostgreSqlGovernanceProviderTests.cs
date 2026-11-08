@@ -24,8 +24,6 @@ public class PostgreSqlGovernanceProviderTests
     [InlineData("postgres")]
     [InlineData("PgSql")]
     [InlineData("pgsql")]
-    [InlineData("Sqlite")]
-    [InlineData("sqlite")]
     [InlineData("SqlServer")]
     [InlineData("mssql")]
     public void ProviderValidation_AcceptsSupportedProviders(string provider)
@@ -70,30 +68,25 @@ public class PostgreSqlGovernanceProviderTests
         ex.Message.ShouldContain("GovernanceDb Provider");
     }
 
-    [Fact]
-    public void MultiNodeClusterMode_RejectsSqlite_WithE2Violation()
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("Sqlite")]
+    [InlineData("sqlite")]
+    public void Sqlite_governance_provider_is_rejected_by_options_validator_and_startup_check(string provider)
     {
-        var options = new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                Provider = "Sqlite"
-            },
-            HighAvailability = new HighAvailabilityOptions
-            {
-                MultiNodeClusterMode = true,
-                Replicas = 3
-            }
-        };
-
+        // SEC-SIMPL-05: the governance provider allow-list is PostgreSql and SqlServer only.
+        var options = new GatewayOptions { GovernanceDb = new GovernanceDbOptions { Provider = provider } };
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
 
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+        var ex = Should.Throw<ValidationException>(() => GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+        ex.Message.ShouldContain("GovernanceDb provider");
+        ex.Message.ShouldNotContain("'Sqlite', 'PostgreSql'");
 
-        ex.Message.ShouldContain("E-2");
-        ex.Message.ShouldContain("PostgreSql");
+        var context = new Autheris.Api.Extensions.DependencyInjection.StartupChecks.StartupCheckContext(options, env, _ => null, null);
+        var startup = Should.Throw<ValidationException>(() => Autheris.Api.Extensions.DependencyInjection.StartupChecks.StorageStartupChecks.GovernanceDbProvider(context));
+        startup.Message.ShouldContain("not supported");
+        startup.Message.ShouldContain("Allowed values are 'PostgreSql' or 'SqlServer'");
     }
 
     [Theory]
@@ -163,14 +156,14 @@ public class PostgreSqlGovernanceProviderTests
     }
 
     [Fact]
-    public async Task DependencyInjection_RegistersSqliteGovernanceRepository_ByDefault()
+    public void DependencyInjection_UnconfiguredProvider_FailsClosed()
     {
         var services = new ServiceCollection();
         var options = new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                Provider = "Sqlite",
+                Provider = "",
                 ConnectionString = "Data Source=:memory:"
             }
         };
@@ -181,17 +174,13 @@ public class PostgreSqlGovernanceProviderTests
         services.AddSingleton(Options.Create(options));
         services.AddLogging();
 
-        services.AddGatewayInfrastructure(options);
-
-        await using var sp = services.BuildServiceProvider();
-
-        var repo = sp.GetService<IGovernanceRepository>();
-        repo.ShouldNotBeNull();
-        repo.ShouldBeOfType<SqliteGovernanceRepository>();
-
-        var exportSource = sp.GetService<IAuditChainExportSource>();
-        exportSource.ShouldNotBeNull();
-        exportSource.ShouldBeOfType<SqliteGovernanceRepository>();
+        // no provider means no governance store and no anchor store: composition or resolution fails closed
+        Should.Throw<InvalidOperationException>(() =>
+        {
+            services.AddGatewayInfrastructure(options);
+            using var sp = services.BuildServiceProvider();
+            sp.GetService<IGovernanceRepository>();
+        });
     }
 
     [Fact]

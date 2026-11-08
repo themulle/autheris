@@ -171,7 +171,7 @@ export default function () {
   }
 
   // --------------------------------------------------------------------------
-  // 1b. 25% Cross-Database Query (PostgreSQL Finance + SQLite HR [+ SQL Server CRM])
+  // 1b. 25% Cross-Database Query (PostgreSQL finance invoices + finance items [+ SQL Server CRM])
   // --------------------------------------------------------------------------
   else if (randSelector < 65) {
     const first = randInt(10, 30);
@@ -185,7 +185,7 @@ export default function () {
             totalCount
             jsonRows
           }
-          sqliteEmployees: table(domain: "hr", name: "hr_table_1", schema: "dbo", first: $first, after: $after) {
+          postgresItems: table(domain: "finance", name: "finance_items", schema: "public", first: $first, after: $after) {
             tableName
             totalCount
             jsonRows
@@ -204,7 +204,7 @@ export default function () {
             totalCount
             jsonRows
           }
-          sqliteEmployees: table(domain: "hr", name: "hr_table_1", schema: "dbo", first: $first, after: $after) {
+          postgresItems: table(domain: "finance", name: "finance_items", schema: "public", first: $first, after: $after) {
             tableName
             totalCount
             jsonRows
@@ -217,7 +217,7 @@ export default function () {
     const checks = {
       'cross-db query status is 200': (r) => r.status === 200,
       'cross-db postgres data present': (r) => r.body.includes('postgresInvoices'),
-      'cross-db sqlite data present': (r) => r.body.includes('sqliteEmployees'),
+      'cross-db items data present': (r) => r.body.includes('postgresItems'),
     };
     if (SQLSERVER_ENABLED) {
       checks['cross-db sqlserver data present'] = (r) => r.body.includes('sqlServerOrders');

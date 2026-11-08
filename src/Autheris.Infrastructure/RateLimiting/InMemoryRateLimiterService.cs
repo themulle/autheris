@@ -392,9 +392,9 @@ public sealed class InMemoryRateLimiterService : IRateLimiterService
                 bucket.LastRefillTimestamp = currentTimestamp;
             }
 
-            // delta = reservedCost - actualCost, clamped to [0, MaxTokensCapacity]
+            // delta = reservedCost - actualCost, allowed into negative balance
             var delta = reservedCost - actualCost;
-            bucket.Tokens = Math.Clamp(bucket.Tokens + delta, 0, policy.MaxTokensCapacity);
+            bucket.Tokens = Math.Min(policy.MaxTokensCapacity, bucket.Tokens + delta);
 
             return Task.FromResult(new CostQuotaResult(true, (int)Math.Floor(bucket.Tokens), 0));
         }

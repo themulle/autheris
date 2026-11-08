@@ -21,16 +21,10 @@ tests/Autheris.Tests.Unit/DataApi/Issue390ReadOrderDirectionTests.cs
 tests/Autheris.Tests.Unit/DevExperienceTests.cs
 tests/Autheris.Tests.Unit/Governance/BaselineSchemaShapeParityTests.cs
 tests/Autheris.Tests.Unit/Governance/ConsentRecertificationScanTests.cs
-tests/Autheris.Tests.Unit/Governance/GovernanceSchemaCatalogReaderTests.cs
 tests/Autheris.Tests.Unit/Governance/GovernanceSchemaShapeVerifierTests.cs
-tests/Autheris.Tests.Unit/Governance/GovernanceSchemaVerificationTests.cs
 tests/Autheris.Tests.Unit/Governance/ReadPathSwitchesMetricsAndAnalyzeTests.cs
-tests/Autheris.Tests.Unit/Governance/RequiredFilterColumnsCatalogTests.cs
 tests/Autheris.Tests.Unit/Governance/SqliteConsentDescriptionRepositoryContractTests.cs
 tests/Autheris.Tests.Unit/Governance/SqliteDataOwnerAssignmentRepositoryContractTests.cs
-tests/Autheris.Tests.Unit/Governance/SqliteGovernanceConcurrencyTests.cs
-tests/Autheris.Tests.Unit/Governance/SqliteGovernanceConnectionProviderTests.cs
-tests/Autheris.Tests.Unit/Governance/SqliteGovernanceRepositoryPocTests.cs
 tests/Autheris.Tests.Unit/Governance/SqliteRelationRepositoryContractTests.cs
 tests/Autheris.Tests.Unit/Governance/TrustedDocuments/TrustedDocumentAdminEndpointsTests.cs
 tests/Autheris.Tests.Unit/GraphQL/GovernedTreeQueryServiceTests.cs
@@ -54,7 +48,6 @@ tests/Autheris.Tests.Unit/Security/CorrelatedRowFilterAliasTests.cs
 tests/Autheris.Tests.Unit/Security/CrossSourceRelationsSecurityTests.cs
 tests/Autheris.Tests.Unit/Security/DatasourceTestingSecurityTests.cs
 tests/Autheris.Tests.Unit/Security/GovernanceMigrationSecurityTests.cs
-tests/Autheris.Tests.Unit/Security/Issue270GovernanceSecurityVerificationTests.cs
 tests/Autheris.Tests.Unit/Security/OlapSqlInspectorTests.cs
 tests/Autheris.Tests.Unit/Security/ProcedureLobBudgetRSql8Tests.cs
 tests/Autheris.Tests.Unit/Security/ReadOnlyTokenProcedureRouteTests.cs
@@ -78,12 +71,10 @@ tests/Autheris.Tests.Unit/Sql/Policy/TypedRowFilterBuilderTests.cs
 tests/Autheris.Tests.Unit/Sql/SqliteWideCommaJoinExecutionTests.cs
 tests/Autheris.Tests.Unit/Sql/TimeZones/DuckDbIcuSandboxTests.cs
 tests/Autheris.Tests.Unit/Sql/TrinoColumnTypeTests.cs
-tests/Autheris.Tests.Unit/SqliteGovernanceRepositoryTestExtensions.cs
 tests/Autheris.Tests.Unit/TestDoubles/SqliteGovernedSqlService.cs
 tests/Autheris.Tests.Unit/VirtualFilters/Federation/KeySourceSqliteFixture.cs
 tests/Autheris.Tests.Unit/VirtualFilters/SqlFilterCompilerCallerAttributeTests.cs
 tests/Autheris.Tests.Unit/VirtualFilters/SqlFilterDefinitionTests.cs
-tests/Autheris.Tests.Unit/VirtualFilters/SqliteVirtualFilterBindingFederationTests.cs
 tests/Autheris.Tests.Unit/VirtualFilters/StructuredFilterSqlTests.cs
 tests/Autheris.Tests.Unit/VirtualFilters/TypedVirtualFilterTests.cs
 tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs

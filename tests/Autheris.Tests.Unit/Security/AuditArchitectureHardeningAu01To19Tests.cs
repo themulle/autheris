@@ -205,7 +205,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
                 env,
                 mockSecretProvider,
                 null,
-                NullLogger<SqliteGovernanceRepository>.Instance));
+                NullLogger<PostgreSqlGovernanceRepository>.Instance));
 
         ex.Message.ShouldContain("AU-01/AU-03");
     }
@@ -322,106 +322,6 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
     #endregion
 
     #region AU-04: Enrolled Transaction Pattern
-
-    [Fact]
-    public async Task AU04_SqliteRepository_EnrolledTransaction_Commit_PersistsEntryAndChainsCorrectly()
-    {
-        var dbPath = Path.Combine(_testDir, "enrolled_tx_commit.db");
-        var wormPath = Path.Combine(_testDir, "worm_commit");
-        var anchorPath = Path.Combine(_testDir, "anchor_commit.json");
-
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source={dbPath}" },
-            Audit = new AuditOptions
-            {
-                ChainAnchorPath = anchorPath,
-                ChainAnchorWormDirectory = wormPath,
-                SynchronousQueryAudit = true
-            }
-        });
-
-        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
-
-        var entry1 = CreateAuditEntry(1, "CONSENT_CREATED");
-        await repo.LockUnguardedAsync();
-        try
-        {
-            using var tx = repo.RawConnection().BeginTransaction();
-            await repo.RecordAuditEventInternalAsync(tx.Connection!, entry1, CancellationToken.None, tx);
-            await tx.CommitAsync();
-            repo.OnTransactionCommitted(tx);
-        }
-        finally
-        {
-            repo.ReleaseLock();
-        }
-
-        var isValid = await repo.VerifyAuditHashChainAsync();
-        isValid.ShouldBeTrue();
-
-        using var cmd = repo.RawConnection().CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE EVENT_TYPE = 'CONSENT_CREATED'";
-        var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
-        count.ShouldBe(1);
-    }
-
-    [Fact]
-    public async Task AU04_SqliteRepository_EnrolledTransaction_Rollback_RestoresPointerAndPreservesChain()
-    {
-        var dbPath = Path.Combine(_testDir, "enrolled_tx_rollback.db");
-        var wormPath = Path.Combine(_testDir, "worm_rollback");
-        var anchorPath = Path.Combine(_testDir, "anchor_rollback.json");
-
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source={dbPath}" },
-            Audit = new AuditOptions
-            {
-                ChainAnchorPath = anchorPath,
-                ChainAnchorWormDirectory = wormPath,
-                SynchronousQueryAudit = true
-            }
-        });
-
-        using var repo = GovernanceStoreFactory.CreateSqlite(new EpochValidationService(), options);
-
-        // 1. Initial committed entry
-        var entry1 = CreateAuditEntry(1, "CONSENT_INITIAL");
-        await repo.RecordAuditEventAsync(entry1);
-        (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
-
-        // 2. Transaction that is rolled back
-        var entry2 = CreateAuditEntry(2, "CONSENT_FAILED_ATTEMPT");
-        await repo.LockUnguardedAsync();
-        try
-        {
-            using var tx = repo.RawConnection().BeginTransaction();
-            await repo.RecordAuditEventInternalAsync(tx.Connection!, entry2, CancellationToken.None, tx);
-            await tx.RollbackAsync();
-            repo.OnTransactionRolledBack(tx);
-        }
-        finally
-        {
-            repo.ReleaseLock();
-        }
-
-        // 3. Rollback must not corrupt audit hash chain
-        var chainValidAfterRollback = await repo.VerifyAuditHashChainAsync();
-        chainValidAfterRollback.ShouldBeTrue();
-
-        // 4. Failed entry must not exist in table
-        using var cmd = repo.RawConnection().CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES WHERE EVENT_TYPE = 'CONSENT_FAILED_ATTEMPT'";
-        var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
-        count.ShouldBe(0);
-
-        // 5. Subsequent audit entry must succeed and chain properly from entry1
-        var entry3 = CreateAuditEntry(3, "CONSENT_RETRY_SUCCESS");
-        await repo.RecordAuditEventAsync(entry3);
-        var chainValidAfterSubsequent = await repo.VerifyAuditHashChainAsync();
-        chainValidAfterSubsequent.ShouldBeTrue();
-    }
 
     #endregion
 

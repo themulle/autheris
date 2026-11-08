@@ -17,6 +17,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Issue #107 (SEC-RF107-14, SEC-RF107-06e): REST administration of the row filter key-set cache settings over real requests.
@@ -35,8 +36,8 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("RowFilterEvaluationEndpointAuthTests"));
         });
     }
 
@@ -344,7 +345,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
         var factory = _factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:RowFilters:KeySetCache:MaxConcurrentKeyQueries", "0");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-wiring-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("RowFilterEvaluationEndpointAuthTests"));
         });
 
         var ex = Should.Throw<Exception>(() => factory.CreateClient());

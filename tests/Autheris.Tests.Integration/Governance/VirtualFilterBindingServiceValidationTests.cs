@@ -1,0 +1,186 @@
+namespace Autheris.Tests.Integration.Governance;
+
+using System;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Catalog.Semantic;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Lineage;
+using Autheris.Application.VirtualFilters;
+using Autheris.Application.VirtualFilters.Federation;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Autheris.Extensions.Dbt;
+using Autheris.Infrastructure.Persistence;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using Shouldly;
+using Xunit;
+
+/// <summary>
+/// The binding checks live in <see cref="VirtualFilterAdministrationService"/>, so every caller of
+/// <c>SaveProfileAsync</c> and of the sync (HTTP API, file repository sync, dbt import) is covered, not only the endpoints.
+/// </summary>
+public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
+{
+    private static readonly VirtualFilterActor DbtActor = new(new Sid("S-1-5-21-DBT-SYNC"), IsSync: true);
+
+    // The direct dbt governance import runs as the calling user in the caller's tenant (the tenant of DavidProfile / DavidFilter).
+    private static readonly DbtGovernanceImportCaller ImportCaller =
+        new(new VirtualFilterActor(new Sid("S-1-5-21-LWE-GOVADMIN"), IsSync: false), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile().TenantId);
+
+    private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
+        Substitute.For<IEpochValidationService>(),
+        Options.Create(new GatewayOptions()));
+
+    private readonly VirtualFilterAdministrationService _service;
+
+    public VirtualFilterBindingServiceValidationTests()
+    {
+        var catalog = Substitute.For<ITableMetadataRepository>();
+        catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
+        {
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
+        });
+        var options = Options.Create(new GatewayOptions
+        {
+            VirtualFilters = new VirtualFilterOptions { Federation = new VirtualFilterFederationOptions { MaxPushdownKeys = 50 } }
+        });
+        _service = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), options, catalog: catalog);
+    }
+
+    public void Dispose() => _repository.Dispose();
+
+    private static VirtualFilterAccessProfile ProfileWith(Func<FilterBinding, FilterBinding> change)
+    {
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile();
+        return profile with { Bindings = profile.Bindings.Select(change).ToList() };
+    }
+
+    [Fact]
+    public async Task SaveProfile_WithAnExplicitKeyBudgetAboveTheGatewayLimit_IsRejectedForAnyCaller()
+    {
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
+
+        var ex = await Should.ThrowAsync<VirtualFilterBindingException>(() =>
+            _service.SaveProfileAsync(ProfileWith(b => b with { MaxPushdownKeys = 51 }), DbtActor));
+
+        ex.Code.ShouldBe(VirtualFilterErrorCodes.PushdownKeyBudgetInvalid);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task SaveProfile_WithAFormatNoEndpointCanSatisfy_IsRejectedForAnyCaller()
+    {
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
+
+        var ex = await Should.ThrowAsync<VirtualFilterBindingException>(() =>
+            _service.SaveProfileAsync(ProfileWith(b => b with { PushdownFormat = PushdownParameterFormat.ODataIn }), DbtActor));
+
+        ex.Code.ShouldBe(VirtualFilterErrorCodes.PushdownFormatUnsupported);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task SaveProfile_WithTheModelDefaultBudget_IsNotCheckedAgainstALowGatewayLimit()
+    {
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
+
+        await _service.SaveProfileAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile(), DbtActor);
+
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem()
+            .Bindings.ShouldHaveSingleItem().MaxPushdownKeys.ShouldBe(FilterBinding.DefaultMaxPushdownKeys);
+    }
+
+    [Fact]
+    public async Task ApplySync_WithAnInvalidBinding_IsRejectedAndStoresNothing()
+    {
+        var request = new VirtualFilterSyncRequest(
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile().TenantId,
+            new ManagedBy("governance/access", "c1"),
+            [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()],
+            [ProfileWith(b => b with { MaxPushdownKeys = 51 })]);
+
+        await Should.ThrowAsync<VirtualFilterBindingException>(() => _service.ApplySyncAsync(request, DbtActor));
+        await Should.ThrowAsync<VirtualFilterBindingException>(() => _service.PlanSyncAsync(request));
+
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task DbtImport_ThroughTheService_SavesAProfileWithDefaultBindingOptions_UnderALowGatewayLimit()
+    {
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
+        var dbt = new DbtMetadataIngestionService(
+            Substitute.For<IDbtProposalRepository>(),
+            Substitute.For<ITableMetadataRepository>(),
+            Substitute.For<ILineageGraphStore>(),
+            epochRepository: null,
+            gatewayOptions: null,
+            sqlEndpointLoader: null,
+            relationRepository: null,
+            virtualFilterAdmin: _service,
+            logger: NullLogger<DbtMetadataIngestionService>.Instance);
+        const string json = """
+            {"access_profiles":{"david":{"tenant":"tenant_lwe","scope":"lwetem_prod.*.*","uncovered":"deny",
+              "grantee":{"type":"user","sid":"S-1-5-21-LWE-DAVID"},
+              "bindings":[{"filter":"nicht_ausgelieferte_krane","target":"lwetem_prod.*.*.client_id"}]}}}
+            """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await dbt.IngestGovernanceStreamAsync(stream, ImportCaller);
+
+        result.AccessProfilesCount.ShouldBe(1);
+        result.Warnings.ShouldBeEmpty();
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task DbtImport_SavesTheProfileAsTheCallingUser_SoTheApprovalWorkflowApplies()
+    {
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
+        var catalog = Substitute.For<ITableMetadataRepository>();
+        catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
+        {
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
+            Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
+        });
+        var approvalService = new VirtualFilterAdministrationService(
+            _repository,
+            Substitute.For<IAuditLogRepository>(),
+            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }),
+            catalog: catalog);
+        var dbt = new DbtMetadataIngestionService(
+            Substitute.For<IDbtProposalRepository>(),
+            Substitute.For<ITableMetadataRepository>(),
+            Substitute.For<ILineageGraphStore>(),
+            epochRepository: null,
+            gatewayOptions: null,
+            sqlEndpointLoader: null,
+            relationRepository: null,
+            virtualFilterAdmin: approvalService,
+            logger: NullLogger<DbtMetadataIngestionService>.Instance);
+        const string json = """
+            {"access_profiles":{"david":{"scope":"lwetem_prod.*.*","uncovered":"deny",
+              "grantee":{"type":"user","sid":"S-1-5-21-LWE-DAVID"},
+              "bindings":[{"filter":"nicht_ausgelieferte_krane","target":"lwetem_prod.*.*.client_id"}]}}}
+            """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var result = await dbt.IngestGovernanceStreamAsync(stream, ImportCaller);
+
+        // No payload tenant: the caller's request tenant. Not the sync actor: the profile waits for a distinct approver.
+        result.Success.ShouldBeTrue();
+        result.Warnings.ShouldBeEmpty();
+        var profile = (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+        profile.TenantId.ShouldBe(ImportCaller.Tenant);
+        profile.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+        profile.CreatedBy.ShouldBe(ImportCaller.Actor.Sid);
+    }
+}

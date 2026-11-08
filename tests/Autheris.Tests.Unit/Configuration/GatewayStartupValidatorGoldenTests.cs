@@ -164,8 +164,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
 
             // 18 ProductionStorageAndAudit
             Prod("ProductionStorage_WormWithoutS3Keys", ("Audit:Worm:Enabled", "true"), ("Audit:Worm:StorageType", "S3"), ("Audit:Worm:EnforceObjectLock", "true")),
-            Prod("ProductionStorage_InMemorySqlite", ("GovernanceDb:ConnectionString", "Data Source=:memory:")),
-            ProdEnv("ProductionStorage_ContainerRelativeSqlitePath", container, ("GovernanceDb:ConnectionString", "Data Source=governance.db")),
             Prod("ProductionStorage_FallbackAuditKey", ("Audit:HmacKeyIsFallback", "true")),
             Prod("ProductionStorage_AnchorMissing", ("Audit:ChainAnchorPath", "")),
             ProdEnv("ProductionStorage_AuditChecksSkippedInTestEnvironment", [("ASPNETCORE_ENVIRONMENT", "Test")], ("Audit:ChainAnchorPath", "")),
@@ -174,8 +172,8 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("GovernanceDbProvider_Unsupported", ("GovernanceDb:Provider", "Oracle")),
             Dev("GovernanceDbProvider_Unsupported", ("GovernanceDb:Provider", "Oracle")),
 
-            // 20 ClusterState
-            Prod("ClusterState_SqliteWithReplicas", ("HighAvailability:Replicas", "2"), ("Caching:Redis:Enabled", "true")),
+            // 20 GovernanceDbProvider
+            Prod("GovernanceProvider_SqliteIsUnsupported", ("GovernanceDb:Provider", "Sqlite"), ("HighAvailability:Replicas", "2"), ("Caching:Redis:Enabled", "true")),
         ];
     }
 

@@ -154,9 +154,19 @@ public static class EmittedSqlInvariantChecker
             i++;
         }
 
+        int pageOffsetCount = 0;
         var declared = new HashSet<string>(parameters.Length + 4, StringComparer.Ordinal);
         foreach (var p in parameters)
         {
+            if (p.Origin == ParameterOrigin.PageOffset)
+            {
+                pageOffsetCount++;
+                if (pageOffsetCount > 1 || statementClass != SqlStatementClass.Select)
+                {
+                    throw new EmittedSqlInvariantViolationException("invalid-page-offset", 0);
+                }
+            }
+
             if (!declared.Add(p.Marker))
             {
                 throw new EmittedSqlInvariantViolationException("duplicate-parameter-marker", 0);

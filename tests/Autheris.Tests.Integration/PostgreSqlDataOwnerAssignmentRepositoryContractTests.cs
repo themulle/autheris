@@ -2,10 +2,14 @@ namespace Autheris.Tests.Integration;
 
 using System.Data.Common;
 using System.Threading.Tasks;
+using System;
+using Xunit;
+using Shouldly;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Governance;
+using Autheris.Tests.Integration.Governance;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -53,5 +57,33 @@ public sealed class PostgreSqlDataOwnerAssignmentRepositoryContractTests : DataO
         var conn = new NpgsqlConnection(_db!.ConnectionString);
         conn.Open();
         return conn;
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task ManualOrSeedPath_NeverEmitsDbtPrefix()
+    {
+        if (_db is null || !_db.IsAvailable)
+        {
+            return;
+        }
+
+        // I393B-T-10 / SC-07: the demo seed writes TABLE_OWNERS ids that never carry the dbt: provenance prefix.
+        var seededConnectionString = await GovernanceTestDatabase.CreateAsync("owners_seed");
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        var options = Options.Create(new GatewayOptions
+        {
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = seededConnectionString, SeedDemoData = true }
+        });
+        await using var seeded = GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env);
+
+        await using var conn = new NpgsqlConnection(seededConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM TABLE_OWNERS";
+        Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBeGreaterThan(0);
+        cmd.CommandText = "SELECT COUNT(*) FROM TABLE_OWNERS WHERE id::text LIKE 'dbt:%'";
+        Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(0);
     }
 }

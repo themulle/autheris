@@ -26,58 +26,83 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 using Autheris.Api.Endpoints;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Issue #447 WP-2a..f: every transport lane stamps its ingress from endpoint metadata only (SEC-ATR-02), and the background
 /// re-entry points (statement manager, async job worker, MCP stdio) carry it (SEC-ATR-05). WP-2 stamps only; nothing is denied here.
 /// A recording decorator of <see cref="IIngressTransportContext"/> plays the "probe gate".
 /// </summary>
-public sealed class IngressStampingTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class IngressStampingTests : IClassFixture<IngressStampingTests.Fixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
-    private readonly Probe _probe = new();
+    private readonly Probe _probe;
 
-    public IngressStampingTests(WebApplicationFactory<Program> factory)
+    public IngressStampingTests(Fixture fixture)
     {
-        var probe = _probe;
-        _factory = factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment("Development");
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{nameof(IngressStampingTests)}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-            builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "500");
-            builder.UseSetting("Gateway:WebSql:Enabled", "true");
-            builder.UseSetting("Gateway:OData:Enabled", "true");
-            builder.UseSetting("Gateway:Mcp:Enabled", "true");
-            builder.UseSetting("Gateway:Arrow:Enabled", "true");
-            builder.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
-            builder.ConfigureServices(services =>
-            {
-                services.AddSingleton(probe);
-                services.RemoveAll<IIngressTransportContext>();
-                services.AddScoped<IIngressTransportContext>(sp => new RecordingContext(new IngressTransportContext(), sp.GetRequiredService<Probe>()));
-
-                // Records the ingress the executing (background) scope sees; throws afterwards so nothing real runs.
-                services.RemoveAll<IGovernedSqlExecutionService>();
-                services.AddScoped<IGovernedSqlExecutionService>(sp =>
-                {
-                    var context = sp.GetRequiredService<IIngressTransportContext>();
-                    var sub = Substitute.For<IGovernedSqlExecutionService>();
-                    sub.ExecuteQueryBufferedAsync(default!, default!, default, default)
-                        .ReturnsForAnyArgs<Task<GovernedSqlResult>>(_ =>
-                        {
-                            probe.Executed.Add(context.Current);
-                            probe.FirstExecution.Release();
-                            return Task.FromException<GovernedSqlResult>(new InvalidOperationException("probe"));
-                        });
-                    return sub;
-                });
-            });
-        });
+        _factory = fixture.Factory;
+        _probe = fixture.Probe;
     }
 
-    private sealed class Probe
+    public sealed class Fixture : IDisposable
+    {
+        private readonly WebApplicationFactory<Program> _root = new();
+        public Probe Probe { get; } = new();
+        public WebApplicationFactory<Program> Factory { get; }
+
+        public Fixture()
+        {
+            var probe = Probe;
+            Factory = _root.WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Development");
+                builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                // WP-SIMPL-51: the shared per-principal cost bucket meters every WebSQL/Trino statement; these tests run many statements
+                // (or a recursive CTE priced above the default Standard capacity) as one principal, so the Standard tier gets ample capacity.
+                builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "1000000");
+                builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:TokenRefillRatePerSecond", "100000");
+                builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
+                builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "500");
+                builder.UseSetting("Gateway:WebSql:Enabled", "true");
+                builder.UseSetting("Gateway:OData:Enabled", "true");
+                builder.UseSetting("Gateway:Mcp:Enabled", "true");
+                builder.UseSetting("Gateway:Arrow:Enabled", "true");
+                builder.UseSetting("Gateway:DuckDbOlap:Enabled", "true");
+                builder.ConfigureServices(services =>
+                {
+                    services.AddSingleton(probe);
+                    services.RemoveAll<IIngressTransportContext>();
+                    services.AddScoped<IIngressTransportContext>(sp => new RecordingContext(new IngressTransportContext(), sp.GetRequiredService<Probe>()));
+
+                    // Records the ingress the executing (background) scope sees; throws afterwards so nothing real runs.
+                    services.RemoveAll<IGovernedSqlExecutionService>();
+                    services.AddScoped<IGovernedSqlExecutionService>(sp =>
+                    {
+                        var context = sp.GetRequiredService<IIngressTransportContext>();
+                        var sub = Substitute.For<IGovernedSqlExecutionService>();
+                        sub.ExecuteQueryBufferedAsync(default!, default!, default, default)
+                            .ReturnsForAnyArgs<Task<GovernedSqlResult>>(_ =>
+                            {
+                                probe.Executed.Add(context.Current);
+                                probe.FirstExecution.Release();
+                                return Task.FromException<GovernedSqlResult>(new InvalidOperationException("probe"));
+                            });
+                        return sub;
+                    });
+                });
+            });
+        }
+
+        public void Dispose()
+        {
+            Factory.Dispose();
+            _root.Dispose();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        }
+    }
+
+    public sealed class Probe
     {
         public ConcurrentQueue<DataSourceTransportFlags> Stamped { get; } = new();
 

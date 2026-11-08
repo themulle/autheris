@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// EXT-05: POST /api/extensions/dbt/sync hands the server-resolved request tenant and the canonical ClusterAdmin flag to the
@@ -31,8 +32,8 @@ public sealed class DbtSyncEndpointCallerTests : IClassFixture<WebApplicationFac
         {
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("DbtSyncEndpointCallerTests"));
             builder.ConfigureTestServices(services =>
             {
                 services.AddSingleton(_service);

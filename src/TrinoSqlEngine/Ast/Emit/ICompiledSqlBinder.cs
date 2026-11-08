@@ -241,6 +241,10 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
             {
                 throw new SecurityException("Positional client parameters are not supported.");
             }
+            else if (bound.Origin == ParameterOrigin.PageOffset && value is null)
+            {
+                throw new SecurityException("A PageOffset slot requires a server-issued bound value.");
+            }
 
             ValidateValue(bound, value);
             if (RejectsEmbeddedNul && value is string text && text.Contains('\0', StringComparison.Ordinal))

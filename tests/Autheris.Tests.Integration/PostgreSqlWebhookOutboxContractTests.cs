@@ -2,6 +2,8 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Threading.Tasks;
+using Xunit;
+using Shouldly;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Options;
@@ -56,5 +58,22 @@ public sealed class PostgreSqlWebhookOutboxContractTests : WebhookOutboxContract
         });
         var repo = Track(GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env));
         return Task.FromResult<IWebhookOutbox?>(repo);
+    }
+
+    [Fact]
+    public async Task EventSurvivesRepositoryRestart()
+    {
+        var first = await OpenAsync();
+        if (first is null)
+        {
+            return;
+        }
+
+        (await first.EnqueueAsync(Msg(eventId: "persisted"))).ShouldBeTrue();
+
+        var second = (await OpenAsync())!;
+        var claimed = await second.ClaimBatchAsync(5, Now, Lease, "w1");
+
+        claimed.ShouldHaveSingleItem().EventId.ShouldBe("persisted");
     }
 }

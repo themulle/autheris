@@ -27,7 +27,7 @@ public sealed class CompositionDescriptorSnapshotTests
     [Theory]
     [Trait("Category", "Security")]
     [Trait("SecurityCondition", "ARCH-MNT-14-SC-05")]
-    [InlineData("dev-sqlite")]
+    [InlineData("dev")]
     [InlineData("production-like")]
     public void Composition_DescriptorSnapshot_IsStable(string profile)
     {

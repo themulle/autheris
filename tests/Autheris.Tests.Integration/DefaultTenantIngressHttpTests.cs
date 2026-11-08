@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// WP-DT-7 / DT-SC-01, DT-SC-09: tenant ingress at HTTP level (Docker-free). A principal without tenant claim is assigned the
@@ -15,37 +16,14 @@ using Xunit;
 /// never reach protected endpoints.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class DefaultTenantIngressHttpTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantIngressHttpTests.Fixture>
 {
     private const string DefaultTenant = "dflt-ingress";
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly Fixture _fixture;
 
-    public DefaultTenantIngressHttpTests(WebApplicationFactory<Program> factory) => _factory = factory;
+    public DefaultTenantIngressHttpTests(Fixture fixture) => _fixture = fixture;
 
-    private WebApplicationFactory<Program> Host(string? defaultTenantId) =>
-        _factory.WithWebHostBuilder(b =>
-        {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-DtIngress-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-            b.UseSetting("Gateway:Mcp:Enabled", "true");
-            b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-            b.UseSetting("Gateway:Rebac:Enabled", "true");
-            b.UseSetting("Gateway:WebSql:Enabled", "true");
-            b.UseSetting("Gateway:Arrow:Enabled", "true");
-            b.UseSetting("Gateway:Modules:Enabled:0", "lakehouse");
-            b.UseSetting("Gateway:Lakehouse:Enabled", "true");
-            if (defaultTenantId is not null)
-            {
-                b.UseSetting("Gateway:Tenancy:DefaultTenantId", defaultTenantId);
-            }
-            else
-            {
-                // appsettings.Development.json configures D; an empty value is rejected, so the key is nulled.
-                b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = null }));
-            }
-        });
+    private WebApplicationFactory<Program> Host(string? defaultTenantId) => _fixture.Host(defaultTenantId);
 
     public static TheoryData<string, string, string?> ClaimlessEndpoints => new()
     {
@@ -85,8 +63,8 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<WebApplication
     [MemberData(nameof(ClaimlessEndpoints))]
     public async Task DT_SC_01_Claimless_Principal_Without_Default_Tenant_Is_Refused_With_TenantUnresolved(string method, string path, string? body)
     {
-        await using var host = Host(null);
-        var client = host.CreateClient();
+        var host = Host(null);
+        using var client = host.CreateClient();
 
         var response = await client.SendAsync(Request(method, path, body, authenticated: true));
         var text = await response.Content.ReadAsStringAsync();
@@ -101,8 +79,8 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<WebApplication
     [MemberData(nameof(ClaimlessEndpoints))]
     public async Task DT_SC_01_Claimless_Principal_With_Default_Tenant_Is_Not_Refused_As_Unresolved(string method, string path, string? body)
     {
-        await using var host = Host(DefaultTenant);
-        var client = host.CreateClient();
+        var host = Host(DefaultTenant);
+        using var client = host.CreateClient();
 
         var response = await client.SendAsync(Request(method, path, body, authenticated: true));
         var text = await response.Content.ReadAsStringAsync();
@@ -114,7 +92,7 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<WebApplication
     [Fact]
     public async Task DT_SC_01_Rebac_Works_For_The_Default_Tenant_Of_A_Claimless_Principal()
     {
-        await using var host = Host(DefaultTenant);
+        var host = Host(DefaultTenant);
         using (var scope = host.Services.CreateScope())
         {
             var store = scope.ServiceProvider.GetRequiredService<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>();
@@ -122,7 +100,7 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<WebApplication
             await store.AddTuplesAsync(new[] { new Autheris.Domain.Model.RebacTuple("other-tenant", "S-1-5-21-DT7-BOB", "viewer", "table:sales.public.dt7_invoices") }, CancellationToken.None);
         }
 
-        var client = host.CreateClient();
+        using var client = host.CreateClient();
         var request = Request("GET", "/api/v1/rebac/tuples", null, authenticated: true);
         request.Headers.Remove("X-Test-Roles");
         request.Headers.Add("X-Test-Roles", "ClusterAdmin");
@@ -145,8 +123,8 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<WebApplication
     {
         foreach (var defaultTenant in new string?[] { null, DefaultTenant })
         {
-            await using var host = Host(defaultTenant);
-            var client = host.CreateClient();
+            var host = Host(defaultTenant);
+            using var client = host.CreateClient();
 
             var response = await client.SendAsync(Request("GET", path, null, authenticated: false));
 
@@ -161,8 +139,8 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<WebApplication
     [InlineData("/api/v1/sql", """{"sql":"SELECT 1"}""")]
     public async Task DT_SC_09_Anonymous_Post_Is_Unauthorized(string path, string body)
     {
-        await using var host = Host(DefaultTenant);
-        var client = host.CreateClient();
+        var host = Host(DefaultTenant);
+        using var client = host.CreateClient();
 
         var response = await client.SendAsync(Request("POST", path, body, authenticated: false));
 
@@ -176,11 +154,61 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<WebApplication
     {
         foreach (var defaultTenant in new string?[] { null, DefaultTenant })
         {
-            await using var host = Host(defaultTenant);
-            var response = await host.CreateClient().GetAsync(path);
+            var host = Host(defaultTenant);
+            using var client = host.CreateClient();
+            var response = await client.GetAsync(path);
             response.StatusCode.ShouldBe(HttpStatusCode.OK);
         }
     }
 
     private static string Truncate(string s) => s.Length <= 300 ? s : s[..300];
+
+    public sealed class Fixture : IDisposable
+    {
+        private readonly WebApplicationFactory<Program> _root = new();
+        private readonly WebApplicationFactory<Program> _withoutDefaultTenant;
+        private readonly WebApplicationFactory<Program> _withDefaultTenant;
+
+        public Fixture()
+        {
+            _withoutDefaultTenant = CreateHost(null);
+            _withDefaultTenant = CreateHost(DefaultTenant);
+        }
+
+        public WebApplicationFactory<Program> Host(string? defaultTenantId) =>
+            defaultTenantId is null ? _withoutDefaultTenant : _withDefaultTenant;
+
+        private WebApplicationFactory<Program> CreateHost(string? defaultTenantId) =>
+            _root.WithWebHostBuilder(b =>
+            {
+                b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
+                b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
+                b.UseSetting("Gateway:Mcp:Enabled", "true");
+                b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+                b.UseSetting("Gateway:Rebac:Enabled", "true");
+                b.UseSetting("Gateway:WebSql:Enabled", "true");
+                b.UseSetting("Gateway:Arrow:Enabled", "true");
+                b.UseSetting("Gateway:Modules:Enabled:0", "lakehouse");
+                b.UseSetting("Gateway:Lakehouse:Enabled", "true");
+                if (defaultTenantId is not null)
+                {
+                    b.UseSetting("Gateway:Tenancy:DefaultTenantId", defaultTenantId);
+                }
+                else
+                {
+                    // appsettings.Development.json configures D; an empty value is rejected, so the key is nulled.
+                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = null }));
+                }
+            });
+
+        public void Dispose()
+        {
+            _withoutDefaultTenant.Dispose();
+            _withDefaultTenant.Dispose();
+            _root.Dispose();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        }
+    }
 }

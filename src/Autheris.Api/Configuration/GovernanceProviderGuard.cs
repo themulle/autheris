@@ -11,7 +11,7 @@ namespace Autheris.Api.Configuration;
 public static partial class GovernanceProviderGuard
 {
     public const string UnsupportedProviderMessage =
-        "Governance provider unsupported (OD-1). See docs/operations/migration-simplification.md.";
+        "Governance provider unsupported (OD-1). Accepted providers: PostgreSql, SqlServer. See docs/operations/migration-simplification.md.";
 
     private static readonly string[] ProviderKeys =
     [
@@ -52,6 +52,7 @@ public static partial class GovernanceProviderGuard
                 continue;
             }
 
+            // only the runtime connection string keys count; a migration-only connection string never satisfies the requirement
             if (key is "GovernanceDb:ConnectionString" or "Gateway:GovernanceDb:ConnectionString")
             {
                 hasNonEmptyConnectionString = true;
@@ -63,7 +64,6 @@ public static partial class GovernanceProviderGuard
             }
         }
 
-        var hasProvider = false;
         foreach (var key in ProviderKeys)
         {
             var rawProvider = cfg[key];
@@ -72,7 +72,6 @@ public static partial class GovernanceProviderGuard
                 continue;
             }
 
-            hasProvider = true;
             var provider = rawProvider.Trim();
             if (!IsSupportedProvider(provider))
             {
@@ -80,7 +79,8 @@ public static partial class GovernanceProviderGuard
             }
         }
 
-        if (!hasProvider && !hasNonEmptyConnectionString)
+        // no provider or an empty runtime connection string fails in every environment (no localhost default).
+        if (!hasNonEmptyConnectionString)
         {
             throw new InvalidOperationException(UnsupportedProviderMessage);
         }

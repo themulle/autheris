@@ -67,6 +67,139 @@ public sealed class PostgreSqlGovernanceSchemaShapeTests : IClassFixture<Postgre
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_94_08c_ShapeTableName_IsParameterBound()
+    {
+        // Ported from the former SQLite catalog reader test (WP-SIMPL-11).
+        await using var db = await PostgreSqlTestDatabase.CreateAsync();
+        await ExecAsync(db.ConnectionString, "CREATE TABLE t1 (id TEXT PRIMARY KEY, v TEXT); CREATE UNIQUE INDEX ux_t1_v ON t1 (v);");
+        var hostile = new[] { "x'; DROP TABLE t1;--", "t1' OR '1'='1", "t1;", "\"t1\"", "t1" };
+        await using var conn = new NpgsqlConnection(db.ConnectionString);
+        await conn.OpenAsync();
+
+        var shape = await new PostgreSqlSchemaCatalogReader().ReadAsync(conn, hostile, CancellationToken.None);
+
+        shape.Tables.Select(t => t.Name).ShouldBe(["t1"]);
+        shape.Tables[0].PrimaryKey.ShouldBe(["id"]);
+        shape.Tables[0].Indexes.ShouldContain(i => i.Columns.SequenceEqual(new[] { "v" }));
+        (await ScalarAsync(db.ConnectionString, "SELECT COUNT(*) FROM pg_class WHERE relname = 't1'")).ShouldBe(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SchemaCatalogReader_Command_EnlistsTheActiveTransaction()
+    {
+        // Ported from the former SQLite catalog reader test (WP-SIMPL-11): PostgreSQL requires every command to enlist the transaction.
+        await using var db = await PostgreSqlTestDatabase.CreateAsync();
+        await using var conn = new NpgsqlConnection(db.ConnectionString);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+
+        using var withTx = SchemaCatalogReaderSupport.Command(new CatalogSession(conn, tx), "SELECT 1");
+
+        withTx.Transaction.ShouldBe(tx);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Verifier_InsideATransaction_ReadsThroughIt()
+    {
+        await using var db = await PostgreSqlTestDatabase.CreateAsync();
+        await using var conn = new NpgsqlConnection(db.ConnectionString);
+        await conn.OpenAsync();
+        await using var tx = await conn.BeginTransactionAsync();
+        var verifier = new GovernanceSchemaShapeVerifier("postgresql", new PostgreSqlSchemaCatalogReader());
+
+        var result = await verifier.VerifyAsync(conn, CancellationToken.None, tx);
+
+        result.Deviations.ShouldNotBeEmpty(); // empty database: every table missing, read without error inside the transaction
+    }
+
+    private static async Task<SchemaShapeResult> VerifyAfterBaselineAsync(params string[] statements)
+    {
+        // Ported from the former SQLite verifier tests (WP-SIMPL-11): the baseline DDL (v1.5.0 shape) is applied directly, then altered.
+        await using var db = await PostgreSqlTestDatabase.CreateAsync();
+        await using var conn = new NpgsqlConnection(db.ConnectionString);
+        await conn.OpenAsync();
+        PostgreSqlBaselineSchema.Apply(conn, null);
+        foreach (var statement in statements)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = statement;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        return await new GovernanceSchemaShapeVerifier("postgresql", new PostgreSqlSchemaCatalogReader()).VerifyAsync(conn, CancellationToken.None);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Verify_WhenConsumerAppTableMissing_FailsClosed()
+    {
+        // SEC-286-2 / AC-3: a missing CONSUMER_APP_* table is a not-ready deviation that names the table.
+        var result = await VerifyAfterBaselineAsync("DROP TABLE consumer_app_actor_daily");
+
+        var deviation = result.Deviations.ShouldHaveSingleItem();
+        deviation.Kind.ShouldBe(SchemaDeviationKind.MissingTable);
+        deviation.Table.ShouldBe("consumer_app_actor_daily");
+        GovernanceSchemaShapeComparer.FormatMessage("PostgreSQL", "db", [1], [], result.Deviations).ShouldContain("consumer_app_actor_daily");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Verify_WhenConsumerAppColumnMissing_FailsClosed()
+    {
+        var result = await VerifyAfterBaselineAsync("ALTER TABLE consumer_app_daily DROP COLUMN rej_other");
+
+        var deviation = result.Deviations.ShouldHaveSingleItem();
+        deviation.Kind.ShouldBe(SchemaDeviationKind.MissingColumn);
+        deviation.Table.ShouldBe("consumer_app_daily");
+        deviation.Name.ShouldBe("rej_other");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Verify_OnExistingBaselineWithoutConsumerTables_IsNotReady()
+    {
+        var result = await VerifyAfterBaselineAsync(
+            "DROP TABLE consumer_app_daily", "DROP TABLE consumer_app_actor_daily", "DROP TABLE consumer_app_queryname_daily");
+
+        result.Deviations.Select(d => d.Table).ShouldBe(
+            ["consumer_app_actor_daily", "consumer_app_daily", "consumer_app_queryname_daily"], ignoreOrder: true);
+        result.Deviations.ShouldAllBe(d => d.Kind == SchemaDeviationKind.MissingTable);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Verify_AfterBaselineOnly_HasNoConsumerAppDeviation()
+    {
+        (await VerifyAfterBaselineAsync()).Deviations.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Adoption_PartialBaselineWithoutHistory_IsCompleted()
+    {
+        await using var db = await PostgreSqlTestDatabase.CreateAsync();
+        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
+        {
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = db.ConnectionString, SeedDemoData = false }
+        });
+        using (var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options))
+        {
+            await new PostgreSqlGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = 1 }.RunAsync();
+        }
+
+        await ExecAsync(db.ConnectionString, "DROP TABLE autheris_schema_migrations");
+
+        using (var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options))
+        {
+            await new PostgreSqlGovernanceMigrationRunner(repository, options) { StepVersionCapOverride = 1 }.RunAsync();
+        }
+
+        (await ScalarAsync(db.ConnectionString, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 1")).ShouldBe(1);
+    }
+
+    [Fact]
     public async Task AppliedBaseline_PassesApplyAndVerify_AndRunsAreIdempotent()
     {
 

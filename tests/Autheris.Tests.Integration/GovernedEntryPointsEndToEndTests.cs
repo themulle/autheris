@@ -20,6 +20,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// WP-X1 (M-7, plan section 28.2): every governed SQL-text entry point reaches the compiler and the binder, proven through the real DI
@@ -57,8 +58,8 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
         {
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-x1ep-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GovernedEntryPointsEndToEndTests"));
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             b.UseSetting("Gateway:OpenSchema", "true");
             b.UseSetting("Gateway:Rebac:Enabled", "false");
@@ -77,6 +78,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
 
     public void Dispose()
     {
+        _factory.Dispose();
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
     }

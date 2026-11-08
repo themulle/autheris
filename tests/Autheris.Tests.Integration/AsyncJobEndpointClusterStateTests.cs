@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>WP-ARC-A-12: an unavailable cluster state or a node-local result surfaces as HTTP 503, never as 404 or 500.</summary>
 public sealed class AsyncJobEndpointClusterStateTests : IClassFixture<WebApplicationFactory<Program>>
@@ -29,8 +30,8 @@ public sealed class AsyncJobEndpointClusterStateTests : IClassFixture<WebApplica
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("AsyncJobEndpointClusterStateTests"));
             builder.ConfigureServices(services =>
             {
                 services.AddSingleton<IAsyncQueryJobManager, UnavailableJobManager>();

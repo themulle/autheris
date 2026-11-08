@@ -22,12 +22,20 @@ project = root / "tests" / "Autheris.Tests.Integration"
 
 
 def classes() -> list[str]:
-    pattern = re.compile(r"^\s*public\s+(?:sealed\s+|partial\s+|abstract\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
+    ns_pattern = re.compile(r"^\s*namespace\s+([A-Za-z0-9_.]+)", re.MULTILINE)
+    cls_pattern = re.compile(r"^\s*public\s+(?:sealed\s+|partial\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
     found = set()
     for path in project.rglob("*.cs"):
         if any(part in ("bin", "obj") for part in path.parts):
             continue
-        found.update(pattern.findall(path.read_text(encoding="utf-8-sig")))
+        text = path.read_text(encoding="utf-8-sig")
+        ns_match = ns_pattern.search(text)
+        ns = ns_match.group(1) if ns_match else NAMESPACE.rstrip(".")
+        prefix = f"{ns[len(NAMESPACE):]}." if ns.startswith(NAMESPACE) else ""
+        for name in cls_pattern.findall(text):
+            if name.endswith("Fixture"):
+                continue
+            found.add(f"{prefix}{name}")
     return sorted(found)
 
 

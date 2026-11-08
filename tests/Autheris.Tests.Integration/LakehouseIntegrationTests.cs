@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
@@ -107,8 +108,8 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("LakehouseIntegrationTests"));
             builder.UseSetting("Gateway:Modules:Enabled:0", "lakehouse");
             builder.UseSetting("Gateway:Lakehouse:Enabled", "true");
             builder.UseSetting("Gateway:Lakehouse:Storage:Provider", "Local");

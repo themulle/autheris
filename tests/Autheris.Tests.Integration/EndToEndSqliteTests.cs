@@ -18,6 +18,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// End-to-End: HTTP -> ASP.NET-Pipeline (CSRF, Auth, Governance) -> Governed SQL / Endpoints -> echte SQLite-Datei.
@@ -25,57 +26,99 @@ using Xunit;
 /// bekannten Kran-Daten, damit echte (nicht synthetische) Zeilen geprueft werden koennen.
 /// Lauf: dotnet test tests/Autheris.Tests.Integration --filter "FullyQualifiedName~EndToEndSqlite"
 /// </summary>
-public sealed class EndToEndSqliteTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixture>
 {
-    private readonly string _workDir;
-    private readonly string _dbPath;
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly Fixture _fixture;
+    private string _dbPath => _fixture.DbPath;
+    private WebApplicationFactory<Program> _factory => _fixture.Factory;
 
-    public EndToEndSqliteTests(WebApplicationFactory<Program> factory)
+    public EndToEndSqliteTests(Fixture fixture)
     {
-        _workDir = Path.Combine(Path.GetTempPath(), "autheris-e2e-" + Guid.NewGuid().ToString("N"));
-        var queriesDir = Path.Combine(_workDir, "queries");
-        Directory.CreateDirectory(queriesDir);
-        _dbPath = Path.Combine(_workDir, "data.db");
-
-        SeedSqlite(_dbPath);
-
-        File.WriteAllText(Path.Combine(queriesDir, "cranes_by_type.sql"),
-            "-- @name cranes_by_type\n-- @datasource default\n-- @summary Krane nach Typ\n-- @method GET\n\n" +
-            "SELECT serial_number, crane_type, tonnage FROM e2e_cranes WHERE crane_type = @crane_type ORDER BY serial_number");
-
-        _factory = factory.WithWebHostBuilder(b =>
-        {
-            b.UseEnvironment("Development");
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-EndToEndSqliteTests-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-            b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            b.UseSetting("Gateway:OpenSchema", "true");
-            b.UseSetting("Gateway:Rebac:Enabled", "false");
-
-            // Echte Datenquelle: SQLite-Datei
-            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}");
-
-            b.UseSetting("Gateway:WebSql:Enabled", "true");
-            b.UseSetting("Gateway:WebSql:AllowDml", "false");
-            b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
-
-            b.UseSetting("Gateway:SqlEndpoints:Enabled", "true");
-            b.UseSetting("Gateway:SqlEndpoints:Directory", queriesDir);
-            b.UseSetting("Gateway:SqlEndpoints:EnableHotReload", "false");
-            b.UseSetting("Gateway:SqlEndpoints:AutoSyncFromDbt", "false");
-
-            b.UseSetting("Gateway:Mcp:Enabled", "true");
-        });
+        _fixture = fixture;
     }
 
-    public void Dispose()
+    public sealed class Fixture : IDisposable
     {
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        private readonly WebApplicationFactory<Program> _root = new();
+        private readonly string _workDir;
+        private bool _seeded;
+
+        public string DbPath { get; }
+        public WebApplicationFactory<Program> Factory { get; }
+
+        public Fixture()
+        {
+            _workDir = Path.Combine(Path.GetTempPath(), "autheris-e2e-" + Guid.NewGuid().ToString("N"));
+            var queriesDir = Path.Combine(_workDir, "queries");
+            Directory.CreateDirectory(queriesDir);
+            DbPath = Path.Combine(_workDir, "data.db");
+
+            SeedSqlite(DbPath);
+
+            File.WriteAllText(Path.Combine(queriesDir, "cranes_by_type.sql"),
+                "-- @name cranes_by_type\n-- @datasource default\n-- @summary Krane nach Typ\n-- @method GET\n\n" +
+                "SELECT serial_number, crane_type, tonnage FROM e2e_cranes WHERE crane_type = @crane_type ORDER BY serial_number");
+
+            var dbPath = DbPath;
+            Factory = _root.WithWebHostBuilder(b =>
+            {
+                b.UseEnvironment("Development");
+                b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
+                b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
+                b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
+                b.UseSetting("Gateway:OpenSchema", "true");
+                b.UseSetting("Gateway:Rebac:Enabled", "false");
+
+                // Echte Datenquelle: SQLite-Datei
+                b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
+                b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
+
+                b.UseSetting("Gateway:WebSql:Enabled", "true");
+                b.UseSetting("Gateway:WebSql:AllowDml", "false");
+                b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
+
+                b.UseSetting("Gateway:SqlEndpoints:Enabled", "true");
+                b.UseSetting("Gateway:SqlEndpoints:Directory", queriesDir);
+                b.UseSetting("Gateway:SqlEndpoints:EnableHotReload", "false");
+                b.UseSetting("Gateway:SqlEndpoints:AutoSyncFromDbt", "false");
+
+                b.UseSetting("Gateway:Mcp:Enabled", "true");
+            });
+        }
+
+        public async Task EnsureCatalogRegisteredAsync()
+        {
+            if (_seeded)
+            {
+                return;
+            }
+
+            using var scope = Factory.Services.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
+            await repo.UpsertTableMetadataAsync(new TableMetadata
+            {
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
+                Identifier = new TableIdentifier("default", "main", "e2e_cranes"),
+                Columns = new List<TableColumn>
+                {
+                    new() { ColumnName = "id", DataType = "integer" },
+                    new() { ColumnName = "serial_number", DataType = "varchar" },
+                    new() { ColumnName = "crane_type", DataType = "varchar" },
+                    new() { ColumnName = "tonnage", DataType = "integer" },
+                }
+            });
+            _seeded = true;
+        }
+
+        public void Dispose()
+        {
+            Factory.Dispose();
+            _root.Dispose();
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        }
     }
 
     private static void SeedSqlite(string path)
@@ -89,23 +132,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
         cmd.ExecuteNonQuery();
     }
 
-    private async Task RegisterCatalogAsync()
-    {
-        using var scope = _factory.Services.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
-        await repo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
-            Identifier = new TableIdentifier("default", "main", "e2e_cranes"),
-            Columns = new List<TableColumn>
-            {
-                new() { ColumnName = "id", DataType = "integer" },
-                new() { ColumnName = "serial_number", DataType = "varchar" },
-                new() { ColumnName = "crane_type", DataType = "varchar" },
-                new() { ColumnName = "tonnage", DataType = "integer" },
-            }
-        });
-    }
+    private Task RegisterCatalogAsync() => _fixture.EnsureCatalogRegisteredAsync();
 
     private HttpClient Client(bool authenticated = true, string roles = "Reader")
     {

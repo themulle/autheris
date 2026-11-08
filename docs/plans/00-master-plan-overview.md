@@ -11,7 +11,7 @@
 
 > [!IMPORTANT]
 > **Directive for all AI agents and contributors:**
-> 1. **Language:** All plans, requirements, and documentation must be written in **English** (aligned with [README.md](file:///root/autheris/README.md)).
+> 1. **Language:** All plans, requirements, and documentation must be written in **English** (aligned with [README.md](../../README.md)).
 > 2. **Repository of Requirements:** All new requirements, design documents, and feature requests must be stored in [`docs/plans/`](./).
 > 3. **Consolidated Category Structure:** Active work is consolidated under three core categories:
 >    - [`security.md`](security.md): Threat modeling, AppSec findings, hardening, and WORM compliance.

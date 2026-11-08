@@ -31,7 +31,7 @@ public sealed class VirtualFilterKeySetProviderWiringTests : IDisposable
         var keySource = _db.Options();
         var options = new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = $"Data Source=vf_keys_wiring_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" },
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql },
             DataSources = keySource.DataSources,
             VirtualFilters = keySource.VirtualFilters
         };

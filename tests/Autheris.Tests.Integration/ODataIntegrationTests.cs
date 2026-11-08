@@ -16,6 +16,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
@@ -34,8 +35,8 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
         {
             builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("ODataIntegrationTests"));
             builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataDbPath}");
         });
@@ -43,6 +44,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
 
     public void Dispose()
     {
+        _factory.Dispose();
         SqliteConnection.ClearAllPools();
         try { File.Delete(_dataDbPath); } catch (IOException) { }
     }

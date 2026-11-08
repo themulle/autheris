@@ -48,13 +48,12 @@ public sealed partial class HelmGovernanceMigrationJobTests
     private static partial Regex EnabledFalse();
 
     [Fact]
-    public void Template_IsOnlyRenderedWhenEnabled_AndFailsForSqlite()
+    public void Template_IsOnlyRenderedWhenEnabled_AndHasNoSqliteBranch()
     {
         var job = Job();
 
         job.ShouldStartWith("{{- if .Values.governanceMigrationJob.enabled }}");
-        job.ShouldContain("fail ");
-        job.ShouldContain("sqlite");
+        job.ToLowerInvariant().ShouldNotContain("sqlite");
     }
 
     [Fact]

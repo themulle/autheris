@@ -1,6 +1,5 @@
 using System.Data.Common;
 using Microsoft.Data.SqlClient;
-using Microsoft.Data.Sqlite;
 using Npgsql;
 using Shouldly;
 using Xunit;
@@ -14,19 +13,16 @@ internal sealed class DialectKit(string name, Func<DbCommand> commandFactory, Fu
 
     public static readonly DialectKit SqlServer = new("SqlServer", () => new SqlCommand(), (c, n, v) => ((SqlCommand)c).Parameters.AddWithValue(n, v));
 
-    public static readonly DialectKit Sqlite = new("Sqlite", () => new SqliteCommand(), (c, n, v) => ((SqliteCommand)c).Parameters.AddWithValue(n, v));
-
     public string Name => name;
 
     public RecordingDbConnection NewConnection() => new(commandFactory);
 
-    public static TheoryData<string> Names() => new() { "PostgreSql", "SqlServer", "Sqlite" };
+    public static TheoryData<string> Names() => new() { "PostgreSql", "SqlServer" };
 
     public static DialectKit Of(string dialect) => dialect switch
     {
         "PostgreSql" => PostgreSql,
         "SqlServer" => SqlServer,
-        "Sqlite" => Sqlite,
         _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
 
