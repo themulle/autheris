@@ -16,11 +16,6 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
     private readonly ConcurrentDictionary<string, IdentityRealm> _realmsByIssuer = new(StringComparer.OrdinalIgnoreCase);
     private string? _defaultRealmId;
 
-    public IdentityRealmRegistry()
-    {
-        Sid.RealmLookup = GetRealm;
-    }
-
     public IdentityRealm? ResolveRealmForScheme(string? issuer, string? authenticationType)
     {
         if (!string.IsNullOrWhiteSpace(issuer))

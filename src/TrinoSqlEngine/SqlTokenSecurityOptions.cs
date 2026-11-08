@@ -78,6 +78,11 @@ public sealed record SqlTokenSecurityOptions
     public bool RejectReservedIdentifiers { get; init; }
 
     /// <summary>
+    /// When true, allows a single trailing statement terminator (';') on the client statement, moving it to the hidden channel.
+    /// </summary>
+    public bool AllowTrailingStatementTerminator { get; init; }
+
+    /// <summary>
     /// The strict switches for a statement compiled for <paramref name="dialect"/> (used by the policy producers that parse administrator
     /// text, such as virtual filter definitions). Bracket sequences are rejected for the dialects that lex <c>[...]</c> as a quoted
     /// identifier (SQL Server, SQLite), and <c>${</c> for Databricks; dollar quoting is rejected everywhere.

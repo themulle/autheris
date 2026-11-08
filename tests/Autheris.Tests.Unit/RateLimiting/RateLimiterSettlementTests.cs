@@ -92,7 +92,7 @@ public sealed class RateLimiterSettlementTests
     }
 
     [Fact]
-    public async Task SettleCostQuotaAsync_ClampsAtZero_NeverUnderflowsOrBecomesNegative()
+    public async Task SettleCostQuotaAsync_AllowsNegativeBalance_WhenDebitExceedsTokens()
     {
         var policy = CreatePolicy(maxCapacity: 100);
         var key = "test-client-" + Guid.NewGuid();
@@ -104,7 +104,7 @@ public sealed class RateLimiterSettlementTests
         var settle = await _limiter.SettleCostQuotaAsync(key, 90, 500, policy, CancellationToken.None);
 
         settle.Allowed.ShouldBeTrue();
-        settle.RemainingTokens.ShouldBe(0);
+        settle.RemainingTokens.ShouldBe(-400);
     }
 
     [Fact]

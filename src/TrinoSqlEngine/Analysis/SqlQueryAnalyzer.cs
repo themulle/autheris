@@ -25,11 +25,30 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     private bool _hasInlineFunctionDefinitions;
 
     private int _joinCount;
+    private int _crossJoinCount;
+    private int _setOperationCount;
+    private bool _hasRootOrderBy;
+    private bool _hasRootOffset;
+    private readonly List<CrossJoinTarget> _crossJoins = new();
     private int _currentSubqueryDepth;
     private int _maxSubqueryDepth;
     private bool _hasExplicitLimit;
     private long? _explicitLimitValue;
     private bool _isRootQuerySpecification = true;
+
+    private sealed class CteStats
+    {
+        public int JoinCount { get; set; }
+        public int CrossJoinCount { get; set; }
+        public List<CrossJoinTarget> CrossJoins { get; } = new();
+        public int SetOperationCount { get; set; }
+        public int MaxSubqueryDepth { get; set; }
+        public List<string> References { get; } = new();
+    }
+
+    private readonly Stack<CteStats> _cteStack = new();
+    private readonly Dictionary<string, CteStats> _completedCteStats = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _rootCteReferences = new();
 
     public SqlQueryAnalyzer()
     {
@@ -42,6 +61,31 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
 
         Reset();
         ParseTreeWalker.Default.Walk(this, statementContext);
+
+        void ResolveCte(string name, HashSet<string> visited)
+        {
+            if (!visited.Add(name)) return;
+            if (_completedCteStats.TryGetValue(name, out var cte))
+            {
+                _joinCount += cte.JoinCount;
+                _crossJoinCount += cte.CrossJoinCount;
+                _crossJoins.AddRange(cte.CrossJoins);
+                _setOperationCount += cte.SetOperationCount;
+                if (cte.MaxSubqueryDepth > _maxSubqueryDepth)
+                {
+                    _maxSubqueryDepth = cte.MaxSubqueryDepth;
+                }
+                foreach (var subRef in cte.References)
+                {
+                    ResolveCte(subRef, new HashSet<string>(visited, StringComparer.OrdinalIgnoreCase));
+                }
+            }
+        }
+
+        foreach (var rootRef in _rootCteReferences)
+        {
+            ResolveCte(rootRef, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
 
         return new SqlQueryMetadata(
             StatementType: _statementType,
@@ -60,7 +104,12 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         {
             WindowColumnReferences = _windowColumnReferences.ToArray(),
             HasRecursiveCte = _hasRecursiveCte,
-            HasNonRecursiveSelfReference = _hasNonRecursiveSelfReference
+            HasNonRecursiveSelfReference = _hasNonRecursiveSelfReference,
+            CrossJoinCount = _crossJoinCount,
+            SetOperationCount = _setOperationCount,
+            HasRootOrderBy = _hasRootOrderBy,
+            HasRootOffset = _hasRootOffset,
+            CrossJoins = _crossJoins.ToArray()
         };
     }
 
@@ -84,6 +133,14 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         _hasSessionProperties = false;
         _hasInlineFunctionDefinitions = false;
         _joinCount = 0;
+        _crossJoinCount = 0;
+        _setOperationCount = 0;
+        _hasRootOrderBy = false;
+        _hasRootOffset = false;
+        _crossJoins.Clear();
+        _cteStack.Clear();
+        _completedCteStats.Clear();
+        _rootCteReferences.Clear();
         _currentSubqueryDepth = 0;
         _maxSubqueryDepth = 0;
         _hasExplicitLimit = false;
@@ -162,6 +219,25 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     public override void EnterTableFunctionInvocation(SqlBaseParser.TableFunctionInvocationContext context)
     {
         _tableFunctionCalls.Add(SqlIdentifierHelper.NormalizeQualifiedName(context.tableFunctionCall().qualifiedName()).ToLowerInvariant());
+        RecordJoin();
+        RecordCrossJoin(new CrossJoinTarget(null, null, true));
+    }
+
+    public override void EnterUnnest(SqlBaseParser.UnnestContext context)
+    {
+        RecordJoin();
+        RecordCrossJoin(new CrossJoinTarget(null, null, true));
+    }
+
+    public override void EnterLateral(SqlBaseParser.LateralContext context)
+    {
+        RecordJoin();
+        RecordCrossJoin(new CrossJoinTarget(null, null, true));
+    }
+
+    public override void EnterSetOperation(SqlBaseParser.SetOperationContext context)
+    {
+        RecordSetOperation();
     }
 
     public override void EnterRootQueryWithSession(SqlBaseParser.RootQueryWithSessionContext context)
@@ -192,6 +268,13 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
 
     public override void EnterNamedQuery(SqlBaseParser.NamedQueryContext context)
     {
+        _currentSubqueryDepth++;
+        if (_currentSubqueryDepth > _maxSubqueryDepth)
+        {
+            _maxSubqueryDepth = _currentSubqueryDepth;
+        }
+        _cteStack.Push(new CteStats());
+
         string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(context.name.GetText());
         if ((context.Parent as SqlBaseParser.WithContext)?.RECURSIVE() != null)
         {
@@ -211,6 +294,16 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     {
         // SEC C-02: CTE names are single-part identifiers (folded scope key, never a dotted string).
         string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(context.name.GetText());
+        if (_cteStack.Count > 0)
+        {
+            var stats = _cteStack.Pop();
+            _completedCteStats[cteKey] = stats;
+        }
+        if (_currentSubqueryDepth > 0)
+        {
+            _currentSubqueryDepth--;
+        }
+
         if ((context.Parent as SqlBaseParser.WithContext)?.RECURSIVE() == null && _definingNonRecursiveCtes.Count > 0)
         {
             _definingNonRecursiveCtes.RemoveAt(_definingNonRecursiveCtes.Count - 1);
@@ -222,6 +315,10 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     public override void EnterSubquery(SqlBaseParser.SubqueryContext context)
     {
         _currentSubqueryDepth++;
+        if (_cteStack.Count > 0 && _currentSubqueryDepth > _cteStack.Peek().MaxSubqueryDepth)
+        {
+            _cteStack.Peek().MaxSubqueryDepth = _currentSubqueryDepth;
+        }
         if (_currentSubqueryDepth > _maxSubqueryDepth)
         {
             _maxSubqueryDepth = _currentSubqueryDepth;
@@ -239,6 +336,10 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     public override void EnterSubqueryRelation(SqlBaseParser.SubqueryRelationContext context)
     {
         _currentSubqueryDepth++;
+        if (_cteStack.Count > 0 && _currentSubqueryDepth > _cteStack.Peek().MaxSubqueryDepth)
+        {
+            _cteStack.Peek().MaxSubqueryDepth = _currentSubqueryDepth;
+        }
         if (_currentSubqueryDepth > _maxSubqueryDepth)
         {
             _maxSubqueryDepth = _currentSubqueryDepth;
@@ -257,7 +358,14 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     {
         if (context.relation() != null && context.relation().Length > 1)
         {
-            _joinCount += (context.relation().Length - 1);
+            int commaJoins = context.relation().Length - 1;
+            for (int i = 0; i < commaJoins; i++)
+            {
+                RecordJoin();
+                string? left = ExtractRelationName(context.relation(i));
+                string? right = ExtractRelationName(context.relation(i + 1));
+                RecordCrossJoin(new CrossJoinTarget(left, right, false));
+            }
         }
 
         if (context.where != null)
@@ -300,7 +408,22 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
 
     public override void EnterJoinRelation(SqlBaseParser.JoinRelationContext context)
     {
-        _joinCount++;
+        RecordJoin();
+        if (context.CROSS() != null)
+        {
+            string? left = ExtractRelationName(context.left);
+            string? right = ExtractRelationName(context.right);
+            RecordCrossJoin(new CrossJoinTarget(left, right, false));
+        }
+        else if (context.joinCriteria() != null && context.joinCriteria().ON() != null)
+        {
+            if (IsConstantExpression(context.joinCriteria().booleanExpression()))
+            {
+                string? left = ExtractRelationName(context.left);
+                string? right = ExtractRelationName((Antlr4.Runtime.RuleContext?)context.rightRelation ?? context.right);
+                RecordCrossJoin(new CrossJoinTarget(left, right, false));
+            }
+        }
     }
 
     public override void EnterJoinCriteria(SqlBaseParser.JoinCriteriaContext context)
@@ -454,16 +577,29 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     {
         // Check top-level limit only on the root query (SEC M-22: CTE bodies and subqueries do not count)
         bool isRoot = context.Parent is SqlBaseParser.QueryContext query && query.Parent is SqlBaseParser.RootQueryContext;
-        if (isRoot && _currentSubqueryDepth == 0 && context.limit != null)
+        if (isRoot && _currentSubqueryDepth == 0)
         {
-            _hasExplicitLimit = true;
-            if (context.limit.rowCount() != null)
+            if (context.limit != null)
             {
-                string text = context.limit.rowCount().GetText();
-                if (long.TryParse(text, out long limitVal))
+                _hasExplicitLimit = true;
+                if (context.limit.rowCount() != null)
                 {
-                    _explicitLimitValue = limitVal;
+                    string text = context.limit.rowCount().GetText();
+                    if (long.TryParse(text, out long limitVal))
+                    {
+                        _explicitLimitValue = limitVal;
+                    }
                 }
+            }
+
+            if (context.orderBy() != null)
+            {
+                _hasRootOrderBy = true;
+            }
+
+            if (context.OFFSET() != null || context.offset != null)
+            {
+                _hasRootOffset = true;
             }
         }
     }
@@ -521,6 +657,14 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             string key = SqlIdentifierHelper.FoldIdentifierForScope(ids[0].GetText());
             if (_cteScopeStack.Peek().Contains(key))
             {
+                if (_cteStack.Count > 0)
+                {
+                    _cteStack.Peek().References.Add(key);
+                }
+                else
+                {
+                    _rootCteReferences.Add(key);
+                }
                 return;
             }
 
@@ -588,6 +732,83 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
                 SchemaQuoted: schemaQuoted,
                 TableNameQuoted: tableNameQuoted));
         }
+    }
+
+    private void RecordJoin()
+    {
+        if (_cteStack.Count > 0)
+        {
+            _cteStack.Peek().JoinCount++;
+        }
+        else
+        {
+            _joinCount++;
+        }
+    }
+
+    private void RecordCrossJoin(CrossJoinTarget target)
+    {
+        if (_cteStack.Count > 0)
+        {
+            _cteStack.Peek().CrossJoinCount++;
+            _cteStack.Peek().CrossJoins.Add(target);
+        }
+        else
+        {
+            _crossJoinCount++;
+            _crossJoins.Add(target);
+        }
+    }
+
+    private void RecordSetOperation()
+    {
+        if (_cteStack.Count > 0)
+        {
+            _cteStack.Peek().SetOperationCount++;
+        }
+        else
+        {
+            _setOperationCount++;
+        }
+    }
+
+    private static string? ExtractRelationName(Antlr4.Runtime.RuleContext? ctx)
+    {
+        if (ctx == null) return null;
+
+        if (ctx is SqlBaseParser.TableNameContext tbl && tbl.qualifiedName() != null)
+        {
+            return SqlIdentifierHelper.NormalizeQualifiedName(tbl.qualifiedName());
+        }
+
+        if (ctx is SqlBaseParser.AliasedRelationContext aliased)
+        {
+            var primaryName = ExtractRelationName(aliased.relationPrimary());
+            if (primaryName != null) return primaryName;
+            if (aliased.identifier() != null)
+            {
+                return SqlIdentifierHelper.NormalizeIdentifier(aliased.identifier().GetText());
+            }
+        }
+
+        for (int i = 0; i < ctx.ChildCount; i++)
+        {
+            if (ctx.GetChild(i) is Antlr4.Runtime.RuleContext child)
+            {
+                var name = ExtractRelationName(child);
+                if (name != null) return name;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsConstantExpression(Antlr4.Runtime.RuleContext? ctx)
+    {
+        if (ctx == null) return false;
+        var refs = new List<FilterColumnReference>();
+        ExtractFilterColumnReferences(ctx, refs);
+        return refs.Count == 0;
     }
 
     private static bool IsQuotedIdentifier(string rawIdentifier)

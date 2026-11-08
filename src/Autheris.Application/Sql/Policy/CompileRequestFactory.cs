@@ -37,7 +37,10 @@ public static class CompileRequestFactory
         IReadOnlySet<string> allowedFunctions,
         TrinoSqlEngine.Ast.Emit.ClientListShapes? clientLists = null,
         bool timeZoneConversionAvailable = false,
-        bool translateDateFunctions = false)
+        bool translateDateFunctions = false,
+        bool bindPageOffset = false,
+        long? pageOffset = null,
+        long maxOffset = 1_000_000)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(options);
@@ -60,18 +63,7 @@ public static class CompileRequestFactory
         {
             TargetDialect = dialect,
             Policy = policy,
-            TokenGuards = new SqlTokenSecurityOptions
-            {
-                RejectComments = true,
-                RejectBackslashInStrings = true,
-                RejectEscapedStringLiterals = true,
-                RejectDollarQuoting = true,
-                RejectBracketLexerDifferentials = dialect is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
-                RejectNonAsciiIdentifiers = true,
-                RejectDotsInQuotedIdentifiers = true,
-                RejectTimeTravelQueries = true,
-                RejectReservedIdentifiers = true   // Phase 5 L3: the gateway prefix autheris_ is reserved in the user statement
-            },
+            TokenGuards = ClientSqlTokenPolicy.Compile(dialect),
             Statements = isDml
                 ? StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge
                 : StatementPermissions.ReadOnly,
@@ -85,7 +77,10 @@ public static class CompileRequestFactory
             // Issue #277 (-11): the only place that reads the flag; every governed compile (WebSQL, MCP, subtree) goes through here.
             // Virtual filters, row-policy fragments and stored endpoints never build their own CompileRequest, so they cannot enable it.
             AllowRecursiveCte = options.AllowRecursiveCte,
-            MaxRecursionDepth = options.MaxRecursionDepth
+            MaxRecursionDepth = options.MaxRecursionDepth,
+            BindPageOffset = bindPageOffset,
+            PageOffset = pageOffset,
+            MaxAllowedOffset = maxOffset
         };
     }
 }

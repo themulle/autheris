@@ -83,6 +83,10 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
             {
                 b.UseSetting("Gateway:Tenancy:DefaultTenantId", "default");
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+                // WP-SIMPL-51: the shared per-principal cost bucket meters every WebSQL/Trino statement; these tests run many statements
+                // (or a recursive CTE priced above the default Standard capacity) as one principal, so the Standard tier gets ample capacity.
+                b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "1000000");
+                b.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:TokenRefillRatePerSecond", "100000");
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));

@@ -5,8 +5,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Common.Quota;
+using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using HotChocolate.Execution;
@@ -19,12 +20,12 @@ using RequestContext = HotChocolate.Execution.RequestContext;
 public sealed class CostAndQuotaMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly IRateLimiterService _rateLimiter;
+    private readonly IQueryCostQuota _costQuota;
 
-    public CostAndQuotaMiddleware(RequestDelegate next, IRateLimiterService rateLimiter)
+    public CostAndQuotaMiddleware(RequestDelegate next, IQueryCostQuota costQuota)
     {
         _next = next ?? throw new ArgumentNullException(nameof(next));
-        _rateLimiter = rateLimiter ?? throw new ArgumentNullException(nameof(rateLimiter));
+        _costQuota = costQuota ?? throw new ArgumentNullException(nameof(costQuota));
     }
 
     private static Dictionary<string, object?>? BuildRuntimeVariables(RequestContext context)
@@ -217,12 +218,7 @@ public sealed class CostAndQuotaMiddleware
             return;
         }
 
-        // 1. Resolve client tier & quota policy
-        var tierResolver = services!.GetRequiredService<IClientTierResolver>();
-        var clientContext = await tierResolver.ResolveAsync(principal, apiKey, clientIp, context.RequestAborted).ConfigureAwait(false);
-        context.ContextData["Autheris.ExposeCostExtensions"] = clientContext.Policy.ExposeCostExtensions;
-
-        // 2. Calculate cost via QueryCostAnalyzerRule (incorporating actual runtime variable values and QueryCostOptions)
+        // 1. Calculate cost via QueryCostAnalyzerRule (incorporating actual runtime variable values and QueryCostOptions)
         var runtimeVariables = BuildRuntimeVariables(context);
 
         int maxResponseRows = gatewayOptions?.GraphQL?.MaxResponseRows ?? 1000;
@@ -238,14 +234,23 @@ public sealed class CostAndQuotaMiddleware
             maxExecutionDepth: maxExecutionDepth,
             relationRegistry: relationRegistry);
 
-        int maxAllowedCost = clientContext.Policy.MaxCostPerQuery;
-        if (gatewayOptions is not null && EffectiveGatewayMaxCost(gatewayOptions) is > 0 and var effectiveGatewayMaxCost)
+        int maxAdmissionCeiling = gatewayOptions is not null ? EffectiveGatewayMaxCost(gatewayOptions) : MaxComplexitySafetyCeiling;
+        if (maxAdmissionCeiling <= 0)
         {
-            maxAllowedCost = Math.Min(maxAllowedCost, effectiveGatewayMaxCost);
+            maxAdmissionCeiling = MaxComplexitySafetyCeiling;
         }
 
-        // 3. Check query cost against effective max limit (min of Tier and MaxAllowedComplexity)
-        if (calculatedCost > maxAllowedCost)
+        var admission = await _costQuota.AdmitAsync(new QueryCostRequest(
+            Principal: principal,
+            ApiKey: apiKey,
+            ClientIp: clientIp,
+            EstimatedCost: calculatedCost,
+            TransportMaxCost: maxAdmissionCeiling,
+            CapByTierMaxCostPerQuery: true), context.RequestAborted).ConfigureAwait(false);
+
+        context.ContextData["Autheris.ExposeCostExtensions"] = admission.Policy.ExposeCostExtensions;
+
+        if (admission.Outcome == QueryCostOutcome.OverCost)
         {
             var usageRecorder = services?.GetService<IConsumerUsageRecorder>();
             if (usageRecorder != null)
@@ -257,10 +262,10 @@ public sealed class CostAndQuotaMiddleware
             }
 
             var error = ErrorBuilder.New()
-                .SetMessage($"The query cost ({calculatedCost}) exceeds the limit of {maxAllowedCost}. Nested list fields require 'first' (e.g. first: 10) or lower pagination limits to bound query cost within budget.")
+                .SetMessage($"The query cost ({calculatedCost}) exceeds the limit of {admission.MaxAllowedCost}. Nested list fields require 'first' (e.g. first: 10) or lower pagination limits to bound query cost within budget.")
                 .SetCode("QUERY_COST_QUOTA_EXCEEDED")
                 .SetExtension("calculatedCost", calculatedCost)
-                .SetExtension("maxAllowedCost", maxAllowedCost)
+                .SetExtension("maxAllowedCost", admission.MaxAllowedCost)
                 .SetExtension("hint", "Add 'first: <n>' to nested list selections or declare lower pagination limits to reduce query cost within budget.")
                 .Build();
             context.Result = OperationResult.FromError(error);
@@ -268,14 +273,7 @@ public sealed class CostAndQuotaMiddleware
             return;
         }
 
-        // 4. Phase 1 Pre-Admission Reservation via ReserveCostQuotaAsync
-        var limitResult = await _rateLimiter.ReserveCostQuotaAsync(
-            clientContext.SubjectId,
-            calculatedCost,
-            clientContext.Policy,
-            context.RequestAborted).ConfigureAwait(false);
-
-        if (!limitResult.Allowed)
+        if (admission.Outcome == QueryCostOutcome.QuotaExhausted)
         {
             var usageRecorder = services?.GetService<IConsumerUsageRecorder>();
             if (usageRecorder != null)
@@ -289,25 +287,25 @@ public sealed class CostAndQuotaMiddleware
             var errorBuilder = ErrorBuilder.New()
                 .SetMessage("Rate limit exceeded. Wait until the next time window.")
                 .SetCode("RATE_LIMIT_EXCEEDED")
-                .SetExtension("retryAfterSeconds", limitResult.RetryAfterSeconds);
+                .SetExtension("retryAfterSeconds", admission.RetryAfterSeconds);
 
-            if (!string.IsNullOrWhiteSpace(clientContext.ResolvedScope))
+            if (!string.IsNullOrWhiteSpace(admission.Scope))
             {
-                errorBuilder.SetExtension("scope", clientContext.ResolvedScope);
+                errorBuilder.SetExtension("scope", admission.Scope);
             }
 
             var error = errorBuilder.Build();
             context.Result = OperationResult.FromError(error);
             HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status429TooManyRequests);
-            HttpResponseGuard.SetHeader(httpContext, "Retry-After", limitResult.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture));
-            if (!string.IsNullOrWhiteSpace(clientContext.ResolvedScope))
+            HttpResponseGuard.SetHeader(httpContext, "Retry-After", admission.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture));
+            if (!string.IsNullOrWhiteSpace(admission.Scope))
             {
-                HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Scope", clientContext.ResolvedScope);
+                HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Scope", admission.Scope);
             }
             return;
         }
 
-        // 5. Phase 2: Execute query with post-execution settlement in finally block
+        // Phase 2: Execute query with post-execution settlement in finally block
         int actualCost = calculatedCost;
         try
         {
@@ -319,55 +317,56 @@ public sealed class CostAndQuotaMiddleware
                 // Mandatory minimum fee on client abort or execution failure.
                 // the failure fee is only a floor. A partial result (e.g. a successful 1000-row root field next
                 // to a deliberately failing one) is charged for the data it produced, so an error cannot refund real work.
-                actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, clientContext.Policy);
+                actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, admission.Policy);
             }
             else
             {
-                actualCost = ComputeActualCost(context, gatewayOptions?.QueryCost, clientContext.Policy);
+                actualCost = ComputeActualCost(context, gatewayOptions?.QueryCost, admission.Policy);
             }
         }
         catch
         {
             // Mandatory minimum fee on exception (rows already produced are still charged).
-            actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, clientContext.Policy);
+            actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, admission.Policy);
             throw;
         }
         finally
         {
-            if (limitResult.Allowed && gatewayOptions?.QueryCost?.EnablePostExecutionSettlement != false)
+            if (admission.Outcome == QueryCostOutcome.Admitted && gatewayOptions?.QueryCost?.EnablePostExecutionSettlement != false)
             {
-                var settleResult = await _rateLimiter.SettleCostQuotaAsync(
-                    clientContext.SubjectId,
-                    calculatedCost,
+                var settleResult = await _costQuota.SettleAsync(
+                    admission,
                     actualCost,
-                    clientContext.Policy,
                     CancellationToken.None).ConfigureAwait(false);
 
-                // Update headers with settled figures
-                HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost", actualCost.ToString(CultureInfo.InvariantCulture));
-                HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost-Reserved", calculatedCost.ToString(CultureInfo.InvariantCulture));
-                HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost-Actual", actualCost.ToString(CultureInfo.InvariantCulture));
-                HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost-Refund", Math.Max(0, calculatedCost - actualCost).ToString(CultureInfo.InvariantCulture));
-                HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Remaining", settleResult.RemainingTokens.ToString(CultureInfo.InvariantCulture));
-
-                if (clientContext.Policy.ExposeCostExtensions && context.Result is OperationResult opResult)
+                if (settleResult is { } settle)
                 {
-                    var extensions = opResult.Extensions ?? HotChocolate.Collections.Immutable.ImmutableOrderedDictionary<string, object?>.Empty;
-                    opResult.Extensions = extensions.SetItem("cost", new Dictionary<string, object?>
+                    // Update headers with settled figures
+                    HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost", actualCost.ToString(CultureInfo.InvariantCulture));
+                    HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost-Reserved", calculatedCost.ToString(CultureInfo.InvariantCulture));
+                    HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost-Actual", actualCost.ToString(CultureInfo.InvariantCulture));
+                    HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost-Refund", Math.Max(0, calculatedCost - actualCost).ToString(CultureInfo.InvariantCulture));
+                    HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Remaining", settle.RemainingTokens.ToString(CultureInfo.InvariantCulture));
+
+                    if (admission.Policy.ExposeCostExtensions && context.Result is OperationResult opResult)
                     {
-                        ["requestedQueryCost"] = calculatedCost,
-                        ["actualQueryCost"] = actualCost,
-                        ["settlementDelta"] = calculatedCost - actualCost,
-                        ["clientTier"] = clientContext.Tier.ToString(),
-                        ["rateLimitRemaining"] = settleResult.RemainingTokens,
-                        ["rateLimitResetSeconds"] = settleResult.RetryAfterSeconds
-                    });
+                        var extensions = opResult.Extensions ?? HotChocolate.Collections.Immutable.ImmutableOrderedDictionary<string, object?>.Empty;
+                        opResult.Extensions = extensions.SetItem("cost", new Dictionary<string, object?>
+                        {
+                            ["requestedQueryCost"] = calculatedCost,
+                            ["actualQueryCost"] = actualCost,
+                            ["settlementDelta"] = calculatedCost - actualCost,
+                            ["clientTier"] = admission.Policy.Tier.ToString(),
+                            ["rateLimitRemaining"] = settle.RemainingTokens,
+                            ["rateLimitResetSeconds"] = settle.RetryAfterSeconds
+                        });
+                    }
                 }
             }
-            else
+            else if (admission.Outcome == QueryCostOutcome.Admitted)
             {
                 HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost", calculatedCost.ToString(CultureInfo.InvariantCulture));
-                HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Remaining", limitResult.RemainingTokens.ToString(CultureInfo.InvariantCulture));
+                HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Remaining", admission.RemainingTokens.ToString(CultureInfo.InvariantCulture));
             }
         }
     }
@@ -459,7 +458,7 @@ public sealed class CostAndQuotaMiddleware
         int depthCost = executedDepth * depthFactor;
         long totalComputed = (long)baseCost + rowCost + depthCost;
 
-        return (int)Math.Clamp(totalComputed, baseCost, policy.MaxCostPerQuery);
+        return (int)Math.Clamp(totalComputed, baseCost, Math.Max(baseCost, policy.MaxCostPerQuery));
     }
 
     internal static long CountResultRows(object? data)
