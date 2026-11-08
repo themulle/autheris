@@ -86,7 +86,7 @@ public sealed class ConsentGrantSqlCoreGoldenTests
         conn.Commands[0].TransactionSet.ShouldBeFalse();
         kit.ShouldBindExactly(conn.Commands[0], ("@domain", "Sales"), ("@schema", "Crm"), ("@table", "Orders"), ("@tenantId", "tenant-a"), ("@role", "Analyst"));
 
-        conn.Commands[1].CommandText.ShouldBe(golden.Fragment("RevokeConsentInTransactionAsync", "SELECT t.source_name"));
+        conn.Commands[1].CommandText.ShouldBe(golden.Of("RevokeConsentInTransactionAsync").Single(f => f.Contains("SELECT t.source_name", StringComparison.Ordinal) && f.Contains("UPDLOCK", StringComparison.Ordinal) == (dialect == "SqlServer")));
         conn.Commands[1].TransactionSet.ShouldBeTrue();
         kit.ShouldBindExactly(conn.Commands[1], ("@id", consentId.ToString()));
 
