@@ -702,7 +702,7 @@ public sealed class Batch5SecurityTestsA
 
     private async Task Case_mgv5_mwww_2()
     {
-        // Verify tenant-scoped GovernanceAdmin cannot toggle cross-data-source relation opt-in
+        // GHSA-mgv5-4r69-mwww
         var relationId = Guid.NewGuid();
         var relationRepo = Substitute.For<ITableRelationRepository>();
 

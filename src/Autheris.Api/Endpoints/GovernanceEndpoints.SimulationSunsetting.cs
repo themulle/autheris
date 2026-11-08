@@ -57,7 +57,7 @@ public static partial class GovernanceEndpoints
         ISchemaSunsettingService sunsettingService,
         HttpContext context)
     {
-        // SEC M-11: Sunsetting rules are global (not tenant-scoped) -> GovernanceAdmin / ClusterAdmin only.
+        // SEC M-11: Sunsetting rules are global (not tenant-scoped) -> canonical ClusterAdmin only (OD-9).
         if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);

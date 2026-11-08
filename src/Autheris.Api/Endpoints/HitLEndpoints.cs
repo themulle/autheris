@@ -192,7 +192,7 @@ public static class HitLEndpoints
 
     /// <summary>
     /// SEC C-05: Non-global approvers (DataSteward/DataOwner) must additionally be registered owner or delegate
-    /// of the ticket's target table. GovernanceAdmin/ClusterAdmin are exempt.
+    /// of the ticket's target table. Canonical ClusterAdmin is exempt (OD-9).
     /// </summary>
     internal static async Task<IResult?> EnsureTableApproverAsync(
         HttpContext context,

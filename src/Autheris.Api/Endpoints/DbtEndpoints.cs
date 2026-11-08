@@ -36,7 +36,7 @@ public static class DbtEndpoints
             IDbtMetadataIngestionService dbtService) =>
         {
             // The direct governance import writes masking rules, sensitivities, virtual filters and access profiles; the DbtAdmin
-            // role alone (manifest / run-results automation) does not authorize it. Only global governance administrators.
+            // role alone (manifest / run-results automation) does not authorize it. Canonical ClusterAdmin only (OD-9).
             if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -127,7 +127,7 @@ public static class DbtEndpoints
             HttpContext context) =>
         {
             // SEC M-11: dbt proposals carry no tenant and change global masking metadata ->
-            // only global governance administrators (GovernanceAdmin / ClusterAdmin) may decide.
+            // canonical ClusterAdmin only (OD-9) may decide.
             if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -163,7 +163,7 @@ public static class DbtEndpoints
             HttpContext context) =>
         {
             // SEC M-11: dbt proposals carry no tenant and change global masking metadata ->
-            // only global governance administrators (GovernanceAdmin / ClusterAdmin) may decide.
+            // canonical ClusterAdmin only (OD-9) may decide.
             if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -196,7 +196,7 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtContractValidator validator) =>
         {
-            // Review E-7 / SG-13: dbt state is global and carries no table ownership; only global governance administrators or DbtAdmin.
+            // Review E-7 / SG-13: dbt state is global and carries no table ownership; only canonical ClusterAdmin (OD-9) or DbtAdmin.
             var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
                                context.User.IsInRole("DbtAdmin");
             if (!isPrivileged)
@@ -258,7 +258,7 @@ public static class DbtEndpoints
             IDbtHealthCircuitBreaker circuitBreaker,
             IDbtTestTargetMap? testTargetMap) =>
         {
-            // Review E-7 / SG-13: dbt state is global and carries no table ownership; only global governance administrators or DbtAdmin.
+            // Review E-7 / SG-13: dbt state is global and carries no table ownership; only canonical ClusterAdmin (OD-9) or DbtAdmin.
             var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
                                context.User.IsInRole("DbtAdmin");
             if (!isPrivileged)
@@ -320,7 +320,7 @@ public static class DbtEndpoints
                 return Results.Ok(new { message = $"Table '{tableId}' health reset to healthy." });
             }
 
-            // SEC M-11: Resetting all health states is a global action -> GovernanceAdmin / ClusterAdmin only.
+            // SEC M-11: Resetting all health states is a global action -> canonical ClusterAdmin only (OD-9).
             if (!EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
