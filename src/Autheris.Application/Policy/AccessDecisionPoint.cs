@@ -29,7 +29,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
     private readonly ITableMetadataRepository? _metadataRepo;
     private readonly IConsentResolutionService? _consentService;
     private readonly IConsentRepository? _consentRepo;
-    private readonly IPolicyEnforcementService? _policyEnforcementService;
+    private readonly IPolicyEnforcementService _policyEnforcementService;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly IRebacEvaluator? _rebacEvaluator;
@@ -39,9 +39,9 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
 
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
+        IPolicyEnforcementService policyEnforcementService,
         IConsentResolutionService? consentService = null,
         IConsentRepository? consentRepo = null,
-        IPolicyEnforcementService? policyEnforcementService = null,
         IClientIpResolver? clientIpResolver = null,
         IMandatoryRowFilterResolver? mandatoryFilters = null,
         IRebacEvaluator? rebacEvaluator = null,
@@ -51,10 +51,11 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         ILogger<AccessDecisionPoint>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(policyEnforcementService);
         _options = options;
+        _policyEnforcementService = policyEnforcementService;
         _consentService = consentService;
         _consentRepo = consentRepo;
-        _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
         _mandatoryFilters = mandatoryFilters ?? NullMandatoryRowFilterResolver.Instance;
         _rebacEvaluator = rebacEvaluator;
@@ -170,7 +171,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         }
 
         string? abacRowFilter = null;
-        if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenant))
+        if (_policyEnforcementService.HasPolicies(tenant))
         {
             var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var claim in principal.Claims)

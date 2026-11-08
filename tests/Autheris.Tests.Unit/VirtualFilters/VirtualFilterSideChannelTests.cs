@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Streaming.Services;
 using Autheris.Application.VirtualFilters;
@@ -94,9 +95,18 @@ public sealed class VirtualFilterSideChannelTests
         var consents = Substitute.For<IConsentRepository>();
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+        var options = Options.Create(new GatewayOptions());
+        var adp = new AccessDecisionPoint(
+            options,
+            Substitute.For<IPolicyEnforcementService>(),
+            consentService: AllowAll(),
+            consentRepo: consents,
+            mandatoryFilters: new FixedOutcome(Outcome(outcome)),
+            metadataRepo: metadata);
         var service = new IcebergRestCatalogFederationService(
-            Substitute.For<IIcebergMetadataReader>(), metadata, Options.Create(new GatewayOptions()), NullLogger<IcebergRestCatalogFederationService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, AllowAll(), consents, mandatoryFilters: new FixedOutcome(Outcome(outcome)));
+            Substitute.For<IIcebergMetadataReader>(), metadata, options, NullLogger<IcebergRestCatalogFederationService>.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+            adp, consentRepo: consents);
         var analyst = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "analyst"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ANALYST")], "Bearer"));
 
         if (delivered)

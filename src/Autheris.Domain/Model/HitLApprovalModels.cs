@@ -38,6 +38,7 @@ public sealed record HitLApprovalBroadcast(
     string ApprovalId,
     string ApproverSid,
     bool IsApproved,
-    string? Reason = null,
+    string? Reason,
+    DateTimeOffset IssuedAt,
     string? Signature = null
 );

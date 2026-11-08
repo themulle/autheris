@@ -3,6 +3,8 @@ namespace Autheris.Api.Hosting;
 using System;
 using System.Linq;
 using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions;
@@ -210,18 +212,46 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
                 ?? user.Identity?.Name
                 ?? "authenticated-user";
             var auditPolicy = endpoint?.Metadata.GetMetadata<AuditPolicy>();
+            var requestPath = httpContext.Request.Path.Value ?? string.Empty;
             var entry = new AuditLogEntry
             {
                 EventType = auditPolicy?.EventType ?? AuditEventTypes.CatalogRead,
                 ActorSid = new Sid(sidValue),
                 TenantId = resolvedTenant,
-                TargetTable = httpContext.Request.Path.Value ?? $"module:{moduleId}",
+                TargetTable = CapAuditString(httpContext.Request.Path.Value ?? $"module:{moduleId}"),
                 Decision = "ALLOW",
-                DetailsJson = $"{{\"module\":\"{moduleId}\",\"path\":\"{httpContext.Request.Path.Value}\"}}",
+                DetailsJson = BuildModuleAuditDetails(moduleId, requestPath),
             };
             await writer.RecordBestEffortAsync(entry, httpContext.RequestAborted).ConfigureAwait(false);
         }
 
         return response;
+    }
+
+    internal static string BuildModuleAuditDetails(string moduleId, string? path)
+    {
+        var rawPath = path ?? string.Empty;
+        var cappedPath = rawPath.Length > 512 ? rawPath[..512] : rawPath;
+
+        using var memoryStream = new MemoryStream();
+        using (var jsonWriter = new Utf8JsonWriter(memoryStream))
+        {
+            jsonWriter.WriteStartObject();
+            jsonWriter.WriteString("module", moduleId);
+            jsonWriter.WriteString("path", cappedPath);
+            jsonWriter.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(memoryStream.ToArray());
+    }
+
+    internal static string CapAuditString(string? value, int maxLen = 512)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length > maxLen ? value[..maxLen] : value;
     }
 }

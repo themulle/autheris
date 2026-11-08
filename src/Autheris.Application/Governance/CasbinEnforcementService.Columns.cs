@@ -7,6 +7,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -359,15 +360,17 @@ public sealed partial class CasbinEnforcementService
         var shareable = true;
         var readsContext = false;
         var referencesTime = false;
+        var referencesClientIp = false;
         foreach (var rule in candidates)
         {
             referencesTime |= ReferencesTime(rule.SubRule);
+            referencesClientIp |= PolicyShapeAnalyzer.ReferencesClientIp(rule.SubRule);
             var shape = PolicyShapeAnalyzer.Analyze(rule.SubRule, rule.RlsFilter);
             shareable &= shape.Shareable;
             readsContext |= shape.ReadsContext;
         }
 
-        return new CandidateSet([.. candidates], shareable, readsContext, referencesTime);
+        return new CandidateSet([.. candidates], shareable, readsContext, referencesTime, referencesClientIp);
     }
 
     private static void AddCandidates(
@@ -404,6 +407,19 @@ public sealed partial class CasbinEnforcementService
         {
             candidates = BuildCandidateSet(snapshot, context, tableStr, requestedAction);
             snapshot.Candidates.Set(candidateKey, candidates);
+        }
+
+        // If candidate rules reference ClientIp and client IP is unavailable/none, deny fail-closed.
+        if (candidates.ReferencesClientIp &&
+            (context.ClientIp is null ||
+             Equals(context.ClientIp, IPAddress.None) ||
+             Equals(context.ClientIp, IPAddress.IPv6None)))
+        {
+            _logger?.LogWarning(
+                "Casbin evaluation denied for subject '{Subject}' on table '{Table}': client address unavailable",
+                LogSanitizer.Sanitize(context.UserSid.Value),
+                LogSanitizer.Sanitize(tableStr));
+            return ValueTask.FromResult(TableAccessDecision.Denied(context.TargetTable, "client address unavailable"));
         }
 
         var roleClosure = snapshot.GetRoleClosure(context.Tenant.Value);
