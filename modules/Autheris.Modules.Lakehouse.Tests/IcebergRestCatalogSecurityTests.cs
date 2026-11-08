@@ -114,6 +114,64 @@ public sealed class IcebergRestCatalogSecurityTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-10")]
+    public async Task Unenforceable_decision_constraints_deny()
+    {
+        _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(Orders("id")));
+
+        var withRowFilter = Substitute.For<IAccessDecisionPoint>();
+        withRowFilter.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<AccessDecision>(AccessDecision.Allowed(
+                OrdersId, new Dictionary<string, ColumnAccessLevel>(), AccessTransport.Lakehouse, "region = 'EU'")));
+        await Should.ThrowAsync<SecurityException>(() =>
+            CreateService(accessDecisionPoint: withRowFilter).LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
+
+        var withMask = Substitute.For<IAccessDecisionPoint>();
+        withMask.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<AccessDecision>(AccessDecision.Allowed(
+                OrdersId, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Mask }, AccessTransport.Lakehouse)));
+        await Should.ThrowAsync<SecurityException>(() =>
+            CreateService(accessDecisionPoint: withMask).LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-AZ-04")]
+    public async Task LoadTable_without_sid_is_denied()
+    {
+        var service = ServiceWith(Orders("id"), AllowFor("analyst@corp.com"));
+        var noSid = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.Name, "analyst@corp.com") }, "Bearer"));
+
+        await Should.ThrowAsync<SecurityException>(() => service.LoadTableAsync("tenant-1", "raw", "orders", noSid).AsTask());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task VendCredential_denied_writes_deny_audit()
+    {
+        var audit = Substitute.For<IAuditLogRepository>();
+        _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(Orders("id")));
+        var repo = Substitute.For<IConsentRepository>();
+        repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+        var service = CreateService(auditRepository: audit, consentService: new ConsentResolutionService(), consentRepo: repo);
+
+        await Should.ThrowAsync<SecurityException>(() => service.VendCredentialAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
+
+        var records = audit.ReceivedCalls()
+            .Where(c => c.GetMethodInfo().Name == nameof(IAuditLogRepository.RecordAuditEventAsync))
+            .Select(c => (AuditLogEntry)c.GetArguments()[0]!)
+            .ToList();
+        records.Count.ShouldBe(1);
+        records[0].EventType.ShouldBe("Iceberg.VendCredential");
+        records[0].Decision.ShouldBe("DENY");
+    }
+
+    [Fact]
     public async Task LoadTable_WithoutConsentInfrastructure_FailsClosed()
     {
         _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())

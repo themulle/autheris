@@ -110,17 +110,28 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
             return AccessDecision.Denied(tableId, [$"Unauthorized access to table '{@namespace}.{table}'."], request.Transport);
         }
 
-        var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
+        if (principal.GetUserSid() is not { } userSid)
+        {
+            return AccessDecision.Denied(tableId, ["missing subject identifier"], request.Transport);
+        }
+
         var groupSids = principal.GetGroupSids();
         var roles = principal.GetUserRoles();
-        var allSubjects = groupSids.Append(userSid).ToList();
+        var allSubjects = new List<Sid>(groupSids.Count + 1);
+        allSubjects.AddRange(groupSids);
+        allSubjects.Add(userSid);
         var now = _timeProvider.GetUtcNow();
         var tenant = !string.IsNullOrWhiteSpace(request.Tenant.Value) ? request.Tenant : new TenantId(tenantId);
         var loaded = await _consentRepo.GetActiveConsentsForSubjectsAsync(allSubjects, tableId, now, tenant, cancellationToken).ConfigureAwait(false);
 
-        var activeConsents = loaded
-            .Where(c => c.TenantId == tenant && c.TableIdentifier == tableId && c.IsActive(now))
-            .ToList();
+        var activeConsents = new List<Consent>(loaded.Count);
+        foreach (var c in loaded)
+        {
+            if (c.TenantId == tenant && c.TableIdentifier == tableId && c.IsActive(now))
+            {
+                activeConsents.Add(c);
+            }
+        }
 
         var scopes = TokenAccessScope.GetScopeSet(principal.Claims);
         var decision = _consentService.ResolveAccess(
@@ -171,6 +182,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         }
 
         string? abacRowFilter = null;
+        IReadOnlyDictionary<string, ColumnAccessLevel>? abacColumnAccess = null;
         if (_policyEnforcementService.HasPolicies(tenant))
         {
             var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -209,6 +221,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
             }
 
             abacRowFilter = abac.CombinedRowFilterSql;
+            abacColumnAccess = abac.ColumnAccess;
         }
 
         if (request.Operation is AccessOperation.SchemaRead or AccessOperation.VendCredentials)
@@ -228,29 +241,87 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
             }
         }
 
+        // The ABAC row filter and masking rules apply to every operation, not only metadata vending.
         return AccessDecision.Allowed(
             tableId,
-            decision.ColumnAccess,
+            MergeColumnAccess(decision, abacColumnAccess, tableMeta),
             request.Transport,
-            decision.CombinedRowFilterSql);
+            RowFilterCombiner.And(decision.CombinedRowFilterSql, abacRowFilter));
+    }
+
+    /// <summary>
+    /// Merges the consent decision, the catalog masking rules and the ABAC column rules; the most restrictive
+    /// level per column wins (Deny, then Mask, then Clear).
+    /// </summary>
+    private static IReadOnlyDictionary<string, ColumnAccessLevel> MergeColumnAccess(
+        TableAccessDecision decision,
+        IReadOnlyDictionary<string, ColumnAccessLevel>? abacColumnAccess,
+        TableMetadata tableMeta)
+    {
+        var merged = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var column in tableMeta.Columns)
+        {
+            var effective = decision.GetEffectiveColumnAccess(column.ColumnName, tableMeta);
+            if (effective != ColumnAccessLevel.Clear)
+            {
+                Restrict(merged, column.ColumnName, effective);
+            }
+        }
+
+        foreach (var name in tableMeta.ColumnMaskingRules.Keys)
+        {
+            var effective = decision.GetEffectiveColumnAccess(name, tableMeta);
+            if (effective != ColumnAccessLevel.Clear)
+            {
+                Restrict(merged, name, effective);
+            }
+        }
+
+        if (abacColumnAccess != null)
+        {
+            foreach (var (name, level) in abacColumnAccess)
+            {
+                if (level != ColumnAccessLevel.Clear)
+                {
+                    Restrict(merged, name, level);
+                }
+            }
+        }
+
+        return merged;
+    }
+
+    private static void Restrict(Dictionary<string, ColumnAccessLevel> merged, string column, ColumnAccessLevel level)
+    {
+        if (!merged.TryGetValue(column, out var existing) || level < existing)
+        {
+            merged[column] = level;
+        }
     }
 
     private static string? ResolvePurpose(IEnumerable<Claim> claims)
     {
-        var list = claims as IReadOnlyCollection<Claim> ?? claims.ToList();
-        var values = DistinctClaimValues(list, "purpose");
+        var values = DistinctClaimValues(claims, "purpose");
         if (values.Count == 0)
         {
-            values = DistinctClaimValues(list, "purpose_id");
+            values = DistinctClaimValues(claims, "purpose_id");
         }
 
         return values.Count == 1 ? values[0] : null;
     }
 
-    private static List<string> DistinctClaimValues(IEnumerable<Claim> claims, string type) =>
-        claims
-            .Where(c => c.Type == type && !string.IsNullOrWhiteSpace(c.Value))
-            .Select(c => c.Value)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+    private static List<string> DistinctClaimValues(IEnumerable<Claim> claims, string type)
+    {
+        var values = new List<string>(1);
+        foreach (var claim in claims)
+        {
+            if (claim.Type == type && !string.IsNullOrWhiteSpace(claim.Value) && !values.Contains(claim.Value))
+            {
+                values.Add(claim.Value);
+            }
+        }
+
+        return values;
+    }
 }
