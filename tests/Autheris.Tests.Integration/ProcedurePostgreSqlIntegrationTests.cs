@@ -22,6 +22,8 @@ public sealed class ProcedurePostgreSqlIntegrationTests : IAsyncLifetime
 {
     private const string LoginPassword = "Proc-Login-1";
     private static readonly ProcedureSecurityContext Caller = new("tenant-a", "S-1-5-21-1", "analytics");
+    // Roles are cluster-wide and the container is shared, so each test instance uses its own login.
+    private readonly string _login = "proc_login_" + Guid.NewGuid().ToString("N")[..12];
     private PostgreSqlTestDatabase? _db;
     private bool _available;
 
@@ -48,17 +50,17 @@ public sealed class ProcedurePostgreSqlIntegrationTests : IAsyncLifetime
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $@"
-CREATE ROLE proc_login LOGIN PASSWORD '{LoginPassword}';
+CREATE ROLE {_login} LOGIN PASSWORD '{LoginPassword}';
 CREATE TABLE public.orders (id integer NOT NULL, tenant_id text NOT NULL, total integer NOT NULL);
 INSERT INTO public.orders VALUES (1, 'tenant-a', 10), (2, 'tenant-b', 20), (3, 'tenant-a', 30);
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_policy ON public.orders USING (tenant_id = current_setting('autheris.tenant_id', true));
 CREATE TABLE public.audit_log (note text);
-GRANT SELECT ON public.orders TO proc_login;
-GRANT INSERT, SELECT ON public.audit_log TO proc_login;
+GRANT SELECT ON public.orders TO {_login};
+GRANT INSERT, SELECT ON public.audit_log TO {_login};
 CREATE FUNCTION public.fn_orders() RETURNS TABLE (id integer, total integer) LANGUAGE sql STABLE AS $$ SELECT o.id, o.total FROM public.orders o ORDER BY o.id $$;
 CREATE FUNCTION public.fn_write() RETURNS TABLE (done integer) LANGUAGE plpgsql VOLATILE AS $$ BEGIN INSERT INTO public.audit_log VALUES ('x'); RETURN QUERY SELECT 1; END $$;
-GRANT EXECUTE ON FUNCTION public.fn_orders(), public.fn_write() TO proc_login;";
+GRANT EXECUTE ON FUNCTION public.fn_orders(), public.fn_write() TO {_login};";
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -72,14 +74,14 @@ GRANT EXECUTE ON FUNCTION public.fn_orders(), public.fn_write() TO proc_login;";
 
     private Task<RawProcedureResult> Run(string function, string outputs)
     {
-        string connectionString = new NpgsqlConnectionStringBuilder(_db!.ConnectionString) { Username = "proc_login", Password = LoginPassword }.ConnectionString;
+        string connectionString = new NpgsqlConnectionStringBuilder(_db!.ConnectionString) { Username = _login, Password = LoginPassword }.ConnectionString;
         var options = Options.Create(new GatewayOptions
         {
             DataSources = new SqlDataSourceOptions
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["procedures"] = new() { Provider = "PostgreSql", ConnectionString = connectionString }
+                    ["procedures"] = new() { Provider = "PostgreSql", ConnectionString = connectionString, DefaultSchema = "public" }
                 }
             }
         });
