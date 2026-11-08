@@ -70,7 +70,6 @@ public static partial class GatewayGovernanceServiceExtensions
 
         // one state directory (Gateway:State:StateDirectory) for the gateway state files.
         services.AddOptions<StateOptions>().BindConfiguration(StateOptions.SectionName).ValidateOnStart();
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<StateOptions>, StateOptionsValidator>();
         services.AddSingleton<IGatewayStatePaths, GatewayStatePaths>();
 
         // ARC-I-13: the anchor store is a required repository dependency; AU-01/AU-03 are enforced when it is built.

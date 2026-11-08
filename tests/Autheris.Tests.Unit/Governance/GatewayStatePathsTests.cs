@@ -101,14 +101,4 @@ public sealed class GatewayStatePathsTests
         GatewayStatePaths.ResolveDirectory(null, ".data").ShouldBe(".data");
         GatewayStatePaths.ResolveDirectory("  ", ".data").ShouldBe(".data");
     }
-
-    [Fact]
-    public void StateOptionsValidator_IsNotEnforcedForServerProviders()
-    {
-        NewValidator("PostgreSql", "true").Validate(null, new StateOptions { StateDirectory = "./state" }).Succeeded.ShouldBeTrue();
-    }
-
-    private static StateOptionsValidator NewValidator(string provider, string? inContainer) =>
-        new(Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { Provider = provider } }),
-            name => name == "DOTNET_RUNNING_IN_CONTAINER" ? inContainer : null);
 }

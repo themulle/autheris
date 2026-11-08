@@ -3,7 +3,7 @@ using Autheris.Application.Common.Interfaces;
 namespace Autheris.Infrastructure.Health;
 
 /// <summary>
-/// SEC R3-4: /health/ready is anonymous and reaches the governance DB (SQLite: behind the repository lock).
+/// SEC R3-4: /health/ready is anonymous and reaches the governance DB.
 /// This decorator serves a short-lived cached report and collapses concurrent callers into a single probe, so the
 /// probe rate on the database is bounded by 1/<c>ttl</c> regardless of how many anonymous requests arrive.
 /// </summary>

@@ -48,7 +48,7 @@ public sealed class GovernanceMigrationOptions
 
     /// <summary>
     /// When true (default false), <c>Mode = Verify</c> fails with <c>GOVERNANCE_RUNTIME_LOGIN_PRIVILEGED</c> if the runtime login can write the
-    /// migration history or run DDL; when false that is only a warning. PostgreSQL and SQL Server; SQLite is skipped.
+    /// migration history or run DDL; when false that is only a warning.
     /// </summary>
     public bool RequireLeastPrivilege { get; init; }
 

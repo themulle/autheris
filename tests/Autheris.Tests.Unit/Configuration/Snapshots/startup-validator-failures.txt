@@ -77,6 +77,6 @@ ProductionStorage_WormWithoutS3Keys [Production]: ValidationException: Security 
 ProductionStorage_FallbackAuditKey [Production]: ValidationException: CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.
 ProductionStorage_AnchorMissing [Production]: ValidationException: CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.
 ProductionStorage_AuditChecksSkippedInTestEnvironment [Production]: OK
-GovernanceDbProvider_Unsupported [Production]: ValidationException: GovernanceDb provider 'Oracle' is not supported. Allowed values are 'Sqlite', 'PostgreSql' or 'SqlServer'.
-GovernanceDbProvider_Unsupported [Development]: ValidationException: GovernanceDb provider 'Oracle' is not supported. Allowed values are 'Sqlite', 'PostgreSql' or 'SqlServer'.
-ClusterState_SqliteWithReplicas [Production]: ValidationException: Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.
+GovernanceDbProvider_Unsupported [Production]: ValidationException: GovernanceDb provider 'Oracle' is not supported. Allowed values are 'PostgreSql' or 'SqlServer'.
+GovernanceDbProvider_Unsupported [Development]: ValidationException: GovernanceDb provider 'Oracle' is not supported. Allowed values are 'PostgreSql' or 'SqlServer'.
+GovernanceProvider_SqliteIsUnsupported [Production]: ValidationException: GovernanceDb provider 'Sqlite' is not supported. Allowed values are 'PostgreSql' or 'SqlServer'.

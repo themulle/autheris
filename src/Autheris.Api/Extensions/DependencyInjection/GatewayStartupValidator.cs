@@ -672,7 +672,7 @@ public static class GatewayStartupValidator
     }
 
     internal static bool IsSupportedGovernanceDbProvider(string? provider) =>
-        DataSourceProvider.Is(provider, DatabaseDialect.Sqlite) || DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer);
+        DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer);
 
     internal static bool IsTruthy(string? value)
     {

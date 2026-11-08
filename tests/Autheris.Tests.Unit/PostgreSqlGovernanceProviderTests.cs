@@ -24,8 +24,6 @@ public class PostgreSqlGovernanceProviderTests
     [InlineData("postgres")]
     [InlineData("PgSql")]
     [InlineData("pgsql")]
-    [InlineData("Sqlite")]
-    [InlineData("sqlite")]
     [InlineData("SqlServer")]
     [InlineData("mssql")]
     public void ProviderValidation_AcceptsSupportedProviders(string provider)
@@ -70,30 +68,25 @@ public class PostgreSqlGovernanceProviderTests
         ex.Message.ShouldContain("GovernanceDb Provider");
     }
 
-    [Fact]
-    public void MultiNodeClusterMode_RejectsSqlite_WithE2Violation()
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("Sqlite")]
+    [InlineData("sqlite")]
+    public void Sqlite_governance_provider_is_rejected_by_options_validator_and_startup_check(string provider)
     {
-        var options = new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                Provider = "Sqlite"
-            },
-            HighAvailability = new HighAvailabilityOptions
-            {
-                MultiNodeClusterMode = true,
-                Replicas = 3
-            }
-        };
-
+        // SEC-SIMPL-05: the governance provider allow-list is PostgreSql and SqlServer only.
+        var options = new GatewayOptions { GovernanceDb = new GovernanceDbOptions { Provider = provider } };
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
 
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+        var ex = Should.Throw<ValidationException>(() => GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+        ex.Message.ShouldContain("GovernanceDb provider");
+        ex.Message.ShouldNotContain("'Sqlite', 'PostgreSql'");
 
-        ex.Message.ShouldContain("E-2");
-        ex.Message.ShouldContain("PostgreSql");
+        var context = new Autheris.Api.Extensions.DependencyInjection.StartupChecks.StartupCheckContext(options, env, _ => null, null);
+        var startup = Should.Throw<ValidationException>(() => Autheris.Api.Extensions.DependencyInjection.StartupChecks.StorageStartupChecks.GovernanceDbProvider(context));
+        startup.Message.ShouldContain("not supported");
+        startup.Message.ShouldContain("Allowed values are 'PostgreSql' or 'SqlServer'");
     }
 
     [Theory]

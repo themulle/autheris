@@ -172,8 +172,8 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("GovernanceDbProvider_Unsupported", ("GovernanceDb:Provider", "Oracle")),
             Dev("GovernanceDbProvider_Unsupported", ("GovernanceDb:Provider", "Oracle")),
 
-            // 20 ClusterState
-            Prod("ClusterState_SqliteWithReplicas", ("GovernanceDb:Provider", "Sqlite"), ("HighAvailability:Replicas", "2"), ("Caching:Redis:Enabled", "true")),
+            // 20 GovernanceDbProvider
+            Prod("GovernanceProvider_SqliteIsUnsupported", ("GovernanceDb:Provider", "Sqlite"), ("HighAvailability:Replicas", "2"), ("Caching:Redis:Enabled", "true")),
         ];
     }
 

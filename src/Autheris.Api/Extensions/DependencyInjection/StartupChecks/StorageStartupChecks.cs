@@ -75,18 +75,7 @@ internal static class StorageStartupChecks
 
         if (!GatewayStartupValidator.IsSupportedGovernanceDbProvider(options.GovernanceDb.Provider))
         {
-            throw new ValidationException($"GovernanceDb provider '{options.GovernanceDb.Provider}' is not supported. Allowed values are 'Sqlite', 'PostgreSql' or 'SqlServer'.");
-        }
-    }
-
-    internal static void ClusterState(StartupCheckContext context)
-    {
-        var options = context.Options;
-
-        if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
-            DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
-        {
-            throw new ValidationException("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.");
+            throw new ValidationException($"GovernanceDb provider '{options.GovernanceDb.Provider}' is not supported. Allowed values are 'PostgreSql' or 'SqlServer'.");
         }
     }
 }
