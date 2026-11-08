@@ -165,6 +165,11 @@ public static class McpDatasetTools
         var dataClosed = switches is not null && !(switches.RestDataEndpointEnabled && switches.IsGroupEnabled(McpToolGroup.Query));
         foreach (var tool in Definitions())
         {
+            if (switches is not null && !switches.ProceduresEnabled && tool.Name == CallProcedure)
+            {
+                continue;
+            }
+
             yield return dataClosed && string.Equals(tool.Name, DescribeApi, StringComparison.Ordinal)
                 ? tool with { InputJsonSchema = tool.InputJsonSchema.Replace("'/api/v1/data/{domain}/{table}'", "'/api/v1/catalog/datasets'", StringComparison.Ordinal) }
                 : tool;
