@@ -40,6 +40,7 @@ public sealed class ReleaseSurfaceTests : IClassFixture<WebApplicationFactory<Pr
             builder.UseSetting("Gateway:Authentication:Adfs:Enabled", "true");
             builder.UseSetting("Gateway:Authentication:Adfs:Authority", "https://adfs.example.test/adfs");
             builder.UseSetting("Gateway:Authentication:Adfs:Audience", "api://autheris");
+            builder.UseSetting("Gateway:Authentication:Adfs:AllowedClientIds:0", "autheris-test-client");
         });
     }
 
