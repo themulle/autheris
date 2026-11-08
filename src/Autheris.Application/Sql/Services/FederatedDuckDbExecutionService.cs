@@ -3,6 +3,7 @@ namespace Autheris.Application.Sql.Services;
 using Autheris.Application.Common;
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
@@ -28,6 +29,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using TrinoSqlEngine.Ast.Emit;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TrinoSqlEngine;
@@ -39,15 +41,7 @@ using Autheris.Application.Sql.ListParameters;
 
 public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionService
 {
-    private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = new()
-    {
-        RejectComments = true,
-        RejectBackslashInStrings = true,
-        RejectEscapedStringLiterals = true,
-        RejectNonAsciiIdentifiers = true,
-        RejectDotsInQuotedIdentifiers = true,
-        RejectTimeTravelQueries = true
-    };
+    private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = Autheris.Application.Sql.Policy.ClientSqlTokenPolicy.Analysis;
 
     private readonly IOptions<GatewayOptions> _options;
     private readonly IAuditLogRepository _auditLogRepository;
@@ -68,6 +62,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly IVirtualFilterFederationPlanner? _vfPlanner;
     private readonly Autheris.Application.Policy.TypedPolicySources? _typedPolicies;
+    private readonly Autheris.Application.Common.Quota.IQueryCostQuota? _costQuota;
     private readonly ILogger<FederatedDuckDbExecutionService>? _logger;
     private readonly CompiledSqlAuditDigester _auditDigester;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
@@ -94,8 +89,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         IVirtualFilterFederationPlanner? vfPlanner = null,
         Autheris.Application.Policy.TypedPolicySources? typedPolicies = null,
         CompiledSqlAuditDigester? auditDigester = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null)
     {
+        _costQuota = costQuota;
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _auditDigester = auditDigester ?? new CompiledSqlAuditDigester(options);
@@ -154,17 +151,64 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
-        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rowWriter);
 
-        var (duckDbResult, _, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
+        var (duckDbResult, plan, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
 
         using var dataTable = ConvertToDataTable(duckDbResult);
         using var reader = dataTable.CreateDataReader();
-        await rowWriter(reader, ct).ConfigureAwait(false);
+        var columns = SqlResultColumns.Describe(reader);
+        var maskArray = duckDbResult.Columns.Select(c => IsMaskedByName(c, plan)).ToImmutableArray();
+        if (maskArray.Length != reader.FieldCount)
+        {
+            throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, TargetSqlDialect.DuckDb);
+        }
+        await rowWriter(reader, new GovernedResultInfo(columns, maskArray), ct).ConfigureAwait(false);
+    }
+
+    public Task ExecuteGovernedQueryAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        Func<DbDataReader, CancellationToken, Task> rowWriter,
+        CancellationToken ct = default) =>
+        ExecuteGovernedQueryAsync(request, user, tenantId, (reader, _, token) => rowWriter(reader, token), ct);
+
+    private static bool IsMaskedByName(string columnName, CrossSourcePlan plan)
+    {
+        bool foundMatch = false;
+        foreach (var req in plan.StagingRequests)
+        {
+            if (req.Subtree != null)
+            {
+                if (req.Subtree.ProjectedColumns.Any(c => string.Equals(c, columnName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    foundMatch = true;
+                    if (req.Subtree.MaskedColumns.Contains(columnName))
+                    {
+                        return true;
+                    }
+                }
+            }
+            else
+            {
+                var matchingCol = req.Metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
+                if (matchingCol != null)
+                {
+                    foundMatch = true;
+                    if (req.Decision.GetEffectiveColumnAccess(matchingCol.ColumnName, req.Metadata) == ColumnAccessLevel.Mask)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return !foundMatch;
     }
 
     public async Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
@@ -265,6 +309,55 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out _);
         var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);
+
+        Autheris.Application.Common.Quota.QueryCostAdmission? admission = null;
+        bool isMeteredTransport = SqlTransports.IsCostMetered(request.Transport);
+        if (_costQuota != null && (_options.Value.WebSql?.Cost?.Enabled ?? true) && !request.PlannedTableRead && isMeteredTransport)
+        {
+            var rowLimit = request.RowLimit ?? SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions());
+            var costOpts = _options.Value.QueryCost ?? new QueryCostOptions();
+            var analysisOpts = new Autheris.Application.Governance.Analysis.QueryAnalysisOptions();
+            var webSqlCost = _options.Value.WebSql?.Cost ?? new WebSqlCostOptions();
+
+            int cEst = Autheris.Application.Sql.Cost.SqlStatementCostEstimator.EstimateCost(
+                metadata,
+                rowLimit,
+                costOpts,
+                analysisOpts,
+                webSqlCost,
+                pageOffset: request.PageOffset ?? 0,
+                isPaged: request.IsPaged);
+
+            try
+            {
+                admission = await _costQuota.AdmitAsync(
+                    new Autheris.Application.Common.Quota.QueryCostRequest(
+                        Principal: user,
+                        ApiKey: null,
+                        ClientIp: null,
+                        EstimatedCost: cEst,
+                        TransportMaxCost: webSqlCost.MaxStatementCost,
+                        CapByTierMaxCostPerQuery: false),
+                    ct).ConfigureAwait(false);
+            }
+            catch (Exception admitEx) when (admitEx is not OperationCanceledException)
+            {
+                throw new SqlQuotaUnavailableException();
+            }
+
+            if (admission?.Outcome == Autheris.Application.Common.Quota.QueryCostOutcome.OverCost)
+            {
+                throw new SqlCostExceededException(cEst, admission.MaxAllowedCost);
+            }
+            if (admission?.Outcome == Autheris.Application.Common.Quota.QueryCostOutcome.QuotaExhausted)
+            {
+                throw new SqlQuotaExhaustedException(admission.RetryAfterSeconds);
+            }
+        }
+
+        var executionSw = System.Diagnostics.Stopwatch.StartNew();
+        bool failed = false;
+        long deliveredRows = 0;
 
         if (metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete)
         {
@@ -372,12 +465,34 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 duckDbResult = duckDbResult with { Rows = duckDbResult.Rows.Take(effectiveMaxRows).ToList(), TotalRowCount = effectiveMaxRows };
             }
 
+            deliveredRows = duckDbResult.Rows.Count;
             return (duckDbResult, plan, truncated);
         }
         catch (Exception ex)
         {
+            failed = true;
             await RecordFailureAuditAsync(request, tenantId, user, ex, correlationId, keySourceReadsAudited ? [] : keySourceReads, parameterContract).ConfigureAwait(false);
             throw;
+        }
+        finally
+        {
+            executionSw.Stop();
+            if (admission != null && _costQuota != null)
+            {
+                try
+                {
+                    var costOpts = _options.Value.QueryCost ?? new QueryCostOptions();
+                    var webSqlCost = _options.Value.WebSql?.Cost ?? new WebSqlCostOptions();
+                    int cAct = Autheris.Application.Sql.Cost.SqlStatementCostEstimator.CalculateSettlementCost(
+                        deliveredRows,
+                        executionSw.Elapsed.TotalSeconds,
+                        costOpts,
+                        webSqlCost,
+                        failed);
+                    await _costQuota.SettleAsync(admission, cAct, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch { }
+            }
         }
     }
 

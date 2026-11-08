@@ -197,9 +197,6 @@ public sealed class CatalogVisibilityServiceTests
     [InlineData("http://schemas.microsoft.com/identity/claims/objectidentifier")]
     [InlineData(ClaimTypes.NameIdentifier)]
     [InlineData("sub")]
-    [InlineData("appid")]
-    [InlineData("client_id")]
-    [InlineData("azp")]
     [InlineData("cert-prefix")]
     [Trait("Category", "Security")]
     public async Task RealAuthPaths_CertForwardAuthBasicApiKey_HaveSid_CatalogNotEmpty(string claimType)

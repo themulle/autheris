@@ -3,6 +3,8 @@ namespace Autheris.Tests.Integration;
 using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Tests.Integration.Governance;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
@@ -13,7 +15,12 @@ public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactor
 
     public OpenApiIntegrationTests(WebApplicationFactory<Program> factory)
     {
-        _factory = factory;
+        _factory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("OpenApiIntegrationTests"));
+        });
     }
 
     [Fact]

@@ -379,7 +379,7 @@ public sealed class McpOpenFindingsSecurityTests
         var http = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim("client_id", "shared-app"), new Claim("appid", "shared-app"), new Claim(ClaimTypes.GroupSid, "S-1-5-21-GROUP"), new Claim("tenant_id", "tenant-a")],
+                [new Claim("client_id", "shared-app"), new Claim("appid", "shared-app"), new Claim("idtyp", "app"), new Claim("oid", "app-oid"), new Claim(ClaimTypes.GroupSid, "S-1-5-21-GROUP"), new Claim("tenant_id", "tenant-a")],
                 "Bearer"))
         };
         http.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
