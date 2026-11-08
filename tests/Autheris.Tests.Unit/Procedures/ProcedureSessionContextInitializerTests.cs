@@ -65,7 +65,6 @@ public sealed class ProcedureSessionContextInitializerTests
             ResultTable: null,
             ClearedResultColumns: [],
             RequiredRoles: [],
-            AllowDynamicSql: false,
             TimeoutSeconds: 30);
 
         var sec = new ProcedureSecurityContext(Tenant.Value, UserSid.Value, Purpose: "audit");

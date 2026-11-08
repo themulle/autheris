@@ -13,16 +13,17 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// F-SQL-02: Loads <c>*.proc.sql</c> declarations into the <see cref="IProcedureRegistry"/> (state Pending).
+/// F-SQL-02: Loads <c>*.proc.yaml</c> declarations into the <see cref="IProcedureRegistry"/> (state Pending).
 /// Activation happens only after <see cref="StoredProcedureCatalogValidator"/> accepted the declaration.
 /// </summary>
 public sealed class ProcedureDefinitionLoader : IDisposable
 {
     internal const string FilePattern = "*.proc.*";
+    internal const string LegacySqlHeaderMessage = "SQL-header procedure declarations (*.proc.sql) are no longer supported; convert them to *.proc.yaml.";
+    internal const string WriteModeRejectedMessage = "Write procedures are enabled with data products (WP-SIMPL-49).";
     private const long MaxFileBytes = 64 * 1024;
 
     internal static bool IsSupportedProcedureFile(string filePath) =>
-        filePath.EndsWith(".proc.sql", StringComparison.OrdinalIgnoreCase) ||
         filePath.EndsWith(".proc.yaml", StringComparison.OrdinalIgnoreCase) ||
         filePath.EndsWith(".proc.yml", StringComparison.OrdinalIgnoreCase);
 
@@ -73,8 +74,14 @@ public sealed class ProcedureDefinitionLoader : IDisposable
             return 0;
         }
 
+        string[] files = Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories);
+        if (files.Any(f => f.EndsWith(".proc.sql", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(LegacySqlHeaderMessage);
+        }
+
         int count = 0;
-        foreach (string file in Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories))
+        foreach (string file in files)
         {
             if (IsSupportedProcedureFile(file) && TryLoadFile(file, directory))
             {
@@ -128,9 +135,7 @@ public sealed class ProcedureDefinitionLoader : IDisposable
 
             string defaultName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(filePath));
             string content = File.ReadAllText(filePath);
-            var definition = (filePath.EndsWith(".proc.yaml", StringComparison.OrdinalIgnoreCase) || filePath.EndsWith(".proc.yml", StringComparison.OrdinalIgnoreCase))
-                ? ProcedureDefinitionParser.ParseYaml(content, defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds)
-                : ProcedureDefinitionParser.Parse(content, defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds);
+            var definition = ProcedureDefinitionParser.ParseYaml(content, defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds);
 
             string fullPath = Path.GetFullPath(filePath);
             string? rejection = CheckPolicy(definition);
@@ -218,7 +223,7 @@ public sealed class ProcedureDefinitionLoader : IDisposable
     {
         if (definition.Mode == ProcedureMode.Write)
         {
-            return "write procedures are not supported yet (phase 2).";
+            return WriteModeRejectedMessage;
         }
 
         // Review P-1: declared mode skips the catalog validation; it is opt-in outside Development and always needs a
@@ -314,7 +319,7 @@ public sealed class ProcedureDefinitionLoader : IDisposable
             _watcher.Deleted += (_, e) => OnWatcherEvent(() => SafeForget(e.FullPath));
             _watcher.Renamed += (_, e) => OnWatcherEvent(() =>
             {
-                // Renaming x.proc.sql to x.proc.sql.disabled must switch the endpoint off; atomic saves (temp + rename)
+                // Renaming x.proc.yaml to x.proc.yaml.disabled must switch the endpoint off; atomic saves (temp + rename)
                 // must load the new content.
                 SafeForget(e.OldFullPath);
                 if (IsSupportedProcedureFile(e.FullPath))

@@ -29,16 +29,16 @@ namespace Autheris.Tests.Unit.Procedures;
 public class ProcedureRowBudgetAndScanCapTests
 {
     private const string ScopedHeader = """
-        -- @name get_cranes
-        -- @procedure tem.usp_Cranes
-        -- @result-table md.crane
-        -- @row-scope-key serial_number
+        name: get_cranes
+        procedure: tem.usp_Cranes
+        result_table: md.crane
+        row_scope_key: serial_number
         """;
 
     private const string UnscopedHeader = """
-        -- @name get_cranes
-        -- @procedure tem.usp_Cranes
-        -- @result-table md.crane
+        name: get_cranes
+        procedure: tem.usp_Cranes
+        result_table: md.crane
         """;
 
     private static readonly TenantId Tenant = new("tenant-a");
@@ -100,7 +100,7 @@ public class ProcedureRowBudgetAndScanCapTests
     private static Fixture Active(bool scoped, int total, int maxRows = 10, int? maxScanRows = null, ProcedureMode mode = ProcedureMode.Read, IReadOnlyList<ProcedureErrorCode>? errorCodes = null)
     {
         var f = new Fixture { Procedures = new ProcedureEndpointsOptions { MaxRows = maxRows, MaxScanRows = maxScanRows } };
-        var def = ProcedureDefinitionParser.Parse(scoped ? ScopedHeader : UnscopedHeader, "x", false, 60) with { Mode = mode, ErrorCodes = errorCodes ?? [] };
+        var def = TestProcedureYaml.Definition(scoped ? ScopedHeader : UnscopedHeader, "x", false, 60) with { Mode = mode, ErrorCodes = errorCodes ?? [] };
         f.Registry.Register(def);
         f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["serial_number", "name"], ["md.crane"], new Dictionary<string, string>()));
         f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new TableMetadata
@@ -361,7 +361,7 @@ public class ProcedureRowBudgetAndScanCapTests
         });
         h.ExecCmd = execCmd;
         h.Invoker = new ProcedureInvoker(new ProcedureConnectionProvider(connFactory, options), options);
-        h.Definition = ProcedureDefinitionParser.Parse(UnscopedHeader, "x", false, 60);
+        h.Definition = TestProcedureYaml.Definition(UnscopedHeader, "x", false, 60);
         return h;
     }
 
@@ -684,18 +684,18 @@ public class ProcedureRowBudgetAndScanCapTests
     // ---------- WP-B: reserved name in the parsers and the catalog ----------
 
     [Theory]
-    [InlineData("-- @param limit int optional")]
-    [InlineData("-- @param Limit int required")]
-    [InlineData("-- @param LIMIT nvarchar(10) optional")]
-    [InlineData("-- @context tenant_id -> @limit")]
-    [InlineData("-- @context user_sid -> @Limit")]
-    [InlineData("-- @context purpose -> LIMIT")]
+    [InlineData("parameters:\n  - name: limit\n    type: int\n    required: false")]
+    [InlineData("parameters:\n  - name: Limit\n    type: int")]
+    [InlineData("parameters:\n  - name: LIMIT\n    type: nvarchar(10)\n    required: false")]
+    [InlineData("context:\n  tenant_id: limit")]
+    [InlineData("context:\n  user_sid: Limit")]
+    [InlineData("context:\n  purpose: LIMIT")]
     [Trait("Category", "Security")]
     public void T_PROC152I2_10_Parser_Header_ParameterNamedLimit_Rejected(string line)
     {
         string header = UnscopedHeader + "\n" + line;
 
-        var ex = Should.Throw<FormatException>(() => ProcedureDefinitionParser.Parse(header, "x", false, 60));
+        var ex = Should.Throw<FormatException>(() => TestProcedureYaml.Definition(header, "x", false, 60));
 
         ex.Message.ShouldBe("Parameter name 'limit' is reserved.");
     }
@@ -705,7 +705,6 @@ public class ProcedureRowBudgetAndScanCapTests
     [InlineData("parameters:\n  - name: '@Limit'\n    type: int")]
     [InlineData("parameters:\n  - name: LIMIT\n    context: tenant_id")]
     [InlineData("context:\n  tenant_id: '@limit'")]
-    [InlineData("context_bindings:\n  - key: user_sid\n    parameter: Limit")]
     [Trait("Category", "Security")]
     public void T_PROC152I2_10_Parser_Yaml_ParameterNamedLimit_Rejected(string fragment)
     {
@@ -756,7 +755,7 @@ public class ProcedureRowBudgetAndScanCapTests
         factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
             .Returns(_ => Task.FromResult<DbConnection>(new ScriptedCatalogConnection("@limit")));
         var validator = new StoredProcedureCatalogValidator(new ProcedureConnectionProvider(factory, options), options);
-        var def = ProcedureDefinitionParser.Parse(UnscopedHeader, "x", false, 60);
+        var def = TestProcedureYaml.Definition(UnscopedHeader, "x", false, 60);
 
         var result = await validator.ValidateAsync(def, CancellationToken.None);
 
@@ -811,8 +810,8 @@ public class ProcedureRowBudgetAndScanCapTests
     public async Task T_PROC152I2_17_OpenApi_LimitParameter_OnlyForVisibleProcedures_NoScanCap()
     {
         var registry = new InMemoryProcedureRegistry();
-        var visible = ProcedureDefinitionParser.Parse(UnscopedHeader, "x", false, 60);
-        var hidden = ProcedureDefinitionParser.Parse(UnscopedHeader.Replace("get_cranes", "hidden_cranes"), "y", false, 60);
+        var visible = TestProcedureYaml.Definition(UnscopedHeader, "x", false, 60);
+        var hidden = TestProcedureYaml.Definition(UnscopedHeader.Replace("get_cranes", "hidden_cranes"), "y", false, 60);
         foreach (var d in new[] { visible, hidden })
         {
             registry.Register(d);

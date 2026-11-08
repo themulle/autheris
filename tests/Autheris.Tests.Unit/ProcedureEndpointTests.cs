@@ -7,6 +7,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Unit.Procedures;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
@@ -21,25 +22,32 @@ namespace Autheris.Tests.Unit;
 public class ProcedureEndpointTests
 {
     private const string ValidHeader = """
-        -- @name get_orders
-        -- @procedure api.usp_GetOrders
-        -- @mode read                       -- read | write
-        -- @summary Lists orders
-        -- @param customer_id int required Customer number
-        -- @param note nvarchar(40) optional Free text
-        -- @context tenant_id -> @TenantId
-        -- @context user_sid  -> @ActorSid
-        -- @result-table sales.orders
-        -- @result-column order_id clear
-        -- @timeout 120
+        name: get_orders
+        procedure: api.usp_GetOrders
+        mode: read
+        summary: Lists orders
+        parameters:
+          - name: customer_id
+            type: int
+            description: Customer number
+          - name: note
+            type: nvarchar(40)
+            required: false
+            description: Free text
+        context:
+          tenant_id: TenantId
+          user_sid: ActorSid
+        result_table: sales.orders
+        cleared_columns: [order_id]
+        timeout: 120
         """;
 
     // ---------- parser ----------
 
     [Fact]
-    public void Parse_ValidHeader_MapsAllFields()
+    public void Parse_CanonicalDefinition_AllFieldsMapped()
     {
-        var def = ProcedureDefinitionParser.Parse(ValidHeader, "fallback", allowRlsNone: false, maxTimeoutSeconds: 60);
+        var def = TestProcedureYaml.Definition(ValidHeader, "fallback", allowRlsNone: false, maxTimeoutSeconds: 60);
 
         def.Name.ShouldBe("get_orders");
         def.ProcedureName.ShouldBe("api.usp_GetOrders");
@@ -57,33 +65,33 @@ public class ProcedureEndpointTests
     }
 
     [Theory]
-    [InlineData("-- @procedure db.api.usp_X")]          // three-part name (other database)
-    [InlineData("-- @procedure [api].[usp_X]")]         // quoting
-    [InlineData("-- @procedure api.usp_X; DROP TABLE x")]
-    [InlineData("-- @procedure usp_X")]                  // schema missing
-    public void Parse_InvalidProcedureName_Throws(string header)
+    [InlineData("procedure: db.api.usp_X")]          // three-part name (other database)
+    [InlineData("procedure: '[api].[usp_X]'")]         // quoting
+    [InlineData("procedure: api.usp_X; DROP TABLE x")]
+    [InlineData("procedure: usp_X")]                  // schema missing
+    public void Parse_InvalidProcedureName_Throws(string yaml)
     {
-        Should.Throw<FormatException>(() => ProcedureDefinitionParser.Parse(header, "x", false, 30));
+        Should.Throw<FormatException>(() => TestProcedureYaml.Definition(yaml, "x", false, 30));
     }
 
     [Fact]
     public void Parse_RlsNone_IsRejectedOutsideDevelopment()
     {
-        const string text = "-- @procedure api.usp_X\n-- @rls none";
-        Should.Throw<FormatException>(() => ProcedureDefinitionParser.Parse(text, "x", allowRlsNone: false, 30));
-        ProcedureDefinitionParser.Parse(text, "x", allowRlsNone: true, 30).RlsMode.ShouldBe(ProcedureRlsMode.None);
+        const string text = "procedure: api.usp_X\nrls: none";
+        Should.Throw<FormatException>(() => TestProcedureYaml.Definition(text, "x", allowRlsNone: false, 30));
+        TestProcedureYaml.Definition(text, "x", allowRlsNone: true, 30).RlsMode.ShouldBe(ProcedureRlsMode.None);
     }
 
     [Theory]
-    [InlineData("-- @procedure api.usp_X\n-- @bogus 1")]                                        // unknown header
-    [InlineData("-- @procedure api.usp_X\n-- @param a geography required")]                     // unsupported type
-    [InlineData("-- @procedure api.usp_X\n-- @param a int required\n-- @param a int required")]  // duplicate
-    [InlineData("-- @procedure api.usp_X\n-- @param TenantId int required\n-- @context tenant_id -> @TenantId")] // client may not set a context param
-    [InlineData("-- @procedure api.usp_X\n-- @approval four-eyes")]                              // phase 2
-    [InlineData("-- @procedure api.usp_X\n-- @mode destroy")]
-    public void Parse_FailClosedOnUnsupportedInput(string header)
+    [InlineData("procedure: api.usp_X\nbogus: 1")]                                              // unknown key
+    [InlineData("procedure: api.usp_X\nparameters:\n  - name: a\n    type: geography")]          // unsupported type
+    [InlineData("procedure: api.usp_X\nparameters:\n  - name: a\n    type: int\n  - name: a\n    type: int")]  // duplicate
+    [InlineData("procedure: api.usp_X\nparameters:\n  - name: TenantId\n    type: int\ncontext:\n  tenant_id: TenantId")] // client may not set a context param
+    [InlineData("procedure: api.usp_X\napproval: four-eyes")]                                    // removed
+    [InlineData("procedure: api.usp_X\nmode: destroy")]
+    public void Parse_FailClosedOnUnsupportedInput(string yaml)
     {
-        Should.Throw<FormatException>(() => ProcedureDefinitionParser.Parse(header, "x", false, 30));
+        Should.Throw<FormatException>(() => TestProcedureYaml.Definition(yaml, "x", false, 30));
     }
 
     // ---------- loader / registration policy ----------
@@ -110,7 +118,7 @@ public class ProcedureEndpointTests
         var (loader, registry, dir) = CreateLoader("api");
         try
         {
-            File.WriteAllText(Path.Combine(dir, "get_orders.proc.sql"), ValidHeader);
+            File.WriteAllText(Path.Combine(dir, "get_orders.proc.yaml"), ValidHeader);
             loader.LoadFromDirectory().ShouldBe(1);
 
             registry.TryGet("get_orders", out var reg).ShouldBeTrue();
@@ -123,17 +131,17 @@ public class ProcedureEndpointTests
     }
 
     [Theory]
-    [InlineData("-- @procedure hr.usp_Salaries")]                        // schema not allowed
-    [InlineData("-- @procedure sys.sp_who")]                              // system schema
-    [InlineData("-- @procedure api.sp_helptext")]                         // system procedure prefix
-    [InlineData("-- @procedure api.xp_cmdshell")]                         // extended procedure
-    [InlineData("-- @procedure api.usp_Write\n-- @mode write")]           // phase 2
+    [InlineData("procedure: hr.usp_Salaries")]                        // schema not allowed
+    [InlineData("procedure: sys.sp_who")]                              // system schema
+    [InlineData("procedure: api.sp_helptext")]                         // system procedure prefix
+    [InlineData("procedure: api.xp_cmdshell")]                         // extended procedure
+    [InlineData("procedure: api.usp_Write\nmode: write")]             // write mode rejected until data products
     public void Loader_RejectsPolicyViolations(string content)
     {
         var (loader, registry, dir) = CreateLoader("api", "sys");
         try
         {
-            File.WriteAllText(Path.Combine(dir, "bad.proc.sql"), content);
+            File.WriteAllText(Path.Combine(dir, "bad.proc.yaml"), content);
             loader.LoadFromDirectory().ShouldBe(0);
             registry.GetAll().ShouldBeEmpty();
         }
@@ -149,7 +157,7 @@ public class ProcedureEndpointTests
         var (loader, registry, dir) = CreateLoader();
         try
         {
-            File.WriteAllText(Path.Combine(dir, "get_orders.proc.sql"), ValidHeader);
+            File.WriteAllText(Path.Combine(dir, "get_orders.proc.yaml"), ValidHeader);
             loader.LoadFromDirectory().ShouldBe(0);
             registry.GetAll().ShouldBeEmpty();
         }
@@ -165,12 +173,12 @@ public class ProcedureEndpointTests
         var (loader, registry, dir) = CreateLoader("api");
         try
         {
-            string file = Path.Combine(dir, "get_orders.proc.sql");
+            string file = Path.Combine(dir, "get_orders.proc.yaml");
             File.WriteAllText(file, ValidHeader);
             loader.TryLoadFile(file, dir).ShouldBeTrue();
             registry.TryGet("get_orders", out _).ShouldBeTrue();
 
-            File.WriteAllText(file, "-- @procedure api.usp_GetOrders\n-- @bogus 1");
+            File.WriteAllText(file, "procedure: api.usp_GetOrders\nbogus: 1");
             loader.TryLoadFile(file, dir).ShouldBeFalse();
             registry.TryGet("get_orders", out _).ShouldBeFalse(); // fail-closed
         }
@@ -222,7 +230,7 @@ public class ProcedureEndpointTests
     private static Fixture Active(Func<ProcedureDefinition, ProcedureDefinition>? tweak = null, string? rowFilter = null)
     {
         var f = new Fixture();
-        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        var def = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
         if (tweak != null)
         {
             def = tweak(def);
@@ -275,7 +283,7 @@ public class ProcedureEndpointTests
     public async Task ResolveResultAccess_WhenHasPoliciesAndUnconstrainedAllow_MasksSensitiveCatalogColumns()
     {
         var f = new Fixture();
-        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        var def = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
         f.Registry.Register(def);
         f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id", "salary"], ["sales.orders"], new Dictionary<string, string>()));
 
@@ -316,7 +324,7 @@ public class ProcedureEndpointTests
     [Fact]
     public void CatalogDomain_FallsBackToDefaultWithoutDataSource()
     {
-        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        var def = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
         (def with { DataSource = null }).CatalogDomain.ShouldBe("default");
         (def with { DataSource = "lwetem_prod" }).CatalogDomain.ShouldBe("lwetem_prod");
     }
@@ -333,7 +341,7 @@ public class ProcedureEndpointTests
     {
         // 503 is only visible to callers that pass the visibility stage (see ProcedureExecutionSecurityTests)
         var f = new Fixture();
-        f.Registry.Register(ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60));
+        f.Registry.Register(TestProcedureYaml.Definition(ValidHeader, "x", false, 60));
         await Should.ThrowAsync<KeyNotFoundException>(() => f.Create().ExecuteAsync("get_orders", null, User(), Tenant));
     }
 
@@ -474,7 +482,7 @@ public class ProcedureEndpointTests
     public void Registry_ReRegistrationResetsToPending()
     {
         var f = Active();
-        f.Registry.Register(ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60));
+        f.Registry.Register(TestProcedureYaml.Definition(ValidHeader, "x", false, 60));
         f.Registry.TryGet("get_orders", out var reg).ShouldBeTrue();
         reg!.State.ShouldBe(ProcedureState.Pending);
     }
@@ -495,7 +503,7 @@ public class ProcedureEndpointTests
         });
 
         var registry = new InMemoryProcedureRegistry();
-        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        var def = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
         registry.Register(def);
 
         var connFactory = Substitute.For<ISqlConnectionFactory>();
@@ -550,7 +558,7 @@ public class ProcedureEndpointTests
         result_table: api.telemetry
         timeout: 45
         summary: Retrieves device telemetry
-        required_roles:
+        roles:
           - telemetry-reader
         parameters:
           - name: device_id
@@ -610,14 +618,14 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
-    public void Parse_SqlWithDeclaredValidationAndOutputs_MapsCorrectly()
+    public void ParseYaml_WithDeclaredValidationAndOutputs_MapsCorrectly()
     {
         const string sql = """
-            -- @procedure api.usp_Custom
-            -- @validation declared
-            -- @output col_a, col_b
+            procedure: api.usp_Custom
+            validation: declared
+            outputs: [col_a, col_b]
             """;
-        var def = ProcedureDefinitionParser.Parse(sql, "custom", false, 30);
+        var def = TestProcedureYaml.Definition(sql, "custom", false, 30);
         def.ValidationMode.ShouldBe(ProcedureValidationMode.Declared);
         def.DeclaredOutputs.ShouldBe(["col_a", "col_b"]);
     }
@@ -790,19 +798,6 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
-    public void ParseSql_WithTvfKind_MapsToTableValuedFunction()
-    {
-        const string sql = """
-            -- @procedure api.ufn_GetCraneTelemetry
-            -- @kind tvf
-            -- @validation declared
-            -- @output crane_id, speed
-            """;
-        var def = ProcedureDefinitionParser.Parse(sql, "telemetry", false, 30);
-        def.Kind.ShouldBe(ProcedureKind.TableValuedFunction);
-    }
-
-    [Fact]
     public async Task Invoker_TvfKind_GeneratesSelectQuery_ForSqlServer()
     {
         var connFactory = Substitute.For<ISqlConnectionFactory>();
@@ -878,7 +873,7 @@ public class ProcedureEndpointTests
     [Theory]
     [InlineData("procedure: api.usp_X\ncontext:\n  tenantid: tenant_id")]                                   // P-5 unknown context key
     [InlineData("procedure: api.usp_X\ncontext:\n  tenant_id: \"t) UNION SELECT * FROM dbo.Secrets --\"")]  // P-4 injection
-    [InlineData("procedure: api.usp_X\ncontext_bindings:\n  - key: tenant_id\n    parameter: \"a b\"")]  // P-4 invalid identifier
+    [InlineData("procedure: api.usp_X\ncontext:\n  tenant_id: \"a b\"")]  // P-4 invalid identifier
     [InlineData("procedure: api.usp_X\napproval: four-eyes")]                                                // P-5 unknown top-level key
     [InlineData("procedure: api.usp_X\nresult_table: \"x; DROP\"")]                                        // P-4 result table
     [InlineData("procedure: api.usp_X\noutputs:\n  - \"a,b\"")]                                           // P-4 output column
@@ -897,12 +892,15 @@ public class ProcedureEndpointTests
     public void Parse_ArgumentOrderFollowsDeclaration()
     {
         const string sql = """
-            -- @procedure api.fn_Telemetry
-            -- @kind tvf
-            -- @context tenant_id -> @tenant
-            -- @param region nvarchar(50) required
+            procedure: api.fn_Telemetry
+            kind: tvf
+            parameters:
+              - name: tenant
+                context: tenant_id
+              - name: region
+                type: nvarchar(50)
             """;
-        var def = ProcedureDefinitionParser.Parse(sql, "telemetry", false, 30);
+        var def = TestProcedureYaml.Definition(sql, "telemetry", false, 30);
         def.ArgumentOrder.ShouldBe(["tenant", "region"]);
     }
 
@@ -983,7 +981,7 @@ public class ProcedureEndpointTests
             SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true, ConnectionName = "ds" } }
         });
         var provider2 = new ProcedureConnectionProvider(Substitute.For<ISqlConnectionFactory>(), options);
-        var def = ProcedureDefinitionParser.Parse("-- @procedure api.usp_X\n-- @validation declared\n-- @output a", "x", false, 30);
+        var def = TestProcedureYaml.Definition("procedure: api.usp_X\nvalidation: declared\noutputs: [a]", "x", false, 30);
 
         // P-6: no tenant context on these providers -> never run with rls: session-context.
         Should.Throw<InvalidOperationException>(() => provider2.Resolve(def));
@@ -1022,7 +1020,7 @@ public class ProcedureEndpointTests
         var loader = new ProcedureDefinitionLoader(registry, options);
         try
         {
-            File.WriteAllText(Path.Combine(dir, "custom.proc.sql"), "-- @procedure api.usp_Custom\n-- @validation declared\n-- @output col_a");
+            File.WriteAllText(Path.Combine(dir, "custom.proc.yaml"), "procedure: api.usp_Custom\nvalidation: declared\noutputs: [col_a]");
             loader.LoadFromDirectory().ShouldBe(0); // P-1: no result table -> no consent -> rejected
         }
         finally
@@ -1054,8 +1052,8 @@ public class ProcedureEndpointTests
         var (loader, registry, dir) = CreateLoader("api");
         try
         {
-            string first = Path.Combine(dir, "a.proc.sql");
-            string second = Path.Combine(dir, "b.proc.sql");
+            string first = Path.Combine(dir, "a.proc.yaml");
+            string second = Path.Combine(dir, "b.proc.yaml");
             File.WriteAllText(first, ValidHeader);
             File.WriteAllText(second, ValidHeader);
 
@@ -1063,7 +1061,7 @@ public class ProcedureEndpointTests
             loader.TryLoadFile(second, dir).ShouldBeFalse(); // P-8: same @name in a second file is rejected
             registry.GetAll().Count.ShouldBe(1);
 
-            File.WriteAllText(first, ValidHeader.Replace("@name get_orders", "@name get_orders_v2", StringComparison.Ordinal));
+            File.WriteAllText(first, ValidHeader.Replace("name: get_orders", "name: get_orders_v2", StringComparison.Ordinal));
             loader.TryLoadFile(first, dir).ShouldBeTrue();
             registry.TryGet("get_orders", out _).ShouldBeFalse(); // P-8: old name is removed
             registry.TryGet("get_orders_v2", out _).ShouldBeTrue();
@@ -1078,7 +1076,7 @@ public class ProcedureEndpointTests
     public void Registry_TryMarkActive_IgnoresReplacedDefinition()
     {
         var registry = new InMemoryProcedureRegistry();
-        var original = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        var original = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
         registry.Register(original);
         var replacement = original with { Summary = "changed during validation" };
         registry.Register(replacement);
@@ -1141,7 +1139,7 @@ public class ProcedureEndpointTests
     public async Task HandleOpenApi_AnonymousCaller_WhenDocumentAllForAnonymousFalse_OmitsEndpoints()
     {
         var registry = new InMemoryProcedureRegistry();
-        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        var def = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
         registry.Register(def);
         registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id"], ["sales.orders"], new Dictionary<string, string>()));
 
@@ -1158,7 +1156,7 @@ public class ProcedureEndpointTests
     public async Task HandleOpenApi_AnonymousCaller_OpenSchema_ListsNoEndpoints()
     {
         var registry = new InMemoryProcedureRegistry();
-        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        var def = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
         registry.Register(def);
         registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id"], ["sales.orders"], new Dictionary<string, string>()));
 
@@ -1175,7 +1173,7 @@ public class ProcedureEndpointTests
     public async Task HandleOpenApi_AuthenticatedCaller_IncludesEndpoints()
     {
         var registry = new InMemoryProcedureRegistry();
-        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        var def = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
         registry.Register(def);
         registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id"], ["sales.orders"], new Dictionary<string, string>()));
 

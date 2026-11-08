@@ -22,10 +22,13 @@ namespace Autheris.Tests.Unit.Procedures;
 public sealed class ProcedureTransportGateTests
 {
     private const string Header = """
-        -- @name get_orders
-        -- @procedure api.usp_GetOrders
-        -- @param customer_id int required Customer number
-        -- @result-table sales.orders
+        name: get_orders
+        procedure: api.usp_GetOrders
+        parameters:
+          - name: customer_id
+            type: int
+            description: Customer number
+        result_table: sales.orders
         """;
 
     private static readonly TenantId Tenant = new("tenant-a");
@@ -67,7 +70,7 @@ public sealed class ProcedureTransportGateTests
         public GovernedProcedureExecutionService Create(IDataSourceTransportGate? gate, string? definitionSource, string tableSource, string tableDomain = "sales")
         {
             var registry = Registry;
-            var def = ProcedureDefinitionParser.Parse(Header, "x", false, 60) with { DataSource = definitionSource };
+            var def = TestProcedureYaml.Definition(Header, "x", false, 60) with { DataSource = definitionSource };
             registry.Register(def);
             registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id"], ["sales.orders"], new Dictionary<string, string>()));
 
