@@ -272,7 +272,8 @@ public sealed class ModuleAssemblyLoadContext : AssemblyLoadContext
                 _nativeContextDirectory ??= Path.Combine(root, Guid.NewGuid().ToString("N"));
                 EnsurePrivateDirectory(_nativeContextDirectory);
 
-                var copyPath = Path.Combine(_nativeContextDirectory, Path.GetFileName(relativePath));
+                var copyPath = Path.Combine(_nativeContextDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                EnsurePrivateDirectory(Path.GetDirectoryName(copyPath)!);
                 using (var stream = new FileStream(copyPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
                     stream.Write(verifiedBytes);
@@ -325,7 +326,22 @@ public sealed class ModuleAssemblyLoadContext : AssemblyLoadContext
         var parent = OperatingSystem.IsWindows()
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Autheris", "native")
             : Path.GetTempPath();
-        return Path.Combine(parent, $"autheris-native-{Environment.ProcessId}");
+        var root = Path.Combine(parent, $"autheris-native-{Environment.ProcessId}");
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+            catch (Exception)
+            {
+                // Best-effort cleanup only.
+            }
+        };
+        return root;
     }
 
     private void EnsurePrivateDirectory(string path)
@@ -353,7 +369,7 @@ public sealed class ModuleAssemblyLoadContext : AssemblyLoadContext
 
         var owner = UnixFileStat.TryGetOwnerUid(path);
         var self = UnixFileStat.TryGetEffectiveUid();
-        if (owner is { } o && self is { } e && o != e)
+        if (owner is not { } o || self is not { } e || o != e)
         {
             throw new ModuleLoadException(
                 _image.ModuleId,

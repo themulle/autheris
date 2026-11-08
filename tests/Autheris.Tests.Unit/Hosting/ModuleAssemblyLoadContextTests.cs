@@ -12,6 +12,7 @@ using System.Text;
 using Autheris.Api.Hosting;
 using Autheris.Infrastructure.Modules.Trust;
 using Parquet;
+using Autheris.Tests.Unit.Support;
 using Shouldly;
 using Xunit;
 
@@ -287,11 +288,27 @@ public sealed class ModuleAssemblyLoadContextTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Same_named_natives_in_different_subdirectories_do_not_collide()
+    {
+        var (alc, relPath, bytes, _) = CreateNativeFixture("collide-root");
+        var other = relPath.Replace("/native/", "/native/sub/");
+        var otherBytes = RandomNumberGenerator.GetBytes(128);
+
+        var first = alc.MaterializeVerifiedNative(relPath, bytes);
+        var second = alc.MaterializeVerifiedNative(other, otherBytes);
+
+        second.ShouldNotBe(first);
+        File.ReadAllBytes(first).ShouldBe(bytes);
+        File.ReadAllBytes(second).ShouldBe(otherBytes);
+    }
+
+    [RuntimeSkippableFact]
+    [Trait("Category", "Security")]
     public void Native_root_with_foreign_mode_fails()
     {
         if (OperatingSystem.IsWindows())
         {
-            return;
+            throw new RuntimeSkipException("Unix file modes are not available on Windows.");
         }
 
         var (alc, relPath, bytes, nativeRoot) = CreateNativeFixture("foreign-root");

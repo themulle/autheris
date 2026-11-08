@@ -7,6 +7,7 @@ using System.Security;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Autheris.Infrastructure.Modules.Trust;
+using Autheris.Tests.Unit.Support;
 using Shouldly;
 using Xunit;
 
@@ -45,13 +46,13 @@ public sealed class FileHashVerifierTests : IDisposable
         return ModulePackageBuilder.CreateSignedManifest(key, files: files);
     }
 
-    [Fact]
+    [RuntimeSkippableFact]
     [Trait("Category", "Security")]
     public async Task Fifo_in_module_root_is_rejected()
     {
         if (!OperatingSystem.IsLinux())
         {
-            return;
+            throw new RuntimeSkipException("FIFO handling is verified on Linux only.");
         }
 
         var dll = ModulePackageBuilder.GetValidModuleDllBytes();
@@ -92,6 +93,18 @@ public sealed class FileHashVerifierTests : IDisposable
 
         Should.Throw<SecurityException>(() => FileHashVerifier.ReadCapped(stream, "grow.bin", maxBytes: 4096));
         stream.TotalServed.ShouldBeLessThan(1024 * 1024);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Failed_or_untyped_stat_result_on_existing_path_is_unknown_kind()
+    {
+        UnixFileStat.ClassifyStatxResult(-1, 38, 0, 0).ShouldBe(UnixFileKind.Unknown);
+        UnixFileStat.ClassifyStatxResult(-1, 1, 0, 0).ShouldBe(UnixFileKind.Unknown);
+        UnixFileStat.ClassifyStatxResult(0, 0, 0x0, 0x8000).ShouldBe(UnixFileKind.Unknown);
+        UnixFileStat.ClassifyStatxResult(-1, 2, 0, 0).ShouldBeNull();
+        UnixFileStat.ClassifyStatxResult(0, 0, 0x1, 0x8000).ShouldBe(UnixFileKind.Regular);
+        UnixFileStat.ClassifyStatxResult(0, 0, 0x1, 0x1000).ShouldBe(UnixFileKind.Fifo);
     }
 
     [Fact]

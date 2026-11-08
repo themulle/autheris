@@ -30,7 +30,11 @@ public static partial class UnixFileStat
     private const int UidOffset = 20;
     private const int ModeOffset = 28;
 
-    [LibraryImport("libc", EntryPoint = "statx", StringMarshalling = StringMarshalling.Utf8)]
+    private const uint StatxType = 0x1;
+    private const int Enoent = 2;
+    private const int Enotdir = 20;
+
+    [LibraryImport("libc", EntryPoint = "statx", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     private static unsafe partial int StatxNative(int dirfd, string path, int flags, uint mask, byte* buffer);
 
     public static UnixFileKind? TryGetFileKind(string path, bool followLinks = true)
@@ -41,7 +45,31 @@ public static partial class UnixFileStat
             return null;
         }
 
-        return (info.Value.Mode & 0xF000) switch
+        if (info.Value.Failed)
+        {
+            return UnixFileKind.Unknown;
+        }
+
+        return ClassifyMode(info.Value.Mode);
+    }
+
+    /// <summary>
+    /// Maps the outcome of a <c>statx</c> call to a kind. A failed call on an existing path, or a result whose
+    /// type bits were not filled in, is <see cref="UnixFileKind.Unknown"/> so callers fail closed.
+    /// </summary>
+    internal static UnixFileKind? ClassifyStatxResult(int result, int errno, uint mask, uint mode)
+    {
+        if (result != 0)
+        {
+            return errno is Enoent or Enotdir ? null : UnixFileKind.Unknown;
+        }
+
+        return (mask & StatxType) == 0 ? UnixFileKind.Unknown : ClassifyMode(mode);
+    }
+
+    private static UnixFileKind ClassifyMode(uint mode)
+    {
+        return (mode & 0xF000) switch
         {
             0x8000 => UnixFileKind.Regular,
             0x4000 => UnixFileKind.Directory,
@@ -55,7 +83,7 @@ public static partial class UnixFileStat
     }
 
     /// <summary>Returns the numeric owner of the path itself (links are not followed), or <see langword="null"/> when unknown.</summary>
-    public static uint? TryGetOwnerUid(string path) => TryStat(path, followLinks: false)?.Uid;
+    public static uint? TryGetOwnerUid(string path) => TryStat(path, followLinks: false)is { Failed: false } i ? i.Uid : null;
 
     /// <summary>Returns the effective user id of the process, or <see langword="null"/> when unavailable.</summary>
     public static uint? TryGetEffectiveUid()
@@ -78,7 +106,7 @@ public static partial class UnixFileStat
     [LibraryImport("libc", EntryPoint = "geteuid")]
     private static partial uint GetEuid();
 
-    private static unsafe (uint Uid, uint Mode)? TryStat(string path, bool followLinks)
+    private static unsafe (uint Uid, uint Mode, bool Failed)? TryStat(string path, bool followLinks)
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -89,9 +117,16 @@ public static partial class UnixFileStat
         try
         {
             var flags = followLinks ? 0 : AtSymlinkNoFollow;
-            if (StatxNative(AtFdCwd, path, flags, StatxBasicStats, buffer) != 0)
+            var result = StatxNative(AtFdCwd, path, flags, StatxBasicStats, buffer);
+            var kind = ClassifyStatxResult(result, result == 0 ? 0 : Marshal.GetLastPInvokeError(), *(uint*)buffer, (uint)*(ushort*)(buffer + ModeOffset));
+            if (kind is null)
             {
                 return null;
+            }
+
+            if (kind == UnixFileKind.Unknown)
+            {
+                return (0, 0, true);
             }
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -101,6 +136,6 @@ public static partial class UnixFileStat
 
         var uid = *(uint*)(buffer + UidOffset);
         var mode = (uint)*(ushort*)(buffer + ModeOffset);
-        return (uid, mode);
+        return (uid, mode, false);
     }
 }

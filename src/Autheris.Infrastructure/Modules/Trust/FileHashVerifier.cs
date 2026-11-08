@@ -146,10 +146,37 @@ public static class FileHashVerifier
     {
         ArgumentNullException.ThrowIfNull(stream);
 
-        var initialCapacity = stream.CanSeek ? (int)Math.Min(Math.Max(stream.Length, 0), maxBytes) : 0;
-        using var buffer = new MemoryStream(initialCapacity);
+        if (stream.CanSeek && stream.Length <= maxBytes)
+        {
+            var exact = new byte[Math.Max(stream.Length, 0)];
+            var filled = 0;
+            int n;
+            while (filled < exact.Length && (n = stream.Read(exact, filled, exact.Length - filled)) > 0)
+            {
+                filled += n;
+            }
+
+            // Anything beyond the reported length is read with the cap enforced on the bytes actually read.
+            var probe = new byte[1];
+            if (filled < exact.Length || stream.Read(probe, 0, 1) == 0)
+            {
+                return filled == exact.Length ? exact : exact[..filled];
+            }
+
+            using var rest = new MemoryStream();
+            rest.Write(exact, 0, filled);
+            rest.Write(probe, 0, 1);
+            return ReadRemainder(stream, rest, relativePath, maxBytes);
+        }
+
+        using var buffer = new MemoryStream();
+        return ReadRemainder(stream, buffer, relativePath, maxBytes);
+    }
+
+    private static byte[] ReadRemainder(Stream stream, MemoryStream buffer, string relativePath, long maxBytes)
+    {
         var chunk = new byte[81920];
-        long total = 0;
+        long total = buffer.Length;
         int read;
         while ((read = stream.Read(chunk, 0, chunk.Length)) > 0)
         {
