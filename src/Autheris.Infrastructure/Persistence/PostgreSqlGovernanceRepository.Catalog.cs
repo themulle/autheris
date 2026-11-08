@@ -881,9 +881,14 @@ RETURNING structure_version, content_version;";
             insertCmd.AddBound("@now", DateTimeOffset.UtcNow.ToString("O"));
 
             var insScalar = await insertCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            return insScalar != null
-                ? Convert.ToInt64(insScalar)
-                : throw new InvalidOperationException("Policy epoch cannot be advanced: table is not registered in the catalog.");
+            if (insScalar != null)
+            {
+                return Convert.ToInt64(insScalar);
+            }
+
+            // Table no longer in the catalog: write no row and do not throw, so a revoke/withdraw in the same transaction still commits.
+            _logger?.LogWarning("Policy epoch was not advanced: the table is not registered in the catalog.");
+            return 0L;
         }
     }
 

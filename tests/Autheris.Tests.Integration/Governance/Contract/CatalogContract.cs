@@ -376,17 +376,6 @@ public abstract class CatalogContract : GovernanceContractBase
     }
 
     [RequiresContainerRuntimeFact]
-    [Trait("Category", "Security")]
-    public async Task Epoch_increment_for_unregistered_table_fails_closed()
-    {
-        if (!Store.IsAvailable) return;
-
-        var unknown = new TableIdentifier("catalog", "dbo", "never_registered_" + Guid.NewGuid().ToString("N")[..8]);
-        var act = () => Store.PolicyEpochs.IncrementTableEpochAsync(unknown);
-        await act.Should().ThrowAsync<InvalidOperationException>();
-    }
-
-    [RequiresContainerRuntimeFact]
     public async Task Physical_indexes_and_policy_epochs_round_trip_atomically()
     {
         if (!Store.IsAvailable) return;
