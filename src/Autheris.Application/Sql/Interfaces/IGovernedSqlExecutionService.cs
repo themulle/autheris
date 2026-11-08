@@ -30,7 +30,7 @@ public static class SqlTransports
     public const string Parquet = "Parquet";
 
     /// <summary>
-    /// SEC-51-12 (fail-closed): the server-stamped transports priced by their own pipeline; every other value
+    /// Fail-closed: the server-stamped transports priced by their own pipeline; every other value
     /// (null, empty, unknown, WebSql, Trino, Parquet) is metered by the statement cost gate.
     /// </summary>
     public static bool IsCostMetered(string? transport) =>
