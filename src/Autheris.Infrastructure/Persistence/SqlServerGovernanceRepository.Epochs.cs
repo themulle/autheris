@@ -20,7 +20,7 @@ public partial class SqlServerGovernanceRepository
             cmd.AddBound("@domain", table.Domain);
             cmd.AddBound("@schema", table.Schema);
             cmd.AddBound("@table", table.TableName);
-            cmd.AddBound("@now", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
 
             var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
             if (scalar != null)
@@ -42,7 +42,7 @@ public partial class SqlServerGovernanceRepository
             insertCmd.AddBound("@domain", table.Domain);
             insertCmd.AddBound("@schema", table.Schema);
             insertCmd.AddBound("@table", table.TableName);
-            insertCmd.AddBound("@now", DateTimeOffset.UtcNow.ToString("O"));
+            insertCmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
 
             var insScalar = await insertCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
             if (insScalar != null)
