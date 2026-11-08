@@ -304,7 +304,7 @@ public class ProcedureRowBudgetAndScanCapTests
         public int GetValueCalls;
         public int Reads;
         public DbCommand ExecCmd = null!;
-        public MssqlProcedureInvoker Invoker = null!;
+        public ProcedureInvoker Invoker = null!;
         public ProcedureDefinition Definition = null!;
     }
 
@@ -360,7 +360,7 @@ public class ProcedureRowBudgetAndScanCapTests
             }
         });
         h.ExecCmd = execCmd;
-        h.Invoker = new MssqlProcedureInvoker(new ProcedureConnectionProvider(connFactory, options), options);
+        h.Invoker = new ProcedureInvoker(new ProcedureConnectionProvider(connFactory, options), options);
         h.Definition = ProcedureDefinitionParser.Parse(UnscopedHeader, "x", false, 60);
         return h;
     }
@@ -962,13 +962,13 @@ public class ProcedureRowBudgetAndScanCapTests
     {
         var def = MapDefinition();
 
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("ZZ001", "secret"), def, out var number, out var state).ShouldBeTrue();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("ZZ001", "secret"), def, out var number, out var state).ShouldBeTrue();
         number.ShouldBeNull();
         state.ShouldBe("ZZ001");
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("ZZ002", "secret"), def, out _, out _).ShouldBeFalse();
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("ZZ001", "secret"), null, out _, out _).ShouldBeFalse();
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("P0001", "secret"), def, out _, out _).ShouldBeTrue();
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("40001", "secret"), def, out _, out _).ShouldBeFalse();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("ZZ002", "secret"), def, out _, out _).ShouldBeFalse();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("ZZ001", "secret"), null, out _, out _).ShouldBeFalse();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("P0001", "secret"), def, out _, out _).ShouldBeTrue();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("40001", "secret"), def, out _, out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -978,10 +978,10 @@ public class ProcedureRowBudgetAndScanCapTests
         var def = MapDefinition() with { ErrorCodes = [new ProcedureErrorCode(null, "ZZ001", "A_B", "m")] };
 
         // A number exception never matches a sqlstate entry, and a sqlstate exception never matches a number entry.
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeNumberException(1205, "x"), def, out _, out _).ShouldBeFalse();
+        ProcedureInvoker.TryGetBusinessError(new FakeNumberException(1205, "x"), def, out _, out _).ShouldBeFalse();
         var numberDef = def with { ErrorCodes = [new ProcedureErrorCode(1205, null, "A_B", "m")] };
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeNumberException(1205, "x"), numberDef, out _, out _).ShouldBeFalse();
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("1205X", "x"), numberDef, out _, out _).ShouldBeFalse();
+        ProcedureInvoker.TryGetBusinessError(new FakeNumberException(1205, "x"), numberDef, out _, out _).ShouldBeFalse();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlStateException("1205X", "x"), numberDef, out _, out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -1093,7 +1093,7 @@ public class ProcedureRowBudgetAndScanCapTests
         var def = MapDefinition();
         var f = Active(scoped: false, total: 1, errorCodes: def.ErrorCodes);
         // The real invoker converts the DbException into number/SQLSTATE only; verify that seam first.
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeNumberException(mapped ? 50001 : 50099, secret), def, out var number, out var state).ShouldBeTrue();
+        ProcedureInvoker.TryGetBusinessError(new FakeNumberException(mapped ? 50001 : 50099, secret), def, out var number, out var state).ShouldBeTrue();
         f.Invoker.ExecuteReadAsync(default!, default!, default!, default, default)
             .ThrowsAsyncForAnyArgs(new ProcedureBusinessException(number, state));
 
@@ -1191,6 +1191,7 @@ public class ProcedureRowBudgetAndScanCapTests
         Directory.CreateDirectory(dir);
         var options = Options.Create(new GatewayOptions
         {
+            DataSources = Autheris.Tests.Unit.Procedures.ProcedureTestData.SqlServerSources("procedures", "telemetry_db"),
             SqlEndpoints = new SqlEndpointsOptions
             {
                 Procedures = new ProcedureEndpointsOptions

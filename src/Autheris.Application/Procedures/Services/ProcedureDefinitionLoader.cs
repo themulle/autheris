@@ -270,7 +270,9 @@ public sealed class ProcedureDefinitionLoader : IDisposable
             return $"data source '{definition.DataSource}' is not allowed for procedures.";
         }
 
-        return null;
+        // every loaded definition passes the same closed dialect admission as host start.
+        string sourceName = string.IsNullOrWhiteSpace(definition.DataSource) ? Settings.ConnectionName : definition.DataSource;
+        return ProcedureConnectionProvider.CheckAdmission(_options.Value, sourceName, definition.Kind);
     }
 
     /// <summary>Fail-closed: a deleted or no longer valid declaration is removed from the registry.</summary>

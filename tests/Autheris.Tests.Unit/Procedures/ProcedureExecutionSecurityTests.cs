@@ -624,10 +624,10 @@ public class ProcedureExecutionSecurityTests
         ActivitySource.AddActivityListener(listener);
 
         // business error: the invoker converts the DbException into number/SQLSTATE only
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlException(50001, secret), out var number, out var sqlState).ShouldBeTrue();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlException(50001, secret), out var number, out var sqlState).ShouldBeTrue();
         number.ShouldBe(50001);
         sqlState.ShouldBeNull();
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlException(1205, secret), out _, out _).ShouldBeFalse();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlException(1205, secret), out _, out _).ShouldBeFalse();
 
         var business = Active();
         business.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null));
