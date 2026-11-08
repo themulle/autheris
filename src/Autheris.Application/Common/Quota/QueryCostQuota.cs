@@ -106,7 +106,7 @@ public sealed class QueryCostQuota : IQueryCostQuota
     public async Task<CostQuotaResult?> SettleAsync(QueryCostAdmission admission, int actualCost, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(admission);
-        if (admission.Outcome != QueryCostOutcome.Admitted)
+        if (admission.Outcome != QueryCostOutcome.Admitted || !admission.TryMarkSettled())
         {
             return null;
         }
