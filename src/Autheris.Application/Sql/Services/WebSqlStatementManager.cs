@@ -250,6 +250,18 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             {
                 // Issue #447: the sources the choke points checked, kept to re-check later pages.
                 sources.Names = scope.ServiceProvider.GetService<IDataSourceTransportGate>()?.CheckedSources ?? [];
+                if (request.Admission != null)
+                {
+                    try
+                    {
+                        var costQuota = scope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();
+                        if (costQuota != null)
+                        {
+                            await costQuota.SettleAsync(request.Admission, 1, CancellationToken.None).ConfigureAwait(false);
+                        }
+                    }
+                    catch { }
+                }
             }
         }, sessionCts.Token);
 

@@ -30,7 +30,12 @@ public sealed record QueryCostAdmission(
     int MaxAllowedCost,
     int RemainingTokens,
     int RetryAfterSeconds,
-    string? Scope);
+    string? Scope)
+{
+    private int _settled;
+
+    public bool TryMarkSettled() => Interlocked.CompareExchange(ref _settled, 1, 0) == 0;
+}
 
 public interface IQueryCostQuota
 {
