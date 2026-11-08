@@ -143,10 +143,13 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
 
         // The module is loaded into its own AssemblyLoadContext (no base-directory fallback), so its
         // interfaces are resolved by name from the loaded module assembly, not by the test's own type identity.
-        var moduleAssembly = System.Runtime.Loader.AssemblyLoadContext.All
+        // Other hosts in the same process load their own copies, so every non-default copy is a candidate.
+        var moduleAssemblies = System.Runtime.Loader.AssemblyLoadContext.All
             .Where(c => c != System.Runtime.Loader.AssemblyLoadContext.Default)
             .SelectMany(c => c.Assemblies)
-            .First(a => a.GetName().Name == "Autheris.Modules.Lakehouse");
+            .Where(a => a.GetName().Name == "Autheris.Modules.Lakehouse")
+            .ToList();
+        moduleAssemblies.ShouldNotBeEmpty();
         foreach (var name in new[]
                  {
                      "Autheris.Extensions.Lakehouse.Interfaces.ILakehouseStorageProvider",
@@ -155,8 +158,10 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
                      "Autheris.Extensions.Lakehouse.Interfaces.ILakehouseDataSourceExecutor"
                  })
         {
-            var serviceType = moduleAssembly.GetType(name, throwOnError: true)!;
-            sp.GetService(serviceType).ShouldNotBeNull(name);
+            moduleAssemblies
+                .Select(a => a.GetType(name, throwOnError: true)!)
+                .Any(t => sp.GetService(t) is not null)
+                .ShouldBeTrue(name);
         }
 
         var dataExecutors = sp.GetServices<IDataSourceExecutor>().ToList();
