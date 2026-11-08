@@ -120,7 +120,7 @@ public static partial class WebSqlEndpoints
         bool isTrinoRoute = httpContext.Request.Path.StartsWithSegments("/v1/statement", StringComparison.OrdinalIgnoreCase);
         var trinoWaitTimeout = TryParseWaitTimeout(httpContext.Request);
 
-        if (await RefuseDmlRequestAsync(httpContext, sql, isTrinoRoute, tenantId, logger, ct))
+        if (await RefuseDmlRequestAsync(httpContext, sql, isTrinoRoute, gatewayOptions.Value.IsWebSqlDmlAllowed, tenantId, logger, ct))
         {
             return;
         }

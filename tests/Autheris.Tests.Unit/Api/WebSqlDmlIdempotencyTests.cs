@@ -56,10 +56,11 @@ public sealed class WebSqlDmlIdempotencyTests
         return context;
     }
 
-    private static async Task<(int Status, IGovernedSqlExecutionService Sql)> Run(DefaultHttpContext ctx)
+    private static async Task<(int Status, IGovernedSqlExecutionService Sql)> Run(DefaultHttpContext ctx, bool allowDml = true)
     {
         var sql = Substitute.For<IGovernedSqlExecutionService>();
-        await WebSqlEndpoints.HandleWebSqlRequest(ctx, sql, Options.Create(new GatewayOptions()), NullLoggerFactory.Instance);
+        var options = Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { AllowDml = allowDml } });
+        await WebSqlEndpoints.HandleWebSqlRequest(ctx, sql, options, NullLoggerFactory.Instance);
         return (ctx.Response.StatusCode, sql);
     }
 
@@ -170,5 +171,54 @@ public sealed class WebSqlDmlIdempotencyTests
         status.ShouldBe(400);
         ExecutorCalls(exec).ShouldBe(0);
         manager.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Guard_is_skipped_and_no_key_reserved_when_dml_is_disabled()
+    {
+        var store = Substitute.For<IIdempotencyStore>();
+        var (status, sql) = await Run(Ctx(Insert, store, key: null), allowDml: false);
+        status.ShouldNotBe(400);
+        ExecutorCalls(sql).ShouldBeGreaterThan(0);
+        store.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("MERGE INTO t USING s ON t.a = s.a WHEN MATCHED THEN DELETE")]
+    [InlineData("WITH c AS (SELECT 1 AS a) INSERT INTO t SELECT a FROM c")]
+    [InlineData("WITH c AS (SELECT 1 AS a) DELETE FROM t WHERE a IN (SELECT a FROM c)")]
+    [InlineData("SELECT 1; DELETE FROM t")]
+    [InlineData("INSERT INTO")]
+    public async Task Trino_route_refuses_anything_that_is_not_a_plain_read(string sql)
+    {
+        var manager = Substitute.For<IWebSqlStatementManager>();
+        var ctx = Ctx(sql, new InMemoryIdempotencyStore(), "k-1", path: "/v1/statement");
+        ctx.RequestServices = new ServiceCollection().AddSingleton(manager).BuildServiceProvider();
+        var (status, exec) = await Run(ctx);
+        status.ShouldBe(400);
+        ExecutorCalls(exec).ShouldBe(0);
+        manager.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("MERGE INTO t USING s ON t.a = s.a WHEN MATCHED THEN DELETE")]
+    [InlineData("WITH c AS (SELECT 1 AS a) INSERT INTO t SELECT a FROM c")]
+    [InlineData("WITH c AS (SELECT 1 AS a) DELETE FROM t WHERE a IN (SELECT a FROM c)")]
+    [InlineData("SELECT 1; DELETE FROM t")]
+    [InlineData("INSERT INTO")]
+    public async Task Web_route_never_executes_unkeyed_dml_like_text(string sql)
+    {
+        var (status, exec) = await Run(Ctx(sql, new InMemoryIdempotencyStore(), key: null));
+        status.ShouldBe(400);
+        ExecutorCalls(exec).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Whitespace_only_or_control_character_key_is_rejected()
+    {
+        var store = new InMemoryIdempotencyStore();
+        (await Run(Ctx(Insert, store, "   "))).Status.ShouldBe(400);
+        (await Run(Ctx(Insert, store, "a\u007fb"))).Status.ShouldBe(400);
+        (await Run(Ctx(Insert, store, "a\tb"))).Status.ShouldBe(400);
     }
 }

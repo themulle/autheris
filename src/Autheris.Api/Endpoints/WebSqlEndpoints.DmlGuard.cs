@@ -18,42 +18,72 @@ public static partial class WebSqlEndpoints
     internal const int MaxIdempotencyKeyLength = 128;
     private static readonly TimeSpan IdempotencyReservationTtl = TimeSpan.FromHours(24);
 
+    internal enum RequestStatementClass { Read, Write, Other, Unparsable }
+
     /// <summary>
-    /// Classifies by the parsed statement type (the same analyzer the rewriter uses), never by text prefix.
-    /// Text that does not parse is not DML here: the executor refuses it.
+    /// Classifies by the parsed statement (the same analyzer the rewriter uses), never by text prefix.
+    /// MERGE counts as a write; text that does not parse, or has trailing statements, is <see cref="RequestStatementClass.Unparsable"/>.
     /// </summary>
-    internal static bool IsDmlStatement(string sql)
+    internal static RequestStatementClass ClassifyStatement(string sql, ILogger logger)
     {
         try
         {
             var normalized = SqlParameterExtractor.NormalizeForAst(sql.Trim());
             var (tree, _) = FastSqlEngine.Default.Parse(normalized.AsMemory());
-            return new SqlQueryAnalyzer().Analyze(tree).StatementType
-                is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete;
+            if (tree.statement() is SqlBaseParser.MergeContext)
+            {
+                return RequestStatementClass.Write;
+            }
+
+            return new SqlQueryAnalyzer().Analyze(tree).StatementType switch
+            {
+                SqlStatementType.Select => RequestStatementClass.Read,
+                SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete => RequestStatementClass.Write,
+                _ => RequestStatementClass.Other
+            };
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return false;
+            logger.LogDebug(ex, "Statement classification failed; the statement is treated as unparsable.");
+            return RequestStatementClass.Unparsable;
         }
     }
 
     /// <summary>
-    /// Request-level guard for DML: refused on the Trino route, and on the WebSQL route admitted once per (tenant, caller, key).
-    /// Returns <c>true</c> when the request was refused (the response is written).
+    /// Request-level guard: the Trino route refuses everything but plain reads; the WebSQL route (when DML is enabled) admits a
+    /// write once per (tenant, caller, key). Returns <c>true</c> when the request was refused (the response is written).
     /// </summary>
     private static async Task<bool> RefuseDmlRequestAsync(
-        HttpContext httpContext, string sql, bool isTrinoRoute, TenantId tenantId, ILogger logger, CancellationToken ct)
+        HttpContext httpContext, string sql, bool isTrinoRoute, bool dmlAllowed, TenantId tenantId, ILogger logger, CancellationToken ct)
     {
-        if (!IsDmlStatement(sql))
+        if (!isTrinoRoute && !dmlAllowed)
         {
-            return false;
+            return false; // the executor's own "DML disabled" refusal answers first and nothing is reserved
         }
 
+        var statementClass = ClassifyStatement(sql, logger);
         if (isTrinoRoute)
         {
+            if (statementClass == RequestStatementClass.Read)
+            {
+                return false;
+            }
+
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest,
-                "Data-changing statements are not supported on this route.", ct);
+                "Only read statements are supported on this route.", ct);
             return true;
+        }
+
+        if (statementClass == RequestStatementClass.Unparsable)
+        {
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest,
+                "The statement could not be parsed as a single statement.", ct);
+            return true;
+        }
+
+        if (statementClass != RequestStatementClass.Write)
+        {
+            return false;
         }
 
         var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);
@@ -64,7 +94,8 @@ public static partial class WebSqlEndpoints
         }
 
         var key = httpContext.Request.Headers[IdempotencyKeyHeader].ToString();
-        if (key.Length is 0 or > MaxIdempotencyKeyLength || !Ascii.IsValid(key) || key.Any(char.IsControl))
+        if (key.Length is 0 or > MaxIdempotencyKeyLength || !Ascii.IsValid(key) || string.IsNullOrWhiteSpace(key)
+            || key.AsSpan().IndexOfAnyInRange('\0', ' ') >= 0 || key.Contains('\u007f'))
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest,
                 $"Data-changing statements require an '{IdempotencyKeyHeader}' header of 1 to {MaxIdempotencyKeyLength} ASCII characters.", ct);
