@@ -271,7 +271,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);
 
         Autheris.Application.Common.Quota.QueryCostAdmission? admission = null;
-        if (_costQuota != null && (_options.Value.WebSql?.Cost?.Enabled ?? true) && !request.PlannedTableRead)
+        bool isMeteredTransport = string.Equals(request.Transport, "WebSql", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(request.Transport, "Trino", StringComparison.OrdinalIgnoreCase);
+        if (_costQuota != null && (_options.Value.WebSql?.Cost?.Enabled ?? true) && !request.PlannedTableRead && isMeteredTransport)
         {
             var rowLimit = request.RowLimit ?? SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions());
             var costOpts = _options.Value.QueryCost ?? new QueryCostOptions();

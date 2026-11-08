@@ -347,51 +347,52 @@ public sealed partial class GovernedSqlExecutor
         var compiled = rewrite.Compiled;
         string dsName = rewrite.DataSourceName;
 
-        // Issue #447 C1: the resolved source of the rewrite, before the ALLOW audit record and before any connection exists.
-        await _transportGate.EnsureCatalogSourceAsync(dsName, ct).ConfigureAwait(false);
-
-        var admission = await AdmitCostAsync(request, user, rewrite.Metadata, ct).ConfigureAwait(false);
-
-        if (!dmlContext.IsDml)
-        {
-            var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
-            var userSid = user.GetUserSid() ?? new Sid("anonymous");
-            var fields = new Dictionary<string, object?>
-            {
-                ["originalSql"] = redactedOriginalSql,
-                ["originalSqlHash"] = originalSqlHash,
-                ["dataSource"] = dsName,
-                ["virtual_filters"] = rewrite.VirtualFilters
-            };
-            if (admission != null)
-            {
-                fields["cost"] = new Dictionary<string, object?>
-                {
-                    ["estimated"] = admission.ReservedCost,
-                    ["maxAllowed"] = admission.MaxAllowedCost,
-                    ["tier"] = admission.Policy.Tier.ToString()
-                };
-            }
-            AddCallerAttributeAuditFields(fields, rewrite, compiled);
-            AddCompiledAuditFields(fields, compiled, clientValues);
-            AddKeySetAuditFields(fields, rewrite);
-            await _auditWriter.RecordAsync(new AuditLogEntry
-            {
-                TenantId = tenantId,
-                EventType = AuditEventTypes.WebSqlQuery,
-                ActorSid = userSid,
-                TargetTable = dsName,
-                Decision = "ALLOW",
-                TraceId = TraceContextResolver.GetCurrentTraceId(),
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
-            }, ct).ConfigureAwait(false);
-        }
-
+        var admission = request.Admission;
         var executionSw = Stopwatch.StartNew();
         long deliveredOrAffectedRows = 0;
         bool executionFailed = false;
+
         try
         {
+            // Issue #447 C1: the resolved source of the rewrite, before the ALLOW audit record and before any connection exists.
+            await _transportGate.EnsureCatalogSourceAsync(dsName, ct).ConfigureAwait(false);
+
+            admission ??= await AdmitCostAsync(request, user, rewrite.Metadata, ct).ConfigureAwait(false);
+
+            if (!dmlContext.IsDml)
+            {
+                var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
+                var userSid = user.GetUserSid() ?? new Sid("anonymous");
+                var fields = new Dictionary<string, object?>
+                {
+                    ["originalSql"] = redactedOriginalSql,
+                    ["originalSqlHash"] = originalSqlHash,
+                    ["dataSource"] = dsName,
+                    ["virtual_filters"] = rewrite.VirtualFilters
+                };
+                if (admission != null)
+                {
+                    fields["cost"] = new Dictionary<string, object?>
+                    {
+                        ["estimated"] = admission.ReservedCost,
+                        ["maxAllowed"] = admission.MaxAllowedCost,
+                        ["tier"] = admission.Policy.Tier.ToString()
+                    };
+                }
+                AddCallerAttributeAuditFields(fields, rewrite, compiled);
+                AddCompiledAuditFields(fields, compiled, clientValues);
+                AddKeySetAuditFields(fields, rewrite);
+                await _auditWriter.RecordAsync(new AuditLogEntry
+                {
+                    TenantId = tenantId,
+                    EventType = AuditEventTypes.WebSqlQuery,
+                    ActorSid = userSid,
+                    TargetTable = dsName,
+                    Decision = "ALLOW",
+                    TraceId = TraceContextResolver.GetCurrentTraceId(),
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
+                }, ct).ConfigureAwait(false);
+            }
 
         var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
 

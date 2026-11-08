@@ -47,9 +47,7 @@ public sealed partial class GovernedSqlExecutor
         CancellationToken ct)
     {
         bool isMeteredTransport = string.Equals(request.Transport, "WebSql", StringComparison.OrdinalIgnoreCase) ||
-                                  string.Equals(request.Transport, "Trino", StringComparison.OrdinalIgnoreCase) ||
-                                  string.Equals(request.Transport, "Parquet", StringComparison.OrdinalIgnoreCase) ||
-                                  string.IsNullOrEmpty(request.Transport);
+                                  string.Equals(request.Transport, "Trino", StringComparison.OrdinalIgnoreCase);
 
         if (!isMeteredTransport || request.PlannedTableRead)
         {

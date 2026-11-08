@@ -226,6 +226,18 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                 request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, sessionCts.Token).ConfigureAwait(false);
             if (metadataResult != null)
             {
+                if (request.Admission != null)
+                {
+                    try
+                    {
+                        var costQuota = scope.ServiceProvider.GetService<Autheris.Application.Common.Quota.IQueryCostQuota>();
+                        if (costQuota != null)
+                        {
+                            await costQuota.SettleAsync(request.Admission, 1, CancellationToken.None).ConfigureAwait(false);
+                        }
+                    }
+                    catch { }
+                }
                 return metadataResult;
             }
 
