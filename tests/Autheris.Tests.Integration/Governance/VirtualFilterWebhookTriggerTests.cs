@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.VirtualFilters;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.IO;
@@ -21,9 +21,9 @@ using Xunit;
 public sealed class VirtualFilterWebhookTriggerTests : IDisposable
 {
     private const string WebhookSecret = "test-gitops-webhook-secret-2026";
-    private readonly SqliteGovernanceRepository _repository = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=vf_wh_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+        Options.Create(new GatewayOptions()));
 
     private readonly VirtualFilterAdministrationService _service;
     private readonly IOptions<GatewayOptions> _options;

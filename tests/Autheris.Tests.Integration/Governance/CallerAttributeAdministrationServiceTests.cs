@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Identity.Attributes;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -25,9 +25,9 @@ public sealed class CallerAttributeAdministrationServiceTests : IDisposable
     private static readonly CallerAttributeActor Alice = new("oid-alice", HoldsApproverRole: false);
     private static readonly CallerAttributeActor Bob = new("oid-bob", HoldsApproverRole: true);
 
-    private readonly SqliteGovernanceRepository _store = GovernanceStoreFactory.CreateSqlite(
+    private readonly PostgreSqlGovernanceRepository _store = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
-        Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=caa_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" } }));
+        Options.Create(new GatewayOptions()));
 
     private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
     private readonly List<AuditLogEntry> _entries = [];
@@ -48,9 +48,9 @@ public sealed class CallerAttributeAdministrationServiceTests : IDisposable
     }
 
     private static CallerAttributeDefinition Claims(string name = "cost_center", string description = "v1") =>
-        SqliteCallerAttributeRepositoryTests.Definition(name, description);
+        Autheris.Tests.Unit.Identity.Attributes.CallerAttributeTestSupport.Definition(name, description);
 
-    private static CallerAttributeDefinition Table(string name = "dept") => SqliteCallerAttributeRepositoryTests.Definition(name) with
+    private static CallerAttributeDefinition Table(string name = "dept") => Autheris.Tests.Unit.Identity.Attributes.CallerAttributeTestSupport.Definition(name) with
     {
         Provider = new CallerAttributeProviderBinding("attribute-table", new Dictionary<string, string>())
     };

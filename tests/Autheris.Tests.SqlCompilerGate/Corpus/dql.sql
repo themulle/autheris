@@ -1140,7 +1140,7 @@ SELECT status FROM CONSENT_REQUESTS WHERE id = @id
 -- @id c87cdf54b562 class=select expected=accept source=tests/Autheris.Tests.Unit/GovernedSqlPlanCacheTests.cs
 SELECT id, name FROM orders
 
--- @id 272ee17617e7 class=select expected=accept source=tests/Autheris.Tests.Unit/InfrastructureTests.cs
+-- @id 272ee17617e7 class=select expected=accept source=tests/Autheris.Tests.Integration/Governance/InfrastructureTests.cs
 SELECT COUNT(*) FROM CONSENTS WHERE id = @id
 
 -- @id 058ebc42c25d class=select expected=accept source=tests/Autheris.Tests.Unit/IntegrationGapCTests.cs

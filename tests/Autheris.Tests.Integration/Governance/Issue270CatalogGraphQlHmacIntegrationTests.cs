@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.GraphQL;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -29,7 +29,7 @@ using Xunit;
 
 public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
 {
-    private readonly SqliteGovernanceRepository _repository;
+    private readonly PostgreSqlGovernanceRepository _repository;
     private readonly ICatalogVersionProvider _versionProvider;
     private readonly ITableRelationRepository _relationRepo = Substitute.For<ITableRelationRepository>();
     private readonly IGovernedTreeQueryService _treeService = Substitute.For<IGovernedTreeQueryService>();
@@ -42,15 +42,14 @@ public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                ConnectionString = $"Data Source=issue270_gql_{Guid.NewGuid():N};Mode=Memory;Cache=Shared",
                 JournalMode = "DELETE"
             }
         });
 
-        _repository = GovernanceStoreFactory.CreateSqlite(
+        _repository = GovernanceTestDatabase.CreateRepository(
             Substitute.For<IEpochValidationService>(),
             options,
-            logger: NullLogger<SqliteGovernanceRepository>.Instance);
+            logger: NullLogger<PostgreSqlGovernanceRepository>.Instance);
 
         _versionProvider = new CatalogVersionProvider(_repository);
 

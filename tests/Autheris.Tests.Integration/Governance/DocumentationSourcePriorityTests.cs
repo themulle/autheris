@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -15,7 +15,7 @@ using Xunit;
 
 public sealed class DocumentationSourcePriorityTests
 {
-    private static SqliteGovernanceRepository CreateRepository(List<string>? precedence = null)
+    private static PostgreSqlGovernanceRepository CreateRepository(List<string>? precedence = null)
     {
         var epochService = new EpochValidationService();
         var options = Options.Create(new GatewayOptions
@@ -34,7 +34,7 @@ public sealed class DocumentationSourcePriorityTests
             }
         });
 
-        return GovernanceStoreFactory.CreateSqlite(epochService, options);
+        return GovernanceTestDatabase.CreateRepository(epochService, options);
     }
 
     [Fact]
@@ -363,7 +363,7 @@ public sealed class DocumentationSourcePriorityTests
         }
         """;
 
-        var meta = SqliteGovernanceRepository.ParseColumnMetaJson(json);
+        var meta = Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson(json);
         meta.ShouldNotBeNull();
         meta["pii"].ShouldBe("false");
         meta["is_active"].ShouldBe("true");
@@ -376,10 +376,10 @@ public sealed class DocumentationSourcePriorityTests
     [Fact]
     public void ParseColumnMetaJson_InvalidOrEmptyJson_ReturnsEmptyDictionary()
     {
-        SqliteGovernanceRepository.ParseColumnMetaJson(null).Count.ShouldBe(0);
-        SqliteGovernanceRepository.ParseColumnMetaJson("").Count.ShouldBe(0);
-        SqliteGovernanceRepository.ParseColumnMetaJson("not json").Count.ShouldBe(0);
-        SqliteGovernanceRepository.ParseColumnMetaJson("[]").Count.ShouldBe(0);
+        Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson(null).Count.ShouldBe(0);
+        Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson("").Count.ShouldBe(0);
+        Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson("not json").Count.ShouldBe(0);
+        Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson("[]").Count.ShouldBe(0);
     }
 
     [Fact]

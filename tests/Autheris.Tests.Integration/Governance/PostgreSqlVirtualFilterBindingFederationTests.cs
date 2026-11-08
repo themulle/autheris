@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.VirtualFilters;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Threading.Tasks;
@@ -7,23 +7,22 @@ using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
 
 /// <summary>F-GOV-14 WI-9: the federation fields of a binding survive the governance store, legacy JSON still loads.</summary>
-public sealed class SqliteVirtualFilterBindingFederationTests : IDisposable
+public sealed class PostgreSqlVirtualFilterBindingFederationTests : IDisposable
 {
-    private readonly string _connectionString = $"Data Source=vfb_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-    private readonly SqliteGovernanceRepository _repository;
+    private readonly string _connectionString;
+    private readonly PostgreSqlGovernanceRepository _repository;
 
-    public SqliteVirtualFilterBindingFederationTests()
+    public PostgreSqlVirtualFilterBindingFederationTests()
     {
-        _repository = GovernanceStoreFactory.CreateSqlite(
+        _repository = GovernanceTestDatabase.CreateRepository(
             Substitute.For<IEpochValidationService>(),
-            Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = _connectionString } }));
+            out _connectionString);
     }
 
     public void Dispose() => _repository.Dispose();
@@ -36,7 +35,7 @@ public sealed class SqliteVirtualFilterBindingFederationTests : IDisposable
     [InlineData(PushdownParameterFormat.CommaSeparated)]
     public async Task Binding_FederationFields_RoundTrip(PushdownParameterFormat? format)
     {
-        var profile = VirtualFilterModelTests.DavidProfile() with
+        var profile = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile() with
         {
             Bindings =
             [
@@ -61,8 +60,8 @@ public sealed class SqliteVirtualFilterBindingFederationTests : IDisposable
     [Fact]
     public async Task LegacyBindingJsonWithCompositeKeys_StillLoads()
     {
-        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [VirtualFilterModelTests.DavidProfile()] });
-        await using (var connection = new SqliteConnection(_connectionString))
+        await Repository.ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile()] });
+        await using (var connection = new Npgsql.NpgsqlConnection(_connectionString))
         {
             await connection.OpenAsync();
             await using var update = connection.CreateCommand();

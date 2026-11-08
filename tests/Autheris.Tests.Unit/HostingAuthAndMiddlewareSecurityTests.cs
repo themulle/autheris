@@ -207,43 +207,6 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), env));
     }
 
-    [Fact]
-    public void DEP04_SqliteGovernanceRepository_CreatesDirectoryIfMissing()
-    {
-        var tempDir = Path.Combine(Path.GetTempPath(), "autheris_dep4_" + Guid.NewGuid().ToString("N"));
-        var dbPath = Path.Combine(tempDir, "sub", "governance.db");
-        var connStr = $"Data Source={dbPath};Cache=Shared";
-
-        Directory.Exists(Path.GetDirectoryName(dbPath)!).ShouldBeFalse();
-
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                Provider = "Sqlite",
-                ConnectionString = connStr
-            }
-        });
-
-        try
-        {
-            using var repo = GovernanceStoreFactory.CreateSqlite(
-                Substitute.For<IEpochValidationService>(),
-                options,
-                Env(Environments.Development));
-
-            Directory.Exists(Path.GetDirectoryName(dbPath)!).ShouldBeTrue();
-            File.Exists(dbPath).ShouldBeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                try { Directory.Delete(tempDir, recursive: true); } catch { }
-            }
-        }
-    }
-
     private static string? FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

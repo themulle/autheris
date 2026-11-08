@@ -47,7 +47,7 @@ INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1
 ORDER BY c.ctid"; // registration (heap) order, see SelectTableColumnsSql
 
-        public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type FROM TABLES
+        public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
 FOR UPDATE";
 
@@ -507,6 +507,9 @@ RETURNING structure_version, content_version;";
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
             var tableExisted = false;
             var structuralChange = false;
+            var targetDesc = metadata.Table.Description;
+            var targetLongDesc = metadata.Table.LongDescription;
+            var targetDocSource = metadata.Table.DocumentationSource;
 
             await using (var cmd = conn.CreateCommand())
             {
@@ -526,6 +529,9 @@ RETURNING structure_version, content_version;";
                     var existingFourEyes = reader.GetInt32(3) == 1;
                     var existingActive = reader.GetInt32(4) == 1;
                     var existingDst = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
+                    var existingDesc = reader.IsDBNull(6) ? null : reader.GetString(6);
+                    var existingLongDesc = reader.IsDBNull(7) ? null : reader.GetString(7);
+                    var existingDocSource = reader.IsDBNull(8) ? null : reader.GetString(8);
                     if (!string.Equals(existingSourceType, metadata.Table.SourceType, StringComparison.OrdinalIgnoreCase) ||
                         !string.Equals(existingSensitivity, metadata.Table.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
                         existingFourEyes != metadata.Table.RequiresFourEyes ||
@@ -534,6 +540,17 @@ RETURNING structure_version, content_version;";
                     {
                         structuralChange = true;
                     }
+
+                    // A lower-priority documentation source never overwrites text of a higher-priority one.
+                    var canOverwriteDesc = !string.IsNullOrWhiteSpace(metadata.Table.Description) &&
+                                           (string.IsNullOrWhiteSpace(existingDesc) ||
+                                            ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
+                    var canOverwriteLongDesc = !string.IsNullOrWhiteSpace(metadata.Table.LongDescription) &&
+                                               (string.IsNullOrWhiteSpace(existingLongDesc) ||
+                                                ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
+                    targetDesc = canOverwriteDesc ? metadata.Table.Description : existingDesc;
+                    targetLongDesc = canOverwriteLongDesc ? metadata.Table.LongDescription : existingLongDesc;
+                    targetDocSource = (canOverwriteDesc || canOverwriteLongDesc) ? (metadata.Table.DocumentationSource ?? existingDocSource) : existingDocSource;
                 }
                 else
                 {
@@ -561,9 +578,9 @@ RETURNING structure_version, content_version;";
                 upsertCmd.AddBound("@dst", (int)metadata.Table.DataSourceType);
                 upsertCmd.AddBound("@httpJson", (object?)httpEndpointJson ?? DBNull.Value);
                 upsertCmd.AddBound("@plugin", (object?)metadata.Table.PluginName ?? DBNull.Value);
-                upsertCmd.AddBound("@desc", (object?)metadata.Table.Description ?? DBNull.Value);
-                upsertCmd.AddBound("@longDesc", (object?)metadata.Table.LongDescription ?? DBNull.Value);
-                upsertCmd.AddBound("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
+                upsertCmd.AddBound("@desc", (object?)targetDesc ?? DBNull.Value);
+                upsertCmd.AddBound("@longDesc", (object?)targetLongDesc ?? DBNull.Value);
+                upsertCmd.AddBound("@docSource", (object?)targetDocSource ?? DBNull.Value);
                 upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
                 upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
@@ -583,7 +600,7 @@ RETURNING structure_version, content_version;";
                 structuralChange = true;
             }
 
-            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct).ConfigureAwait(false))
+            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, ShouldOverwriteDocumentation).ConfigureAwait(false))
             {
                 structuralChange = true;
             }
@@ -808,42 +825,25 @@ RETURNING structure_version, content_version;";
         }
     }
 
-    private async Task<long> IncrementTableEpochInternalAsync(NpgsqlConnection conn, NpgsqlTransaction tx, TableIdentifier table, CancellationToken ct)
+    private bool ShouldOverwriteDocumentation(string? existingSource, string? newSource)
     {
-        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
-        await using (var cmd = conn.CreateCommand())
+        if (string.IsNullOrWhiteSpace(existingSource))
         {
-            cmd.Transaction = tx;
-            cmd.CommandText = @"UPDATE POLICY_EPOCHS
-                                SET epoch = epoch + 1, updated_at = @now
-                                WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
-                                RETURNING epoch";
-            cmd.AddBound("@domain", table.Domain);
-            cmd.AddBound("@schema", table.Schema);
-            cmd.AddBound("@table", table.TableName);
-            cmd.AddBound("@now", DateTimeOffset.UtcNow.ToString("O"));
-
-            var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            if (scalar != null)
-            {
-                return Convert.ToInt64(scalar);
-            }
-
-            await using var insertCmd = conn.CreateCommand();
-            insertCmd.Transaction = tx;
-            insertCmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                      VALUES (@id, @domain, @schema, @table, 1, @now)
-                                      ON CONFLICT (table_id) DO UPDATE SET epoch = POLICY_EPOCHS.epoch + 1, updated_at = EXCLUDED.updated_at
-                                      RETURNING epoch";
-            insertCmd.AddBound("@id", Guid.NewGuid().ToString());
-            insertCmd.AddBound("@domain", table.Domain);
-            insertCmd.AddBound("@schema", table.Schema);
-            insertCmd.AddBound("@table", table.TableName);
-            insertCmd.AddBound("@now", DateTimeOffset.UtcNow.ToString("O"));
-
-            var insScalar = await insertCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            return insScalar != null ? Convert.ToInt64(insScalar) : 1L;
+            return true;
         }
+
+        if (string.IsNullOrWhiteSpace(newSource))
+        {
+            return false;
+        }
+
+        var precedence = _options?.Catalog?.DocumentationSourcePrecedence ??
+            new List<string> { "Manual", "DataCatalog", "dbt", "OpenApi", "Database", "Default" };
+        var existingRank = precedence.FindIndex(s => string.Equals(s, existingSource, StringComparison.OrdinalIgnoreCase));
+        var newRank = precedence.FindIndex(s => string.Equals(s, newSource, StringComparison.OrdinalIgnoreCase));
+        if (existingRank < 0) existingRank = int.MaxValue;
+        if (newRank < 0) newRank = int.MaxValue;
+        return newRank <= existingRank;
     }
 
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)

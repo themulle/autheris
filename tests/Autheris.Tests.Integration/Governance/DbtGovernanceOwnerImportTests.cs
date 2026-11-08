@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Autheris.Tests.Unit.Catalog;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance;
 using Autheris.Application.Common.Interfaces;
@@ -11,7 +12,6 @@ using Autheris.Domain.Options;
 using Autheris.Extensions.Dbt;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Governance;
-using Autheris.Tests.Unit.Catalog;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -19,20 +19,20 @@ using NSubstitute.ExceptionExtensions;
 using Shouldly;
 using Xunit;
 
-namespace Autheris.Tests.Unit.Dbt;
+namespace Autheris.Tests.Integration.Governance;
 
 /// <summary>Issue #393 part b: owners from the dbt governance import (I393B-SC-01..11, I393B-T-01..15) end to end on a real SQLite governance store.</summary>
 public sealed class DbtGovernanceOwnerImportTests : IDisposable
 {
     private const string Admin = "S-1-5-21-ADMIN-1";
     private static readonly TenantId Tenant = new("Sales");
-    private readonly SqliteGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
     private readonly TableIdentifier _table = new("sales", "dbo", "orders_" + Guid.NewGuid().ToString("N")[..8]);
 
     public DbtGovernanceOwnerImportTests()
     {
-        var options = Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = $"Data Source=dbtowners_{Guid.NewGuid():N};Mode=Memory;Cache=Shared", SeedDemoData = false } });
-        _repo = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options);
+        var options = Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { SeedDemoData = false } });
+        _repo = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), options);
         SeedTable(_table);
     }
 

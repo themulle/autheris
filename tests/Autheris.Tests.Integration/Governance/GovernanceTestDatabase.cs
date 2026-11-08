@@ -81,6 +81,21 @@ internal static class GovernanceTestDatabase
         return repository;
     }
 
+    /// <summary>Creates a repository on an existing clone (restart scenarios: several repository lifetimes over the same database).</summary>
+    internal static Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository CreateRepositoryOn(
+        string connectionString,
+        Autheris.Application.Common.Interfaces.IEpochValidationService epochValidationService,
+        Autheris.Application.Audit.IAuditChainAnchorStore? auditAnchorStore = null,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? options = null)
+    {
+        var gateway = options ?? Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions());
+        typeof(Autheris.Domain.Options.GovernanceDbOptions).GetProperty("Provider")!.SetValue(gateway.Value.GovernanceDb, "PostgreSql");
+        typeof(Autheris.Domain.Options.GovernanceDbOptions).GetProperty("ConnectionString")!.SetValue(gateway.Value.GovernanceDb, connectionString);
+        var repository = GovernanceStoreFactory.CreatePostgreSql(epochValidationService, gateway, null, auditAnchorStore, null, null);
+        Clones.Add(repository, connectionString);
+        return repository;
+    }
+
     /// <summary>Overload for tests that need no raw SQL access.</summary>
     internal static Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository CreateRepository(
         Autheris.Application.Common.Interfaces.IEpochValidationService epochValidationService,

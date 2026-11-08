@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Security;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Collections.Generic;
@@ -28,14 +28,14 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
 {
-    private readonly SqliteGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
     private readonly InProcessChannelEventBus _eventBus;
 
     public CatalogAtScaleSecurityTests()
     {
         var epoch = Substitute.For<IEpochValidationService>();
         _eventBus = new InProcessChannelEventBus();
-        _repo = GovernanceStoreFactory.CreateSqlite(epoch);
+        _repo = GovernanceTestDatabase.CreateRepository(epoch);
     }
 
     public async ValueTask DisposeAsync()

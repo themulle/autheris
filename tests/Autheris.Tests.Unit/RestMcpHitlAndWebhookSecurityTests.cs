@@ -224,45 +224,6 @@ public class RestMcpHitlAndWebhookSecurityTests
         StreamingCdcEndpoints.IsCdcClusterAdmin(CreateContext("tenant-a", ["ClusterAdmin"]).User).ShouldBeTrue();
     }
 
-    [Fact]
-    public async Task H06_SqliteRepository_TicketLookupIsTenantBound_AndActivationOnlyFromPending()
-    {
-        using var repo = GovernanceStoreFactory.CreateSqlite(new FakeEpochValidationService());
-        var tableId = new TableIdentifier("sales", "crm", "h06_contacts");
-        var table = new Table { Id = Guid.NewGuid(), SourceName = tableId.Domain, SchemaName = tableId.Schema, TableName = tableId.TableName, IsActive = true };
-        var meta = await repo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Identifier = tableId,
-            Table = table,
-            Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }]
-        });
-
-        var ticketId = $"H06-{Guid.NewGuid():N}";
-        var created = await repo.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TableId = meta.Table.Id,
-            TableIdentifier = tableId,
-            RequesterSid = new Sid("S-1-5-21-H06"),
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = "S-1-5-21-H06",
-            BusinessJustification = "H-06 tenant binding",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            Status = "PENDING_EXTERNAL_APPROVAL",
-            TenantId = new TenantId("tenant-a"),
-            ItsmTicketId = ticketId
-        });
-
-        (await repo.GetConsentRequestByTicketIdAsync(ticketId, new TenantId("tenant-b"))).ShouldBeNull();
-        (await repo.GetConsentRequestByTicketIdAsync(ticketId, new TenantId("tenant-a"))).ShouldNotBeNull();
-
-        await repo.ActivateConsentForAutoApproveAsync(created.Id);
-        await repo.ActivateConsentForAutoApproveAsync(created.Id);
-
-        var active = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-H06")], tableId, DateTimeOffset.UtcNow);
-        active.Count.ShouldBe(1);
-        (await repo.GetConsentRequestAsync(created.Id))!.Status.ShouldBe("APPROVED");
-    }
-
     // =========================================================================
     // M-09 / H-16: MCP sessions
     // =========================================================================

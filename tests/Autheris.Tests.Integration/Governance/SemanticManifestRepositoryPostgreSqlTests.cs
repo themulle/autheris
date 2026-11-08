@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Dbt;
+namespace Autheris.Tests.Integration.Governance;
 
 using System;
 using System.Linq;
@@ -16,7 +16,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>#112 T-3.2: persistence contract of <see cref="ISemanticManifestStore"/> on the SQLite governance store.</summary>
-public sealed class SemanticManifestRepositorySqliteTests : IDisposable
+public sealed class SemanticManifestRepositoryPostgreSqlTests : IDisposable
 {
     private static readonly TenantId TenantA = new("tenant-a");
     private static readonly TenantId TenantB = new("tenant-b");
@@ -24,7 +24,9 @@ public sealed class SemanticManifestRepositorySqliteTests : IDisposable
 
     public void Dispose() => _dir.Dispose();
 
-    private SqliteGovernanceRepository NewRepository()
+    private string? _connectionString;
+
+    private PostgreSqlGovernanceRepository NewRepository()
     {
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
@@ -32,11 +34,18 @@ public sealed class SemanticManifestRepositorySqliteTests : IDisposable
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                ConnectionString = $"Data Source={System.IO.Path.Combine(_dir.Path, "gov.db")}",
                 SeedDemoData = false
             }
         });
-        return GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, env);
+        if (_connectionString is not null)
+        {
+            // Same database again: a second repository lifetime over the persisted data.
+            return GovernanceTestDatabase.CreateRepositoryOn(_connectionString, Substitute.For<IEpochValidationService>(), options: options);
+        }
+
+        var repository = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), out var connectionString, options, env);
+        _connectionString = connectionString;
+        return repository;
     }
 
     internal static StoredSemanticManifest Sample(TenantId tenant, string version = "v1", string json = "{\"a\":1}", string hash = "h1") =>
