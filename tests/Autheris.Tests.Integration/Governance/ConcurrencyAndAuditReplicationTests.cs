@@ -57,7 +57,7 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         var isChainValid = await _repository.VerifyAuditHashChainAsync();
         isChainValid.ShouldBeTrue("Audit hash chain must remain 100% valid under high concurrency.");
 
-        var entries = await _repository.GetAuditLogEntriesAsync(limit: 200);
+        var entries = (await _repository.GetAuditLogEntriesAsync(limit: 200)).OrderBy(e => e.ChainSequence).ToList();
         entries.Count.ShouldBeGreaterThanOrEqualTo(totalEvents);
 
         // Ensure every entry is strictly chained

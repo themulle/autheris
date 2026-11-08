@@ -29,7 +29,7 @@ internal static class GovernanceStoreFactory
             options,
             env,
             secrets,
-            auditAnchorStore ?? AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
+            auditAnchorStore ?? AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, WormSigner(options.Value), null),
             NSubstitute.Substitute.For<ICallerContextProvider>(),
             logger,
             eventBus);
@@ -45,6 +45,16 @@ internal static class GovernanceStoreFactory
             throw;
         }
     }
+
+    private static readonly Lazy<AsymmetricAuditAnchorSigner> TestSigner = new(() =>
+    {
+        using var ec = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        return new AsymmetricAuditAnchorSigner(System.Text.Encoding.UTF8.GetBytes(ec.ExportPkcs8PrivateKeyPem()));
+    });
+
+    // A configured WORM anchor directory requires an external signer (as in production); tests share one throwaway key so restarts verify.
+    private static AsymmetricAuditAnchorSigner? WormSigner(GatewayOptions options) =>
+        string.IsNullOrWhiteSpace(options.Audit.ChainAnchorWormDirectory) ? null : TestSigner.Value;
 
     public static SqlServerGovernanceRepository CreateSqlServer(
         IEpochValidationService epochValidationService,

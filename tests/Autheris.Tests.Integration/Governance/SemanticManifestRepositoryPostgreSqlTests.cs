@@ -24,6 +24,8 @@ public sealed class SemanticManifestRepositoryPostgreSqlTests : IDisposable
 
     public void Dispose() => _dir.Dispose();
 
+    private string? _connectionString;
+
     private PostgreSqlGovernanceRepository NewRepository()
     {
         var env = Substitute.For<IHostEnvironment>();
@@ -35,7 +37,15 @@ public sealed class SemanticManifestRepositoryPostgreSqlTests : IDisposable
                 SeedDemoData = false
             }
         });
-        return GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), options, env);
+        if (_connectionString is not null)
+        {
+            // Same database again: a second repository lifetime over the persisted data.
+            return GovernanceTestDatabase.CreateRepositoryOn(_connectionString, Substitute.For<IEpochValidationService>(), options: options);
+        }
+
+        var repository = GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>(), out var connectionString, options, env);
+        _connectionString = connectionString;
+        return repository;
     }
 
     internal static StoredSemanticManifest Sample(TenantId tenant, string version = "v1", string json = "{\"a\":1}", string hash = "h1") =>
