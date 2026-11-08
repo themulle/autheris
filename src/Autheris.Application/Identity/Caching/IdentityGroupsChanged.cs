@@ -64,20 +64,37 @@ public sealed class BroadcastingRoleResolverCache(RoleResolverCache local, IEven
         }
         catch (Exception)
         {
+            IdentityGroupMetrics.RecordPublishFailed();
             logger?.LogWarning("Publishing the identity group invalidation failed; the cache entry expires with its TTL.");
         }
     }
 }
 
 /// <summary>Applies <see cref="IdentityGroupsChanged"/> to the node-local cache. Anything unexpected invalidates everything (fail closed).</summary>
-public sealed class IdentityGroupsChangedSubscriber(RoleResolverCache local, IEventBus eventBus) : IHostedService, IDisposable
+public sealed class IdentityGroupsChangedSubscriber(RoleResolverCache local, IEventBus eventBus, ILogger<IdentityGroupsChangedSubscriber>? logger = null) : IHostedService, IDisposable
 {
     private IDisposable? _subscription;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _subscription ??= eventBus.Subscribe<IdentityGroupsChanged>(IdentityGroupsChangedChannel.Name, Handle);
+        // Hooks first: a failing Subscribe must not leave a node that never learns about a restored connection.
         eventBus.ConnectionRestored += local.InvalidateAll;
+        if (eventBus is IEventBusDeliveryFailures failures)
+        {
+            failures.DeliveryFailed += OnDeliveryFailed;
+        }
+
+        try
+        {
+            _subscription ??= eventBus.Subscribe<IdentityGroupsChanged>(IdentityGroupsChangedChannel.Name, Handle);
+        }
+        catch (Exception ex)
+        {
+            // Without a subscription the node relies on the TTL; whatever it holds now is dropped.
+            local.InvalidateAll();
+            logger?.LogError(ex, "Subscribing to the identity group invalidation channel failed; cached groups expire with their TTL.");
+        }
+
         return Task.CompletedTask;
     }
 
@@ -90,8 +107,22 @@ public sealed class IdentityGroupsChangedSubscriber(RoleResolverCache local, IEv
     public void Dispose()
     {
         eventBus.ConnectionRestored -= local.InvalidateAll;
+        if (eventBus is IEventBusDeliveryFailures failures)
+        {
+            failures.DeliveryFailed -= OnDeliveryFailed;
+        }
+
         _subscription?.Dispose();
         _subscription = null;
+    }
+
+    private void OnDeliveryFailed(string channel)
+    {
+        // A message on our channel that could not be delivered may have been an invalidation: drop everything.
+        if (string.Equals(channel, IdentityGroupsChangedChannel.Name, StringComparison.Ordinal))
+        {
+            local.InvalidateAll();
+        }
     }
 
     internal Task Handle(IdentityGroupsChanged? message)

@@ -50,7 +50,11 @@ public sealed class RoleResolver : IRoleResolver
         var realm = _realmRegistry?.GetRealm(identity.RealmId) ?? _realmRegistry?.GetDefaultRealm();
         if (realm == null)
         {
-            return Task.FromResult(RoleResolution.Empty);
+            // No realm to resolve against: unknown groups, never "no groups".
+            return Task.FromResult(RoleResolution.EmptyWithExpiry(DateTimeOffset.MinValue) with
+            {
+                Status = RoleResolutionStatus.Degraded
+            });
         }
         return ResolveAsync(identity, realm, cancellationToken);
     }

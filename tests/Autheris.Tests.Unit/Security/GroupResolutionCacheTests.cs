@@ -213,4 +213,85 @@ public sealed class GroupResolutionCacheTests
         fail = false;
         (await sut.ResolveAsync(Identity("r"), Realm("r"))).Groups.ShouldBe([SidA]);
     }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-07b")]
+    public async Task Undeliverable_message_through_redis_bus_invalidates_all()
+    {
+        var redisSubscriber = Substitute.For<StackExchange.Redis.ISubscriber>();
+        Action<StackExchange.Redis.RedisChannel, StackExchange.Redis.RedisValue>? onMessage = null;
+        redisSubscriber.When(x => x.Subscribe(Arg.Any<StackExchange.Redis.RedisChannel>(), Arg.Any<Action<StackExchange.Redis.RedisChannel, StackExchange.Redis.RedisValue>>(), Arg.Any<StackExchange.Redis.CommandFlags>()))
+            .Do(call => onMessage = call.Arg<Action<StackExchange.Redis.RedisChannel, StackExchange.Redis.RedisValue>>());
+        var mux = Substitute.For<StackExchange.Redis.IConnectionMultiplexer>();
+        mux.GetSubscriber(Arg.Any<object?>()).Returns(redisSubscriber);
+        using var bus = new RedisEventBus(mux, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), Microsoft.Extensions.Logging.Abstractions.NullLogger<RedisEventBus>.Instance);
+        var node = new RoleResolverCache();
+        using var subscriber = new IdentityGroupsChangedSubscriber(node, bus);
+        await subscriber.StartAsync(CancellationToken.None);
+        onMessage.ShouldNotBeNull();
+
+        foreach (var payload in new[] { "{ not json", "null" })
+        {
+            await node.SetAsync("r", "u", Entry(TimeSpan.FromMinutes(5)));
+            onMessage!(default, payload);
+            (await EventuallyGoneAsync(node, "r", "u")).ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-07b")]
+    public async Task Subscribe_failure_invalidates_all_and_still_hooks_connection_restored()
+    {
+        var bus = Substitute.For<Autheris.Application.Common.Interfaces.IEventBus>();
+        bus.Subscribe<IdentityGroupsChanged>(Arg.Any<string>(), Arg.Any<Func<IdentityGroupsChanged, Task>>()).Returns(_ => throw new InvalidOperationException("down"));
+        var node = new RoleResolverCache();
+        using var subscriber = new IdentityGroupsChangedSubscriber(node, bus);
+        await node.SetAsync("r", "u", Entry(TimeSpan.FromMinutes(5)));
+
+        await subscriber.StartAsync(CancellationToken.None);
+
+        (await node.GetAsync("r", "u")).ShouldBeNull();
+        await node.SetAsync("r", "u", Entry(TimeSpan.FromMinutes(5)));
+        bus.ConnectionRestored += Raise.Event<Action>();
+        (await node.GetAsync("r", "u")).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-07b")]
+    public async Task Publish_failure_is_counted_without_keys_and_does_not_throw()
+    {
+        var bus = Substitute.For<Autheris.Application.Common.Interfaces.IEventBus>();
+        bus.PublishAsync(Arg.Any<string>(), Arg.Any<IdentityGroupsChanged>(), Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new InvalidOperationException("down"));
+        var tags = new List<string>();
+        long total = 0;
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (i, l) =>
+        {
+            if (i.Name == "autheris_identity_group_invalidation_publish_failed_total") l.EnableMeasurementEvents(i);
+        };
+        listener.SetMeasurementEventCallback<long>((_, v, t, _) =>
+        {
+            lock (tags) { total += v; foreach (var tag in t) tags.Add(tag.Key); }
+        });
+        listener.Start();
+        var cache = new BroadcastingRoleResolverCache(new RoleResolverCache(), bus);
+
+        cache.Invalidate("r", "secret-user-key");
+
+        (await Eventually.WaitAsync(() => { lock (tags) { return total > 0; } }, TimeSpan.FromSeconds(5))).ShouldBeTrue();
+        lock (tags) { tags.ShouldBeEmpty(); }
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-03h")]
+    public async Task Unknown_realm_resolution_is_degraded()
+    {
+        var sut = new RoleResolver([Provider(_ => Groups(SidA))], new RoleResolverCache(), null, Options(5));
+
+        var resolution = await sut.ResolveRolesAsync(Identity("no-such-realm"));
+
+        resolution.IsDegraded.ShouldBeTrue();
+        resolution.Groups.ShouldBeEmpty();
+    }
 }

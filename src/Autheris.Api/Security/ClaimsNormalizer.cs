@@ -30,6 +30,28 @@ public static class ClaimsNormalizer
         "http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid"
     ];
 
+    /// <summary>
+    /// Number of provider group values (token <c>groups</c>/<c>groupsid</c> claim types) that <see cref="Normalize"/> drops because they are
+    /// not canonical SIDs (for example Entra object ids). The caller marks the request degraded when the realm takes groups from the token.
+    /// </summary>
+    public static int CountDroppedProviderGroups(ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        var count = 0;
+        foreach (var claimType in ProviderGroupClaimTypes)
+        {
+            foreach (var claim in principal.FindAll(c => c.Type == claimType && c.Issuer != IdentityClaimIssuers.Pipeline))
+            {
+                if (!SidFormat.IsCanonical(claim.Value?.Trim()))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
     public static ClaimsPrincipal Normalize(ClaimsPrincipal principal, X509Certificate2? clientCertificate = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
