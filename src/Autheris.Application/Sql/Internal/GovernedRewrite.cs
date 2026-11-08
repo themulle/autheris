@@ -18,7 +18,9 @@ internal sealed record GovernedRewrite(
     IReadOnlyDictionary<string, IReadOnlyList<string>>? VirtualFilters = null,
     IReadOnlyList<Autheris.Application.Sql.Policy.RowFilterKeySets.RowFilterKeySetOutcome>? KeySets = null,
     IReadOnlyDictionary<string, IReadOnlyList<Autheris.Domain.Model.CallerAttributeAuditEntry>>? CallerAttributes = null,
-    SqlQueryMetadata? Metadata = null);
+    SqlQueryMetadata? Metadata = null,
+    string? PagingUnavailable = null,
+    bool BindPageOffset = false);
 
 /// <summary>
 /// Collects the DML classification during governance so that executed AND rejected DML can be audited.

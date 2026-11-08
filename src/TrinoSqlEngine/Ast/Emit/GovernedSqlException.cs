@@ -206,3 +206,19 @@ public class SqlQuotaUnavailableException : Exception
     {
     }
 }
+
+public class SqlPagingUnsupportedException : Exception
+{
+    public SqlPagingUnsupportedException(string? message = null)
+        : base(message ?? GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.PagingUnsupported))
+    {
+    }
+}
+
+public class SqlPagingTokenInvalidException : Exception
+{
+    public SqlPagingTokenInvalidException(string? message = null)
+        : base(message ?? GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.PagingTokenInvalid))
+    {
+    }
+}

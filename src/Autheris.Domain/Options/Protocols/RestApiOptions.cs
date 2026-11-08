@@ -115,6 +115,22 @@ public sealed class WebSqlOptions
 
     /// <summary>Cost estimation, quota admission and settlement options for WebSQL statements.</summary>
     public WebSqlCostOptions Cost { get; init; } = new();
+
+    /// <summary>HMAC-bound statement paging options for WebSQL statements.</summary>
+    public WebSqlPagingOptions Paging { get; init; } = new();
+}
+
+public sealed class WebSqlPagingOptions
+{
+    public const string SectionName = "Paging";
+
+    public bool Enabled { get; init; } = true;
+
+    [Range(0, 1_000_000)]
+    public long MaxOffset { get; init; } = 10_000;
+
+    [Range(1, 1440)]
+    public int TokenLifetimeMinutes { get; init; } = 15;
 }
 
 public sealed class WebSqlCostOptions

@@ -62,6 +62,7 @@ public sealed partial class GovernedSqlExecutor
     private readonly CompiledSqlAuditDigester _digester;
     private readonly IProviderExecutionGuard _executionGuard;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
+    private readonly Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec _pageTokenCodec;
 
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
@@ -76,7 +77,8 @@ public sealed partial class GovernedSqlExecutor
         IKeyVaultSecretProvider? secretProvider = null,
         CompiledSqlAuditDigester? auditDigester = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
-        Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null)
+        Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null,
+        Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null)
     {
         _costQuota = costQuota;
         // Issue #447 no gate means deny, never pass-through.
@@ -94,6 +96,7 @@ public sealed partial class GovernedSqlExecutor
         _digester = auditDigester ?? new CompiledSqlAuditDigester(_options, secretProvider, environment);
         // L-A3: the guard is a required dependency; there is no silent pass-through fallback in the executor.
         _executionGuard = executionGuard ?? throw new ArgumentNullException(nameof(executionGuard));
+        _pageTokenCodec = pageTokenCodec ?? new Autheris.Application.Sql.Paging.WebSqlPageTokenCodec(_digester);
     }
 
     public async Task ExecuteGovernedQueryAsync(
@@ -119,6 +122,12 @@ public sealed partial class GovernedSqlExecutor
         IReadOnlyList<SqlResultColumn> columnDescriptions = Array.Empty<SqlResultColumn>();
         bool isTruncated = false;
         var sw = Stopwatch.StartNew();
+
+        GovernedSqlPageOutcome? pageOutcome = null;
+        if (request.Page != null || request.NextToken != null)
+        {
+            request = request with { OnPageOutcome = outcome => pageOutcome = outcome };
+        }
 
         await ExecuteCoreAsync(
             request,
@@ -152,6 +161,11 @@ public sealed partial class GovernedSqlExecutor
 
         sw.Stop();
 
+        if (pageOutcome?.Page != null && rows.Count > pageOutcome.Page.Size)
+        {
+            rows = rows.Take(pageOutcome.Page.Size).ToList();
+        }
+
         return new GovernedSqlResult(
             OriginalSql: request.Sql,
             Columns: columns.AsReadOnly(),
@@ -160,7 +174,10 @@ public sealed partial class GovernedSqlExecutor
             ElapsedMilliseconds: sw.ElapsedMilliseconds,
             Truncated: isTruncated,
             ColumnDescriptions: columnDescriptions,
-            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled);
+            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled,
+            Page: pageOutcome?.Page,
+            Next: pageOutcome?.NextToken,
+            PagingUnavailable: pageOutcome?.PagingUnavailable);
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(
@@ -261,6 +278,46 @@ public sealed partial class GovernedSqlExecutor
         var bindNames = GovernedSqlExecutionService.MergeGatewayParameters(request);
         string sqlForRewrite = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, bindNames, request.GatewayParameters, out var referencedNames);
 
+        if (request.NextToken != null || request.Page != null)
+        {
+            var meta = FastSqlEngine.Default.Analyze(sqlForRewrite.AsMemory());
+            if (meta.StatementType != SqlStatementType.Select)
+            {
+                throw new SqlPagingUnsupportedException();
+            }
+        }
+
+        if (request.NextToken != null)
+        {
+            if (user.GetUserSid() == null)
+            {
+                throw new SqlPagingTokenInvalidException();
+            }
+
+            string sourceId = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
+            string transport = request.Transport ?? "WebSql";
+            long maxOffset = _options.Value.WebSql.Paging?.MaxOffset ?? 10_000;
+            var decoded = _pageTokenCodec.DecodeToken(
+                request.NextToken,
+                request.Sql,
+                request.Parameters,
+                user,
+                tenantId,
+                sourceId,
+                transport,
+                maxOffset);
+
+            if (request.Page != null && request.Page.Size != decoded.Size)
+            {
+                throw new SqlPagingTokenInvalidException();
+            }
+
+            request = request with
+            {
+                Page = new SqlPageWindow(decoded.Offset, decoded.Size, decoded.PageNumber)
+            };
+        }
+
         var dmlContext = new DmlAuditContext();
         GovernedRewrite rewrite;
         IReadOnlyDictionary<string, object?> clientValues;
@@ -271,11 +328,14 @@ public sealed partial class GovernedSqlExecutor
             var referenced = referencedNames as IReadOnlySet<string> ?? new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase);
             clientValues = BuildClientValues(request, referenced);
             var shapes = ClientListParameters.Shapes(clientValues, referenced);
-            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, clientLists: shapes).ConfigureAwait(false);
+            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, clientLists: shapes, page: request.Page).ConfigureAwait(false);
         }
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
-            await ChargeFailureFeeOnDenialAsync(user).ConfigureAwait(false);
+            if (policyEx is not (SqlPagingTokenInvalidException or Antlr4.Runtime.Misc.ParseCanceledException or Antlr4.Runtime.RecognitionException))
+            {
+                await ChargeFailureFeeOnDenialAsync(user).ConfigureAwait(false);
+            }
             string auditDs = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
             // only the gateway's own policy messages are stored; an engine exception is reduced to its stable code.
             // L-4: the same holds for the engine errors that the error mapper owns (unsupported construct, reserved identifier, syntax
@@ -415,6 +475,7 @@ public sealed partial class GovernedSqlExecutor
             // G-11: only after a successful Compile, and only the compiled text (markers, never a bound value).
             using var syntheticReader = new SyntheticDataTableReader(compiled.Sql);
             await rowWriter(syntheticReader, ct).ConfigureAwait(false);
+            NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated: false);
             return compiled.Sql;
         }
 
@@ -547,6 +608,7 @@ public sealed partial class GovernedSqlExecutor
             binder.Bind(command, compiled, clientValues);
 
             // the execution and the streaming of the rows run under the provider guard (SQLite interrupts at the timeout).
+            bool isTruncated = false;
             await _executionGuard.RunAsync(
                 connection,
                 TimeSpan.FromSeconds(commandTimeout),
@@ -559,6 +621,7 @@ public sealed partial class GovernedSqlExecutor
                             var limitedReader = new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit);
                             await rowWriter(limitedReader, ct).ConfigureAwait(false);
                             deliveredOrAffectedRows = limitedReader.DeliveredRows;
+                            isTruncated = limitedReader.HasMoreRows;
                         }
                         else
                         {
@@ -575,6 +638,7 @@ public sealed partial class GovernedSqlExecutor
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 txCompleted = true;
             }
+            NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated);
             return compiled.Sql;
         }
         catch (Exception ex)
@@ -835,53 +899,47 @@ public sealed partial class GovernedSqlExecutor
         }
     }
 
-    /// <summary>
-    /// 128 (C-4, C-15):<c>list_params</c> = list name to expanded element count. The names come from the compiled statement (the
-    /// binder slots of the SQL's own identifiers, never from a client key) and the counts are the compiled counts; no value. A list that
-    /// expanded to nothing (an empty list) has no slot and is not listed here; <c>list_params_empty</c> names it (names only).
-    /// </summary>
-    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
-    private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
-
-    private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues)
+    private void NotifyPageOutcome(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, GovernedRewrite? rewrite, bool isTruncated)
     {
-        SortedDictionary<string, int>? lists = null;
-        foreach (var slot in compiled.Parameters)
+        if (request.Page == null || request.OnPageOutcome == null)
         {
-            if (slot is { Origin: ParameterOrigin.ClientNamed, ListCount: { } count, SourceName: { } name })
-            {
-                (lists ??= new SortedDictionary<string, int>(StringComparer.Ordinal))[name] = count;
-            }
+            return;
         }
 
-        if (lists is not null)
+        var pageResponse = new GovernedSqlPageResponse(request.Page.Number, request.Page.Offset, request.Page.Size);
+        string? nextToken = null;
+        string? pagingUnavailable = rewrite?.PagingUnavailable;
+        if (pagingUnavailable == null && isTruncated)
         {
-            fields["list_params"] = lists;
-        }
-
-        // An empty list expands to nothing, so it has no slot above: its trace is the name only (no values), limited to plain identifiers.
-        if (clientValues is not null)
-        {
-            SortedSet<string>? empty = null;
-            foreach (var (name, value) in clientValues)
+            long nextOffset = checked(request.Page.Offset + request.Page.Size);
+            long maxOffset = _options.Value.WebSql.Paging?.MaxOffset ?? 10_000;
+            if (nextOffset > maxOffset)
             {
-                if (value is ClientListValue { Count: 0 } && AuditListNameRegex().IsMatch(name))
-                {
-                    (empty ??= new SortedSet<string>(StringComparer.Ordinal)).Add(name.ToLowerInvariant());
-                }
+                pagingUnavailable = "offset_limit";
             }
-
-            if (empty is not null)
+            else if (user.GetUserSid() == null)
             {
-                fields["list_params_empty"] = empty.ToArray();
+                pagingUnavailable = "caller_not_bindable";
+            }
+            else
+            {
+                string sourceId = rewrite?.DataSourceName ?? _options.Value.WebSql.DefaultDataSourceName;
+                nextToken = _pageTokenCodec.EncodeToken(
+                    request.Sql,
+                    request.Parameters,
+                    user,
+                    tenantId,
+                    sourceId,
+                    request.Transport ?? "WebSql",
+                    nextOffset,
+                    request.Page.Size,
+                    request.Page.Number + 1,
+                    TimeSpan.FromMinutes(_options.Value.WebSql.Paging?.TokenLifetimeMinutes ?? 15));
             }
         }
+        request.OnPageOutcome(new GovernedSqlPageOutcome(pageResponse, nextToken, pagingUnavailable));
     }
 
-    /// <summary>
-    /// 129 (A-11, BC-129-15): the caller attributes of the statement per table as registry id, outcome and reason code, and the number of caller
-    /// attribute binds. Absent when no attribute took part; never a name of unregistered input, a subject key or a value.
-    /// </summary>
     private static void AddCallerAttributeAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite, CompiledSql compiled)
     {
         if (rewrite.CallerAttributes is not { Count: > 0 } attributes)
@@ -894,49 +952,5 @@ public sealed partial class GovernedSqlExecutor
             p => p.Value.Select(a => new Dictionary<string, object?> { ["id"] = a.Id, ["outcome"] = a.Outcome, ["reason"] = a.Reason }).ToList(),
             StringComparer.OrdinalIgnoreCase);
         fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
-    }
-
-    /// <summary>X1.2 / compiler version, dialect, bind count and the digest; the compiled text only with Audit:StoreCompiledSql.</summary>
-    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues = null)
-    {
-        fields["compiler_version"] = compiled.CompilerVersion;
-        fields["dialect"] = compiled.Dialect.ToString();
-        fields["bind_count"] = compiled.Parameters.Length;
-        if (compiled.HasRecursiveCte)
-        {
-            fields["recursiveCte"] = true;   // written only for recursive statements (also on a template cache hit)
-        }
-
-        AddListAuditField(fields, compiled, clientValues);
-        fields["sql.compiled_digest"] = _digester.Compute(compiled);
-        if (_options.Value.Audit.StoreCompiledSql)
-        {
-            fields["compiledSql"] = compiled.Sql;
-        }
-    }
-
-    /// <summary>
-    /// Issue #107 (A-14): the key-set outcome per site with reason and counts; never key values or a hash of them. Absent when no site
-    /// used or tried the strategy, so a statement without opt-in is audited exactly as before.
-    /// </summary>
-    private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
-    {
-        if (rewrite.KeySets is not { Count: > 0 } outcomes)
-        {
-            return;
-        }
-
-        fields["row_filter_key_sets"] = outcomes.Select(o => new Dictionary<string, object?>
-        {
-            ["table"] = o.Table,
-            ["rule_id"] = o.RuleId,
-            ["source"] = o.Source.ToString(),
-            ["strategy_source"] = o.StrategySource.ToString(),
-            ["outcome"] = o.Outcome.ToString(),
-            ["reason"] = o.Reason?.ToString(),
-            ["key_count"] = o.KeyCount,
-            ["padded_count"] = o.PaddedCount,
-            ["age_seconds"] = o.AgeSeconds
-        }).ToList();
     }
 }

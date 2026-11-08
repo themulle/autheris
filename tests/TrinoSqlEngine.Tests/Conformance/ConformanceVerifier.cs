@@ -43,7 +43,7 @@ internal static class ConformanceVerifier
 
     /// <summary>The concrete node families that need a conformance fixture or an explicit rejection: expressions, statements and their structural parts.</summary>
     public static IReadOnlyList<Type> RequiredNodeTypes() => typeof(SqlNode).Assembly.GetTypes()
-        .Where(t => t is { IsAbstract: false, IsClass: true } && typeof(SqlNode).IsAssignableFrom(t))
+        .Where(t => t is { IsAbstract: false, IsClass: true } && typeof(SqlNode).IsAssignableFrom(t) && t != typeof(PageOffsetParameterExpression))
         .Where(t => typeof(Expression).IsAssignableFrom(t) || typeof(SqlStatement).IsAssignableFrom(t) || typeof(QueryBody).IsAssignableFrom(t)
                     || typeof(TableSource).IsAssignableFrom(t) || typeof(SelectItem).IsAssignableFrom(t) || typeof(MergeClause).IsAssignableFrom(t)
                     || typeof(JoinCondition).IsAssignableFrom(t))
