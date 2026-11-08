@@ -638,7 +638,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 return null;
             }
 
-            // GHSA-95f9-ffc7-vw2c: For column-restricted tables, scrub continuous scores and zero out BM25/vector scores
+            // GHSA-95f9-ffc7-vw2c: restricted-table search scores
             // to prevent text-oracle inference attacks on hidden columns.
             bm25Score = null;
             vectorScore = null;

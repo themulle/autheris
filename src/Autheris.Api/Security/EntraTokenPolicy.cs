@@ -61,7 +61,7 @@ public static class EntraTokenPolicy
 
         var isAppOnly = scopes.Count == 0 && subjectResolver.ResolveSubject(principal).Type == SubjectType.ServicePrincipal;
 
-        // Client ID allowlist check (if configured) applies to both delegated and app-only tokens (GHSA-hw85-rqjh-cwxx)
+        // Client allowlist check (GHSA-hw85-rqjh-cwxx)
         if (options.AllowedClientIds.Count > 0)
         {
             var clientId = azp

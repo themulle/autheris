@@ -26,11 +26,11 @@ public sealed class GovernanceAdvancedMoatsIntegrationTests : IClassFixture<WebA
         });
     }
 
-    private System.Net.Http.HttpClient CreateAuthClient()
+    private System.Net.Http.HttpClient CreateAuthClient(string roles = "GovernanceAdmin")
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-GOV-ADMIN");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", roles);
         return client;
     }
 
@@ -77,7 +77,7 @@ p, S-1-5-21-USER-2, default, Orders, read, true, deny
     [Fact]
     public async Task SchemaSunsetting_Endpoints_FullLifecycle()
     {
-        var client = CreateAuthClient();
+        var client = CreateAuthClient("ClusterAdmin");
 
         var baseTime = DateTimeOffset.UtcNow;
         var ruleId = Guid.NewGuid();

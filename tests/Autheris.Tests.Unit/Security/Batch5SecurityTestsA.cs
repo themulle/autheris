@@ -49,13 +49,13 @@ using Xunit;
 
 /// <summary>
 /// Security unit tests for Batch 5 advisories:
-/// 1. GHSA-335j-6vwc-7p4c: DeleteProfile retry epoch bump and cache invalidation.
-/// 2. GHSA-wg8p-wfw5-qvgj: HitL step-up approval with enrolled secret and no code when RequireTotp2Fa is false.
-/// 3. GHSA-jcpx-6m27-2m97: Analytics & ChangeDetection endpoints table-not-found unified to 403 ACCESS_DENIED.
-/// 4. GHSA-qx32-576x-5cq2: GDPR report table authorization, non-owner recipient isolation, and REST export ForwardAuth rejection.
-/// 5. GHSA-cj7m-c75j-6p6h: Async jobs scratch disk quota tenant isolation and cancellation byte release.
-/// 6. GHSA-78j7-3gh6-7cqx: Arrow export ReBAC matching canonical table object ID format.
-/// 7. GHSA-mgv5-4r69-mwww: CDC stream admin and cross-data-source relation forbidden for tenant-scoped GovernanceAdmin.
+/// 1. GHSA-335j-6vwc-7p4c
+/// 2. GHSA-wg8p-wfw5-qvgj
+/// 3. GHSA-jcpx-6m27-2m97
+/// 4. GHSA-qx32-576x-5cq2
+/// 5. GHSA-cj7m-c75j-6p6h
+/// 6. GHSA-78j7-3gh6-7cqx
+/// 7. GHSA-mgv5-4r69-mwww
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class Batch5SecurityTestsA
@@ -130,11 +130,11 @@ public sealed class Batch5SecurityTestsA
     }
 
     // =========================================================================
-    // 1. GHSA-335j-6vwc-7p4c: DeleteProfile_Retry_After_EpochBump_Failure_Still_Invalidates
+    // 1. GHSA-335j-6vwc-7p4c
     // =========================================================================
 
     [Fact]
-    public async Task DeleteProfile_Retry_After_EpochBump_Failure_Still_Invalidates()
+    public async Task Ghsa_335j_7p4c_regression()
     {
         // Calling DeleteProfileAsync when profile is already null/deleted still invokes cache invalidation/epoch bump idempotently.
         var repo = new InMemoryAccessProfileRepository();
@@ -168,11 +168,11 @@ public sealed class Batch5SecurityTestsA
     }
 
     // =========================================================================
-    // 2. GHSA-wg8p-wfw5-qvgj: HitLApprove_EnrolledSecret_NoCode_RequireTotpFalse_Denied
+    // 2. GHSA-wg8p-wfw5-qvgj
     // =========================================================================
 
     [Fact]
-    public async Task HitLApprove_EnrolledSecret_NoCode_RequireTotpFalse_Denied()
+    public async Task Ghsa_wg8p_qvgj_regression()
     {
         // With RequireTotp2Fa=false, if the approver has an enrolled TOTP secret but supplies no code, approval is denied.
         var clusterState = new InMemoryClusterStateProvider();
@@ -232,11 +232,17 @@ public sealed class Batch5SecurityTestsA
     }
 
     // =========================================================================
-    // 3. GHSA-jcpx-6m27-2m97: Analytics & ChangeDetection TableNotFound -> 403 ACCESS_DENIED
+    // 3. GHSA-jcpx-6m27-2m97
     // =========================================================================
 
     [Fact]
-    public async Task AnalyticsEndpoints_TableNotFound_Returns403()
+    public async Task Ghsa_jcpx_2m97_regression()
+    {
+        await Case_jcpx_2m97_1();
+        await Case_jcpx_2m97_2();
+    }
+
+    private async Task Case_jcpx_2m97_1()
     {
         // Unify table existence oracle (missing vs denied) to 403 ACCESS_DENIED on TableNotFoundException
         var tableId = new TableIdentifier("sales", "dbo", "orders");
@@ -259,8 +265,7 @@ public sealed class Batch5SecurityTestsA
         body.ShouldContain(ApiErrorCodes.AccessDenied);
     }
 
-    [Fact]
-    public async Task ChangeDetectionEndpoints_TableNotFound_Returns403()
+    private async Task Case_jcpx_2m97_2()
     {
         // Unify table existence oracle (missing vs denied) to 403 ACCESS_DENIED on TableNotFoundException
         var tableId = new TableIdentifier("sales", "dbo", "orders");
@@ -289,11 +294,18 @@ public sealed class Batch5SecurityTestsA
     }
 
     // =========================================================================
-    // 4. GHSA-qx32-576x-5cq2: GDPR report authorization and isolation
+    // 4. GHSA-qx32-576x-5cq2
     // =========================================================================
 
     [Fact]
-    public async Task Gdpr_Report_Denied_For_Caller_Without_Table_Authorization()
+    public async Task Ghsa_qx32_5cq2_regression()
+    {
+        await Case_qx32_5cq2_1();
+        await Case_qx32_5cq2_2();
+        await Case_qx32_5cq2_3();
+    }
+
+    private async Task Case_qx32_5cq2_1()
     {
         // Verify caller without table ownership / admin standing is denied access to report for another subject
         var table = new TableIdentifier("finance", "dbo", "salary");
@@ -329,8 +341,7 @@ public sealed class Batch5SecurityTestsA
             lineageService.GetGdprDataDisclosureReportAsync(table, subjectSid: null, 365, callerContext, CancellationToken.None));
     }
 
-    [Fact]
-    public async Task Gdpr_Report_Does_Not_List_Other_Actors_For_NonOwner()
+    private async Task Case_qx32_5cq2_2()
     {
         // When a non-owner/non-admin caller views their own disclosure report, only their own accesses are visible.
         var table = new TableIdentifier("finance", "dbo", "salary");
@@ -390,8 +401,7 @@ public sealed class Batch5SecurityTestsA
         report.DisclosedRecipients.Any(r => r.RecipientSid == otherActorSid.Value).ShouldBeFalse();
     }
 
-    [Fact]
-    public async Task Gdpr_Rest_Export_Rejects_ForwardAuth_ClusterAdmin_Role()
+    private async Task Case_qx32_5cq2_3()
     {
         // ForwardAuth scheme claiming ClusterAdmin role is not canonical ClusterAdmin and must be rejected with 403
         var context = CreateEndpointContext(
@@ -420,11 +430,17 @@ public sealed class Batch5SecurityTestsA
     }
 
     // =========================================================================
-    // 5. GHSA-cj7m-c75j-6p6h: AsyncJobs scratch quota tenant isolation & release
+    // 5. GHSA-cj7m-c75j-6p6h
     // =========================================================================
 
     [Fact]
-    public async Task AsyncJobs_ScratchQuota_TenantIsolated()
+    public async Task Ghsa_cj7m_6p6h_regression()
+    {
+        await Case_cj7m_6p6h_1();
+        await Case_cj7m_6p6h_2();
+    }
+
+    private async Task Case_cj7m_6p6h_1()
     {
         // Scratch quota is summed strictly per tenant. Heavy usage in Tenant B does not affect Tenant A.
         var tempDir = Path.Combine(Path.GetTempPath(), $"autheris_jobs_quota_{Guid.NewGuid():N}");
@@ -487,8 +503,7 @@ public sealed class Batch5SecurityTestsA
         }
     }
 
-    [Fact]
-    public async Task AsyncJobs_Cancel_ReleasesScratchBytes()
+    private async Task Case_cj7m_6p6h_2()
     {
         // Cancelled jobs clear BytesProduced and do not consume scratch quota.
         var tempDir = Path.Combine(Path.GetTempPath(), $"autheris_jobs_cancel_{Guid.NewGuid():N}");
@@ -551,7 +566,7 @@ public sealed class Batch5SecurityTestsA
     }
 
     // =========================================================================
-    // 6. GHSA-78j7-3gh6-7cqx: ArrowExport_Rebac_MatchesCanonicalObjectId
+    // 6. GHSA-78j7-3gh6-7cqx
     // =========================================================================
 
     private sealed class EndpointInvocationContext(HttpContext httpContext) : EndpointFilterInvocationContext
@@ -562,7 +577,7 @@ public sealed class Batch5SecurityTestsA
     }
 
     [Fact]
-    public async Task ArrowExport_Rebac_MatchesCanonicalObjectId()
+    public async Task Ghsa_78j7_7cqx_regression()
     {
         // Verify RebacTableGate.ObjectId("table:domain.schema.table") is evaluated by RebacEndpointFilter and ArrowExportEndpoints
         var canonicalTableId = new TableIdentifier("sales", "public", "orders");
@@ -645,11 +660,17 @@ public sealed class Batch5SecurityTestsA
     }
 
     // =========================================================================
-    // 7. GHSA-mgv5-4r69-mwww: Tenant-scoped GovernanceAdmin forbidden for global actions
+    // 7. GHSA-mgv5-4r69-mwww
     // =========================================================================
 
     [Fact]
-    public async Task CdcStreamAdmin_TenantScopedGovernanceAdmin_Forbidden()
+    public async Task Ghsa_mgv5_mwww_regression()
+    {
+        await Case_mgv5_mwww_1();
+        await Case_mgv5_mwww_2();
+    }
+
+    private async Task Case_mgv5_mwww_1()
     {
         // Verify tenant-scoped GovernanceAdmin cannot perform global actions on CDC stream admin
         var claims = new List<Claim>
@@ -679,10 +700,9 @@ public sealed class Batch5SecurityTestsA
         status.ShouldBe(StatusCodes.Status403Forbidden);
     }
 
-    [Fact]
-    public async Task CrossDataSource_TenantScopedGovernanceAdmin_Forbidden()
+    private async Task Case_mgv5_mwww_2()
     {
-        // Verify tenant-scoped GovernanceAdmin cannot toggle cross-data-source relation opt-in
+        // GHSA-mgv5-4r69-mwww
         var relationId = Guid.NewGuid();
         var relationRepo = Substitute.For<ITableRelationRepository>();
 
@@ -709,11 +729,11 @@ public sealed class Batch5SecurityTestsA
         tenantStatus.ShouldBe(StatusCodes.Status403Forbidden);
         await relationRepo.DidNotReceiveWithAnyArgs().SetRelationCrossDataSourceOptInAsync(default, default, default);
 
-        // Scenario 2: Global GovernanceAdmin (no tenant_id claim) is PERMITTED
+        // Scenario 2: canonical ClusterAdmin is PERMITTED (OD-9: GovernanceAdmin is never global)
         var globalClaims = new List<Claim>
         {
             new("sub", "S-1-5-21-GLOBALADMIN"),
-            new(ClaimTypes.Role, "GovernanceAdmin")
+            new(ClaimTypes.Role, "ClusterAdmin")
         };
         var globalContext = new DefaultHttpContext
         {

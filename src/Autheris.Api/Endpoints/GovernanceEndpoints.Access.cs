@@ -578,7 +578,7 @@ public static partial class GovernanceEndpoints
         var profile = await accessProfileRepo.GetProfileAsync(tenantId, id, ct).ConfigureAwait(false);
         if (profile == null)
         {
-            // GHSA-335j-6vwc-7p4c: Retrying revoke after a failed epoch bump must still invalidate cache/bump epoch.
+            // GHSA-335j-6vwc-7p4c: profile revoke retry
             var invalidatedOnRetry = await TryInvalidateAccessProfileCacheAsync(context, tenantId, id, callerSid, ct).ConfigureAwait(false);
             if (!invalidatedOnRetry)
             {
@@ -611,7 +611,7 @@ public static partial class GovernanceEndpoints
         var auditRepo = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
         await auditRepo.RecordRequiredAsync(auditEvent, CancellationToken.None).ConfigureAwait(false);
 
-        // Cluster-wide cache invalidation (AR-01 / GHSA-335j-6vwc-7p4c)
+        // Cluster-wide cache invalidation (AR-01)
         var invalidated = await TryInvalidateAccessProfileCacheAsync(context, tenantId, id, callerSid, ct).ConfigureAwait(false);
         if (!invalidated)
         {

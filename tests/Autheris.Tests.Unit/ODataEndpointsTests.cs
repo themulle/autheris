@@ -403,7 +403,7 @@ public sealed class ODataEndpointsTests
         var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
 
         ODataEndpoints.IsOpenApiAdmin(clusterAdmin).ShouldBeTrue();
-        ODataEndpoints.IsOpenApiAdmin(govAdmin).ShouldBeTrue();
+        ODataEndpoints.IsOpenApiAdmin(govAdmin).ShouldBeFalse();
         ODataEndpoints.IsOpenApiAdmin(regularUser).ShouldBeFalse();
         ODataEndpoints.IsOpenApiAdmin(anonymous).ShouldBeFalse();
         ODataEndpoints.IsOpenApiAdmin(null).ShouldBeFalse();

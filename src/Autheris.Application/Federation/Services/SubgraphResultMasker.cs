@@ -211,7 +211,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
 
         if (!shouldMask)
         {
-            // GHSA-xpw9-4m63-69pf: Recurse into dictionary/JSON scalars even if top-level field is not sensitive
+            // GHSA-xpw9-4m63-69pf: nested value masking
             if (value is IDictionary or IReadOnlyDictionary<string, object?>)
             {
                 var maskedDict = MaskRecursive(value, null, null, ctx);

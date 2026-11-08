@@ -65,36 +65,17 @@ internal static class EndpointSecurity
         => Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
     /// <summary>
-    /// SEC M-11 / GHSA-mgv5-4r69-mwww: Global (tenant-independent) governance administrators: Canonical ClusterAdmin,
-    /// or GovernanceAdmin that is not bound to a tenant scope.
+    /// OD-9: global (tenant-independent) administration is reserved to the canonical ClusterAdmin.
+    /// GovernanceAdmin is always tenant-bound, also without a tenant claim (such a token resolves to the default tenant).
     /// </summary>
     public static bool IsGlobalGovernanceAdmin(ClaimsPrincipal? principal)
-    {
-        if (principal == null)
-        {
-            return false;
-        }
+        => IsCanonicalClusterAdmin(principal);
 
-        if (IsCanonicalClusterAdmin(principal))
-        {
-            return true;
-        }
-
-        if (!GatewayPolicies.HasRole(principal, GatewayRole.GovernanceAdmin))
-        {
-            return false;
-        }
-
-        var tenantClaim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
-        if (tenantClaim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Absent)
-        {
-            return true;
-        }
-
-        // If the tenant claim was default-assigned by the ingress/gateway rather than explicitly bound by caller or realm,
-        // it is not a tenant-scoped restricted token.
-        return principal.FindFirst("autheris:tenant_status")?.Value == "default";
-    }
+    /// <summary>OD-9: GovernanceAdmin that is not a canonical ClusterAdmin; its reach ends at the caller tenant.</summary>
+    public static bool IsTenantBoundGovernanceAdmin(ClaimsPrincipal? principal)
+        => principal != null
+           && !IsCanonicalClusterAdmin(principal)
+           && GatewayPolicies.HasRole(principal, GatewayRole.GovernanceAdmin);
 
     /// <summary>SEC C-05: Approver roles (DataSteward, DataOwner, GovernanceAdmin) or ClusterAdmin.</summary>
     public static bool IsApprover(ClaimsPrincipal? principal)

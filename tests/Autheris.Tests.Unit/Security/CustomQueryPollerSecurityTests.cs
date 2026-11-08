@@ -369,7 +369,7 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         var service = CreateAdminService();
         var audit = CreateAuditWriter();
 
-        var result = await CdcStreamAdminEndpoints.ResetWatermarkAsync(desc.Id.Value, request, CtxGlobal("GovernanceAdmin"), service, audit, default);
+        var result = await CdcStreamAdminEndpoints.ResetWatermarkAsync(desc.Id.Value, request, CtxGlobal("ClusterAdmin"), service, audit, default);
         Status(result).ShouldBe(200);
 
         // Verify Tier A audit event recorded

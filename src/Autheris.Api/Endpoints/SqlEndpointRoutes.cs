@@ -202,7 +202,7 @@ public static class SqlEndpointRoutes
 
     // G3: RawSql, DataSource and ReferencedTables are internal schema details; only admins see them.
     internal static bool IsListAdmin(System.Security.Claims.ClaimsPrincipal? user)
-        => EndpointSecurity.IsCanonicalClusterAdmin(user) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
+        => EndpointSecurity.IsCanonicalClusterAdmin(user);
 
     internal static IReadOnlyList<object> ToPublicListing(IEnumerable<Autheris.Domain.Model.SqlEndpointDefinition> endpoints, int maxListItems = 1000)
         => endpoints.Select(e => (object)new

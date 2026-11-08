@@ -463,7 +463,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             throw new GdprSubjectScopeUnresolvedException();
         }
 
-        // GHSA-qx32-576x-5cq2: Access and impact analyses require table owner, delegate, GovernanceAdmin or PrivacyAdmin standing.
+        // GHSA-qx32-576x-5cq2: analysis standing
         bool isAuthorized = callerContext == null ||
             await IsAuthorizedForAccessAnalysisAsync(table.Value, callerContext, ct).ConfigureAwait(false);
 
@@ -508,7 +508,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
 
         if (callerContext != null && !isAuthorized)
         {
-            // GHSA-qx32-576x-5cq2: Non-owners / non-admins can only ever see their own accesses, never other actors.
+            // GHSA-qx32-576x-5cq2: actor visibility
             allowedQuery = allowedQuery.Where(a => string.Equals(a.ActorSid.Value, callerContext.UserSid.Value, StringComparison.OrdinalIgnoreCase));
         }
         else

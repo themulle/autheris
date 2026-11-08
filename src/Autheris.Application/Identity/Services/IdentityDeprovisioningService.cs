@@ -93,7 +93,7 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         // 5. Invalidate role cache
         _roleResolverCache?.Invalidate(realmId, userKey);
 
-        // 5b. GHSA-wvwx-q6jg-44wv: Remove CDC webhook subscriptions created by deprovisioned subject
+        // 5b. GHSA-wvwx-q6jg-44wv: webhook subscription cleanup
         if (_subscriptionStore != null)
         {
             try
