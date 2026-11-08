@@ -26,7 +26,7 @@ A critical whole-project review (10 findings) concluded that Autheris is an AI-g
 | Governance persistence | SqlServer / PostgreSql / Sqlite repositories, 26 partials each, 5,276 / 5,243 / 5,241 lines (~15,800); Persistence folder 37,605 lines; migrations triplicated |
 | SQL engine | TrinoSqlEngine 25,698 + tests 33,692 + gate 5,772 + Fuzz + 3 Stryker configs; SqlAstBuilder 1,673; AstSecurityVisitor 13 partials / 3,234; 8 `TargetSqlDialect` values, 6 generators; parity suite SQLite-centric (33 vs 1 DuckDB); master plan lists SQL Server/PostgreSQL/DuckDB parity baselines as open; ADR-017 has no build-vs-buy |
 | Tests | 14,333 [Fact]/[Theory]; Unit 10,782 vs Integration 906; 4,159 Substitute.For; 986 Received/DidNotReceive; 92 Task.Delay/Thread.Sleep; 76 unit files use SqliteConnection/DuckDBConnection directly; 11 use TestServer/WebApplication.Create; 155 loose files in Unit root with review-style names |
-| Docs | 96 feature docs; 4 "Not implemented" docs still indexed (f-ai-09, f-ai-10, f-gov-06, f-perf-10); 37-39 "Status: [Done] (100% GA)" (correction: not 44); 310 `file:///root/autheris/` occurrences; 23 broken relative links; non-English concept doc (1,326 lines) |
+| Docs | 96 feature docs; 4 "Not implemented" docs still indexed (f-ai-09, f-ai-10, f-gov-06, f-perf-10); 37-39 "Status: [Done] (100% GA)" (correction: not 44); 310 absolute file link occurrences; 23 broken relative links; non-English concept doc (1,326 lines) |
 | Code comments | ~1,860 plan/ticket-id comment lines, >= 521 distinct ids; 339 plan files deleted (dangling references) |
 | Process | 1,544 commits in 31 days, 232 in one day; +1.55M / -474k lines; 539 fix vs 286 feat; 101 security-fix commits; single human identity (four identities) |
 | Versioning | 56 tags v1.0.0..v1.7.0 in 4 weeks; Directory.Build.props 1.2.1; Chart appVersion "1.0.0" and default tag falls back to it (non-upgradable: v1.5.0 is oldest migration base); no CHANGELOG |
@@ -234,12 +234,12 @@ See section 5 for the full process requirements. Targets: net-added-LOC gate act
 
 1. Fix or delete docs that describe missing components: f-sec-04 (OpenFGA client) and its index line are deleted (ReBAC is removed by WP-SIMPL-46, OD-30); Arrow Flight SQL docs deleted together with the endpoints (2.3).
 2. Remove the 4 "Not implemented" docs and index lines; remove all `Status:` tags from docs/ outside docs/plans (37-39 "Done" tags, verified); no "100% GA / Production-Ready" wording.
-3. Replace all 310 `file:///root/autheris/` links with relative links; fix 23 broken relative links.
+3. Replace all 310 absolute file link links with relative links; fix 23 broken relative links.
 4. Translate or delete docs/architecture/konzept-data-governance-und-mcp-documentation.md (English only; default: condense into the English architecture doc, delete the original).
 5. Feature-doc count: <= 45 (from 96), one per surviving KEEP area and module; each module README replaces its feature doc.
 6. CI: a link/path checker (relative links, referenced source paths in backticks exist), a "no Status tag in docs/" check, a non-ASCII-German heuristic is optional.
 7. Protocol claims (JDBC, gRPC, wire formats) require an interop test in CI or are removed.
-8. Targets: broken links = 0; `file:///` = 0; status tags in docs/ (outside plans) = 0; docs referencing non-existent source files = 0.
+8. Targets: broken links = 0; absolute file links = 0; status tags in docs/ (outside plans) = 0; docs referencing non-existent source files = 0.
 
 ### REQ-SIMPL-05 Governance persistence (finding 5)
 
@@ -411,7 +411,7 @@ Stage order rationale: truth first (cheap, restores credibility), delete before 
 | Options classes / settable props | 173 / ~1,173 | <= 90 / <= 600 |
 | Unconsumed options baseline | 46 lines | 0, file removed |
 | Undocumented option names | 335 of 937 | 0, generated reference |
-| Feature docs | 96 | <= 45; 0 broken links, 0 status tags, 0 `file:///` |
+| Feature docs | 96 | <= 45; 0 broken links, 0 status tags, 0 absolute file links |
 | Container-backed + integration share | 6.3% | >= 15% |
 | Substitute.For / Received | 4,159 / 986 | <= 2,000 / <= 400 |
 | Test LOC | 382,125 | <= 247,000 (PLAN-SIMPL section 3) |
