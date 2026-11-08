@@ -37,7 +37,7 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
         IOptions<GatewayOptions> options,
         ILogger<SqlServerGovernanceMigrationRunner>? logger = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
-        : base(SqliteGovernanceMigrationRunner.GetMigrationOptions(options), logger)
+        : base(GetMigrationOptions(options), logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         _repository = repository;

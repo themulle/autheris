@@ -27,7 +27,7 @@ public sealed class Issue404PhysicalIndexWiringTests
         typeof(DataCatalogSyncService).GetConstructors().Single().GetParameters()
             .ShouldContain(p => p.ParameterType == typeof(IPhysicalIndexRepository));
 
-        foreach (var profile in new[] { "dev-sqlite", "production-like" })
+        foreach (var profile in new[] { "dev", "production-like" })
         {
             var path = Autheris.Tests.Unit.Common.SnapshotFile.SnapshotPath($"composition-{profile}.txt");
             File.ReadAllText(path).ShouldContain("Autheris.Application.Common.Interfaces.IPhysicalIndexRepository Singleton", Case.Sensitive);

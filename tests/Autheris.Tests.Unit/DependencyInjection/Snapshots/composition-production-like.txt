@@ -204,9 +204,9 @@
 0203 Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.StateOptions> Singleton key=- type:Autheris.Infrastructure.Persistence.StateOptionsValidator
 0204 Autheris.Infrastructure.Persistence.IGatewayStatePaths Singleton key=- type:Autheris.Infrastructure.Persistence.GatewayStatePaths
 0205 Autheris.Application.Audit.IAuditChainAnchorStore Singleton key=- factory:Autheris.Application.Audit.IAuditChainAnchorStore
-0206 Autheris.Infrastructure.Persistence.SqliteGovernanceRepository Singleton key=- type:Autheris.Infrastructure.Persistence.SqliteGovernanceRepository
+0206 Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository Singleton key=- type:Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository
 0207 Autheris.Infrastructure.Persistence.Migrations.IGovernanceStoreInitializer Singleton key=- factory:Autheris.Infrastructure.Persistence.Migrations.IGovernanceStoreInitializer
-0208 Autheris.Infrastructure.Persistence.Migrations.IGovernanceMigrationRunner Singleton key=- type:Autheris.Infrastructure.Persistence.Migrations.SqliteGovernanceMigrationRunner
+0208 Autheris.Infrastructure.Persistence.Migrations.IGovernanceMigrationRunner Singleton key=- type:Autheris.Infrastructure.Persistence.Migrations.PostgreSqlGovernanceMigrationRunner
 0209 Autheris.Application.Common.Interfaces.IGovernanceRepository Singleton key=- factory:Autheris.Application.Common.Interfaces.IGovernanceRepository
 0210 Autheris.Application.Common.Interfaces.ITableMetadataRepository Singleton key=- factory:Autheris.Application.Common.Interfaces.ITableMetadataRepository
 0211 Autheris.Application.Identity.Attributes.IConsentMaterializationGuard Singleton key=- factory:Autheris.Application.Identity.Attributes.IConsentMaterializationGuard

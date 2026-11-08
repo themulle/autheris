@@ -114,10 +114,4 @@ public sealed class SqliteGovernanceMigrationRunner : GovernanceMigrationRunnerB
             _repository.ReleaseLock();
         }
     }
-
-    internal static GovernanceMigrationOptions GetMigrationOptions(IOptions<GatewayOptions> options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return options.Value?.GovernanceDb?.Migrations ?? new GovernanceMigrationOptions();
-    }
 }

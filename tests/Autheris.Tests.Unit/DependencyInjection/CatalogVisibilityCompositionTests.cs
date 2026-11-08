@@ -37,7 +37,7 @@ public sealed class CatalogVisibilityCompositionTests
         services.AddLogging();
         var options = new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" }
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }
         };
         services.AddSingleton(Options.Create(options));
         services.AddAutherisStorage(options, env);

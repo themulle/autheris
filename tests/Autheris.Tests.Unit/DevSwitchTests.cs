@@ -127,24 +127,16 @@ public sealed class DevSwitchTests
     // ---------- Persistence ----------
 
     [Fact]
-    public void Persist_OverridesConnectionString_AndCreatesDirectory()
+    public void Persist_DoesNotWriteAGovernanceConnectionString_OrCreateTheDirectory()
     {
         var dir = Path.Combine(Path.GetTempPath(), "autheris-dev-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var (config, report) = Resolve("Development",
-                ("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared"),
-                ("Gateway:Dev:Persist:Enabled", "true"),
-                ("Gateway:Dev:Persist:Directory", dir));
+        var (config, _) = Resolve("Development",
+            ("Gateway:GovernanceDb:ConnectionString", "Host=db;Database=x;Username=u;Password=p"),
+            ("Gateway:Dev:Persist:Enabled", "true"),
+            ("Gateway:Dev:Persist:Directory", dir));
 
-            Directory.Exists(dir).ShouldBeTrue();
-            Bind(config).GovernanceDb.ConnectionString.ShouldBe($"Data Source={Path.Combine(dir, "dev.db")}");
-            report.Notes.ShouldContain(n => n.Contains("scripts/dev-reset.sh"));
-        }
-        finally
-        {
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
-        }
+        Directory.Exists(dir).ShouldBeFalse();
+        Bind(config).GovernanceDb.ConnectionString.ShouldBe("Host=db;Database=x;Username=u;Password=p");
     }
 
     [Fact]

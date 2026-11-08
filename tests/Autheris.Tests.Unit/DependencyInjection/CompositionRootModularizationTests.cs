@@ -39,8 +39,8 @@ public sealed class CompositionRootModularizationTests
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                Provider = "Sqlite",
-                ConnectionString = "Data Source=:memory:"
+                Provider = "PostgreSql",
+                ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql
             }
         };
 

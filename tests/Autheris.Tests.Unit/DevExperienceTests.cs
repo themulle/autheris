@@ -182,7 +182,7 @@ public sealed class DevExperienceTests
 
         json.ShouldContain("\"environment\":\"Development\"");
         json.ShouldContain("\"sessionActive\":true");
-        json.ShouldContain("\"provider\":\"Sqlite\"");
+        json.ShouldContain("\"provider\":\"PostgreSql\"");
         json.ShouldNotContain("s3cret-pw");
         json.ShouldNotContain("secret-conn-string");
         json.ShouldNotContain("pbkdf2");

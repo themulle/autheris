@@ -173,3 +173,4 @@ Autheris.Tests.Unit.Governance.SqliteGovernanceConcurrencyTests.Revoke_IsVisible
 Autheris.Tests.Unit.Governance.SqliteGovernanceConcurrencyTests.VirtualFilterSnapshot_DoesNotTakeAWriteLock,N/A on PostgreSQL: there is no SQLite database-level write lock (WP-SIMPL-11),Security
 Autheris.Tests.Unit.Governance.SqliteGovernanceConcurrencyTests.Writes_WaitForTheWriteGate,N/A on PostgreSQL: the single-writer SQLite write gate does not exist (WP-SIMPL-11),Security
 Autheris.Tests.Unit.Governance.SqliteCatalogKeyDefinitionContractTests.MissingKeyTables_TableIsUnavailable,covered by Autheris.Tests.Integration.Governance.PostgreSqlCatalogKeyTablesTests.MissingKeyTables_TableIsUnavailable (WP-SIMPL-11),Security
+Autheris.Tests.Unit.Governance.GatewayStatePathsTests.AnchorDefaultsNextToGovernanceDb,covered by Autheris.Tests.Unit.Security.AuditChainSecurityTests.Unsupported_provider_has_no_default_anchor_store (WP-SIMPL-11 PR-C1),Security

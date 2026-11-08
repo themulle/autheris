@@ -163,14 +163,14 @@ public class PostgreSqlGovernanceProviderTests
     }
 
     [Fact]
-    public async Task DependencyInjection_RegistersSqliteGovernanceRepository_ByDefault()
+    public async Task DependencyInjection_UnconfiguredProvider_FailsClosed()
     {
         var services = new ServiceCollection();
         var options = new GatewayOptions
         {
             GovernanceDb = new GovernanceDbOptions
             {
-                Provider = "Sqlite",
+                Provider = "",
                 ConnectionString = "Data Source=:memory:"
             }
         };
@@ -185,13 +185,8 @@ public class PostgreSqlGovernanceProviderTests
 
         await using var sp = services.BuildServiceProvider();
 
-        var repo = sp.GetService<IGovernanceRepository>();
-        repo.ShouldNotBeNull();
-        repo.ShouldBeOfType<SqliteGovernanceRepository>();
-
-        var exportSource = sp.GetService<IAuditChainExportSource>();
-        exportSource.ShouldNotBeNull();
-        exportSource.ShouldBeOfType<SqliteGovernanceRepository>();
+        // no provider means no governance store and no anchor store: resolving the repository fails closed
+        Should.Throw<InvalidOperationException>(() => sp.GetService<IGovernanceRepository>());
     }
 
     [Fact]

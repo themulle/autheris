@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Configuration;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Autheris.Api.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
@@ -13,7 +14,7 @@ using Xunit;
 public sealed class GovernanceProviderGuardTests
 {
     private const string ExpectedMessage =
-        "Governance provider unsupported (OD-1). See docs/operations/migration-simplification.md.";
+        "Governance provider unsupported (OD-1). Accepted providers: PostgreSql, SqlServer. See docs/operations/migration-simplification.md.";
 
     [Theory]
     [Trait("Category", "Security")]
@@ -159,6 +160,103 @@ public sealed class GovernanceProviderGuardTests
             GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(environmentName)));
 
         ex.Message.ShouldBe(ExpectedMessage);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Absent_provider_with_connection_string_resolves_postgresql_family()
+    {
+        var cfg = BuildConfig(new Dictionary<string, string?>
+        {
+            ["GovernanceDb:ConnectionString"] = "Host=localhost;Database=autheris;Username=postgres;Password=secret"
+        });
+
+        Should.NotThrow(() => GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(Environments.Production)));
+        new Autheris.Domain.Options.GovernanceDbOptions().Provider.ShouldBe("PostgreSql");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("PostgreSql", "GovernanceDb:ConnectionString")]
+    [InlineData("SqlServer", "GovernanceDb:ConnectionString")]
+    [InlineData("PostgreSql", "Gateway:GovernanceDb:ConnectionString")]
+    public void Provider_set_with_empty_connection_string_fails_startup(string provider, string connectionStringKey)
+    {
+        foreach (var environmentName in new[] { Environments.Development, "Test", Environments.Production })
+        {
+            foreach (var emptyValue in new string?[] { null, "", "   " })
+            {
+                var cfg = BuildConfig(new Dictionary<string, string?>
+                {
+                    [provider is "PostgreSql" && connectionStringKey.StartsWith("Gateway", StringComparison.Ordinal)
+                        ? "Gateway:GovernanceDb:Provider"
+                        : "GovernanceDb:Provider"] = provider,
+                    [connectionStringKey] = emptyValue,
+                    // a migration-only connection string must not satisfy the runtime requirement
+                    ["GovernanceDb:MigrationConnectionString"] = "Host=localhost;Database=autheris;Username=m;Password=migration-secret"
+                });
+
+                var ex = Should.Throw<InvalidOperationException>(() =>
+                    GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(environmentName)));
+                ex.Message.ShouldBe(ExpectedMessage);
+                ex.Message.ShouldNotContain("migration-secret");
+            }
+        }
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("Postgres")]
+    [InlineData("PgSql")]
+    [InlineData("MsSql")]
+    [InlineData("postgresql ")]
+    public void Provider_alias_is_rejected_or_normalized_consistently(string provider)
+    {
+        var cfg = BuildConfig(new Dictionary<string, string?>
+        {
+            ["GovernanceDb:Provider"] = provider,
+            ["GovernanceDb:ConnectionString"] = "Host=localhost;Database=autheris;Username=postgres;Password=secret"
+        });
+
+        // the guard is strict for the runtime aliases; only exact family names (trim, ignore case) pass.
+        if (provider.Trim().Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+        {
+            Should.NotThrow(() => GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(Environments.Production)));
+            return;
+        }
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(Environments.Production)));
+        ex.Message.ShouldBe(ExpectedMessage);
+        ex.Message.ShouldContain("PostgreSql");
+        ex.Message.ShouldContain("SqlServer");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void No_bypass_switch_exists()
+    {
+        var names = typeof(Autheris.Domain.Options.GovernanceDbOptions).GetProperties().Select(p => p.Name)
+            .Concat(typeof(GovernanceProviderGuard).GetMembers(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                .Select(m => m.Name))
+            .ToList();
+
+        names.ShouldNotContain(n => n.Contains("Bypass", StringComparison.OrdinalIgnoreCase)
+            || n.Contains("AllowSqlite", StringComparison.OrdinalIgnoreCase)
+            || n.Contains("Legacy", StringComparison.OrdinalIgnoreCase)
+            || n.Contains("Unsafe", StringComparison.OrdinalIgnoreCase)
+            || n.Contains("Skip", StringComparison.OrdinalIgnoreCase));
+
+        // no environment variable or key changes the outcome: an in-memory override of a bypass-like key still fails.
+        var cfg = BuildConfig(new Dictionary<string, string?>
+        {
+            ["GovernanceDb:Provider"] = "Sqlite",
+            ["GovernanceDb:AllowSqlite"] = "true",
+            ["Gateway:Dev:AllowSqliteGovernance"] = "true",
+            ["GovernanceDb:ConnectionString"] = "Host=localhost;Database=a;Username=u;Password=p"
+        });
+        Should.Throw<InvalidOperationException>(() =>
+            GovernanceProviderGuard.ThrowIfUnsupported(cfg, new StubHostEnvironment(Environments.Development)));
     }
 
     private static IConfiguration BuildConfig(Dictionary<string, string?> values) =>
