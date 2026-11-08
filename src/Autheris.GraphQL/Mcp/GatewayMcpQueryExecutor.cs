@@ -16,10 +16,12 @@ using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using HotChocolate.Execution;
 using HotChocolate.Language;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Production-grade MCP Query Executor bridging MCP tool calls into HotChocolate's execution engine
@@ -46,6 +48,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     // Without it HotChocolate would open a fresh scope with no ingress, which the transport gate denies.
     private readonly IServiceProvider? _services;
 
+    // WP-SIMPL-53: Mcp:MaxResultRows is re-read per call; without options the default cap applies (never unbounded).
+    private readonly IOptionsMonitor<GatewayOptions>? _options;
+
+    private int RowCap() => McpRowCap.ResolveCap(_options?.CurrentValue.Mcp.MaxResultRows ?? McpRowCap.DefaultCap);
+
     public GatewayMcpQueryExecutor(
         IRequestExecutorProvider executorProvider,
         IGatewayExecutionService gatewayExecutionService,
@@ -55,9 +62,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         IPersistedToolValidator? persistedToolValidator = null,
         IMcpDatasetCatalog? datasetCatalog = null,
         IMcpToolExecutionHandler? toolExecutionHandler = null,
-        IServiceProvider? services = null)
+        IServiceProvider? services = null,
+        IOptionsMonitor<GatewayOptions>? gatewayOptions = null)
     {
         _services = services;
+        _options = gatewayOptions;
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
         _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -116,6 +125,13 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             }
         }
 
+        // SEC-53-02: a bad client row limit is rejected before any tool runs.
+        if (McpRowCap.LimitArgument(tool.Name) is { } limitArgument
+            && !McpRowCap.TryReadLimit(variables.GetValueOrDefault(limitArgument), out _))
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, $"'{limitArgument}' must be a positive integer.");
+        }
+
         // Pre-Flight Query Simulator Tool (F-AI-04)
         if (tool.Name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase))
         {
@@ -135,7 +151,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         {
             try
             {
-                return await _toolExecutionHandler.ExecuteToolAsync(tool, argumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
+                var handled = await _toolExecutionHandler.ExecuteToolAsync(tool, argumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
+                return McpRowCap.TrimRows(handled, RowCap());
             }
             catch (Exception ex) when (ex is not OperationCanceledException && SqlCompilerErrorMapper.TryMap(ex, out _))
             {
@@ -310,11 +327,14 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     ? await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, Text("language"), Bool("brief") ?? false, cancellationToken).ConfigureAwait(false)
                     : await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
                 McpDatasetTools.DescribeMyAccess => await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table") ?? string.Empty, cancellationToken).ConfigureAwait(false),
-                McpDatasetTools.SampleRows => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), Bool("synthetic") ?? false, cancellationToken).ConfigureAwait(false),
+                McpDatasetTools.SampleRows => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables) is { } requestedCount ? McpRowCap.Effective(requestedCount, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows)) : null, Bool("synthetic") ?? false, cancellationToken).ConfigureAwait(false),
                 _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)
             };
 
-            return JsonSerializer.Serialize(result, CamelCaseJsonOptions);
+            var serialized = JsonSerializer.Serialize(result, CamelCaseJsonOptions);
+            return tool.Name.Equals(McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase)
+                ? McpRowCap.TrimRows(serialized, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows))
+                : serialized;
         }
         catch (TableNotFoundException)
         {
@@ -479,7 +499,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Unsupported GraphQL execution result.");
         }
 
-        var json = FormatOperationResult(result);
+        var json = McpRowCap.TrimGraphQl(FormatOperationResult(result), RowCap());
         return result.Errors is null || result.Errors.Count == 0
             ? json
             : CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "GraphQL execution returned errors.", json);
