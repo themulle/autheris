@@ -72,14 +72,29 @@ public sealed record CompiledSqlTemplate(
     }
 
     /// <summary>Rebinds the slots with the values of the current request.</summary>
-    public CompiledSql Rebind(IReadOnlyDictionary<string, PolicyValue> policyValues)
+    public CompiledSql Rebind(IReadOnlyDictionary<string, PolicyValue> policyValues, long? pageOffset = null, long maxOffset = 1_000_000)
     {
+        if (pageOffset.HasValue && (pageOffset.Value < 0 || pageOffset.Value > maxOffset))
+        {
+            throw new System.Security.SecurityException("Page offset value is outside permitted bounds.");
+        }
+
+        bool hasOffsetSlot = false;
         var parameters = ImmutableArray.CreateBuilder<BoundParameter>(Slots.Length);
         foreach (var slot in Slots)
         {
             object? value = slot.LiteralValue;
             var type = slot.Type;
-            if (slot.Origin is ParameterOrigin.Tenant or ParameterOrigin.Policy or ParameterOrigin.Mask)
+            if (slot.Origin is ParameterOrigin.PageOffset)
+            {
+                hasOffsetSlot = true;
+                if (!pageOffset.HasValue || pageOffset.Value < 0)
+                {
+                    throw new System.Security.SecurityException("A PageOffset slot requires a server-issued offset value.");
+                }
+                value = pageOffset.Value;
+            }
+            else if (slot.Origin is ParameterOrigin.Tenant or ParameterOrigin.Policy or ParameterOrigin.Mask)
             {
                 if (slot.SourceName is null || !policyValues.TryGetValue(slot.SourceName, out var current) || current.Type != slot.Type)
                 {
@@ -107,6 +122,11 @@ public sealed record CompiledSqlTemplate(
             }
 
             parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType, slot.ListIndex, slot.ListCount, slot.ZoneArgument, slot.EscapeLikePattern));
+        }
+
+        if (pageOffset.HasValue && !hasOffsetSlot)
+        {
+            throw new System.Security.SecurityException("A page offset value was supplied for a template without a PageOffset slot.");
         }
 
         return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion)

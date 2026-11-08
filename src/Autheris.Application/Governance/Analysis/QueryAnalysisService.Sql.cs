@@ -8,6 +8,8 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Services;
+using Autheris.Application.Sql;
+using Autheris.Application.Sql.Cost;
 using Autheris.Application.Sql.Federation.Conjuncts;
 using Autheris.Application.Sql.Federation.KeySet;
 using Autheris.Application.Sql.Federation.Pushdown;
@@ -368,13 +370,13 @@ public sealed partial class QueryAnalysisService
             }
         }
 
-        var fieldCount = Math.Max(1, metadata.ProjectedColumns.Count);
-        var joinCost = metadata.JoinCount * _analysisOptions.CostPerJoin;
-        var subqueryCost = metadata.MaxSubqueryDepth * _analysisOptions.CostPerSubqueryDepth;
-        var fieldCost = fieldCount * _analysisOptions.CostPerRequestedField;
-        var unpaginatedPenalty = !metadata.HasExplicitLimit ? _analysisOptions.UnboundedScanPenalty : 0;
-
-        outcome.EstimatedCost = fieldCost + joinCost + subqueryCost + unpaginatedPenalty;
+        var rowLimit = SqlRowLimit.For(_gatewayOptions.WebSql ?? new WebSqlOptions());
+        outcome.EstimatedCost = SqlStatementCostEstimator.EstimateCost(
+            metadata,
+            rowLimit,
+            _gatewayOptions.QueryCost ?? new QueryCostOptions(),
+            _analysisOptions,
+            _gatewayOptions.WebSql?.Cost ?? new WebSqlCostOptions());
         outcome.EstimatedRows = metadata.HasExplicitLimit && metadata.ExplicitLimitValue.HasValue
             ? (int)Math.Min((long)int.MaxValue, metadata.ExplicitLimitValue.Value)
             : 1000;

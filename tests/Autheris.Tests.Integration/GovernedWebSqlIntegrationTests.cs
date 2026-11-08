@@ -315,6 +315,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
         {
             builder.UseSetting("Gateway:WebSql:AllowRecursiveCte", "true");
             builder.UseSetting("Gateway:WebSql:MaxRecursionDepth", "100");
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "5000");
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "5000");
         });
 
     private static async Task RegisterOrgAsync(WebApplicationFactory<Program> factory, bool withSsn, Dictionary<string, MaskingRule>? masking = null)

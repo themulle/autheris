@@ -49,6 +49,18 @@ internal static class SqlErrorResponse
             ext["line"] = mapped.Line.Value;
             ext["column"] = mapped.Column.Value;
         }
+        if (ex is TrinoSqlEngine.Ast.Emit.SqlCostExceededException costEx)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext["estimatedCost"] = costEx.EstimatedCost;
+            ext["maxAllowedCost"] = costEx.MaxAllowedCost;
+        }
+        else if (ex is TrinoSqlEngine.Ast.Emit.SqlQuotaExhaustedException quotaEx)
+        {
+            httpContext.Response.Headers.RetryAfter = quotaEx.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            ext ??= new Dictionary<string, object?>();
+            ext["retryAfterSeconds"] = quotaEx.RetryAfterSeconds;
+        }
         await ApiProblems.WriteAsync(httpContext, mapped.Status, mapped.Code, mapped.Title, ct, ext).ConfigureAwait(false);
     }
 }

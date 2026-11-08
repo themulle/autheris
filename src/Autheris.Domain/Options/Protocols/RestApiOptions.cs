@@ -112,6 +112,50 @@ public sealed class WebSqlOptions
     /// Heterogeneous Cross-Source / Federation Join options (DuckDB in-process engine).
     /// </summary>
     public CrossSourceOptions CrossSource { get; init; } = new();
+
+    /// <summary>Cost estimation, quota admission and settlement options for WebSQL statements.</summary>
+    public WebSqlCostOptions Cost { get; init; } = new();
+
+    /// <summary>HMAC-bound statement paging options for WebSQL statements.</summary>
+    public WebSqlPagingOptions Paging { get; init; } = new();
+}
+
+public sealed class WebSqlPagingOptions
+{
+    public const string SectionName = "Paging";
+
+    public bool Enabled { get; init; } = true;
+
+    [Range(0, 1_000_000)]
+    public long MaxOffset { get; init; } = 10_000;
+
+    [Range(1, 1440)]
+    public int TokenLifetimeMinutes { get; init; } = 15;
+}
+
+public sealed class WebSqlCostOptions
+{
+    public const string SectionName = "Cost";
+
+    public bool Enabled { get; init; } = true;
+
+    [Range(1, 1_000_000)]
+    public int MaxStatementCost { get; init; } = 2000;
+
+    [Range(0, 100_000)]
+    public int CrossJoinCost { get; init; } = 250;
+
+    [Range(0, 10_000)]
+    public int SetOperationCost { get; init; } = 25;
+
+    [Range(1, 1_000_000)]
+    public int OffsetRowsPerCostUnit { get; init; } = 100;
+
+    [Range(0, 10_000)]
+    public int ExecutionSecondCost { get; init; } = 10;
+
+    [Range(0, 100_000)]
+    public int DmlStatementCost { get; init; } = 50;
 }
 
 public sealed class CrossSourceOptions

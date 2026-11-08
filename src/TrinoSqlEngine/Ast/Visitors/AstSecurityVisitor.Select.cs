@@ -111,7 +111,13 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (isRootRead && _options.EnforcedMaxRows > 0 && !_rootLimitHandled)
         {
             _rootLimitHandled = true;
-            if (pagination != null)
+            if (_options.BindPageOffset)
+            {
+                pagination = new PaginationClause(
+                    Offset: new PageOffsetParameterExpression(),
+                    Limit: new LiteralExpression(_options.EnforcedMaxRows, LiteralType.Integer));
+            }
+            else if (pagination != null)
             {
                 var clampedLimit = ClampLimit(pagination.Limit, _options.EnforcedMaxRows);
                 // M-22: WITH TIES can return more rows than the limit, so it is downgraded to ONLY under an enforced cap.

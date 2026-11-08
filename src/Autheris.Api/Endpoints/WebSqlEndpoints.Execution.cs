@@ -71,6 +71,7 @@ public static partial class WebSqlEndpoints
         Dictionary<string, object?>? parameters = null;
         string? dataSource = null;
 
+        WebSqlRequestDto? bodyDto = null;
         var contentType = httpContext.Request.ContentType ?? string.Empty;
         if (contentType.Contains("text/plain", StringComparison.OrdinalIgnoreCase) ||
             contentType.Contains("application/sql", StringComparison.OrdinalIgnoreCase))
@@ -82,7 +83,7 @@ public static partial class WebSqlEndpoints
         {
             try
             {
-                var bodyDto = await JsonSerializer.DeserializeAsync<WebSqlRequestDto>(
+                bodyDto = await JsonSerializer.DeserializeAsync<WebSqlRequestDto>(
                     httpContext.Request.Body,
                     JsonOptions,
                     ct);
@@ -127,7 +128,51 @@ public static partial class WebSqlEndpoints
             dataSource = trinoCatalogHeader.ToString().Trim();
         }
 
-        var governedRequest = new GovernedSqlQueryRequest(sql, parameters, dataSource, Transport: isTrinoRoute ? SqlTransports.Trino : SqlTransports.WebSql);
+        var pageReq = bodyDto?.Page;
+        var nextTok = bodyDto?.Next;
+        bool isPagingRequested = pageReq != null || nextTok != null;
+
+        if (isPagingRequested)
+        {
+            if (isTrinoRoute || trinoWaitTimeout != null)
+            {
+                await WriteWebSqlErrorAsync(httpContext, new TrinoSqlEngine.Ast.Emit.SqlPagingUnsupportedException(), logger, ct);
+                return;
+            }
+
+            var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
+            var maxAllowedRows = SqlRowLimit.For(webSqlOptions).MaxAllowedRows;
+            if (pageReq != null)
+            {
+                if (pageReq.Size is null or < 1 || pageReq.Size > maxAllowedRows)
+                {
+                    await WriteRequestValidationErrorAsync(httpContext, ApiErrorCodes.BadRequest, $"Page size must be between 1 and {maxAllowedRows}.", ct);
+                    return;
+                }
+            }
+
+            if (nextTok != null && nextTok.Length > 512)
+            {
+                await WriteWebSqlErrorAsync(httpContext, new TrinoSqlEngine.Ast.Emit.SqlPagingTokenInvalidException(), logger, ct);
+                return;
+            }
+        }
+
+        SqlPageWindow? pageWindow = null;
+        if (pageReq?.Size != null)
+        {
+            pageWindow = new SqlPageWindow(0, pageReq.Size.Value, 1);
+        }
+
+        GovernedSqlPageOutcome? pageOutcome = null;
+        var governedRequest = new GovernedSqlQueryRequest(
+            sql,
+            parameters,
+            dataSource,
+            Transport: isTrinoRoute ? SqlTransports.Trino : SqlTransports.WebSql,
+            Page: pageWindow,
+            NextToken: nextTok,
+            OnPageOutcome: isPagingRequested ? outcome => pageOutcome = outcome : null);
 
         if (isTrinoRoute || trinoWaitTimeout != null)
         {
@@ -182,6 +227,11 @@ public static partial class WebSqlEndpoints
 
         if (isParquet)
         {
+            if (isPagingRequested)
+            {
+                await WriteWebSqlErrorAsync(httpContext, new TrinoSqlEngine.Ast.Emit.SqlPagingUnsupportedException(), logger, ct);
+                return;
+            }
             await HandleParquetWebSqlRequestAsync(httpContext, sqlService, gatewayOptions, logger, governedRequest, user, tenantId, ct);
             return;
         }
@@ -275,6 +325,26 @@ public static partial class WebSqlEndpoints
 
             writer.WriteNumber("rowCount", rowCount);
             writer.WriteBoolean("truncated", truncated);
+
+            if (pageOutcome?.Page != null)
+            {
+                writer.WriteStartObject("page");
+                writer.WriteNumber("number", pageOutcome.Page.Number);
+                writer.WriteNumber("offset", pageOutcome.Page.Offset);
+                writer.WriteNumber("size", pageOutcome.Page.Size);
+                writer.WriteEndObject();
+            }
+
+            if (!string.IsNullOrEmpty(pageOutcome?.NextToken))
+            {
+                writer.WriteString("next", pageOutcome.NextToken);
+            }
+
+            if (!string.IsNullOrEmpty(pageOutcome?.PagingUnavailable))
+            {
+                writer.WriteString("pagingUnavailable", pageOutcome.PagingUnavailable);
+            }
+
             writer.WriteEndObject();
             if (truncated && !httpContext.Response.HasStarted)
             {

@@ -209,6 +209,22 @@ public sealed class SqlEmitterContext
             zoneArgument: true);
     }
 
+    /// <summary>Binds a pagination offset slot.</summary>
+    public string BindPageOffset()
+    {
+        if (!IsBound)
+        {
+            return "0";
+        }
+
+        return Bind(
+            new DedupKey(DedupKind.Value, (int)SqlParameterType.Int64, (int)ParameterOrigin.PageOffset, null, null, 0, null),
+            value: null,
+            type: SqlParameterType.Int64,
+            origin: ParameterOrigin.PageOffset,
+            sourceName: null);
+    }
+
     private static void ValidateClientParameter(ParameterReference parameter)
     {
         ArgumentNullException.ThrowIfNull(parameter);
