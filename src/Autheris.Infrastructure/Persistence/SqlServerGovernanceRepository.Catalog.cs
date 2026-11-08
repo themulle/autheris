@@ -825,21 +825,29 @@ WHERE id = 1;";
 
             await using var insertCmd = conn.CreateCommand();
             insertCmd.Transaction = tx;
+            // Missing epoch row: key the new row by the real TABLES.id (a random id would never match later updates).
             insertCmd.CommandText = @"MERGE POLICY_EPOCHS WITH (HOLDLOCK) AS target
-                                      USING (SELECT @id AS table_id) AS source
+                                      USING (SELECT id AS table_id, source_name AS domain, schema_name, table_name FROM TABLES
+                                             WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)) AS source
                                       ON target.table_id = source.table_id
                                       WHEN MATCHED THEN UPDATE SET epoch = target.epoch + 1, updated_at = @now
                                       WHEN NOT MATCHED THEN INSERT (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                          VALUES (@id, @domain, @schema, @table, 1, @now)
+                                          VALUES (source.table_id, source.domain, source.schema_name, source.table_name, 2, @now)
                                       OUTPUT inserted.epoch;";
-            insertCmd.AddBound("@id", Guid.NewGuid().ToString());
             insertCmd.AddBound("@domain", table.Domain);
             insertCmd.AddBound("@schema", table.Schema);
             insertCmd.AddBound("@table", table.TableName);
             insertCmd.AddBound("@now", DateTimeOffset.UtcNow.ToString("O"));
 
             var insScalar = await insertCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            return insScalar != null ? Convert.ToInt64(insScalar) : 1L;
+            if (insScalar != null)
+            {
+                return Convert.ToInt64(insScalar);
+            }
+
+            // Table no longer in the catalog: write no row and do not throw, so a revoke/withdraw in the same transaction still commits.
+            _logger?.LogWarning("Policy epoch was not advanced: the table is not registered in the catalog.");
+            return 0L;
         }
     }
 

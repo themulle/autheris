@@ -51,11 +51,14 @@ public class DataPathSecurityTests : IDisposable
         var sqlExecutor = new Autheris.Tests.Unit.TestDoubles.SyntheticSqlDataSourceExecutor();
         _executionService = new GatewayExecutionService(
             _repository,
+            _repository,
+            _repository,
             _resolutionService,
             _cacheService,
             _maskingProvider,
             gatewayOptions,
-            dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+            transportGate: AllowTransportGate.Instance);
         _query = new Query();
         _visibility = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(
             _repository, _repository,
@@ -65,6 +68,26 @@ public class DataPathSecurityTests : IDisposable
     public void Dispose()
     {
         _repository.Dispose();
+    }
+
+    // The Unit project installs an allow-all fallback gate; Integration tests pass an explicit one (SEC-ATR-01).
+    private sealed class AllowTransportGate : Autheris.Application.DataSources.IDataSourceTransportGate
+    {
+        public static AllowTransportGate Instance { get; } = new();
+
+        public Autheris.Domain.Options.DataSources.DataSourceTransportFlags Ingress => Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest;
+
+        public IReadOnlyList<string> CheckedSources => [];
+
+        public Task EnsureAsync(string? dataSourceName, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task EnsureAllAsync(IEnumerable<string?> dataSourceNames, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task EnsureCatalogSourcesAsync(IEnumerable<string?> catalogSourceNames, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task EnsureCatalogSourceAsync(string? catalogSourceName, CancellationToken ct = default) => Task.CompletedTask;
+
+        public bool IsAllowed(string? dataSourceName) => true;
     }
 
     private sealed class IsolatedHttpContextAccessor(HttpContext context) : IHttpContextAccessor

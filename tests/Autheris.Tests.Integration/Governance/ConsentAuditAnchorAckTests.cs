@@ -49,7 +49,7 @@ public sealed class ConsentAuditAnchorAckTests : IDisposable
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = @"INSERT INTO ROLES (id, role_name, description) VALUES ('role-admin', 'GovernanceAdmin', 'test') ON CONFLICT DO NOTHING;
-                                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid) VALUES (@id, 'role-admin', 'User', @sid);";
+                                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid) SELECT @id, id, 'User', @sid FROM ROLES WHERE role_name = 'GovernanceAdmin';";
             cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
             cmd.Parameters.AddWithValue("@sid", Admin.Value);
             await cmd.ExecuteNonQueryAsync();

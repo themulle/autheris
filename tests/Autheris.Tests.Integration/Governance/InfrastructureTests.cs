@@ -117,7 +117,7 @@ public class InfrastructureTests : IDisposable
         var isValid = await _repository.VerifyAuditHashChainAsync();
         isValid.ShouldBeTrue();
 
-        var entries = await _repository.GetAuditLogEntriesAsync();
+        var entries = (await _repository.GetAuditLogEntriesAsync()).OrderBy(e => e.ChainSequence).ToList();
         entries.Count.ShouldBeGreaterThanOrEqualTo(3);
 
         // Verify that entry hashes are chained: entry 2's PrevHash == entry 1's EntryHash
@@ -169,7 +169,7 @@ public class InfrastructureTests : IDisposable
                     TraceId = "trace-restart-003"
                 });
 
-                var entries = await repo2.GetAuditLogEntriesAsync();
+                var entries = (await repo2.GetAuditLogEntriesAsync()).OrderBy(e => e.ChainSequence).ToList();
                 entries.Count.ShouldBe(3);
                 entries[2].PrevHash.ShouldBe(entries[1].EntryHash);
 

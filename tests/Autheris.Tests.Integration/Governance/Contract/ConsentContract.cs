@@ -423,6 +423,23 @@ public abstract class ConsentContract : GovernanceContractBase
 
     [RequiresContainerRuntimeFact]
     [Trait("Category", "Security")]
+    public async Task Revoke_of_consent_for_unregistered_table_still_succeeds()
+    {
+        if (!Store.IsAvailable) return;
+
+        var table = await SeedTableAsync("revoke_unregistered");
+        var consent = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, GranteeSid));
+        await Store.ExecuteNonQueryAsync("DELETE FROM POLICY_EPOCHS WHERE table_id = @tid", ("@tid", table.Table.Id.ToString()));
+        await Store.ExecuteNonQueryAsync("DELETE FROM TABLES WHERE id = @tid", ("@tid", table.Table.Id.ToString()));
+
+        Store.SetCaller(new CallerContext("contract-test", "1.0", "revoke"));
+        await Store.Consents.RevokeConsentAsync(consent.Id, Owner1Sid, "Table removed");
+
+        (await Store.Consents.GetConsentByIdAsync(consent.Id))!.IsRevoked.Should().BeTrue();
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
     public async Task Revoke_unifies_grants()
     {
         if (!Store.IsAvailable) return;
