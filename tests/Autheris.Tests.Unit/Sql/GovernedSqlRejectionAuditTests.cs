@@ -34,7 +34,7 @@ public sealed class GovernedSqlRejectionAuditTests
 
     private static ClaimsPrincipal Writer() =>
         new(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-L4"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer")], "Test"));
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-L4"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer"), new Claim("scp", "Sql.Write")], "Test"));
 
     private static (GovernedSqlExecutionService Service, List<AuditLogEntry> Audit) CreateService(global::Autheris.Application.Audit.IAuditWriter? writer = null)
     {

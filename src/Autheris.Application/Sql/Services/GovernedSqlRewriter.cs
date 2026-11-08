@@ -252,9 +252,12 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         if (isDml)
         {
-            if (user.IsReadOnly())
+            // The read-only marking wins over the scope; without the explicit scope every token is read-only.
+            if (user.IsReadOnly() || !user.HasScope(TokenAccessScope.WriteScope))
             {
-                throw new WebSqlPolicyException("This token only permits read access; DML statements are rejected.");
+                throw new WebSqlPolicyException(
+                    "This token only permits read access; DML statements are rejected.",
+                    WebSqlPolicyException.ReadOnlyTokenCode);
             }
         }
 

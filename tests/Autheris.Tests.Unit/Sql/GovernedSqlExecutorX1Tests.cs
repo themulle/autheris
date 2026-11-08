@@ -50,7 +50,7 @@ public sealed class GovernedSqlExecutorX1Tests
 
     internal static ClaimsPrincipal Writer() =>
         new(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer")], "Test"));
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer"), new Claim("scp", "Sql.Write")], "Test"));
 
     private static TableMetadata Orders(string sourceType)
     {

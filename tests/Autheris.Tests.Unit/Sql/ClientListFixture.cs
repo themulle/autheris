@@ -178,7 +178,8 @@ internal sealed class ClientListFixture : IAsyncDisposable
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LIST-USER"),
                 new Claim("tenant_id", tenant),
-                new Claim(ClaimTypes.Role, writer ? WriterRole : "Reader")
+                new Claim(ClaimTypes.Role, writer ? WriterRole : "Reader"),
+                new Claim("scp", "Sql.Write")
             ],
             "Test"));
     }

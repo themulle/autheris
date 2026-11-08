@@ -46,7 +46,7 @@ public sealed class GovernedPipelineCachePoisoningTests
     };
 
     private static ClaimsPrincipal User(string sid) =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer")], "Test"));
+        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer"), new Claim("scp", "Sql.Write")], "Test"));
 
     private static Consent RegionConsent(string sid, string region, TableMetadata table) => new()
     {

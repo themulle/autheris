@@ -61,7 +61,8 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         var claims = new List<Claim>
         {
             new(ClaimTypes.PrimarySid, "S-1-5-21-WEBSQL-USER"),
-            new("tenant_id", Tenant)
+            new("tenant_id", Tenant),
+            new("scp", "Sql.Write")
         };
         foreach (var role in roles)
         {

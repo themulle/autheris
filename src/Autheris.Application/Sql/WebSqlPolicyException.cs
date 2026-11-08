@@ -10,6 +10,9 @@ using System.Security;
 /// </summary>
 public class WebSqlPolicyException : SecurityException
 {
+    /// <summary>Code of the refusal for a token that does not carry the explicit write scope (or is marked read-only).</summary>
+    public const string ReadOnlyTokenCode = "READ_ONLY_TOKEN";
+
     public string? Code { get; init; }
 
     public WebSqlPolicyException()
