@@ -28,6 +28,8 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
     private readonly Func<AuditLogEntry, DbTransaction?, CancellationToken, Task>? _auditRecorder;
     private readonly Action<string>? _metadataInvalidator;
+    private readonly Action<DbTransaction>? _onTransactionCommitted;
+    private readonly Action<DbTransaction>? _onTransactionRolledBack;
 
     /// <summary>
     /// Test seam: runs inside decision transactions between locked read and guarded state transition.
@@ -41,7 +43,9 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         ILogger<GovernanceRepository>? logger = null,
         Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null,
         Func<AuditLogEntry, DbTransaction?, CancellationToken, Task>? auditRecorder = null,
-        Action<string>? metadataInvalidator = null)
+        Action<string>? metadataInvalidator = null,
+        Action<DbTransaction>? onTransactionCommitted = null,
+        Action<DbTransaction>? onTransactionRolledBack = null)
     {
         _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
         _epochValidationService = epochValidationService;
@@ -50,6 +54,8 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         _materializationGuard = materializationGuard;
         _auditRecorder = auditRecorder;
         _metadataInvalidator = metadataInvalidator;
+        _onTransactionCommitted = onTransactionCommitted;
+        _onTransactionRolledBack = onTransactionRolledBack;
     }
 
     internal IGovernanceSqlDialect Dialect => _dialect;
@@ -146,6 +152,24 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     {
         string code = ex is Npgsql.PostgresException pg ? pg.SqlState : ex is Microsoft.Data.SqlClient.SqlException sql ? sql.Number.ToString(System.Globalization.CultureInfo.InvariantCulture) : "n/a";
         _logger?.LogError("Execution failed for {FragmentId} after {ElapsedMs}ms ({ExceptionType}, code {ErrorCode})", fragmentId, elapsedMs, ex.GetType().Name, code);
+    }
+
+    internal async Task CommitTransactionAsync(DbTransaction tx, CancellationToken ct)
+    {
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        _onTransactionCommitted?.Invoke(tx);
+    }
+
+    internal async Task RollbackTransactionAsync(DbTransaction tx, CancellationToken ct = default)
+    {
+        try
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+        }
+        finally
+        {
+            _onTransactionRolledBack?.Invoke(tx);
+        }
     }
 
     private void InvalidateTableMetadata(string tableKey)

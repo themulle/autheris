@@ -2,6 +2,7 @@ namespace Autheris.Infrastructure.Persistence;
 
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.Common;
 using System.Globalization;
 using System.Linq;
@@ -17,32 +18,13 @@ using Microsoft.Extensions.Logging;
 
 public partial class GovernanceRepository
 {
-    internal static class ConsentGrantSql
-    {
-        public static string ActiveRoleConsents(bool withTenant) => @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
-                                       c.is_revoked, c.tenant_id
-                                FROM CONSENTS c
-                                JOIN TABLES t ON c.table_id = t.id
-                                WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                  AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
-                                  AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
+    private string RevokeTargetSql => _dialect is PostgreSqlGovernanceDialect
+        ? PostgreSqlGovernanceRepository.ConsentGrantSql.RevokeTarget
+        : SqlServerGovernanceRepository.ConsentGrantSql.RevokeTarget;
 
-        public static string RevokeTarget(IGovernanceSqlDialect dialect) =>
-            // Transitional: StartsWith("WITH") engine sniffing goes away when lock clauses live in the dialect.
-            dialect.LockRowsForUpdate.StartsWith("WITH", StringComparison.OrdinalIgnoreCase)
-                ? @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
-                    FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)
-                    JOIN TABLES t ON c.table_id = t.id
-                    WHERE c.id = @id"
-                : @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
-                    FROM CONSENTS c
-                    JOIN TABLES t ON c.table_id = t.id
-                    WHERE c.id = @id
-                    FOR UPDATE OF c";
-    }
-
-    private string RevokeTargetSql => ConsentGrantSql.RevokeTarget(_dialect);
+    private string ActiveRoleConsentsSql(bool withTenant) => _dialect is PostgreSqlGovernanceDialect
+        ? PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(withTenant)
+        : SqlServerGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(withTenant);
 
     public async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
         TableIdentifier table,
@@ -51,9 +33,10 @@ public partial class GovernanceRepository
         DateTimeOffset atTime,
         CancellationToken ct = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(roleName);
         TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)); // no cross-tenant role read
 
-        var sql = ConsentGrantSql.ActiveRoleConsents(tenantId != null);
+        var sql = ActiveRoleConsentsSql(tenantId != null);
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         var consents = await ConsentGrantSqlCore.ReadActiveRoleConsentsAsync(conn, sql, table, roleName, tenantId, atTime, ct).ConfigureAwait(false);
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
@@ -140,22 +123,23 @@ public partial class GovernanceRepository
                 await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
             }
 
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch (ConsentTenantIntegrityException refusal)
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             await RecordTenantRefusalAuditAsync(conn, actor, refusal, ct).ConfigureAwait(false);
             throw;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
 
         foreach (var table in tables.Values)
         {
+            _metadataInvalidator?.Invoke(table.ToString().ToLowerInvariant());
             await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
         }
     }
@@ -175,17 +159,17 @@ public partial class GovernanceRepository
         {
             if (!await UpdateConsentDescriptionInTransactionAsync(conn, tx, new ConsentDescriptionUpdate(consentId, tenant, description), ct).ConfigureAwait(false))
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
                 return false;
             }
 
             await RecordAuditEventAsync(audit, tx, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
             return true;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
     }
@@ -203,17 +187,17 @@ public partial class GovernanceRepository
                 await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
             }
 
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch (ConsentTenantIntegrityException refusal)
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             await RecordTenantRefusalAuditAsync(conn, revokedBySid, refusal, ct).ConfigureAwait(false);
             throw;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
 
@@ -230,11 +214,11 @@ public partial class GovernanceRepository
         try
         {
             await RecordAuditEventAsync(ConsentTenantRefusalAudit.Build(actor, refusal), tx, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
     }
@@ -245,7 +229,13 @@ public partial class GovernanceRepository
         var target = await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, RevokeTargetSql, consentId, actor, ct).ConfigureAwait(false);
         if (target is not { } found)
         {
-            return null;
+            throw new KeyNotFoundException($"Consent with ID '{consentId}' does not exist.");
+        }
+
+        TableIdentifier? tableId = found.Table;
+        if (!found.IsGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, null, ct).ConfigureAwait(false))
+        {
+            throw new UnauthorizedAccessException($"User '{actor}' is neither a data owner nor a delegated approver for '{tableId.Value}', nor the beneficiary.");
         }
 
         if (found.AlreadyRevoked)
@@ -253,14 +243,7 @@ public partial class GovernanceRepository
             return null;
         }
 
-        var tenant = ConsentGrantSqlCore.ResolveConsentTenant(found.TenantRaw, consentId, found.Table.ToString());
-        TenantScope.RequireTenant(tenant, nameof(GovernanceTable.Consents));
-        StoredTenant.RequireWritable(tenant);
-
-        if (!found.IsGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(conn, tx, found.Table, actor, null, ct).ConfigureAwait(false))
-        {
-            throw new InvalidOperationException($"Sid {actor.Value} is not authorized to revoke consents for table {found.Table}.");
-        }
+        var tenant = ConsentGrantSqlCore.ResolveConsentTenant(found.TenantRaw, consentId, tableId.Value.ToString());
 
         if (!await ConsentGrantSqlCore.MarkRevokedAsync(conn, tx, consentId, actor, reason, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false))
         {
@@ -270,22 +253,19 @@ public partial class GovernanceRepository
         await RecordAuditEventAsync(new AuditLogEntry
         {
             TenantId = tenant,
-            EventType = AuditEventTypes.ConsentRevoked,
+            EventType = "CONSENT_REVOKED",
             ActorSid = actor,
-            TargetTable = found.Table.ToString(),
+            TargetTable = tableId.Value.ToString(),
             Decision = ConsentGrantSqlCore.RevokedDecision,
             TraceId = Guid.NewGuid().ToString("N"),
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
             {
                 ConsentId = consentId,
-                RevokedBy = actor.Value,
-                Reason = reason,
-                Scope = found.Table.ToString(),
-                RevokedAt = TimeProvider.System.GetUtcNow()
+                Reason = reason
             })
         }, tx, ct).ConfigureAwait(false);
 
-        return found.Table;
+        return tableId;
     }
 
     internal async Task<bool> IsAuthorizedApproverForTableInternalAsync(
@@ -294,16 +274,17 @@ public partial class GovernanceRepository
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = @"SELECT COUNT(*)
-                            FROM TABLE_OWNERS tow
-                            JOIN DATA_OWNERS dow ON tow.data_owner_id = dow.id
-                            JOIN TABLES t ON tow.table_id = t.id
+                            FROM TABLES t
+                            JOIN TABLE_OWNERS tow ON t.id = tow.table_id
+                            JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
                             WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                              AND (LOWER(dow.ad_sid) = LOWER(@apprSid) OR (@itsmAccount IS NOT NULL AND (LOWER(dow.ad_account) = LOWER(@itsmAccount) OR LOWER(dow.email) = LOWER(@itsmAccount))))";
+                              AND (o.ad_sid = @apprSid OR (@itsmAccount IS NOT NULL AND (LOWER(o.ad_account) = LOWER(@itsmAccount) OR LOWER(o.email) = LOWER(@itsmAccount))))
+                              AND o.is_active = 1";
         cmd.AddBound("@domain", table.Domain);
         cmd.AddBound("@schema", table.Schema);
         cmd.AddBound("@table", table.TableName);
         cmd.AddBound("@apprSid", approverSid.Value);
-        cmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
+        cmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value, DbType.String);
 
         var directOwnerCount = Convert.ToInt64(await ExecuteScalarAsync(cmd, "ConsentGrants.CheckDirectOwner", ct).ConfigureAwait(false));
         if (directOwnerCount > 0) return true;
@@ -311,17 +292,18 @@ public partial class GovernanceRepository
         await using var delCmd = conn.CreateCommand();
         delCmd.Transaction = tx;
         delCmd.CommandText = @"SELECT COUNT(*)
-                               FROM DATA_OWNER_DELEGATIONS del
-                               JOIN TABLE_OWNERS tow ON del.data_owner_id = tow.data_owner_id
+                               FROM DATA_OWNER_DELEGATIONS d
+                               JOIN DATA_OWNERS o ON d.data_owner_id = o.id
+                               JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
                                JOIN TABLES t ON tow.table_id = t.id
                                WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                 AND (del.delegate_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(del.delegate_sid) = LOWER(@itsmAccount)))
-                                 AND del.valid_from <= @now AND @now < del.valid_to";
+                                 AND (d.delegate_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(d.delegate_sid) = LOWER(@itsmAccount)))
+                                 AND d.valid_from <= @now AND d.valid_to >= @now";
         delCmd.AddBound("@domain", table.Domain);
         delCmd.AddBound("@schema", table.Schema);
         delCmd.AddBound("@table", table.TableName);
         delCmd.AddBound("@apprSid", approverSid.Value);
-        delCmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
+        delCmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value, DbType.String);
         delCmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
 
         var delegateCount = Convert.ToInt64(await ExecuteScalarAsync(delCmd, "ConsentGrants.CheckDelegates", ct).ConfigureAwait(false));
@@ -330,12 +312,12 @@ public partial class GovernanceRepository
         await using var roleCmd = conn.CreateCommand();
         roleCmd.Transaction = tx;
         roleCmd.CommandText = @"SELECT COUNT(*)
-                                FROM ROLE_MEMBERS rm
-                                JOIN ROLES r ON rm.role_id = r.id
+                                FROM ROLES r
+                                JOIN ROLE_MEMBERS rm ON r.id = rm.role_id
                                 WHERE (r.role_name = 'GovernanceAdmin' OR r.role_name = 'ClusterAdmin')
                                   AND (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(rm.member_sid) = LOWER(@itsmAccount)))";
         roleCmd.AddBound("@apprSid", approverSid.Value);
-        roleCmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
+        roleCmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value, DbType.String);
 
         var roleAdminCount = Convert.ToInt64(await ExecuteScalarAsync(roleCmd, "ConsentGrants.CheckRoleAdmin", ct).ConfigureAwait(false));
         return roleAdminCount > 0;
@@ -410,13 +392,9 @@ internal static class ConsentGrantSqlCore
 
         var table = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
         var rawTenant = reader.IsDBNull(3) ? null : reader.GetString(3);
-        var granteeType = Enum.Parse<GranteeType>(reader.GetString(4), true);
-        var granteeSid = reader.IsDBNull(5) ? null : reader.GetString(5);
+        var isGranteeSelf = string.Equals(reader.GetString(4), "User", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(reader.IsDBNull(5) ? null : reader.GetString(5), actor.Value, StringComparison.OrdinalIgnoreCase);
         var isRevoked = reader.GetInt32(6) == 1;
-
-        var isGranteeSelf = granteeType != GranteeType.Role
-            && !string.IsNullOrWhiteSpace(granteeSid)
-            && string.Equals(granteeSid, actor.Value, StringComparison.OrdinalIgnoreCase);
 
         return new RevokeTarget(table, rawTenant, isGranteeSelf, isRevoked);
     }

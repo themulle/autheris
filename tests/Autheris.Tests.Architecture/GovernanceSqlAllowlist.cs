@@ -9,7 +9,6 @@ internal static class GovernanceSqlAllowlist
         [("GovernanceRepository.Consent.cs", "ActiveForSubjectsCoreAsync")] = "appends the constant tenant predicate and the generated @sN placeholder list",
         [("GovernanceRepository.Consent.cs", "AllActiveCoreAsync")] = "appends the constant tenant predicate and the generated @sN placeholder list",
         [("GovernanceRepository.Consent.cs", "BuildLockRowsQuery")] = "joins constant fragments with the dialect lock clause constant",
-        [("GovernanceRepository.ConsentGrants.cs", "ActiveRoleConsents")] = "toggles one constant tenant predicate",
         [("GovernanceRepository.ConsentPage.cs", "GetConsentPageAsync")] = "constant prefix/suffix around a where built from constant predicates and parameters",
         [("GovernanceRepository.ConsentSql.cs", "GetRequestsByRequesterSidAsync")] = "constant sql plus constant ORDER BY",
         [("GovernanceRepository.ConsentSql.cs", "HydrateConsentsBatchAsync")] = "constant prefix plus BindIdInClause placeholders (bounded batch)",

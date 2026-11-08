@@ -36,8 +36,8 @@ public partial class GovernanceRepository
 
         public const string SelectConsentRequestByIdSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-                                       r.itsm_ticket_id, t.source_name, t.schema_name, t.table_name,
-                                       r.tenant_id, r.requester_identifiers_json, r.context_json
+                                       t.source_name, t.schema_name, t.table_name, r.itsm_ticket_id, r.tenant_id,
+                                       r.requester_identifiers_json, r.context_json
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.id = @id";
@@ -50,37 +50,22 @@ public partial class GovernanceRepository
                                 WHERE r.requester_sid = @reqSid";
 
         public const string SelectPendingRequestsForApproverSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
-                                       r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-                                       r.itsm_ticket_id, t.source_name, t.schema_name, t.table_name,
-                                       r.tenant_id, r.requester_identifiers_json, r.context_json
-                                FROM CONSENT_REQUESTS r
-                                JOIN TABLES t ON r.table_id = t.id
-                                WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
-                                  AND (
-                                      EXISTS (
-                                          SELECT 1
-                                          FROM TABLE_OWNERS tow
-                                          JOIN DATA_OWNERS dow ON tow.data_owner_id = dow.id
-                                          WHERE tow.table_id = r.table_id
-                                            AND (dow.ad_sid = @apprSid OR (@itsmAccount IS NOT NULL AND (LOWER(dow.ad_account) = LOWER(@itsmAccount) OR LOWER(dow.email) = LOWER(@itsmAccount))))
-                                      )
-                                      OR EXISTS (
-                                          SELECT 1
-                                          FROM DATA_OWNER_DELEGATIONS del
-                                          JOIN TABLE_OWNERS tow ON del.data_owner_id = tow.data_owner_id
-                                          WHERE tow.table_id = r.table_id
-                                            AND (del.delegate_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(del.delegate_sid) = LOWER(@itsmAccount)))
-                                            AND del.valid_from <= @now AND @now < del.valid_to
-                                      )
-                                      OR EXISTS (
-                                          SELECT 1
-                                          FROM ROLE_MEMBERS rm
-                                          JOIN ROLES rol ON rm.role_id = rol.id
-                                          WHERE (rol.role_name = 'GovernanceAdmin' OR rol.role_name = 'ClusterAdmin')
-                                            AND (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(rm.member_sid) = LOWER(@itsmAccount)))
-                                      )
-                                  )
-                                ORDER BY r.requested_at ASC";
+                                   r.business_justification, r.status, r.requested_at, r.requested_valid_to,
+                                   t.source_name, t.schema_name, t.table_name, r.context_json
+                            FROM CONSENT_REQUESTS r
+                            JOIN TABLES t ON r.table_id = t.id
+                            WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
+                              AND r.table_id IN (
+                                  SELECT tow.table_id
+                                  FROM TABLE_OWNERS tow
+                                  JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
+                                  WHERE o.ad_sid = @apprSid AND o.is_active = 1
+                                  UNION
+                                  SELECT tow.table_id
+                                  FROM DATA_OWNER_DELEGATIONS del
+                                  JOIN TABLE_OWNERS tow ON del.data_owner_id = tow.data_owner_id
+                                  WHERE del.delegate_sid = @apprSid AND del.valid_from <= @now AND @now < del.valid_to
+                              )";
 
         public const string CountConfiguredOwnersSql = @"SELECT COUNT(*)
                             FROM TABLES t
@@ -273,26 +258,30 @@ public partial class GovernanceRepository
         {
             var created = await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
             await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
             await InvalidateTableEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
             return created;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
     }
 
     private async Task<Consent> InsertConsentCoreAsync(DbConnection conn, DbTransaction tx, Consent consent, CancellationToken ct)
     {
+        var consentId = consent.Id == Guid.Empty ? Guid.NewGuid() : consent.Id;
+        var tableId = await ConsentSqlCore.ResolveTableIdOrThrowAsync(conn, tx, ConsentSql.FindTableIdSql, consent.TableId, consent.TableIdentifier, "consent", ct).ConfigureAwait(false);
+        var tenantIdStr = StoredTenant.RequireWritable(consent.TenantId);
+
         const string insertConsentSql = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id, description)
                                 VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId, @description)";
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = insertConsentSql;
-        cmd.AddBound("@id", consent.Id.ToString());
-        cmd.AddBound("@tid", consent.TableId.ToString());
+        cmd.AddBound("@id", consentId.ToString());
+        cmd.AddBound("@tid", tableId.ToString());
         cmd.AddBound("@reqId", consent.ConsentRequestId.HasValue ? consent.ConsentRequestId.Value.ToString() : (object)DBNull.Value);
         cmd.AddBound("@effect", consent.Effect.ToString());
         cmd.AddBound("@granteeType", consent.GranteeType.ToString());
@@ -300,13 +289,38 @@ public partial class GovernanceRepository
         cmd.AddBound("@sidNorm", ConsentSubjectFilter.NormalizeParameter(consent.GranteeSid?.Value));
         cmd.AddBound("@roleId", consent.RoleId.HasValue ? consent.RoleId.Value.ToString() : (object)DBNull.Value);
         cmd.AddBound("@roleName", (object?)consent.RoleName ?? DBNull.Value);
-        cmd.AddBound("@validFrom", consent.ValidFrom.ToString("O"));
-        cmd.AddBound("@validTo", consent.ValidTo.ToString("O"));
-        cmd.AddBound("@tenantId", consent.TenantId.Value);
+        cmd.AddBound("@validFrom", consent.ValidFrom.ToUniversalTime().ToString("O"));
+        cmd.AddBound("@validTo", consent.ValidTo.ToUniversalTime().ToString("O"));
+        cmd.AddBound("@tenantId", tenantIdStr);
         cmd.AddBound("@description", (object?)consent.Description ?? DBNull.Value);
         await ExecuteNonQueryAsync(cmd, "Consent.InsertConsent", ct).ConfigureAwait(false);
 
-        await ConsentSqlCore.InsertColumnRulesAndRowFiltersAsync(conn, tx, consent, ct).ConfigureAwait(false);
+        var created = new Consent
+        {
+            Id = consentId,
+            TableId = tableId,
+            TableIdentifier = consent.TableIdentifier,
+            ConsentRequestId = consent.ConsentRequestId,
+            Effect = consent.Effect,
+            TenantId = consent.TenantId,
+            GranteeType = consent.GranteeType,
+            GranteeSid = consent.GranteeSid,
+            CreatedBySid = consent.CreatedBySid,
+            RoleId = consent.RoleId,
+            RoleName = consent.RoleName,
+            ValidFrom = consent.ValidFrom,
+            ValidTo = consent.ValidTo,
+            IsRevoked = consent.IsRevoked,
+            RevokedBySid = consent.RevokedBySid,
+            RevokedAt = consent.RevokedAt,
+            RevokeReason = consent.RevokeReason,
+            RenewalCount = consent.RenewalCount,
+            Description = consent.Description,
+            ColumnRules = consent.ColumnRules,
+            RowFilters = consent.RowFilters,
+            RowFilterCondition = consent.RowFilterCondition
+        };
+        await ConsentSqlCore.InsertColumnRulesAndRowFiltersAsync(conn, tx, created, ct).ConfigureAwait(false);
 
         var auditEntry = new AuditLogEntry
         {
@@ -318,7 +332,8 @@ public partial class GovernanceRepository
             TraceId = Guid.NewGuid().ToString("N"),
             DetailsJson = JsonSerializer.Serialize(new
             {
-                ConsentId = consent.Id,
+                ConsentId = consentId,
+                TableId = tableId,
                 consent.Effect,
                 Grantee = consent.GranteeSid?.Value ?? consent.RoleName,
                 Scope = consent.TableIdentifier.ToString(),
@@ -327,7 +342,7 @@ public partial class GovernanceRepository
             })
         };
         await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
-        return consent;
+        return created;
     }
 
     public async Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default)
@@ -353,7 +368,7 @@ public partial class GovernanceRepository
                 conn, tx, SelectSystemRevokeTargetSql, consentId, consentRequestId, ct).ConfigureAwait(false);
             if (foundTable is null)
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
                 return false;
             }
 
@@ -385,11 +400,17 @@ public partial class GovernanceRepository
                 })
             };
             await RecordAuditEventAsync(entry, tx, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
+        }
+        catch (ConsentTenantIntegrityException refusal)
+        {
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
+            await RecordTenantRefusalAuditAsync(conn, revokedBySid, refusal, ct).ConfigureAwait(false);
+            throw;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
 
@@ -422,11 +443,11 @@ public partial class GovernanceRepository
             StoredTenant.RequireWritable(extendTenant);
 
             await RecordAuditEventAsync(ConsentSqlCore.BuildExpiryExtendedAudit(extendTenant, tableId, consentId, newValidTo), tx, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
 
@@ -463,15 +484,15 @@ public partial class GovernanceRepository
                     table => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {
-                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
                     return null;
                 }
 
-                await tx.CommitAsync(ct).ConfigureAwait(false);
+                await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
             }
             catch
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
                 throw;
             }
         }
@@ -561,7 +582,7 @@ public partial class GovernanceRepository
             {
                 if (isExternalItsmApproval)
                 {
-                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
                     return req;
                 }
 
@@ -578,12 +599,12 @@ public partial class GovernanceRepository
             var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null);
             await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
 
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
             return req;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
     }
@@ -596,7 +617,7 @@ public partial class GovernanceRepository
         {
             if (!await ConsentSqlCore.ExecuteWithdrawUpdateAsync(conn, tx, requestId, requesterSid, ct).ConfigureAwait(false))
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
                 return false;
             }
 
@@ -609,12 +630,12 @@ public partial class GovernanceRepository
                     tx, ct).ConfigureAwait(false);
             }
 
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
             return true;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
     }
@@ -695,14 +716,14 @@ public partial class GovernanceRepository
 
             var createdConsent = await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
             await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
 
             await InvalidateTableEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
             return createdConsent;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
     }
@@ -774,12 +795,12 @@ public partial class GovernanceRepository
             var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason);
             await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
 
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
             return req;
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
     }
@@ -827,7 +848,7 @@ public partial class GovernanceRepository
             var (activated, _) = await ConsentSqlCore.TryActivateConsentRowsAsync(conn, tx, req, allowPendingAutoApprove, "ALLOW", now, ct).ConfigureAwait(false);
             if (!activated)
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
                 return;
             }
 
@@ -844,11 +865,11 @@ public partial class GovernanceRepository
                 TenantId = req.TenantId
             };
             await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
 
@@ -862,11 +883,11 @@ public partial class GovernanceRepository
         try
         {
             await ConsentSqlCore.DeleteConsentRequestRowsAsync(conn, tx, requestId, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
     }

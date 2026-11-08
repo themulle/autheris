@@ -75,7 +75,7 @@ internal static class DialectSqlFragmentExtractor
             Collect(owner, rootMethod, fragments, ref transactionCalls);
             if (owner == unified)
             {
-                CollectAreaHelpers(owner, rootMethod, area, fragments, ref transactionCalls);
+                CollectAreaHelpers(owner, rootMethod, area, dialect, fragments, ref transactionCalls);
             }
             methods.Add(new DialectSqlMethod(root, fragments, transactionCalls));
             set.UnionWith(fragments);
@@ -412,8 +412,8 @@ internal static class DialectSqlFragmentExtractor
         return false;
     }
 
-    /// <summary>The unified roots delegate their SQL to the area's static holder/core types (also through private <c>*Sql</c> getters); their strings belong to the root's fragments.</summary>
-    private static void CollectAreaHelpers(TypeDefinition owner, MethodDefinition root, DialectSqlArea area, List<string> fragments, ref int transactionCalls)
+    /// <summary>The unified roots delegate their SQL to the area's static holder/core types (also through private <c>*Sql</c> getters and helpers); their strings belong to the root's fragments.</summary>
+    private static void CollectAreaHelpers(TypeDefinition owner, MethodDefinition root, DialectSqlArea area, string dialect, List<string> fragments, ref int transactionCalls)
     {
         var seen = new HashSet<MethodDefinition>();
         var queue = new Queue<IReadOnlyList<MethodDefinition>>();
@@ -431,15 +431,22 @@ internal static class DialectSqlFragmentExtractor
                     }
 
                     var type = definition.DeclaringType;
-                    if (type.Name == $"{area.TypeName}Sql" || type.Name == $"{area.TypeName}SqlCore")
+                    var ownedByDialect = type.DeclaringType is null || type.DeclaringType.Name is "GovernanceRepository" || type.DeclaringType.Name == $"{dialect}GovernanceRepository";
+                    if (ownedByDialect && (type.Name == $"{area.TypeName}Sql" || type.Name == $"{area.TypeName}SqlCore"))
                     {
                         foreach (var helper in Bodies(type, definition))
                         {
                             CollectBody(helper, fragments, ref transactionCalls);
                         }
                     }
-                    else if (type == owner && definition.Name.StartsWith("get_", StringComparison.Ordinal) && definition.Name.EndsWith("Sql", StringComparison.Ordinal))
+                    else if (type == owner && definition.Name.EndsWith("Sql", StringComparison.Ordinal))
                     {
+                        // Inlined constants of both engines' holders appear in the selecting member's own body.
+                        foreach (var own in Bodies(owner, definition))
+                        {
+                            CollectBody(own, fragments, ref transactionCalls);
+                        }
+
                         queue.Enqueue(Bodies(owner, definition));
                     }
                 }
