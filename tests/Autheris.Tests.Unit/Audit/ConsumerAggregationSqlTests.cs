@@ -2,8 +2,6 @@ using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence;
-using Autheris.Infrastructure.Persistence.Migrations;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using Xunit;
 
@@ -112,47 +110,6 @@ public sealed class ConsumerAggregationSqlTests
     [Fact]
     public void For_UnknownDialect_Throws() =>
         Should.Throw<ArgumentOutOfRangeException>(() => ConsumerAggregationSql.For((ConsumerAggregationDialect)99));
-
-    [Fact]
-    public async Task RecordAndQuery_Sqlite_RoundTripsAfterBaselineOnly()
-    {
-        await using var conn = new SqliteConnection("Data Source=:memory:");
-        await conn.OpenAsync();
-        new SqliteBaselineSchema(conn, null).Apply();
-        var table = new TableIdentifier("sales", "dbo", "orders");
-        var tenant = new TenantId("tenant-1");
-        string day = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
-
-        await ConsumerAggregationStore.RecordDailyUsageAsync(conn, ConsumerAggregationDialect.Sqlite, null, table, tenant, day, "powerbi", "c1", "1.0", 2, 20, 2, 0, 0, 0, 0);
-        await ConsumerAggregationStore.RecordDailyUsageAsync(conn, ConsumerAggregationDialect.Sqlite, null, table, tenant, day, "powerbi", "c1", "1.0", 3, 30, 3, 1, 0, 0, 0);
-        await ConsumerAggregationStore.RecordActorSampleAsync(conn, ConsumerAggregationDialect.Sqlite, null, table, tenant, day, "powerbi", new string('a', 64));
-        await ConsumerAggregationStore.RecordActorSampleAsync(conn, ConsumerAggregationDialect.Sqlite, null, table, tenant, day, "powerbi", new string('a', 64));
-        await ConsumerAggregationStore.RecordQueryNameAsync(conn, ConsumerAggregationDialect.Sqlite, null, table, tenant, day, "powerbi", "GetOrders", 5);
-
-        var rows = await ConsumerAggregationStore.QueryConsumerAppDailyAsync(conn, null, table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
-
-        var row = rows.ShouldHaveSingleItem();
-        row.Calls.ShouldBe(5);
-        row.RowsReturned.ShouldBe(50);
-        row.Rejections.Access.ShouldBe(1);
-        row.DistinctActors.ShouldBe(1);
-        row.QueryNames.ShouldBe(["GetOrders"]);
-    }
-
-    [Fact]
-    public async Task Store_OnDatabaseWithoutBaseline_FailsAndNeverCreatesTables()
-    {
-        await using var conn = new SqliteConnection("Data Source=:memory:");
-        await conn.OpenAsync();
-        var table = new TableIdentifier("sales", "dbo", "orders");
-
-        await Should.ThrowAsync<SqliteException>(() => ConsumerAggregationStore.RecordQueryNameAsync(
-            conn, ConsumerAggregationDialect.Sqlite, null, table, new TenantId("t"), "2026-10-23", "app", "q", 1));
-
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'CONSUMER_APP_%'";
-        Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(0);
-    }
 
     private static string OnClause(string merge)
     {

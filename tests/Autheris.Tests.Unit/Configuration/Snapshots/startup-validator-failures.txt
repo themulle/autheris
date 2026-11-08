@@ -74,8 +74,6 @@ ProductionAuthentication_EntraIdIncomplete [Production]: ValidationException: Se
 ProductionAuthentication_AdfsIncomplete [Production]: ValidationException: Security violation: Outside Development, Adfs.Audience and Authority must be configured.
 ProductionAuthentication_WellFormedHashAccepted [Production]: OK
 ProductionStorage_WormWithoutS3Keys [Production]: ValidationException: Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.
-ProductionStorage_InMemorySqlite [Production]: ValidationException: Security violation: In-memory SQLite databases (GovernanceDb.ConnectionString) are strictly prohibited outside Development.
-ProductionStorage_ContainerRelativeSqlitePath [Production]: ValidationException: Security and configuration error (DEP-4): In the container, the process runs as non-root user ($APP_UID). The SQLite path 'governance.db' is located directly in the non-writable application directory (/app). Use the writable data directory '/app/data' (for example Gateway:State:StateDirectory=/app/data).
 ProductionStorage_FallbackAuditKey [Production]: ValidationException: CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.
 ProductionStorage_AnchorMissing [Production]: ValidationException: CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.
 ProductionStorage_AuditChecksSkippedInTestEnvironment [Production]: OK

@@ -27,7 +27,7 @@ internal sealed record DialectSqlSnapshot(string Dialect, string Area, IReadOnly
 /// </summary>
 internal static class DialectSqlFragmentExtractor
 {
-    public static readonly string[] Dialects = ["PostgreSql", "SqlServer", "Sqlite"];
+    public static readonly string[] Dialects = ["PostgreSql", "SqlServer"];
 
     public static readonly DialectSqlArea[] Areas =
     [
@@ -47,7 +47,7 @@ internal static class DialectSqlFragmentExtractor
 
     public static DialectSqlSnapshot Extract(string dialect, DialectSqlArea area)
     {
-        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
+        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
         var repo = module.GetType($"{InfrastructureNamespace}.{dialect}GovernanceRepository")
             ?? throw new InvalidOperationException($"{dialect}GovernanceRepository not found");
 
@@ -269,7 +269,7 @@ internal static class DialectSqlFragmentExtractor
     private static bool IsCompilerGenerated(TypeReference type) => type.Name.Contains('<', StringComparison.Ordinal);
 
     public static TypeDefinition RepositoryType(string dialect) =>
-        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly)
+        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
             .GetType($"{InfrastructureNamespace}.{dialect}GovernanceRepository");
 
     /// <summary>The root method plus every compiler-generated state machine / closure method reachable from it (the bodies a reviewer would call "the method").</summary>

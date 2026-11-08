@@ -41,7 +41,7 @@ public class ArchitectureTests
     [Fact]
     public void Infrastructure_ShouldNotHaveDependencyOnApi()
     {
-        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly)
+        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
             .ShouldNot()
             .HaveDependencyOnAny(ApiNamespace)
             .GetResult();
@@ -83,7 +83,7 @@ public class ArchitectureTests
         {
             typeof(Autheris.Domain.Common.Sid).Assembly,
             typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-            typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
+            typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
             typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly
         };
 
@@ -130,7 +130,7 @@ public class ArchitectureTests
         {
             typeof(Autheris.Domain.Common.Sid).Assembly,
             typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-            typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
+            typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
             typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly
         };
 

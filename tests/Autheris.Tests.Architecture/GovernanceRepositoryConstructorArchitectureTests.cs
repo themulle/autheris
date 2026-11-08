@@ -39,7 +39,7 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
     ];
 
     private static ModuleDefinition InfrastructureModule() =>
-        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
+        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
 
     private static ModuleDefinition TestModule() => CecilModuleCache.For(typeof(GovernanceRepositoryConstructorArchitectureTests).Assembly);
 

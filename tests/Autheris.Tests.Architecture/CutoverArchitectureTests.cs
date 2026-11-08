@@ -37,7 +37,7 @@ public sealed class CutoverArchitectureTests
     [
         typeof(Autheris.Domain.Common.Sid).Assembly,
         typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-        typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
+        typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
         typeof(Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor).Assembly,
         typeof(Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator).Assembly,
         typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,

@@ -163,7 +163,7 @@ public class PostgreSqlGovernanceProviderTests
     }
 
     [Fact]
-    public async Task DependencyInjection_UnconfiguredProvider_FailsClosed()
+    public void DependencyInjection_UnconfiguredProvider_FailsClosed()
     {
         var services = new ServiceCollection();
         var options = new GatewayOptions
@@ -181,12 +181,13 @@ public class PostgreSqlGovernanceProviderTests
         services.AddSingleton(Options.Create(options));
         services.AddLogging();
 
-        services.AddGatewayInfrastructure(options);
-
-        await using var sp = services.BuildServiceProvider();
-
-        // no provider means no governance store and no anchor store: resolving the repository fails closed
-        Should.Throw<InvalidOperationException>(() => sp.GetService<IGovernanceRepository>());
+        // no provider means no governance store and no anchor store: composition or resolution fails closed
+        Should.Throw<InvalidOperationException>(() =>
+        {
+            services.AddGatewayInfrastructure(options);
+            using var sp = services.BuildServiceProvider();
+            sp.GetService<IGovernanceRepository>();
+        });
     }
 
     [Fact]

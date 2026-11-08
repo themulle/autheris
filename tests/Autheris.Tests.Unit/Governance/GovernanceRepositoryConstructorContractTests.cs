@@ -42,7 +42,7 @@ public sealed class GovernanceRepositoryConstructorContractTests
                 "SqlServer" => secureTransport
                     ? "Server=db.example;Database=x;User Id=u;Password=p;Encrypt=Strict;TrustServerCertificate=false"
                     : "Server=localhost;Database=x;User Id=u;Password=p;TrustServerCertificate=true",
-                _ => $"Data Source=ctor_{Guid.NewGuid():N};Mode=Memory;Cache=Shared",
+                _ => throw new ArgumentOutOfRangeException(nameof(provider)),
             },
         },
         Audit = new AuditOptions { ChainAnchorPath = anchorPath ?? string.Empty },

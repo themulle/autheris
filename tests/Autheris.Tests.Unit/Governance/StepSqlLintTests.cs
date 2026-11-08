@@ -138,7 +138,7 @@ public sealed class StepSqlLintTests
     [Fact]
     public void ShippedCatalogues_HoldExactlySteps0002To0005()
     {
-        foreach (var engine in new[] { "sqlite", "postgresql", "sqlserver" })
+        foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
             SqlMigrationStep.LoadEmbedded(engine).Select(s => (s.Version, s.Name)).ShouldBe([
                 (2, "key_and_index_column_direction"),

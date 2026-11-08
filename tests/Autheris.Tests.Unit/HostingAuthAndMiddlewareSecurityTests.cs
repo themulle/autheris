@@ -168,45 +168,6 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
         compose.ShouldContain("/app/data");
     }
 
-    [Fact]
-    public void DEP04_ValidateGatewayOptions_InContainer_RelativeSqlitePath_AbortsStartup()
-    {
-        var options = new GatewayOptions
-        {
-            DataMasking = ProdMasking(),
-            GovernanceDb = new GovernanceDbOptions
-            {
-                Provider = "Sqlite",
-                ConnectionString = "Data Source=governance.db;Cache=Shared"
-            }
-        };
-        Func<string, string?> env = name => name == "DOTNET_RUNNING_IN_CONTAINER" ? "true" : null;
-
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), env));
-
-        ex.Message.ShouldContain("DEP-4");
-        ex.Message.ShouldContain("/app/data");
-    }
-
-    [Fact]
-    public void DEP04_ValidateGatewayOptions_InContainer_AppDataSqlitePath_IsAllowed()
-    {
-        var options = new GatewayOptions
-        {
-            DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" },
-            GovernanceDb = new GovernanceDbOptions
-            {
-                Provider = "Sqlite",
-                ConnectionString = "Data Source=/app/data/governance.db;Cache=Shared"
-            }
-        };
-        Func<string, string?> env = name => name == "DOTNET_RUNNING_IN_CONTAINER" ? "true" : null;
-
-        Should.NotThrow(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), env));
-    }
-
     private static string? FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

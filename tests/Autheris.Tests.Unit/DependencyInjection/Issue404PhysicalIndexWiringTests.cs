@@ -14,9 +14,8 @@ using Xunit;
 public sealed class Issue404PhysicalIndexWiringTests
 {
     [Fact]
-    public void AllThreeRepositories_ImplementThePort()
+    public void BothRepositories_ImplementThePort()
     {
-        typeof(IPhysicalIndexRepository).IsAssignableFrom(typeof(SqliteGovernanceRepository)).ShouldBeTrue();
         typeof(IPhysicalIndexRepository).IsAssignableFrom(typeof(PostgreSqlGovernanceRepository)).ShouldBeTrue();
         typeof(IPhysicalIndexRepository).IsAssignableFrom(typeof(SqlServerGovernanceRepository)).ShouldBeTrue();
     }
