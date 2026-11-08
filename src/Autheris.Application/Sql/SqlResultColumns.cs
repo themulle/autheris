@@ -13,7 +13,8 @@ public sealed record SqlResultColumn(
     Type? ClrType,
     int? NumericPrecision = null,
     int? NumericScale = null,
-    string? DataTypeName = null);
+    string? DataTypeName = null,
+    bool? AllowDbNull = null);
 
 /// <summary>
 /// Result column names and types read from a <see cref="DbDataReader"/>.
@@ -80,7 +81,8 @@ public static class SqlResultColumns
                 TryGet(() => reader.GetFieldType(i)) ?? column?.DataType,
                 column?.NumericPrecision,
                 column?.NumericScale,
-                TryGet(() => reader.GetDataTypeName(i)) ?? column?.DataTypeName);
+                TryGet(() => reader.GetDataTypeName(i)) ?? column?.DataTypeName,
+                column?.AllowDBNull);
         }
 
         return columns;

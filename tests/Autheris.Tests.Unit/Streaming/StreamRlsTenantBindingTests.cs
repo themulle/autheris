@@ -68,7 +68,6 @@ public sealed class StreamRlsTenantBindingTests : IDisposable
 
     public void Dispose()
     {
-        Sid.RealmLookup = null;
     }
 
     [Fact]
@@ -80,7 +79,6 @@ public sealed class StreamRlsTenantBindingTests : IDisposable
             IdentityRealmKind.Customer,
             tenantBinding: TenantBindingSpecification.Fixed(boundTenant));
 
-        Sid.RealmLookup = r => r == "corp-realm" ? realm : null;
 
         // Subscriber token has conflicting raw tenant_id claim "other-tenant" but autheris:realm "corp-realm"
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
@@ -114,7 +112,6 @@ public sealed class StreamRlsTenantBindingTests : IDisposable
             IdentityRealmKind.Customer,
             tenantBinding: TenantBindingSpecification.Fixed(boundTenant));
 
-        Sid.RealmLookup = r => r == "corp-realm" ? realm : null;
 
         var principal = DefaultTenantCaller.StampRealm(realm, new ClaimsIdentity(
         [
@@ -147,7 +144,6 @@ public sealed class StreamRlsTenantBindingTests : IDisposable
                 "finance_tid",
                 new Dictionary<string, TenantId> { ["org-12345"] = mappedTenant }));
 
-        Sid.RealmLookup = r => r == "finance-realm" ? realm : null;
 
         var principal = DefaultTenantCaller.StampRealm(realm, new ClaimsIdentity(
         [
@@ -179,7 +175,6 @@ public sealed class StreamRlsTenantBindingTests : IDisposable
             IdentityRealmKind.Customer,
             tenantBinding: TenantBindingSpecification.Fixed(boundTenant));
 
-        Sid.RealmLookup = r => r == "corp-realm" ? realm : null;
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
         [

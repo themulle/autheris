@@ -220,4 +220,14 @@ public sealed class CompiledSqlAuditDigesterTests
 
         secrets.Received(1).GetSecretBytes("AUDIT");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Anonymize_DropsCommentText()
+    {
+        var digester = Digester();
+        var (redacted, _) = digester.Anonymize("SELECT 1 /* secret comment */ -- another comment\nFROM orders");
+        redacted.ShouldNotContain("secret comment");
+        redacted.ShouldNotContain("another comment");
+    }
 }

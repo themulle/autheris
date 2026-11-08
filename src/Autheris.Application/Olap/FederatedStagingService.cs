@@ -313,7 +313,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                             ["subtreeId"] = subtree.SubtreeId,
                             ["rowCount"] = subtreeRows.Count,
                             ["rlsPushedDown"] = true,
-                            ["inDbMaskingExecuted"] = true
+                            ["inDbMaskingExecuted"] = subtreeReadResult.InDbMaskingExecuted
                         };
 
                         await _auditRepo.RecordAuditEventAsync(new AuditLogEntry
