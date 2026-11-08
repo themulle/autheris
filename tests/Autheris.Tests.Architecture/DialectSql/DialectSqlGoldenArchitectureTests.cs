@@ -175,13 +175,25 @@ public sealed class DialectSqlGoldenArchitectureTests
         }
     }
 
-    private static MethodDefinition Method(TypeDefinition repo, string name, int? parameterCount = null) =>
-        repo.Methods.Single(m => m.Name == name && (parameterCount is null || m.Parameters.Count == parameterCount));
+    private static MethodDefinition Method(TypeDefinition repo, string name, int? parameterCount = null)
+    {
+        var govRepo = repo.Module.GetType($"{DialectSqlFragmentExtractor.InfrastructureNamespace}.GovernanceRepository");
+        if (govRepo != null)
+        {
+            var govMatch = govRepo.Methods.FirstOrDefault(m => m.Name == name && (parameterCount is null || m.Parameters.Count == parameterCount));
+            if (govMatch != null)
+            {
+                return govMatch;
+            }
+        }
+        return repo.Methods.Single(m => m.Name == name && (parameterCount is null || m.Parameters.Count == parameterCount));
+    }
 
     private static IEnumerable<Instruction> Instructions(string dialect, string name, int? parameterCount = null)
     {
         var repo = DialectSqlFragmentExtractor.RepositoryType(dialect);
-        return DialectSqlFragmentExtractor.Bodies(repo, Method(repo, name, parameterCount)).SelectMany(m => m.Body.Instructions);
+        var method = Method(repo, name, parameterCount);
+        return DialectSqlFragmentExtractor.Bodies(method.DeclaringType, method).SelectMany(m => m.Body.Instructions);
     }
 
     private static readonly string[] ConsentRevokeMethods = ["RevokeConsentInTransactionAsync", "RevokeSystemConsentAsync", "RevokeConsentAsync"];
@@ -261,7 +273,7 @@ public sealed class DialectSqlGoldenArchitectureTests
     {
         // DEF-01 (replaces ARCH-MNT-22-T-09): every dialect invalidates the epoch and evicts the cached table metadata (PG/MSSQL touch _metadataCache directly).
         var instructions = Instructions(dialect, "ReplaceConsentsAsync", parameterCount: 7).ToList();
-        instructions.Any(i => i.Operand is MethodReference { Name: "InvalidateEpochAsync" }).ShouldBeTrue();
-        instructions.Any(i => i.Operand is FieldReference { Name: "_metadataCache" }).ShouldBeTrue();
+        instructions.Any(i => i.Operand is MethodReference { Name: "InvalidateEpochAsync" or "InvalidateTableEpochAsync" }).ShouldBeTrue();
+        instructions.Any(i => i.Operand is FieldReference { Name: "_metadataCache" or "_metadataInvalidator" }).ShouldBeTrue();
     }
 }

@@ -15,9 +15,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Unified governance repository (WP-SIMPL-20, AD-1).
+/// Unified governance repository.
 /// Persists and queries governance metadata across supported engines using <see cref="IGovernanceSqlDialect"/>.
-/// Enforces tenant scoping (SEC-SIMPL-22), safe parameterization (SEC-SIMPL-21), and confidentiality in logging (SEC-SIMPL-25).
+/// Enforces tenant scoping, safe parameterization, and confidentiality in logging.
 /// </summary>
 public partial class GovernanceRepository : IConsentRepository, IConsentApprovalRepository, IConsentDescriptionRepository
 {
@@ -28,6 +28,8 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
     private readonly Func<AuditLogEntry, DbTransaction?, CancellationToken, Task>? _auditRecorder;
     private readonly Action<string>? _metadataInvalidator;
+    private readonly Action<DbTransaction>? _onTransactionCommitted;
+    private readonly Action<DbTransaction>? _onTransactionRolledBack;
 
     /// <summary>
     /// Test seam: runs inside decision transactions between locked read and guarded state transition.
@@ -41,7 +43,9 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         ILogger<GovernanceRepository>? logger = null,
         Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null,
         Func<AuditLogEntry, DbTransaction?, CancellationToken, Task>? auditRecorder = null,
-        Action<string>? metadataInvalidator = null)
+        Action<string>? metadataInvalidator = null,
+        Action<DbTransaction>? onTransactionCommitted = null,
+        Action<DbTransaction>? onTransactionRolledBack = null)
     {
         _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
         _epochValidationService = epochValidationService;
@@ -50,6 +54,8 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         _materializationGuard = materializationGuard;
         _auditRecorder = auditRecorder;
         _metadataInvalidator = metadataInvalidator;
+        _onTransactionCommitted = onTransactionCommitted;
+        _onTransactionRolledBack = onTransactionRolledBack;
     }
 
     internal IGovernanceSqlDialect Dialect => _dialect;
@@ -69,7 +75,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     }
 
     /// <summary>
-    /// Executes a reader command, logging fragment-id and duration only (SEC-SIMPL-25).
+    /// Executes a reader command, logging fragment-id and duration only.
     /// Never logs parameter values or full command text with parameters.
     /// </summary>
     internal async Task<DbDataReader> ExecuteReaderAsync(DbCommand command, string fragmentId, CancellationToken ct = default)
@@ -94,7 +100,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     }
 
     /// <summary>
-    /// Executes a non-query command, logging fragment-id and duration only (SEC-SIMPL-25).
+    /// Executes a non-query command, logging fragment-id and duration only.
     /// </summary>
     internal async Task<int> ExecuteNonQueryAsync(DbCommand command, string fragmentId, CancellationToken ct = default)
     {
@@ -118,7 +124,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     }
 
     /// <summary>
-    /// Executes a scalar command, logging fragment-id and duration only (SEC-SIMPL-25).
+    /// Executes a scalar command, logging fragment-id and duration only.
     /// </summary>
     internal async Task<object?> ExecuteScalarAsync(DbCommand command, string fragmentId, CancellationToken ct = default)
     {
@@ -138,6 +144,24 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
             sw.Stop();
             _logger?.LogError(ex, "Execution failed for {FragmentId} after {ElapsedMs}ms", fragmentId, sw.ElapsedMilliseconds);
             throw;
+        }
+    }
+
+    internal async Task CommitTransactionAsync(DbTransaction tx, CancellationToken ct)
+    {
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        _onTransactionCommitted?.Invoke(tx);
+    }
+
+    internal async Task RollbackTransactionAsync(DbTransaction tx, CancellationToken ct = default)
+    {
+        try
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+        }
+        finally
+        {
+            _onTransactionRolledBack?.Invoke(tx);
         }
     }
 

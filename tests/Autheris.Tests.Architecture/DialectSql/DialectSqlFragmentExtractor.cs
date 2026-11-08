@@ -43,7 +43,7 @@ internal static class DialectSqlFragmentExtractor
         "ConsentGrant")
     ];
 
-    private const string InfrastructureNamespace = "Autheris.Infrastructure.Persistence";
+    internal const string InfrastructureNamespace = "Autheris.Infrastructure.Persistence";
 
     public static DialectSqlSnapshot Extract(string dialect, DialectSqlArea area)
     {
@@ -228,10 +228,24 @@ internal static class DialectSqlFragmentExtractor
         var open = root.IndexOf('(');
         var name = open < 0 ? root : root[..open];
         var firstParameter = open < 0 ? null : root[(open + 1)..^1];
-        var matches = repo.Methods
-            .Where(m => m.Name == name)
-            .Where(m => firstParameter is null || (m.Parameters.Count > 0 && m.Parameters[0].ParameterType.Name == firstParameter))
-            .ToList();
+        var govRepo = repo.Module.GetType($"{InfrastructureNamespace}.GovernanceRepository");
+        var matches = new List<MethodDefinition>();
+        if (govRepo != null)
+        {
+            matches = govRepo.Methods
+                .Where(m => m.Name == name)
+                .Where(m => firstParameter is null || (m.Parameters.Count > 0 && m.Parameters[0].ParameterType.Name == firstParameter))
+                .ToList();
+        }
+
+        if (matches.Count == 0)
+        {
+            matches = repo.Methods
+                .Where(m => m.Name == name)
+                .Where(m => firstParameter is null || (m.Parameters.Count > 0 && m.Parameters[0].ParameterType.Name == firstParameter))
+                .ToList();
+        }
+
         if (optional && matches.Count == 0)
         {
             return null;
@@ -380,9 +394,10 @@ internal static class DialectSqlFragmentExtractor
 
     private static bool IsNestedIn(TypeDefinition type, TypeDefinition repo)
     {
+        var govRepo = repo.Module.GetType($"{InfrastructureNamespace}.GovernanceRepository");
         for (var t = type.DeclaringType; t is not null; t = t.DeclaringType)
         {
-            if (t == repo)
+            if (t == repo || (govRepo != null && t == govRepo))
             {
                 return true;
             }

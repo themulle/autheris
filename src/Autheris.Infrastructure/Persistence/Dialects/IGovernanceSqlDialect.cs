@@ -5,7 +5,7 @@ using System.Data.Common;
 using Autheris.Domain.Interfaces;
 
 /// <summary>
-/// Engine-specific SQL fragment and connection provider for the unified governance repository (WP-SIMPL-20).
+/// Engine-specific SQL fragment and connection provider for the unified governance repository.
 /// Has exactly the 11 divergence members mandated by the architecture spec.
 /// </summary>
 internal interface IGovernanceSqlDialect
