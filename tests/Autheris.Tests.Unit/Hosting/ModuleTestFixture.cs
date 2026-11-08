@@ -10,6 +10,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Hosting;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
@@ -289,7 +290,7 @@ internal static class ModulePackageBuilder
         string? entryType = null,
         IReadOnlyList<ModuleManifestFile>? files = null,
         string version = "1.2.0",
-        string hostVersion = "1.2.0",
+        string? hostVersion = null,
         string abstractionsVersion = "1.0.0",
         string? keyIdOverride = null,
         string? signatureOverride = null)
@@ -300,7 +301,7 @@ internal static class ModulePackageBuilder
             Schema: 1,
             Id: moduleId,
             Version: version,
-            HostVersion: hostVersion,
+            HostVersion: hostVersion ?? ModuleLoader.ResolveHostVersion(),
             AbstractionsVersion: abstractionsVersion,
             EntryAssembly: entryAssembly,
             EntryType: effectiveEntryType,
