@@ -88,4 +88,80 @@ public sealed partial class GovernedSqlExecutor
                 dsName, Activity.Current?.TraceId.ToString());
         }
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
+    private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
+
+    private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues)
+    {
+        SortedDictionary<string, int>? lists = null;
+        foreach (var slot in compiled.Parameters)
+        {
+            if (slot is { Origin: ParameterOrigin.ClientNamed, ListCount: { } count, SourceName: { } name })
+            {
+                (lists ??= new SortedDictionary<string, int>(StringComparer.Ordinal))[name] = count;
+            }
+        }
+
+        if (lists is not null)
+        {
+            fields["list_params"] = lists;
+        }
+
+        if (clientValues is not null)
+        {
+            SortedSet<string>? empty = null;
+            foreach (var (name, value) in clientValues)
+            {
+                if (value is ClientListValue { Count: 0 } && AuditListNameRegex().IsMatch(name))
+                {
+                    (empty ??= new SortedSet<string>(StringComparer.Ordinal)).Add(name.ToLowerInvariant());
+                }
+            }
+
+            if (empty is not null)
+            {
+                fields["list_params_empty"] = empty.ToArray();
+            }
+        }
+    }
+
+    private void AddCompiledAuditFields(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues = null)
+    {
+        fields["compiler_version"] = compiled.CompilerVersion;
+        fields["dialect"] = compiled.Dialect.ToString();
+        fields["bind_count"] = compiled.Parameters.Length;
+        if (compiled.HasRecursiveCte)
+        {
+            fields["recursiveCte"] = true;
+        }
+
+        AddListAuditField(fields, compiled, clientValues);
+        fields["sql.compiled_digest"] = _digester.Compute(compiled);
+        if (_options.Value.Audit.StoreCompiledSql)
+        {
+            fields["compiledSql"] = compiled.Sql;
+        }
+    }
+
+    private static void AddKeySetAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite)
+    {
+        if (rewrite.KeySets is not { Count: > 0 } outcomes)
+        {
+            return;
+        }
+
+        fields["row_filter_key_sets"] = outcomes.Select(o => new Dictionary<string, object?>
+        {
+            ["table"] = o.Table,
+            ["rule_id"] = o.RuleId,
+            ["source"] = o.Source.ToString(),
+            ["strategy_source"] = o.StrategySource.ToString(),
+            ["outcome"] = o.Outcome.ToString(),
+            ["reason"] = o.Reason?.ToString(),
+            ["key_count"] = o.KeyCount,
+            ["padded_count"] = o.PaddedCount,
+            ["age_seconds"] = o.AgeSeconds
+        }).ToList();
+    }
 }

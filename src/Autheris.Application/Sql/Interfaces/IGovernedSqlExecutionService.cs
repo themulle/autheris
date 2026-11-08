@@ -27,6 +27,22 @@ public static class SqlTransports
     /// <summary>The in-memory DuckDB OLAP endpoint (<c>POST /api/v1/olap/query</c>). Never part of the default allowed list.</summary>
     public const string Olap = "Olap";
 
+    /// <summary>The Parquet export route; metered like WebSQL client SQL.</summary>
+    public const string Parquet = "Parquet";
+
+    /// <summary>
+    /// Fail-closed: the server-stamped transports priced by their own pipeline; every other value
+    /// (null, empty, unknown, WebSql, Trino, Parquet) is metered by the statement cost gate.
+    /// </summary>
+    public static bool IsCostMetered(string? transport) =>
+        string.IsNullOrWhiteSpace(transport)
+        || !(string.Equals(transport, Rest, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, Mcp, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, ArrowExport, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, SqlEndpoints, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, AsyncJob, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(transport, Olap, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>
     /// Issue #447: the federation transport name of a server-stamped ingress;<c>null</c> for an unset ingress.
     /// GraphQL and OData read through the planner like REST, so they are judged as <see cref="Rest"/>.
@@ -52,6 +68,13 @@ public static class SqlTransports
 /// client SQL and is therefore not gated by <c>WebSql:Enabled</c>; it still runs through the full governed pipeline.
 /// Never set from client input.
 /// </param>
+public sealed record SqlPageWindow(long Offset, int Size, int Number);
+public sealed record GovernedSqlPageResponse(int Number, long Offset, int Size);
+public sealed record GovernedSqlPageOutcome(
+    GovernedSqlPageResponse? Page,
+    string? NextToken,
+    string? PagingUnavailable);
+
 public sealed record GovernedSqlQueryRequest(
     string Sql,
     IReadOnlyDictionary<string, object?>? Parameters = null,
@@ -59,7 +82,10 @@ public sealed record GovernedSqlQueryRequest(
     SqlRowLimit? RowLimit = null,
     string? Transport = null,
     bool PlannedTableRead = false,
-    int? TimeoutSeconds = null)
+    int? TimeoutSeconds = null,
+    SqlPageWindow? Page = null,
+    string? NextToken = null,
+    Action<GovernedSqlPageOutcome>? OnPageOutcome = null)
 {
     /// <summary>
     /// Issue #280: parameters whose names the gateway generated for a planned read (internal; never from client input). The setter is
@@ -71,6 +97,10 @@ public sealed record GovernedSqlQueryRequest(
     /// #398: byte budget for the string cells of a buffered read (planned aggregations with text group keys). Internal; never from client input.
     /// </summary>
     internal ResultByteBudget? ResultByteBudget { get; init; }
+
+    internal Autheris.Application.Common.Quota.QueryCostAdmission? Admission { get; init; }
+    public int? PageOffset { get; init; }
+    public bool IsPaged { get; init; }
 }
 
 public sealed record GovernedSqlResult(
@@ -81,7 +111,10 @@ public sealed record GovernedSqlResult(
     long ElapsedMilliseconds,
     bool Truncated = false,
     [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<SqlResultColumn>? ColumnDescriptions = null,
-    [property: System.Text.Json.Serialization.JsonIgnore] bool InDbColumnMaskingExecuted = false);
+    [property: System.Text.Json.Serialization.JsonIgnore] bool InDbColumnMaskingExecuted = false,
+    GovernedSqlPageResponse? Page = null,
+    string? Next = null,
+    string? PagingUnavailable = null);
 
 public interface IGovernedSqlExecutionService
 {
