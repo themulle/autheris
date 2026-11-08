@@ -71,42 +71,40 @@ public sealed class ProcedureInvoker : IProcedureInvoker
             try
             {
                 // 1. Session settings + security context on the very same connection.
+                if (!TenantId.TryParse(security.TenantId, out var validatedTenantId))
                 {
-                    if (!TenantId.TryParse(security.TenantId, out var validatedTenantId))
-                    {
-                        throw new GatewayForbiddenException("Invalid tenant identity.");
-                    }
+                    throw new GatewayForbiddenException("Invalid tenant identity.");
+                }
 
-                    if (dialect == DatabaseDialect.SqlServer)
-                    {
-                        await using var init = connection.CreateCommand();
-                        init.CommandType = CommandType.Text;
-                        init.CommandTimeout = 30;
-                        init.CommandText =
-                            "SET XACT_ABORT ON; " +
-                            "SET LOCK_TIMEOUT " + settings.LockTimeoutMs.ToString(CultureInfo.InvariantCulture) + ";";
-                        await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                if (dialect == DatabaseDialect.SqlServer)
+                {
+                    await using var init = connection.CreateCommand();
+                    init.CommandType = CommandType.Text;
+                    init.CommandTimeout = 30;
+                    init.CommandText =
+                        "SET XACT_ABORT ON; " +
+                        "SET LOCK_TIMEOUT " + settings.LockTimeoutMs.ToString(CultureInfo.InvariantCulture) + ";";
+                    await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
-                        await _sessionInitializer.InitializeSessionAsync(
-                            connection,
-                            tx: null,
-                            dialect,
-                            validatedTenantId,
-                            userSid: security.UserSid,
-                            purpose: security.Purpose,
-                            ct: ct).ConfigureAwait(false);
-                    }
-                    else if (dialect == DatabaseDialect.PostgreSql)
-                    {
-                        transaction = await _sessionInitializer.InitializeSessionAsync(
-                            connection,
-                            dialect,
-                            validatedTenantId,
-                            userSid: security.UserSid,
-                            purpose: security.Purpose,
-                            requireTransaction: true,
-                            ct: ct).ConfigureAwait(false);
-                    }
+                    await _sessionInitializer.InitializeSessionAsync(
+                        connection,
+                        tx: null,
+                        dialect,
+                        validatedTenantId,
+                        userSid: security.UserSid,
+                        purpose: security.Purpose,
+                        ct: ct).ConfigureAwait(false);
+                }
+                else if (dialect == DatabaseDialect.PostgreSql)
+                {
+                    transaction = await _sessionInitializer.InitializeSessionAsync(
+                        connection,
+                        dialect,
+                        validatedTenantId,
+                        userSid: security.UserSid,
+                        purpose: security.Purpose,
+                        requireTransaction: true,
+                        ct: ct).ConfigureAwait(false);
                 }
 
                 // 2. The procedure or table-valued function call.

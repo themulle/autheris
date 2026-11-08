@@ -116,7 +116,7 @@ GRANT EXECUTE ON FUNCTION public.fn_orders(), public.fn_write() TO proc_login;";
     }
 
     [Fact]
-    public async Task DeclaredOutputs_ContractEnforced()
+    public async Task ResultColumns_AreReturnedByName()
     {
         if (!_available) return;
 

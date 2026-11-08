@@ -52,6 +52,7 @@ public sealed class ProcedureSqlServerIntegrationTests : IAsyncLifetime
             "CREATE PROCEDURE dbo.usp_Orders AS SELECT id, total FROM dbo.orders ORDER BY id;",
             "CREATE PROCEDURE dbo.usp_Overwrite AS EXEC sys.sp_set_session_context @key = N'autheris.tenant_id', @value = N'tenant-b'; SELECT id FROM dbo.orders;",
             "CREATE TABLE dbo.audit_log (id int IDENTITY, note nvarchar(20));",
+            "CREATE PROCEDURE dbo.usp_Commit AS BEGIN TRAN; INSERT INTO dbo.audit_log (note) VALUES (N'c'); COMMIT; SELECT 1 AS done;",
             "CREATE PROCEDURE dbo.usp_Write AS INSERT INTO dbo.audit_log (note) VALUES (N'x'); SELECT 1 AS done;");
     }
 
@@ -128,6 +129,21 @@ public sealed class ProcedureSqlServerIntegrationTests : IAsyncLifetime
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM dbo.audit_log";
+        ((int)(await cmd.ExecuteScalarAsync())!).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ProcedureCommitsOwnTransaction_RowPersists()
+    {
+        if (!_available) return;
+
+        // OD-44: a procedure with its own transaction control runs as declared.
+        await Run(Definition("usp_Commit", "  - done\n"));
+
+        await using var conn = new SqlConnection(_db!.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM dbo.audit_log WHERE note = N'c'";
         ((int)(await cmd.ExecuteScalarAsync())!).ShouldBe(1);
     }
 
