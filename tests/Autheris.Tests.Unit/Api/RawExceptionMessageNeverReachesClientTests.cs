@@ -130,7 +130,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     {
         var engine = Substitute.For<IDataContractEngine>();
         engine.RegisterContractAsync(default!, default).ThrowsAsyncForAnyArgs(new ArgumentException(Sentinel));
-        var ctx = Ctx(["GovernanceAdmin"]);
+        var ctx = Ctx(["ClusterAdmin"]);
 
         var c = await RunAsync(await DataContractEndpoints.HandleApplyAsync(ctx, engine), ctx);
 
@@ -143,7 +143,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     {
         var engine = Substitute.For<IDataContractEngine>();
         engine.RegisterContractAsync(default!, default).ThrowsAsyncForAnyArgs(new NotSupportedException(Sentinel));
-        var ctx = Ctx(["GovernanceAdmin"]);
+        var ctx = Ctx(["ClusterAdmin"]);
 
         await Should.ThrowAsync<NotSupportedException>(async () => await DataContractEndpoints.HandleApplyAsync(ctx, engine));
     }
@@ -153,7 +153,7 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     {
         var engine = Substitute.For<IDataContractEngine>();
         engine.RegisterContractAsync(default!, default).ThrowsAsyncForAnyArgs(new OperationCanceledException(Sentinel));
-        var ctx = Ctx(["GovernanceAdmin"]);
+        var ctx = Ctx(["ClusterAdmin"]);
 
         await Should.ThrowAsync<OperationCanceledException>(async () => await DataContractEndpoints.HandleApplyAsync(ctx, engine));
     }

@@ -96,7 +96,7 @@ public class SecurityReviewG3EndpointAuthzTests
 
         SqlEndpointRoutes.IsListAdmin(Ctx("t", ["Reader"]).User).ShouldBeFalse();
         SqlEndpointRoutes.IsListAdmin(Ctx("t", ["GovernanceAdmin"]).User).ShouldBeFalse();
-        SqlEndpointRoutes.IsListAdmin(Ctx(null, ["GovernanceAdmin"]).User).ShouldBeTrue();
+        SqlEndpointRoutes.IsListAdmin(Ctx(null, ["GovernanceAdmin"]).User).ShouldBeFalse();
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class SecurityReviewG3EndpointAuthzTests
         }
 
         ODataEndpoints.IsOpenApiAdmin(Ctx("t", ["ClusterAdmin"]).User).ShouldBeTrue();
-        ODataEndpoints.IsOpenApiAdmin(Ctx(null, ["GovernanceAdmin"]).User).ShouldBeTrue();
+        ODataEndpoints.IsOpenApiAdmin(Ctx(null, ["GovernanceAdmin"]).User).ShouldBeFalse();
     }
 
     [Fact]

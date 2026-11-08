@@ -609,7 +609,7 @@ public class AuthenticationSecurityTests
     [InlineData("PlatformAdmin", false)]
     [InlineData("TenantAdmin", false)]
     [InlineData("PrivacyAdmin", false)]
-    [InlineData("GovernanceAdmin", true)]
+    [InlineData("GovernanceAdmin", false)]
     [InlineData("ClusterAdmin", true)]
     public void M1_TenantAdminAliases_DoNotSatisfyGlobalGovernanceAdmin(string roleName, bool expectedGlobalGov)
     {

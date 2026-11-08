@@ -112,7 +112,7 @@ public sealed class GovernanceEmptyBodyValidationTests
     public async Task RegisterRule_EmptyOrIncompleteBody_Returns400(string json)
     {
         var service = Substitute.For<ISchemaSunsettingService>();
-        var context = CreateContext(includeTenant: false, "GovernanceAdmin");
+        var context = CreateContext(includeTenant: false, "ClusterAdmin");
 
         var result = await GovernanceEndpoints.RegisterSunsettingRuleAsync(Bind<FieldSunsettingRule>(json), service, context);
 
@@ -135,7 +135,7 @@ public sealed class GovernanceEmptyBodyValidationTests
     public async Task RegisterRule_ValidBody_Returns201()
     {
         var service = Substitute.For<ISchemaSunsettingService>();
-        var context = CreateContext(includeTenant: false, "GovernanceAdmin");
+        var context = CreateContext(includeTenant: false, "ClusterAdmin");
         var rule = new FieldSunsettingRule(Guid.NewGuid(), "src.public.t", "f", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(30));
 
         var result = await GovernanceEndpoints.RegisterSunsettingRuleAsync(rule, service, context);

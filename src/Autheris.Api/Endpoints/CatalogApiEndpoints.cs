@@ -334,7 +334,7 @@ public static class CatalogApiEndpoints
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableRelationRepository relationRepo,
         CancellationToken ct)
     {
-        if (!EndpointSecurity.IsCanonicalClusterAdmin(context.User) && !EndpointSecurity.IsGlobalGovernanceAdmin(context.User))
+        if (!EndpointSecurity.IsCanonicalClusterAdmin(context.User))
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }

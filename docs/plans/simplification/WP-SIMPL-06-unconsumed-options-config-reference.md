@@ -20,6 +20,7 @@ Every option property that no code reads (verified per entry) is deleted and fai
 - `ConfigurationReferenceTests` generator/comparer and `docs/reference/configuration.md`.
 ### Out of scope
 - `CasbinOptions.EnforceInQueryPipeline`, `McpOptions.RequirePiiMasking`: already removed (asserted by `tests/Autheris.Tests.Unit/Configuration/DeadSecurityOptionsRemovedTests.cs:28,57`; guarded in `UnknownGatewayKeyGuardTests.cs:220-222`). Nothing to do.
+- `McpOptions.MaxResultRows` (unconsumed on `main`, #578): not deleted here; WP-SIMPL-53 PR 1 enforces it (D-53a). If WP-06 runs first, exempt it in the unconsumed-options baseline with a reference to #578.
 - The 14 consumed entries (section 4): not deleted; `WebhooksOptions.MaxPayloadBytes` in particular is a DoS bound.
 - `GatewayOptions.OpenSchema`: deleted by WP-SIMPL-41.
 - `ScimOptions.AllowedIpRanges`: WIRED and enforced (`src/Autheris.Api/Security/ScimAuthenticationHandler.cs:57`, `src/Autheris.Application/Identity/ScimIpAllowlist.cs`, validator `IdentityRealmsScimOptionsValidator.cs:33`; property `src/Autheris.Domain/Options/Security/IdentityRealmsOptions.cs:46`). Per SEC-SIMPL-32 it STAYS (plan text superseded).

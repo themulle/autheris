@@ -10,7 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// GHSA-xpw9-4m63-69pf: Validates that when Federation result masking is enabled, an ISubgraphResultMasker is registered.
+/// GHSA-xpw9-4m63-69pf: Federation masking startup check.
 /// </summary>
 public sealed class FederationMaskingStartupCheck(
     IOptions<FederationOptions> options,

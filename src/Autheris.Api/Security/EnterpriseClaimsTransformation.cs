@@ -86,7 +86,7 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             identity.AddClaim(new Claim("autheris:realm", realmId));
         }
 
-        // GHSA-hw85-rqjh-cwxx: Enforce realm-level client ID allowlist if configured
+        // GHSA-hw85-rqjh-cwxx: realm client allowlist
         if (realm?.AllowedClientIds is { Count: > 0 } allowedClients)
         {
             var clientId = identity.FindFirst("azp")?.Value

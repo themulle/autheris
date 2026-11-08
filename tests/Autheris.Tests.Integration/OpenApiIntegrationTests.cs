@@ -28,7 +28,7 @@ public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactor
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
         var response = await client.GetAsync("/odata/v4/$openapi");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -45,7 +45,7 @@ public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactor
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
         var response = await client.GetAsync("/odata/v4/finance/openapi.json");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -66,7 +66,7 @@ public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactor
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
         var response = await client.GetAsync("/odata/v4/$openapi?format=yaml");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -180,7 +180,7 @@ public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactor
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
         var response = await client.GetAsync("/odata/v4/$openapi/index");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -200,7 +200,7 @@ public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactor
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
         var response = await client.GetAsync("/odata/v4/finance/openapi.json?mode=modular");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -219,7 +219,7 @@ public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactor
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
         var response = await client.GetAsync("/odata/v4/$openapi/schemas/finance/dbo/finance_table_1");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);

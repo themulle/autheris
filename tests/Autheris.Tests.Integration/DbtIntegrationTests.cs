@@ -92,7 +92,7 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-USER-1");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
         var response = await client.GetAsync("/api/extensions/dbt/exposures");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
@@ -150,7 +150,7 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
         // 1. Sync manifest to generate proposal
         var content = new StringContent(SampleDbtManifest, Encoding.UTF8, "application/json");
@@ -219,7 +219,7 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
 
         var sampleRunResults = """
         {
@@ -272,7 +272,7 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-SID");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin");
         client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
 
         // 0. Sync manifest so that models and test target mappings are registered
