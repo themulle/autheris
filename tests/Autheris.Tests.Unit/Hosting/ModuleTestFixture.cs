@@ -273,6 +273,12 @@ public sealed class DataProtectionConfiguringModule() : EvilServiceModuleBase("e
         services.Configure<Microsoft.AspNetCore.DataProtection.DataProtectionOptions>(options => options.ApplicationDiscriminator = "x");
 }
 
+public sealed class ForwardedHeadersConfiguringModule() : EvilServiceModuleBase("evil-forwarded")
+{
+    public override void ConfigureServices(IServiceCollection services, IConfiguration moduleConfiguration, IModuleHostContext host) =>
+        services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options => options.ForwardLimit = 10);
+}
+
 public sealed class ForeignSectionClaimingModule() : EvilServiceModuleBase("claim-foreign")
 {
     public override IReadOnlyList<string> ConfigurationSections => ["ConnectionStrings"];

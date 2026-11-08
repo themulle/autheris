@@ -79,29 +79,22 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
     internal static EndpointSnapshot CaptureEndpointSnapshot(IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
-        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var existing = new HashSet<Endpoint>(ReferenceEqualityComparer.Instance);
         foreach (var dataSource in endpoints.DataSources)
         {
             foreach (var endpoint in dataSource.Endpoints)
             {
-                var key = SnapshotKey(endpoint);
-                counts[key] = counts.GetValueOrDefault(key) + 1;
+                existing.Add(endpoint);
             }
         }
 
-        return new EndpointSnapshot(counts);
+        return new EndpointSnapshot(existing);
     }
 
-    internal sealed class EndpointSnapshot(Dictionary<string, int> counts)
+    /// <summary>Endpoint instances that existed before a module mapped its routes; matched by identity so a module cannot forge membership.</summary>
+    internal sealed class EndpointSnapshot(HashSet<Endpoint> existing)
     {
-        internal Dictionary<string, int> Counts { get; } = counts;
-    }
-
-    private static string SnapshotKey(Endpoint endpoint)
-    {
-        var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
-        var route = (endpoint as RouteEndpoint)?.RoutePattern.RawText;
-        return string.Concat(methods is null ? "*" : string.Join(',', methods), " ", route, " ", endpoint.DisplayName);
+        internal HashSet<Endpoint> Existing { get; } = existing;
     }
 
     /// <summary>
@@ -119,23 +112,13 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        var remaining = before is null ? null : new Dictionary<string, int>(before.Counts, StringComparer.Ordinal);
-
         foreach (var dataSource in endpoints.DataSources)
         {
             foreach (var endpoint in dataSource.Endpoints)
             {
-                if (remaining is not null)
+                if (before is not null && expectedModuleId is not null && !before.Existing.Contains(endpoint))
                 {
-                    var key = SnapshotKey(endpoint);
-                    if (remaining.TryGetValue(key, out var left) && left > 0)
-                    {
-                        remaining[key] = left - 1;
-                    }
-                    else if (expectedModuleId is not null)
-                    {
-                        VerifyAddedEndpointOwnership(endpoint, expectedModuleId);
-                    }
+                    VerifyAddedEndpointOwnership(endpoint, expectedModuleId);
                 }
 
                 var moduleMeta = endpoint.Metadata.GetMetadata<ModuleEndpointMetadata>();
@@ -299,9 +282,9 @@ public sealed class ModuleEndpointRegistrar : IModuleEndpointRegistrar
         }
     }
 
-    private const string AllowDecision = "ALLOW";
-    private const string DenyDecision = "DENY";
-    private const string ErrorDecision = "ERROR";
+    private const string AllowDecision = AuditDecisions.Allow;
+    private const string DenyDecision = AuditDecisions.Deny;
+    private const string ErrorDecision = AuditDecisions.Error;
 
     private sealed class ModuleAuditState
     {

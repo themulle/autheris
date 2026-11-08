@@ -214,6 +214,25 @@ public sealed class LakehouseModuleContractTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Lakehouse_module_loads_under_the_service_guard()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Modules:Enabled:0"] = "lakehouse",
+                ["Gateway:Modules:AllowUnsignedInDevelopment"] = "true",
+                ["Gateway:Modules:WorkspacePath"] = Path.Combine(FindRepositoryRoot(), "modules", "Autheris.Modules.Lakehouse", "bin"),
+            })
+            .Build();
+        var env = new ContractHostEnvironment { EnvironmentName = Environments.Development };
+
+        var result = new ModuleLoader().LoadAndConfigureServices(new ServiceCollection(), config, env);
+
+        result.LoadedModuleIds.ShouldBe(["lakehouse"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Lakehouse_config_without_module_fails_fast()
     {
         var config = new ConfigurationBuilder()

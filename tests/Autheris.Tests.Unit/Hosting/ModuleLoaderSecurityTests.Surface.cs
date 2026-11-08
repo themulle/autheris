@@ -61,6 +61,37 @@ public sealed partial class ModuleLoaderSecurityTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Module_configuring_forwarded_headers_is_rejected() =>
+        AssertModuleRejected("evil-forwarded", typeof(ForwardedHeadersConfiguringModule), "ForwardedHeadersOptions");
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("bad:id")]
+    [InlineData("Upper")]
+    [InlineData("a b")]
+    [InlineData("-lead")]
+    [InlineData("trail-")]
+    [InlineData("dou--ble")]
+    public void Module_id_outside_the_allowed_pattern_is_rejected(string moduleId)
+    {
+        var config = BuildConfig(moduleId);
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Production };
+        var loader = new ModuleLoader(isDirectoryWritableOverride: _ => false);
+
+        Should.Throw<ModuleLoadException>(() => loader.LoadAndConfigureServices(new ServiceCollection(), config, env));
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("Gateway:Caching", true)]
+    [InlineData("Gateway:Caching:Foo", true)]
+    [InlineData("Gateway:Lakehouse", false)]
+    [InlineData("Gateway:Sample", false)]
+    public void Host_config_section_check_covers_parent_prefixes(string section, bool expected) =>
+        ModuleSecurityGuards.IsHostConfigSection(section).ShouldBe(expected);
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Module_claiming_foreign_section_is_rejected()
     {
         AssertModuleRejected("claim-foreign", typeof(ForeignSectionClaimingModule), "ConnectionStrings");

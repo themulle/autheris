@@ -583,13 +583,12 @@ public sealed class ModuleLoader
         }
     }
 
+    private static readonly System.Text.RegularExpressions.Regex ModuleIdPattern =
+        new("^[a-z0-9]+([-_][a-z0-9]+)*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
+
     private static void ValidateModuleIdFormat(string moduleId)
     {
-        if (string.IsNullOrWhiteSpace(moduleId) ||
-            moduleId.Contains("..", StringComparison.Ordinal) ||
-            moduleId.Contains('/', StringComparison.Ordinal) ||
-            moduleId.Contains('\\', StringComparison.Ordinal) ||
-            Path.IsPathRooted(moduleId))
+        if (string.IsNullOrWhiteSpace(moduleId) || !ModuleIdPattern.IsMatch(moduleId))
         {
             throw new ModuleLoadException(
                 string.IsNullOrWhiteSpace(moduleId) ? "unknown" : moduleId,

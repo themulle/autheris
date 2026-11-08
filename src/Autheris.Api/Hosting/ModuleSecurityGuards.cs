@@ -71,6 +71,12 @@ internal static class ModuleSecurityGuards
         "Autheris.Application.Identity",
     ];
 
+    // Options types outside the protected namespaces that still steer host security behavior.
+    private static readonly Type[] ProtectedOptionsTypes =
+    [
+        typeof(Microsoft.AspNetCore.Builder.ForwardedHeadersOptions),
+    ];
+
     private static readonly Type[] OptionsServiceDefinitions =
     [
         typeof(IConfigureOptions<>),
@@ -113,6 +119,21 @@ internal static class ModuleSecurityGuards
 
     internal static bool IsHostConfigSection(string section)
     {
+        // A section is a host section when it, or any parent below the root, is one.
+        var segments = section.Split(':');
+        for (var count = 2; count <= segments.Length; count++)
+        {
+            if (IsHostConfigSectionExact(string.Join(':', segments.Take(count))))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsHostConfigSectionExact(string section)
+    {
         foreach (var protectedPrefix in ProtectedConfigPrefixes)
         {
             if (string.Equals(section, protectedPrefix, StringComparison.OrdinalIgnoreCase) ||
@@ -129,7 +150,7 @@ internal static class ModuleSecurityGuards
         }
 
         var name = section["Gateway:".Length..];
-        if (typeof(Autheris.Domain.Options.GatewayOptions).GetProperty(
+        if (!name.Contains(':', StringComparison.Ordinal) && typeof(Autheris.Domain.Options.GatewayOptions).GetProperty(
                 name,
                 BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase) is not null)
         {
@@ -215,7 +236,8 @@ internal static class ModuleSecurityGuards
         // Open generic definitions have no concrete argument and are skipped.
         if (serviceType.IsConstructedGenericType &&
             OptionsServiceDefinitions.Contains(serviceType.GetGenericTypeDefinition()) &&
-            IsProtectedNamespace(serviceType.GetGenericArguments()[0].Namespace))
+            (IsProtectedNamespace(serviceType.GetGenericArguments()[0].Namespace) ||
+             ProtectedOptionsTypes.Contains(serviceType.GetGenericArguments()[0])))
         {
             return true;
         }

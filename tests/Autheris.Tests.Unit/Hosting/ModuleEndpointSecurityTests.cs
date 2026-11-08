@@ -21,6 +21,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -223,16 +224,46 @@ public sealed class ModuleEndpointSecurityTests
             ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "sample", before));
     }
 
+    [Fact]
+    public void Preexisting_endpoint_lookalike_does_not_pass_ownership_check()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+#pragma warning disable ASP0022 // the duplicate route is the point of the test
+        endpoints.MapGet("/modules/sample/dup", () => Results.Ok());
+        var before = ModuleEndpointRegistrar.CaptureEndpointSnapshot(endpoints);
+
+        // Same method, route and display name as an endpoint that already existed, but a different instance without ownership.
+        endpoints.MapGet("/modules/sample/dup", () => Results.Ok());
+#pragma warning restore ASP0022
+
+        Should.Throw<ModuleLoadException>(() =>
+            ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "sample", before));
+    }
+
     // ---- B11: audit decision (SEC-50-09) ----
 
-    private static (DefaultEndpointFilterInvocationContext Context, FakeAuditWriter Writer) NewFilterContext(bool authenticated = true)
+    private static (DefaultEndpointFilterInvocationContext Context, FakeAuditWriter Writer) NewFilterContext(
+        bool authenticated = true,
+        bool withTenant = true,
+        Autheris.Application.Common.Interfaces.IRateLimiterService? rateLimiter = null)
     {
         var writer = new FakeAuditWriter();
-        var services = new ServiceCollection().AddSingleton<IAuditWriter>(writer).BuildServiceProvider();
+        var collection = new ServiceCollection().AddSingleton<IAuditWriter>(writer);
+        if (rateLimiter is not null)
+        {
+            collection.AddSingleton(rateLimiter);
+        }
+
+        var services = collection.BuildServiceProvider();
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, "S-1-5-21-1") };
+        if (withTenant)
+        {
+            claims.Add(new Claim("tenant_id", "tenant-a"));
+        }
+
         var identity = authenticated
-            ? new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, "S-1-5-21-1"), new Claim("tenant_id", "tenant-a")],
-                authenticationType: "TestAuth")
+            ? new ClaimsIdentity(claims, authenticationType: "TestAuth")
             : new ClaimsIdentity();
         var httpContext = new DefaultHttpContext { RequestServices = services, User = new ClaimsPrincipal(identity) };
         httpContext.Request.Path = "/modules/sample/x";
@@ -317,5 +348,41 @@ public sealed class ModuleEndpointSecurityTests
             await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
                 "sample", thrown, _ => throw new InvalidOperationException("x")));
         thrownWriter.Entries.ShouldHaveSingleItem().Decision.ShouldBe("ERROR");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-09")]
+    public async Task Rate_limited_request_is_audited_once_as_deny()
+    {
+        var limiter = NSubstitute.Substitute.For<Autheris.Application.Common.Interfaces.IRateLimiterService>();
+        limiter.CheckPostAuthSidAsync(
+                Arg.Any<string>(),
+                Arg.Any<Autheris.Domain.Options.PostAuthSidRateLimitOptions>(),
+                Arg.Any<System.Threading.CancellationToken>())
+            .Returns(Task.FromResult(new Autheris.Application.Common.Interfaces.RateLimitResult(false, 30)));
+        var (context, writer) = NewFilterContext(rateLimiter: limiter);
+
+        var result = await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+            "sample", context, Returning(Results.Ok()));
+
+        result.ShouldBeAssignableTo<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>()!
+            .StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+        writer.Entries.ShouldHaveSingleItem().Decision.ShouldBe(Autheris.Domain.Audit.AuditDecisions.Deny);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-09")]
+    public async Task Unresolved_tenant_is_audited_once_as_deny()
+    {
+        var (context, writer) = NewFilterContext(withTenant: false);
+
+        var result = await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+            "sample", context, Returning(Results.Ok()));
+
+        result.ShouldBeAssignableTo<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>()!
+            .StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        writer.Entries.ShouldHaveSingleItem().Decision.ShouldBe(Autheris.Domain.Audit.AuditDecisions.Deny);
     }
 }
