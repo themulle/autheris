@@ -191,6 +191,7 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:Arrow:Enabled", "true");
                 b.UseSetting("Gateway:Modules:Enabled:0", "lakehouse");
+                LakehouseWorkspaceTestSettings.Apply((k, v) => b.UseSetting(k, v));
                 b.UseSetting("Gateway:Lakehouse:Enabled", "true");
                 if (defaultTenantId is not null)
                 {

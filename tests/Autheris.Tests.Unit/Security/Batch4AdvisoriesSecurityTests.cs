@@ -189,13 +189,20 @@ public sealed class Batch4AdvisoriesSecurityTests
         metaRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(meta);
 
+        var options = Options.Create(new GatewayOptions());
+        var adp = new AccessDecisionPoint(
+            options,
+            Substitute.For<IPolicyEnforcementService>(),
+            transportGate: gate,
+            metadataRepo: metaRepo);
+
         var service = new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(),
             metaRepo,
-            Options.Create(new GatewayOptions()),
+            options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
             Substitute.For<IAuditLogRepository>(),
-            transportGate: gate);
+            adp);
 
         var user = Wp0.User("user-1", Tenant.Value);
         await Should.ThrowAsync<TransportNotAllowedException>(() =>

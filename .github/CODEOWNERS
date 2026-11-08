@@ -13,12 +13,11 @@ src/Autheris.Application/VirtualFilters/  @themulle
 
 # Subsystem 3: Masking
 # subsystem: masking | primary: @themulle | backup: vacant
-src/Autheris.Application/Data/  @themulle
+src/Autheris.Application/Sql/Masking/  @themulle
 
 # Subsystem 4: Audit
 # subsystem: audit | primary: @themulle | backup: vacant
 src/Autheris.Application/Audit/  @themulle
-src/Autheris.Application/Auditing/  @themulle
 src/Autheris.Domain/Audit/  @themulle
 
 # Subsystem 5: Policy & Authorization
@@ -40,16 +39,13 @@ src/Autheris.Domain/Tenancy/  @themulle
 src/TrinoSqlEngine/  @themulle
 tests/Autheris.Tests.SqlCompilerGate/  @themulle
 src/Autheris.Application/Sql/  @themulle
-src/Autheris.Application/SqlEndpoints/  @themulle
+src/Autheris.Application/Sql/Endpoints/  @themulle
 
 # Subsystem 8: Catalog & Classification
 # subsystem: catalog | primary: @themulle | backup: vacant
 src/Autheris.Application/Catalog/  @themulle
-src/Autheris.Application/DataCatalog/  @themulle
-src/Autheris.Application/OpenMetadata/  @themulle
-src/Autheris.Application/SchemaRegistry/  @themulle
+src/Autheris.Application/Catalog/OpenMetadata/  @themulle
 src/Autheris.Application/Lineage/  @themulle
-src/Autheris.Application/Dbt/  @themulle
 src/Autheris.Extensions/DataCatalog/  @themulle
 src/Autheris.Extensions/OpenMetadata/  @themulle
 src/Autheris.Extensions/Dbt/  @themulle
@@ -99,34 +95,36 @@ Directory.Build.props  @themulle
 NuGet.config  @themulle
 **/packages.lock.json  @themulle
 src/Autheris.Application/Analytics/  @themulle
-src/Autheris.Application/Caching/  @themulle
 src/Autheris.Application/Common/  @themulle
-src/Autheris.Application/Connectors/  @themulle
+src/Autheris.Application/Common/Hosting/  @themulle
+src/Autheris.Application/Common/Interfaces/  @themulle
+src/Autheris.Application/Common/Serialization/  @themulle
 src/Autheris.Application/DataSources/  @themulle
-src/Autheris.Application/Diagnostics/  @themulle
+src/Autheris.Application/DataSources/Connectors/  @themulle
 src/Autheris.Application/Events/  @themulle
 src/Autheris.Application/Extensibility/  @themulle
 src/Autheris.Application/Federation/  @themulle
 src/Autheris.Application/FinOps/  @themulle
-src/Autheris.Application/Hosting/  @themulle
-src/Autheris.Application/Integrations/  @themulle
-src/Autheris.Application/Interfaces/  @themulle
-src/Autheris.Application/Jobs/  @themulle
+src/Autheris.Application/Governance/Caching/  @themulle
+src/Autheris.Application/Governance/Diagnostics/  @themulle
+src/Autheris.Application/Governance/Workflows/  @themulle
+src/Autheris.Application/Identity/Caching/  @themulle
+src/Autheris.Application/Mcp/Diagnostics/  @themulle
 src/Autheris.Application/Mesh/  @themulle
 src/Autheris.Application/OData/  @themulle
 src/Autheris.Application/Observability/  @themulle
+src/Autheris.Application/Observability/Telemetry/  @themulle
 src/Autheris.Application/Olap/  @themulle
-src/Autheris.Application/Performance/  @themulle
 src/Autheris.Application/Plugins/  @themulle
 src/Autheris.Application/Runtime/  @themulle
-src/Autheris.Application/ResourceGroups/  @themulle
-src/Autheris.Application/Serialization/  @themulle
+src/Autheris.Application/Runtime/Hosting/  @themulle
+src/Autheris.Application/Runtime/Jobs/  @themulle
+src/Autheris.Application/Runtime/ResourceGroups/  @themulle
 src/Autheris.Application/Services/  @themulle
 src/Autheris.Application/State/  @themulle
+src/Autheris.Application/State/Caching/  @themulle
 src/Autheris.Application/Streaming/  @themulle
-src/Autheris.Application/Telemetry/  @themulle
 src/Autheris.Application/Webhooks/  @themulle
-src/Autheris.Application/Workflows/  @themulle
 src/Autheris.Domain/Caching/  @themulle
 src/Autheris.Domain/Common/  @themulle
 src/Autheris.Domain/Connectors/  @themulle
@@ -136,12 +134,9 @@ src/Autheris.Domain/Exceptions/  @themulle
 src/Autheris.Domain/Interfaces/  @themulle
 src/Autheris.Domain/Model/  @themulle
 src/Autheris.Domain/Options/  @themulle
+src/Autheris.Domain/Options/Integrations/  @themulle
 src/Autheris.Domain/Plugins/  @themulle
-src/Autheris.Extensions/Backstage/  @themulle
 src/Autheris.Extensions/Cdc/  @themulle
-src/Autheris.Extensions/Itsm/  @themulle
-src/Autheris.Extensions/Lakehouse/  @themulle
-src/Autheris.Extensions/OData/  @themulle
 
 # Subsystem 14: Docs
 # subsystem: docs | primary: @themulle | backup: vacant

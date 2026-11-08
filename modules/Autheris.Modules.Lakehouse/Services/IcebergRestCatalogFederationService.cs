@@ -40,32 +40,19 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         IOptions<GatewayOptions> options,
         ILogger<IcebergRestCatalogFederationService> logger,
         IAuditLogRepository auditRepository,
-        IConsentResolutionService? consentService = null,
+        IAccessDecisionPoint accessDecisionPoint,
         IConsentRepository? consentRepo = null,
-        IPolicyEnforcementService? policyEnforcementService = null,
-        IClientIpResolver? clientIpResolver = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
-        IRebacEvaluator? rebacEvaluator = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
-        IAccessDecisionPoint? accessDecisionPoint = null)
+        IRebacEvaluator? rebacEvaluator = null)
     {
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _auditRepository = auditRepository ?? throw new ArgumentNullException(nameof(auditRepository));
+        ArgumentNullException.ThrowIfNull(accessDecisionPoint);
+        _accessDecisionPoint = accessDecisionPoint;
         _consentRepo = consentRepo;
         _rebacEvaluator = rebacEvaluator;
-        _accessDecisionPoint = accessDecisionPoint ?? new AccessDecisionPoint(
-            _options,
-            consentService,
-            consentRepo,
-            policyEnforcementService,
-            clientIpResolver,
-            mandatoryFilters,
-            rebacEvaluator,
-            metadataRepo,
-            transportGate);
     }
 
     public async ValueTask<IReadOnlyList<string>> ListNamespacesAsync(string tenantId, ClaimsPrincipal principal, CancellationToken ct = default)
