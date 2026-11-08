@@ -654,3 +654,4 @@ ast;ast-012;@mask-hmac
 ast;ast-013;@mask-constant
 ast;ast-014;@mask-geojitter
 ast;ast-015;@parenthesized
+ast;ast-016;@page-offset

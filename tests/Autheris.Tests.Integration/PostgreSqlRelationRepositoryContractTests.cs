@@ -2,6 +2,8 @@ namespace Autheris.Tests.Integration;
 
 using System.Data.Common;
 using System.Threading.Tasks;
+using Xunit;
+using Shouldly;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
@@ -60,4 +62,24 @@ public sealed class PostgreSqlRelationRepositoryContractTests : RelationReposito
         "CREATE TRIGGER trg_fail_key_insert BEFORE INSERT ON TABLE_RELATION_KEYS FOR EACH ROW WHEN (NEW.key_ordinal = 2) EXECUTE FUNCTION trg_fail_key_insert_fn()";
 
     protected override string RemoveKeyInsertFailureSql => "DROP TRIGGER IF EXISTS trg_fail_key_insert ON TABLE_RELATION_KEYS; DROP FUNCTION IF EXISTS trg_fail_key_insert_fn()";
+
+    [Fact]
+    public async Task PostgreSql_CreateRelation_ResolvesTableIdsFromIdentifiers()
+    {
+        if (_repo is null)
+        {
+            return;
+        }
+
+        // AC-151-4: the repository no longer trusts relation.ParentTableId/ChildTableId (the helper passes random ids).
+        var parent = NewTable("parent");
+        var child = NewTable("child");
+        await SeedTableAsync(parent);
+        await SeedTableAsync(child);
+
+        var result = await Repo.CreateRelationAsync(Rel(parent, child, ["a"], ["b"]));
+
+        var stored = Scalar("SELECT parent_table_id || '|' || child_table_id FROM TABLE_RELATIONS WHERE id = @id", ("@id", result.StoredId.ToString()));
+        stored.ShouldBe($"{TableId(parent)}|{TableId(child)}");
+    }
 }

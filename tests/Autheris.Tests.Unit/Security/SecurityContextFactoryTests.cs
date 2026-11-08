@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Security;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -207,5 +208,30 @@ public sealed class SecurityContextFactoryTests
         }, ClusterAdminPolicy.ForwardAuthScheme));
 
         ClusterAdminPolicy.IsCanonicalClusterAdmin(principal).ShouldBeFalse();
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-AUTH-BG")]
+    [InlineData("X-Break-Glass-Justification")]
+    [InlineData("X-Justification")]
+    public void BreakGlass_headers_ignored(string headerName)
+    {
+        const string Marker = "marker-justification-value";
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", "S-1-5-21-USER1"), new Claim("tenant_id", "tenant-alpha")], "Bearer"));
+        httpContext.Request.Headers[headerName] = Marker;
+
+        var ctx = SecurityContextFactory.CreateFromHttpContext(httpContext);
+
+        ctx.IsAuthenticated.ShouldBeTrue();
+        typeof(Autheris.Domain.Security.SecurityPrincipalContext).GetProperties()
+            .ShouldNotContain(p => p.Name.Contains("Justification", StringComparison.OrdinalIgnoreCase));
+        typeof(SecurityContextFactory).GetFields().ShouldNotContain(f => f.Name.Contains("Justification", StringComparison.OrdinalIgnoreCase));
+        foreach (var property in ctx.GetType().GetProperties().Where(p => p.PropertyType == typeof(string)))
+        {
+            (property.GetValue(ctx) as string).ShouldNotBe(Marker);
+        }
     }
 }

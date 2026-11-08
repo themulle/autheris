@@ -228,13 +228,11 @@ Rendered as the entries of a container "env" list.
       name: {{ .Values.gateway.authentication.forwardAuth.sharedSecret.existingSecret }}
       key: {{ .Values.gateway.authentication.forwardAuth.sharedSecret.key | default "sharedSecret" }}
 {{- end }}
-{{- if .Values.gateway.governanceDb.existingSecret }}
 - name: Gateway__GovernanceDb__ConnectionString
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.gateway.governanceDb.existingSecret }}
+      name: {{ required "gateway.governanceDb.existingSecret is required (secret holding the governance connection string)" .Values.gateway.governanceDb.existingSecret }}
       key: {{ .Values.gateway.governanceDb.connectionStringSecretKey }}
-{{- end }}
 {{- if and .Values.gateway.redis.enabled .Values.gateway.redis.existingSecret }}
 - name: Gateway__Caching__Redis__Configuration
   valueFrom:

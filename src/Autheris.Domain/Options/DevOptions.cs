@@ -36,21 +36,10 @@ public sealed class DevOptions
     /// <summary>Class A: seed demo catalog data. Null = preset default.</summary>
     public bool? DemoData { get; init; }
 
-    /// <summary>Class A: keep the governance database in a file instead of memory.</summary>
-    public DevPersistOptions Persist { get; init; } = new();
-
     /// <summary>Class B: header-based test identities (<c>X-Test-User-Sid</c>). Null = preset default.</summary>
     public bool? TestAuthHandler { get; init; }
 
     public DevToolingOptions Tooling { get; init; } = new();
-}
-
-public sealed class DevPersistOptions
-{
-    public bool Enabled { get; init; } = false;
-
-    /// <summary>Directory of <c>dev.db</c> (and its audit anchor). Created on start.</summary>
-    public string Directory { get; init; } = ".data";
 }
 
 public sealed class DevToolingOptions
@@ -70,11 +59,10 @@ public sealed record DevFeatures(
     bool VerboseErrors,
     bool PersonaLogin,
     bool Info,
-    bool PersistDb,
     IReadOnlyList<string> DevSecurity,
     bool ShowPasswords = false)
 {
-    public static DevFeatures Off { get; } = new(false, false, false, false, false, [], false);
+    public static DevFeatures Off { get; } = new(false, false, false, false, [], false);
 
     /// <summary>
     /// Class B switches that are active (they change who can access what, development only).
@@ -96,7 +84,6 @@ public sealed record DevFeatures(
             options.Dev.VerboseErrors,
             options.Dev.PersonaLogin,
             options.Dev.Info,
-            options.Dev.Persist.Enabled,
             devSecurity,
             options.Dev.ShowPasswords);
     }
@@ -126,7 +113,6 @@ public static class DevOptionsValidator
         // ignored there (they resolve to off), so they are not an error.
         var violations = new List<string>();
         if (!string.Equals(dev.Preset, DevOptions.PresetStandard, StringComparison.OrdinalIgnoreCase)) violations.Add("Preset");
-        if (dev.Persist.Enabled) violations.Add("Persist:Enabled");
         if (dev.DemoData == true) violations.Add("DemoData");
         if (dev.TestAuthHandler == true) violations.Add("TestAuthHandler");
         if (dev.Tooling.BananaCakePop == true) violations.Add("Tooling:BananaCakePop");

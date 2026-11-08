@@ -6,22 +6,22 @@ namespace Autheris.Tests.Parity.Infrastructure;
 
 /// <summary>
 /// An ephemeral in-process host created for tests that perform state mutations (such as GraphQL mutations).
-/// Runs against its own isolated SQLite seed files and governance database so it never disrupts the shared <see cref="ParityHostFixture"/>.
+/// Runs against its own isolated SQLite seed files and PostgreSQL governance database so it never disrupts the shared <see cref="ParityHostFixture"/>.
 /// </summary>
 public sealed class IsolatedParityHost : IAsyncDisposable, IParityHost
 {
     private readonly string _workDir;
     private readonly string _dataPath;
     private readonly string _secondPath;
-    private readonly string _govPath;
+    private readonly string _govConnectionString;
     private WebApplicationFactory<Program>? _factory;
 
-    private IsolatedParityHost(string workDir, string dataPath, string secondPath, string govPath)
+    private IsolatedParityHost(string workDir, string dataPath, string secondPath, string govConnectionString)
     {
         _workDir = workDir;
         _dataPath = dataPath;
         _secondPath = secondPath;
-        _govPath = govPath;
+        _govConnectionString = govConnectionString;
     }
 
     public static async Task<IsolatedParityHost> CreateAsync(bool enableSubscriptions = false)
@@ -31,11 +31,11 @@ public sealed class IsolatedParityHost : IAsyncDisposable, IParityHost
         Directory.CreateDirectory(workDir);
         var dataPath = Path.Combine(workDir, "data.db");
         var secondPath = Path.Combine(workDir, "second.db");
-        var govPath = Path.Combine(workDir, "gov.db");
+        var govConnectionString = await ParityGovernanceDatabase.CreateAsync();
         ParitySeed.Create(dataPath);
         ParitySeed.Create(secondPath, ParitySeed.SecondSales);
 
-        var host = new IsolatedParityHost(workDir, dataPath, secondPath, govPath);
+        var host = new IsolatedParityHost(workDir, dataPath, secondPath, govConnectionString);
         using (var seeding = host.NewHost(enableSubscriptions))
         {
             await ParityHostFixture.RegisterCatalogAsync(seeding);
@@ -55,7 +55,7 @@ public sealed class IsolatedParityHost : IAsyncDisposable, IParityHost
 
     private WebApplicationFactory<Program> NewHost(bool enableSubscriptions) => new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
     {
-        ParityHostSettings.Apply(b, _govPath);
+        ParityHostSettings.Apply(b, _govConnectionString);
         b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
         b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataPath}");
         b.UseSetting("Gateway:DataSources:Connections:second:Provider", "Sqlite");

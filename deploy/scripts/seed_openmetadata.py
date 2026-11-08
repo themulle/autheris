@@ -145,7 +145,7 @@ def seed_services_and_databases(token):
                     "scheme": "postgresql+psycopg2",
                     "hostPort": "sqlserver:1433",
                     "username": "sa",
-                    "authType": {"password": "Password123!"},
+                    "authType": {"password": os.environ.get("MSSQL_SA_PASSWORD", "")},
                     "database": "crm"
                 }
             }

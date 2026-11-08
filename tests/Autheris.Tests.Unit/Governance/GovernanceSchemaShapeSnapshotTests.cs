@@ -11,55 +11,24 @@ using Xunit;
 namespace Autheris.Tests.Unit.Governance;
 
 /// <summary>
-/// Plan D-2: the embedded <c>governance-shape.sqlite.json</c> is generated from a freshly migrated database and compared strictly.
+/// Plan D-2: the embedded governance shape snapshots list the tables of the server baselines (snapshot equality against a migrated database runs in the integration tests).
 /// On a mismatch the test writes the actual snapshot to <c>AUTHERIS_SHAPE_SNAPSHOT_DIR</c> (default: temp) and fails; nobody edits the file by hand.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class GovernanceSchemaShapeSnapshotTests
 {
     [Fact]
-    public async Task EmbeddedSnapshot_EqualsShapeOfFreshlyMigratedDatabase()
-    {
-        var cs = $"Data Source=shape_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = cs, SeedDemoData = false }
-        });
-        using var repository = GovernanceStoreFactory.CreateUnmigratedSqlite(Substitute.For<IEpochValidationService>(), options);
-
-        var reader = new SqliteSchemaCatalogReader();
-        await using var connection = await repository.Connections.OpenAsync(CancellationToken.None);
-        // The baseline DDL is applied directly: the runner itself depends on the snapshot that this test generates.
-        new SqliteBaselineSchema(connection, null).Apply();
-        var tables = await reader.ListTablesAsync(connection, CancellationToken.None);
-        var actual = await reader.ReadAsync(connection, tables, CancellationToken.None);
-        var actualJson = GovernanceSchemaShapeLoader.Serialize(actual);
-
-        var resource = GovernanceSchemaShapeLoader.ResourceName("sqlite");
-        using var stream = typeof(GovernanceSchemaShapeLoader).Assembly.GetManifestResourceStream(resource);
-        var expectedJson = stream is null ? null : new StreamReader(stream).ReadToEnd().ReplaceLineEndings("\n");
-        if (expectedJson != actualJson)
-        {
-            var dir = Environment.GetEnvironmentVariable("AUTHERIS_SHAPE_SNAPSHOT_DIR") ?? Path.GetTempPath();
-            var path = Path.Combine(dir, resource);
-            File.WriteAllText(path, actualJson);
-            Assert.Fail($"The embedded snapshot '{resource}' differs from the migrated schema. The actual snapshot was written to '{path}'; copy it to src/Autheris.Infrastructure/Persistence/Migrations/Shape/.");
-        }
-    }
-
-    [Fact]
     public void EmbeddedSnapshot_CoversTheDeclaredKeyAndIndexTables()
     {
-        var shape = GovernanceSchemaShapeLoader.LoadEmbedded("sqlite");
+        var shape = GovernanceSchemaShapeLoader.LoadEmbedded("postgresql");
 
-        shape.Tables.Select(t => t.Name).ShouldContain("TABLE_PRIMARY_KEY_COLUMNS");
-        shape.Tables.Select(t => t.Name).ShouldContain("TABLE_INDEXES");
-        shape.Tables.Select(t => t.Name).ShouldContain("TABLE_INDEX_COLUMNS");
+        shape.Tables.Select(t => t.Name.ToUpperInvariant()).ShouldContain("TABLE_PRIMARY_KEY_COLUMNS");
+        shape.Tables.Select(t => t.Name.ToUpperInvariant()).ShouldContain("TABLE_INDEXES");
+        shape.Tables.Select(t => t.Name.ToUpperInvariant()).ShouldContain("TABLE_INDEX_COLUMNS");
         shape.Tables.ShouldAllBe(t => t.Columns.Count > 0);
     }
 
     [Theory]
-    [InlineData("sqlite", "TABLE_TAGS", "TABLE_CATALOG_SETTINGS")]
     [InlineData("postgresql", "table_tags", "table_catalog_settings")]
     [InlineData("sqlserver", "TABLE_TAGS", "TABLE_CATALOG_SETTINGS")]
     public void EmbeddedSnapshot_CoversTheCatalogTagAndSettingsTables(string engine, string tags, string settings)
@@ -76,7 +45,6 @@ public sealed class GovernanceSchemaShapeSnapshotTests
     }
 
     [Theory]
-    [InlineData("sqlite", "CONSUMER_APP_DAILY", "CONSUMER_APP_ACTOR_DAILY", "CONSUMER_APP_QUERYNAME_DAILY")]
     [InlineData("postgresql", "consumer_app_daily", "consumer_app_actor_daily", "consumer_app_queryname_daily")]
     [InlineData("sqlserver", "CONSUMER_APP_DAILY", "CONSUMER_APP_ACTOR_DAILY", "CONSUMER_APP_QUERYNAME_DAILY")]
     public void EmbeddedSnapshot_CoversConsumerAppTables(string engine, string daily, string actor, string queryName)
@@ -100,7 +68,6 @@ public sealed class GovernanceSchemaShapeSnapshotTests
     }
 
     [Theory]
-    [InlineData("sqlite", "TRUSTED_DOCUMENT_APPS", "TRUSTED_DOCUMENT_APP_ORIGINS", "TRUSTED_DOCUMENT_APP_VERSIONS", "TRUSTED_DOCUMENT_HASHES", "TRUSTED_DOCUMENT_GENERATION")]
     [InlineData("postgresql", "trusted_document_apps", "trusted_document_app_origins", "trusted_document_app_versions", "trusted_document_hashes", "trusted_document_generation")]
     [InlineData("sqlserver", "TRUSTED_DOCUMENT_APPS", "TRUSTED_DOCUMENT_APP_ORIGINS", "TRUSTED_DOCUMENT_APP_VERSIONS", "TRUSTED_DOCUMENT_HASHES", "TRUSTED_DOCUMENT_GENERATION")]
     public void EmbeddedSnapshot_CoversTrustedDocumentTables(string engine, string apps, string origins, string versions, string hashes, string generation)
@@ -130,7 +97,6 @@ public sealed class GovernanceSchemaShapeSnapshotTests
     }
 
     [Theory]
-    [InlineData("sqlite", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]
     [InlineData("postgresql", "table_row_filter_strategies", "consent_row_filters")]
     [InlineData("sqlserver", "TABLE_ROW_FILTER_STRATEGIES", "CONSENT_ROW_FILTERS")]
     public void EmbeddedSnapshot_CoversTheRowFilterStrategyTable(string engine, string strategies, string rowFilters)
@@ -148,7 +114,6 @@ public sealed class GovernanceSchemaShapeSnapshotTests
     }
 
     [Theory]
-    [InlineData("sqlite", "TABLE_RELATIONS", "TABLE_RELATION_KEYS", "UX_TABLE_RELATIONS_NATURAL")]
     [InlineData("postgresql", "table_relations", "table_relation_keys", "ux_table_relations_natural")]
     [InlineData("sqlserver", "TABLE_RELATIONS", "TABLE_RELATION_KEYS", "UX_TABLE_RELATIONS_NATURAL")]
     public void EmbeddedSnapshot_CoversTheRelationKeyTable(string engine, string relations, string keys, string naturalIndex)
@@ -169,7 +134,6 @@ public sealed class GovernanceSchemaShapeSnapshotTests
     }
 
     [Theory]
-    [InlineData("sqlite", "CATALOG_STATE", "TABLE_RELATIONS", "IX_TABLE_RELATIONS_PARENT", "IX_TABLE_RELATIONS_CHILD")]
     [InlineData("postgresql", "catalog_state", "table_relations", "ix_table_relations_parent", "ix_table_relations_child")]
     [InlineData("sqlserver", "CATALOG_STATE", "TABLE_RELATIONS", "ix_table_relations_parent", "ix_table_relations_child")]
     public void EmbeddedSnapshot_CoversCatalogStateAndRelationIndexes(string engine, string catalogState, string relations, string parentIndex, string childIndex)

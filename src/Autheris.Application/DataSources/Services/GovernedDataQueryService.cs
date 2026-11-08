@@ -195,7 +195,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         }
 
         // 6. Execution & Routing
-        var queryRequest = new GovernedSqlQueryRequest(planned.Sql, planned.Parameters.Count > 0 ? planned.Parameters : null, Transport: request.Transport);
+        var queryRequest = new GovernedSqlQueryRequest(planned.Sql, planned.Parameters.Count > 0 ? planned.Parameters : null, Transport: request.Transport, PlannedTableRead: true);
         GovernedSqlResult sqlResult;
 
         if (isCrossSource)

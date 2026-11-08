@@ -174,7 +174,7 @@ public static class GatewayStartupValidator
     /// <summary>
     /// 26 (X1): every stored row predicate that the production parser rejects denies its table, and so does a dialect that WebSQL
     /// does not admit. A deny at scale is an outage, so the start lists all of them (a warning per table, ids and codes only). The same
-    /// lint runs as the blocking pre-deploy step <c>tools/PolicyPredicateLint</c>.
+    /// lint (<c>PolicyPredicateLinter</c>) runs here at startup; the runtime deny is the enforcing control, there is no separate pre-deploy step.
     /// </summary>
     public static IReadOnlyList<DeniedTable> ListDeniedTables(
         PolicyLintInput input,
@@ -211,7 +211,7 @@ public static class GatewayStartupValidator
 
         if (denied.Count > 0)
         {
-            logger?.LogWarning("Governed SQL: {Count} table/policy combination(s) are denied at startup. Run tools/PolicyPredicateLint before the next deploy.", denied.Count);
+            logger?.LogWarning("Governed SQL: {Count} table/policy combination(s) are denied at startup. Fix the listed policies; each denied table stays denied until then.", denied.Count);
         }
 
         return denied;
@@ -672,27 +672,7 @@ public static class GatewayStartupValidator
     }
 
     internal static bool IsSupportedGovernanceDbProvider(string? provider) =>
-        DataSourceProvider.Is(provider, DatabaseDialect.Sqlite) || DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer);
-
-    internal static bool IsInMemorySqlite(string? connectionString)
-    {
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return false;
-        }
-
-        try
-        {
-            var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString);
-            return builder.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) ||
-                   builder.Mode == Microsoft.Data.Sqlite.SqliteOpenMode.Memory;
-        }
-        catch (ArgumentException)
-        {
-            return connectionString.Contains(":memory:", StringComparison.OrdinalIgnoreCase) ||
-                   connectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase);
-        }
-    }
+        DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer);
 
     internal static bool IsTruthy(string? value)
     {

@@ -7622,6 +7622,21 @@
           "Value": "x"
         }
       ]
+    },
+    {
+      "Id": "ast-016",
+      "Group": "ast",
+      "Sql": "@page-offset",
+      "Outcome": "ok",
+      "Expected": "SELECT `a` AS `r` FROM `s`.`t` LIMIT 10 OFFSET :p1",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int64",
+          "Origin": "PageOffset",
+          "ValueType": "null"
+        }
+      ]
     }
   ]
 }

@@ -68,9 +68,8 @@ public static partial class GatewayGovernanceServiceExtensions
         // the durable CDC webhook subscription store is a view of the governance repository (only when the feature is on).
         var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
 
-        // one state directory for the SQLite governance database and the audit anchor next to it.
+        // one state directory (Gateway:State:StateDirectory) for the gateway state files.
         services.AddOptions<StateOptions>().BindConfiguration(StateOptions.SectionName).ValidateOnStart();
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<StateOptions>, StateOptionsValidator>();
         services.AddSingleton<IGatewayStatePaths, GatewayStatePaths>();
 
         // ARC-I-13: the anchor store is a required repository dependency; AU-01/AU-03 are enforced when it is built.
@@ -96,9 +95,7 @@ public static partial class GatewayGovernanceServiceExtensions
         }
         else
         {
-            RegisterGovernanceAggregateStores<SqliteGovernanceRepository, SqliteGovernanceMigrationRunner>(
-                services,
-                cdcWebhooksEnabled);
+            throw new InvalidOperationException("Governance provider unsupported (OD-1). See docs/operations/migration-simplification.md.");
         }
 
         // durable, fenced CDC watermarks live in the governance database (the extension registers no store).

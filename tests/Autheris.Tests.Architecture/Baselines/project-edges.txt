@@ -55,7 +55,5 @@ Autheris.Tests.Unit->Autheris.Modules.Abstractions
 Autheris.Tests.Unit->Autheris.Modules.Lakehouse
 Autheris.Tests.Unit->Autheris.Tests.Common
 Autheris.Tests.Unit->TrinoSqlEngine
-PolicyPredicateLint->Autheris.Application
-PolicyPredicateLint->Autheris.Infrastructure
 TrinoSqlEngine.Tests->TrinoSqlEngine
 casbin-policy-lint->Autheris.Application

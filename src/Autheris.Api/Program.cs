@@ -54,6 +54,8 @@ builder.Host.UseDefaultServiceProvider(options =>
 Autheris.Api.Configuration.LegacySwitchGuard.ThrowIfLegacyKeysSet(builder.Configuration);
 Autheris.Api.Configuration.SerilogSectionGuard.ThrowIfConfigured(builder.Configuration);
 var devReport = Autheris.Api.Configuration.DevConfiguration.Apply(builder.Configuration, builder.Environment);
+// fail closed on an unsupported governance provider; sees the effective configuration (env/CLI/appsettings/dev), no exemption.
+Autheris.Api.Configuration.GovernanceProviderGuard.ThrowIfUnsupported(builder.Configuration, builder.Environment);
 Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(builder.Configuration);
 builder.Services.AddSingleton(devReport);
 
@@ -73,6 +75,9 @@ builder.Services.AddGatewayModules(builder.Configuration, builder.Environment, g
 
 // 4. Build and Pipeline Configuration
 var app = builder.Build();
+
+// the audit chain anchor store must resolve (no default store exists for an unsupported provider).
+Autheris.Api.Extensions.DependencyInjection.GovernanceStartupAssertions.AssertAnchorStoreResolvable(app.Services);
 
 // init-job mode. Applies the governance schema migrations (honoring GovernanceDb:Migrations) and exits without serving.
 if (Array.IndexOf(args, "--migrate-governance") >= 0 || Array.IndexOf(args, "--verify-governance") >= 0)

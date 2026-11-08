@@ -21,6 +21,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
@@ -74,8 +75,8 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
         {
             builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("IntegrationTestBillingPlugin"));
             builder.ConfigureServices(services =>
             {
                 // Register a mock HttpClientFactory that serves declarative REST responses

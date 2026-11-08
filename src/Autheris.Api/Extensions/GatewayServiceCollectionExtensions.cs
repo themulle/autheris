@@ -114,7 +114,7 @@ public static partial class GatewayServiceCollectionExtensions
         var hostContext = new ModuleHostContext(
             TimeProvider.System,
             ModuleLoader.DefaultHostVersion,
-            new GovernanceConnectionFactory(gatewayOptions.GovernanceDb, statePaths: null, environment));
+            new GovernanceConnectionFactory(gatewayOptions.GovernanceDb));
         var logger = bootstrapLoggerFactory?.CreateLogger<ModuleLoader>();
         var loader = new ModuleLoader(logger: logger);
         var moduleLoadResult = loader.LoadAndConfigureServices(services, configuration, environment, hostContext);

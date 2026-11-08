@@ -98,6 +98,11 @@ internal static class ProductionStartupChecks
             return;
         }
 
+        if (!options.WebSql.Cost.Enabled)
+        {
+            throw new ValidationException("Security violation: WebSql:Cost:Enabled must not be false outside Development.");
+        }
+
         // RR-L3-05: warn_enable_introspection and GraphQL:EnableIntrospection are prohibited outside Development without explicit opt-in
         if ((options.IsIntrospectionForced || options.GraphQL.EnableIntrospection) && !options.AllowInsecureWarnFlagsInProduction)
         {

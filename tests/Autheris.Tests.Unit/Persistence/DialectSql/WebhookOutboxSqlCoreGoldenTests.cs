@@ -32,56 +32,56 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
     {
         "PostgreSql" => PostgreSqlGovernanceRepository.WebhookOutboxSql.ClaimBatch(),
         "SqlServer" => SqlServerGovernanceRepository.WebhookOutboxSql.ClaimBatch(),
-        _ => SqliteGovernanceRepository.WebhookOutboxSql.ClaimBatch()
+        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
 
     private static string EnqueueSql(string dialect) => dialect switch
     {
         "PostgreSql" => PostgreSqlGovernanceRepository.WebhookOutboxSql.Enqueue,
         "SqlServer" => SqlServerGovernanceRepository.WebhookOutboxSql.Enqueue,
-        _ => SqliteGovernanceRepository.WebhookOutboxSql.Enqueue
+        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
 
     private static string FencedSql(string dialect, string setClause) => dialect switch
     {
         "PostgreSql" => PostgreSqlGovernanceRepository.WebhookOutboxSql.FencedUpdate(setClause),
         "SqlServer" => SqlServerGovernanceRepository.WebhookOutboxSql.FencedUpdate(setClause),
-        _ => SqliteGovernanceRepository.WebhookOutboxSql.FencedUpdate(setClause)
+        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
 
     private static Action<DbCommand, WebhookFencedValues> Binder(string dialect) => dialect switch
     {
         "PostgreSql" => PostgreSqlGovernanceRepository.BindFencedUpdate,
         "SqlServer" => SqlServerGovernanceRepository.BindFencedUpdate,
-        _ => SqliteGovernanceRepository.BindFencedUpdate
+        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
 
     private static string DeferSql(string dialect) => dialect switch
     {
         "PostgreSql" => PostgreSqlGovernanceRepository.WebhookOutboxSql.DeferSubscription,
         "SqlServer" => SqlServerGovernanceRepository.WebhookOutboxSql.DeferSubscription,
-        _ => SqliteGovernanceRepository.WebhookOutboxSql.DeferSubscription
+        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
 
     private static string ListSql(string dialect, WebhookOwnerScope scope) => dialect switch
     {
         "PostgreSql" => PostgreSqlGovernanceRepository.WebhookOutboxSql.ListDeadLetters(scope),
         "SqlServer" => SqlServerGovernanceRepository.WebhookOutboxSql.ListDeadLetters(scope),
-        _ => SqliteGovernanceRepository.WebhookOutboxSql.ListDeadLetters(scope)
+        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
 
     private static string CountSql(string dialect) => dialect switch
     {
         "PostgreSql" => PostgreSqlGovernanceRepository.WebhookOutboxSql.CountPending,
         "SqlServer" => SqlServerGovernanceRepository.WebhookOutboxSql.CountPending,
-        _ => SqliteGovernanceRepository.WebhookOutboxSql.CountPending
+        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
 
     private static string PurgeSql(string dialect) => dialect switch
     {
         "PostgreSql" => PostgreSqlGovernanceRepository.WebhookOutboxSql.Purge,
         "SqlServer" => SqlServerGovernanceRepository.WebhookOutboxSql.Purge,
-        _ => SqliteGovernanceRepository.WebhookOutboxSql.Purge
+        _ => throw new ArgumentOutOfRangeException(nameof(dialect))
     };
 
     [Trait("Category", "Security")]
@@ -144,7 +144,7 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
     public static TheoryData<string, string> FencedCases()
     {
         var data = new TheoryData<string, string>();
-        foreach (var dialect in new[] { "PostgreSql", "SqlServer", "Sqlite" })
+        foreach (var dialect in new[] { "PostgreSql", "SqlServer" })
         {
             foreach (var kind in new[] { "Complete", "Reschedule", "DeadLetter" })
             {
@@ -186,15 +186,6 @@ public sealed class WebhookOutboxSqlCoreGoldenTests
         {
             kit.Add(reference, "@id", "w1");
             kit.Add(reference, "@owner", "worker-1");
-            if (dialect == "Sqlite")
-            {
-                kit.Add(reference, "@status", (object?)status ?? DBNull.Value);
-                kit.Add(reference, "@error", (object?)error ?? DBNull.Value);
-                kit.Add(reference, "@next", (object?)next ?? DBNull.Value);
-                kit.Add(reference, "@now", WebhookOutboxMapping.Ms(Now));
-                return;
-            }
-
             if (usesStatus)
             {
                 if (dialect == "PostgreSql")

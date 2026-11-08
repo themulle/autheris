@@ -101,6 +101,15 @@ public sealed record CompileRequest
     /// It comes from validated options, never from SQL text; it is validated only when <see cref="AllowRecursiveCte"/> is set.
     /// </summary>
     public int MaxRecursionDepth { get; init; } = CompileLimits.DefaultMaxRecursionDepth;
+
+    /// <summary>
+    /// When true, the root pagination offset is emitted as a bind slot (ParameterOrigin.PageOffset)
+    /// instead of an inline literal or absent clause. Part of the value-free template cache key.
+    /// </summary>
+    public bool BindPageOffset { get; init; }
+
+    internal long? PageOffset { get; init; }
+    internal long MaxAllowedOffset { get; init; } = 1_000_000;
 }
 
 /// <summary>

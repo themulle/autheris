@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 public sealed class GovernanceAdvancedMoatsIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 {
@@ -20,8 +21,8 @@ public sealed class GovernanceAdvancedMoatsIntegrationTests : IClassFixture<WebA
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GovernanceAdvancedMoatsIntegrationTests"));
         });
     }
 

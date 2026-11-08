@@ -18,6 +18,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// #112 WP-6 / T-6.1: HTTP -> GraphQL -> typed <c>T_aggregate</c> / <c>queryMetrics</c> -> governed planner path -> real SQLite file.
@@ -81,8 +82,8 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<WebApplication
     {
         b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
         b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
-        b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-        b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={_govPath}");
+        b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+        b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(_govPath));
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
         b.UseSetting("Gateway:Rebac:Enabled", "false");
         b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");

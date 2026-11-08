@@ -17,6 +17,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>Issue #94 (SEC, plan 13.3): ordering and paging of an unkeyed table never leak rows the consent row filter excludes.</summary>
 public sealed class UnkeyedTablePagingStabilityTests : IDisposable
@@ -44,8 +45,8 @@ public sealed class UnkeyedTablePagingStabilityTests : IDisposable
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-paging-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("UnkeyedTablePagingStabilityTests"));
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", "Sqlite");
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", $"Data Source={_path}");
         });

@@ -5,7 +5,6 @@
 Autheris.Application.Security.TenantRegistryGateOptions.MaxNewRegistrationsPerIssuerPerWindow|TenantRegistryGate
 Autheris.Domain.Options.AuthenticationOptions.EnableKerberos|IsKerberosConfigured
 Autheris.Domain.Options.DevOptions.DemoData|DevConfiguration
-Autheris.Domain.Options.DevOptions.Persist|DevConfiguration
 Autheris.Domain.Options.DevOptions.TestAuthHandler|DevConfiguration
 Autheris.Domain.Options.DevOptions.Tooling|DevConfiguration
 Autheris.Domain.Options.DevToolingOptions.BananaCakePop|DevConfiguration

@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 [Trait("Category", "Security")]
 public sealed class BorderlineRemovalTests : IClassFixture<BorderlineRemovalTests.Fixture>
@@ -127,8 +128,8 @@ public sealed class BorderlineRemovalTests : IClassFixture<BorderlineRemovalTest
                 builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
                 builder.UseSetting("Gateway:GraphQL:PersistedQueriesOnly", "true");
                 builder.UseSetting("Gateway:GraphQL:AppScopedTrustedDocuments:Enabled", "true");
-                builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{nameof(BorderlineRemovalTests)}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
             });
         }
 

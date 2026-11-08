@@ -52,7 +52,7 @@ public sealed class NoDebugSecuritySeamsArchitectureTests
         foreach (var assembly in new[]
                  {
                      typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-                     typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
+                     typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
                      typeof(Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator).Assembly,
                      typeof(TrinoSqlEngine.FastSqlEngine).Assembly
                  })

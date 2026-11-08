@@ -31,7 +31,7 @@ public sealed class VirtualFilterWiringTests
         var services = new ServiceCollection();
         var options = new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = $"Data Source=vf_wiring_{Guid.NewGuid():N};Mode=Memory;Cache=Shared" }
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }
         };
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");

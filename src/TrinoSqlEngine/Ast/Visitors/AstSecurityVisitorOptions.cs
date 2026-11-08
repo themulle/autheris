@@ -61,4 +61,7 @@ internal sealed record AstSecurityVisitorOptions
 
     /// <summary>Issue #277: a<c>WITH RECURSIVE</c> compiles only when true. Default false; DML rejects it regardless.</summary>
     public bool AllowRecursiveCte { get; init; }
+
+    /// <summary>When true, the root pagination offset is emitted as a bind slot (ParameterOrigin.PageOffset).</summary>
+    public bool BindPageOffset { get; init; }
 }

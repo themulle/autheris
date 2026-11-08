@@ -195,7 +195,7 @@ Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen un
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `Provider` | `string` | `"SqlServer"`, `"PostgreSql"`, `"Sqlite"` | `"SqlServer"` | Datenbank-Treiber für die Governance-Verwaltung. |
+| `Provider` | `string` | `"PostgreSql"`, `"SqlServer"` | `"PostgreSql"` | Datenbank-Treiber für die Governance-Verwaltung. Jeder andere Wert (auch `"Sqlite"`) lässt den Start fehlschlagen (siehe `docs/operations/migration-simplification.md`). |
 | `ConnectionString` | `string` | ADO.NET ConnStr | `"Data Source=governance.db;Cache=Shared"` | Verbindungszeichenfolge zur Governance-DB. |
 | `CommandTimeoutSeconds` | `int` | `1 .. 60` | `15` | Timeout für Governance-SQL-Statements. |
 | `EnableOutboxProcessor` | `bool` | `true \| false` | `true` | Startet den asynchronen Outbox-Worker für Invalidation-Events. |
@@ -206,7 +206,7 @@ Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen un
 | `Migrations:LockTimeoutSeconds` | `int` | `10 .. 3600` | `300` | Upper bound for opening the migration connection and acquiring the cross-process schema lock. Exceeding it fails startup with `GOVERNANCE_MIGRATION_LOCK_TIMEOUT`. |
 | `Migrations:StepLockTimeoutSeconds` | `int` | `1 .. 3600` | `30` | PostgreSQL `lock_timeout` / SQL Server `LOCK_TIMEOUT` inside one migration step (a timeout rolls the step back). |
 | `Migrations:StepStatementTimeoutSeconds` | `int` | `10 .. 86400` | `900` | PostgreSQL `statement_timeout` inside one migration step. |
-| `Migrations:RequireLeastPrivilege` | `bool` | `true \| false` | `false` | PostgreSQL / SQL Server: in `Mode=Verify` the runtime login is checked for write access to the migration history and DDL rights. `false` logs `GOVERNANCE_RUNTIME_LOGIN_PRIVILEGED`; `true` fails startup. Skipped on SQLite. |
+| `Migrations:RequireLeastPrivilege` | `bool` | `true \| false` | `false` | PostgreSQL / SQL Server: in `Mode=Verify` the runtime login is checked for write access to the migration history and DDL rights. `false` logs `GOVERNANCE_RUNTIME_LOGIN_PRIVILEGED`; `true` fails startup. |
 
 **Schema migrations.** The governance schema is created and evolved by ordered migrations recorded in the table `autheris_schema_migrations` (`version`, `name`, `checksum`, `applied_at`, `applied_by`). Repository constructors run no DDL. A hosted service that is registered before every other hosted service runs the migrations once at startup, holding the existing cross-replica lock (PostgreSQL `pg_advisory_lock`, SQL Server `sp_getapplock`, SQLite `BEGIN IMMEDIATE`), and then initializes the store (audit chain tail and anchor verification, optional demo seed, audit processor start). Migration `0001` (`baseline_governance_schema`) is the frozen v1.5.0 baseline of the complete governance schema (including `WEBHOOK_OUTBOX`, `autheris_cdc_watermarks`, and `CLOUDEVENT_SUBSCRIPTIONS`); every later schema change is a new ordered, forward-only step (`0002`, `0003`, ...) with a checksum over its SQL. v1.5.0 is the oldest supported base: databases created by a release older than v1.5.0 are not upgraded (they fail with `GOVERNANCE_SCHEMA_UNSUPPORTED_BASE` before any statement runs). Startup fails closed, with a governed error code, when a migration cannot be applied, when the history or a stored checksum differs from the build, when the database is newer than the build (unless `AllowNewerSchema`), when the schema shape drifts, or when the append-only audit trigger or truncate guard is missing or disabled after a step or the run (PostgreSQL, SQL Server).
 
@@ -238,8 +238,8 @@ Run the migrations as a one-off job with `Autheris.Api --migrate-governance`: it
 
 ```json
 "GovernanceDb": {
-  "Provider": "Sqlite",
-  "ConnectionString": "Data Source=governance.db;Cache=Shared",
+  "Provider": "PostgreSql",
+  "ConnectionString": "Host=postgres.internal;Port=5432;Database=autheris_governance;Username=autheris;SSL Mode=VerifyFull",
   "CommandTimeoutSeconds": 15,
   "EnableOutboxProcessor": true,
   "SeedDemoData": false
@@ -828,8 +828,6 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 | `PersonaLogin` | `bool` | `true` | A | `/api/dev/personas` and `/api/dev/login/{persona}`. |
 | `Info` | `bool` | `true` | A | `/api/dev/info` (effective configuration without secrets). |
 | `DemoData` | `bool?` | preset | A | Seed demo catalog data. Alias of `GovernanceDb.SeedDemoData`. |
-| `Persist:Enabled` | `bool` | `false` | A | Keep the governance database in `<Persist:Directory>/dev.db`. |
-| `Persist:Directory` | `string` | `.data` | A | Directory of the development database and its audit anchor. Reset with `scripts/dev-reset.sh`. |
 | `TestAuthHandler` | `bool?` | preset | B | Header-based test identities. Alias of `Authentication.EnableTestAuthHandler`. |
 | `Tooling:BananaCakePop` | `bool?` | preset | A | Alias of `GraphQL.EnableBananaCakePop` in Development. |
 | `Tooling:Introspection` | `bool?` | preset | B | Alias of `GraphQL.EnableIntrospection` in Development. |
@@ -1354,7 +1352,7 @@ spec:
 | `Authentication:RequireKerberosOnly` | `false` | `true` |
 | `Authentication:ForwardAuth:Enabled` | `false` / `true` für Tests | `true` (hinter K8s Traefik Ingress) |
 | `Authentication:ForwardAuth:RequireTrustedProxy` | `false` | `true` (Validiert Traefik Pod CIDRs) |
-| `GovernanceDb:Provider` | `Sqlite` (In-Memory `:memory:`) | `SqlServer` oder `PostgreSql` |
+| `GovernanceDb:Provider` | `PostgreSql` oder `SqlServer` (Connection-String Pflicht) | `PostgreSql` oder `SqlServer` (TLS mit Zertifikatsprüfung) |
 | `Caching:EpochValidation:FailClosed` | `false` | `true` (Zero-Trust Fail-Closed) |
 | `GraphQL:EnableIntrospection` | `true` | `false` |
 | `GraphQL:EnableBananaCakePop` | `true` (Nitro IDE im Browser) | `false` |

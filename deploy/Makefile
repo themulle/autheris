@@ -45,8 +45,8 @@ test-ext:
 up:
 	@./scripts/generate-env.sh
 	@./scripts/stage_sources.sh
-	podman compose up -d --build postgres redis governance-seed gqlgateway-api reverse-proxy prometheus grafana || \
-	podman-compose up -d --build postgres redis governance-seed gqlgateway-api reverse-proxy prometheus grafana
+	podman compose up -d --build postgres redis gqlgateway-api reverse-proxy prometheus grafana || \
+	podman-compose up -d --build postgres redis gqlgateway-api reverse-proxy prometheus grafana
 
 # Tear down containers and networks
 down:

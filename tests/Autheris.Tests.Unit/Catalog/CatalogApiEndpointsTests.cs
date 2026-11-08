@@ -129,6 +129,7 @@ public sealed class CatalogApiEndpointsTests
             Arg.Is<AdminSetDatasetStateRequest>(r => r.DatasetId == "sales.orders" && r.State == "active"),
             Arg.Any<string>(),
             Arg.Any<string?>(),
+            Arg.Any<TenantId?>(),
             Arg.Any<CancellationToken>())
             .Returns(new AdminSetDatasetStateResult("sales.orders", "quarantined", "active", true, "Dataset activated."));
 
@@ -147,6 +148,7 @@ public sealed class CatalogApiEndpointsTests
             Arg.Any<AdminSetDatasetStateRequest>(),
             Arg.Any<string>(),
             Arg.Any<string?>(),
+            Arg.Any<TenantId?>(),
             Arg.Any<CancellationToken>())
             .Returns(new AdminSetDatasetStateResult("unknown.table", "unknown", "active", false, "Dataset 'unknown.table' not found."));
 

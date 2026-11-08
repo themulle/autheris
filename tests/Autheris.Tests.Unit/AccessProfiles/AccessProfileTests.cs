@@ -23,7 +23,6 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -502,80 +501,6 @@ public sealed class AccessProfileTests
 
         var aliceAfter = await repo.GetProfilesForSubjectAsync(TenantLiebherr, "alice");
         aliceAfter.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task SqliteGovernanceRepository_AccessProfiles_PersistenceAndSubjectLookup()
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                ConnectionString = $"Data Source=governance_test_{Guid.NewGuid():N};Mode=Memory;Cache=Shared",
-                Provider = "Sqlite"
-            }
-        });
-
-        var epochService = Substitute.For<IEpochValidationService>();
-        using var sqliteRepo = GovernanceStoreFactory.CreateSqlite(
-            epochService,
-            options,
-            logger: NullLogger<SqliteGovernanceRepository>.Instance);
-
-        var profile = new AccessProfile
-        {
-            ProfileId = "prof-david-sqlite",
-            Name = "David Sqlite Profile",
-            TenantId = TenantLiebherr,
-            MaskingMode = MaskingPolicyMode.Unmasked,
-            TargetTables = ["tem.*", "conf.*"],
-            RowFilterPredicate = "delivery_status != 'DELIVERED'",
-            Assignments = TestAssign.Users("S-1-5-21-DAVID-SQLITE"),
-            CreatedAt = DateTimeOffset.UtcNow,
-            ValidTo = DateTimeOffset.UtcNow.AddDays(90),
-            Justification = "Valid Justification for Enterprise PoC Telemetry",
-            CreatedBy = "admin@autheris.internal"
-        };
-
-        // Upsert
-        await sqliteRepo.UpsertProfileAsync(profile);
-
-        // Get by ID
-        var fetched = await sqliteRepo.GetProfileAsync(TenantLiebherr, "prof-david-sqlite");
-        fetched.ShouldNotBeNull();
-        fetched.Name.ShouldBe("David Sqlite Profile");
-        fetched.MaskingMode.ShouldBe(MaskingPolicyMode.Unmasked);
-        fetched.TargetTables.ShouldContain("tem.*");
-        fetched.TargetTables.ShouldContain("conf.*");
-        fetched.RowFilterPredicate.ShouldBe("delivery_status != 'DELIVERED'");
-        fetched.Assignments.Select(a => a.Subject).ShouldContain("S-1-5-21-DAVID-SQLITE");
-
-        // SEC-SC-04: a user that was never assigned does not hold the Unmasked profile until a four-eyes approved assignment exists.
-        (await sqliteRepo.GetProfilesForSubjectAsync(TenantLiebherr, "david")).ShouldBeEmpty();
-        await sqliteRepo.AssignProfileAsync(TenantLiebherr, "prof-david-sqlite", new AccessProfileAssignment
-        {
-            Subject = "david", ExpiresAt = DateTimeOffset.UtcNow.AddDays(20), CreatedBy = "admin@autheris.internal",
-            ApprovedBy = "owner@autheris.internal", Justification = "Four-eyes approved telemetry exception"
-        });
-
-        // Lookup by Subject
-        var davidProfiles = await sqliteRepo.GetProfilesForSubjectAsync(TenantLiebherr, "david");
-        davidProfiles.Count.ShouldBe(1);
-        davidProfiles[0].ProfileId.ShouldBe("prof-david-sqlite");
-
-        // Lookup all
-        var allProfiles = await sqliteRepo.GetAllProfilesAsync(TenantLiebherr);
-        allProfiles.Count.ShouldBe(1);
-
-        // Delete
-        var deleted = await sqliteRepo.DeleteProfileAsync(TenantLiebherr, "prof-david-sqlite");
-        deleted.ShouldBeTrue();
-
-        var afterDelete = await sqliteRepo.GetProfileAsync(TenantLiebherr, "prof-david-sqlite");
-        afterDelete.ShouldBeNull();
-
-        var davidAfter = await sqliteRepo.GetProfilesForSubjectAsync(TenantLiebherr, "david");
-        davidAfter.ShouldBeEmpty();
     }
 
     private static HttpContext CreateEndpointContext(
@@ -1266,45 +1191,6 @@ public sealed class AccessProfileTests
         AccessProfileAssignmentRules.Rank((MaskingPolicyMode)7).ShouldBe(AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Strict));
         AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Strict).ShouldBeLessThan(AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Default));
         AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Default).ShouldBeLessThan(AccessProfileAssignmentRules.Rank(MaskingPolicyMode.Unmasked));
-    }
-
-    [Fact]
-    public async Task SqliteStore_UndefinedMaskingMode_IsRefusedOnWrite_AndReadAsStrict()
-    {
-        var connectionString = $"Data Source=governance_mode_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        var options = Options.Create(new GatewayOptions
-        {
-            GovernanceDb = new GovernanceDbOptions { ConnectionString = connectionString, Provider = "Sqlite" }
-        });
-        using var sqliteRepo = GovernanceStoreFactory.CreateSqlite(Substitute.For<IEpochValidationService>(), options, logger: NullLogger<SqliteGovernanceRepository>.Instance);
-
-        AccessProfile Profile(MaskingPolicyMode mode) => new()
-        {
-            ProfileId = "prof-mode",
-            Name = "Mode Profile",
-            TenantId = TenantLiebherr,
-            MaskingMode = mode,
-            TargetTables = ["tem.*"],
-            ValidTo = DateTimeOffset.UtcNow.AddDays(10),
-            CreatedBy = "admin@autheris.internal"
-        };
-
-        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => sqliteRepo.UpsertProfileAsync(Profile((MaskingPolicyMode)7)));
-
-        // A row written before the guard (or by another writer) with a numeric mode is read as the most restrictive mode.
-        await sqliteRepo.UpsertProfileAsync(Profile(MaskingPolicyMode.Default));
-        (await sqliteRepo.GetProfileAsync(TenantLiebherr, "prof-mode"))!.MaskingMode.ShouldBe(MaskingPolicyMode.Default);
-        await using (var raw = new SqliteConnection(connectionString))
-        {
-            await raw.OpenAsync();
-            await using var cmd = raw.CreateCommand();
-            cmd.CommandText = "UPDATE ACCESS_PROFILES SET masking_mode = '7' WHERE profile_id = 'prof-mode'";
-            (await cmd.ExecuteNonQueryAsync()).ShouldBe(1);
-        }
-
-        var fetched = await sqliteRepo.GetProfileAsync(TenantLiebherr, "prof-mode");
-        fetched.ShouldNotBeNull();
-        fetched.MaskingMode.ShouldBe(MaskingPolicyMode.Strict);
     }
 
     // ---------------------------------------------------------------- Unmasked lifts only the catalog default mask

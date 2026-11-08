@@ -46,7 +46,7 @@ LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1";
 
-        public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type FROM TABLES WITH (UPDLOCK, ROWLOCK)
+        public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES WITH (UPDLOCK, ROWLOCK)
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
         public const string UpsertTableSql = @"MERGE dbo.TABLES WITH (HOLDLOCK) AS t
@@ -512,6 +512,7 @@ WHERE id = 1;";
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
             var tableExisted = false;
             var structuralChange = false;
+            var docs = new CatalogSqlCore.TableDocumentation(metadata.Table.Description, metadata.Table.LongDescription, metadata.Table.DocumentationSource);
 
             await using (var cmd = conn.CreateCommand())
             {
@@ -526,19 +527,7 @@ WHERE id = 1;";
                 {
                     tableId = Guid.Parse(reader.GetString(0));
                     tableExisted = true;
-                    var existingSourceType = reader.GetString(1);
-                    var existingSensitivity = reader.GetString(2);
-                    var existingFourEyes = reader.GetInt32(3) == 1;
-                    var existingActive = reader.GetInt32(4) == 1;
-                    var existingDst = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
-                    if (!string.Equals(existingSourceType, metadata.Table.SourceType, StringComparison.OrdinalIgnoreCase) ||
-                        !string.Equals(existingSensitivity, metadata.Table.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
-                        existingFourEyes != metadata.Table.RequiresFourEyes ||
-                        existingActive != metadata.Table.IsActive ||
-                        existingDst != (int)metadata.Table.DataSourceType)
-                    {
-                        structuralChange = true;
-                    }
+                    (structuralChange, docs) = CatalogSqlCore.ReadExistingTableForUpsert(reader, metadata.Table, _options?.Catalog?.DocumentationSourcePrecedence);
                 }
                 else
                 {
@@ -566,9 +555,9 @@ WHERE id = 1;";
                 upsertCmd.AddBound("@dst", (int)metadata.Table.DataSourceType);
                 upsertCmd.AddBound("@httpJson", (object?)httpEndpointJson ?? DBNull.Value);
                 upsertCmd.AddBound("@plugin", (object?)metadata.Table.PluginName ?? DBNull.Value);
-                upsertCmd.AddBound("@desc", (object?)metadata.Table.Description ?? DBNull.Value);
-                upsertCmd.AddBound("@longDesc", (object?)metadata.Table.LongDescription ?? DBNull.Value);
-                upsertCmd.AddBound("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
+                upsertCmd.AddBound("@desc", (object?)docs.Description ?? DBNull.Value);
+                upsertCmd.AddBound("@longDesc", (object?)docs.LongDescription ?? DBNull.Value);
+                upsertCmd.AddBound("@docSource", (object?)docs.Source ?? DBNull.Value);
                 upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
                 upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
@@ -588,7 +577,7 @@ WHERE id = 1;";
                 structuralChange = true;
             }
 
-            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct).ConfigureAwait(false))
+            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, (existing, incoming) => CatalogSqlCore.ShouldOverwriteDocumentation(_options?.Catalog?.DocumentationSourcePrecedence, existing, incoming)).ConfigureAwait(false))
             {
                 structuralChange = true;
             }
@@ -810,47 +799,6 @@ WHERE id = 1;";
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
             throw;
-        }
-    }
-
-    private async Task<long> IncrementTableEpochInternalAsync(SqlConnection conn, SqlTransaction tx, TableIdentifier table, CancellationToken ct)
-    {
-        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = @"UPDATE POLICY_EPOCHS
-                                SET epoch = epoch + 1, updated_at = @now
-                                OUTPUT inserted.epoch
-                                WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
-            cmd.AddBound("@domain", table.Domain);
-            cmd.AddBound("@schema", table.Schema);
-            cmd.AddBound("@table", table.TableName);
-            cmd.AddBound("@now", DateTimeOffset.UtcNow.ToString("O"));
-
-            var scalar = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            if (scalar != null)
-            {
-                return Convert.ToInt64(scalar);
-            }
-
-            await using var insertCmd = conn.CreateCommand();
-            insertCmd.Transaction = tx;
-            insertCmd.CommandText = @"MERGE POLICY_EPOCHS WITH (HOLDLOCK) AS target
-                                      USING (SELECT @id AS table_id) AS source
-                                      ON target.table_id = source.table_id
-                                      WHEN MATCHED THEN UPDATE SET epoch = target.epoch + 1, updated_at = @now
-                                      WHEN NOT MATCHED THEN INSERT (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                          VALUES (@id, @domain, @schema, @table, 1, @now)
-                                      OUTPUT inserted.epoch;";
-            insertCmd.AddBound("@id", Guid.NewGuid().ToString());
-            insertCmd.AddBound("@domain", table.Domain);
-            insertCmd.AddBound("@schema", table.Schema);
-            insertCmd.AddBound("@table", table.TableName);
-            insertCmd.AddBound("@now", DateTimeOffset.UtcNow.ToString("O"));
-
-            var insScalar = await insertCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            return insScalar != null ? Convert.ToInt64(insScalar) : 1L;
         }
     }
 

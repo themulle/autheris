@@ -231,7 +231,7 @@ public sealed class ModuleLoader
         var effectiveHostContext = hostContext ?? new ModuleHostContext(
             TimeProvider.System,
             _hostVersion,
-            new GovernanceConnectionFactory(new Autheris.Domain.Options.GovernanceDbOptions(), statePaths: null, environment));
+            new GovernanceConnectionFactory(new Autheris.Domain.Options.GovernanceDbOptions()));
 
         string? workspacePath = configuration[WorkspacePathConfigKey];
         if (!string.IsNullOrWhiteSpace(workspacePath))

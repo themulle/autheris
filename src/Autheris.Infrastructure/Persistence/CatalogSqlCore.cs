@@ -727,6 +727,73 @@ WHERE rm.member_sid = @sid";
         return (existingColsByName, existingMaskingRules, colIdByName);
     }
 
+    /// <summary>The description texts and their documentation source that an upsert writes for a table.</summary>
+    public readonly record struct TableDocumentation(string? Description, string? LongDescription, string? Source);
+
+    /// <summary>
+    /// Reads the row of <c>SelectTableForUpdateSql</c> (columns 1 to 8) and returns whether the table changed structurally and which
+    /// documentation texts the upsert writes (<see cref="ShouldOverwriteDocumentation"/>).
+    /// </summary>
+    public static (bool StructuralChange, TableDocumentation Docs) ReadExistingTableForUpsert(DbDataReader reader, Table incoming, IReadOnlyList<string>? precedence)
+    {
+        var structuralChange =
+            !string.Equals(reader.GetString(1), incoming.SourceType, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(reader.GetString(2), incoming.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
+            (reader.GetInt32(3) == 1) != incoming.RequiresFourEyes ||
+            (reader.GetInt32(4) == 1) != incoming.IsActive ||
+            (reader.IsDBNull(5) ? 0 : reader.GetInt32(5)) != (int)incoming.DataSourceType;
+        var existingDesc = reader.IsDBNull(6) ? null : reader.GetString(6);
+        var existingLongDesc = reader.IsDBNull(7) ? null : reader.GetString(7);
+        var existingSource = reader.IsDBNull(8) ? null : reader.GetString(8);
+
+        var canOverwriteDesc = !string.IsNullOrWhiteSpace(incoming.Description) &&
+                               (string.IsNullOrWhiteSpace(existingDesc) || ShouldOverwriteDocumentation(precedence, existingSource, incoming.DocumentationSource));
+        var canOverwriteLongDesc = !string.IsNullOrWhiteSpace(incoming.LongDescription) &&
+                                   (string.IsNullOrWhiteSpace(existingLongDesc) || ShouldOverwriteDocumentation(precedence, existingSource, incoming.DocumentationSource));
+        return (structuralChange, new TableDocumentation(
+            canOverwriteDesc ? incoming.Description : existingDesc,
+            canOverwriteLongDesc ? incoming.LongDescription : existingLongDesc,
+            canOverwriteDesc || canOverwriteLongDesc ? incoming.DocumentationSource ?? existingSource : existingSource));
+    }
+
+    private static readonly string[] DefaultDocumentationSourcePrecedence = ["Manual", "DataCatalog", "dbt", "OpenApi", "Database", "Default"];
+
+    /// <summary>
+    /// Documentation source precedence (<c>Catalog:DocumentationSourcePrecedence</c>, highest first): an incoming source overwrites an existing
+    /// description only when its rank is equal or higher. An existing row without a source is always overwritten, an incoming write without a
+    /// source never overwrites; unlisted sources rank last.
+    /// </summary>
+    public static bool ShouldOverwriteDocumentation(IReadOnlyList<string>? precedence, string? existingSource, string? newSource)
+    {
+        if (string.IsNullOrWhiteSpace(existingSource))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(newSource))
+        {
+            return false;
+        }
+
+        IReadOnlyList<string> order = precedence ?? DefaultDocumentationSourcePrecedence;
+        var existingRank = RankOf(order, existingSource);
+        var newRank = RankOf(order, newSource);
+        return newRank <= existingRank;
+
+        static int RankOf(IReadOnlyList<string> order, string source)
+        {
+            for (var i = 0; i < order.Count; i++)
+            {
+                if (string.Equals(order[i], source, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return int.MaxValue;
+        }
+    }
+
     public static async Task<bool> UpsertColumnsAndMaskingRulesAsync(
         DbConnection conn,
         DbTransaction tx,

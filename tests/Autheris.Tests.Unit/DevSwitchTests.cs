@@ -127,27 +127,6 @@ public sealed class DevSwitchTests
     // ---------- Persistence ----------
 
     [Fact]
-    public void Persist_OverridesConnectionString_AndCreatesDirectory()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), "autheris-dev-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var (config, report) = Resolve("Development",
-                ("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared"),
-                ("Gateway:Dev:Persist:Enabled", "true"),
-                ("Gateway:Dev:Persist:Directory", dir));
-
-            Directory.Exists(dir).ShouldBeTrue();
-            Bind(config).GovernanceDb.ConnectionString.ShouldBe($"Data Source={Path.Combine(dir, "dev.db")}");
-            report.Notes.ShouldContain(n => n.Contains("scripts/dev-reset.sh"));
-        }
-        finally
-        {
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
-        }
-    }
-
-    [Fact]
     public void Persist_Disabled_KeepsConfiguredConnectionString()
     {
         var (config, _) = Resolve("Development",
@@ -207,7 +186,6 @@ public sealed class DevSwitchTests
     private static readonly (string Name, Func<DevOptions> Risky)[] RiskyValues =
     [
         ("Preset", () => new DevOptions { Preset = "Quickstart" }),
-        ("Persist:Enabled", () => new DevOptions { Persist = new DevPersistOptions { Enabled = true } }),
         ("DemoData", () => new DevOptions { DemoData = true }),
         ("TestAuthHandler", () => new DevOptions { TestAuthHandler = true }),
         ("Tooling:BananaCakePop", () => new DevOptions { Tooling = new DevToolingOptions { BananaCakePop = true } }),

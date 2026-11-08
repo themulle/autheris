@@ -4,14 +4,11 @@ using System;
 using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
-using Autheris.Infrastructure.Persistence;
 using Autheris.Modules.Abstractions;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -22,42 +19,16 @@ using Npgsql;
 public sealed class GovernanceConnectionFactory : IGovernanceConnectionFactory, IDisposable, IAsyncDisposable
 {
     private readonly GovernanceDbOptions _governanceDb;
-    private readonly SqliteGovernanceConnectionProvider? _sqliteProvider;
 
     public GovernanceConnectionFactory(IServiceProvider services)
-        : this(
-            services?.GetService<IOptions<GatewayOptions>>()?.Value?.GovernanceDb ?? new GovernanceDbOptions(),
-            services?.GetService<IGatewayStatePaths>(),
-            services?.GetService<IHostEnvironment>())
+        : this(services?.GetService<IOptions<GatewayOptions>>()?.Value?.GovernanceDb ?? new GovernanceDbOptions())
     {
     }
 
-    public GovernanceConnectionFactory(
-        GovernanceDbOptions governanceDb,
-        IGatewayStatePaths? statePaths = null,
-        IHostEnvironment? environment = null)
+    public GovernanceConnectionFactory(GovernanceDbOptions governanceDb)
     {
         ArgumentNullException.ThrowIfNull(governanceDb);
         _governanceDb = governanceDb;
-
-        if (!DataSourceProvider.Is(_governanceDb.Provider, DatabaseDialect.PostgreSql) &&
-            !DataSourceProvider.Is(_governanceDb.Provider, DatabaseDialect.SqlServer))
-        {
-            var resolvedConnStr = statePaths is not null
-                ? statePaths.ResolveGovernanceConnectionString(_governanceDb.ConnectionString)
-                : (string.IsNullOrWhiteSpace(_governanceDb.ConnectionString)
-                    ? "Data Source=:memory:"
-                    : _governanceDb.ConnectionString);
-
-            bool allowUnsafeJournal = environment is not null &&
-                string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
-
-            _sqliteProvider = new SqliteGovernanceConnectionProvider(
-                resolvedConnStr,
-                _governanceDb.JournalMode,
-                logger: null,
-                allowUnsafeJournalModes: allowUnsafeJournal);
-        }
     }
 
     public async ValueTask<DbConnection> OpenGovernanceConnectionAsync(CancellationToken ct = default)
@@ -102,16 +73,13 @@ public sealed class GovernanceConnectionFactory : IGovernanceConnectionFactory, 
             }
         }
 
-        return await _sqliteProvider!.OpenAsync(ct).ConfigureAwait(false);
+        // Fail closed: the guard rejects other providers at startup, so reaching this line means a misconfigured composition.
+        throw new InvalidOperationException("Governance provider unsupported (OD-1). See docs/operations/migration-simplification.md.");
     }
 
     public void Dispose()
     {
-        _sqliteProvider?.Dispose();
     }
 
-    public ValueTask DisposeAsync()
-    {
-        return _sqliteProvider?.DisposeAsync() ?? ValueTask.CompletedTask;
-    }
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

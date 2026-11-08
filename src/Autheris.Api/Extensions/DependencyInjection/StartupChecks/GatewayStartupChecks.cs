@@ -53,7 +53,6 @@ internal static class GatewayStartupChecks
         new("ProductionAuthentication", AuthenticationStartupChecks.ProductionAuthentication),
         new("ProductionStorageAndAudit", StorageStartupChecks.ProductionStorageAndAudit),
         new("GovernanceDbProvider", StorageStartupChecks.GovernanceDbProvider),
-        new("ClusterState", StorageStartupChecks.ClusterState),
     ];
 
     internal static void ObjectGraph(StartupCheckContext context)
