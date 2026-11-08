@@ -85,7 +85,8 @@ public sealed partial class CasbinEnforcementService : IPolicyEnforcementService
         CasbinRuleMetadata[] Rules,
         bool Shareable,
         bool ReadsContext,
-        bool ReferencesTime);
+        bool ReferencesTime,
+        bool ReferencesClientIp);
 
     private sealed class PolicySnapshot(
         FrozenDictionary<string, Enforcer> enforcers,

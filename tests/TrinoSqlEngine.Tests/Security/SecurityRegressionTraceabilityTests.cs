@@ -14,7 +14,7 @@ namespace TrinoSqlEngine.Tests.Security;
 public partial class SecurityRegressionTraceabilityTests
 {
     // not preceded by a letter, digit or hyphen (so R-SQL-3, F-SQL-02, SEC-ADG-08 and ST-1 do not match), numeric suffix only
-    [GeneratedRegex(@"(?<![A-Za-z0-9\-])(?:SEC|SQ|SQL|SR15|RR)-\d+(?![A-Za-z0-9])", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?<![A-Za-z0-9\-])(?:SEC|SQ|SQL|SR15|RR)-\d+(?![A-Za-z0-9\-])", RegexOptions.CultureInvariant)]
     private static partial Regex LegacyIdPattern();
 
     private static readonly string[] CatalogFiles = { "SecurityRegressionCatalog.cs", "SecurityRegressionTraceabilityTests.cs" };

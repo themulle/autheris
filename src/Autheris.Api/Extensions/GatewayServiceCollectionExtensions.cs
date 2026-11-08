@@ -107,14 +107,16 @@ public static partial class GatewayServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration,
         IHostEnvironment environment,
-        GatewayOptions gatewayOptions)
+        GatewayOptions gatewayOptions,
+        ILoggerFactory? bootstrapLoggerFactory = null)
     {
         services.TryAddScoped<Autheris.Application.Policy.IAccessDecisionPoint, Autheris.Application.Policy.AccessDecisionPoint>();
         var hostContext = new ModuleHostContext(
             TimeProvider.System,
             ModuleLoader.DefaultHostVersion,
             new GovernanceConnectionFactory(gatewayOptions.GovernanceDb));
-        var loader = new ModuleLoader();
+        var logger = bootstrapLoggerFactory?.CreateLogger<ModuleLoader>();
+        var loader = new ModuleLoader(logger: logger);
         var moduleLoadResult = loader.LoadAndConfigureServices(services, configuration, environment, hostContext);
         Autheris.Api.Configuration.UnknownGatewayKeyGuard.ThrowIfUnknownKeys(
             configuration,
