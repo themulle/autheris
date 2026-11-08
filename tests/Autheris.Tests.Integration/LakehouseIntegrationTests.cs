@@ -141,17 +141,23 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
         using var scope = _factory.Services.CreateScope();
         var sp = scope.ServiceProvider;
 
-        var storageProvider = sp.GetService<ILakehouseStorageProvider>();
-        storageProvider.ShouldNotBeNull();
-
-        var metaReader = sp.GetService<IIcebergMetadataReader>();
-        metaReader.ShouldNotBeNull();
-
-        var pruner = sp.GetService<IIcebergPartitionPruner>();
-        pruner.ShouldNotBeNull();
-
-        var lakehouseExecutor = sp.GetService<ILakehouseDataSourceExecutor>();
-        lakehouseExecutor.ShouldNotBeNull();
+        // The module is loaded into its own AssemblyLoadContext (no base-directory fallback), so its
+        // interfaces are resolved by name from the loaded module assembly, not by the test's own type identity.
+        var moduleAssembly = System.Runtime.Loader.AssemblyLoadContext.All
+            .Where(c => c != System.Runtime.Loader.AssemblyLoadContext.Default)
+            .SelectMany(c => c.Assemblies)
+            .First(a => a.GetName().Name == "Autheris.Modules.Lakehouse");
+        foreach (var name in new[]
+                 {
+                     "Autheris.Extensions.Lakehouse.Interfaces.ILakehouseStorageProvider",
+                     "Autheris.Extensions.Lakehouse.Interfaces.IIcebergMetadataReader",
+                     "Autheris.Extensions.Lakehouse.Interfaces.IIcebergPartitionPruner",
+                     "Autheris.Extensions.Lakehouse.Interfaces.ILakehouseDataSourceExecutor"
+                 })
+        {
+            var serviceType = moduleAssembly.GetType(name, throwOnError: true)!;
+            sp.GetService(serviceType).ShouldNotBeNull(name);
+        }
 
         var dataExecutors = sp.GetServices<IDataSourceExecutor>().ToList();
         dataExecutors.Any(e => e.SupportedType == DataSourceType.LakehouseIceberg).ShouldBeTrue();
