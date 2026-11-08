@@ -6,23 +6,39 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Identity.Caching;
+using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 
 public sealed class RoleResolver : IRoleResolver
 {
     private readonly IEnumerable<IRoleProvider> _providers;
     private readonly IRoleResolverCache _cache;
     private readonly IIdentityRealmRegistry? _realmRegistry;
+    private readonly int _ttlMinutes;
+    private readonly int _maxGroups;
 
-    public RoleResolver(IEnumerable<IRoleProvider> providers, IRoleResolverCache cache, IIdentityRealmRegistry? realmRegistry = null)
+    public RoleResolver(
+        IEnumerable<IRoleProvider> providers,
+        IRoleResolverCache cache,
+        IIdentityRealmRegistry? realmRegistry = null,
+        IOptions<GatewayOptions>? options = null)
     {
         _providers = providers ?? throw new ArgumentNullException(nameof(providers));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _realmRegistry = realmRegistry;
+        var auth = options?.Value.Authentication;
+        _ttlMinutes = auth?.GroupCacheTtlMinutes is >= 1 and <= 60 ? auth.GroupCacheTtlMinutes : 5;
+        _maxGroups = auth?.MaxGroupSidsPerCaller is >= 1 and <= 4096 ? auth.MaxGroupSidsPerCaller : 1024;
     }
 
-    public RoleResolver(IIdentityRealmRegistry realmRegistry, IEnumerable<IRoleProvider> providers, IRoleResolverCache cache)
-        : this(providers, cache, realmRegistry)
+    public RoleResolver(
+        IIdentityRealmRegistry realmRegistry,
+        IEnumerable<IRoleProvider> providers,
+        IRoleResolverCache cache,
+        IOptions<GatewayOptions>? options = null)
+        : this(providers, cache, realmRegistry, options)
     {
     }
 
@@ -57,6 +73,8 @@ public sealed class RoleResolver : IRoleResolver
         // 2. Select providers configured in realm.ResolverChain in order
         var chain = realm.ResolverChain ?? [];
         var activeProviders = new List<IRoleProvider>();
+        // An empty chain on a Resolver realm or a chain naming a provider that is not registered cannot answer: degraded, never "no groups".
+        var degraded = realm.GroupSource == RealmGroupSource.Resolver && chain.Count == 0;
         foreach (var providerId in chain)
         {
             var p = _providers.FirstOrDefault(x => string.Equals(x.ProviderId, providerId, StringComparison.OrdinalIgnoreCase));
@@ -64,17 +82,18 @@ public sealed class RoleResolver : IRoleResolver
             {
                 activeProviders.Add(p);
             }
+            else
+            {
+                degraded = true;
+            }
         }
 
         var mergedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var mergedAppRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var mergedAttributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        bool isWorkforceRealm = realm.Kind == IdentityRealmKind.EntraWorkforce ||
-                               string.Equals(realm.Id, "workforce-entra", StringComparison.OrdinalIgnoreCase);
-
         // GOV-08: a provider that failed (or threw) makes the whole resolution degraded: the groups are unknown, not empty.
-        var degraded = false;
+        var rejected = 0;
 
         foreach (var provider in activeProviders)
         {
@@ -92,9 +111,16 @@ public sealed class RoleResolver : IRoleResolver
                     {
                         if (string.IsNullOrWhiteSpace(g)) continue;
 
-                        // Namespace isolation: <realmId>|<groupId>
-                        var namespacedGroup = $"{realm.Id}|{g}";
-                        mergedGroups.Add(namespacedGroup);
+                        // Canonical SIDs are globally unique, so no realm prefix: isolation is the cache key (realm, user) and the
+                        // provider chain of the realm. A non-canonical value is dropped and the resolution is degraded.
+                        if (!SidFormat.IsCanonical(g.Trim()))
+                        {
+                            rejected++;
+                            degraded = true;
+                            continue;
+                        }
+
+                        mergedGroups.Add(g.Trim());
                     }
 
                     foreach (var role in result.AppRoles)
@@ -126,7 +152,15 @@ public sealed class RoleResolver : IRoleResolver
             }
         }
 
-        var ttlMinutes = isWorkforceRealm ? 15 : 5;
+        IdentityGroupMetrics.RecordRejected(IdentityGroupMetrics.SourceResolver, rejected);
+        if (mergedGroups.Count > _maxGroups)
+        {
+            // Never truncated: a dropped group could carry a deny.
+            mergedGroups.Clear();
+            degraded = true;
+        }
+
+        var ttlMinutes = _ttlMinutes;
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.AddMinutes(ttlMinutes);
 

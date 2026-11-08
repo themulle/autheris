@@ -102,7 +102,7 @@ public sealed class GovernedTableCacheConsentMaskTests
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.PrimarySid, userSid),
-            new Claim(ClaimTypes.GroupSid, groupSid)
+            Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(groupSid)
         ], "Auth"));
 
         var caller = new TableCacheCallerContext(principal, new TenantId("tenant-1"));

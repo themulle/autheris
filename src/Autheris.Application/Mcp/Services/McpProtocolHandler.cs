@@ -405,7 +405,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         {
             foreach (var g in session.GroupSids)
             {
-                identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.GroupSid, g));
+                identity.AddClaim(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g));
             }
         }
         if (session.AdditionalClaims != null)

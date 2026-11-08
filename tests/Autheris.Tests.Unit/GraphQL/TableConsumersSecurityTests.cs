@@ -45,7 +45,7 @@ public sealed class TableConsumersSecurityTests
         {
             foreach (var g in groups)
             {
-                identity.AddClaim(new Claim(ClaimTypes.GroupSid, g));
+                identity.AddClaim(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g));
             }
         }
 

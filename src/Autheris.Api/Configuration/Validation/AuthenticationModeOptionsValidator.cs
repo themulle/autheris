@@ -39,6 +39,16 @@ public sealed class AuthenticationModeOptionsValidator(
             }
         }
 
+        if (auth.GroupCacheTtlMinutes is < 1 or > 60)
+        {
+            failures.Add("Security violation: Gateway:Authentication:GroupCacheTtlMinutes must be between 1 and 60.");
+        }
+
+        if (auth.MaxGroupSidsPerCaller is < 1 or > 4096)
+        {
+            failures.Add("Security violation: Gateway:Authentication:MaxGroupSidsPerCaller must be between 1 and 4096.");
+        }
+
         if (fwd.TrustUpstreamTenant && fwd.AllowedTenantIds.Count == 0)
         {
             failures.Add("Security violation: Gateway:Authentication:ForwardAuth:TrustUpstreamTenant requires a non-empty Gateway:Authentication:ForwardAuth:AllowedTenantIds.");

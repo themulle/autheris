@@ -250,7 +250,6 @@ public sealed class UnknownGatewayKeyGuardTests
     [InlineData("Gateway:QueryCost:NestedDepthFactor")]
     [InlineData("Gateway:Rebac:OpenFgaApiUrl")]
     [InlineData("Gateway:Rebac:OpenFgaStoreId")]
-    [InlineData("Gateway:Authentication:GroupCacheTtlMinutes")]
     [InlineData("Gateway:DataSources:Connections:testSource:Databricks:Auth:Obo:AllowLongRunning")]
     [InlineData("Gateway:CatalogSearch:FieldWeights")]
     [InlineData("Gateway:DataMasking:MaskingCacheTtlHours")]

@@ -158,7 +158,7 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             foreach (var group in rolesResolution.Groups)
             {
                 identity.AddClaim(new System.Security.Claims.Claim("autheris:group", group));
-                identity.AddClaim(new System.Security.Claims.Claim(ClaimTypes.GroupSid, group));
+                identity.AddClaim(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(group));
             }
 
             foreach (var role in rolesResolution.Roles)
