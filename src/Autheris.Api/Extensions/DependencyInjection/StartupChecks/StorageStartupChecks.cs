@@ -42,46 +42,6 @@ internal static class StorageStartupChecks
             throw new ValidationException("Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.");
         }
 
-        // an unset connection string resolves to the state-directory file outside Development/Test, so only an
-        // explicitly configured in-memory database can be in effect here (and is rejected).
-        if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
-            GatewayStartupValidator.IsInMemorySqlite(options.GovernanceDb.ConnectionString))
-        {
-            throw new ValidationException("Security violation: In-memory SQLite databases (GovernanceDb.ConnectionString) are strictly prohibited outside Development.");
-        }
-
-        // DEP-4: In container environments, a relative SQLite database path in /app is unwritable for non-root APP_UID
-        if (GatewayStartupValidator.IsTruthy(getEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER")) &&
-            DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
-        {
-            try
-            {
-                var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(options.GovernanceDb.ConnectionString);
-                if (!string.IsNullOrWhiteSpace(builder.DataSource) &&
-                    !builder.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) &&
-                    builder.Mode != Microsoft.Data.Sqlite.SqliteOpenMode.Memory)
-                {
-                    var isDirectRootFile = !builder.DataSource.Contains('/') && !builder.DataSource.Contains('\\');
-                    var isAppRoot = builder.DataSource.Equals("/app/governance.db", StringComparison.OrdinalIgnoreCase);
-                    if (isDirectRootFile || isAppRoot)
-                    {
-                        throw new ValidationException(
-                            "Security and configuration error (DEP-4): In the container, the process runs as non-root user ($APP_UID). " +
-                            $"The SQLite path '{builder.DataSource}' is located directly in the non-writable application directory (/app). " +
-                            "Use the writable data directory '/app/data' (for example Gateway:State:StateDirectory=/app/data).");
-                    }
-                }
-            }
-            catch (ValidationException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                logger?.LogWarning(ex, "Failed to parse SQLite connection string during container path check.");
-            }
-        }
-
         // AU-01 & AU-03: Startup Fail-Closed & Umgebungsvalidierung für Audit
         var envName = getEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? environment.EnvironmentName;
         bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
@@ -95,7 +55,7 @@ internal static class StorageStartupChecks
                     "CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.");
             }
 
-            // Produktion: Leerer Wert gilt zwingend als Produktion! Every provider, SQLite files included, needs an explicit anchor:
+            // Produktion: Leerer Wert gilt zwingend als Produktion! Every provider needs an explicit anchor:
             // the anchor must not live only next to the database it protects (consistent with AuditChainAnchorStoreFactory).
             if (string.IsNullOrWhiteSpace(options.Audit.ChainAnchorPath) &&
                 string.IsNullOrWhiteSpace(options.Audit.ChainAnchorWormDirectory) &&

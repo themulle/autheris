@@ -21,8 +21,7 @@ using Microsoft.Extensions.Options;
 /// 26 (X1): at startup, lists the tables that the governed SQL pipeline denies (unparsable stored row predicates, dialects that
 /// WebSQL does not admit) so that an operator sees a deny at scale before the first request. It reads the access profiles of the configured
 /// tenants and the virtual filters; it logs table and policy ids and stable codes only. It runs as background work (the host never waits for the store). A store that cannot be read is a warning, never a
-/// failed start (the request path stays fail closed on its own). Correlated consent filters (Casbin) are covered by the pre-deploy lint
-/// <c>tools/PolicyPredicateLint</c>, which reads the whole governance store.
+/// failed start (the request path stays fail closed on its own). Correlated consent filters (Casbin) are not part of this report.
 /// </summary>
 public sealed class DeniedTablesStartupReporter(
     ITableMetadataRepository tables,

@@ -152,3 +152,6 @@ git grep -n -E "RowFilterPredicate|SubqueryJoinHop|AdditionalHops|SubqueryCorrel
 - D-48e (OD-40 default): In internal mode, an owner change ends pattern coverage of that object until the new owner approves; in external mode the external decision covers the whole pattern.
 - D-48f: `GET /api/v1/governance/effective-filters` stays as the hard-policy view; the new report links to it.
 - D-48g: Discovery shows a `RowDependent` column as `Masked` with `clearInSomeRows: true`, so discovery never claims Clear for rows the caller cannot see clear.
+
+## Notes from other work packages
+- 2026-11-08 (WP-SIMPL-11 PR-C3): the `tools/PolicyPredicateLint` pre-deploy tool (its only loader was the SQLite governance lint source) is deleted. Any reference to it in this package is obsolete: the enforcing control is the runtime deny (`GatewayStartupValidator.ListDeniedTables`, reported at startup by `DeniedTablesStartupReporter`), and `PolicyPredicateLinter` keeps its unit tests (`PolicyPredicateLintTests`). No PostgreSQL lint source exists; an offline pre-deploy lint over the whole governance store is an owner follow-up.

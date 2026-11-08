@@ -31,8 +31,14 @@ append_only=(
 
 status=0
 
+# WP-SIMPL-11: the SQLite governance store is removed on purpose (SEC-SIMPL-05). Its artefacts may be deleted; nothing else is exempt.
+sqlite_removed='/Migrations/Steps/sqlite/|/Migrations/SqliteBaselineSchema\.cs$|/Migrations/Shape/governance-shape\.sqlite\.|/Golden/GovernanceSteps/checksums\.sqlite\.txt$'
+
 while IFS=$'\t' read -r change path; do
   [[ -z "${path:-}" ]] && continue
+  if [[ "$change" == "D" && "$path" =~ $sqlite_removed ]]; then
+    continue
+  fi
   if [[ "$change" != "A" ]]; then
     echo "VIOLATION: released governance artefact '$path' was changed ($change); add a new step instead." >&2
     status=1
@@ -43,10 +49,21 @@ while IFS=$'\t' read -r change path; do
   [[ -z "${path:-}" ]] && continue
   case "$change" in
     A) ;;
+    D)
+      if [[ ! "$path" =~ $sqlite_removed ]]; then
+        echo "VIOLATION: golden '$path' was deleted or renamed ($change)." >&2
+        status=1
+      fi
+      ;;
     M)
       base_file="$(mktemp)"; head_file="$(mktemp)"
       git show "$merge_base:$path" > "$base_file"
       git show "$head_ref:$path" > "$head_file"
+      if [[ "$path" == */Golden/GovernanceBaseline/v1.5.0.sha256 ]]; then
+        # the lines of the removed SQLite governance artefacts may disappear; every other released line must stay a byte prefix
+        grep -vi 'sqlite' "$base_file" > "$base_file.f" || true
+        mv "$base_file.f" "$base_file"
+      fi
       size="$(wc -c < "$base_file")"
       if ! cmp -s -n "$size" "$base_file" "$head_file"; then
         echo "VIOLATION: golden '$path' modifies or removes released lines (append-only)." >&2

@@ -96,9 +96,7 @@ public static partial class GatewayGovernanceServiceExtensions
         }
         else
         {
-            RegisterGovernanceAggregateStores<SqliteGovernanceRepository, SqliteGovernanceMigrationRunner>(
-                services,
-                cdcWebhooksEnabled);
+            throw new InvalidOperationException("Governance provider unsupported (OD-1). See docs/operations/migration-simplification.md.");
         }
 
         // durable, fenced CDC watermarks live in the governance database (the extension registers no store).

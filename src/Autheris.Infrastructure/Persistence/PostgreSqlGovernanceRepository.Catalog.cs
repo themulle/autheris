@@ -47,7 +47,7 @@ INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1
 ORDER BY c.ctid"; // registration (heap) order, see SelectTableColumnsSql
 
-        public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type FROM TABLES
+        public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
 FOR UPDATE";
 
@@ -507,6 +507,7 @@ RETURNING structure_version, content_version;";
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
             var tableExisted = false;
             var structuralChange = false;
+            var docs = new CatalogSqlCore.TableDocumentation(metadata.Table.Description, metadata.Table.LongDescription, metadata.Table.DocumentationSource);
 
             await using (var cmd = conn.CreateCommand())
             {
@@ -521,19 +522,7 @@ RETURNING structure_version, content_version;";
                 {
                     tableId = Guid.Parse(reader.GetString(0));
                     tableExisted = true;
-                    var existingSourceType = reader.GetString(1);
-                    var existingSensitivity = reader.GetString(2);
-                    var existingFourEyes = reader.GetInt32(3) == 1;
-                    var existingActive = reader.GetInt32(4) == 1;
-                    var existingDst = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
-                    if (!string.Equals(existingSourceType, metadata.Table.SourceType, StringComparison.OrdinalIgnoreCase) ||
-                        !string.Equals(existingSensitivity, metadata.Table.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
-                        existingFourEyes != metadata.Table.RequiresFourEyes ||
-                        existingActive != metadata.Table.IsActive ||
-                        existingDst != (int)metadata.Table.DataSourceType)
-                    {
-                        structuralChange = true;
-                    }
+                    (structuralChange, docs) = CatalogSqlCore.ReadExistingTableForUpsert(reader, metadata.Table, _options?.Catalog?.DocumentationSourcePrecedence);
                 }
                 else
                 {
@@ -561,9 +550,9 @@ RETURNING structure_version, content_version;";
                 upsertCmd.AddBound("@dst", (int)metadata.Table.DataSourceType);
                 upsertCmd.AddBound("@httpJson", (object?)httpEndpointJson ?? DBNull.Value);
                 upsertCmd.AddBound("@plugin", (object?)metadata.Table.PluginName ?? DBNull.Value);
-                upsertCmd.AddBound("@desc", (object?)metadata.Table.Description ?? DBNull.Value);
-                upsertCmd.AddBound("@longDesc", (object?)metadata.Table.LongDescription ?? DBNull.Value);
-                upsertCmd.AddBound("@docSource", (object?)metadata.Table.DocumentationSource ?? DBNull.Value);
+                upsertCmd.AddBound("@desc", (object?)docs.Description ?? DBNull.Value);
+                upsertCmd.AddBound("@longDesc", (object?)docs.LongDescription ?? DBNull.Value);
+                upsertCmd.AddBound("@docSource", (object?)docs.Source ?? DBNull.Value);
                 upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
                 upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
@@ -583,7 +572,7 @@ RETURNING structure_version, content_version;";
                 structuralChange = true;
             }
 
-            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct).ConfigureAwait(false))
+            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, (existing, incoming) => CatalogSqlCore.ShouldOverwriteDocumentation(_options?.Catalog?.DocumentationSourcePrecedence, existing, incoming)).ConfigureAwait(false))
             {
                 structuralChange = true;
             }
