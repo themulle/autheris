@@ -36,7 +36,7 @@ public static class DevStartupBanner
         var features = DevFeatures.Resolve(options, env.IsDevelopment());
         sb.AppendLine($"  Preset       {options.Dev.Preset}" + (string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString) || options.GovernanceDb.ConnectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase)
             ? " (in-memory database)"
-            : features.PersistDb ? " (persistent database)" : string.Empty));
+            : string.Empty));
         if (features.DevSecurity.Count > 0)
         {
             sb.AppendLine($"  Dev security {string.Join(", ", features.DevSecurity)}");

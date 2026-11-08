@@ -37,7 +37,7 @@ public sealed class CutoverArchitectureTests
     [
         typeof(Autheris.Domain.Common.Sid).Assembly,
         typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-        typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
+        typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
         typeof(Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor).Assembly,
         typeof(Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator).Assembly,
         typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
@@ -405,7 +405,6 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Application.Procedures.Services.StoredProcedureCatalogValidator", "catalog validation queries over the procedure definitions (metadata only)"),
         ("Autheris.Infrastructure.Persistence.Catalog.*", "column-metadata readers: fixed information_schema/PRAGMA queries of the governed catalog provider"),
         // -- persistence of the gateway's own governance store (its schema bootstrap and repositories) --
-        ("Autheris.Infrastructure.Persistence.SqliteGovernanceRepository", "governance store repository"),
         ("Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository", "governance store repository and schema bootstrap"),
         ("Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository", "governance store repository and schema bootstrap"),
         ("Autheris.Infrastructure.Persistence.CatalogPhysicalIndexStore", "governance store: physical non-unique index tables (issue #404), fixed statements with bound values, no client text"),
@@ -413,8 +412,6 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.RowFilterEvaluationStore", "governance store: row filter evaluation settings (issue #107), fixed statements with bound values over the three engines, no client text"),
         ("Autheris.Infrastructure.Persistence.DatasetCatalogStore", "governance store: dataset catalog tags and visibility tier (issue #111), fixed statements with bound values over the three engines, no client text"),
         ("Autheris.Infrastructure.Persistence.Migrations.*", "governance schema migrations (WP-ARC-B-12): fixed DDL and version-table statements, no client text"),
-        ("Autheris.Infrastructure.Persistence.SqliteGovernanceConnectionProvider", "governance SQLite connection setup (WP-ARC-B-13): fixed PRAGMA statements with a validated journal-mode token, no client text"),
-        ("Autheris.Infrastructure.Persistence.SqliteGovernanceLintSource", "read-only governance store reader of the pre-deploy policy lint"),
         ("Autheris.Infrastructure.Persistence.TenantRegistryStore", "tenant registry table of the governance store"),
         ("Autheris.Infrastructure.Persistence.VirtualFilterStore", "virtual filter table of the governance store"),
         ("Autheris.Infrastructure.Persistence.CallerAttributeStore", "caller attribute registry tables of the governance store (REQ-GOV-129): fixed statements with bound values, no client text"),

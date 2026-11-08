@@ -134,10 +134,5 @@ src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Catalog.cs
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.CdcWatermarks.cs|1
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Consent.cs|9
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Schema.cs|1
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Audit.cs|4
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Catalog.cs|8
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.CdcWatermarks.cs|1
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Consent.cs|9
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Schema.cs|2
 src/Autheris.Infrastructure/Persistence/TenantRegistryStore.cs|1
 src/Autheris.Infrastructure/Plugins/PluginManager.cs|2

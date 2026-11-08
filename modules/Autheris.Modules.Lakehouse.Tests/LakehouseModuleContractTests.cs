@@ -39,15 +39,8 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
-public sealed class LakehouseModuleContractTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class LakehouseModuleContractTests
 {
-    private readonly WebApplicationFactory<Program> _factory;
-
-    public LakehouseModuleContractTests(WebApplicationFactory<Program> factory)
-    {
-        _factory = factory;
-    }
-
     private static string FindRepositoryRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
@@ -141,40 +134,6 @@ public sealed class LakehouseModuleContractTests : IClassFixture<WebApplicationF
 
             await endpoint.RequestDelegate!(context);
             context.Response.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
-        }
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Iceberg_routes_404_when_absent()
-    {
-        await using var host = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment("Development");
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-lh-absent-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", "tenant-1");
-        });
-
-        using var client = host.CreateClient();
-        var routes = new (HttpMethod Method, string Path)[]
-        {
-            (HttpMethod.Get, "/v1/tenant-1/namespaces"),
-            (HttpMethod.Get, "/v1/tenant-1/namespaces/raw/tables"),
-            (HttpMethod.Get, "/v1/tenant-1/namespaces/raw/tables/orders"),
-            (HttpMethod.Post, "/v1/tenant-1/namespaces/raw/tables/orders/credentials")
-        };
-
-        foreach (var (method, path) in routes)
-        {
-            using var request = new HttpRequestMessage(method, path);
-            request.Headers.Add("X-Test-User-Sid", "S-1-5-21-LAKEHOUSE-CONTRACT");
-            request.Headers.Add("X-Test-Roles", "GovernanceAdmin");
-            request.Headers.Add("X-Test-Tenant-Id", "tenant-1");
-
-            using var response = await client.SendAsync(request);
-            response.StatusCode.ShouldBe(HttpStatusCode.NotFound, $"Expected 404 when Lakehouse module is not enabled for {method} {path}.");
         }
     }
 

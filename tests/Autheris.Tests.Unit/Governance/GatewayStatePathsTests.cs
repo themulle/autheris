@@ -80,38 +80,6 @@ public sealed class GatewayStatePathsTests
     }
 
     [Fact]
-    public void AnchorDefaultsNextToGovernanceDb()
-    {
-        GatewayStatePaths.AuditAnchorFileFor("/var/state/governance.db").ShouldBe("/var/state/governance.db.audit-anchor.json");
-
-        var directory = Path.Combine(Path.GetTempPath(), $"autheris-state-{Guid.NewGuid():N}");
-        try
-        {
-            var paths = Paths("Production", directory);
-            var options = new GatewayOptions { GovernanceDb = new GovernanceDbOptions { ConnectionString = string.Empty } };
-            var store = AuditChainAnchorStoreFactory.CreateForGovernance(options, Env("Production"), Substitute.For<IKeyVaultSecretProvider>(), new TestSigner(), null, paths);
-
-            store.Save(new AuditChainAnchor(1, "hash", DateTimeOffset.UtcNow, "hmac"));
-
-            File.Exists(GatewayStatePaths.AuditAnchorFileFor(paths.GovernanceDatabaseFile)).ShouldBeTrue();
-        }
-        finally
-        {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, recursive: true);
-            }
-        }
-    }
-
-    private sealed class TestSigner : IAuditAnchorSigner
-    {
-        public string Sign(ReadOnlySpan<byte> data) => "sig";
-
-        public bool Verify(ReadOnlySpan<byte> data, string signature) => signature == "sig";
-    }
-
-    [Fact]
     public void ExplicitChainAnchorPath_Wins()
     {
         var anchorPath = Path.Combine(Path.GetTempPath(), $"explicit-anchor-{Guid.NewGuid():N}.json");
@@ -133,14 +101,4 @@ public sealed class GatewayStatePathsTests
         GatewayStatePaths.ResolveDirectory(null, ".data").ShouldBe(".data");
         GatewayStatePaths.ResolveDirectory("  ", ".data").ShouldBe(".data");
     }
-
-    [Fact]
-    public void StateOptionsValidator_IsNotEnforcedForServerProviders()
-    {
-        NewValidator("PostgreSql", "true").Validate(null, new StateOptions { StateDirectory = "./state" }).Succeeded.ShouldBeTrue();
-    }
-
-    private static StateOptionsValidator NewValidator(string provider, string? inContainer) =>
-        new(Options.Create(new GatewayOptions { GovernanceDb = new GovernanceDbOptions { Provider = provider } }),
-            name => name == "DOTNET_RUNNING_IN_CONTAINER" ? inContainer : null);
 }

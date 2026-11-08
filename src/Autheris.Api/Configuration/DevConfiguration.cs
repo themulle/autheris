@@ -142,22 +142,6 @@ public static class DevConfiguration
             builder.Sources.Insert(0, new MemoryConfigurationSource { InitialData = fill });
         }
 
-        if (SameBool(configuration[G + "Dev:Persist:Enabled"], "true"))
-        {
-            var directory = Autheris.Infrastructure.Persistence.GatewayStatePaths.ResolveDirectory(
-                configuration[G + "Dev:Persist:Directory"],
-                Autheris.Infrastructure.Persistence.GatewayStatePaths.ResolveDirectory(configuration[G + "State:StateDirectory"], ".data"));
-            System.IO.Directory.CreateDirectory(directory);
-            var connectionString = $"Data Source={System.IO.Path.Combine(directory, "dev.db")}";
-            var key = G + "GovernanceDb:ConnectionString";
-            builder.Add(new MemoryConfigurationSource
-            {
-                InitialData = new Dictionary<string, string?> { [key] = connectionString }
-            });
-            applied[key] = connectionString;
-            notes.Add($"Dev persistence is on: governance database in '{directory}' (reset with scripts/dev-reset.sh).");
-        }
-
         return new DevConfigurationReport(preset, notes, applied);
     }
 

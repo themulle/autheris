@@ -4,10 +4,9 @@ namespace Autheris.Domain.Options;
 
 public sealed class GovernanceDbOptions
 {
-    public string Provider { get; init; } = "Sqlite"; // "Sqlite", "PostgreSql" ("Postgres", "PgSql") or "SqlServer" ("MsSql")
+    public string Provider { get; init; } = "PostgreSql"; // "PostgreSql" or "SqlServer"; no other provider is supported for governance
     /// <summary>
-    /// ADO.NET connection string. Empty (default) for SQLite: Development/Test use a private in-memory database, every other environment
-    /// the governance database file in <c>Gateway:State:StateDirectory</c>.
+    /// ADO.NET connection string. Required: an empty value fails startup in every environment.
     /// </summary>
     public string ConnectionString { get; init; } = string.Empty;
     [Range(1, 60)] public int CommandTimeoutSeconds { get; init; } = 15;
@@ -20,13 +19,6 @@ public sealed class GovernanceDbOptions
     /// alter or truncate the audit table.
     /// </summary>
     public string? MigrationConnectionString { get; init; }
-
-    /// <summary>
-    /// R-42: SQLite journal mode: WAL (default), DELETE, TRUNCATE, MEMORY, OFF.
-    /// When running inside Docker/Podman with bind mounts from Windows/WSL filesystems where
-    /// shared memory (-shm) is broken, configure DELETE or TRUNCATE to avoid database disk image corruption.
-    /// </summary>
-    public string JournalMode { get; init; } = "WAL";
 
     /// <summary>versioned governance schema migrations (<c>GovernanceDb:Migrations</c>).</summary>
     public GovernanceMigrationOptions Migrations { get; init; } = new();
@@ -56,7 +48,7 @@ public sealed class GovernanceMigrationOptions
 
     /// <summary>
     /// When true (default false), <c>Mode = Verify</c> fails with <c>GOVERNANCE_RUNTIME_LOGIN_PRIVILEGED</c> if the runtime login can write the
-    /// migration history or run DDL; when false that is only a warning. PostgreSQL and SQL Server; SQLite is skipped.
+    /// migration history or run DDL; when false that is only a warning.
     /// </summary>
     public bool RequireLeastPrivilege { get; init; }
 

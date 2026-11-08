@@ -205,7 +205,7 @@ public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
                 env,
                 mockSecretProvider,
                 null,
-                NullLogger<SqliteGovernanceRepository>.Instance));
+                NullLogger<PostgreSqlGovernanceRepository>.Instance));
 
         ex.Message.ShouldContain("AU-01/AU-03");
     }

@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// Validates storage and cluster state options (GovernanceDb provider, SQLite in multi-node, Redis in multi-node).
+/// Validates storage and cluster state options (GovernanceDb provider, Redis in multi-node).
 /// </summary>
 public sealed class GatewayStorageOptionsValidator : IValidateOptions<GatewayOptions>
 {
@@ -30,12 +30,7 @@ public sealed class GatewayStorageOptionsValidator : IValidateOptions<GatewayOpt
 
         if (!GatewayStartupValidator.IsSupportedGovernanceDbProvider(opts.GovernanceDb.Provider))
         {
-            failures.Add("The GovernanceDb provider currently supports only 'Sqlite', 'PostgreSql' or 'SqlServer'.");
-        }
-
-        if (isMultiNode && DataSourceProvider.Is(opts.GovernanceDb.Provider, DatabaseDialect.Sqlite))
-        {
-            failures.Add("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.");
+            failures.Add("The GovernanceDb provider supports only 'PostgreSql' or 'SqlServer'.");
         }
 
         if (!_environment.IsDevelopment() && isMultiNode && !opts.Caching.Redis.Enabled)

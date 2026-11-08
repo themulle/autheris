@@ -146,7 +146,6 @@ public sealed class CdcStreamContractsTests
 public sealed class CdcStreamSchemaSnapshotTests
 {
     [Theory]
-    [InlineData("sqlite")]
     [InlineData("postgresql")]
     [InlineData("sqlserver")]
     public void Snapshot_ContainsI1StreamTables(string engine)

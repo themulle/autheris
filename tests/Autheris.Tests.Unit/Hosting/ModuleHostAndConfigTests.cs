@@ -290,3 +290,30 @@ public sealed class ModuleEndpointTests
         }
     }
 }
+
+[Trait("Category", "Security")]
+public sealed class ModuleGovernanceDbIsolationTests
+{
+    [Theory]
+    [InlineData("Gateway:GovernanceDb")]
+    [InlineData("Gateway:GovernanceDb:ConnectionString")]
+    [InlineData("gateway:governancedb:provider")]
+    public void Module_cannot_override_governance_db(string claimedSection)
+    {
+        var root = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:GovernanceDb:ConnectionString"] = "Host=secret-host;Password=secret"
+            })
+            .Build();
+
+        var method = typeof(ModuleLoader).GetMethod(
+            "BuildScopedModuleConfiguration",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+
+        var ex = Should.Throw<System.Reflection.TargetInvocationException>(() =>
+            method.Invoke(null, ["mod", new[] { claimedSection }, root]));
+        ex.InnerException.ShouldBeOfType<ModuleLoadException>();
+        ex.InnerException!.Message.ShouldNotContain("secret");
+    }
+}

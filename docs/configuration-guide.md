@@ -828,8 +828,6 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 | `PersonaLogin` | `bool` | `true` | A | `/api/dev/personas` and `/api/dev/login/{persona}`. |
 | `Info` | `bool` | `true` | A | `/api/dev/info` (effective configuration without secrets). |
 | `DemoData` | `bool?` | preset | A | Seed demo catalog data. Alias of `GovernanceDb.SeedDemoData`. |
-| `Persist:Enabled` | `bool` | `false` | A | Keep the governance database in `<Persist:Directory>/dev.db`. |
-| `Persist:Directory` | `string` | `.data` | A | Directory of the development database and its audit anchor. Reset with `scripts/dev-reset.sh`. |
 | `TestAuthHandler` | `bool?` | preset | B | Header-based test identities. Alias of `Authentication.EnableTestAuthHandler`. |
 | `Tooling:BananaCakePop` | `bool?` | preset | A | Alias of `GraphQL.EnableBananaCakePop` in Development. |
 | `Tooling:Introspection` | `bool?` | preset | B | Alias of `GraphQL.EnableIntrospection` in Development. |

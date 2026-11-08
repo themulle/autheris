@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text.RegularExpressions;
 using NetArchTest.Rules;
 using Shouldly;
 using Xunit;
@@ -41,7 +43,7 @@ public class ArchitectureTests
     [Fact]
     public void Infrastructure_ShouldNotHaveDependencyOnApi()
     {
-        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly)
+        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
             .ShouldNot()
             .HaveDependencyOnAny(ApiNamespace)
             .GetResult();
@@ -83,7 +85,7 @@ public class ArchitectureTests
         {
             typeof(Autheris.Domain.Common.Sid).Assembly,
             typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-            typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
+            typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
             typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly
         };
 
@@ -130,7 +132,7 @@ public class ArchitectureTests
         {
             typeof(Autheris.Domain.Common.Sid).Assembly,
             typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-            typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
+            typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
             typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly
         };
 
@@ -245,4 +247,63 @@ public class ArchitectureTests
         violations.ShouldBeEmpty(
             $"Autheris.Application must not contain types in duplicate or vendor-named namespaces: {string.Join(", ", violations)}");
     }
+
+    // WP-SIMPL-11 (SEC-SIMPL-05, 12.1 #7): the SQLite governance family is gone. The pattern is narrowed so that the data-source guards
+    // (SqliteExecutionGuard, SqliteProviderExecutionGuard) and data-source readers stay legal.
+    private static readonly Regex SqliteGovernanceTypeName = new(
+        @"^Sqlite\w*Governance\w*$|^SqliteBaselineSchema$|^SqliteSchemaCatalogReader$",
+        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking);
+
+    private static List<string> FindSqliteGovernanceTypes(IEnumerable<Type> types) =>
+        types.Where(t => SqliteGovernanceTypeName.IsMatch(t.Name))
+            .Select(t => t.FullName ?? t.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void No_Sqlite_governance_types_or_steps_folder()
+    {
+        var infrastructure = typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly;
+        var api = typeof(Autheris.Api.Configuration.GovernanceProviderGuard).Assembly;
+
+        FindSqliteGovernanceTypes(infrastructure.GetTypes().Concat(api.GetTypes())).ShouldBeEmpty(
+            "SEC-SIMPL-05: the SQLite governance store is removed; no Sqlite*Governance* type may exist in Autheris.Infrastructure or Autheris.Api");
+
+        var stepsFolder = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Infrastructure", "Persistence", "Migrations", "Steps", "sqlite");
+        Directory.Exists(stepsFolder).ShouldBeFalse("SEC-SIMPL-05: Migrations/Steps/sqlite must not exist");
+
+        var shapeFolder = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Infrastructure", "Persistence", "Migrations", "Shape");
+        Directory.EnumerateFiles(shapeFolder, "governance-shape.sqlite.*").ShouldBeEmpty("SEC-SIMPL-05: no SQLite governance shape file");
+        infrastructure.GetManifestResourceNames()
+            .Where(n => n.StartsWith("governance-shape.sqlite.", StringComparison.Ordinal) || n.StartsWith("governance-step.sqlite", StringComparison.Ordinal))
+            .ShouldBeEmpty("SEC-SIMPL-05: no embedded SQLite governance shape or step resource");
+
+        typeof(Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator)
+            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+            .Where(m => m.Name == "IsInMemorySqlite")
+            .ShouldBeEmpty("SEC-SIMPL-05: the governance in-memory SQLite check is removed with the store");
+    }
+
+    /// <summary>Mutation check of 12.1 #7: a dummy Sqlite governance type is flagged, the data-source guards are not.</summary>
+    [Fact]
+    [Trait("Category", "Security")]
+    public void No_Sqlite_governance_types_detector_flags_a_dummy_type_and_spares_data_source_guards()
+    {
+        var infrastructure = typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly;
+        var guards = infrastructure.GetTypes()
+            .Where(t => t.Name is "SqliteExecutionGuard" or "SqliteProviderExecutionGuard")
+            .ToList();
+        guards.Count.ShouldBe(2, "the data-source SQLite guards stay (WP-SIMPL-31)");
+
+        FindSqliteGovernanceTypes(guards).ShouldBeEmpty();
+        FindSqliteGovernanceTypes([typeof(SqliteMutationGovernanceStoreDummy)]).ShouldHaveSingleItem();
+        FindSqliteGovernanceTypes([typeof(SqliteBaselineSchema), typeof(SqliteSchemaCatalogReader)]).Count.ShouldBe(2);
+    }
+
+    private sealed class SqliteMutationGovernanceStoreDummy;
+
+    private sealed class SqliteBaselineSchema;
+
+    private sealed class SqliteSchemaCatalogReader;
 }

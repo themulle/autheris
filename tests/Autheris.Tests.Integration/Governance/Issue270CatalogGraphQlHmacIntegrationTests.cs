@@ -40,10 +40,7 @@ public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
     {
         var options = Options.Create(new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions
-            {
-                JournalMode = "DELETE"
-            }
+            GovernanceDb = new GovernanceDbOptions()
         });
 
         _repository = GovernanceTestDatabase.CreateRepository(

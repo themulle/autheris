@@ -507,9 +507,7 @@ RETURNING structure_version, content_version;";
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
             var tableExisted = false;
             var structuralChange = false;
-            var targetDesc = metadata.Table.Description;
-            var targetLongDesc = metadata.Table.LongDescription;
-            var targetDocSource = metadata.Table.DocumentationSource;
+            var docs = new CatalogSqlCore.TableDocumentation(metadata.Table.Description, metadata.Table.LongDescription, metadata.Table.DocumentationSource);
 
             await using (var cmd = conn.CreateCommand())
             {
@@ -524,33 +522,7 @@ RETURNING structure_version, content_version;";
                 {
                     tableId = Guid.Parse(reader.GetString(0));
                     tableExisted = true;
-                    var existingSourceType = reader.GetString(1);
-                    var existingSensitivity = reader.GetString(2);
-                    var existingFourEyes = reader.GetInt32(3) == 1;
-                    var existingActive = reader.GetInt32(4) == 1;
-                    var existingDst = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
-                    var existingDesc = reader.IsDBNull(6) ? null : reader.GetString(6);
-                    var existingLongDesc = reader.IsDBNull(7) ? null : reader.GetString(7);
-                    var existingDocSource = reader.IsDBNull(8) ? null : reader.GetString(8);
-                    if (!string.Equals(existingSourceType, metadata.Table.SourceType, StringComparison.OrdinalIgnoreCase) ||
-                        !string.Equals(existingSensitivity, metadata.Table.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
-                        existingFourEyes != metadata.Table.RequiresFourEyes ||
-                        existingActive != metadata.Table.IsActive ||
-                        existingDst != (int)metadata.Table.DataSourceType)
-                    {
-                        structuralChange = true;
-                    }
-
-                    // A lower-priority documentation source never overwrites text of a higher-priority one.
-                    var canOverwriteDesc = !string.IsNullOrWhiteSpace(metadata.Table.Description) &&
-                                           (string.IsNullOrWhiteSpace(existingDesc) ||
-                                            ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
-                    var canOverwriteLongDesc = !string.IsNullOrWhiteSpace(metadata.Table.LongDescription) &&
-                                               (string.IsNullOrWhiteSpace(existingLongDesc) ||
-                                                ShouldOverwriteDocumentation(existingDocSource, metadata.Table.DocumentationSource));
-                    targetDesc = canOverwriteDesc ? metadata.Table.Description : existingDesc;
-                    targetLongDesc = canOverwriteLongDesc ? metadata.Table.LongDescription : existingLongDesc;
-                    targetDocSource = (canOverwriteDesc || canOverwriteLongDesc) ? (metadata.Table.DocumentationSource ?? existingDocSource) : existingDocSource;
+                    (structuralChange, docs) = CatalogSqlCore.ReadExistingTableForUpsert(reader, metadata.Table, _options?.Catalog?.DocumentationSourcePrecedence);
                 }
                 else
                 {
@@ -578,9 +550,9 @@ RETURNING structure_version, content_version;";
                 upsertCmd.AddBound("@dst", (int)metadata.Table.DataSourceType);
                 upsertCmd.AddBound("@httpJson", (object?)httpEndpointJson ?? DBNull.Value);
                 upsertCmd.AddBound("@plugin", (object?)metadata.Table.PluginName ?? DBNull.Value);
-                upsertCmd.AddBound("@desc", (object?)targetDesc ?? DBNull.Value);
-                upsertCmd.AddBound("@longDesc", (object?)targetLongDesc ?? DBNull.Value);
-                upsertCmd.AddBound("@docSource", (object?)targetDocSource ?? DBNull.Value);
+                upsertCmd.AddBound("@desc", (object?)docs.Description ?? DBNull.Value);
+                upsertCmd.AddBound("@longDesc", (object?)docs.LongDescription ?? DBNull.Value);
+                upsertCmd.AddBound("@docSource", (object?)docs.Source ?? DBNull.Value);
                 upsertCmd.AddBound("@requiredFilterColumnsJson", metadata.RequiredFilterColumns.IsDefaultOrEmpty ? (object)DBNull.Value : JsonSerializer.Serialize(metadata.RequiredFilterColumns));
                 upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
                 upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
@@ -600,7 +572,7 @@ RETURNING structure_version, content_version;";
                 structuralChange = true;
             }
 
-            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, ShouldOverwriteDocumentation).ConfigureAwait(false))
+            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, (existing, incoming) => CatalogSqlCore.ShouldOverwriteDocumentation(_options?.Catalog?.DocumentationSourcePrecedence, existing, incoming)).ConfigureAwait(false))
             {
                 structuralChange = true;
             }
@@ -823,27 +795,6 @@ RETURNING structure_version, content_version;";
             await tx.RollbackAsync(ct).ConfigureAwait(false);
             throw;
         }
-    }
-
-    private bool ShouldOverwriteDocumentation(string? existingSource, string? newSource)
-    {
-        if (string.IsNullOrWhiteSpace(existingSource))
-        {
-            return true;
-        }
-
-        if (string.IsNullOrWhiteSpace(newSource))
-        {
-            return false;
-        }
-
-        var precedence = _options?.Catalog?.DocumentationSourcePrecedence ??
-            new List<string> { "Manual", "DataCatalog", "dbt", "OpenApi", "Database", "Default" };
-        var existingRank = precedence.FindIndex(s => string.Equals(s, existingSource, StringComparison.OrdinalIgnoreCase));
-        var newRank = precedence.FindIndex(s => string.Equals(s, newSource, StringComparison.OrdinalIgnoreCase));
-        if (existingRank < 0) existingRank = int.MaxValue;
-        if (newRank < 0) newRank = int.MaxValue;
-        return newRank <= existingRank;
     }
 
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)

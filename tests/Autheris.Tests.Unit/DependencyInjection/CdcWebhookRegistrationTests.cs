@@ -34,7 +34,7 @@ public sealed class CdcWebhookRegistrationTests
         services.AddLogging();
         var options = new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" }
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }
         };
         services.AddSingleton(Options.Create(options));
         services.AddAutherisStorage(options, env);
@@ -91,7 +91,7 @@ public sealed class CdcWebhookRegistrationTests
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns(Environments.Development);
         services.AddSingleton(env);
-        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:CdcWebhooks:Enabled"] = "true", ["Gateway:GovernanceDb:Provider"] = "Sqlite" }).Build();
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:CdcWebhooks:Enabled"] = "true", ["Gateway:GovernanceDb:Provider"] = "PostgreSql", ["Gateway:GovernanceDb:ConnectionString"] = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }).Build();
         services.AddSingleton<IConfiguration>(_ => cfg);
         services.AddLogging();
         var options = services.AddGatewayOptions(cfg, env);

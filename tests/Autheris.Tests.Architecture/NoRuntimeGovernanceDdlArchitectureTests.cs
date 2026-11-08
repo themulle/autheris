@@ -80,7 +80,7 @@ public sealed class NoRuntimeGovernanceDdlArchitectureTests
     public void DdlScan_DetectsKnownBaselineDdl_PositiveControl()
     {
         var baseline = SourceFiles("src/Autheris.Infrastructure/Persistence/Migrations")
-            .Single(f => f.Relative.EndsWith("/SqliteBaselineSchema.cs", StringComparison.Ordinal));
+            .Single(f => f.Relative.EndsWith("/PostgreSqlBaselineSchema.cs", StringComparison.Ordinal));
 
         Ddl.IsMatch(baseline.Text).ShouldBeTrue();
         Ddl.IsMatch("IF OBJECT_ID(N'dbo.X', N'U') IS NULL CREATE TABLE dbo.X (a INT)").ShouldBeTrue();
