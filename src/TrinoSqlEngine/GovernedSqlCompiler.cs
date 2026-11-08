@@ -135,7 +135,7 @@ internal sealed class GovernedSqlCompiler
         if (template is not null && TryRehydrate(template, typed))
         {
             _cache.CountHit();
-            return template.Rebind(typed.PolicyValues);
+            return template.Rebind(typed.PolicyValues, request.PageOffset, request.MaxAllowedOffset);
         }
 
         _cache.CountMiss();
@@ -257,7 +257,12 @@ internal sealed class GovernedSqlCompiler
         CheckBudget(request, clock, token);
 
         // 11. only verified output is cached, value-free
-        _cache.Add(CompiledSqlTemplate.From(keyMaterial, compiled, typed.Dependencies), keyHash);
+        var templateToCache = CompiledSqlTemplate.From(keyMaterial, compiled, typed.Dependencies);
+        _cache.Add(templateToCache, keyHash);
+        if (request.BindPageOffset)
+        {
+            return templateToCache.Rebind(typed.PolicyValues, request.PageOffset, request.MaxAllowedOffset);
+        }
         return compiled;
     }
 
@@ -388,6 +393,7 @@ internal sealed class GovernedSqlCompiler
             TablesWithMaskedColumns = CaseInsensitive(request.Policy.TablesWithMaskedColumns),
             EnforcedMaxRows = request.EnforcedMaxRows,
             AllowRecursiveCte = request.AllowRecursiveCte,
+            BindPageOffset = request.BindPageOffset,
             TablesWithConsentRowFilter = CaseInsensitive(request.Policy.TablesWithConsentRowFilter),
             RejectMaskedColumnsInPredicates = true,
             // DML guards of the request (DmlGuardOptions.Strict by default); the coverage verifier proves what they require.

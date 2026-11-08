@@ -74,6 +74,7 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddSingleton<ISqlSecurityValidator, DefaultSqlSecurityValidator>();
         // L-A1: one key resolution for the process (singleton), shared by the governed and the federated executors.
         services.AddSingleton<CompiledSqlAuditDigester>();
+        services.AddSingleton<Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec, Autheris.Application.Sql.Paging.WebSqlPageTokenCodec>();
         services.AddScoped<GovernedSqlRewriteDependencies>();
         services.AddScoped<GovernedSqlExecutionDependencies>();
         // R-4: the federated executor is resolved on first cross-source use (breaks the construction cycle without a service locator).

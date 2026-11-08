@@ -38,6 +38,19 @@ internal static class SqlErrorResponse
 
         // `limit` carries the limit kind only, never a count; the title is the fixed message of the code (never exception text).
         var ext = mapped.Limit is null ? null : new Dictionary<string, object?> { ["limit"] = mapped.Limit };
+        if (ex is TrinoSqlEngine.Ast.Emit.SqlCostExceededException costEx)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext["estimatedCost"] = costEx.EstimatedCost;
+            ext["maxAllowedCost"] = costEx.MaxAllowedCost;
+        }
+        else if (ex is TrinoSqlEngine.Ast.Emit.SqlQuotaExhaustedException quotaEx)
+        {
+            httpContext.Response.Headers.RetryAfter = quotaEx.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            ext ??= new Dictionary<string, object?>();
+            ext["retryAfterSeconds"] = quotaEx.RetryAfterSeconds;
+        }
+
         await ApiProblems.WriteAsync(httpContext, mapped.Status, mapped.Code, mapped.Title, ct, ext).ConfigureAwait(false);
     }
 }

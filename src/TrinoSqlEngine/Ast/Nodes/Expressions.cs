@@ -92,6 +92,8 @@ public enum LiteralType
 
 public sealed record ParenthesizedExpression(Expression Expression) : Expression;
 
+public sealed record PageOffsetParameterExpression : Expression;
+
 public sealed record BinaryExpression(
     Expression Left,
     BinaryOperator Operator,
