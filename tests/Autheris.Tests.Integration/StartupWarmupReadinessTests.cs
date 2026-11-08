@@ -14,6 +14,7 @@ using Microsoft.Extensions.Hosting;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
@@ -259,8 +260,8 @@ public sealed class StartupWarmupReadinessTests
         {
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-warmup-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Probe"));
             if (warmupEnabled is { } enabled)
             {
                 builder.UseSetting("Gateway:Startup:Warmup:Enabled", enabled ? "true" : "false");

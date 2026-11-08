@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
@@ -26,8 +27,8 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("QueryDefenseStressTests"));
             builder.UseSetting("Gateway:GraphQL:MaxAllowedExecutionDepth", "6");
             builder.UseSetting("Gateway:GraphQL:MaxAllowedComplexity", "250");
             // The depth test walks a schema-introspection path; introspection is not a limit and stays unrelated to the defenses.

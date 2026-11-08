@@ -24,8 +24,7 @@ public sealed partial class DefaultTenantRatchetTests(ITestOutputHelper output)
     private static readonly string[] FrozenBaselines =
     [
         "src/Autheris.Infrastructure/Persistence/Migrations/PostgreSqlBaselineSchema.cs",
-        "src/Autheris.Infrastructure/Persistence/Migrations/SqlServerBaselineSchema.cs",
-        "src/Autheris.Infrastructure/Persistence/Migrations/SqliteBaselineSchema.cs"
+        "src/Autheris.Infrastructure/Persistence/Migrations/SqlServerBaselineSchema.cs"
     ];
 
     /// <summary>The removed-key guard names the removed keys by design.</summary>

@@ -352,6 +352,49 @@ public abstract class CatalogContract : GovernanceContractBase
     }
 
     [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Epoch_increment_with_missing_policy_epoch_row_advances_and_keys_by_table_id()
+    {
+        if (!Store.IsAvailable) return;
+
+        var table = await Store.TableMetadata.UpsertTableMetadataAsync(BuildTable("epoch_missing_row"));
+        var tableId = table.Table.Id.ToString();
+        await Store.ExecuteNonQueryAsync("DELETE FROM POLICY_EPOCHS WHERE table_id = @tid", ("@tid", tableId));
+        var missingRowEpoch = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
+
+        var first = await Store.PolicyEpochs.IncrementTableEpochAsync(table.Identifier);
+        first.Should().BeGreaterThan(missingRowEpoch);
+        var second = await Store.PolicyEpochs.IncrementTableEpochAsync(table.Identifier);
+        second.Should().BeGreaterThan(first);
+
+        var rows = await Store.ExecuteScalarAsync(
+            "SELECT COUNT(*) FROM POLICY_EPOCHS WHERE LOWER(table_name) = LOWER(@name)", ("@name", table.Identifier.TableName));
+        Convert.ToInt64(rows).Should().Be(1);
+        var keyed = await Store.ExecuteScalarAsync(
+            "SELECT COUNT(*) FROM POLICY_EPOCHS WHERE table_id = @tid", ("@tid", tableId));
+        Convert.ToInt64(keyed).Should().Be(1);
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Epoch_increment_for_unregistered_table_writes_no_row_and_does_not_throw()
+    {
+        if (!Store.IsAvailable) return;
+
+        var unknown = new TableIdentifier("nosuchsource", "dbo", "epoch_unregistered_table");
+        var before = Convert.ToInt64(await Store.ExecuteScalarAsync("SELECT COUNT(*) FROM POLICY_EPOCHS"));
+
+        // A throw here fails the test: an unregistered table must not abort the surrounding transaction.
+        await Store.PolicyEpochs.IncrementTableEpochAsync(unknown);
+
+        var after = Convert.ToInt64(await Store.ExecuteScalarAsync("SELECT COUNT(*) FROM POLICY_EPOCHS"));
+        after.Should().Be(before);
+        var named = await Store.ExecuteScalarAsync(
+            "SELECT COUNT(*) FROM POLICY_EPOCHS WHERE LOWER(table_name) = LOWER(@name)", ("@name", unknown.TableName));
+        Convert.ToInt64(named).Should().Be(0);
+    }
+
+    [RequiresContainerRuntimeFact]
     public async Task Physical_indexes_and_policy_epochs_round_trip_atomically()
     {
         if (!Store.IsAvailable) return;

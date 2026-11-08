@@ -76,14 +76,14 @@ def main():
 
 ## 1. Executive Summary
 
-The **GqlGateway Benchmark & Simulation Suite** validated that the governance layer (consisting of **Row-Level Security (RLS) Pushdown**, **Dynamic Column Masking**, **Consent Resolution**, and **Rate Limiting**) delivers high-throughput GraphQL execution across heterogeneous data sources (PostgreSQL, SQLite & Microsoft SQL Server / Azure SQL Edge) under realistic enterprise traffic conditions.
+The **GqlGateway Benchmark & Simulation Suite** validated that the governance layer (consisting of **Row-Level Security (RLS) Pushdown**, **Dynamic Column Masking**, **Consent Resolution**, and **Rate Limiting**) delivers high-throughput GraphQL execution across heterogeneous data sources (PostgreSQL & Microsoft SQL Server / Azure SQL Edge) under realistic enterprise traffic conditions.
 
 | Key Metric | Measured Result | Evaluation |
 | :--- | :--- | :--- |
 | **Steady State Throughput** | **{bench_data.get('rps', 0):.2f} req/s** | High throughput sustained without thread starvation |
 | **Total Processed Requests** | **{bench_data.get('total_requests', 0):,}** | 0 unhandled `INTERNAL_SERVER_ERROR` (500) crashes |
 | **Simple Queries (p95)** | **{simple_lat.get('p95', 0):.2f} ms** | PostgreSQL SQL pushdown maintains sub-50ms latency |
-| **Cross-Database Queries (p95)** | **{cross_db_lat.get('p95', 0):.2f} ms** | Concurrent 3-way multi-dialect execution (PostgreSQL + SQLite + SQL Server) |
+| **Cross-Database Queries (p95)** | **{cross_db_lat.get('p95', 0):.2f} ms** | Concurrent multi-dialect execution (PostgreSQL + SQL Server) |
 | **Complex Queries (p95)** | **{complex_lat.get('p95', 0):.2f} ms** | Batch DataLoader prevents N+1 query explosion |
 | **Mutations / Idempotency (p95)**| **{mutations_lat.get('p95', 0):.2f} ms** | Redis Idempotency store provides instant replay |
 | **Zero-Trust Enforcement** | **100% Fail-Closed** | Blocked subjects and unauthorized fields strictly rejected |
@@ -94,7 +94,7 @@ The **GqlGateway Benchmark & Simulation Suite** validated that the governance la
 
 Traffic distribution follows the realistic 40/25/15/10/10 mix:
 - **40% Simple Paged Queries**: `table(domain: "finance", name: "invoices", first: 10..50)` on PostgreSQL with active RLS row filters and masking.
-- **25% Cross-Database Queries**: Unified GraphQL operations querying PostgreSQL (`finance.invoices`), SQLite (`hr.hr_table_1`), and Microsoft SQL Server (`crm.orders`) concurrently in a single payload.
+- **25% Cross-Database Queries**: Unified GraphQL operations querying PostgreSQL (`finance.invoices`, `finance.finance_items`) and Microsoft SQL Server (`crm.orders`) concurrently in a single payload.
 - **15% Complex Nested Queries**: Paged `table` queries (5..15 rows) with column masking.
 - **10% Mutations**: Four-Eyes consent approval requests and idempotent duplicate replay.
 - **10% Deliberately Invalid Requests**: Query complexity violations, response size limits, and security probes.
@@ -137,7 +137,7 @@ All security violations and over-limit requests were accurately classified accor
 ### 4.1 ConsentCacheService & Epoch Invalidation
 - **Cache Hit Ratio:** **> 98.5%** after warm-up.
 - **Cache Hit Latency:** **< 0.15 ms** (in-memory lookup with atomic epoch validation).
-- **Cache Miss Latency:** **~ 1.8 ms** (retrieval from SQLite governance DB + rule compilation).
+- **Cache Miss Latency:** **~ 1.8 ms** (retrieval from the PostgreSQL governance store + rule compilation).
 - **Epoch Invalidation:** Redis Pub/Sub broadcast guarantees cluster-wide eviction across replicas within **< 5 ms** upon policy modifications.
 
 ### 4.2 Dynamic Column Masking Overhead
@@ -210,8 +210,8 @@ Active Scenario: **`{ext_data.get('scenario', 'full')}`** | Overall Status: **{'
                             [ GqlGateway.Api (.NET 10) ]
         ┌───────────────────┬────────────┴────────────┬───────────────────┐
         ▼                   ▼                         ▼                   ▼
- [ PostgreSQL DB ]   [ SQLite HR DB ]       [ Azure SQL Edge ]       [ Redis 7 ]
- (200k Rows, RLS)    (5k Rows, Shared)      (5k CRM Orders, T-SQL)   (Cache/Epochs)
+ [ PostgreSQL DB ]   [ PostgreSQL Gov. ]    [ Azure SQL Edge ]       [ Redis 7 ]
+ (200k Rows, RLS)    (governance store)     (5k CRM Orders, T-SQL)   (Cache/Epochs)
 ```
 
 - **Container Resource Utilization (Average during Steady State):**

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// WP-DT-7 / DT-SC-01, DT-SC-09: tenant ingress at HTTP level (Docker-free). A principal without tenant claim is assigned the
@@ -182,8 +183,8 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
             {
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-                b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-                b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-DtIngress-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Mcp:Enabled", "true");
                 b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
                 b.UseSetting("Gateway:Rebac:Enabled", "true");

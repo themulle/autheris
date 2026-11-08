@@ -22,7 +22,7 @@ This guide helps engineers run the gateway locally with zero external dependenci
 
 - **.NET SDK**: 10.0 or higher (`net10.0`)
 - **IDE**: Visual Studio 2026, VS Code with C# Dev Kit, or JetBrains Rider
-- **No external services required**: the gateway ships an in-memory SQLite governance catalog, demo data and configured test users, so it runs completely without Docker, SQL Server or Redis.
+- **One external service required**: the governance store is PostgreSQL (or SQL Server). Start it with the compose stack or a local PostgreSQL container and set `Gateway:GovernanceDb:ConnectionString`; demo data (`GovernanceDb:SeedDemoData`) and configured test users need nothing else (no Redis, no SQL Server).
 - **WSL**: if many integration tests fail with an inotify limit error, run them with `DOTNET_USE_POLLING_FILE_WATCHER=true`.
 
 ---
@@ -93,7 +93,7 @@ curl -s https://localhost:7214/api/dev/info | jq .dev   # preset, features, acti
 
 ### 2.5 Reset local state
 
-By default the development database is in memory and starts fresh on every run. If you enabled persistence (see 3.3), stop the gateway and run `scripts/dev-reset.sh`.
+The governance database is a PostgreSQL or SQL Server instance configured through `Gateway:GovernanceDb`; reset it with your database tooling.
 
 ---
 
@@ -117,7 +117,7 @@ All development-only behaviour lives in one section, `Gateway:Dev`. Nothing in i
 }
 ```
 
-Environment variables work as usual, for example `Gateway__Dev__Persist__Enabled=true`.
+Environment variables work as usual, for example `Gateway__Dev__Preset=Standard`.
 
 ### 3.1 Switch classes
 
@@ -146,12 +146,10 @@ A preset is a set of concrete values, not hidden logic. What it applied is visib
 | `PersonaLogin` | `true` | A | `GET /api/dev/personas` (users, SIDs, roles, login links; never passwords) and `GET /api/dev/login/{persona}?redirect=/graphql` (one-click login; only same-site paths are followed). |
 | `Info` | `true` | A | `GET /api/dev/info`: preset, resolved features, class B switches, auth schemes, session state, database provider, rate limits, GraphQL flags, active bypasses. No connection strings or passwords. |
 | `DemoData` | preset | A | Seeds the demo catalog (idempotent). Alias of `GovernanceDb.SeedDemoData`. |
-| `Persist:Enabled` / `Persist:Directory` | `false` / `.data` | A | Keeps the governance database in `<Directory>/dev.db`, so approvals and audit data survive restarts. |
 | `TestAuthHandler` | preset | B | Header-based test identities (section 4.1). Alias of `Authentication.EnableTestAuthHandler`. |
 | `Tooling:BananaCakePop` | preset | A | Nitro IDE at `/graphql`. Alias of `GraphQL.EnableBananaCakePop` in Development. |
 | `Tooling:Introspection` | preset | B | GraphQL introspection. Alias of `GraphQL.EnableIntrospection` in Development. |
 
-**Persistence.** `.data/` is git-ignored. Reset with `scripts/dev-reset.sh [dir]` with the gateway stopped. The script removes the database, its WAL files **and** `dev.db.audit-anchor.json`. Deleting only the database leaves an anchor that points to a sequence the new database does not have, and the next start reports an audit chain integrity violation. In a container, map the directory to a named volume and avoid bind mounts on 9p/virtiofs file systems because of SQLite WAL.
 
 ### 3.4 Precedence
 
@@ -264,7 +262,7 @@ During early development or when onboarding third-party webhooks (e.g. ServiceNo
 The codebase follows **Clean Architecture**:
 - `Autheris.Domain`: pure business rules, entities, options and domain calculation services. No dependencies on external libraries or frameworks.
 - `Autheris.Application`: core execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`), data source executors and repository contracts.
-- `Autheris.Infrastructure`: ADO.NET SQL persistence (`SqliteGovernanceRepository`), Redis messaging (`RedisEventBus`), rate limiters, idempotency stores and claims transformation.
+- `Autheris.Infrastructure`: ADO.NET SQL persistence (`PostgreSqlGovernanceRepository`, `SqlServerGovernanceRepository`), Redis messaging (`RedisEventBus`), rate limiters, idempotency stores and claims transformation.
 - `Autheris.GraphQL`: Hot Chocolate schema configuration, dynamic types, queries, mutations and subscriptions.
 - `Autheris.Api`: ASP.NET Core host, authentication handlers (`BasicAuthenticationHandler`, `ForwardAuthAuthenticationHandler`), `Dev` configuration and endpoints, rate limiting middleware, health probes and graceful drain.
 

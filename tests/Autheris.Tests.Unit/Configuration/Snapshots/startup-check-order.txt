@@ -24,4 +24,3 @@ ProductionTransportAndOrigins
 ProductionAuthentication
 ProductionStorageAndAudit
 GovernanceDbProvider
-ClusterState

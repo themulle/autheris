@@ -23,6 +23,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Issue #280: the typed <c>where</c> of a governed aggregation (eq, in, a gte/lt time window) reaches the database as bound gateway
@@ -104,8 +105,8 @@ public abstract class GovernedAggregationWhereParamsBase : IDisposable
             builder.UseSetting("Analytics:Privacy:DefaultMinGroupSize", "1");
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-agg280-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GovernedAggregationWhereParamsBase"));
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", Source);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", target.Provider);

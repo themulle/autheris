@@ -23,6 +23,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Table = Autheris.Domain.Model.Table;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>How the mock CRM web-api treats the filter arguments it receives.</summary>
 public enum CrmApiMode
@@ -220,8 +221,8 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
         {
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "10000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-FederatedVf-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Tables"));
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:VirtualFilters:GenerationCheckSeconds", "0");
             b.UseSetting("Gateway:VirtualFilters:Federation:KeyCacheTtlSeconds", "1");

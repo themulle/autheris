@@ -8,7 +8,7 @@ namespace Autheris.Tests.Unit.Governance;
 [Trait("Category", "Security")]
 public sealed class GovernanceSchemaShapeComparerTests
 {
-    private static readonly GovernanceSchemaShape Snapshot = GovernanceSchemaShapeLoader.LoadEmbedded("sqlite");
+    private static readonly GovernanceSchemaShape Snapshot = GovernanceSchemaShapeLoader.LoadEmbedded("postgresql");
 
     private static GovernanceSchemaShape Without(Func<IReadOnlyList<SchemaTable>, IReadOnlyList<SchemaTable>> change) => Snapshot with { Tables = change(Snapshot.Tables) };
 

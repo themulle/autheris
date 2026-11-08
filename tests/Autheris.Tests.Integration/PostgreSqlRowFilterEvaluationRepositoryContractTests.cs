@@ -1,6 +1,11 @@
 namespace Autheris.Tests.Integration;
 
 using System.Threading.Tasks;
+using Autheris.Domain.Model;
+using Autheris.Domain.Common;
+using System.Threading;
+using Xunit;
+using Shouldly;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
@@ -13,6 +18,7 @@ using NSubstitute;
 public sealed class PostgreSqlRowFilterEvaluationRepositoryContractTests : RowFilterEvaluationRepositoryContractTestsBase
 {
     private PostgreSqlTestDatabase? _db;
+    private readonly IEpochValidationService _epochs = Substitute.For<IEpochValidationService>();
     private PostgreSqlGovernanceRepository? _repo;
 
     protected override async Task<IGovernanceRepository?> CreateRepositoryAsync()
@@ -29,7 +35,7 @@ public sealed class PostgreSqlRowFilterEvaluationRepositoryContractTests : RowFi
         {
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = _db.ConnectionString, SeedDemoData = false }
         });
-        _repo = GovernanceStoreFactory.CreatePostgreSql(Substitute.For<IEpochValidationService>(), options, env);
+        _repo = GovernanceStoreFactory.CreatePostgreSql(_epochs, options, env);
         return _repo;
     }
 
@@ -44,5 +50,27 @@ public sealed class PostgreSqlRowFilterEvaluationRepositoryContractTests : RowFi
         {
             await _db.DisposeAsync();
         }
+    }
+
+    [Fact]
+    public async Task ObjectChange_InvalidatesTheEpochAfterCommit()
+    {
+        if (_repo is null)
+        {
+            return;
+        }
+
+        var id = new TableIdentifier("Sales", "Crm", "epoch_obj");
+        await Repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table { SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, DisplayName = id.TableName, IsActive = true },
+            Columns = [new TableColumn { ColumnName = "a", DataType = "INT" }]
+        });
+        _epochs.ClearReceivedCalls();
+
+        await Repo.SetRowFilterEvaluationAsync(id, new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 5), new Sid("S-1-5-21-admin"));
+
+        await _epochs.Received(1).InvalidateEpochAsync(id, Arg.Any<CancellationToken>());
     }
 }

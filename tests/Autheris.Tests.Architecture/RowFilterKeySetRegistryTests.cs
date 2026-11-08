@@ -20,7 +20,7 @@ public sealed class RowFilterKeySetRegistryTests
     [
         CecilModuleCache.For(typeof(Autheris.Domain.Common.TableIdentifier).Assembly),
         CecilModuleCache.For(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly),
-        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly),
+        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly),
         CecilModuleCache.For(typeof(Autheris.GraphQL.Catalog.GraphQlTreeBuilder).Assembly),
         CecilModuleCache.For(typeof(Autheris.Api.Security.ClaimsNormalizer).Assembly),
         CecilModuleCache.For(typeof(TrinoSqlEngine.FastSqlEngine).Assembly)

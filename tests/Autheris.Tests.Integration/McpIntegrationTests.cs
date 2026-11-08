@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 public class McpIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 {
@@ -25,8 +26,8 @@ public class McpIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
             builder.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
             builder.UseSetting("Gateway:Insecure:danger_bypass_mcp_auth", "true");
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("McpIntegrationTests"));
         });
     }
 

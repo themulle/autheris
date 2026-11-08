@@ -8,6 +8,4 @@ src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.c
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Audit.cs|1120
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Catalog.cs|1055
 src/Autheris.Infrastructure/Persistence/SqlServerWindowsAuthConfigurator.cs|1242
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Audit.cs|1004
-src/Autheris.Infrastructure/Persistence/SqliteGovernanceRepository.Catalog.cs|1045
 src/TrinoSqlEngine/Ast/Builder/SqlAstBuilder.cs|1673

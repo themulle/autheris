@@ -24,6 +24,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// Virtual filters, phase 0 (docs/plans/2026-10-08-umsetzungsplan-virtuelle-filter.md): the same correlated consent row
@@ -332,8 +333,8 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
                 b.UseEnvironment("Development");
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-                b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-                b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-RowFilterParity-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+                b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("run"));
                 b.UseSetting("Gateway:Rebac:Enabled", "false");
 
                 b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");

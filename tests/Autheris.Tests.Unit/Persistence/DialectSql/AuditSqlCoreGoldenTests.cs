@@ -36,7 +36,7 @@ public sealed class AuditSqlCoreGoldenTests
         {
             "PostgreSql" => PostgreSqlGovernanceRepository.AuditSql.InsertPurgeCheckpoint,
             "SqlServer" => SqlServerGovernanceRepository.AuditSql.InsertPurgeCheckpoint,
-            _ => SqliteGovernanceRepository.AuditSql.InsertPurgeCheckpoint
+            _ => throw new ArgumentOutOfRangeException(nameof(dialect))
         };
 
         await AuditSqlCore.SavePurgeCheckpointAsync(conn, insertSql, checkpoint, CancellationToken.None);

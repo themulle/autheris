@@ -136,7 +136,7 @@ public static class DevEndpoints
             dev = new
             {
                 preset = options.Dev.Preset,
-                features = new { features.Banner, features.VerboseErrors, features.PersonaLogin, features.Info, features.PersistDb },
+                features = new { features.Banner, features.VerboseErrors, features.PersonaLogin, features.Info },
                 devSecurity = features.DevSecurity,
                 applied = report?.Applied ?? new Dictionary<string, string>(),
                 notes = report?.Notes ?? []

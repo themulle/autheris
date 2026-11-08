@@ -158,7 +158,7 @@ public sealed class DialectSqlGoldenArchitectureTests
     {
         // ARCH-MNT-22-T-07 / SC-05: ConsentQueryTenantArchitectureTests skips every type whose name contains "GovernanceRepository"; the
         // extracted cores and SQL holders must stay visible to it.
-        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
+        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
         var candidates = module.GetTypes()
             .Where(t => t.Name.EndsWith("SqlCore", StringComparison.Ordinal) || t.Name.EndsWith("Sql", StringComparison.Ordinal))
             .Where(t => DialectSqlFragmentExtractor.Areas.Any(a => t.Name.StartsWith(a.TypeName, StringComparison.Ordinal)))
@@ -247,7 +247,7 @@ public sealed class DialectSqlGoldenArchitectureTests
     public void IntegrityAuditTenant_Is_Referenced_Only_By_The_Refusal_Audit()
     {
         // DEF-SC-04: one named bucket, used by exactly one method (the single replacement point for the default-tenant lane).
-        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly);
+        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
         var users = module.GetTypes().SelectMany(t => t.Methods).Where(m => m.HasBody)
             .Where(m => m.Body.Instructions.Any(i => i.Operand is MethodReference { Name: "get_IntegrityAuditTenant" }))
             .Select(m => m.DeclaringType.Name + "." + m.Name).ToList();
@@ -259,21 +259,9 @@ public sealed class DialectSqlGoldenArchitectureTests
     [MemberData(nameof(DialectNames))]
     public void ReplaceConsents_Invalidates_Epoch_And_Metadata_Cache_All_Dialects(string dialect)
     {
-        // DEF-01 (replaces ARCH-MNT-22-T-09): every dialect invalidates the epoch and evicts the cached table metadata. PG/MSSQL touch
-        // _metadataCache directly; SQLite queues the eviction in the epoch bump (QueueMetadataInvalidation, applied on commit).
+        // DEF-01 (replaces ARCH-MNT-22-T-09): every dialect invalidates the epoch and evicts the cached table metadata (PG/MSSQL touch _metadataCache directly).
         var instructions = Instructions(dialect, "ReplaceConsentsAsync", parameterCount: 7).ToList();
         instructions.Any(i => i.Operand is MethodReference { Name: "InvalidateEpochAsync" }).ShouldBeTrue();
-        if (dialect == "Sqlite")
-        {
-            Calls(instructions).ShouldContain(c => c.Name == "IncrementTableEpochInternalAsync");
-            var repo = DialectSqlFragmentExtractor.RepositoryType(dialect);
-            var bump = repo.Methods.Single(m => m.Name == "IncrementTableEpochInternalAsync" && m.Parameters.Count == 4);
-            DialectSqlFragmentExtractor.Bodies(repo, bump).SelectMany(m => m.Body.Instructions)
-                .Any(i => i.Operand is MethodReference { Name: "QueueMetadataInvalidation" }).ShouldBeTrue();
-        }
-        else
-        {
-            instructions.Any(i => i.Operand is FieldReference { Name: "_metadataCache" }).ShouldBeTrue();
-        }
+        instructions.Any(i => i.Operand is FieldReference { Name: "_metadataCache" }).ShouldBeTrue();
     }
 }

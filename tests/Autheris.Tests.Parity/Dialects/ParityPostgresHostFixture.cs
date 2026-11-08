@@ -27,12 +27,14 @@ public sealed class ParityPostgresHostFixture : IAsyncLifetime, IParityHost
 
     private PostgreSqlContainer? _container;
     private string _workDir = string.Empty;
+    private string _govConnectionString = string.Empty;
     private WebApplicationFactory<Program>? _factory;
 
     public async Task InitializeAsync()
     {
         ParityRunGuard.EnsureEnabled();
         _workDir = Path.Combine(Path.GetTempPath(), "autheris-parity-pg-" + Guid.NewGuid().ToString("N"));
+        _govConnectionString = await ParityGovernanceDatabase.CreateAsync();
         Directory.CreateDirectory(_workDir);
         _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
         await _container.StartAsync();
@@ -71,7 +73,7 @@ public sealed class ParityPostgresHostFixture : IAsyncLifetime, IParityHost
 
     private WebApplicationFactory<Program> NewHost(string connectionString) => new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
     {
-        ParityHostSettings.Apply(b, Path.Combine(_workDir, "gov.db"));
+        ParityHostSettings.Apply(b, _govConnectionString);
         b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
         b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", connectionString);
         b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", Schema);

@@ -194,7 +194,6 @@ public sealed class AdvisoryRegressionTests
     [InlineData("other_tenant_rule_never_applies")]
     [InlineData("strictest_rule_wins_in_any_order")]
     [InlineData("rule_change_invalidates_the_cache")]
-    [InlineData("rule_write_through_the_repository_invalidates_the_cache")]
     public async Task Ghsa_7pjw_hvff_regression(string bullet)
     {
         static TableMetadata WithRule(string owner, string name, string ruleType) => Table(owner, name) with
@@ -202,27 +201,6 @@ public sealed class AdvisoryRegressionTests
             Columns = [new TableColumn { ColumnName = "pin" }],
             ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["pin"] = new MaskingRule { RuleType = ruleType } }
         };
-
-        if (bullet.StartsWith("rule_write", StringComparison.Ordinal))
-        {
-            using var real = Autheris.Tests.Unit.GovernanceStoreFactory.CreateSqlite(Substitute.For<Autheris.Application.Common.Interfaces.IEpochValidationService>());
-            var tableId = Guid.NewGuid();
-            TableMetadata Stored(string ruleType) => new()
-            {
-                Identifier = new TableIdentifier("src_a", "dbo", "orders"),
-                Table = new Table { Id = tableId, SourceName = "src_a", SchemaName = "dbo", TableName = "orders", DisplayName = "orders", IsActive = true },
-                OwnerTenantId = "tenant-a",
-                Columns = [new TableColumn { ColumnName = "pin", DataType = "TEXT" }],
-                ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["pin"] = new MaskingRule { RuleType = ruleType } }
-            };
-
-            var live = new CatalogFederatedMaskingCatalog(real, Options.Create(new GatewayOptions()));
-            await real.UpsertTableMetadataAsync(Stored("MASK_EMAIL"));
-            (await live.GetClassificationsAsync(TenantA))["pin"].RuleType.ShouldBe("MASK_EMAIL");
-            await real.UpsertTableMetadataAsync(Stored("NULLIFY"));
-            (await live.GetClassificationsAsync(TenantA))["pin"].RuleType.ShouldBe("NULLIFY");
-            return;
-        }
 
         var repo = Substitute.For<ITableMetadataRepository>();
         var catalog = new CatalogFederatedMaskingCatalog(repo, Options.Create(new GatewayOptions()));

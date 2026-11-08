@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// BUG #157 (PLAN-BUG-157 WP-3): a catalog table without queryable columns no longer stops the host; the omission is listed in the
@@ -50,8 +51,8 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
         {
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={_dbFile}");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(_dbFile));
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:SystemMetrics:Enabled", systemMetricsEnabled ? "true" : "false");
         });

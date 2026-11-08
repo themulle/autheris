@@ -36,7 +36,7 @@ public sealed class IdentityRealmRegistryWiringTests
         services.AddLogging();
         var options = new GatewayOptions
         {
-            GovernanceDb = new GovernanceDbOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" },
+            GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql },
             Tenancy = new TenancyOptions { DefaultTenantId = DefaultTenant }
         };
         services.AddSingleton(Options.Create(options));

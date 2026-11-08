@@ -47,21 +47,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         string? dbDesc = null;
         try
         {
-            if (_governanceRepository is SqliteGovernanceRepository sqliteRepo)
-            {
-                // SEC E-12: Use thread-safe PingAsync behind _lock to avoid concurrency collisions with running transactions
-                dbHealthy = await sqliteRepo.PingAsync(ct).ConfigureAwait(false);
-                if (sqliteRepo.IsAuditPipelineFaulted)
-                {
-                    dbHealthy = false;
-                    dbDesc = "SQLite Governance DB: Audit pipeline is faulted.";
-                }
-                else
-                {
-                    dbDesc = dbHealthy ? "SQLite Governance DB connection active." : "SQLite query returned null.";
-                }
-            }
-            else if (_governanceRepository is PostgreSqlGovernanceRepository pgRepo)
+            if (_governanceRepository is PostgreSqlGovernanceRepository pgRepo)
             {
                 dbHealthy = await pgRepo.PingAsync(ct).ConfigureAwait(false);
                 if (pgRepo.IsAuditPipelineFaulted)

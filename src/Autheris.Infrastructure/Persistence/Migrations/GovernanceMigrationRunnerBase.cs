@@ -13,6 +13,12 @@ namespace Autheris.Infrastructure.Persistence.Migrations;
 /// </summary>
 public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
 {
+    internal static GovernanceMigrationOptions GetMigrationOptions(Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions> options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return options.Value?.GovernanceDb?.Migrations ?? new GovernanceMigrationOptions();
+    }
+
     private static readonly TimeSpan ClientLockGrace = TimeSpan.FromSeconds(2);
 
     private readonly GovernanceMigrationOptions _options;

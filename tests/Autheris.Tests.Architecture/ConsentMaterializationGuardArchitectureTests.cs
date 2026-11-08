@@ -13,7 +13,7 @@ namespace Autheris.Tests.Architecture;
 [Trait("Category", "Security")]
 public sealed class ConsentMaterializationGuardArchitectureTests
 {
-    private static readonly string[] Providers = ["PostgreSql", "SqlServer", "Sqlite"];
+    private static readonly string[] Providers = ["PostgreSql", "SqlServer"];
 
     // Shared insert helper used by CreateConsentAsync / the atomic approval; the seam (decorator or the atomic method) guards it.
     private const string SharedInsert = "InsertConsentCoreAsync";

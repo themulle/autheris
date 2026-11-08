@@ -24,23 +24,6 @@ mutation EmergencyRevokeConsent {
 ### 1.3 Direct Database Fallback (Break-Glass)
 If the GraphQL API is inaccessible, update the governance database directly. Column names are those of the `CONSENTS` and `POLICY_EPOCHS` tables (timestamps are ISO-8601 text).
 
-SQLite:
-
-```sql
--- 1. Mark consent as revoked
-UPDATE CONSENTS
-SET is_revoked = 1,
-    revoke_reason = 'Emergency security incident',
-    revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE id = 'b8a92e10-67c3-4d7a-8f81-54625b902da1';
-
--- 2. Increment table policy epoch so that nodes drop cached authorizations
-UPDATE POLICY_EPOCHS
-SET epoch = epoch + 1,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE table_id = (SELECT table_id FROM CONSENTS WHERE id = 'b8a92e10-67c3-4d7a-8f81-54625b902da1');
-```
-
 PostgreSQL:
 
 ```sql
@@ -162,10 +145,11 @@ The hash is keyed. It cannot be recomputed without the key, so a plain SHA-256 s
 ### 4.2 Verification
 Preferred: use the built-in verification (`VerifyAuditHashChainAsync`), which also checks the anchor; a violation sets the audit pipeline to faulted and `/health/ready` reports the governance database as unhealthy. The built-in check is not scheduled automatically; run it from your monitoring at least daily.
 
-Offline check of an export (needs the audit key as hex in `AUDIT_HMAC_KEY_HEX`; SQLite variant, for PostgreSQL also escape `\n`/`\r`):
+Offline check of an export (needs the audit key as hex in `AUDIT_HMAC_KEY_HEX`; PostgreSQL variant; escape `\n`/`\r` in the same way as the gateway):
 
 ```python
-import hashlib, hmac, os, sqlite3
+import hashlib, hmac, os
+import psycopg
 
 KEY = bytes.fromhex(os.environ["AUDIT_HMAC_KEY_HEX"])
 GENESIS = "GENESIS_" + "0" * 64
@@ -173,12 +157,12 @@ GENESIS = "GENESIS_" + "0" * 64
 def esc(v):
     return "" if not v else v.replace("\\", "\\\\").replace("|", "\\|")
 
-def verify_audit_chain(db_path):
-    conn = sqlite3.connect(db_path)
+def verify_audit_chain(dsn):
+    conn = psycopg.connect(dsn)
     rows = conn.execute("""
         SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision,
                trace_id, details_json, prev_hash, entry_hash, seq, tenant_id
-        FROM AUDIT_LOG_ENTRIES ORDER BY rowid ASC""").fetchall()
+        FROM audit_log_entries ORDER BY seq ASC""").fetchall()
     print(f"Verifying {len(rows)} audit log records...")
 
     expected_prev = GENESIS
@@ -197,7 +181,7 @@ def verify_audit_chain(db_path):
     print("Chain consistent. Compare the last seq/hash with the signed anchor to rule out truncation.")
 
 if __name__ == "__main__":
-    verify_audit_chain("governance.db")
+    verify_audit_chain(os.environ["GOVERNANCE_DSN"])  # libpq connection string of a read-only account
 ```
 
 The script cannot check the anchor signature or a truncated tail; compare the last `seq`/`entry_hash` with the anchor file.
@@ -243,7 +227,7 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 
 - **Base and upgrade path.** The governance schema is versioned in `autheris_schema_migrations`. **v1.5.0 is the oldest supported base** (migration `0001`, frozen). A database at v1.5.0 or newer upgrades automatically to the schema of the running build by ordered, forward-only steps (`0002`, `0003`, ...). The release notes list the steps a release adds (`Governance schema: steps NNNN-MMMM`) and flag any non-additive step.
 - **Who applies.** Default (`GovernanceDb:Migrations:Mode=Apply`): the first start of a new build applies pending steps under the cross-replica schema lock with the runtime login (or with `MigrationConnectionString` when set); later replicas wait up to `Migrations:LockTimeoutSeconds`, find nothing pending and only verify. Talos or a pre-deployment job: run `Autheris.Api --migrate-governance` (always applies, ignores `Mode`, uses `MigrationConnectionString` when set) and start the application with `Mode=Verify`; an application that starts before the job ran fails closed with `GOVERNANCE_SCHEMA_PENDING`. `Autheris.Api --verify-governance` checks without any DDL or write (same checks and codes as `Verify`). Both commands exit `0` on success and `1` on failure.
-- **Upgrade procedure.** (1) Back up the governance database. (2) Run `--migrate-governance` (or start the new build in `Apply`). (3) On failure read the error code on stderr / the critical log entry `Governance database migration or initialization failed`; a failed step is rolled back completely (PostgreSQL and SQL Server run each step in its own transaction, SQLite all pending steps in one), earlier committed steps stay and a rerun continues after them. (4) Start the new build; `Verify` must pass.
+- **Upgrade procedure.** (1) Back up the governance database. (2) Run `--migrate-governance` (or start the new build in `Apply`). (3) On failure read the error code on stderr / the critical log entry `Governance database migration or initialization failed`; a failed step is rolled back completely (PostgreSQL and SQL Server run each step in its own transaction), earlier committed steps stay and a rerun continues after them. (4) Start the new build; `Verify` must pass.
 - **Error codes** (full table in the [configuration guide](configuration-guide.md)): `GOVERNANCE_SCHEMA_PENDING` (Verify, run the job), `GOVERNANCE_SCHEMA_UNSUPPORTED_BASE`, `GOVERNANCE_SCHEMA_DRIFT`, `GOVERNANCE_SCHEMA_CHECKSUM_MISMATCH`, `GOVERNANCE_SCHEMA_HISTORY_GAP` / `_DUPLICATE` / `_RENAMED`, `GOVERNANCE_SCHEMA_NEWER_THAN_BUILD`, `GOVERNANCE_MIGRATION_STEP_FAILED`, `GOVERNANCE_MIGRATION_LOCK_TIMEOUT`. Error texts carry the code, engine, database name, versions, step and table/column names only, never SQL text, row values or connection details.
 - **Locks and timeouts.** `Migrations:LockTimeoutSeconds` (default 300, 10-3600) bounds opening the connection and acquiring the schema lock; exceeding it fails with `GOVERNANCE_MIGRATION_LOCK_TIMEOUT` and nothing is changed (the orchestrator restarts the pod; a killed migrator never leaves a stale lock). Inside a step, `Migrations:StepLockTimeoutSeconds` (default 30) and, on PostgreSQL, `Migrations:StepStatementTimeoutSeconds` (default 900) roll the step back when exceeded. `Verify` takes no lock.
 - **Database older than v1.5.0.** Such a database (or any foreign schema in the governance tables) is not upgraded. Startup and both jobs fail with `GOVERNANCE_SCHEMA_UNSUPPORTED_BASE` and a drift report, **before any statement runs** (not even the history table is created). The caller loads the data into a database created by v1.5.0 or newer (reinstall), or applies the DDL of that version itself and restores the matching backup. Do not edit `autheris_schema_migrations` to make the check pass: checksums and the shape of every applied version are verified.
@@ -253,15 +237,15 @@ The monthly FinOps budget is enforced against a cluster-wide counter in the shar
 - Unavailable tables: a table whose persisted key or index definition is invalid is logged as a Warning and treated as unavailable (404 on reads, skipped by catalog syncs). Fix or delete its rows in `TABLE_PRIMARY_KEY_COLUMNS`, `TABLE_INDEXES` and `TABLE_INDEX_COLUMNS` ([F-GOV-21](features/f-gov-21-declared-table-keys-and-read-ordering.md#22-fail-closed-on-an-invalid-persisted-definition)). Direct loads into these tables bypass the governance epoch; load before start or bump the epoch.
 - WebSQL `504` (`urn:autheris:problem:websql-execution-timeout`): usually a user `ORDER BY` on an unindexed column of a large table. Add an index on the ordering column in the source or raise `WebSql:ExecutionTimeoutSeconds` ([F-DATA-02](features/f-data-02-governed-websql.md#44-execution-timeouts)).
 - Separate pipelines: set `GovernanceDb:Migrations:Mode=Verify` on the application and run `Autheris.Api --migrate-governance` as a pre-deployment job (with `GovernanceDb:MigrationConnectionString` for a DDL-capable role that owns the governance objects). The command exits `0` on success and `1` on failure; it applies whatever `Mode` is set to.
-- Helm: `governanceMigrationJob.enabled=true` renders this as a `pre-install,pre-upgrade` hook Job (`<release>-autheris-migrate`, `Migrations:Mode=Apply`) and sets the application to `Migrations:Mode=Verify`. The job runs with the same configuration and secrets as the application (governance connection string, audit and masking keys, Redis); set `governanceMigrationJob.migrationConnectionStringSecretKey` to a key of `gateway.governanceDb.existingSecret` that holds a DDL-capable connection string. It is not supported for the SQLite provider. A failed job (`backoffLimit: 0`) aborts the release before any application pod is replaced; read the job pod log for the migration error.
+- Helm: `governanceMigrationJob.enabled=true` renders this as a `pre-install,pre-upgrade` hook Job (`<release>-autheris-migrate`, `Migrations:Mode=Apply`) and sets the application to `Migrations:Mode=Verify`. The job runs with the same configuration and secrets as the application (governance connection string, audit and masking keys, Redis); set `governanceMigrationJob.migrationConnectionStringSecretKey` to a key of `gateway.governanceDb.existingSecret` that holds a DDL-capable connection string. A failed job (`backoffLimit: 0`) aborts the release before any application pod is replaced; read the job pod log for the migration error.
 - Migrations are forward-only. Rolling back to an older build means restoring a database backup taken before the upgrade. An older build refuses to start against a newer schema (`GOVERNANCE_SCHEMA_NEWER_THAN_BUILD`) unless `GovernanceDb:Migrations:AllowNewerSchema=true`, which is only safe after purely additive steps: it logs `GOVERNANCE_SCHEMA_NEWER_ALLOWED` per start, runs no DDL and still verifies the history, checksums and shape of every step the older build knows.
 
-### 4.ad State directory (SQLite governance provider, WP-ARC-B-13)
+### 4.ad State directory (WP-ARC-B-13)
 
-- `Gateway:State:StateDirectory` (default `./state`; the container images set `/app/data`) is the one writable location for local state. With the SQLite provider and no `GovernanceDb:ConnectionString` it holds `governance.db`; Development and Test without a connection string use a private in-memory database instead. An explicitly configured connection string always wins, and an in-memory database is rejected outside Development.
+- `Gateway:State:StateDirectory` (default `./state`; the container images set `/app/data`) is the writable location for local state (audit chain anchor file, local caches). The governance store itself is PostgreSQL or SQL Server and holds no local file.
 - Outside Development/Test the audit chain anchor must be configured explicitly (`Audit:ChainAnchorPath` on a separately protected volume, `Audit:ChainAnchorWormDirectory` or a KMS signer); the gateway refuses to start otherwise. Only in Development/Test the anchor defaults to `<governance database file>.audit-anchor.json` next to the database.
-- Backup set: back up `governance.db` together with its `-wal` and `-shm` side files (or checkpoint first) and the audit anchor file (`Audit:ChainAnchorPath`) as one unit. Restoring the database without the matching anchor makes the audit chain verification report a violation.
-- In a container the directory must be an absolute path on a mounted volume and not `/app`; the gateway refuses to start otherwise. `Cache=Shared` is ignored for file databases (connections are pooled per operation); WAL is the default journal mode, use `GovernanceDb:JournalMode=DELETE` on filesystems without shared-memory support (for example WSL bind mounts or network shares).
+- Backup set: back up the governance database and the audit anchor file (`Audit:ChainAnchorPath`) as one unit. Restoring the database without the matching anchor makes the audit chain verification report a violation.
+- In a container the directory must be an absolute path on a mounted volume and not `/app`; the gateway refuses to start otherwise.
 
 ---
 
@@ -480,7 +464,7 @@ Based on production load tests (Hetzner Dedicated AX-series, AMD EPYC / Ryzen 9,
 | **Standard Enterprise** | 500 – 2,000 | 5,000 – 15,000 | 2 – 4 vCPU, 2 – 4 GB RAM | 3 – 5 |
 | **High-Throughput Analytics** | 2,000 – 10,000 | 20,000 – 50,000+ | 8 vCPU, 8 – 16 GB RAM | 5 – 10 (HPA) |
 
-> **Replica count:** more than one replica requires `GovernanceDb:Provider = PostgreSql` (SQLite is rejected at startup) and, outside Development, `Caching:Redis:Enabled = true` for cluster-wide cache/epoch and token-revocation propagation. The PostgreSQL connection must use TLS with certificate verification (`SSL Mode=VerifyFull` or `VerifyCA`; DEP-7) and a dedicated account; apply the schema with `GovernanceDb:MigrationConnectionString` and give the runtime role only the rights it needs (INSERT/SELECT on `AUDIT_LOG_ENTRIES` plus `USAGE` on its sequence; no UPDATE/DELETE/TRUNCATE).
+> **Replica count:** more than one replica requires `GovernanceDb:Provider = PostgreSql` (any other provider than PostgreSql or SqlServer fails startup) and, outside Development, `Caching:Redis:Enabled = true` for cluster-wide cache/epoch and token-revocation propagation. The PostgreSQL connection must use TLS with certificate verification (`SSL Mode=VerifyFull` or `VerifyCA`; DEP-7) and a dedicated account; apply the schema with `GovernanceDb:MigrationConnectionString` and give the runtime role only the rights it needs (INSERT/SELECT on `AUDIT_LOG_ENTRIES` plus `USAGE` on its sequence; no UPDATE/DELETE/TRUNCATE).
 
 ### 9.2 Latency Budgets & SLA Targets
 

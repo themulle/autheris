@@ -826,8 +826,8 @@ public static class AuditChainAnchorStoreFactory
 
     /// <summary>
     /// Builds the anchor store of the governance repository for the configured provider (AU-01/AU-03, ARC-I-13). Outside
-    /// Development/Test a persistent anchor (file, WORM directory or KMS signer) is mandatory; the provider defaults are the SQLite
-    /// <c>&lt;db&gt;.audit-anchor.json</c> file or, for PostgreSQL and SQL Server, <c>Audit:ChainAnchorPath</c>.
+    /// Development/Test a persistent anchor (file, WORM directory or KMS signer) is mandatory; the default is <c>Audit:ChainAnchorPath</c>.
+    /// Only PostgreSQL and SQL Server have an anchor store; every other provider throws.
     /// </summary>
     public static IAuditChainAnchorStore CreateForGovernance(
         GatewayOptions options,
@@ -858,50 +858,21 @@ public static class AuditChainAnchorStoreFactory
                 "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
         }
 
+        // only PostgreSQL and SQL Server have an anchor store; no provider (null/empty/whitespace included) and no
+        // other provider gets a default, file or in-memory fallback.
         var provider = options.GovernanceDb?.Provider;
-        var primary = DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer)
-            ? (!string.IsNullOrWhiteSpace(audit?.ChainAnchorPath)
-                ? new FileAuditChainAnchorStore(audit.ChainAnchorPath)
-                : (IAuditChainAnchorStore)new InMemoryAuditChainAnchorStore())
-            : CreateSqliteDefaultStore(
-                statePaths?.ResolveGovernanceConnectionString(options.GovernanceDb?.ConnectionString) ?? options.GovernanceDb?.ConnectionString,
-                audit?.ChainAnchorPath);
+        if (string.IsNullOrWhiteSpace(provider) ||
+            !(DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer)))
+        {
+            throw new InvalidOperationException(
+                "No audit chain anchor store exists for the configured governance provider. Supported providers are PostgreSql and SqlServer.");
+        }
+
+        IAuditChainAnchorStore primary = !string.IsNullOrWhiteSpace(audit?.ChainAnchorPath)
+            ? new FileAuditChainAnchorStore(audit.ChainAnchorPath)
+            : new InMemoryAuditChainAnchorStore();
 
         return Create(audit, primary, secrets, signer, logger);
-    }
-
-    private static IAuditChainAnchorStore CreateSqliteDefaultStore(string? connectionString, string? configuredPath)
-    {
-        if (!string.IsNullOrWhiteSpace(configuredPath))
-        {
-            return new FileAuditChainAnchorStore(configuredPath);
-        }
-
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return new InMemoryAuditChainAnchorStore();
-        }
-
-        string dataSource;
-        bool isMemory;
-        try
-        {
-            var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString);
-            dataSource = builder.DataSource;
-            isMemory = builder.Mode == Microsoft.Data.Sqlite.SqliteOpenMode.Memory;
-        }
-        catch
-        {
-            dataSource = connectionString;
-            isMemory = false;
-        }
-
-        if (isMemory || string.IsNullOrWhiteSpace(dataSource) || dataSource == ":memory:")
-        {
-            return new InMemoryAuditChainAnchorStore();
-        }
-
-        return new FileAuditChainAnchorStore(GatewayStatePaths.AuditAnchorFileFor(dataSource));
     }
 
     private static IAuditAnchorSigner? CreateSigner(AuditOptions? options, IKeyVaultSecretProvider? secrets)

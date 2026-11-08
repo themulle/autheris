@@ -13,7 +13,7 @@ public sealed class NamespaceAssemblyConsistencyTests(Xunit.Abstractions.ITestOu
     [
         typeof(Autheris.Domain.Options.GatewayOptions).Assembly,
         typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-        typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly,
+        typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
         typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly,
         typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
         typeof(Program).Assembly,

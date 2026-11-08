@@ -30,7 +30,7 @@ public sealed class CallerAttributeDefinitionTests
     [Fact]
     public void Hash_CoversProviderConfiguration_ButNotIdOrStatus()
     {
-        var a = SqliteCallerAttributeRepositoryTests.Definition();
+        var a = CallerAttributeTestSupport.Definition();
         var sameMeaning = a with { Id = System.Guid.NewGuid(), Status = FilterApprovalStatus.Active };
         var otherClaim = a with { Provider = new CallerAttributeProviderBinding("claims", new Dictionary<string, string> { ["claim"] = "other" }) };
 
@@ -42,7 +42,7 @@ public sealed class CallerAttributeDefinitionTests
     [Fact]
     public void Hash_IsLengthPrefixed_SoShiftedFieldsDoNotCollide()
     {
-        var a = SqliteCallerAttributeRepositoryTests.Definition(description: "ab");
+        var a = CallerAttributeTestSupport.Definition(description: "ab");
         var b = a with { Name = "cost_centerab", Description = string.Empty };
         a.ComputeDefinitionHash().ShouldNotBe(b.ComputeDefinitionHash());
     }

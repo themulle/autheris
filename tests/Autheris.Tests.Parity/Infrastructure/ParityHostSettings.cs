@@ -12,7 +12,7 @@ public interface IParityHost
 /// <summary>Settings shared by every parity host (SQLite and container dialects). Test auth is enabled only here (SEC-PAR-03).</summary>
 public static class ParityHostSettings
 {
-    public static void Apply(IWebHostBuilder b, string governancePath)
+    public static void Apply(IWebHostBuilder b, string governanceConnectionString)
     {
         b.UseEnvironment("Development");
         b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
@@ -29,7 +29,7 @@ public static class ParityHostSettings
         // MISC-10: a floor of 1 is only valid with the explicit AllowDisabled opt-in (production validation stays untouched).
         b.UseSetting("Analytics:Privacy:AllowDisabled", "true");
         b.UseSetting("Analytics:Privacy:DefaultMinGroupSize", "1");
-        b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
+        b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
         b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={governancePath}");
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
         b.UseSetting("Gateway:Rebac:Enabled", "false");
