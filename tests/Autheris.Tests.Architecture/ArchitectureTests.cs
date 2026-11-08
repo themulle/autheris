@@ -285,6 +285,64 @@ public class ArchitectureTests
             .ShouldBeEmpty("SEC-SIMPL-05: the governance in-memory SQLite check is removed with the store");
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Governance_sql_is_built_only_from_constants_and_parameters()
+    {
+        // SEC-SIMPL-26: scans GovernanceRepository*.cs, AuditSqlCore.cs, *GovernanceDialect.cs for string concatenation/interpolation outside allowlist
+        var persistenceDir = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Infrastructure", "Persistence");
+        var targetFiles = Directory.GetFiles(persistenceDir, "GovernanceRepository*.cs", SearchOption.AllDirectories)
+            .Concat(Directory.GetFiles(persistenceDir, "AuditSqlCore.cs", SearchOption.AllDirectories))
+            .Concat(Directory.GetFiles(persistenceDir, "*GovernanceDialect.cs", SearchOption.AllDirectories))
+            .ToList();
+
+        targetFiles.ShouldNotBeEmpty("Target files for SEC-SIMPL-26 must exist.");
+
+        var violations = new List<string>();
+
+        foreach (var file in targetFiles)
+        {
+            var fileName = Path.GetFileName(file);
+            var lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i].Trim();
+                if (line.StartsWith("//", StringComparison.Ordinal) || line.StartsWith("/*", StringComparison.Ordinal) || line.StartsWith('*'))
+                {
+                    continue;
+                }
+
+                // Check CommandText assignments
+                if (line.Contains("CommandText") && line.Contains('='))
+                {
+                    // Allowlisted:
+                    // 1. Literal strings / constants (e.g. cmd.CommandText = "SELECT ..."; or cmd.CommandText = sql;)
+                    // 2. BindIdInClause calls
+                    // 3. ConsentPage safe builder: SelectConsentPagePrefix + where.ToString() + SelectConsentPageSuffix
+                    // 4. sql + " ORDER BY ..."
+                    var withoutLiterals = Regex.Replace(line, @"""[^""]*""", "\"\"");
+                    bool isSafe = line.Contains("BindIdInClause")
+                        || line.Contains("SelectConsentPagePrefix + where.ToString() + SelectConsentPageSuffix")
+                        || line.Contains("sql + \" ORDER BY r.requested_at DESC\"")
+                        || (!line.Contains("$\"") && !withoutLiterals.Contains('+'));
+
+                    if (!isSafe)
+                    {
+                        violations.Add($"{fileName}:{i + 1}: {line}");
+                    }
+                }
+
+                // Check string interpolation on SQL keywords
+                if (line.Contains("$\"") && (line.Contains("SELECT ") || line.Contains("INSERT ") || line.Contains("UPDATE ") || line.Contains("DELETE ")))
+                {
+                    violations.Add($"{fileName}:{i + 1} (interpolated SQL): {line}");
+                }
+            }
+        }
+
+        violations.ShouldBeEmpty("SEC-SIMPL-26: Governance SQL must be built only from constants and parameters.");
+    }
+
     /// <summary>Mutation check of 12.1 #7: a dummy Sqlite governance type is flagged, the data-source guards are not.</summary>
     [Fact]
     [Trait("Category", "Security")]

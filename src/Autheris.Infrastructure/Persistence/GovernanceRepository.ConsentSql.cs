@@ -8,14 +8,16 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Infrastructure.Persistence.Dialects;
 
 /// <summary>
 /// Engine-neutral statement execution and row mapping for consent queries, batch hydration, consent insertion, consent requests,
-/// four-eyes approval state reads, guarded status transitions, and ITSM activation ( Step 4).
-/// This class receives an open connection (and optional transaction) and never opens, commits, rolls back, or disposes either.
+/// four-eyes approval state reads, guarded status transitions, and ITSM activation (folded from ConsentSqlCore.cs).
 /// </summary>
 internal static class ConsentSqlCore
 {
@@ -265,7 +267,7 @@ internal static class ConsentSqlCore
         return string.Join(",", names);
     }
 
-    public static async Task LoadConsentDescriptionsAsync(DbConnection conn, IReadOnlyCollection<Consent> consents, CancellationToken ct)
+    public static async Task LoadDescriptionsBatchAsync(DbConnection conn, IReadOnlyCollection<Consent> consents, CancellationToken ct)
     {
         if (consents.Count == 0) return;
         var byId = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
@@ -397,48 +399,8 @@ internal static class ConsentSqlCore
         };
     }
 
-    public static async Task<Guid> ResolveTableIdOrThrowAsync(DbConnection conn, DbTransaction? tx, string? findTableIdSql, Guid existingTableId, TableIdentifier table, string operationLabel, CancellationToken ct)
+    public static async Task InsertColumnRulesAndRowFiltersAsync(DbConnection conn, DbTransaction tx, Consent consent, CancellationToken ct)
     {
-        if (existingTableId != Guid.Empty || findTableIdSql == null) return existingTableId;
-
-        await using var findCmd = conn.CreateCommand();
-        findCmd.Transaction = tx;
-        findCmd.CommandText = findTableIdSql;
-        findCmd.AddBound("@domain", table.Domain);
-        findCmd.AddBound("@schema", table.Schema);
-        findCmd.AddBound("@table", table.TableName);
-        var idObj = await findCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        if (idObj == null) throw new InvalidOperationException($"Cannot create {operationLabel}: Target table '{table}' does not exist in catalog.");
-
-        return Guid.Parse(idObj.ToString()!);
-    }
-
-    public static async Task<(Consent Created, AuditLogEntry AuditEntry)> InsertConsentRowsAsync(DbConnection conn, DbTransaction tx, string insertConsentSql, string? findTableIdSql, Consent consent, CancellationToken ct)
-    {
-        var consentId = consent.Id == Guid.Empty ? Guid.NewGuid() : consent.Id;
-        var tableId = await ResolveTableIdOrThrowAsync(conn, tx, findTableIdSql, consent.TableId, consent.TableIdentifier, "consent", ct).ConfigureAwait(false);
-        var tenantIdStr = StoredTenant.RequireWritable(consent.TenantId);
-
-        await using (var cmd = conn.CreateCommand())
-        {
-            cmd.Transaction = tx;
-            cmd.CommandText = insertConsentSql;
-            cmd.AddBound("@id", consentId.ToString());
-            cmd.AddBound("@tid", tableId.ToString());
-            cmd.AddBound("@reqId", (object?)consent.ConsentRequestId?.ToString() ?? DBNull.Value);
-            cmd.AddBound("@effect", consent.Effect.ToString());
-            cmd.AddBound("@granteeType", consent.GranteeType.ToString());
-            cmd.AddBound("@granteeSid", (object?)consent.GranteeSid?.Value ?? DBNull.Value);
-            cmd.AddBound("@sidNorm", ConsentSubjectFilter.NormalizeParameter((object?)consent.GranteeSid?.Value ?? DBNull.Value));
-            cmd.AddBound("@roleId", (object?)consent.RoleId?.ToString() ?? DBNull.Value);
-            cmd.AddBound("@roleName", (object?)consent.RoleName ?? DBNull.Value);
-            cmd.AddBound("@validFrom", consent.ValidFrom.ToUniversalTime().ToString("O"));
-            cmd.AddBound("@validTo", consent.ValidTo.ToUniversalTime().ToString("O"));
-            cmd.AddBound("@tenantId", tenantIdStr);
-            cmd.AddBound("@description", (object?)consent.Description ?? DBNull.Value);
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-
         foreach (var rule in consent.ColumnRules)
         {
             var ruleId = rule.Id == Guid.Empty ? Guid.NewGuid() : rule.Id;
@@ -446,7 +408,7 @@ internal static class ConsentSqlCore
             ruleCmd.Transaction = tx;
             ruleCmd.CommandText = InsertColumnRuleSql;
             ruleCmd.AddBound("@id", ruleId.ToString());
-            ruleCmd.AddBound("@consentId", consentId.ToString());
+            ruleCmd.AddBound("@consentId", consent.Id.ToString());
             ruleCmd.AddBound("@colId", rule.TableColumnId.ToString());
             ruleCmd.AddBound("@colName", rule.ColumnName);
             ruleCmd.AddBound("@level", (int)rule.AccessLevel);
@@ -463,7 +425,7 @@ internal static class ConsentSqlCore
             filterCmd.Transaction = tx;
             filterCmd.CommandText = InsertRowFilterSql;
             filterCmd.AddBound("@id", filterId.ToString());
-            filterCmd.AddBound("@consentId", consentId.ToString());
+            filterCmd.AddBound("@consentId", consent.Id.ToString());
             filterCmd.AddBound("@fg", filter.FilterGroup);
             filterCmd.AddBound("@colId", filter.TableColumnId.ToString());
             filterCmd.AddBound("@colName", filter.ColumnName);
@@ -488,46 +450,22 @@ internal static class ConsentSqlCore
             filterCmd.AddBound("@ksMax", (object?)filter.KeySetMaxKeys ?? DBNull.Value);
             await filterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+    }
 
-        var auditEntry = new AuditLogEntry
-        {
-            TenantId = consent.TenantId,
-            EventType = "CONSENT_GRANTED",
-            ActorSid = consent.CreatedBySid ?? new Sid("SYSTEM"),
-            TargetTable = consent.TableIdentifier.ToString(),
-            Decision = "GRANTED",
-            TraceId = Guid.NewGuid().ToString("N"),
-            DetailsJson = JsonSerializer.Serialize(new
-            {
-                ConsentId = consentId,
-                GranteeType = consent.GranteeType.ToString(),
-                GranteeSid = consent.GranteeSid?.Value,
-                ValidFrom = consent.ValidFrom,
-                ValidTo = consent.ValidTo
-            })
-        };
+    public static async Task<Guid> ResolveTableIdOrThrowAsync(DbConnection conn, DbTransaction? tx, string? findTableIdSql, Guid existingTableId, TableIdentifier table, string operationLabel, CancellationToken ct)
+    {
+        if (existingTableId != Guid.Empty || findTableIdSql == null) return existingTableId;
 
-        var created = new Consent
-        {
-            Id = consentId,
-            TableId = tableId,
-            TableIdentifier = consent.TableIdentifier,
-            ConsentRequestId = consent.ConsentRequestId,
-            Effect = consent.Effect,
-            GranteeType = consent.GranteeType,
-            GranteeSid = consent.GranteeSid,
-            RoleId = consent.RoleId,
-            RoleName = consent.RoleName,
-            ValidFrom = consent.ValidFrom,
-            ValidTo = consent.ValidTo,
-            IsRevoked = consent.IsRevoked,
-            TenantId = consent.TenantId,
-            ColumnRules = consent.ColumnRules,
-            RowFilters = consent.RowFilters,
-            Description = consent.Description
-        };
+        await using var findCmd = conn.CreateCommand();
+        findCmd.Transaction = tx;
+        findCmd.CommandText = findTableIdSql;
+        findCmd.AddBound("@domain", table.Domain);
+        findCmd.AddBound("@schema", table.Schema);
+        findCmd.AddBound("@table", table.TableName);
+        var idObj = await findCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        if (idObj == null) throw new InvalidOperationException($"Cannot create {operationLabel}: Target table '{table}' does not exist in catalog.");
 
-        return (created, auditEntry);
+        return Guid.Parse(idObj.ToString()!);
     }
 
     public static async Task<(TableIdentifier? Table, string? RawTenant)> ReadSystemRevokeTargetAsync(DbConnection conn, DbTransaction? tx, string selectSql, Guid consentId, Guid consentRequestId, CancellationToken ct)
@@ -773,7 +711,7 @@ internal static class ConsentSqlCore
 
     public static async Task<(bool RequiresFourEyes, string? Sensitivity, bool SameApprover, int NextStepNumber)> ReadApprovalStateAsync(
         DbConnection conn, DbTransaction? tx, Guid requestId, Sid approverSid, string? itsmApproverAccount,
-        IReadOnlyCollection<string> approverOwnerIds, Func<IReadOnlyList<string>, CancellationToken, Task<IReadOnlyCollection<string>>> resolveOwnerIdsAsync, CancellationToken ct)
+        IReadOnlyCollection<string> approverOwnerIds, Func<IReadOnlyList<string>, Task<IReadOnlyCollection<string>>> resolveOwnerIdsAsync, CancellationToken ct)
     {
         bool requiresFourEyes = false;
         string? tableSensitivity = null;
@@ -803,7 +741,7 @@ internal static class ConsentSqlCore
         bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount));
         for (int i = 0; !sameApprover && i < existingApprovers.Count; i++)
         {
-            var storedOwnerIds = await resolveOwnerIdsAsync(ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i]), ct).ConfigureAwait(false);
+            var storedOwnerIds = await resolveOwnerIdsAsync(ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i])).ConfigureAwait(false);
             sameApprover = ConsentApprovalPolicy.ShareOwnerId(storedOwnerIds, approverOwnerIds);
         }
 
