@@ -428,9 +428,11 @@ Developer-ready specs in `simplification/`; dependencies and order in the README
 - [WP-SIMPL-50](simplification/WP-SIMPL-50-review-remediation-v1-7-1.md) Remediation of the v1.7.1..HEAD code and security reviews: release blockers (unsigned workspace module fallback, missing-ABAC-service and unknown-IP fail-open, CODEOWNERS remap, module audit serialization, HitL broadcast binding), module host hardening (trust, route prefix, service allowlist, no raw governance connection, signed release path), ABAC row-filter propagation, ITSM and break-glass leftovers removed, aggregation residual risk after the DP removal (OD-11), low cleanups; developer-ready, Phase 3 approved with conditions SEC-50-01..16, owner confirmed all defaults 2026-11-07 (D-50i KMS/HSM signing key with environment-secret interim, D-50k Lakehouse route move); not started (about 9.5 pd).
 - Follow-up to WP-SIMPL-50 D-50j (not scheduled): enable culture analyzers CA1307, CA1309 and CA1310 as errors in `src` (culture-sensitive identifier comparisons are a bypass class); CA1304, CA1305 and CA1311 later.
 - [WP-SIMPL-51](simplification/WP-SIMPL-51-websql-client-contract.md) WebSQL client contract from issues #527, #528, #529, #533: cost estimate and per-caller quota shared with GraphQL, typed columns with mask flags, syntax error positions and trailing semicolon, paging via bound continuation tokens without rewriting the statement (about 8 pd; developer-ready, Phase 3 approved with conditions SEC-51-01..22, owner confirmed all defaults 2026-11-07 incl. D-51m policy-denied statements charged; not started).
-- [WP-SIMPL-52](simplification/WP-SIMPL-52-governance-data-model.md) Governance data model consolidation and classification-based masking (OD-45): data classifications per tenant with hierarchy, multiple classifications per column, typed mask functions per classification with per-column override, Clear/Masked/Deny per classification on grants and profile items, per-classification time-limited clear requests; column-level DDL for the WP-45..49 tables, pattern grants in `consents`, access-profile items, canonical grant id `CONSENTS.id`, drop step for superseded columns and tables (about 13 pd; Draft, Phase 3 security review pending).
+- [WP-SIMPL-52](simplification/WP-SIMPL-52-governance-data-model.md) Governance data model consolidation and classification-based masking (OD-45): data classifications per tenant with hierarchy, multiple classifications per column, typed mask functions per classification with per-column override, Clear/Masked/Deny per classification on grants and profile items, per-classification time-limited clear requests; column-level DDL for the WP-45..49 tables, pattern grants in `consents`, access-profile items, canonical grant id `CONSENTS.id`, drop step for superseded columns and tables; PR 4b catalog text of Masked columns per classification (#571, D-52p) (about 14.5 pd; Draft, Phase 3 security review pending).
+- [WP-SIMPL-53](simplification/WP-SIMPL-53-mcp-catalog-client-hints.md) MCP row cap and truthful catalog hints from issues #578, #579, #572, #573: `Mcp:MaxResultRows` enforced on every row-reading MCP tool, catalog hints derived from the effective tool and route switches, dataset size class from ingested metadata only, aggregation and WebSQL index-usability pricing and hints (about 7 pd; Draft, Phase 3 pending; PR 3-5 under `freeze-exception`, Q23).
+- [WP-SIMPL-54](simplification/WP-SIMPL-54-golden-queries-from-dbt.md) Golden queries maintained by data owners in dbt `meta.golden_queries`, stored in the governance store, served without restart (#580; about 4.5 pd; after the feature freeze, in the dbt module; not in the total below, like WP-SIMPL-49).
 
-Total effort: about 259.5-266.5 pd (WP-SIMPL-50 review remediation about 9.5 pd, WP-SIMPL-51 WebSQL client contract about 8 pd and WP-SIMPL-52 governance data model about 13 pd included) as the sum of the table above: WP-SIMPL-01..37 about 120-124 pd (security lane WP-SIMPL-36 8-12 and WP-SIMPL-37 4 included; WP-SIMPL-30 cancelled; WP-14, WP-16, WP-18 and WP-21 aligned with their specs and owner decisions) plus the owner-decision work packages WP-SIMPL-38..48 about 109-112 pd (WP-48 12 pd, WP-47 raised to 16 pd by OD-43) (estimates from section 11 of each spec). Contingency is not included; the earlier figure of 135-157 pd covered WP-01..37 only.
+Total effort: about 268-275 pd (WP-SIMPL-50 review remediation about 9.5 pd, WP-SIMPL-51 WebSQL client contract about 8 pd, WP-SIMPL-52 governance data model about 14.5 pd and WP-SIMPL-53 MCP row cap and catalog hints about 7 pd included; WP-SIMPL-49 and WP-SIMPL-54 after the freeze, excluded) as the sum of the table above: WP-SIMPL-01..37 about 120-124 pd (security lane WP-SIMPL-36 8-12 and WP-SIMPL-37 4 included; WP-SIMPL-30 cancelled; WP-14, WP-16, WP-18 and WP-21 aligned with their specs and owner decisions) plus the owner-decision work packages WP-SIMPL-38..48 about 109-112 pd (WP-48 12 pd, WP-47 raised to 16 pd by OD-43) (estimates from section 11 of each spec). Contingency is not included; the earlier figure of 135-157 pd covered WP-01..37 only.
 
 ## 5. Architecture view: KEEP / MODULE / DELETE
 
@@ -522,7 +524,7 @@ DDL rule: only L-PER changes governance DDL (WP-11 removes the SQLite tree, WP-2
 
 ## Open issues and advisories assessment
 
-Assessment date 2026-11-05 (PM consolidation of seven triage slices; #527, #528, #529 and #533 added 2026-11-07 as WP-SIMPL-51). Scope: all 51 open GitHub issues and the draft security advisories. **Disclosure rule (SEC-SIMPL-01):** advisories are private drafts in a public repository; this plan names them only by GHSA id and the affected component. Details stay in the advisory.
+Assessment date 2026-11-05 (PM consolidation of seven triage slices; #527, #528, #529 and #533 added 2026-11-07 as WP-SIMPL-51; #571, #572, #573, #578, #579 and #580 added 2026-11-08 as WP-SIMPL-52 PR 4b, WP-SIMPL-53 and WP-SIMPL-54). Scope: all 61 assessed GitHub issues and the draft security advisories. **Disclosure rule (SEC-SIMPL-01):** advisories are private drafts in a public repository; this plan names them only by GHSA id and the affected component. Details stay in the advisory.
 
 Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), **QUICK-WIN** (small, independent), **OBSOLETE-BY-REMOVAL** (closed by the deleting WP; no fix work), **PARTLY-OBSOLETE** (the part in deleted code is closed by the deleting WP; the rest is fixed), **DUPLICATE**, **NEEDS-DECISION** (depends on an owner decision below). Priorities P0 (now) to P3 (backlog). "Security lane" means WP-SIMPL-36 (section 4), which runs parallel to Stage 0 under the freeze exception; its first item is merging `fix/security-batch-5`.
 
@@ -538,7 +540,7 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 8. **CI workflow bundles** (workflow edits need owner approval, `[WF]`): #517 + #518 in one PR; #519 + the remaining part of #521 in a second; both in a fixed merge order with WP-SIMPL-21 and -35. With Oracle and Databricks kept (OD-12), the Oracle and Spark/Databricks suites stay: full suites nightly (as #522 proposes), a security-tagged smoke subset on PRs, Oracle and SQL Server images pre-pulled (#521). Deletions alone cut only about 10-15 % of integration-test time, so #519 (with a shard-weight regeneration script, rerun after each deletion WP) and #520 stay necessary.
 9. **Options cleanup.** #477 merges into #514 / WP-SIMPL-06, except the pre-filled security allowlists, which are fixed in the security lane (empty by default, fail closed).
 
-### Issues (51)
+### Issues (61)
 
 | Issue | Title | Verdict | Prio | Work package / sequencing |
 |---|---|---|---|---|
@@ -597,6 +599,12 @@ Verdicts: **BLOCKER** (stops other work), **FIX-IN-CORE** (code stays; fix it), 
 | #528 | WebSQL column types and mask flags | FIX-IN-CORE | P2 | WP-SIMPL-51 I2; breaking response shape allowed |
 | #529 | WebSQL syntax error position, trailing semicolon | QUICK-WIN | P2 | WP-SIMPL-51 I3; position only, no statement echo |
 | #533 | WebSQL and GraphQL paging without rewriting | FIX-IN-CORE | P2 | WP-SIMPL-51 I4; bound continuation token, ORDER BY required (D-51b) |
+| #571 | Catalog text of masked columns: governance decides visibility | FIX-IN-CORE | P2 | Extends WP-SIMPL-52 (5.8, PR 4b, D-52p; OD-45): per-classification `catalog_text` with per-column override, default VISIBLE (Q25) |
+| #572 | Catalog: approximate table size per dataset | FIX-IN-CORE | P3 | WP-SIMPL-53 PR 3: size class from ingested metadata only (OD-25), never exact counts (Q24); freeze exception (Q23) |
+| #573 | Aggregation/WebSQL without usable index: price and hint | FIX-IN-CORE | P2 | WP-SIMPL-53 PR 4 (GraphQL, after WP-44) and PR 5 (WebSQL, after WP-51 PR 1/4); freeze exception (Q23) |
+| #578 | `Mcp:MaxResultRows` documented but not enforced | FIX-IN-CORE | P1 | WP-SIMPL-53 PR 1 (enforce, D-53a); WP-SIMPL-06 keeps the option |
+| #579 | MCP catalog hints name disabled tools and routes | FIX-IN-CORE | P2 | WP-SIMPL-53 PR 2 (hints from `IReadPathSwitches`) |
+| #580 | Golden queries maintained by data owners (dbt meta) | NEEDS-DECISION (default taken) | P3 | WP-SIMPL-54 after the feature freeze, in the dbt module (WP-28); dbt meta only (Q26, Q27) |
 
 ### Security advisories
 
@@ -651,6 +659,11 @@ All owner decisions are recorded in PRD section 2.0 (OD-1..OD-45, binding); this
 
 | ID | Question | Default taken |
 |---|---|---|
+| Q23 | Freeze status of WP-SIMPL-53 PR 3-5 (new response fields for #572, #573) | Carried under `freeze-exception` with the issue link, like WP-51 (client-guidance gaps on core paths); if the owner declines, PR 3-5 move after Stage 3 exit. Owner decision open |
+| Q24 | Table size exposure (#572) | Coarse size class with source and age, visible datasets only, never exact counts, also for datasets with row policies. Owner decision open |
+| Q25 | Granularity of the masked-column catalog-text setting (#571) | Per classification rule with per-column override, default VISIBLE; no per-grant or per-scope setting. Owner decision open |
+| Q26 | When to build golden queries from dbt (#580) | After the feature freeze (WP-SIMPL-54, new table and ingestion path, dbt module first). Owner decision open |
+| Q27 | Golden-query catalog REST API (#580 option 2) | Not built; dbt meta is the only owner-maintained source. Owner decision open |
 | Q1 | Where do modules live? | Same repo under `modules/`, same tag and version as the host |
 | Q2 | Module release cadence | Same as host (deviation from PRD "own cadence"; single version source wins); revisit after first production release |
 | Q3 | Third-party/custom modules | Not supported; only first-party signed modules; custom code uses the existing plugin interfaces |

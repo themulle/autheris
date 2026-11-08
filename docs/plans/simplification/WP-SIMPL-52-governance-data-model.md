@@ -51,6 +51,7 @@ Row-policy predicates keep evaluating raw values server-side (unchanged); a poli
 ### 5.8 Transparency and audit
 - WebSQL (WP-51): `masked` stays a boolean; no classification or mask function in result metadata (D-52k).
 - Discovery (WP-41): for each visible column `classifications: [{code, displayName}]` and `clearRequestable: [codes with separate approval and clear grantable]`; hidden objects/columns never; `Pii` becomes `classifications` contains `PII` or a descendant; `ClearAccessRequiresSeparateApproval` = any classification with separate approval.
+- Catalog text of Masked columns (issue #571, added 2026-11-08): `classification_mask_rules` and `column_mask_overrides` get `catalog_text VARCHAR(8) NOT NULL DEFAULT 'VISIBLE'` (`VISIBLE`|`HIDDEN`), resolved with the same lookup as 5.4; `HIDDEN` wins over `VISIBLE` across the column's classifications and contributing grants. For a column that is Masked for the caller with effective `HIDDEN`, every catalog path (MCP `describe_dataset` full and `brief`, `list_datasets`, catalog REST detail, GraphQL catalog, catalog search snippets) returns the column name and type only: description, display name, semantics, value profile and examples are omitted; golden-query examples and the GraphQL example query that select such a column are dropped for that caller. Catalog search does not index text of columns that have any `HIDDEN` rule or override (D-52p). Deny columns stay invisible; Clear columns are unaffected.
 - Audit (data access): per masked column `{column, classifications[], maskFunction, keyRef}` (no key material, no constant values); per grant the classification levels applied. Admin audit events: `CLASSIFICATION_CHANGED`, `COLUMN_CLASSIFICATION_CHANGED`, `MASK_RULE_CHANGED`, `MASK_OVERRIDE_CHANGED`.
 ### 5.9 Admin API (`/api/v1/governance/classifications`, `.WithAudit`)
 `GET/PUT /classifications/{code}`, `GET/PUT /classifications/{code}/mask-rule`, `PUT/DELETE /catalog/columns/{columnId}/classifications/{code}?scope=tenant|global`, `PUT/DELETE /catalog/columns/{columnId}/mask-overrides/{code|_all}`. Vocabulary and tenant rules: GovernanceAdmin of the tenant; `*` scope writes: ClusterAdmin only; column assignment/override: data owner/delegate of the table or GovernanceAdmin. Removing a classification from a column requires the same authority as granting Clear for it (it lifts masking) and is audited.
@@ -67,7 +68,7 @@ Row-policy predicates keep evaluating raw values server-side (unchanged); a poli
 | Table (step) | Columns | Keys / constraints |
 |---|---|---|
 | `data_classifications` (S1) | `scope VARCHAR(64)`, `code VARCHAR(64)`, `display_name VARCHAR(256)`, `description VARCHAR(1024) NULL`, `parent_code VARCHAR(64) NULL`, `restriction_rank SMALLINT`, `clear_grantable BOOLEAN`, `separate_approval BOOLEAN`, `approver_mode VARCHAR(24)` (DATA_OWNER, STEWARD, DATA_OWNER_AND_STEWARD), `steward_group_sid VARCHAR(256) NULL`, `max_clear_days INT NULL`, `is_active BOOLEAN`, `version INT`, `updated_by VARCHAR(256)`, `updated_at TIMESTAMPTZ` | PK `(scope, code)`; CHECK rank 0..100; CHECK `approver_mode = 'DATA_OWNER' OR steward_group_sid IS NOT NULL`; parent resolved in the same scope or `*` |
-| `classification_mask_rules` (S1) | `scope VARCHAR(64)`, `code VARCHAR(64)` (`_DEFAULT` allowed), `mask_function VARCHAR(32)`, `params_json TEXT NULL`, `key_ref VARCHAR(128) NULL`, `version INT`, `updated_by`, `updated_at` | PK `(scope, code)` |
+| `classification_mask_rules` (S1) | `scope VARCHAR(64)`, `code VARCHAR(64)` (`_DEFAULT` allowed), `mask_function VARCHAR(32)`, `params_json TEXT NULL`, `key_ref VARCHAR(128) NULL`, `catalog_text VARCHAR(8) DEFAULT 'VISIBLE'` (#571; same column on `column_mask_overrides`), `version INT`, `updated_by`, `updated_at` | PK `(scope, code)`; CHECK `catalog_text IN ('VISIBLE','HIDDEN')` |
 | `column_classifications` (S1) | `scope VARCHAR(64)`, `table_column_id TEXT`, `code VARCHAR(64)`, `source VARCHAR(16)`, `assigned_by VARCHAR(256)`, `assigned_at TIMESTAMPTZ` | PK `(scope, table_column_id, code)`; FK `table_column_id` -> `table_columns(id)` ON DELETE CASCADE; index `(table_column_id)` |
 | `column_mask_overrides` (S1) | `id UUID`, `scope VARCHAR(64)`, `table_column_id TEXT`, `code VARCHAR(64) NULL`, `mask_function`, `params_json NULL`, `key_ref NULL`, `updated_by`, `updated_at` | PK `id`; UNIQUE `(scope, table_column_id, code)` (SQL Server: filtered unique index per NULL/NOT NULL code); FK column CASCADE |
 | `consent_classification_access` (S2) | `tenant_id VARCHAR(64)`, `consent_id TEXT`, `code VARCHAR(64)`, `access_level SMALLINT` (0 Deny, 1 Mask, 2 Clear), `valid_until TIMESTAMPTZ NULL`, `approved_by_sid VARCHAR(256) NULL`, `approved_at TIMESTAMPTZ NULL` | PK `(tenant_id, consent_id, code)`; FK `consent_id` -> `consents(id)` CASCADE |
@@ -122,7 +123,7 @@ Unit `tests/Autheris.Tests.Unit/Governance/Classification/`:
 - `PerCellClassificationTests` (WP-48 harness): `Row_clear_only_under_grant_with_classification_clear` (randomized, S), `Single_mask_expression_is_most_restrictive_of_masking_grants` (S).
 - `ClassificationGrantWriteTests`: `Clear_on_credentials_rejected` (S), `Clear_request_routes_to_steward_for_PII_SPECIAL`, `Requester_cannot_approve_own_classification_clear` (S), `External_decision_cannot_widen_classification_level` (S), `Clear_validity_capped_by_max_clear_days`.
 - `ClassificationAdminAuthorizationTests`: `Star_scope_write_requires_cluster_admin` (S), `Removing_column_classification_requires_owner_or_admin_and_is_audited` (S), `Cross_tenant_classification_read_returns_404` (S).
-- `ClassificationAuditTests`: `Masked_column_audit_lists_classifications_and_function_not_key` (S); `DiscoveryClassificationTests`: `Hidden_column_classification_never_exposed` (S), `Clear_requestable_lists_separate_approval_codes`; `WebSqlMaskedFlagTests`: `Masked_flag_carries_no_classification` (S).
+- `ClassificationAuditTests`: `Masked_column_audit_lists_classifications_and_function_not_key` (S); `DiscoveryClassificationTests`: `Hidden_column_classification_never_exposed` (S), `Clear_requestable_lists_separate_approval_codes`; `WebSqlMaskedFlagTests`: `Masked_flag_carries_no_classification` (S); `MaskedCatalogTextTests` (#571): `Hidden_text_omitted_on_every_catalog_path` (Theory over MCP full/brief, REST, GraphQL catalog; S), `Examples_selecting_hidden_text_column_dropped` (S), `Hidden_wins_over_visible_across_classifications` (S), `Clear_caller_sees_text`, `Default_visible_keeps_today_output`, `Search_does_not_match_hidden_column_text` (S).
 Integration `tests/Autheris.Tests.Integration/Governance/Migrations/` (PG and SQL Server, Testcontainers): `ClassificationMigrationParityTests.Decisions_identical_after_step_1_and_2` (S), `Backfill_maps_every_rule_type`, `Drop_step_aborts_on_active_role_grant` (S), `Shape_matches_after_each_step`. Architecture: `No_IsSensitive_reference_outside_migrations`, `Mask_keys_never_persisted` (no column named `*key*` except `key_ref`/`key_id`).
 
 ## 10. PR slicing (<= 400 net added src lines each)
@@ -130,6 +131,7 @@ Integration `tests/Autheris.Tests.Integration/Governance/Migrations/` (PG and SQ
 2. PR 2 Mask catalogue: new `MaskKind`s, renderer per dialect, in-memory evaluator, tenant key derivation reuse, parity cells (~390).
 3. PR 3 Resolver + decision integration (`ClassificationAccessResolver`, decision point, `ConsentColumnSnapshot`, `ApplyProfileMasking` removal), step 2 (~400; `size-exception` allowed for generated shape JSON only).
 4. PR 4 Consumers off `IsSensitive` (GrantClassifier, catalog/MCP/OData/federation/profiling, dbt/OpenMetadata mapping to classifications), audit fields, discovery fields (~350).
+4b. PR 4b Catalog text of Masked columns (#571, 5.8): `catalog_text` attribute (included in step 1 DDL), resolver output `CatalogTextVisible`, filtering on the catalog paths and examples, search indexing rule (~170). After PR 4.
 5. PR 5 Admin API and per-classification clear requests (needs WP-47 pipeline) (~380).
 6. PR 6a/6b Drop steps 3 and 4 (~120 src + SQL).
 
@@ -155,9 +157,10 @@ WP-41: `Pii` -> `classifications`, `clearRequestable`. WP-42: `GovernanceTable` 
 - D-52m Canonical grant id `CONSENTS.id`.
 - D-52n Data products are `TABLES` rows.
 - D-52o Drop/keep list of step 4.
+- D-52p (#571) Catalog text of Masked columns is a per-classification rule attribute with per-column override, default `VISIBLE` (today's behaviour); no per-grant or per-scope setting (Q25); search never indexes text of columns with any `HIDDEN` rule.
 
 ## 14. Estimate
-PR 1 2 pd, PR 2 2.5 pd, PR 3 3 pd, PR 4 2 pd, PR 5 2.5 pd, PR 6 1 pd: about 13 pd (part B spec edits included).
+PR 1 2 pd, PR 2 2.5 pd, PR 3 3 pd, PR 4 2 pd, PR 4b 1.5 pd, PR 5 2.5 pd, PR 6 1 pd: about 14.5 pd (part B spec edits included).
 
 ## Appendix A. Example dataset
 - Classifications (scope `*`): `PII` rank 40 rule `HASH key_ref=mask-2026`; `FINANCIAL` rank 30 rule `PARTIAL keep_last=4`; `PII_SPECIAL` rank 60 parent `PII`, rule `NULLIFY`, approver `DATA_OWNER_AND_STEWARD` (steward group `S-1-5-21-..-HealthStewards`), `max_clear_days 30`.
