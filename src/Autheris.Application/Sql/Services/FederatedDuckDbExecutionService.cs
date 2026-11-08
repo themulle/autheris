@@ -35,7 +35,6 @@ using Microsoft.Extensions.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast.Builder;
-using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Application.Sql.ListParameters;
