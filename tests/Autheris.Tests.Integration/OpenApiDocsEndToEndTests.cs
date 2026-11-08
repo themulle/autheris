@@ -81,7 +81,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
     {
         var c = _factory.CreateClient();
         c.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-OPENAPI-ADMIN");
-        c.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin,SchemaAdmin");
+        c.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,SchemaAdmin");
         return c;
     }
 
@@ -356,7 +356,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
     {
         var c = f.CreateClient();
         c.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-OPENAPI-ADMIN");
-        c.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin,SchemaAdmin");
+        c.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,SchemaAdmin");
         return c;
     }
 
