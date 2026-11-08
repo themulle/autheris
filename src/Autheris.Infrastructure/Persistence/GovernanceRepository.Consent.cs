@@ -390,6 +390,12 @@ public partial class GovernanceRepository
             await RecordAuditEventAsync(entry, tx, ct).ConfigureAwait(false);
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
+        catch (ConsentTenantIntegrityException refusal)
+        {
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
+            await RecordTenantRefusalAuditAsync(conn, revokedBySid, refusal, ct).ConfigureAwait(false);
+            throw;
+        }
         catch
         {
             await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
