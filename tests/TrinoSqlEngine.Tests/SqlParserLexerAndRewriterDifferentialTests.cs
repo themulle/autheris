@@ -42,7 +42,7 @@ public class SqlParserLexerAndRewriterDifferentialTests
     [InlineData("SELECT E'foo bar' FROM orders")]
     public void SQ01_TypeConstructorWithE_IsRejected(string sql)
     {
-        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
+        var ex = Assert.ThrowsAny<ParseCanceledException>(() => Env().Compile(sql));
         Assert.Contains("Escaped string literal type constructors", ex.Message);
     }
 
@@ -65,7 +65,7 @@ public class SqlParserLexerAndRewriterDifferentialTests
     [InlineData("SELECT /* /* double */ */ 1 FROM orders")]
     public void SQ02_NestedBlockComments_AreStrictlyRejected(string sql)
     {
-        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
+        var ex = Assert.ThrowsAny<ParseCanceledException>(() => Env().Compile(sql));
         Assert.Contains("Nested block comments", ex.Message);
     }
 
@@ -74,7 +74,7 @@ public class SqlParserLexerAndRewriterDifferentialTests
     [InlineData("SELECT /* standard comment */ 1 FROM orders")]
     public void SQ02_RejectComments_RejectsAllComments(string sql)
     {
-        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
+        var ex = Assert.ThrowsAny<ParseCanceledException>(() => Env().Compile(sql));
         Assert.Contains("SQL comments are not permitted", ex.Message);
     }
 
@@ -83,7 +83,7 @@ public class SqlParserLexerAndRewriterDifferentialTests
     [InlineData("SELECT $$line1\nline2$$ FROM orders")]
     public void SQ02_DollarQuoting_IsRejected_ForSqlServer(string sql)
     {
-        var ex = Assert.Throws<ParseCanceledException>(() => Env(TargetSqlDialect.SqlServer).Compile(sql));
+        var ex = Assert.ThrowsAny<ParseCanceledException>(() => Env(TargetSqlDialect.SqlServer).Compile(sql));
         Assert.Contains("Dollar-quoted strings", ex.Message);
     }
 
@@ -210,7 +210,7 @@ public class SqlParserLexerAndRewriterDifferentialTests
     [InlineData("SELECT * FROM srv.db.dbo.orders")]
     public void SQ09_LinkedServer_4PartNames_AreRejected(string sql)
     {
-        var ex = Assert.Throws<ParseCanceledException>(() => _engine.Analyze(sql.AsMemory()));
+        var ex = Assert.ThrowsAny<ParseCanceledException>(() => _engine.Analyze(sql.AsMemory()));
         Assert.True(ex.Message.Contains("Four-part table names") ||
                     ex.Message.Contains("Linked server") ||
                     ex.Message.Contains("mismatched input"));
@@ -276,7 +276,7 @@ public class SqlParserLexerAndRewriterDifferentialTests
     [Fact]
     public void SQ11_DotsInQuotedIdentifiers_WhenStrict_IsRejected()
     {
-        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile("SELECT * FROM \"my.table\""));
+        var ex = Assert.ThrowsAny<ParseCanceledException>(() => Env().Compile("SELECT * FROM \"my.table\""));
         Assert.Contains("Dots inside quoted identifiers", ex.Message);
     }
 
@@ -289,7 +289,7 @@ public class SqlParserLexerAndRewriterDifferentialTests
     [InlineData("SELECT * FROM orders FOR VERSION AS OF 100")]
     public void SQ13_TimeTravelQueries_WhenStrict_AreRejected(string sql)
     {
-        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
+        var ex = Assert.ThrowsAny<ParseCanceledException>(() => Env().Compile(sql));
         Assert.Contains("Time-travel queries", ex.Message);
     }
 

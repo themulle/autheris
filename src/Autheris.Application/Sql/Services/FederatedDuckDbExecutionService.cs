@@ -40,15 +40,7 @@ using Autheris.Application.Sql.ListParameters;
 
 public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionService
 {
-    private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = new()
-    {
-        RejectComments = true,
-        RejectBackslashInStrings = true,
-        RejectEscapedStringLiterals = true,
-        RejectNonAsciiIdentifiers = true,
-        RejectDotsInQuotedIdentifiers = true,
-        RejectTimeTravelQueries = true
-    };
+    private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = Autheris.Application.Sql.Policy.ClientSqlTokenPolicy.Analysis;
 
     private readonly IOptions<GatewayOptions> _options;
     private readonly IAuditLogRepository _auditLogRepository;

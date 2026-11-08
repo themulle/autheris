@@ -63,18 +63,7 @@ public static class CompileRequestFactory
         {
             TargetDialect = dialect,
             Policy = policy,
-            TokenGuards = new SqlTokenSecurityOptions
-            {
-                RejectComments = true,
-                RejectBackslashInStrings = true,
-                RejectEscapedStringLiterals = true,
-                RejectDollarQuoting = true,
-                RejectBracketLexerDifferentials = dialect is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
-                RejectNonAsciiIdentifiers = true,
-                RejectDotsInQuotedIdentifiers = true,
-                RejectTimeTravelQueries = true,
-                RejectReservedIdentifiers = true   // Phase 5 L3: the gateway prefix autheris_ is reserved in the user statement
-            },
+            TokenGuards = ClientSqlTokenPolicy.Compile(dialect),
             Statements = isDml
                 ? StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge
                 : StatementPermissions.ReadOnly,
