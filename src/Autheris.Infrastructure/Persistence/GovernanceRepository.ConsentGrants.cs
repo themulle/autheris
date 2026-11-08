@@ -2,6 +2,7 @@ namespace Autheris.Infrastructure.Persistence;
 
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.Common;
 using System.Globalization;
 using System.Linq;
@@ -272,16 +273,17 @@ public partial class GovernanceRepository
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = @"SELECT COUNT(*)
-                            FROM TABLE_OWNERS tow
-                            JOIN DATA_OWNERS dow ON tow.data_owner_id = dow.id
-                            JOIN TABLES t ON tow.table_id = t.id
+                            FROM TABLES t
+                            JOIN TABLE_OWNERS tow ON t.id = tow.table_id
+                            JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
                             WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                              AND (LOWER(dow.ad_sid) = LOWER(@apprSid) OR (@itsmAccount IS NOT NULL AND (LOWER(dow.ad_account) = LOWER(@itsmAccount) OR LOWER(dow.email) = LOWER(@itsmAccount))))";
+                              AND (o.ad_sid = @apprSid OR (@itsmAccount IS NOT NULL AND (LOWER(o.ad_account) = LOWER(@itsmAccount) OR LOWER(o.email) = LOWER(@itsmAccount))))
+                              AND o.is_active = 1";
         cmd.AddBound("@domain", table.Domain);
         cmd.AddBound("@schema", table.Schema);
         cmd.AddBound("@table", table.TableName);
         cmd.AddBound("@apprSid", approverSid.Value);
-        cmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
+        cmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value, DbType.String);
 
         var directOwnerCount = Convert.ToInt64(await ExecuteScalarAsync(cmd, "ConsentGrants.CheckDirectOwner", ct).ConfigureAwait(false));
         if (directOwnerCount > 0) return true;
@@ -289,17 +291,18 @@ public partial class GovernanceRepository
         await using var delCmd = conn.CreateCommand();
         delCmd.Transaction = tx;
         delCmd.CommandText = @"SELECT COUNT(*)
-                               FROM DATA_OWNER_DELEGATIONS del
-                               JOIN TABLE_OWNERS tow ON del.data_owner_id = tow.data_owner_id
+                               FROM DATA_OWNER_DELEGATIONS d
+                               JOIN DATA_OWNERS o ON d.data_owner_id = o.id
+                               JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
                                JOIN TABLES t ON tow.table_id = t.id
                                WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                 AND (del.delegate_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(del.delegate_sid) = LOWER(@itsmAccount)))
-                                 AND del.valid_from <= @now AND @now < del.valid_to";
+                                 AND (d.delegate_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(d.delegate_sid) = LOWER(@itsmAccount)))
+                                 AND d.valid_from <= @now AND d.valid_to >= @now";
         delCmd.AddBound("@domain", table.Domain);
         delCmd.AddBound("@schema", table.Schema);
         delCmd.AddBound("@table", table.TableName);
         delCmd.AddBound("@apprSid", approverSid.Value);
-        delCmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
+        delCmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value, DbType.String);
         delCmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
 
         var delegateCount = Convert.ToInt64(await ExecuteScalarAsync(delCmd, "ConsentGrants.CheckDelegates", ct).ConfigureAwait(false));
@@ -308,12 +311,12 @@ public partial class GovernanceRepository
         await using var roleCmd = conn.CreateCommand();
         roleCmd.Transaction = tx;
         roleCmd.CommandText = @"SELECT COUNT(*)
-                                FROM ROLE_MEMBERS rm
-                                JOIN ROLES r ON rm.role_id = r.id
+                                FROM ROLES r
+                                JOIN ROLE_MEMBERS rm ON r.id = rm.role_id
                                 WHERE (r.role_name = 'GovernanceAdmin' OR r.role_name = 'ClusterAdmin')
                                   AND (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(rm.member_sid) = LOWER(@itsmAccount)))";
         roleCmd.AddBound("@apprSid", approverSid.Value);
-        roleCmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
+        roleCmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value, DbType.String);
 
         var roleAdminCount = Convert.ToInt64(await ExecuteScalarAsync(roleCmd, "ConsentGrants.CheckRoleAdmin", ct).ConfigureAwait(false));
         return roleAdminCount > 0;
