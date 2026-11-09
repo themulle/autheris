@@ -72,7 +72,7 @@ public sealed class ProcedureYamlGenerator : IProcedureYamlGenerator
 
         if (request.RequiredRoles != null && request.RequiredRoles.Count > 0)
         {
-            sb.AppendLine("required_roles:");
+            sb.AppendLine("roles:");
             foreach (var role in request.RequiredRoles)
             {
                 sb.AppendLine($"  - {FormatScalar(role)}");

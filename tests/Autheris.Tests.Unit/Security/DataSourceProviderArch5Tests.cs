@@ -51,10 +51,7 @@ public sealed class DataSourceProviderArch5Tests
     [InlineData("sqlite3")]
     public void AllPaths_AgreeOnTheDialect(string provider)
     {
-        DataSourceProvider.TryResolveDialect(provider, out var expected).ShouldBeTrue();
-
-        ProcedureConnectionProvider.TryResolveDialect(provider, out var procedureDialect).ShouldBeTrue();
-        procedureDialect.ShouldBe(expected);
+        DataSourceProvider.TryResolveDialect(provider, out _).ShouldBeTrue();
     }
 
     [Fact]

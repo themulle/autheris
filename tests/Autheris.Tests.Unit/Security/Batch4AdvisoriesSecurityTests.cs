@@ -142,7 +142,6 @@ public sealed class Batch4AdvisoriesSecurityTests
             ResultTable: "dbo.orders",
             ClearedResultColumns: [],
             RequiredRoles: [],
-            AllowDynamicSql: false,
             TimeoutSeconds: 30);
 
         var validation = new ProcedureValidationResult(true, [], [], [], new Dictionary<string, string>(), null);
