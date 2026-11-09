@@ -30,31 +30,55 @@ public partial class PostgreSqlGovernanceRepository
         public const string SelectVerifyScan = GovernanceRepository.AuditSql.SelectVerifyScan;
     }
 
-    public Task<AuditPurgeCheckpoint?> GetLatestPurgeCheckpointAsync(CancellationToken ct = default) =>
-        _governanceRepository.GetLatestPurgeCheckpointAsync(ct);
+    public Task<AuditPurgeCheckpoint?> GetLatestPurgeCheckpointAsync(CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.GetLatestPurgeCheckpointAsync(ct);
+    }
 
-    public Task SavePurgeCheckpointAsync(AuditPurgeCheckpoint checkpoint, CancellationToken ct = default) =>
-        _governanceRepository.SavePurgeCheckpointAsync(checkpoint, ct);
+    public Task SavePurgeCheckpointAsync(AuditPurgeCheckpoint checkpoint, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.SavePurgeCheckpointAsync(checkpoint, ct);
+    }
 
     public Task<(long MaxEligibleSequence, long FirstSurvivingSequence, string SurvivingPrevHash, long PurgeCount)?> PlanPurgePrefixAsync(
         DateTimeOffset thresholdUtc,
-        CancellationToken ct = default) =>
-        _governanceRepository.PlanPurgePrefixAsync(thresholdUtc, ct);
+        CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.PlanPurgePrefixAsync(thresholdUtc, ct);
+    }
 
-    public Task<int> ExecutePurgeBatchAsync(long maxSequenceInclusive, int batchSize, CancellationToken ct = default) =>
-        _governanceRepository.ExecutePurgeBatchAsync(maxSequenceInclusive, batchSize, ct);
+    public Task<int> ExecutePurgeBatchAsync(long maxSequenceInclusive, int batchSize, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.ExecutePurgeBatchAsync(maxSequenceInclusive, batchSize, ct);
+    }
 
-    public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default) =>
-        _governanceRepository.RecordAuditEventAsync(entry, ct);
+    public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.RecordAuditEventAsync(entry, ct);
+    }
 
-    public Task RecordAuditEventsAsync(IReadOnlyList<AuditLogEntry> entries, CancellationToken ct = default) =>
-        _governanceRepository.RecordAuditEventsAsync(entries, ct);
+    public Task RecordAuditEventsAsync(IReadOnlyList<AuditLogEntry> entries, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.RecordAuditEventsAsync(entries, ct);
+    }
 
-    public Task RecordAuditEventAsync(AuditLogEntry entry, DbTransaction existingTx, CancellationToken ct = default) =>
-        _governanceRepository.RecordAuditEventAsync(entry, existingTx, ct);
+    public Task RecordAuditEventAsync(AuditLogEntry entry, DbTransaction existingTx, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.RecordAuditEventAsync(entry, existingTx, ct);
+    }
 
-    internal Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct, DbTransaction? existingTx = null) =>
-        _governanceRepository.RecordAuditEventInternalAsync(entry, ct, existingTx);
+    internal Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct, DbTransaction? existingTx = null)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.RecordAuditEventInternalAsync(entry, ct, existingTx);
+    }
 
     public void OnTransactionCommitted(DbTransaction tx) =>
         _governanceRepository.OnTransactionCommitted(tx);
@@ -65,11 +89,17 @@ public partial class PostgreSqlGovernanceRepository
     public void RollbackPendingAuditTransactions() =>
         _governanceRepository.RollbackPendingAuditTransactions();
 
-    public Task FlushAuditChannelAsync(CancellationToken ct = default) =>
-        _governanceRepository.FlushAuditChannelAsync(ct);
+    public Task FlushAuditChannelAsync(CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.FlushAuditChannelAsync(ct);
+    }
 
-    public Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default) =>
-        _governanceRepository.GetAuditLogEntriesAsync(limit, tenantId, ct);
+    public Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.GetAuditLogEntriesAsync(limit, tenantId, ct);
+    }
 
     public Task<IReadOnlyList<AuditLogEntry>> QueryAuditLogsAsync(
         string? targetTable = null,
@@ -77,22 +107,40 @@ public partial class PostgreSqlGovernanceRepository
         DateTimeOffset? since = null,
         int limit = 1000,
         TenantId? tenantId = null,
-        CancellationToken ct = default) =>
-        _governanceRepository.QueryAuditLogsAsync(targetTable, actorSid, since, limit, tenantId, ct);
+        CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.QueryAuditLogsAsync(targetTable, actorSid, since, limit, tenantId, ct);
+    }
 
     public Task<Autheris.Application.Governance.Paging.AuditLogPage> QueryAuditLogPageAsync(
-        Autheris.Application.Governance.Paging.AuditLogPageQuery query, CancellationToken ct = default) =>
-        _governanceRepository.QueryAuditLogPageAsync(query, ct);
+        Autheris.Application.Governance.Paging.AuditLogPageQuery query, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.QueryAuditLogPageAsync(query, ct);
+    }
 
-    public Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default) =>
-        _governanceRepository.VerifyAuditHashChainAsync(ct);
+    public Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.VerifyAuditHashChainAsync(ct);
+    }
 
-    public Task<AuditChainRange?> GetAuditChainRangeAsync(DateTimeOffset windowFrom, DateTimeOffset windowTo, CancellationToken ct = default) =>
-        _governanceRepository.GetAuditChainRangeAsync(windowFrom, windowTo, ct);
+    public Task<AuditChainRange?> GetAuditChainRangeAsync(DateTimeOffset windowFrom, DateTimeOffset windowTo, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.GetAuditChainRangeAsync(windowFrom, windowTo, ct);
+    }
 
-    public Task<IReadOnlyList<AuditChainRecord>> GetAuditChainPageAsync(long afterRowId, long lastRowIdInclusive, int pageSize, CancellationToken ct = default) =>
-        _governanceRepository.GetAuditChainPageAsync(afterRowId, lastRowIdInclusive, pageSize, ct);
+    public Task<IReadOnlyList<AuditChainRecord>> GetAuditChainPageAsync(long afterRowId, long lastRowIdInclusive, int pageSize, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.GetAuditChainPageAsync(afterRowId, lastRowIdInclusive, pageSize, ct);
+    }
 
-    public AuditChainAnchor? GetVerifiedChainAnchor() =>
-        _governanceRepository.GetVerifiedChainAnchor();
+    public AuditChainAnchor? GetVerifiedChainAnchor()
+    {
+        ThrowIfNotReady();
+        return _governanceRepository.GetVerifiedChainAnchor();
+    }
 }
