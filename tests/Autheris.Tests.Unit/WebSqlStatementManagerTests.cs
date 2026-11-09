@@ -388,7 +388,7 @@ public sealed class WebSqlStatementManagerTests : IDisposable
 
         var statementManager = Substitute.For<IWebSqlStatementManager>();
 
-        await Autheris.Api.Endpoints.WebSqlEndpoints.HandleTrinoQueuedStatementRequest("stmt-1", anonymousContext, statementManager, NullLoggerFactory.Instance);
+        await Autheris.Api.Endpoints.TrinoProtocolEndpoints.HandleTrinoPoll("stmt-1", 0, anonymousContext, statementManager, NullLoggerFactory.Instance);
 
         anonymousContext.Response.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
     }

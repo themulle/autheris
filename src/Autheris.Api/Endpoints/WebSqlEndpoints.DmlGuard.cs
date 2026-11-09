@@ -52,30 +52,18 @@ public static partial class WebSqlEndpoints
     }
 
     /// <summary>
-    /// Request-level guard: the Trino route refuses everything but plain reads; the WebSQL route (when DML is enabled) admits a
-    /// write once per (tenant, caller, key). Returns <c>true</c> when the request was refused (the response is written).
+    /// Request-level guard: the WebSQL route (when DML is enabled) admits a write once per (tenant, caller, key).
+    /// Returns <c>true</c> when the request was refused (the response is written).
     /// </summary>
     private static async Task<bool> RefuseDmlRequestAsync(
-        HttpContext httpContext, string sql, bool isTrinoRoute, bool dmlAllowed, TenantId tenantId, ILogger logger, CancellationToken ct)
+        HttpContext httpContext, string sql, bool dmlAllowed, TenantId tenantId, ILogger logger, CancellationToken ct)
     {
-        if (!isTrinoRoute && !dmlAllowed)
+        if (!dmlAllowed)
         {
             return false; // the executor's own "DML disabled" refusal answers first and nothing is reserved
         }
 
         var statementClass = ClassifyStatement(sql, logger);
-        if (isTrinoRoute)
-        {
-            if (statementClass == RequestStatementClass.Read)
-            {
-                return false;
-            }
-
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest,
-                "Only read statements are supported on this route.", ct);
-            return true;
-        }
-
         if (statementClass == RequestStatementClass.Unparsable)
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest,

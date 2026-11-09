@@ -391,7 +391,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         // the reload removes Trino from S: the next page of the running statement is re-checked and refused
         SourceSAllows("WebSql, Rest, GraphQL, OData, Mcp");
         var before = await TakeAsync();
-        var page = await BodyAsync(await client.GetAsync($"/v1/statement/queued/{statementId}"));
+        var page = await BodyAsync(await client.GetAsync($"/v1/statement/queued/{statementId}/0"));
 
         ErrorName(page).ShouldBe("TRANSPORT_NOT_ALLOWED", page);
         page.ShouldNotContain("row-one");
@@ -413,7 +413,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         var statementId = doc.RootElement.GetProperty("id").GetString()!;
 
         var before = await TakeAsync();
-        var onTrino = await BodyAsync(await client.GetAsync($"/v1/statement/queued/{statementId}"));
+        var onTrino = await BodyAsync(await client.GetAsync($"/v1/statement/queued/{statementId}/0"));
 
         ErrorName(onTrino).ShouldBe("TRANSPORT_NOT_ALLOWED", onTrino);
         onTrino.ShouldNotContain("row-one");

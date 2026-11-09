@@ -32,9 +32,8 @@ public static partial class WebSqlEndpoints
 
     public static IEndpointRouteBuilder MapWebSqlEndpoints(this IEndpointRouteBuilder app, GatewayOptions? gatewayOptions = null)
     {
-        // Issue #447: the ingress transport comes from endpoint metadata only. /v1/statement* is Trino, everything else WebSql.
+        // Issue #447: the ingress transport comes from endpoint metadata only.
         var webSql = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.WebSql);
-        var trino = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Trino);
 
         // OpenAPI description of the endpoint (documentation only, no data). Like the other specs it is anonymous only
         // in OpenSchema mode.
@@ -61,27 +60,6 @@ public static partial class WebSqlEndpoints
            .WithName("ExecuteGovernedWebSql")
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .WithRequestBodyLimit(2 * 1024 * 1024)
-           .RequireAuthorization()
-           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
-
-        trino.MapPost("/v1/statement", HandleWebSqlRequest)
-           .WithName("ExecuteTrinoStatementV1")
-           .WithRequestBodyLimit(2 * 1024 * 1024)
-           .RequireAuthorization()
-           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
-
-        trino.MapGet("/v1/statement/queued/{statementId}", HandleWebSqlStatementPollRequest)
-           .WithName("GetTrinoQueuedStatementV1")
-           .RequireAuthorization()
-           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
-
-        trino.MapGet("/v1/statement/executing/{statementId}", HandleWebSqlStatementPollRequest)
-           .WithName("GetTrinoExecutingStatementV1")
-           .RequireAuthorization()
-           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
-
-        trino.MapDelete("/v1/statement/{statementId}", HandleWebSqlStatementCancelRequest)
-           .WithName("CancelTrinoStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 

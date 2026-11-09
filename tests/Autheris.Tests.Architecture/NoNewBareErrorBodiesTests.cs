@@ -47,7 +47,8 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         ("src/Autheris.Api/Security/BasicAuthenticationHandler.cs", "new { error = new { code = \"UNAUTHORIZED\"", 1, "OData v4 JSON error object for the OData basic-auth challenge"),
         ("src/Autheris.Api/Endpoints/ODataEndpoints.cs", "new { error = new { code = \"NotFound\"", 1, "OData v4 JSON error object (reshaped, fixed message)"),
         ("src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs", "new { error = safeBody, status = statusCode }", 1, "Envoy ext_authz denied-response pass-through"),
-        ("src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs", "[\"error\"] = trinoError", 1, "Trino in-protocol QueryResults.error (a spec member of a 200 result, not an HTTP-level error body)")
+        ("src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs", "[\"error\"] = webSqlError", 1, "WebSQL in-protocol error member of statement status"),
+        ("src/Autheris.Api/Endpoints/TrinoQueryResultsWriter.cs", "[\"error\"] = trinoError", 1, "Trino in-protocol QueryResults.error (a spec member of a 200 result, not an HTTP-level error body)")
     ];
 
     [GeneratedRegex(@"\bnew\s*\{")]
