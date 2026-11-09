@@ -1226,7 +1226,7 @@ public class SecurityFindingsRemediationTests
         context.User = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
         context.Response.Body = new MemoryStream();
 
-        await WebSqlEndpoints.HandleTrinoQueuedStatementRequest("stmt-foreign-tenant", context, statementManager, NullLoggerFactory.Instance);
+        await TrinoProtocolEndpoints.HandleTrinoPoll("stmt-foreign-tenant", 0, context, statementManager, NullLoggerFactory.Instance);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
         context.Response.Body.Seek(0, SeekOrigin.Begin);
@@ -1245,7 +1245,7 @@ public class SecurityFindingsRemediationTests
         context.User = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "user-1")], "TestAuth"));
         context.Request.Headers["X-Trino-User"] = "user-1";
 
-        await WebSqlEndpoints.HandleTrinoCancelStatementRequest("stmt-foreign-tenant", context, statementManager);
+        await TrinoProtocolEndpoints.HandleTrinoCancel("stmt-foreign-tenant", 0, context, statementManager);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
     }

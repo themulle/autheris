@@ -158,7 +158,7 @@ public sealed class IngressStampingTests : IClassFixture<IngressStampingTests.Fi
     public async Task TrinoRoute_StampsIngress_Trino()
     {
         (await SendAsync(HttpMethod.Post, "/v1/statement", "{\"sql\":\"SELECT 1\"}")).ShouldBe([DataSourceTransportFlags.Trino]);
-        (await SendAsync(HttpMethod.Get, "/v1/statement/queued/abc")).ShouldBe([DataSourceTransportFlags.Trino]);
+        (await SendAsync(HttpMethod.Get, "/v1/statement/queued/abc/0")).ShouldBe([DataSourceTransportFlags.Trino]);
     }
 
     [Fact]
@@ -299,7 +299,7 @@ public sealed class IngressStampingTests : IClassFixture<IngressStampingTests.Fi
     [InlineData("/api/sql", DataSourceTransportFlags.WebSql)]
     [InlineData("/api/v1/sql/statements/{statementId}", DataSourceTransportFlags.WebSql)]
     [InlineData("/v1/statement", DataSourceTransportFlags.Trino)]
-    [InlineData("/v1/statement/executing/{statementId}", DataSourceTransportFlags.Trino)]
+    [InlineData("/v1/statement/executing/{statementId}/{token:long:min(0)}", DataSourceTransportFlags.Trino)]
     [InlineData("/api/v1/jobs/query", DataSourceTransportFlags.WebSql)]
     [InlineData("/odata/v4/{domain}/{schema}/{tableName}", DataSourceTransportFlags.OData)]
     [InlineData("/odata/v4/{entitySetName}", DataSourceTransportFlags.OData)]

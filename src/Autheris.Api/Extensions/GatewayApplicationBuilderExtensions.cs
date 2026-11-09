@@ -269,6 +269,7 @@ public static class GatewayApplicationBuilderExtensions
         }
         app.MapEnvoyExtAuthzEndpoints();
         app.MapWebSqlEndpoints(gatewayOptions);
+        app.MapTrinoProtocolEndpoints(gatewayOptions);
         if (switches.RestDataEndpointEnabled)
         {
             app.MapDatasetDataEndpoints();

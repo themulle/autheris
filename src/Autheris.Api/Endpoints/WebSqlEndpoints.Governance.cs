@@ -286,22 +286,12 @@ public static partial class WebSqlEndpoints
 
     internal static TimeSpan? TryParseWaitTimeout(HttpRequest request)
     {
-        string? val = null;
-        if (request.Headers.TryGetValue("X-Trino-Wait-Timeout", out var headerVal) && !string.IsNullOrWhiteSpace(headerVal))
+        if (request.Query.TryGetValue("wait_timeout", out var queryVal) && !string.IsNullOrWhiteSpace(queryVal))
         {
-            val = headerVal.ToString().Trim();
-        }
-        else if (request.Query.TryGetValue("wait_timeout", out var queryVal) && !string.IsNullOrWhiteSpace(queryVal))
-        {
-            val = queryVal.ToString().Trim();
+            return ParseDuration(queryVal.ToString().Trim());
         }
 
-        if (string.IsNullOrWhiteSpace(val))
-        {
-            return null;
-        }
-
-        return ParseDuration(val);
+        return null;
     }
 
     internal static TimeSpan ParseDuration(string text)
@@ -330,7 +320,7 @@ public static partial class WebSqlEndpoints
         return TimeSpan.FromSeconds(5);
     }
 
-    internal static async Task WriteTrinoStatementResponseAsync(
+    internal static async Task WriteWebSqlStatementResponseAsync(
         HttpContext httpContext,
         StatementExecutionStatus status,
         CancellationToken ct)
@@ -366,37 +356,11 @@ public static partial class WebSqlEndpoints
             completedSplits = status.State == "FINISHED" ? 1 : 0,
             cpuTimeMillis = status.ElapsedTimeMillis,
             wallTimeMillis = status.ElapsedTimeMillis,
-            queuedTimeMillis = 0,
+            queuedTimeMillis = 0L,
             elapsedTimeMillis = status.ElapsedTimeMillis
         };
 
-        object? trinoError = null;
-        if (status.State == "FAILED")
-        {
-            if (status.Failure?.Kind == SqlFailureKind.TransportDenied)
-            {
-                // Issue #447: fixed text and code; no source name, no sub-reason.
-                trinoError = new
-                {
-                    message = "Access to the data source is not allowed over this transport.",
-                    errorCode = 3,
-                    errorName = Autheris.Domain.Exceptions.TransportNotAllowedException.Code,
-                    errorType = "USER_ERROR"
-                };
-            }
-            else
-            {
-                bool isInternalError = status.Failure == null || status.Failure.Kind == SqlFailureKind.Internal;
-                trinoError = new
-                {
-                    // NL-SC-33: fixed message per denial class; the status text (SQL, table names, exception text) never reaches the protocol entry.
-                    message = isInternalError ? GenericServerErrorMessage : "The SQL statement could not be executed.",
-                    errorCode = isInternalError ? 2 : 1,
-                    errorName = isInternalError ? "INTERNAL_ERROR" : "SYNTAX_ERROR",
-                    errorType = isInternalError ? "INTERNAL_ERROR" : "USER_ERROR"
-                };
-            }
-        }
+        var webSqlError = BuildWebSqlStatementError(status);
 
         var responseObj = new Dictionary<string, object?>
         {
@@ -407,10 +371,7 @@ public static partial class WebSqlEndpoints
 
         if (status.State is "QUEUED" or "RUNNING")
         {
-            var ingress = ResolveIngress(httpContext);
-            responseObj["nextUri"] = ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino
-                ? $"/v1/statement/queued/{status.StatementId}"
-                : $"/api/v1/sql/statements/{status.StatementId}";
+            responseObj["nextUri"] = $"/api/v1/sql/statements/{status.StatementId}";
         }
 
         if (trinoColumns != null)
@@ -423,11 +384,39 @@ public static partial class WebSqlEndpoints
             responseObj["data"] = status.Data;
         }
 
-        if (trinoError != null)
+        if (webSqlError != null)
         {
-            responseObj["error"] = trinoError;
+            responseObj["error"] = webSqlError;
         }
 
-        await httpContext.Response.WriteAsJsonAsync(responseObj, ct);
+        await httpContext.Response.WriteAsJsonAsync(responseObj, /* Status200OK */ ct);
+    }
+
+    private static object? BuildWebSqlStatementError(StatementExecutionStatus status)
+    {
+        if (status.State != "FAILED")
+        {
+            return null;
+        }
+
+        if (status.Failure?.Kind == SqlFailureKind.TransportDenied)
+        {
+            return new
+            {
+                message = "Access to the data source is not allowed over this transport.",
+                errorCode = 3,
+                errorName = Autheris.Domain.Exceptions.TransportNotAllowedException.Code,
+                errorType = "USER_ERROR"
+            };
+        }
+
+        bool isInternalError = status.Failure == null || status.Failure.Kind == SqlFailureKind.Internal;
+        return new
+        {
+            message = isInternalError ? GenericServerErrorMessage : "The SQL statement could not be executed.",
+            errorCode = isInternalError ? 2 : 1,
+            errorName = isInternalError ? "INTERNAL_ERROR" : "SYNTAX_ERROR",
+            errorType = isInternalError ? "INTERNAL_ERROR" : "USER_ERROR"
+        };
     }
 }

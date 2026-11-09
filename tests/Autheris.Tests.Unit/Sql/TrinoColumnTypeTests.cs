@@ -166,7 +166,7 @@ public sealed class TrinoColumnTypeTests
         var context = new DefaultHttpContext();
         context.Response.Body = new MemoryStream();
 
-        await WebSqlEndpoints.WriteTrinoStatementResponseAsync(context, status, CancellationToken.None);
+        await TrinoQueryResultsWriter.WriteAsync(context, status, token: 0, CancellationToken.None);
 
         context.Response.Body.Position = 0;
         using var doc = await JsonDocument.ParseAsync(context.Response.Body);

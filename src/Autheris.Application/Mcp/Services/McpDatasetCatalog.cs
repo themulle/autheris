@@ -1097,7 +1097,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             endpoints.Add(new("WebSQL", "POST", "/api/v1/sql",
                 "Body {\"sql\", \"parameters\", \"dataSource\"}: governed SQL in Trino syntax with 3-part names (<catalog>.<schema>.<table>) or 2-part names (<schema>.<table>)."));
             endpoints.Add(new("Trino Protocol", "POST", "/v1/statement",
-                "Standard Trino REST Client protocol: query in body or JSON, X-Trino-Wait-Timeout for sync/async execution, continuation via /v1/statement/queued/{id}."));
+                "Standard Trino REST Client protocol: query in body, X-Trino-Wait-Timeout for sync/async execution, absolute nextUri continuation, DELETE nextUri cancels."));
         }
 
         if (o.SqlEndpoints.Enabled)

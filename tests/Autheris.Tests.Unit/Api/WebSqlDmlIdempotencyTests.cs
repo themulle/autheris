@@ -278,12 +278,10 @@ public sealed class WebSqlDmlIdempotencyTests
     [InlineData("DELETE FROM t")]
     public async Task Trino_route_dml_is_refused_without_query_id(string sql)
     {
-        var manager = new FakeWebSqlStatementManager();
         var ctx = Ctx(sql, new InMemoryIdempotencyStore(), "k-1", path: "/v1/statement");
-        var services = new ServiceCollection().AddSingleton<IWebSqlStatementManager>(manager).BuildServiceProvider();
-        ctx.RequestServices = services;
-        var (status, exec) = await Run(ctx);
-        status.ShouldBe(400);
+        var (status, exec, manager, body) = await RunTrino(ctx);
+        status.ShouldBe(200);
+        body.ShouldContain("PERMISSION_DENIED");
         ExecutorCalls(exec).ShouldBe(0);
         manager.CallCount.ShouldBe(0);
     }
@@ -306,13 +304,29 @@ public sealed class WebSqlDmlIdempotencyTests
     [InlineData("INSERT INTO")]
     public async Task Trino_route_refuses_anything_that_is_not_a_plain_read(string sql)
     {
-        var manager = new FakeWebSqlStatementManager();
         var ctx = Ctx(sql, new InMemoryIdempotencyStore(), "k-1", path: "/v1/statement");
-        ctx.RequestServices = new ServiceCollection().AddSingleton<IWebSqlStatementManager>(manager).BuildServiceProvider();
-        var (status, exec) = await Run(ctx);
-        status.ShouldBe(400);
+        var (status, exec, manager, body) = await RunTrino(ctx);
+        status.ShouldBe(200);
+        body.ShouldContain("FAILED");
         ExecutorCalls(exec).ShouldBe(0);
         manager.CallCount.ShouldBe(0);
+    }
+
+    private static async Task<(int Status, FakeSqlExecutionService Sql, FakeWebSqlStatementManager Manager, string Body)> RunTrino(DefaultHttpContext ctx)
+    {
+        var sql = new FakeSqlExecutionService();
+        var manager = new FakeWebSqlStatementManager();
+        var services = new ServiceCollection()
+            .AddSingleton<IWebSqlStatementManager>(manager)
+            .AddSingleton<IGovernedSqlExecutionService>(sql)
+            .BuildServiceProvider();
+        ctx.RequestServices = services;
+        var options = Options.Create(new GatewayOptions());
+        await TrinoProtocolEndpoints.HandleTrinoSubmit(ctx, sql, options, NullLoggerFactory.Instance);
+        ctx.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var reader = new StreamReader(ctx.Response.Body);
+        var body = await reader.ReadToEndAsync();
+        return (ctx.Response.StatusCode, sql, manager, body);
     }
 
     [Theory]
