@@ -197,6 +197,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
     {
         await RegisterCatalogAsync();
         var c = Client();
+        c.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
         (await c.PostAsJsonAsync("/api/v1/sql", new { sql = "DROP TABLE e2e_cranes" })).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await c.PostAsJsonAsync("/api/v1/sql", new { sql = "DELETE FROM e2e_cranes" })).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 

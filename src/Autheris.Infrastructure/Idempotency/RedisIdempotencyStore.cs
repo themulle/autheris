@@ -8,7 +8,7 @@ using StackExchange.Redis;
 
 namespace Autheris.Infrastructure.Idempotency;
 
-public sealed class RedisIdempotencyStore : IIdempotencyStore
+public sealed class RedisIdempotencyStore : IClusterWideIdempotencyStore
 {
     private readonly IConnectionMultiplexer _multiplexer;
     private readonly ILogger<RedisIdempotencyStore> _logger;
