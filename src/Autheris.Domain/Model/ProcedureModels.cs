@@ -84,7 +84,6 @@ public sealed record ProcedureDefinition(
     string? ResultTable,
     IReadOnlyList<string> ClearedResultColumns,
     IReadOnlyList<string> RequiredRoles,
-    bool AllowDynamicSql,
     int TimeoutSeconds,
     ProcedureValidationMode ValidationMode = ProcedureValidationMode.Catalog,
     IReadOnlyList<string>? DeclaredOutputs = null,

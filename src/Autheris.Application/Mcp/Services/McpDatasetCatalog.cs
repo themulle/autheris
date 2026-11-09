@@ -58,6 +58,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
     private readonly Autheris.Application.Catalog.Localization.ILanguageNegotiator? _languageNegotiator;
     private readonly IOptions<CatalogLocalizationOptions>? _localizationOptions;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public McpDatasetCatalog(
@@ -80,7 +81,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
-        IOptions<CatalogLocalizationOptions>? localizationOptions = null)
+        IOptions<CatalogLocalizationOptions>? localizationOptions = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -103,6 +105,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._procedureExecutionService = procedureExecutionService;
         this._languageNegotiator = languageNegotiator;
         this._localizationOptions = localizationOptions;
+        this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
     }
 
     public McpDatasetCatalog(
@@ -124,7 +127,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
-        IOptions<CatalogLocalizationOptions>? localizationOptions = null)
+        IOptions<CatalogLocalizationOptions>? localizationOptions = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -146,6 +150,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._procedureExecutionService = procedureExecutionService;
         this._languageNegotiator = languageNegotiator;
         this._localizationOptions = localizationOptions;
+        this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
     }
 
     public Task<McpDatasetList> ListDatasetsAsync(
@@ -665,6 +670,13 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
         }
 
+        // describing a procedure is gated like calling it (definition source plus the result table's source).
+        await _transportGate.EnsureCatalogSourcesAsync(
+            [
+                string.IsNullOrWhiteSpace(def.DataSource) ? options?.Value.SqlEndpoints.Procedures.ConnectionName : def.DataSource,
+                string.IsNullOrWhiteSpace(resMeta.Table.SourceName) ? resId.Value.Domain : resMeta.Table.SourceName
+            ], ct).ConfigureAwait(false);
+
         var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
         var accessStatus = options?.Value.IsMcpAuthBypassed == true
             ? "GRANTED"
@@ -1132,7 +1144,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         if (o.Lakehouse.Enabled)
         {
-            endpoints.Add(new("Iceberg REST Catalog", "GET", "/v1/namespaces", "Apache Iceberg REST Catalog protocol endpoint."));
+            endpoints.Add(new("Iceberg REST Catalog", "GET", "/modules/lakehouse/iceberg/v1/{prefix}/namespaces", "Apache Iceberg REST Catalog protocol endpoint."));
         }
 
         return endpoints;

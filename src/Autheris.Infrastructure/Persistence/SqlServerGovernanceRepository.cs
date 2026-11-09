@@ -17,6 +17,7 @@ namespace Autheris.Infrastructure.Persistence;
 public partial class SqlServerGovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IAuditPurgeKeyProvider, IDisposable, IAsyncDisposable
 {
     private readonly string _connectionString;
+    private readonly GovernanceRepository _governanceRepository;
     private readonly IEpochValidationService _epochValidationService;
     // bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
     private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
@@ -116,6 +117,17 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
         }
 
         _connectionString = builder.ConnectionString;
+
+        _governanceRepository = new GovernanceRepository(
+            new Dialects.SqlServerGovernanceDialect(_connectionString),
+            epochValidationService,
+            options,
+            logger: null,
+            materializationGuard: materializationGuard,
+            auditRecorder: (entry, tx, ct) => tx is not null ? RecordAuditEventAsync(entry, tx, ct) : RecordAuditEventAsync(entry, ct),
+            metadataInvalidator: key => _metadataCache.TryRemove(key, out _),
+            onTransactionCommitted: OnTransactionCommitted,
+            onTransactionRolledBack: OnTransactionRolledBack);
 
         // Bounded channel with backpressure to limit in-flight audit entries
         var channelOptions = new BoundedChannelOptions(Math.Max(1, options?.Value?.Audit?.QueryAuditChannelCapacity ?? 5_000))

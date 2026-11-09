@@ -238,6 +238,7 @@ public sealed class TypedPolicySourcesWiringTests
         var services = new ServiceCollection();
         var options = new GatewayOptions
         {
+            SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true } },
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }
         };
         var env = Substitute.For<IHostEnvironment>();

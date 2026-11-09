@@ -113,7 +113,9 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
 
         foreach (var tenant in new TenantId?[] { TenantA, TenantB, null })
         {
-            var actual = (await _repo.GetActiveConsentsForSubjectsAsync(sids, _table, Now, tenant)).Select(c => c.Id).ToHashSet();
+            var actual = (tenant.HasValue
+                ? await _repo.GetActiveConsentsForSubjectsAsync(sids, _table, Now, tenant.Value)
+                : await _repo.GetActiveConsentsForSubjectsAsync(sids, _table, Now)).Select(c => c.Id).ToHashSet();
             var expected = OracleForTable(_seeded.Where(c => !IsRevoked(c)), _tableId, subjects, tenant);
             actual.ShouldBe(expected, ignoreOrder: true, customMessage: $"tenant={tenant?.Value ?? "<none>"}");
         }
