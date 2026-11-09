@@ -110,7 +110,8 @@ public sealed class IdentityPipeline : IIdentityPipeline
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "The identity pipeline failed; the principal is not authenticated.");
+            // Provider exception text can carry directory or token details: only the type name is logged.
+            _logger.LogWarning("The identity pipeline failed ({ExceptionType}); the principal is not authenticated.", ex.GetType().Name);
             return Unauthenticated();
         }
     }
@@ -305,6 +306,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
     private async ValueTask<string?> AddRolesAndRightsAsync(
         ClaimsIdentity identity, ClaimsPrincipal normalized, IdentityRealm realm, string realmId, TenantId? tenant, HashSet<Sid> groups, CancellationToken ct)
     {
+        // Roles come from the realm's own provider chain (Resolver realms only); the ForwardAuth GroupSource override above applies to groups, never to roles.
         if (_roleResolver is null || tenant is not { Value: not null } tenantId)
         {
             return _roleResolver is null ? null : "tenant unresolved";
@@ -327,7 +329,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
             identity.FindFirst("email")?.Value ?? identity.FindFirst(ClaimTypes.Email)?.Value,
             tenantId,
             realmId,
-            normalized.Claims.ToList());
+            [.. normalized.Claims]);
 
         var rolesResolution = await _roleResolver.ResolveRolesAsync(resolvedIdentity, ct).ConfigureAwait(false);
         if (rolesResolution.IsDegraded)
@@ -344,7 +346,13 @@ public sealed class IdentityPipeline : IIdentityPipeline
         // a mapper failure yields no functional-right claims (fail closed). The mapper receives canonical group SIDs and roles.
         if (_functionalRightMapper != null)
         {
-            var groupsAndRoles = groups.Select(g => g.Value).Concat(rolesResolution.Roles).Distinct().ToList();
+            var groupsAndRoles = new HashSet<string>(groups.Count + rolesResolution.Roles.Count, StringComparer.Ordinal);
+            foreach (var group in groups)
+            {
+                groupsAndRoles.Add(group.Value);
+            }
+
+            groupsAndRoles.UnionWith(rolesResolution.Roles);
             try
             {
                 var rights = await _functionalRightMapper.GetRightsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles, ct).ConfigureAwait(false);

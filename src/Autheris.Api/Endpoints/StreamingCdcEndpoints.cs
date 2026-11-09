@@ -323,6 +323,13 @@ public static class StreamingCdcEndpoints
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
+        if (capture.Error == CdcSnapshotCaptureError.GroupsUnresolved)
+        {
+            return SafeErrorResults.Problem(
+                StatusCodes.Status403Forbidden, "identity.groups_unresolved",
+                "The groups of the caller could not be resolved.", context);
+        }
+
         if (capture.Error == CdcSnapshotCaptureError.RestrictedScope)
         {
             return SafeErrorResults.Problem(

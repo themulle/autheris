@@ -48,7 +48,8 @@ public sealed class StreamingCdcEndpointErrorTests
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"),
             new Claim(ClaimTypes.Name, "admin"),
             new Claim("tenant", "tenant-a"),
-            new Claim(ClaimTypes.Role, "GovernanceAdmin")
+            new Claim(ClaimTypes.Role, "GovernanceAdmin"),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(), Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
         ], "Test"));
         return context;
     }
