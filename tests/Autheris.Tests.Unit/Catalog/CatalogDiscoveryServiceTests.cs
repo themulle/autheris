@@ -36,7 +36,7 @@ public sealed class CatalogDiscoveryServiceTests
         var options = Wp0.Options(Autheris.Tests.Common.TenancyShape.Single);
         return new CatalogDiscoveryService(
             _metadataRepository,
-            _auditLogRepository,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditLogRepository),
             Microsoft.Extensions.Options.Options.Create(options),
             Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadataRepository, consents, options, Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.WithBatchFromCheck(_rebacEvaluator)),
             _secretProvider,

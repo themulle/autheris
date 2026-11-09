@@ -12,32 +12,30 @@ using System.Threading.Tasks;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
-using Microsoft.Extensions.Logging;
 using Autheris.Infrastructure.Persistence.Catalog;
+using Autheris.Infrastructure.Persistence.Dialects;
+using Microsoft.Extensions.Logging;
 
-/// <summary>
-/// Engine-neutral statement execution, parameter binding, row hydration, and catalog helpers
-/// across PostgreSQL, SQL Server, and SQLite ( Step 3).
-/// This class operates over <see cref="DbConnection"/> and <see cref="DbCommand"/>, and never opens,
-/// commits, rolls back, or disposes connections or transactions.
-/// </summary>
-internal static class CatalogSqlCore
+public partial class GovernanceRepository
 {
+    // Statement execution, binding and row hydration (engine neutral).
+
     // PERS-17: epoch rows are matched by the natural key (domain, schema, table): a write inserts the row with its own id, which is not TABLES.id.
-    public const string EpochJoin = "POLICY_EPOCHS p JOIN TABLES t ON LOWER(p.domain) = LOWER(t.source_name) AND LOWER(p.schema_name) = LOWER(t.schema_name) AND LOWER(p.table_name) = LOWER(t.table_name)";
-    public const string EpochByTableIdSql = "SELECT MAX(p.epoch) FROM " + EpochJoin + " WHERE t.id = @tableId";
-    public const string AllEpochsSql = "SELECT t.id, MAX(p.epoch) FROM " + EpochJoin + " GROUP BY t.id";
+    internal const string EpochJoin = "POLICY_EPOCHS p JOIN TABLES t ON LOWER(p.domain) = LOWER(t.source_name) AND LOWER(p.schema_name) = LOWER(t.schema_name) AND LOWER(p.table_name) = LOWER(t.table_name)";
+    internal const string EpochByTableIdSql = "SELECT MAX(p.epoch) FROM POLICY_EPOCHS p JOIN TABLES t ON LOWER(p.domain) = LOWER(t.source_name) AND LOWER(p.schema_name) = LOWER(t.schema_name) AND LOWER(p.table_name) = LOWER(t.table_name) WHERE t.id = @tableId";
+    internal const string AllEpochsSql = "SELECT t.id, MAX(p.epoch) FROM POLICY_EPOCHS p JOIN TABLES t ON LOWER(p.domain) = LOWER(t.source_name) AND LOWER(p.schema_name) = LOWER(t.schema_name) AND LOWER(p.table_name) = LOWER(t.table_name) GROUP BY t.id";
 
-    public const string ActiveTableByIdSql = "SELECT source_name, schema_name, table_name FROM TABLES WHERE id = @id AND is_active = 1";
-    public const string ActiveTableColumnNamesSql = "SELECT column_name FROM TABLE_COLUMNS WHERE table_id = @t";
+    internal const string ActiveTableByIdSql = "SELECT source_name, schema_name, table_name FROM TABLES WHERE id = @id AND is_active = 1";
+    internal const string ActiveTableColumnNamesSql = "SELECT column_name FROM TABLE_COLUMNS WHERE table_id = @t";
 
-    public const string TransitiveRolesSql = @"SELECT r.role_name
+    internal const string TransitiveRolesSql = @"SELECT r.role_name
 FROM ROLES r
 JOIN ROLE_MEMBERS rm ON r.id = rm.role_id
 WHERE rm.member_sid = @sid";
 
-    public static Table ReadTableEntity(DbDataReader reader, ILogger? logger = null, int o = 0)
+    internal static Table ReadTableEntity(DbDataReader reader, ILogger? logger = null, int o = 0)
     {
         var tableId = Guid.Parse(reader.GetString(o));
         var dstInt = reader.IsDBNull(o + 9) ? 0 : reader.GetInt32(o + 9);
@@ -91,7 +89,7 @@ WHERE rm.member_sid = @sid";
         };
     }
 
-    public static IReadOnlyDictionary<string, string> ParseColumnMetaJson(string? metaJson)
+    internal static IReadOnlyDictionary<string, string> ParseColumnMetaJson(string? metaJson)
     {
         if (string.IsNullOrWhiteSpace(metaJson))
         {
@@ -119,7 +117,7 @@ WHERE rm.member_sid = @sid";
         }
     }
 
-    public static bool HasMaskingRulesChanged(
+    internal static bool HasMaskingRulesChanged(
         IReadOnlyDictionary<string, MaskingRule> existing,
         IReadOnlyDictionary<string, MaskingRule>? incoming)
     {
@@ -149,7 +147,7 @@ WHERE rm.member_sid = @sid";
         return false;
     }
 
-    public static TableColumn ReadTableColumn(
+    internal static TableColumn ReadTableColumn(
         DbDataReader reader,
         out Guid tableId,
         out MaskingRule? maskingRule,
@@ -207,7 +205,7 @@ WHERE rm.member_sid = @sid";
         };
     }
 
-    public static async Task<(List<TableColumn> Columns, Dictionary<string, MaskingRule> MaskingRules)> LoadTableColumnsAsync(
+    internal static async Task<(List<TableColumn> Columns, Dictionary<string, MaskingRule> MaskingRules)> LoadTableColumnsAsync(
         DbCommand cmd,
         ILogger? logger,
         CancellationToken ct)
@@ -228,7 +226,7 @@ WHERE rm.member_sid = @sid";
         return (columns, maskingRules);
     }
 
-    public static DataOwner ReadDataOwner(DbDataReader reader, int o = 0) => new()
+    internal static DataOwner ReadDataOwner(DbDataReader reader, int o = 0) => new()
     {
         Id = Guid.Parse(reader.GetString(o)),
         AdSid = new Sid(reader.GetString(o + 1)),
@@ -238,7 +236,7 @@ WHERE rm.member_sid = @sid";
         IsActive = reader.GetInt32(o + 5) == 1
     };
 
-    public static RelationRowData ReadRelationRow(DbDataReader reader, int o = 0) => new(
+    internal static RelationRowData ReadRelationRow(DbDataReader reader, int o = 0) => new(
         reader.GetString(o),
         reader.GetString(o + 1),
         reader.GetString(o + 2),
@@ -251,7 +249,7 @@ WHERE rm.member_sid = @sid";
         reader.IsDBNull(o + 13) ? null : reader.GetString(o + 13),
         !reader.IsDBNull(o + 14) && Convert.ToBoolean(reader.GetValue(o + 14), CultureInfo.InvariantCulture));
 
-    public static async Task<IReadOnlyList<TableRelation>> ReadRelationsAsync(
+    internal static async Task<IReadOnlyList<TableRelation>> ReadRelationsAsync(
         DbCommand cmd,
         ILogger? logger,
         CancellationToken ct)
@@ -266,7 +264,7 @@ WHERE rm.member_sid = @sid";
         return RelationRowAssembler.Assemble(rows, logger);
     }
 
-    public static async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(
+    internal static async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(
         DbConnection conn,
         string sql,
         TableIdentifier parentTable,
@@ -281,7 +279,7 @@ WHERE rm.member_sid = @sid";
         return await ReadRelationsAsync(cmd, logger, ct).ConfigureAwait(false);
     }
 
-    public static async Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(
+    internal static async Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(
         DbConnection conn,
         string sql,
         ILogger? logger,
@@ -292,7 +290,7 @@ WHERE rm.member_sid = @sid";
         return await ReadRelationsAsync(cmd, logger, ct).ConfigureAwait(false);
     }
 
-    public static async Task<long> ReadTableEpochAsync(DbConnection conn, Guid tableId, CancellationToken ct)
+    internal static async Task<long> ReadTableEpochAsync(DbConnection conn, Guid tableId, CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = EpochByTableIdSql;
@@ -301,7 +299,7 @@ WHERE rm.member_sid = @sid";
         return value is null or DBNull ? -1 : Convert.ToInt64(value, CultureInfo.InvariantCulture);
     }
 
-    public static async Task<Dictionary<Guid, long>> ReadAllTableEpochsAsync(DbConnection conn, CancellationToken ct)
+    internal static async Task<Dictionary<Guid, long>> ReadAllTableEpochsAsync(DbConnection conn, CancellationToken ct)
     {
         var epochs = new Dictionary<Guid, long>();
         await using var cmd = conn.CreateCommand();
@@ -318,7 +316,7 @@ WHERE rm.member_sid = @sid";
         return epochs;
     }
 
-    public static async Task<long> GetTableEpochAsync(
+    internal static async Task<long> GetTableEpochAsync(
         DbConnection conn,
         string sql,
         TableIdentifier table,
@@ -333,7 +331,7 @@ WHERE rm.member_sid = @sid";
         return result is long l ? l : (result is int i ? i : 1L);
     }
 
-    public static async Task<TableIdentifier?> GetActiveTableIdentifierAsync(
+    internal static async Task<TableIdentifier?> GetActiveTableIdentifierAsync(
         DbConnection conn,
         string sql,
         TableIdentifier table,
@@ -360,7 +358,7 @@ WHERE rm.member_sid = @sid";
         }
     }
 
-    public static async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(
+    internal static async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(
         DbConnection conn,
         Guid tableId,
         CancellationToken ct)
@@ -384,7 +382,7 @@ WHERE rm.member_sid = @sid";
         }
     }
 
-    public static async Task<string> ResolveActiveTableIdAsync(
+    internal static async Task<string> ResolveActiveTableIdAsync(
         DbConnection conn,
         DbTransaction? tx,
         string sql,
@@ -408,7 +406,7 @@ WHERE rm.member_sid = @sid";
         return ids.Count == 1 ? ids[0] : throw RelationWriteSupport.TableNotResolved(relationName, table, ids.Count);
     }
 
-    public static async Task<List<string>> LoadColumnNamesAsync(
+    internal static async Task<List<string>> LoadColumnNamesAsync(
         DbConnection conn,
         DbTransaction? tx,
         string tableId,
@@ -428,7 +426,7 @@ WHERE rm.member_sid = @sid";
         return names;
     }
 
-    public static async Task<bool> ReplaceRelationKeysAsync(
+    internal static async Task<bool> ReplaceRelationKeysAsync(
         DbConnection conn,
         DbTransaction tx,
         string storedId,
@@ -475,7 +473,7 @@ WHERE rm.member_sid = @sid";
         return keysChanged;
     }
 
-    public static async Task<bool> UpdateRelationCrossDataSourceAsync(
+    internal static async Task<bool> UpdateRelationCrossDataSourceAsync(
         DbConnection conn,
         DbTransaction tx,
         Guid relationId,
@@ -491,7 +489,7 @@ WHERE rm.member_sid = @sid";
         return rows > 0;
     }
 
-    public static async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(
+    internal static async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(
         DbConnection conn,
         string sql,
         TableIdentifier table,
@@ -513,7 +511,7 @@ WHERE rm.member_sid = @sid";
         return owners;
     }
 
-    public static async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(
+    internal static async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(
         DbConnection conn,
         string sql,
         IEnumerable<string> identifiers,
@@ -535,7 +533,7 @@ WHERE rm.member_sid = @sid";
         return ids;
     }
 
-    public static async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(
+    internal static async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(
         DbConnection conn,
         Sid subjectSid,
         CancellationToken ct)
@@ -554,7 +552,7 @@ WHERE rm.member_sid = @sid";
         return roles;
     }
 
-    public static async Task<CatalogVersion> GetCatalogVersionAsync(
+    internal static async Task<CatalogVersion> GetCatalogVersionAsync(
         DbConnection conn,
         string sql,
         CancellationToken ct)
@@ -570,7 +568,7 @@ WHERE rm.member_sid = @sid";
         return new CatalogVersion(1, 1);
     }
 
-    public static void ValidateVersionDeltas(long structureDelta, long contentDelta)
+    internal static void ValidateVersionDeltas(long structureDelta, long contentDelta)
     {
         if (structureDelta < 0 || contentDelta < 0 || (structureDelta == 0 && contentDelta == 0))
         {
@@ -578,14 +576,10 @@ WHERE rm.member_sid = @sid";
         }
     }
 
-    public static async Task PublishCatalogChangedEventAsync(
-        IEventBus? eventBus,
-        ILogger? logger,
-        CatalogVersion version,
-        DateTimeOffset timestamp,
-        CancellationToken ct)
+    private async Task PublishCatalogChangedEventAsync(CatalogVersion version, CancellationToken ct)
     {
-        if (eventBus != null)
+        var timestamp = TimeProvider.System.GetUtcNow();
+        if (_eventBus is { } eventBus)
         {
             try
             {
@@ -594,16 +588,15 @@ WHERE rm.member_sid = @sid";
                     new CatalogChangedEvent(version.StructureVersion, version.ContentVersion, timestamp),
                     ct).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                logger?.LogWarning(ex, "Failed to publish catalog changed event; polling will detect changes.");
+                LogCatalogNotice("Failed to publish catalog changed event; polling will detect changes.");
             }
         }
     }
 
-    public static async Task<List<(Guid Id, TableIdentifier Identifier, Table Table)>> LoadActiveTablesAsync(
+    private async Task<List<(Guid Id, TableIdentifier Identifier, Table Table)>> LoadActiveTablesAsync(
         DbCommand cmd,
-        ILogger? logger,
         CancellationToken ct)
     {
         var activeTables = new List<(Guid Id, TableIdentifier Identifier, Table Table)>();
@@ -612,22 +605,21 @@ WHERE rm.member_sid = @sid";
         {
             try
             {
-                var tableEntity = ReadTableEntity(reader, logger);
+                var tableEntity = ReadTableEntity(reader, _logger);
                 var identifier = new TableIdentifier(tableEntity.SourceName, tableEntity.SchemaName, tableEntity.TableName);
                 activeTables.Add((tableEntity.Id, identifier, tableEntity));
             }
             catch (Exception ex) when (ex is InvalidCastException or FormatException or JsonException or ArgumentException)
             {
-                logger?.LogWarning(ex, "Catalog row in TABLES is invalid and was skipped.");
+                LogCatalogNotice("A catalog row in TABLES is invalid and was skipped.");
             }
         }
 
         return activeTables;
     }
 
-    public static async Task<(Dictionary<Guid, List<TableColumn>> ColumnsByTable, Dictionary<Guid, Dictionary<string, MaskingRule>> MaskingRulesByTable, HashSet<Guid> CorruptedTableIds)> LoadBatchTableColumnsAsync(
+    private async Task<(Dictionary<Guid, List<TableColumn>> ColumnsByTable, Dictionary<Guid, Dictionary<string, MaskingRule>> MaskingRulesByTable, HashSet<Guid> CorruptedTableIds)> LoadBatchTableColumnsAsync(
         DbCommand cmd,
-        ILogger? logger,
         CancellationToken ct)
     {
         var columnsByTable = new Dictionary<Guid, List<TableColumn>>();
@@ -645,7 +637,7 @@ WHERE rm.member_sid = @sid";
                     tid = parsedTid;
                 }
 
-                var col = ReadTableColumn(reader, out var tableId, out var rule, logger);
+                var col = ReadTableColumn(reader, out var tableId, out var rule, _logger);
                 tid = tableId;
                 if (!columnsByTable.TryGetValue(tableId, out var colList))
                 {
@@ -666,7 +658,7 @@ WHERE rm.member_sid = @sid";
             }
             catch (Exception ex) when (ex is InvalidCastException or FormatException or JsonException or ArgumentException)
             {
-                logger?.LogWarning(ex, "Catalog row in TABLE_COLUMNS / COLUMN_MASKING_RULES is invalid; marking table as unavailable (fail-closed).");
+                LogCatalogNotice("A catalog row in TABLE_COLUMNS or COLUMN_MASKING_RULES is invalid; the table is marked unavailable (fail-closed).");
                 if (tid.HasValue)
                 {
                     corruptedTableIds.Add(tid.Value);
@@ -677,7 +669,7 @@ WHERE rm.member_sid = @sid";
         return (columnsByTable, maskingRulesByTable, corruptedTableIds);
     }
 
-    public static async Task<(Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource)> ExistingColsByName, Dictionary<string, MaskingRule> ExistingMaskingRules, Dictionary<string, Guid> ColIdByName)> LoadExistingColumnsAndMaskingRulesAsync(
+    internal static async Task<(Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource)> ExistingColsByName, Dictionary<string, MaskingRule> ExistingMaskingRules, Dictionary<string, Guid> ColIdByName)> LoadExistingColumnsAndMaskingRulesAsync(
         DbConnection conn,
         DbTransaction tx,
         Guid tableId,
@@ -728,13 +720,13 @@ WHERE rm.member_sid = @sid";
     }
 
     /// <summary>The description texts and their documentation source that an upsert writes for a table.</summary>
-    public readonly record struct TableDocumentation(string? Description, string? LongDescription, string? Source);
+    internal readonly record struct TableDocumentation(string? Description, string? LongDescription, string? Source);
 
     /// <summary>
     /// Reads the row of <c>SelectTableForUpdateSql</c> (columns 1 to 8) and returns whether the table changed structurally and which
     /// documentation texts the upsert writes (<see cref="ShouldOverwriteDocumentation"/>).
     /// </summary>
-    public static (bool StructuralChange, TableDocumentation Docs) ReadExistingTableForUpsert(DbDataReader reader, Table incoming, IReadOnlyList<string>? precedence)
+    internal static (bool StructuralChange, TableDocumentation Docs) ReadExistingTableForUpsert(DbDataReader reader, Table incoming, IReadOnlyList<string>? precedence)
     {
         var structuralChange =
             !string.Equals(reader.GetString(1), incoming.SourceType, StringComparison.OrdinalIgnoreCase) ||
@@ -763,7 +755,7 @@ WHERE rm.member_sid = @sid";
     /// description only when its rank is equal or higher. An existing row without a source is always overwritten, an incoming write without a
     /// source never overwrites; unlisted sources rank last.
     /// </summary>
-    public static bool ShouldOverwriteDocumentation(IReadOnlyList<string>? precedence, string? existingSource, string? newSource)
+    internal static bool ShouldOverwriteDocumentation(IReadOnlyList<string>? precedence, string? existingSource, string? newSource)
     {
         if (string.IsNullOrWhiteSpace(existingSource))
         {
@@ -794,7 +786,7 @@ WHERE rm.member_sid = @sid";
         }
     }
 
-    public static async Task<bool> UpsertColumnsAndMaskingRulesAsync(
+    internal static async Task<bool> UpsertColumnsAndMaskingRulesAsync(
         DbConnection conn,
         DbTransaction tx,
         string insertColumnSql,

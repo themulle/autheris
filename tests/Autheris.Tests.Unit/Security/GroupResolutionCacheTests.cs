@@ -32,11 +32,7 @@ public sealed class GroupResolutionCacheTests
 
     private static IRoleProvider Provider(Func<IdentityRealm, ProviderRoleResult> result)
     {
-        var provider = Substitute.For<IRoleProvider>();
-        provider.ProviderId.Returns("p");
-        provider.GetRolesAsync(Arg.Any<ResolvedIdentity>(), Arg.Any<IdentityRealm>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(result(call.Arg<IdentityRealm>())));
-        return provider;
+        return new FakeRoleProvider("p", result);
     }
 
     private static ProviderRoleResult Groups(params string[] groups) =>
@@ -78,8 +74,7 @@ public sealed class GroupResolutionCacheTests
     [Trait("SecurityCondition", "SEC-AUTH-07a")]
     public void Ttl_outside_1_to_60_fails_startup(int ttl)
     {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
+        var env = new FakeHostEnvironment(Environments.Development);
         var validator = new AuthenticationModeOptionsValidator(env);
 
         var result = validator.Validate(null, new GatewayOptions { Authentication = new AuthenticationOptions { GroupCacheTtlMinutes = ttl } });
@@ -127,7 +122,7 @@ public sealed class GroupResolutionCacheTests
     public async Task Event_handler_failure_invalidates_all()
     {
         var node = new RoleResolverCache();
-        using var subscriber = new IdentityGroupsChangedSubscriber(node, Substitute.For<Autheris.Application.Common.Interfaces.IEventBus>());
+        using var subscriber = new IdentityGroupsChangedSubscriber(node, new FakeEventBus());
         await node.SetAsync("r", "u", Entry(TimeSpan.FromMinutes(5)));
 
         // A message that cannot be interpreted (missing key list, null message) drops every entry.
@@ -159,7 +154,7 @@ public sealed class GroupResolutionCacheTests
     public async Task Oversized_invalidation_message_degrades_to_invalidate_all()
     {
         var node = new RoleResolverCache();
-        using var subscriber = new IdentityGroupsChangedSubscriber(node, Substitute.For<Autheris.Application.Common.Interfaces.IEventBus>());
+        using var subscriber = new IdentityGroupsChangedSubscriber(node, new FakeEventBus());
         await node.SetAsync("r", "unrelated", Entry(TimeSpan.FromMinutes(5)));
         var tooMany = Enumerable.Range(0, IdentityGroupsChangedChannel.MaxUserKeys + 1).Select(i => $"u{i}").ToArray();
 
@@ -218,22 +213,18 @@ public sealed class GroupResolutionCacheTests
     [Trait("SecurityCondition", "SEC-AUTH-07b")]
     public async Task Undeliverable_message_through_redis_bus_invalidates_all()
     {
-        var redisSubscriber = Substitute.For<StackExchange.Redis.ISubscriber>();
-        Action<StackExchange.Redis.RedisChannel, StackExchange.Redis.RedisValue>? onMessage = null;
-        redisSubscriber.When(x => x.Subscribe(Arg.Any<StackExchange.Redis.RedisChannel>(), Arg.Any<Action<StackExchange.Redis.RedisChannel, StackExchange.Redis.RedisValue>>(), Arg.Any<StackExchange.Redis.CommandFlags>()))
-            .Do(call => onMessage = call.Arg<Action<StackExchange.Redis.RedisChannel, StackExchange.Redis.RedisValue>>());
-        var mux = Substitute.For<StackExchange.Redis.IConnectionMultiplexer>();
-        mux.GetSubscriber(Arg.Any<object?>()).Returns(redisSubscriber);
+        var capture = new FakeRedis.Capture();
+        var mux = FakeRedis.Multiplexer(capture);
         using var bus = new RedisEventBus(mux, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), Microsoft.Extensions.Logging.Abstractions.NullLogger<RedisEventBus>.Instance);
         var node = new RoleResolverCache();
         using var subscriber = new IdentityGroupsChangedSubscriber(node, bus);
         await subscriber.StartAsync(CancellationToken.None);
-        onMessage.ShouldNotBeNull();
+        capture.OnMessage.ShouldNotBeNull();
 
         foreach (var payload in new[] { "{ not json", "null" })
         {
             await node.SetAsync("r", "u", Entry(TimeSpan.FromMinutes(5)));
-            onMessage!(default, payload);
+            capture.OnMessage!(default, payload);
             (await EventuallyGoneAsync(node, "r", "u")).ShouldBeTrue();
         }
     }
@@ -242,8 +233,7 @@ public sealed class GroupResolutionCacheTests
     [Trait("SecurityCondition", "SEC-AUTH-07b")]
     public async Task Subscribe_failure_invalidates_all_and_still_hooks_connection_restored()
     {
-        var bus = Substitute.For<Autheris.Application.Common.Interfaces.IEventBus>();
-        bus.Subscribe<IdentityGroupsChanged>(Arg.Any<string>(), Arg.Any<Func<IdentityGroupsChanged, Task>>()).Returns(_ => throw new InvalidOperationException("down"));
+        var bus = new FakeEventBus { FailSubscribe = true };
         var node = new RoleResolverCache();
         using var subscriber = new IdentityGroupsChangedSubscriber(node, bus);
         await node.SetAsync("r", "u", Entry(TimeSpan.FromMinutes(5)));
@@ -252,7 +242,7 @@ public sealed class GroupResolutionCacheTests
 
         (await node.GetAsync("r", "u")).ShouldBeNull();
         await node.SetAsync("r", "u", Entry(TimeSpan.FromMinutes(5)));
-        bus.ConnectionRestored += Raise.Event<Action>();
+        bus.RaiseConnectionRestored();
         (await node.GetAsync("r", "u")).ShouldBeNull();
     }
 
@@ -260,9 +250,7 @@ public sealed class GroupResolutionCacheTests
     [Trait("SecurityCondition", "SEC-AUTH-07b")]
     public async Task Publish_failure_is_counted_without_keys_and_does_not_throw()
     {
-        var bus = Substitute.For<Autheris.Application.Common.Interfaces.IEventBus>();
-        bus.PublishAsync(Arg.Any<string>(), Arg.Any<IdentityGroupsChanged>(), Arg.Any<CancellationToken>())
-            .Returns<Task>(_ => throw new InvalidOperationException("down"));
+        var bus = new FakeEventBus { FailPublish = true };
         var tags = new List<string>();
         long total = 0;
         using var listener = new System.Diagnostics.Metrics.MeterListener();

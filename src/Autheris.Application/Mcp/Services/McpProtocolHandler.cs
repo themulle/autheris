@@ -122,7 +122,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         };
     }
 
-    private static string HandleInitialize(object? id)
+    private string HandleInitialize(object? id)
     {
         return $$"""
         {
@@ -134,7 +134,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
               "name": "Autheris.McpServer",
               "version": "1.4.0"
             },
-            "instructions": "{{EscapeJson(McpDatasetTools.ServerInstructions)}}",
+            "instructions": "{{EscapeJson(McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(_options)))}}",
             "capabilities": {
               "tools": { "listChanged": false },
               "resources": { "subscribe": false, "listChanged": false }

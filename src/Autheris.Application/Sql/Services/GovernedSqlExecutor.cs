@@ -64,6 +64,7 @@ public sealed partial class GovernedSqlExecutor
     private readonly IProviderExecutionGuard _executionGuard;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec _pageTokenCodec;
+    private readonly IKeyVaultSecretProvider? _secrets;
 
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
@@ -89,6 +90,7 @@ public sealed partial class GovernedSqlExecutor
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _connectionFactory = connectionFactory;
         _environment = environment;
+        _secrets = secretProvider;
         _logger = logger;
         _concurrencyGate = concurrencyGate;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
@@ -439,6 +441,8 @@ public sealed partial class GovernedSqlExecutor
 
             admission ??= await AdmitCostAsync(request, user, rewrite.Metadata, ct).ConfigureAwait(false);
 
+            var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
+
             if (!dmlContext.IsDml)
             {
                 var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
@@ -459,6 +463,10 @@ public sealed partial class GovernedSqlExecutor
                         ["tier"] = admission.Policy.Tier.ToString()
                     };
                 }
+                if (connOptions?.Databricks is { } db)
+                {
+                    AddDatabricksAuditFields(fields, db, tenantId, _secrets, _environment, _logger);
+                }
                 AddCallerAttributeAuditFields(fields, rewrite, compiled);
                 AddCompiledAuditFields(fields, compiled, clientValues);
                 AddKeySetAuditFields(fields, rewrite);
@@ -474,9 +482,7 @@ public sealed partial class GovernedSqlExecutor
                 }, ct).ConfigureAwait(false);
             }
 
-        var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
-
-        if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
+        if (connOptions == null || (string.IsNullOrWhiteSpace(connOptions.ConnectionString) && !DataSourceProvider.Is(connOptions.Provider, DatabaseDialect.Databricks)) || _connectionFactory == null)
         {
             bool isDev = _environment != null &&
                          string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
@@ -524,6 +530,10 @@ public sealed partial class GovernedSqlExecutor
             // L-2: the audit key is resolved before the statement can write. A key that cannot be read fails the statement closed here,
             // not after the commit (a committed write without its audit record).
             _digester.EnsureKey();
+
+            // Write-ahead: the required intent record (statement fingerprint and target tables, no values) exists before any
+            // connection, transaction or statement. A failing audit store refuses the statement.
+            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlIntent, "ALLOW", compiled, affectedRows: null, reason: null, synthetic: false).ConfigureAwait(false);
         }
 
         var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
@@ -609,8 +619,9 @@ public sealed partial class GovernedSqlExecutor
                     }
                     catch (Exception auditEx)
                     {
-                        // The statement's own failure is what the caller must see, not a failure of its audit.
-                        _logger?.LogError(auditEx, "WebSQL DML failure audit could not be written on data source {DataSource}.", dsName);
+                        // The statement's own failure is what the caller must see, not a failure of its audit (the intent record exists).
+                        GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
+                        _logger?.LogCritical(auditEx, "WebSQL DML failure audit could not be written on data source {DataSource}.", dsName);
                     }
 
                     throw;

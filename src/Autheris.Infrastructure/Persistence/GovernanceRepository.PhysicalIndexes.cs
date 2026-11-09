@@ -4,8 +4,8 @@ using Autheris.Domain.Model;
 
 namespace Autheris.Infrastructure.Persistence;
 
-/// <summary>Issue #404: write seam of the physical non-unique indexes (own partial so the catalog partials do not grow).</summary>
-public partial class PostgreSqlGovernanceRepository : IPhysicalIndexRepository
+/// <summary>Write seam of the physical non-unique indexes (own partial so the catalog partial does not grow).</summary>
+public partial class GovernanceRepository : IPhysicalIndexRepository
 {
     public async Task<bool> ReplacePhysicalIndexesAsync(TableIdentifier table, IReadOnlyList<PhysicalIndexDefinition> indexes, CancellationToken ct = default)
     {
@@ -17,7 +17,7 @@ public partial class PostgreSqlGovernanceRepository : IPhysicalIndexRepository
             try
             {
                 found = await CatalogPhysicalIndexStore.ReplaceForTableAsync(
-                    conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, indexes,
+                    conn, tx, KeyDialect, table, indexes,
                     () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (!found)
                 {
@@ -36,8 +36,7 @@ public partial class PostgreSqlGovernanceRepository : IPhysicalIndexRepository
             }
         }
 
-        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
-        await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
+        await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
         return found;
     }
 }

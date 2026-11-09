@@ -29,4 +29,14 @@ public sealed class InertOptionWarningsTests
         warning.ShouldContain("WebSQL");
         warning.ShouldContain("REST data API");
     }
+
+    [Fact]
+    public void ConfiguredDmlWriterRoles_AreReportedInert()
+    {
+        var options = new GatewayOptions { WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["Writer"] } };
+
+        var warning = InertOptionWarnings.Collect(options).ShouldHaveSingleItem();
+
+        warning.ShouldContain("WebSql:DmlWriterRoles");
+    }
 }

@@ -312,9 +312,9 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         // Audit persistence files to ensure batch queries in GetAllTablesAsync do not interpolate identifiers
         var repoFiles = new[]
         {
-            "src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.cs",
-            "src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Catalog.cs",
-            "src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Catalog.cs"
+            "src/Autheris.Infrastructure/Persistence/GovernanceRepository.Catalog.cs",
+            "src/Autheris.Infrastructure/Persistence/GovernanceRepository.CatalogSql.cs",
+            "src/Autheris.Infrastructure/Persistence/GovernanceRepository.CatalogRows.cs"
         };
 
         var root = FindRepositoryRoot();

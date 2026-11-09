@@ -50,7 +50,7 @@ public sealed class Issue143ScopeBlindPathTests
 
     private static ClaimsPrincipal Analyst(string? scp = null)
     {
-        var claims = new List<Claim> { new(ClaimTypes.Name, "analyst@corp.com"), new(ClaimTypes.Role, "DataScientist") };
+        var claims = new List<Claim> { new(ClaimTypes.Name, "analyst@corp.com"), new(ClaimTypes.PrimarySid, "analyst@corp.com"), new(ClaimTypes.Role, "DataScientist") };
         if (scp != null)
         {
             claims.Add(new Claim("scp", scp));
@@ -151,7 +151,7 @@ public sealed class Issue143ScopeBlindPathTests
         var seen = new List<IReadOnlySet<string>?>();
         var service = IcebergWith(seen, sensitive: false);
         var plainScope = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim("scope", Restricted)], "Bearer"));
+            [new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com"), new Claim("scope", Restricted)], "Bearer"));
 
         await LoadAsync(service, plainScope);
         await LoadAsync(service, Analyst());

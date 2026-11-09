@@ -45,7 +45,7 @@ public sealed class AccessPlanningRowFilterPlanTests
         _admin.ValidateObjectAsync(Orders, Arg.Any<RowFilterEvaluationSettings?>(), Arg.Any<CancellationToken>())
             .Returns(new RowFilterEvaluationPreview(Orders, Stored));
         _service = new AccessPlanningService(
-            Substitute.For<IAuditLogRepository>(), _tables, Substitute.For<IRebacStore>(), _totp, _secrets,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tables, Substitute.For<IRebacStore>(), _totp, _secrets,
             secretProvider: keyVault,
             planOptions: Options.Create(new AccessPlanOptions { SigningKeyRef = "accessplan-signing" }),
             accessPlanStore: _store,
@@ -265,7 +265,7 @@ public sealed class AccessPlanningRowFilterPlanTests
     [Fact]
     public async Task Service_WithoutAdminService_FailsClosed()
     {
-        var bare = new AccessPlanningService(Substitute.For<IAuditLogRepository>());
+        var bare = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()));
 
         await Should.ThrowAsync<SecurityException>(() => bare.PlanRowFilterEvaluationAsync(RuleRequest(), Admin, Tenant));
     }

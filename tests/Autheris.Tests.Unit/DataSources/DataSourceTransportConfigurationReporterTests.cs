@@ -192,7 +192,7 @@ public sealed class DataSourceTransportConfigurationReporterTests
         var visibility = CatalogVisibilityTestFactory.Create(tables, Wp0.Consents(), options);
         var admin = Wp0.User("root", null, ["ClusterAdmin"]);
         var service = new CatalogDiscoveryService(
-            tables, Substitute.For<IAuditLogRepository>(), Options.Create(options), visibility, transportResolver: resolver);
+            tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Options.Create(options), visibility, transportResolver: resolver);
 
         var sources = await service.ListDatasourcesAsync(Wp0.Context(admin));
 

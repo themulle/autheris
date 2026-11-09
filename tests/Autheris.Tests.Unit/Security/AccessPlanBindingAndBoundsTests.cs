@@ -35,7 +35,7 @@ public sealed class AccessPlanBindingAndBoundsTests
 
     private AccessPlanningService CreateService(AccessPlanOptions? options = null, IHostEnvironment? env = null)
         => new(
-            _audit,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_audit),
             Substitute.For<ITableMetadataRepository>(),
             _rebac,
             _totp,
@@ -150,7 +150,7 @@ public sealed class AccessPlanBindingAndBoundsTests
         var prod = Substitute.For<IHostEnvironment>();
         prod.EnvironmentName.Returns("Production");
         var service = new AccessPlanningService(
-            _audit, dataOwnershipRepository: ownership, hostEnvironment: prod, timeProvider: _time);
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_audit), dataOwnershipRepository: ownership, hostEnvironment: prod, timeProvider: _time);
 
         var result = await service.ResolvePrincipalAsync(new AdminResolvePrincipalRequest("a"), AdminA);
 

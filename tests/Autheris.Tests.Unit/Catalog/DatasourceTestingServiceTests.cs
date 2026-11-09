@@ -91,7 +91,7 @@ public sealed class DatasourceTestingServiceTests
         _httpClientFactory.CreateClient("DeclarativeHttp").Returns(client);
 
         var service = new DatasourceTestingService(
-            _metadataRepo, _httpClientFactory, _auditRepo, _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
+            _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
 
         var result = await service.TestDatasourceAsync("crm.dbo.customers", new DatasourceTestRequest(), CreateAdminUser());
 
@@ -116,7 +116,7 @@ public sealed class DatasourceTestingServiceTests
         _httpClientFactory.CreateClient("DeclarativeHttp").Returns(client);
 
         var service = new DatasourceTestingService(
-            _metadataRepo, _httpClientFactory, _auditRepo, _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
+            _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
 
         var result = await service.TestDatasourceAsync("crm.dbo.customers", new DatasourceTestRequest(), CreateAdminUser());
 
@@ -135,7 +135,7 @@ public sealed class DatasourceTestingServiceTests
             .Returns([httpTable]);
 
         var service = new DatasourceTestingService(
-            _metadataRepo, _httpClientFactory, _auditRepo, _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
+            _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
 
         var result = await service.TestDatasourceAsync("cloud.dbo.metadata", new DatasourceTestRequest(), CreateAdminUser());
 
@@ -151,7 +151,7 @@ public sealed class DatasourceTestingServiceTests
             .Returns([httpTable]);
 
         var service = new DatasourceTestingService(
-            _metadataRepo, _httpClientFactory, _auditRepo, _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
+            _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
 
         var req = new DatasourceTestRequest(RelativeProbePath: "../../etc/passwd");
         var result = await service.TestDatasourceAsync("crm.dbo.customers", req, CreateAdminUser());
@@ -174,7 +174,7 @@ public sealed class DatasourceTestingServiceTests
             .Returns([httpTable]);
 
         var service = new DatasourceTestingService(
-            _metadataRepo, _httpClientFactory, _auditRepo, _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
+            _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
 
         var result = await service.TestDatasourceAsync(
             "crm.dbo.customers", new DatasourceTestRequest(RelativeProbePath: probePath), CreateAdminUser());
@@ -210,7 +210,7 @@ public sealed class DatasourceTestingServiceTests
             .Returns([sqlTableMeta]);
 
         var service = new DatasourceTestingService(
-            _metadataRepo, _httpClientFactory, _auditRepo, _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
+            _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
 
         var result = await service.TestDatasourceAsync("sales.dbo.orders", new DatasourceTestRequest(), CreateAdminUser());
 
@@ -237,7 +237,7 @@ public sealed class DatasourceTestingServiceTests
         _httpClientFactory.CreateClient("DeclarativeHttp").Returns(new HttpClient(fakeHandler));
 
         var service = new DatasourceTestingService(
-            _metadataRepo, _httpClientFactory, _auditRepo, _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
+            _metadataRepo, _httpClientFactory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _secretProvider, _environment, NullLogger<DatasourceTestingService>.Instance);
 
         var request = new DatasourceTestRequest(
             AdditionalHeaders: new Dictionary<string, string>

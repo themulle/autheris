@@ -25,13 +25,12 @@ public sealed class LdapsRoleProviderTests
         return bytes;
     }
 
-    private static ILdapDirectoryAdapter Adapter(IReadOnlyList<string>? users = null, IReadOnlyList<byte[]>? groups = null)
-    {
-        var adapter = Substitute.For<ILdapDirectoryAdapter>();
-        adapter.FindUserDnsAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(users ?? ["CN=alice,DC=corp"]));
-        adapter.ReadTokenGroupsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(groups ?? []));
-        return adapter;
-    }
+    private static FakeLdapAdapter Adapter(IReadOnlyList<string>? users = null, IReadOnlyList<byte[]>? groups = null) =>
+        new()
+        {
+            FindUsers = _ => Task.FromResult(users ?? ["CN=alice,DC=corp"]),
+            TokenGroups = groups ?? [],
+        };
 
     [Fact]
     [Trait("SecurityCondition", "SEC-AUTH-03g")]
@@ -55,7 +54,7 @@ public sealed class LdapsRoleProviderTests
 
         await sut.GetRolesAsync(Identity(claims: [new Claim(ClaimTypes.PrimarySid, UserSid), new Claim("name", "alice"), new Claim("sAMAccountName", "alice")]), Realm);
 
-        var filter = (string)adapter.ReceivedCalls().First(c => c.GetMethodInfo().Name == nameof(ILdapDirectoryAdapter.FindUserDnsAsync)).GetArguments()[0]!;
+        var filter = adapter.Filters.First();
         filter.ShouldContain("(objectSid=");
         filter.ShouldNotContain("alice");
         filter.ShouldNotContain("sAMAccountName");
@@ -77,23 +76,24 @@ public sealed class LdapsRoleProviderTests
     [Trait("SecurityCondition", "SEC-AUTH-03g")]
     public async Task Ldaps_timeout_is_degraded_and_trips_breaker()
     {
-        var adapter = Substitute.For<ILdapDirectoryAdapter>();
-        adapter.FindUserDnsAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns<Task<IReadOnlyList<string>>>(async call =>
+        var adapter = new FakeLdapAdapter
+        {
+            FindUsers = async ct =>
             {
-                await new TaskCompletionSource<bool>().Task.WaitAsync(call.Arg<CancellationToken>());
+                await new TaskCompletionSource<bool>().Task.WaitAsync(ct);
                 return [];
-            });
+            },
+        };
         var sut = new LdapsRoleProvider(adapter, timeout: TimeSpan.FromMilliseconds(50), failureThreshold: 2);
         var identity = Identity(claims: new Claim(ClaimTypes.PrimarySid, UserSid));
 
         (await sut.GetRolesAsync(identity, Realm)).Failed.ShouldBeTrue();
         (await sut.GetRolesAsync(identity, Realm)).Failed.ShouldBeTrue();
         sut.IsCircuitBreakerOpen.ShouldBeTrue();
-        adapter.ClearReceivedCalls();
+        var callsWhenOpen = adapter.FindUserCalls;
 
         (await sut.GetRolesAsync(identity, Realm)).Failed.ShouldBeTrue();
-        await adapter.DidNotReceiveWithAnyArgs().FindUserDnsAsync(default!, default, default);
+        adapter.FindUserCalls.ShouldBe(callsWhenOpen);
     }
 
     [Fact]

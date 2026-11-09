@@ -363,7 +363,7 @@ public sealed class DocumentationSourcePriorityTests
         }
         """;
 
-        var meta = Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson(json);
+        var meta = Autheris.Infrastructure.Persistence.GovernanceRepository.ParseColumnMetaJson(json);
         meta.ShouldNotBeNull();
         meta["pii"].ShouldBe("false");
         meta["is_active"].ShouldBe("true");
@@ -376,10 +376,10 @@ public sealed class DocumentationSourcePriorityTests
     [Fact]
     public void ParseColumnMetaJson_InvalidOrEmptyJson_ReturnsEmptyDictionary()
     {
-        Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson(null).Count.ShouldBe(0);
-        Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson("").Count.ShouldBe(0);
-        Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson("not json").Count.ShouldBe(0);
-        Autheris.Infrastructure.Persistence.CatalogSqlCore.ParseColumnMetaJson("[]").Count.ShouldBe(0);
+        Autheris.Infrastructure.Persistence.GovernanceRepository.ParseColumnMetaJson(null).Count.ShouldBe(0);
+        Autheris.Infrastructure.Persistence.GovernanceRepository.ParseColumnMetaJson("").Count.ShouldBe(0);
+        Autheris.Infrastructure.Persistence.GovernanceRepository.ParseColumnMetaJson("not json").Count.ShouldBe(0);
+        Autheris.Infrastructure.Persistence.GovernanceRepository.ParseColumnMetaJson("[]").Count.ShouldBe(0);
     }
 
     [Fact]

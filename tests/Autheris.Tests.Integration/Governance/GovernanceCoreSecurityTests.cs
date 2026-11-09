@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Linq;
+using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -91,5 +94,26 @@ public sealed class GovernanceCoreSecurityTests
         entry.ShouldNotContain(secretTenant);
         entry.ShouldNotContain(secretSubject);
         entry.ShouldNotContain("SELECT * FROM CONSENTS");
+    }
+
+    [Fact]
+    public void Catalog_statements_touch_only_global_tables()
+    {
+        // SEC-SIMPL-22: the moved catalog statements carry no tenant predicate, so every table they name must be a table without a tenant_id column.
+        var sql = typeof(GovernanceRepository).GetNestedType("CatalogSql", BindingFlags.NonPublic)!;
+        var statements = sql.GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToList();
+        statements.ShouldNotBeEmpty();
+
+        var tables = statements
+            .SelectMany(s => Regex.Matches(s, @"\b(?:FROM|JOIN|INTO|UPDATE|MERGE(?:\s+INTO)?)\s+(?:dbo\.)?([A-Za-z_]+)", RegexOptions.IgnoreCase).Select(m => m.Groups[1].Value.ToUpperInvariant()))
+            .Where(n => n is not ("SELECT" or "SET" or "EXCLUDED" or "TABLE"))
+            .Distinct()
+            .ToList();
+
+        tables.ShouldNotBeEmpty();
+        tables.Where(n => !GovernanceGlobalTables.IsGlobal(n)).ShouldBeEmpty();
     }
 }

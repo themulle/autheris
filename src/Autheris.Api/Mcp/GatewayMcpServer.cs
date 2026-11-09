@@ -44,7 +44,7 @@ public static class GatewayMcpServer
         services.AddMcpServer(o =>
             {
                 o.ServerInfo = new Implementation { Name = ServerName, Version = "2.0.0" };
-                o.ServerInstructions = McpDatasetTools.ServerInstructions;
+                o.ServerInstructions = McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(options));
             })
             .WithHttpTransport(t => t.SessionMode = HttpServerSessionMode.Stateless)
             .WithListToolsHandler(ListToolsAsync)

@@ -39,7 +39,7 @@ using Xunit;
 /// The bullets that need per-member column decisions inside the subtree planner are tracked by WP-SIMPL-21 / the Sql lane.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class AdvisoryRegressionTests
+public sealed partial class AdvisoryRegressionTests
 {
     private const string Spec = """{"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{"/a":{"get":{"summary":"x"}}},"components":{"schemas":{"A":{"type":"object","properties":{"id":{"type":"string"}}}}}}""";
 
@@ -53,7 +53,7 @@ public sealed class AdvisoryRegressionTests
     }
 
     private static CatalogDiscoveryService Discovery(IKeyVaultSecretProvider provider, IOpenApiIngestionService ingestion) =>
-        new(Substitute.For<ITableMetadataRepository>(), Substitute.For<IAuditLogRepository>(),
+        new(Substitute.For<ITableMetadataRepository>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             Options.Create(new GatewayOptions()), null,
             provider, ingestion, Substitute.For<ICatalogSearchEngine>(), NullLogger<CatalogDiscoveryService>.Instance);
 
@@ -120,7 +120,7 @@ public sealed class AdvisoryRegressionTests
                 secrets.DidNotReceiveWithAnyArgs().SetSecret(default!, default!);
                 break;
             case "mcp_registration_is_tenant_bound":
-                var planning = new AccessPlanningService(Substitute.For<IAuditLogRepository>(), Substitute.For<ITableMetadataRepository>(),
+                var planning = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
                     Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
                 var mcp = new AdminRegisterDatasourceRequest("crane", "telemetry", Auth: new DatasourceAuthDto("apiKey", Secret: "s"));
                 await Should.ThrowAsync<UnauthorizedAccessException>(() => planning.RegisterDatasourceAsync(mcp, "admin", "tenant-a"));
@@ -129,7 +129,7 @@ public sealed class AdvisoryRegressionTests
                 break;
             case "mcp_registration_refuses_existing_secret":
                 secrets.GetSecretBytes("datasource:telemetry:tenant-a:crane:auth_secret").Returns([9]);
-                var existing = new AccessPlanningService(Substitute.For<IAuditLogRepository>(), Substitute.For<ITableMetadataRepository>(),
+                var existing = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
                     Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore(), secretProvider: secrets);
                 await Should.ThrowAsync<ArgumentException>(() => existing.RegisterDatasourceAsync(
                     new AdminRegisterDatasourceRequest("crane", "telemetry", Auth: new DatasourceAuthDto("apiKey", Secret: "s")), "admin", "tenant-a", isClusterAdmin: true));
@@ -167,7 +167,7 @@ public sealed class AdvisoryRegressionTests
             var gateway = new GatewayOptions { DataSources = new SqlDataSourceOptions() };
             gateway.DataSources.Connections["src_b"] = new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "Server=h;Database=d;" };
             var testing = new DatasourceTestingService(
-                repo, Substitute.For<IHttpClientFactory>(), Substitute.For<IAuditLogRepository>(), null, null, null,
+                repo, Substitute.For<IHttpClientFactory>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), null, null, null,
                 factory, Options.Create(gateway), new SqlSourceDescriber());
 
             await Should.ThrowAsync<KeyNotFoundException>(() =>
@@ -177,7 +177,7 @@ public sealed class AdvisoryRegressionTests
         }
 
         var audit = Substitute.For<IAuditLogRepository>();
-        var service = new AccessPlanningService(audit, repo, Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>(),
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), repo, Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>(),
             new TotpVerificationService(), new InMemoryTotpSecretStore());
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(bullet.Contains("foreign", StringComparison.Ordinal) ? Table("tenant-b") : null);
