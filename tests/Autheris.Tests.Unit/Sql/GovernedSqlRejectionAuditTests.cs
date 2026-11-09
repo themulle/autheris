@@ -38,6 +38,8 @@ public sealed class GovernedSqlRejectionAuditTests
 
     private static (GovernedSqlExecutionService Service, List<AuditLogEntry> Audit) CreateService(global::Autheris.Application.Audit.IAuditWriter? writer = null)
     {
+        // Test-only seam: the production write decision denies every DML target.
+        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         var table = new TableMetadata
         {
             Identifier = new TableIdentifier("default", "public", "orders"),

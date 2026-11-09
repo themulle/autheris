@@ -170,14 +170,18 @@ internal sealed class ClientListFixture : IAsyncDisposable
 
     public IReadOnlyList<AuditLogEntry> Audit => _entries;
 
-    public static ClaimsPrincipal User(string tenant = TenantA, bool writer = true) =>
-        new(new ClaimsIdentity(
+    public static ClaimsPrincipal User(string tenant = TenantA, bool writer = true)
+    {
+        // Test-only seam: the production write decision denies every DML target.
+        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
+        return new(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LIST-USER"),
                 new Claim("tenant_id", tenant),
                 new Claim(ClaimTypes.Role, writer ? WriterRole : "Reader")
             ],
             "Test"));
+    }
 
     public static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
 

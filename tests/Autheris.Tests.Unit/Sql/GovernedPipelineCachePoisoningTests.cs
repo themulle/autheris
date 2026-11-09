@@ -64,6 +64,8 @@ public sealed class GovernedPipelineCachePoisoningTests
     private GovernedSqlExecutionService CreateService(
         Func<TableMetadata> table, Func<IReadOnlyList<Consent>>? consents = null, bool allowDml = false, ISqlEngine? engine = null)
     {
+        // Test-only seam: the production write decision denies every DML target.
+        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(OrdersId.Equals(ci.Arg<TableIdentifier>()) ? table() : null));

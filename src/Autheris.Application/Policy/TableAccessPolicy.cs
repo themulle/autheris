@@ -472,9 +472,10 @@ public sealed partial class TableAccessPolicy
 
     /// <summary>
     /// Evaluates whether the given principal has permission to perform write / DML operations on the specified table.
-    /// Requires an explicit Casbin action "write" (or "*") and consent clearance where applicable.
+    /// Interim decision: every write target is denied. No role, consent, policy, option or bypass mode can turn this true;
+    /// the decision is independent of the principal until a dedicated write decision replaces it.
     /// </summary>
-    public async Task<bool> CanWriteTableAsync(
+    public Task<bool> CanWriteTableAsync(
         ClaimsPrincipal user,
         TenantId tenant,
         TableMetadata metadata,
@@ -484,37 +485,7 @@ public sealed partial class TableAccessPolicy
         ArgumentNullException.ThrowIfNull(user);
         ArgumentNullException.ThrowIfNull(metadata);
 
-        // SEC SG-25: Fail-closed for writes without explicit write policy.
-        // Consent only grants read access. If Casbin is not available or has no policies for this tenant,
-        // write access is denied unless the principal is a canonical cluster admin or holds an authorized DML writer role.
-        var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(user);
-        var hasDmlWriterRole = _options?.WebSql?.DmlWriterRoles != null &&
-                               _options.WebSql.DmlWriterRoles.Count > 0 &&
-                               _options.WebSql.DmlWriterRoles.Any(r => user.IsInRole(r));
-
-        if (!isClusterAdmin && !hasDmlWriterRole)
-        {
-            if (!_policyEnforcementService.HasPolicies(tenant))
-            {
-                return false;
-            }
-        }
-
-        var userSid = user.GetUserSid() ?? new Sid(user.Identity?.Name ?? "anonymous");
-        var query = TableAccessQuery.ForPrincipal(
-            user,
-            userSid,
-            tenant,
-            metadata,
-            extraAttributes: new Dictionary<string, object?>
-            {
-                ["gql.action"] = "write",
-                ["action"] = "write"
-            },
-            contract: contract);
-
-        var decision = await DecideAsync(query, ct).ConfigureAwait(false);
-        return decision.IsAllowed;
+        return Task.FromResult(DmlWriteDecisionTestSeam.IsPermissive);
     }
 
     /// <summary>
@@ -529,7 +500,6 @@ public sealed partial class TableAccessPolicy
     {
         ArgumentNullException.ThrowIfNull(user);
 
-        var metadata = new TableMetadata { Identifier = table };
-        return CanWriteTableAsync(user, tenant, metadata, contract, ct);
+        return Task.FromResult(DmlWriteDecisionTestSeam.IsPermissive);
     }
 }

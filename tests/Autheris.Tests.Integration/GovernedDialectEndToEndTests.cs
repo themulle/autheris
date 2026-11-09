@@ -198,7 +198,7 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
         ex.InnerException.ShouldBeNull();
     }
 
-    [Fact]
+    [Fact(Skip = "DML is refused by the interim deny-all write decision; re-enabled when the governed write decision lands (WP-SIMPL-45). Executor-level behaviour stays covered by unit tests.")]
     public async Task Dml_IsTenantScoped_ThroughTheCheckedExecutor()
     {
         if (!await EnsureHostAsync()) return;
@@ -214,7 +214,7 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
         await QueryAsync($"UPDATE {Ref} SET region = 'EU' WHERE id = 1", "acme", roles: ["Writer"]);   // restore
     }
 
-    [Fact]
+    [Fact(Skip = "DML is refused by the interim deny-all write decision; re-enabled when the governed write decision lands (WP-SIMPL-45). Executor-level behaviour stays covered by unit tests.")]
     public async Task Dml_AboveMaxAffectedRows_IsRejectedAndRolledBack()
     {
         if (!await EnsureHostAsync()) return;
@@ -224,6 +224,15 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
 
         ex.Code.ShouldBe("DML_AFFECTED_ROWS_LIMIT");
         Ids(await QueryAsync($"SELECT id FROM {Ref} WHERE region = 'QQ'", "acme")).ShouldBeEmpty();   // rolled back
+    }
+
+    [Fact]
+    public async Task Dml_IsRefused_WithoutAWriteDecision()
+    {
+        if (!await EnsureHostAsync()) return;
+
+        await Should.ThrowAsync<Autheris.Application.Sql.WebSqlTableDeniedException>(() => QueryAsync($"UPDATE {Ref} SET region = 'ZZ' WHERE id = 1", "acme", roles: ["Writer"]));
+        Ids(await QueryAsync($"SELECT id FROM {Ref} WHERE region = 'ZZ'", "acme")).ShouldBeEmpty();
     }
 
     [Fact]

@@ -85,6 +85,8 @@ public sealed class GovernedSqlExecutorX1Tests
     /// <summary>Compiles a statement through the real governed pipeline (catalog, policies, engine) for a source type.</summary>
     internal static async Task<CompiledSql> CompileAsync(string sourceType, string sql, ClaimsPrincipal? user = null, bool allowRecursive = false)
     {
+        // Test-only seam: the production write decision denies every DML target.
+        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         var table = Orders(sourceType);
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())

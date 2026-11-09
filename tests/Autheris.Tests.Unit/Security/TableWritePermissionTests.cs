@@ -98,7 +98,7 @@ public sealed class TableWritePermissionTests
     }
 
     [Fact]
-    public async Task TableAccessPolicy_CanWriteTableAsync_Evaluates_Granular_Write_Permission()
+    public async Task TableAccessPolicy_CanWriteTableAsync_Stays_Denied_After_Casbin_Write_Grant()
     {
         using var casbin = new CasbinEnforcementService();
         casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "read", "true", "allow");
@@ -148,15 +148,15 @@ public sealed class TableWritePermissionTests
         var canWriteInitial = await tableAccessPolicy.CanWriteTableAsync(user, TenantA, tableMeta);
         canWriteInitial.ShouldBeFalse();
 
-        // Grant explicit "write" permission in Casbin:
+        // Writes are denied until a dedicated write decision exists; a Casbin write rule does not change that.
         casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "write", "true", "allow");
 
         var canWriteAfterGrant = await tableAccessPolicy.CanWriteTableAsync(user, TenantA, tableMeta);
-        canWriteAfterGrant.ShouldBeTrue();
+        canWriteAfterGrant.ShouldBeFalse();
     }
 
     [Fact]
-    public async Task TableAccessPolicy_CanWriteTableAsync_WithContract_EnforcesAllowedTables()
+    public async Task TableAccessPolicy_CanWriteTableAsync_WithContract_Stays_Denied()
     {
         using var casbin = new CasbinEnforcementService();
         casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "write", "true", "allow");
@@ -210,6 +210,6 @@ public sealed class TableWritePermissionTests
         // When contract allows "orders"
         var contractAllowing = new Autheris.Application.Governance.Contracts.SchemaContractDefinition("partner", allowedTables: ["orders"]);
         var canWriteAllowed = await tableAccessPolicy.CanWriteTableAsync(user, TenantA, tableMeta, contractAllowing, default);
-        canWriteAllowed.ShouldBeTrue();
+        canWriteAllowed.ShouldBeFalse();
     }
 }
