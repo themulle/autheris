@@ -66,7 +66,7 @@ public sealed class HierarchicalDataSourceOptionsResolverTests
                     StagingTtlSeconds = 7200,
                     MinimumLogLevel = "Debug",
                     LogGeneratedSql = true,
-                    AllowedTransports = DataSourceTransportFlags.Trino | DataSourceTransportFlags.ArrowFlight
+                    AllowedTransports = DataSourceTransportFlags.Trino | DataSourceTransportFlags.OData
                 }
             }
         });
@@ -83,7 +83,7 @@ public sealed class HierarchicalDataSourceOptionsResolverTests
         profile.StagingTtl.ShouldBe(TimeSpan.FromSeconds(7200));
         profile.MinimumLogLevel.ShouldBe("Debug");
         profile.LogGeneratedSql.ShouldBeTrue();
-        profile.AllowedTransports.ShouldBe(DataSourceTransportFlags.Trino | DataSourceTransportFlags.ArrowFlight);
+        profile.AllowedTransports.ShouldBe(DataSourceTransportFlags.Trino | DataSourceTransportFlags.OData);
     }
 
     [Fact]

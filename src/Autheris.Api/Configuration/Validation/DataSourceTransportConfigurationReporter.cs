@@ -86,11 +86,6 @@ public sealed class DataSourceTransportConfigurationReporter : IHostedService, I
             disabled |= DataSourceTransportFlags.OData;
         }
 
-        if (gateway.Arrow?.Enabled == false)
-        {
-            disabled |= DataSourceTransportFlags.ArrowFlight;
-        }
-
         return disabled;
     }
 

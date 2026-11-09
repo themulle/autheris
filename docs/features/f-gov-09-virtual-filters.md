@@ -12,7 +12,7 @@ In enterprise data access, traditional Row-Level Security (RLS) policies are fre
 - Ad-hoc WebSQL (`/api/v1/sql`, `/v1/statement`)
 - GraphQL table and selection tree queries (`/graphql`)
 - OData v4 endpoints (`/odata/v4/*`)
-- Arrow IPC over HTTP & binary export (`/api/v1/flight/sql/*`, `/api/v1/export/arrow`)
+- Arrow IPC over HTTP & binary export (`/api/v1/export/arrow`)
 - Governed Stored Procedures (`/api/v1/procedures/*`)
 - Embedded DuckDB OLAP queries (`/api/v1/olap/query`)
 

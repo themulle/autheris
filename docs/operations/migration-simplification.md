@@ -42,6 +42,7 @@ The table below lists every capability removed (`DELETE`) or extracted into an o
 
 - `Gateway:Itsm`
 - `Gateway:Backstage`
+- `Gateway:Garnet`
 - `Gateway:Catalog:Purview`
 - `Gateway:Catalog:Collibra`
 - `Gateway:Catalog:Alation`

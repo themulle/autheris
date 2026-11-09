@@ -21,11 +21,15 @@ public sealed class OpenMetadataSyncServiceTests
     private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
     private readonly IPolicyEpochRepository _epochRepo = Substitute.For<IPolicyEpochRepository>();
 
-    private GatewayOptions CreateOptions(string? webhookSecret = "om-test-secret-42")
+    private GatewayOptions CreateOptions(string? webhookSecret = "om-test-secret-42", bool bypassSignature = false)
     {
         return new GatewayOptions
         {
             DataMasking = new DataMaskingOptions { HmacKeyId = "test-hmac-key" },
+            Insecure = new InsecureGettingStartedOptions
+            {
+                danger_bypass_webhook_signature_validation = bypassSignature
+            },
             OpenMetadata = new OpenMetadataOptions
             {
                 DefaultTenantId = "default-tenant",
@@ -499,5 +503,22 @@ public sealed class OpenMetadataSyncServiceTests
         await syncService.SyncPermissionsAsync(dryRun: false);
 
         createdConsents.ShouldNotContain(c => c.GranteeSid == new Sid("S-1-5-21-ALICE-SID"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Literal_bypassed_signature_is_rejected_when_bypass_off()
+    {
+        var options = CreateOptions(bypassSignature: false);
+        var syncService = new OpenMetadataSyncService(
+            _client,
+            _metadataRepo,
+            _consentRepo,
+            _epochRepo,
+            Options.Create(options),
+            NullLogger<OpenMetadataSyncService>.Instance);
+
+        var result = await syncService.HandleWebhookEventAsync("{}", "bypassed", CancellationToken.None);
+        result.ShouldBeFalse();
     }
 }

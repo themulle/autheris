@@ -9,6 +9,7 @@ using Autheris.Application.DataSources;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -21,7 +22,7 @@ public sealed class DataSourceTransportGateTests
     public static TheoryData<DataSourceTransportFlags> SingleFlags => new()
     {
         DataSourceTransportFlags.WebSql, DataSourceTransportFlags.GraphQL, DataSourceTransportFlags.Rest, DataSourceTransportFlags.OData,
-        DataSourceTransportFlags.Mcp, DataSourceTransportFlags.Trino, DataSourceTransportFlags.ArrowFlight
+        DataSourceTransportFlags.Mcp, DataSourceTransportFlags.Trino
     };
 
     private static HierarchicalDataSourceOptionsResolver NewResolver(params (string Name, DataSourceTransportFlags? Flags)[] profiles) =>
@@ -251,5 +252,26 @@ public sealed class DataSourceTransportGateTests
         public T Get(string? name) => value;
 
         public IDisposable? OnChange(Action<T, string?> listener) => null;
+    }
+
+    [Theory]
+    [InlineData("ArrowFlight")]
+    [InlineData("WebSql, ArrowFlight")]
+    public void ArrowFlight_transport_value_fails_startup(string transportValue)
+    {
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:DataSources:Profiles:src:AllowedTransports"] = transportValue
+            })
+            .Build();
+
+        var section = configuration.GetSection("Gateway:DataSources");
+        var validator = new Autheris.Api.Configuration.Validation.DataSourceTransportRawValueValidator(section);
+        var result = validator.Validate(null, new DataSourceConfigurationOptions());
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain("ArrowFlight");
+        result.FailureMessage.ShouldContain("removed");
     }
 }

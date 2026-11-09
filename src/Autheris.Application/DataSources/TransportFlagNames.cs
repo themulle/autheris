@@ -11,7 +11,7 @@ public static class TransportFlagNames
     private static readonly DataSourceTransportFlags[] Singles =
     [
         DataSourceTransportFlags.WebSql, DataSourceTransportFlags.GraphQL, DataSourceTransportFlags.Rest, DataSourceTransportFlags.OData,
-        DataSourceTransportFlags.Mcp, DataSourceTransportFlags.Trino, DataSourceTransportFlags.ArrowFlight
+        DataSourceTransportFlags.Mcp, DataSourceTransportFlags.Trino
     ];
 
     /// <summary>The names of the single flags set in <paramref name="flags"/> (empty for <c>None</c>); never the aggregate <c>All</c>.</summary>

@@ -137,6 +137,26 @@ public sealed class BreakGlassRemovalTests
         AccessProfileAssignmentRules.IsEffective(profile, legacyBreakGlassAssignment, now).ShouldBeFalse();
     }
 
+    [Fact]
+    public void No_break_glass_justification_member()
+    {
+        typeof(Autheris.Domain.Security.SecurityPrincipalContext)
+            .GetProperty("BreakGlassJustification", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+            .ShouldBeNull();
+
+        typeof(Autheris.Domain.Security.SecurityPrincipalContext)
+            .GetField("BreakGlassJustification", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+            .ShouldBeNull();
+    }
+
+    [Fact]
+    public void No_break_glass_audit_event()
+    {
+        typeof(Autheris.Domain.Audit.AuditEventTypes)
+            .GetField("BreakGlassActivated", BindingFlags.Public | BindingFlags.Static)
+            .ShouldBeNull();
+    }
+
     private sealed class InspectingInterceptor(Action<IngressContext> inspect) : IIngressInterceptor
     {
         public int Order => 1;

@@ -311,7 +311,7 @@ try {
     $env:TARGET_PROXY = "http://${targetHost}:${ProxyPort}"
     Write-Success "All services healthy! (Reverse Proxy: ${env:TARGET_PROXY}, Gateway: :${GatewayPort})"
 
-    # 4b. Execute Extension Integration Verification (Lakehouse, OData, Catalogs, ITSM, dbt)
+    # 4b. Execute Extension Integration Verification (Lakehouse, OData, OpenMetadata, dbt)
     Write-Info "Executing GqlGateway Extensions integration tests (Scenario: '$Scenario')..."
     $pythonCmd = Get-Command "python" -ErrorAction SilentlyContinue
     if ($pythonCmd) {

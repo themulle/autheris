@@ -11,25 +11,23 @@ using Autheris.Domain.Options;
 
 /// <summary>
 /// Well-known integration names used for the per-integration egress allowlist (SEC E-02). Only integrations listed in
-/// <see cref="OutboundEgressOptions.TrustedIntegrations"/> (default: Itsm, Catalog, OpenMetadata, Lineage) may use the
+/// <see cref="OutboundEgressOptions.TrustedIntegrations"/> (default: OpenMetadata, Lineage) may use the
 /// trusted internal hosts/networks. <see cref="Lakehouse"/> never may, because its target URLs come from producer data
 /// (Iceberg manifests).
 /// </summary>
 public static class EgressIntegrations
 {
-    public const string Itsm = "Itsm";
-    public const string Catalog = "Catalog";
+    public const string OpenApiIngestion = "OpenApiIngestion";
     public const string OpenMetadata = "OpenMetadata";
     public const string Lineage = "Lineage";
     public const string Lakehouse = "Lakehouse";
     public const string AuditWorm = "AuditWorm";
     public const string Cdn = "Cdn";
-    public const string Shadowing = "Shadowing";
     public const string Databricks = "Databricks";
     public const string Webhooks = "Webhooks";
 
     /// <summary>Integrations that may be listed in <see cref="OutboundEgressOptions.TrustedIntegrations"/>.</summary>
-    public static IReadOnlyList<string> AllowlistCapable { get; } = [Itsm, Catalog, OpenMetadata, Lineage, AuditWorm, Cdn, Shadowing, Webhooks];
+    public static IReadOnlyList<string> AllowlistCapable { get; } = [OpenApiIngestion, OpenMetadata, Lineage, AuditWorm, Cdn, Webhooks];
 }
 
 /// <summary>

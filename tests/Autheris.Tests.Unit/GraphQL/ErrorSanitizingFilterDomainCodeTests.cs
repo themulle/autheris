@@ -15,7 +15,7 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class ErrorSanitizingFilterDomainCodeTests
 {
-    private const string Leak = "connect failed host=itsm.internal.example password=hunter2 table hr.salaries";
+    private const string Leak = "connect failed host=catalog.internal.example password=hunter2 table hr.salaries";
 
     private static ErrorSanitizingFilter CreateFilter(string envName)
     {
@@ -25,8 +25,6 @@ public sealed class ErrorSanitizingFilterDomainCodeTests
     }
 
     [Theory]
-    [InlineData("Development", "ITSM_UNAVAILABLE")]
-    [InlineData("Production", "ITSM_UNAVAILABLE")]
     [InlineData("Development", "INVALID_STATE")]
     [InlineData("Production", "INVALID_STATE")]
     [InlineData("Production", "CONSENT_ON_ATTRIBUTE_SOURCE")]

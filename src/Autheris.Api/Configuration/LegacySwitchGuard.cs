@@ -25,10 +25,6 @@ public static class LegacySwitchGuard
             ["OpenMetadata:danger_bypass_webhook_signature_validation"] = "Insecure:danger_bypass_webhook_signature_validation",
             ["OpenMetadata:warn_ignore_webhook_timestamp_tolerance"] = "Insecure:warn_ignore_webhook_timestamp_tolerance",
             ["OpenMetadata:danger_allow_untrusted_certificates"] = "Insecure:danger_allow_untrusted_certificates",
-            ["Itsm:danger_bypass_webhook_signature_validation"] = "Insecure:danger_bypass_webhook_signature_validation",
-            ["Itsm:warn_ignore_webhook_timestamp_tolerance"] = "Insecure:warn_ignore_webhook_timestamp_tolerance",
-            ["Itsm:warn_mock_external_systems_if_unreachable"] = "Insecure:warn_mock_external_systems_if_unreachable",
-            ["Itsm:danger_allow_untrusted_certificates"] = "Insecure:danger_allow_untrusted_certificates",
             ["Mcp:warn_allow_unmasked_ai_access"] = "Insecure:warn_allow_unmasked_ai_access",
             ["Mcp:danger_bypass_mcp_auth"] = "Insecure:danger_bypass_mcp_auth",
             ["Lakehouse:warn_allow_unsigned_s3_requests"] = "Insecure:warn_allow_unsigned_s3_requests",
@@ -46,7 +42,6 @@ public static class LegacySwitchGuard
     /// <summary>Removed keys (relative to <c>Gateway:</c>) without a replacement: the behaviour they enabled no longer exists.</summary>
     public static IReadOnlyCollection<string> Removed { get; } =
     [
-        "Itsm:warn_fallback_default_tenant_for_webhooks",
         "Insecure:warn_fallback_default_tenant_for_webhooks",
         "Caching:Redis:FailClosedOnRevocationLookupError"
     ];

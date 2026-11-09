@@ -25,6 +25,7 @@ public static class UnknownGatewayKeyGuard
     [
         GatewayConfigurationSchema.Root + ":Itsm",
         GatewayConfigurationSchema.Root + ":Backstage",
+        GatewayConfigurationSchema.Root + ":Garnet",
         GatewayConfigurationSchema.Root + ":Catalog:Purview",
         GatewayConfigurationSchema.Root + ":Catalog:Collibra",
         GatewayConfigurationSchema.Root + ":Catalog:Alation",

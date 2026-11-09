@@ -146,7 +146,7 @@ public sealed class IntegrationGapATests
     }
 
     // =========================================================================
-    // GAP05: DefaultEnvironmentSecretProvider – instance-specific ITSM secrets
+    // GAP05: DefaultEnvironmentSecretProvider
     // =========================================================================
 
     private static DefaultEnvironmentSecretProvider CreateSecretProvider(string environment, params (string Key, string Value)[] entries)
@@ -159,46 +159,6 @@ public sealed class IntegrationGapATests
 
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
         return new DefaultEnvironmentSecretProvider(configuration, Env(environment));
-    }
-
-    [Theory]
-    [InlineData("Development")]
-    [InlineData("Production")]
-    public void GAP05_InstanceSecret_DoesNotFallBackToGlobalSecret(string environment)
-    {
-        var provider = CreateSecretProvider(environment,
-            ("ITSM_WEBHOOK_SECRET", "global-secret"),
-            ("ITSM__WEBHOOK_SECRET", "global-secret"),
-            ("Gateway:Itsm:WebhookSecret", "global-secret"),
-            ("itsm:webhook-secret", "global-secret"));
-
-        Should.Throw<InvalidOperationException>(() => provider.GetSecretBytes("itsm:webhook-secret:gap-a-inst-unknown"));
-    }
-
-    [Fact]
-    public void GAP05_InstanceSecret_InDevelopment_DoesNotReturnReferenceNameAsSecret()
-    {
-        var provider = CreateSecretProvider("Development");
-
-        Should.Throw<InvalidOperationException>(() => provider.GetSecretBytes("itsm:webhook-secret:gap-a-inst-dev"));
-    }
-
-    [Fact]
-    public void GAP05_ConfiguredInstanceSecret_IsResolved()
-    {
-        var provider = CreateSecretProvider("Production",
-            ("itsm:webhook-secret:gap-a-inst-1", "instance-secret-1"),
-            ("ITSM_WEBHOOK_SECRET", "global-secret"));
-
-        Encoding.UTF8.GetString(provider.GetSecretBytes("itsm:webhook-secret:gap-a-inst-1")).ShouldBe("instance-secret-1");
-    }
-
-    [Fact]
-    public void GAP05_GlobalItsmSecret_StillResolvesViaAliases()
-    {
-        var provider = CreateSecretProvider("Production", ("ITSM_WEBHOOK_SECRET", "global-secret"));
-
-        Encoding.UTF8.GetString(provider.GetSecretBytes("itsm:webhook-secret")).ShouldBe("global-secret");
     }
 
     [Fact]

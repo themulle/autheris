@@ -84,7 +84,6 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "METRIC_FILTER_INVALID",
         "PRIVACY_BUDGET_EXHAUSTED",
         // ConsentRequestException codes the removed Development passthrough used to expose; fixed messages only.
-        "ITSM_UNAVAILABLE",
         "INVALID_STATE",
         "CONSENT_ON_ATTRIBUTE_SOURCE",
         "CONSENT_NOT_EXTENDABLE",
@@ -139,7 +138,6 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["UNKNOWN_METRIC"] = "The metric is not available.",
         ["METRIC_FILTER_INVALID"] = "The metric filter does not fit the dimension type.",
         ["PRIVACY_BUDGET_EXHAUSTED"] = "Privacy budget exhausted.",
-        ["ITSM_UNAVAILABLE"] = "The external ticketing system is unavailable; the request was not created.",
         ["INVALID_STATE"] = "The consent request is not in a state that allows this operation.",
         ["CONSENT_ON_ATTRIBUTE_SOURCE"] = "A consent on this table is not possible.",
         ["CONSENT_NOT_EXTENDABLE"] = "The consent cannot be extended. Create a new consent.",

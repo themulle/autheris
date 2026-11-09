@@ -11,7 +11,6 @@ using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Options;
 
 public static class WebhookEndpoints
 {
@@ -19,8 +18,7 @@ public static class WebhookEndpoints
     {
         app.MapPost("/api/webhooks/openmetadata", async (
             HttpContext context,
-            IOpenMetadataSyncService syncService,
-            IOptions<GatewayOptions> options) =>
+            IOpenMetadataSyncService syncService) =>
         {
             // SEC M-07: Bounded read instead of a bypassable Content-Length check.
             var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
@@ -35,11 +33,6 @@ public static class WebhookEndpoints
 
             string? signature = context.Request.Headers["X-OpenMetadata-Signature"].FirstOrDefault() ??
                                 context.Request.Headers["X-OM-Signature"].FirstOrDefault();
-
-            if (string.IsNullOrWhiteSpace(signature) && options.Value.IsWebhookSignatureBypassed)
-            {
-                signature = "bypassed";
-            }
 
             var success = await syncService.HandleWebhookEventAsync(payload, signature, context.RequestAborted);
             if (!success)

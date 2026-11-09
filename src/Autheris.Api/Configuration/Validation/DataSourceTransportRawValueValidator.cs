@@ -43,6 +43,12 @@ public sealed class DataSourceTransportRawValueValidator(IConfigurationSection s
             return;
         }
 
+        if (raw.Contains("ArrowFlight", StringComparison.OrdinalIgnoreCase))
+        {
+            failures.Add($"{prefix}.{KeyName}: transport 'ArrowFlight' was removed; remove it from the configuration.");
+            return;
+        }
+
         if (!Enum.TryParse<DataSourceTransportFlags>(raw, ignoreCase: true, out var parsed) ||
             (parsed & ~DataSourceTransportFlags.All) != 0)
         {

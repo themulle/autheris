@@ -264,11 +264,11 @@ public class SecurityFindingsRemediationTests
     [Fact]
     public void DefaultEnvironmentSecretProvider_ResolvesExactCandidatesWithoutCollisions()
     {
-        // Arrange: Config has both a generic secret and the dedicated itsm webhook secret
+        // Arrange: Config has both a generic secret and the dedicated hmac masking secret
         var configBuilder = new ConfigurationBuilder();
         configBuilder.AddInMemoryCollection(new[]
         {
-            new System.Collections.Generic.KeyValuePair<string, string?>("ITSM_WEBHOOK_SECRET", "itsm-secret-12345"),
+            new System.Collections.Generic.KeyValuePair<string, string?>("HMAC_SECRET", "hmac-secret-12345678901234567890123456789012"),
             new System.Collections.Generic.KeyValuePair<string, string?>("SOME_OTHER_SECRET", "other-999")
         });
         var configuration = configBuilder.Build();
@@ -279,10 +279,10 @@ public class SecurityFindingsRemediationTests
         var provider = new DefaultEnvironmentSecretProvider(configuration, mockEnv);
 
         // Act
-        var secretBytes = provider.GetSecretBytes("itsm:webhook-token");
+        var secretBytes = provider.GetSecretBytes("hmac-masking-secret");
 
         // Assert
-        Encoding.UTF8.GetString(secretBytes).ShouldBe("itsm-secret-12345");
+        Encoding.UTF8.GetString(secretBytes).ShouldBe("hmac-secret-12345678901234567890123456789012");
     }
 
     [Fact]
@@ -912,24 +912,6 @@ public class SecurityFindingsRemediationTests
         logger.Messages.ShouldContain(m => m.Contains("Reference with length 14"));
     }
 
-    [Fact]
-    public void INF_3_DefaultEnvironmentSecretProvider_InstanceSpecificItsm_RedactsSecretReference()
-    {
-        var config = new ConfigurationBuilder().Build();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
-        var logger = new TestSecretProviderLogger();
-
-        var provider = new DefaultEnvironmentSecretProvider(config, env, logger);
-        Should.Throw<InvalidOperationException>(() => provider.GetSecretBytes("itsm:webhook-secret:inst-xyz-987"));
-
-        logger.Messages.Count.ShouldBeGreaterThan(0);
-        foreach (var msg in logger.Messages)
-        {
-            msg.ShouldNotContain("itsm:webhook-secret:inst-xyz-987");
-        }
-        logger.Messages.ShouldContain(m => m.Contains("Reference with length 32"));
-    }
 
     private sealed class TestSecretProviderLogger : Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>
     {

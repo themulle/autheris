@@ -13,8 +13,6 @@ namespace Autheris.Infrastructure.Security;
 
 public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
 {
-    private const string ItsmWebhookSecretInstancePrefix = "itsm:webhook-secret:";
-
     private readonly IConfiguration? _configuration;
     private readonly IHostEnvironment? _environment;
     private readonly Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>? _logger;
@@ -125,7 +123,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
 
         var candidates = new List<string> { secretRef };
 
-        // 1. If secretRef is an HTTPS Azure Key Vault URI (e.g. https://my-vault.vault.azure.net/secrets/itsm-webhook-secret)
+        // 1. If secretRef is an HTTPS Azure Key Vault URI (e.g. https://my-vault.vault.azure.net/secrets/audit-signing-key)
         if (Uri.TryCreate(secretRef, UriKind.Absolute, out var uri) &&
             string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
             IsValidVaultHost(uri.Host))
@@ -151,23 +149,9 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         candidates.Add(secretRef.Replace("-", ":"));
 
         // 3. Strictly bounded well-known aliases (exact match only, preventing accidental cross-secret collisions)
-        // SEC H-06: Instance-specific ITSM references ("itsm:<name>:<instance>", e.g. itsm:webhook-secret:{instanceId})
-        // never fall back to the global well-known secret; otherwise every instance would share the global key.
-        var isInstanceSpecificItsmRef = secretRef.StartsWith("itsm:", StringComparison.OrdinalIgnoreCase) && IsInstanceSpecificReference(secretRef);
-        if (isInstanceSpecificItsmRef)
-        {
-            _logger?.LogDebug("Secret reference '{SecretRef}' is instance-specific; no global alias fallback is applied.", SanitizeForLog(DescribeReference(secretRef)));
-        }
-        else if (secretRef.StartsWith("itsm:", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(secretRef, "itsm-webhook-secret", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(secretRef, "ITSM_WEBHOOK_SECRET", StringComparison.OrdinalIgnoreCase))
-        {
-            candidates.Add("ITSM__WEBHOOK_SECRET");
-            candidates.Add("ITSM_WEBHOOK_SECRET");
-        }
         // R-DEP-1: well-known aliases apply to exact reference names only. A prefix match ("audit:tenant-x") would
         // silently resolve a missing, specific secret to the global one.
-        else if (string.Equals(secretRef, "hmac-masking-secret", StringComparison.OrdinalIgnoreCase) ||
+        if (string.Equals(secretRef, "hmac-masking-secret", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(secretRef, "HMAC_SECRET", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(secretRef, "HMAC_SECRET_KEY", StringComparison.OrdinalIgnoreCase))
         {
@@ -221,13 +205,6 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             }
         }
 
-        // SEC H-06: An unresolved instance-specific ITSM secret is "not found" in every environment. The Development
-        // placeholder (reference name as key) would be a publicly known HMAC key for that instance.
-        if (isInstanceSpecificItsmRef && secretRef.StartsWith(ItsmWebhookSecretInstancePrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Security error: The instance-specific secret ({DescribeReference(secretRef)}) is not configured.");
-        }
-
         // In Development, allow using the secret reference itself as dev key
         if (_environment?.IsDevelopment() ?? false)
         {
@@ -247,12 +224,6 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
     {
         var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(secretRef));
         return $"Reference with length {secretRef.Length}, SHA-256 prefix {Convert.ToHexStringLower(hash)[..8]}";
-    }
-
-    private static bool IsInstanceSpecificReference(string secretRef)
-    {
-        var segments = secretRef.Split(':');
-        return segments.Length >= 3 && segments.All(segment => segment.Length > 0);
     }
 
     private void ValidateSecretLength(byte[] bytes, string secretRef)

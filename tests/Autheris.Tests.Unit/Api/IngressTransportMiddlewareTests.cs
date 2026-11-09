@@ -34,7 +34,7 @@ public sealed class IngressTransportMiddlewareTests
     [Theory]
     [InlineData(DataSourceTransportFlags.GraphQL)]
     [InlineData(DataSourceTransportFlags.Mcp)]
-    [InlineData(DataSourceTransportFlags.ArrowFlight)]
+    [InlineData(DataSourceTransportFlags.Trino)]
     public async Task EndpointMetadata_StampsIngress(DataSourceTransportFlags flag)
     {
         var (ctx, ingress) = NewContext(flag);

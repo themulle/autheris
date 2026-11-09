@@ -3,14 +3,14 @@ using System.ComponentModel.DataAnnotations;
 namespace Autheris.Domain.Options;
 
 /// <summary>
-/// Outbound egress allowlist for integrations (ITSM, catalogs, OpenMetadata, lineage, lakehouse) that run inside the
+/// Outbound egress allowlist for integrations (OpenMetadata, lineage, lakehouse, OpenAPI ingestion) that run inside the
 /// corporate network. The SSRF guard blocks private/loopback targets by default; explicitly trusted internal hosts or
 /// networks are exempt from the private-address check. Cloud metadata endpoints and link-local addresses stay blocked,
 /// and HTTPS remains mandatory outside Development.
 /// </summary>
 public sealed class OutboundEgressOptions
 {
-    /// <summary>Exact host names (case-insensitive, without port), e.g. "jira.corp.local".</summary>
+    /// <summary>Exact host names (case-insensitive, without port), e.g. "openmetadata.corp.local".</summary>
     public List<string> TrustedInternalHosts { get; init; } = [];
 
     /// <summary>CIDR networks, e.g. "10.20.0.0/16". Resolved addresses inside these networks are permitted.</summary>
@@ -18,7 +18,7 @@ public sealed class OutboundEgressOptions
 
     /// <summary>
     /// SEC E-02: integrations that may use the trusted hosts/networks above. Null (not configured) = default
-    /// <c>Itsm, Catalog, OpenMetadata, Lineage</c>. Allowed names: Itsm, Catalog, OpenMetadata, Lineage, AuditWorm, Cdn.
+    /// <c>OpenMetadata, Lineage</c>. Allowed names: OpenApiIngestion, OpenMetadata, Lineage, AuditWorm, Cdn, Webhooks.
     /// Lakehouse can never use the allowlist (its target URLs come from Iceberg manifests, i.e. producer data).
     /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed.
     /// </summary>
@@ -32,7 +32,7 @@ public sealed class OutboundEgressOptions
     /// </summary>
     public bool AllowSystemProxy { get; init; }
 
-    private static readonly string[] DefaultTrustedIntegrations = ["Itsm", "Catalog", "OpenMetadata", "Lineage"];
+    private static readonly string[] DefaultTrustedIntegrations = ["OpenMetadata", "Lineage"];
 
     /// <summary>Configured <see cref="TrustedIntegrations"/> or the default list.</summary>
     public IReadOnlyList<string> GetEffectiveTrustedIntegrations() => TrustedIntegrations ?? (IReadOnlyList<string>)DefaultTrustedIntegrations;

@@ -206,7 +206,7 @@ public sealed class DataSourceTransportConfigurationReporterTests
     public void TransportFlagNames_ListsSingleFlagsOnly()
     {
         TransportFlagNames.Of(DataSourceTransportFlags.None).ShouldBeEmpty();
-        TransportFlagNames.Of(DataSourceTransportFlags.All).Count.ShouldBe(7);
+        TransportFlagNames.Of(DataSourceTransportFlags.All).Count.ShouldBe(6);
         TransportFlagNames.Of(DataSourceTransportFlags.All).ShouldNotContain("All");
     }
 }
