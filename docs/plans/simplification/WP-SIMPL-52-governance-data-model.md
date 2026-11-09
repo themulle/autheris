@@ -142,6 +142,9 @@ Downgrade by reclassification (removing PII lifts masking): owner/admin authorit
 WP-41: `Pii` -> `classifications`, `clearRequestable`. WP-42: `GovernanceTable` additions (5.10.7); grant id definition (5.10.5). WP-45: `ACCESS_PROFILE_WRITE_RULES.item_no`; SQLite removed. WP-46: column set "Clear/Masked per PII column" -> "per classification" (5.5). WP-47: `GRANT_RECORDS.object_kind/object_ref`, profile item tables, classification access in `scope_json`, per-classification approver routing; SQLite removed. WP-48: DDL of section 6; "PII-classified" -> "classified with separate approval"; mask expression rule D-52e. WP-49: `ProductColumnClass` replaced by lineage-derived `column_classifications` (`LINEAGE`), declassification per code in `columns_json`; products are `TABLES` rows. WP-51: unchanged (D-52k).
 
 ## 13. Decisions (defaults taken; owner may change)
+Owner confirmation (2026-11-08, "take the suggested defaults everywhere"): D-52a, D-52b (`CREDENTIALS` never Clear), D-52j, D-52o (dropping `access_policies*` also removes the `ACCESS_POLICIES` recertification asset type) and the out-of-scope status of reversible tokenization (section 3) are owner-confirmed. Per-column overrides (5.4) MAY mask weaker than the classification rule, only by data owner/delegate or GovernanceAdmin authority with audit (`MASK_OVERRIDE_CHANGED`); owner-confirmed as the plan default.
+- Residual risk: an override can weaken masking for one column below the classification rule; mitigated only by authority and audit, not by a technical floor.
+- Revisit option (not adopted): "stricter only" overrides, rejecting any override less restrictive than the effective rule (5.3 order); requires a separate owner decision.
 - D-52a Vocabulary: global built-ins (`*`) plus tenant codes; catalog stays global, assignments scoped `*` or tenant.
 - D-52b Built-in set and ranks as in 5.1; `CREDENTIALS` never Clear.
 - D-52c Hierarchy inherits mask rules, never Clear.
