@@ -189,4 +189,17 @@ public sealed class RemovedConfigKeysTests
         unknown.ShouldContain(u => key.Equals(u, StringComparison.OrdinalIgnoreCase) || key.StartsWith(u + ":", StringComparison.OrdinalIgnoreCase));
         ex.Message.ShouldContain(unknown[0]);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Procedure_EnableHotReloadKey_FailsFast_SEC_PROC_08()
+    {
+        var config = Config("Gateway:SqlEndpoints:Procedures:EnableHotReload", "false");
+
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
+
+        ex.Message.ShouldContain("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); definitions are re-scanned each interval)");
+        UnknownGatewayKeyGuard.FindUnknownKeys(config).Count.ShouldBe(1);
+        UnknownGatewayKeyGuard.FindUnknownKeys(Config("Gateway:SqlEndpoints:Procedures:Enabled", "false")).ShouldBeEmpty();
+    }
 }

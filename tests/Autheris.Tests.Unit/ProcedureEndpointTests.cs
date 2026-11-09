@@ -105,7 +105,7 @@ public class ProcedureEndpointTests
             DataSources = Autheris.Tests.Unit.Procedures.ProcedureTestData.SqlServerSources("procedures", "telemetry_db"),
             SqlEndpoints = new SqlEndpointsOptions
             {
-                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = [.. allowedSchemas], EnableHotReload = false }
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = [.. allowedSchemas] }
             }
         });
         var registry = new InMemoryProcedureRegistry();
@@ -646,7 +646,6 @@ public class ProcedureEndpointTests
                     Directory = dir,
                     AllowedSchemas = ["api"],
                     AllowedDataSources = ["telemetry_db"],
-                    EnableHotReload = false,
                     AllowDeclaredValidation = true,
                     RequireDdlHashForDeclared = false // fixture declares no ddl_hash (INC-2 D-8)
                 }
@@ -1013,7 +1012,7 @@ public class ProcedureEndpointTests
             DataSources = Autheris.Tests.Unit.Procedures.ProcedureTestData.SqlServerSources("procedures", "telemetry_db"),
             SqlEndpoints = new SqlEndpointsOptions
             {
-                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = ["api"], EnableHotReload = false, AllowDeclaredValidation = true }
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = ["api"], AllowDeclaredValidation = true }
             }
         });
         var registry = new InMemoryProcedureRegistry();
@@ -1146,7 +1145,7 @@ public class ProcedureEndpointTests
         var httpContext = new DefaultHttpContext();
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity()); // unauthenticated
 
-        var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, VisibleService());
+        var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, new ProcedureCatalog(registry, VisibleService()));
         var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
         paths.ShouldBeEmpty();
@@ -1163,7 +1162,7 @@ public class ProcedureEndpointTests
         var httpContext = new DefaultHttpContext();
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity()); // unauthenticated
 
-        var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, VisibleService());
+        var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, new ProcedureCatalog(registry, VisibleService()));
         var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
         paths.ShouldBeEmpty(); // OQ-12: open-schema anonymous documentation lists no procedure
@@ -1180,7 +1179,7 @@ public class ProcedureEndpointTests
         var httpContext = new DefaultHttpContext();
         httpContext.User = User(); // authenticated
 
-        var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, VisibleService());
+        var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, new ProcedureCatalog(registry, VisibleService()));
         var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
         paths.ShouldContainKey("/api/v1/procedures/get_orders");

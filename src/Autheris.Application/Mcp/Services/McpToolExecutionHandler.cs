@@ -54,7 +54,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly ISemanticCatalogService? _semanticCatalog;
     private readonly Autheris.Application.Analytics.ISemanticMetricQueryService? _metricQueryService;
     private readonly TenantId? _catalogOwner;
-    private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
+    private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
 
     public McpToolExecutionHandler(
@@ -67,7 +67,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         ISemanticCatalogService? semanticCatalog = null,
         Autheris.Application.Analytics.ISemanticMetricQueryService? metricQueryService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null)
     {
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
@@ -79,7 +79,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _semanticCatalog = semanticCatalog;
         _metricQueryService = metricQueryService;
-        _procedureRegistry = procedureRegistry;
+        _procedureCatalog = procedureCatalog;
         _procedureExecutionService = procedureExecutionService;
     }
 
@@ -507,7 +507,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     {
         // without the procedure services (kill switch off) the tool is answered like an unknown one, before any
         // argument is looked at; never NOT_AVAILABLE, which would reveal the feature.
-        if (_procedureRegistry == null || _procedureExecutionService == null)
+        if (_procedureCatalog == null || _procedureExecutionService == null)
         {
             return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "NOT_FOUND",
                 $"Tool '{McpDatasetTools.CallProcedure}' is not registered or allowed.");
@@ -545,19 +545,11 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         rawInputs["limit"] = maxRows;
 
         bool isReadOnlyCaller = userPrincipal.IsReadOnly() || sessionContext.IsReadOnly;
-        if (_procedureRegistry.TryGet(procName, out var reg) && reg != null)
+        // Unknown and invisible procedures both fall through to the executor, which answers and audits them alike.
+        var reg = await _procedureCatalog.FindVisibleAsync(procName, userPrincipal, tenantId, ct).ConfigureAwait(false);
+        if (reg != null && isReadOnlyCaller && reg.Definition.Mode != ProcedureMode.Read)
         {
-            // Visibility check first: prevents existence and mode oracle
-            var isVisible = await _procedureExecutionService.IsVisibleAsync(reg, userPrincipal, tenantId, ct).ConfigureAwait(false);
-            if (!isVisible)
-            {
-                return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "NOT_FOUND", "Procedure endpoint not found.");
-            }
-
-            if (isReadOnlyCaller && reg.Definition.Mode != ProcedureMode.Read)
-            {
-                return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "FORBIDDEN", "This token only permits read access; write procedures are rejected.");
-            }
+            return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "FORBIDDEN", "This token only permits read access; write procedures are rejected.");
         }
 
         try

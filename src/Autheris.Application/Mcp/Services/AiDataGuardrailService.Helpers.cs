@@ -365,52 +365,8 @@ public sealed partial class AiDataGuardrailService
             return [];
         }
 
-        var definition = registered.Definition;
-        var keys = new List<string>();
-        if (registered.Validation != null)
-        {
-            keys.AddRange(registered.Validation.ReferencedTables);
-        }
-
-        if (definition.ResultTable != null && !keys.Contains(definition.ResultTable, StringComparer.OrdinalIgnoreCase))
-        {
-            keys.Add(definition.ResultTable);
-        }
-
-        if (keys.Count == 0)
-        {
-            return null;
-        }
-
-        var tables = new List<TableIdentifier>(keys.Count);
-        foreach (var key in keys)
-        {
-            if (!TryParseProcedureTable(definition.CatalogDomain, key, out var tableId))
-            {
-                return null;
-            }
-
-            if (!tables.Contains(tableId))
-            {
-                tables.Add(tableId);
-            }
-        }
-
-        return tables;
-    }
-
-    /// <summary>Same key-to-table mapping as the procedure visibility stage; a malformed key is unresolvable.</summary>
-    private static bool TryParseProcedureTable(string catalogDomain, string key, out TableIdentifier tableId)
-    {
-        try
-        {
-            return TableIdentifier.TryParse(catalogDomain + "." + key, out tableId) || TableIdentifier.TryParse(key, out tableId);
-        }
-        catch (ArgumentException)
-        {
-            tableId = default;
-            return false;
-        }
+        var tables = registered.GovernedTables();
+        return tables is { Count: > 0 } ? tables : null;
     }
 
     /// <summary>
