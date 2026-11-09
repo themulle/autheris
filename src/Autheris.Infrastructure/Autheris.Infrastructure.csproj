@@ -35,6 +35,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Autheris.Tests.Unit" />
     <InternalsVisibleTo Include="Autheris.Tests.Integration" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 
 </Project>

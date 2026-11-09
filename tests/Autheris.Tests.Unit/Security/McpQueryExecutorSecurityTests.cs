@@ -30,7 +30,7 @@ public sealed class McpQueryExecutorSecurityTests
         var mcpExecutor = new GatewayMcpQueryExecutor(
             executorProvider,
             gatewayExec,
-            NullLogger<GatewayMcpQueryExecutor>.Instance,
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
             persistedToolValidator: toolValidator);
 
         var tool = new McpToolDefinition("query_orders", "Query orders", "{}", "");
@@ -66,7 +66,7 @@ public sealed class McpQueryExecutorSecurityTests
         var mcpExecutor = new GatewayMcpQueryExecutor(
             executorProvider,
             gatewayExec,
-            NullLogger<GatewayMcpQueryExecutor>.Instance);
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100));
 
         var tool = new McpToolDefinition("query_customers", "Query customers", "{}", "");
         var session = new McpSessionContext("s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Roles: null);
@@ -101,7 +101,7 @@ public sealed class McpQueryExecutorSecurityTests
         var mcpExecutor = new GatewayMcpQueryExecutor(
             executorProvider,
             gatewayExec,
-            NullLogger<GatewayMcpQueryExecutor>.Instance);
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100));
 
         var tool = new McpToolDefinition("query_customers", "Query customers", "{}", "");
         var session = new McpSessionContext(
@@ -127,7 +127,7 @@ public sealed class McpQueryExecutorSecurityTests
         var mcpExecutor = new GatewayMcpQueryExecutor(
             executorProvider,
             gatewayExec,
-            NullLogger<GatewayMcpQueryExecutor>.Instance);
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100));
 
         var mutationDoc = "mutation CreateUser { createUser(name: \"Alice\") { id } }";
         var tool = new McpToolDefinition("create_user", "Create a user", "{}", mutationDoc);

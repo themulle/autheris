@@ -9,4 +9,9 @@ public sealed class DatabricksOptions
     /// </summary>
     [Range(1, int.MaxValue)]
     public int TokenCacheMaxEntries { get; init; } = 10_000;
+
+    /// <summary>
+    /// Optional allowlist of account-level token hosts accepted for OAuth M2M TokenEndpoint.
+    /// </summary>
+    public IReadOnlyList<string> AllowedAccountTokenHosts { get; init; } = [];
 }
