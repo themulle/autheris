@@ -240,12 +240,12 @@ public sealed class Issue270GovernanceBatchHydrationTests : IDisposable
         var dict4 = new Dictionary<string, MaskingRule> { ["col"] = rule4 };
         var dict5 = new Dictionary<string, MaskingRule> { ["col"] = rule5 };
 
-        CatalogSqlCore.HasMaskingRulesChanged(empty, empty).ShouldBeFalse();
-        CatalogSqlCore.HasMaskingRulesChanged(dict1, dict2).ShouldBeFalse();
-        CatalogSqlCore.HasMaskingRulesChanged(dict1, empty).ShouldBeTrue();
-        CatalogSqlCore.HasMaskingRulesChanged(empty, dict1).ShouldBeTrue();
-        CatalogSqlCore.HasMaskingRulesChanged(dict1, dict3).ShouldBeTrue();
-        CatalogSqlCore.HasMaskingRulesChanged(dict1, dict4).ShouldBeTrue();
-        CatalogSqlCore.HasMaskingRulesChanged(dict1, dict5).ShouldBeTrue();
+        GovernanceRepository.HasMaskingRulesChanged(empty, empty).ShouldBeFalse();
+        GovernanceRepository.HasMaskingRulesChanged(dict1, dict2).ShouldBeFalse();
+        GovernanceRepository.HasMaskingRulesChanged(dict1, empty).ShouldBeTrue();
+        GovernanceRepository.HasMaskingRulesChanged(empty, dict1).ShouldBeTrue();
+        GovernanceRepository.HasMaskingRulesChanged(dict1, dict3).ShouldBeTrue();
+        GovernanceRepository.HasMaskingRulesChanged(dict1, dict4).ShouldBeTrue();
+        GovernanceRepository.HasMaskingRulesChanged(dict1, dict5).ShouldBeTrue();
     }
 }

@@ -21,8 +21,14 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public partial class GovernanceRepository : IConsentRepository, IConsentApprovalRepository, IConsentDescriptionRepository
 {
+    private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
+
+    // Bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
+    private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
+    private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();
     private readonly IGovernanceSqlDialect _dialect;
-    private readonly ILogger<GovernanceRepository>? _logger;
+    private readonly ILogger? _logger;
+    private readonly IEventBus? _eventBus;
     private readonly GatewayOptions? _options;
     private readonly IEpochValidationService? _epochValidationService;
     private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
@@ -40,13 +46,15 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         IGovernanceSqlDialect dialect,
         IEpochValidationService? epochValidationService = null,
         IOptions<GatewayOptions>? options = null,
-        ILogger<GovernanceRepository>? logger = null,
+        ILogger? logger = null,
         Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null,
         Func<AuditLogEntry, DbTransaction?, CancellationToken, Task>? auditRecorder = null,
         Action<string>? metadataInvalidator = null,
         Action<DbTransaction>? onTransactionCommitted = null,
-        Action<DbTransaction>? onTransactionRolledBack = null)
+        Action<DbTransaction>? onTransactionRolledBack = null,
+        IEventBus? eventBus = null)
     {
+        _eventBus = eventBus;
         _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
         _epochValidationService = epochValidationService;
         _options = options?.Value;
@@ -59,6 +67,14 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     }
 
     internal IGovernanceSqlDialect Dialect => _dialect;
+
+    internal Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> MetadataCache => _metadataCache;
+
+    /// <summary>Test seam: runs after a metadata read loaded its snapshot and before the result is cached.</summary>
+    internal Func<CancellationToken, Task>? AfterMetadataSnapshotForTesting { get; set; }
+
+    /// <summary>Test seam: a positive key-table probe is cached per instance; this models a fresh instance.</summary>
+    internal void ResetKeyTableProbeForTesting() => _keyTables.Reset();
 
     public async ValueTask<DbConnection> OpenConnectionAsync(CancellationToken ct = default)
     {
@@ -174,6 +190,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
 
     private void InvalidateTableMetadata(string tableKey)
     {
+        _metadataCache.TryRemove(tableKey, out _);
         _metadataInvalidator?.Invoke(tableKey);
     }
 

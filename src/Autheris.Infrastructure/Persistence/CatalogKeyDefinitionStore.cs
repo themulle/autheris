@@ -457,7 +457,7 @@ internal static class CatalogKeyDefinitionStore
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 stored.Add((reader.GetString(0), reader.GetString(1),
-                    CatalogSqlCore.ParseColumnMetaJson(reader.IsDBNull(2) ? null : reader.GetString(2))));
+                    GovernanceRepository.ParseColumnMetaJson(reader.IsDBNull(2) ? null : reader.GetString(2))));
             }
         }
 
@@ -550,7 +550,7 @@ internal static class CatalogKeyDefinitionStore
                     Id = Guid.Parse(reader.GetString(0)),
                     TableId = tableId,
                     ColumnName = reader.GetString(1),
-                    Meta = CatalogSqlCore.ParseColumnMetaJson(reader.IsDBNull(2) ? null : reader.GetString(2))
+                    Meta = GovernanceRepository.ParseColumnMetaJson(reader.IsDBNull(2) ? null : reader.GetString(2))
                 });
             }
         }

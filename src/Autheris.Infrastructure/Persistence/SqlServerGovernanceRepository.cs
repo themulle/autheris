@@ -20,13 +20,11 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
     private readonly GovernanceRepository _governanceRepository;
     private readonly IEpochValidationService _epochValidationService;
     // bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
-    private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
+    private Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache => _governanceRepository.MetadataCache;
 
     /// <summary>Test seam: drops cached metadata after a test changed rows behind the repository.</summary>
-    private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();
 
     internal void InvalidateMetadataCacheForTesting() => _metadataCache.Clear();
-    private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private readonly SemaphoreSlim _auditLock = new(1, 1);
     private volatile bool _isAuditPipelineFaulted = false;
     public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted || Volatile.Read(ref _auditChainViolation) != null;
@@ -50,7 +48,6 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
     private readonly ICallerContextProvider? _callerContextProvider;
-    private readonly IEventBus? _eventBus;
 
     private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
 
@@ -75,7 +72,6 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
 
         _epochValidationService = epochValidationService;
         _logger = logger;
-        _eventBus = eventBus;
         _options = options.Value;
         _callerContextProvider = callerContextProvider;
 
@@ -122,12 +118,12 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
             new Dialects.SqlServerGovernanceDialect(_connectionString),
             epochValidationService,
             options,
-            logger: null,
+            logger: logger,
             materializationGuard: materializationGuard,
             auditRecorder: (entry, tx, ct) => tx is not null ? RecordAuditEventAsync(entry, tx, ct) : RecordAuditEventAsync(entry, ct),
-            metadataInvalidator: key => _metadataCache.TryRemove(key, out _),
             onTransactionCommitted: OnTransactionCommitted,
-            onTransactionRolledBack: OnTransactionRolledBack);
+            onTransactionRolledBack: OnTransactionRolledBack,
+            eventBus: eventBus);
 
         // Bounded channel with backpressure to limit in-flight audit entries
         var channelOptions = new BoundedChannelOptions(Math.Max(1, options?.Value?.Audit?.QueryAuditChannelCapacity ?? 5_000))
@@ -264,7 +260,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
             InitializeAuditChainAnchor();
             if (_shouldSeed)
             {
-                SeedInitialCatalog();
+                _governanceRepository.SeedInitialCatalog();
             }
 
             // The store serves requests only from here on; a failed initialization leaves it closed.

@@ -50,7 +50,7 @@ public sealed class TableMetadataDefaultsTests
         }
 
         var persistence = Path.Combine(root, "src", "Autheris.Infrastructure", "Persistence");
-        foreach (var file in Directory.GetFiles(persistence, "*GovernanceRepository.Catalog.cs"))
+        foreach (var file in Directory.GetFiles(persistence, "*GovernanceRepository.Catalog*.cs"))
         {
             foreach (var (line, index) in File.ReadAllLines(file).Select((l, i) => (l, i + 1)))
             {
