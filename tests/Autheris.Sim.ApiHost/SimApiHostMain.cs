@@ -297,7 +297,6 @@ public static class SimApiHostMain
         b.UseSetting("Gateway:GovernanceDb:ConnectionString", governanceConnectionString);
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
         b.UseSetting("Gateway:Rebac:Enabled", "false");
-        b.UseSetting("Gateway:OpenSchema", "true");
     }
 
     private static async Task RegisterCatalogAsync(WebApplicationFactory<Program> host)

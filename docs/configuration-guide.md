@@ -754,7 +754,11 @@ Ermöglicht die zentrale Anbindung an **OpenMetadata** zur automatisierten Spieg
 > **Tenant-scoped GraphQL catalog and `syncOpenMetadata`**: Outside the default tenant, the tenant administrator view of the GraphQL `catalog` is limited to tables on which the caller's tenant holds at least one consent record (Allow or Deny) or that are listed in `Catalog.SharedTables`. Only the canonical `ClusterAdmin` keeps the global view; `GovernanceAdmin` is tenant-scoped. `accessStatus` is computed from the caller's consents. `syncOpenMetadata` is available to the canonical `ClusterAdmin` (all tenants) and to `GovernanceAdmin` (own tenant only: tables mapped to that tenant via `OpenMetadata.ServiceDatabaseToTenantMap`); it returns warnings as stable codes with counts (for example `OM_TABLE_MAP_FAILED: 3`) and failures as the error code `SYNC_FAILED` without detail text. Full details are written to the server log.
 
 > [!NOTE]
-> **`AllowAuthenticatedCatalogDiscovery` is deprecated and has no effect.** Every non-administrator (GraphQL, REST, MCP) sees only the tables and columns its consents allow; the flag no longer widens the catalog. A start-up warning is logged when it is set. The explicit `OpenSchema` mode is a separate operator opt-in and is unchanged.
+> **`AllowAuthenticatedCatalogDiscovery` is deprecated and has no effect.** Every non-administrator (GraphQL, REST, MCP) sees only the tables and columns its consents allow; the flag no longer widens the catalog. A start-up warning is logged when it is set.
+
+#### Removed: OpenSchema
+
+The `Gateway:OpenSchema` and `Gateway:Catalog:OpenSchema` keys were removed (OD-19). Setting either key triggers application startup failure via `LegacySwitchGuard`. Anonymous catalog access is not supported; authenticated users discover the catalog by default ("visible unless hidden"). Objects and columns can be explicitly hidden using `PUT /api/v1/catalog/datasets/{id}/discovery`, and the legacy `visibility` tier is ignored.
 
 > [!NOTE]
 > **Sensitivity Classification Ranking (D-4 & ADR-010)**:
@@ -792,7 +796,7 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 
 > [!CAUTION]
 > **Production & Staging Warning (DANGER Switches)**:
-> All `danger_`-prefixed switches, as well as flags reclassified as `DANGER:` (such as `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance`, `Catalog.OpenSchema`, `OpenMetadata.AutoCreateConsents`, and `WebSql.MaxAffectedRows <= 0` with DML enabled), **strictly abort application startup outside of the `Development` environment** (`ValidationException` fail-fast).
+> All `danger_`-prefixed switches, as well as flags reclassified as `DANGER:` (such as `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance`, `OpenMetadata.AutoCreateConsents`, and `WebSql.MaxAffectedRows <= 0` with DML enabled), **strictly abort application startup outside of the `Development` environment** (`ValidationException` fail-fast).
 
 | Eigenschaft | Typ | Standard | Sicherheits-Level | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
@@ -822,7 +826,7 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 
 | Property | Type | Default | Class | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `Preset` | `string` | `Standard` | A/B | `Standard`, `Quickstart` (adds `warn_allow_all_cors_origins`, `warn_enable_introspection`, `warn_auto_approve_access_requests`, `OpenSchema`) or `Strict` (no test auth, no introspection). The former `Gateway:Profile` key was removed and fails startup. |
+| `Preset` | `string` | `Standard` | A/B | `Standard`, `Quickstart` (adds `warn_allow_all_cors_origins`, `warn_enable_introspection`, `warn_auto_approve_access_requests`) or `Strict` (no test auth, no introspection). The former `Gateway:Profile` key was removed and fails startup. |
 | `Banner` | `bool` | `true` | A | Startup banner with links and personas. |
 | `VerboseErrors` | `bool` | `true` | A | Diagnostic `problem+json` for 403 and unhandled exceptions. |
 | `PersonaLogin` | `bool` | `true` | A | `/api/dev/personas` and `/api/dev/login/{persona}`. |

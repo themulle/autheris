@@ -33,7 +33,6 @@ public static class ParityHostSettings
         b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={governancePath}");
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
         b.UseSetting("Gateway:Rebac:Enabled", "false");
-        b.UseSetting("Gateway:OpenSchema", "true");
         b.UseSetting("Gateway:Mcp:Enabled", "true");
         b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
     }

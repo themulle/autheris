@@ -134,7 +134,7 @@ public static class McpEndpoints
             endpoint.RequireCors("McpDeveloperCors");
         }
 
-        // SEC H-02: OpenSchema no longer opens MCP. Only the explicit (production-blocked) MCP auth bypass does.
+        // SEC H-02: Only the explicit (production-blocked) MCP auth bypass allows anonymous MCP.
         if (gatewayOptions.IsMcpAuthBypassed)
         {
             endpoint.AllowAnonymous();

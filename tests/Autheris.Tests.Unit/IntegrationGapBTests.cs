@@ -127,14 +127,12 @@ public sealed class IntegrationGapBTests
     // ---------------------------------------------------------------- GAP06
 
     [Fact]
-    public async Task GAP06_OpenSchema_DoesNotExemptMcpToolsFromAbac()
+    public async Task GAP06_Catalog_DoesNotExemptMcpToolsFromAbac()
     {
         var options = Options.Create(new GatewayOptions
         {
             // Casbin is enabled: the guardrail asks it only then.
-            Casbin = new CasbinOptions { Enabled = true },
-            OpenSchema = true,
-            Catalog = new DataCatalogOptions { OpenSchema = true }
+            Casbin = new CasbinOptions { Enabled = true }
         });
         var policy = new DenyingPolicyService();
         var executor = Substitute.For<IMcpQueryExecutor>();
@@ -174,7 +172,7 @@ public sealed class IntegrationGapBTests
     }
 
     [Fact]
-    public async Task GAP06_OpenSchema_DoesNotOpenMcpResourcesForAnonymousCallers()
+    public async Task GAP06_McpResources_NotOpenedForAnonymousCallers()
     {
         var table = new TableIdentifier("finance", "dbo", "ledger");
         var repo = Substitute.For<ITableMetadataRepository>();
@@ -188,7 +186,7 @@ public sealed class IntegrationGapBTests
             }
         }));
         var consents = Substitute.For<IConsentRepository>();
-        var options = Options.Create(new GatewayOptions { OpenSchema = true, Catalog = new DataCatalogOptions { OpenSchema = true } });
+        var options = Options.Create(new GatewayOptions());
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, null, consents, options);
 
         (await compiler.GetSemanticResourcesAsync(null, null)).ShouldBeEmpty();

@@ -409,7 +409,6 @@ public sealed class ReadPathAsyncJobWebSqlOffIntegrationTests : IClassFixture<We
         _factory = ReadPathHost.With(
             factory,
             ("Gateway:Insecure:danger_bypass_consent_checks", "true"),
-            ("Gateway:OpenSchema", "true"),
             ("Gateway:Rebac:Enabled", "false"),
             ("Gateway:DataSources:Connections:default:Provider", "Sqlite"),
             ("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}"),

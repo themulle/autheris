@@ -14,7 +14,7 @@ public sealed class DevOptions
 
     /// <summary>
     /// <c>Standard</c> (convenience on, security strict), <c>Quickstart</c> (Standard plus relaxed CORS, introspection,
-    /// auto-approve and OpenSchema) or <c>Strict</c> (no test auth, no introspection).
+    /// and auto-approve) or <c>Strict</c> (no test auth, no introspection).
     /// </summary>
     public string Preset { get; init; } = PresetStandard;
 

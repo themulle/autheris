@@ -181,12 +181,9 @@ public class DataPathSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task Catalog_WhenOpenSchemaEnabled_AllowsAnonymousAndNonPrivilegedUsers()
+    public async Task Catalog_WhenAnonymous_ReturnsEmpty()
     {
-        var options = Options.Create(new GatewayOptions
-        {
-            OpenSchema = true
-        });
+        var options = Options.Create(new GatewayOptions());
 
         // Anonymous accessor
         var anonymousAccessor = new HttpContextAccessor
@@ -195,15 +192,15 @@ public class DataPathSecurityTests : IDisposable
         };
 
         var catalog = await _query.GetCatalogAsync(_repository, anonymousAccessor, options, _visibility);
-        catalog.ShouldContain(t => t.TableName == "finance_table_1");
-        catalog.ShouldContain(t => t.TableName == "finance_table_2");
+        catalog.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Catalog_WhenDomainSpecifiedOrInScope_FiltersToDomain()
     {
-        var options = Options.Create(new GatewayOptions { OpenSchema = true });
+        var options = Options.Create(new GatewayOptions());
         var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin"), new Claim(ClaimTypes.Role, "ClusterAdmin")], "TestAuth"));
         httpContext.Items["Autheris.DomainScope"] = "finance";
         var accessor = new HttpContextAccessor { HttpContext = httpContext };
 
@@ -219,8 +216,10 @@ public class DataPathSecurityTests : IDisposable
     [Fact]
     public async Task Catalog_WhenPaginationAndSearchSpecified_PaginatesAndFilters()
     {
-        var options = Options.Create(new GatewayOptions { OpenSchema = true });
-        var accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext() };
+        var options = Options.Create(new GatewayOptions());
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin"), new Claim(ClaimTypes.Role, "ClusterAdmin")], "TestAuth"));
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
 
         var searchResult = await _query.GetCatalogAsync(domain: null, first: 1, after: null, search: "finance_table_1",
             _repository, _repository, accessor, options, _visibility);

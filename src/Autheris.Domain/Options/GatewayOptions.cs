@@ -75,12 +75,6 @@ public sealed class GatewayOptions
     public bool IsQuickstartProfile => string.Equals(Dev.Preset, DevOptions.PresetQuickstart, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Open Schema Mode: Allows anyone to view the entire data catalog, OpenAPI specs, and schema documentation.
-    /// Default: false (Disabled).
-    /// </summary>
-    public bool OpenSchema { get; init; } = false;
-
-    /// <summary>
     /// SEC C-04: Explicit opt-in to run the Development environment inside a container
     /// (DOTNET_RUNNING_IN_CONTAINER=true). Alternatively set the environment variable AUTHERIS_ALLOW_DEV_IN_CONTAINER=true.
     /// Without opt-in, startup is aborted, because Development disables most protections.
@@ -93,7 +87,6 @@ public sealed class GatewayOptions
     [Required] public HostingLimitsOptions Hosting { get; init; } = new();
 
     // Convenience accessors combining global 'Insecure' section and domain-specific options
-    public bool IsOpenSchemaAllowed => OpenSchema || Catalog.OpenSchema;
     public bool IsAnonymousAccessAllowed => Insecure.danger_allow_anonymous_access;
     public bool IsConsentBypassed => Insecure.danger_bypass_consent_checks;
     public bool IsColumnMaskingDisabled => Insecure.danger_disable_column_masking;
@@ -118,12 +111,6 @@ public sealed class GatewayOptions
 
     public bool IsWebSqlGovernanceBypassed => Insecure.danger_bypass_websql_governance;
     public bool IsCrossSourceEnabled => CrossSource.Enabled || WebSql.CrossSource.Enabled;
-
-    /// <summary>
-    /// SEC H-02: OpenSchema (global or Catalog) opens catalog/OpenAPI documentation routes to anonymous callers
-    /// and is therefore treated as a DANGER bypass (blocked outside Development).
-    /// </summary>
-    public bool IsOpenSchemaExplicitlyEnabled => OpenSchema || Catalog.OpenSchema;
 
     // SEC H-19: Consents created automatically from OpenMetadata policies bypass the approval workflow (reported as WARN).
     public bool IsOpenMetadataAutoCreateConsentsEnabled => OpenMetadata.AutoCreateConsents;
@@ -204,7 +191,6 @@ public sealed class GatewayOptions
         if (IsLakehouseAuthBypassed) list.Add("DANGER:danger_bypass_lakehouse_auth");
         if (IsRebacBypassed) list.Add("DANGER:danger_bypass_rebac");
         if (IsWebSqlGovernanceBypassed) list.Add("DANGER:danger_bypass_websql_governance");
-        if (IsOpenSchemaExplicitlyEnabled) list.Add("DANGER:open_schema (OpenSchema / Catalog.OpenSchema)");
         if (IsMcpUnmaskedAllowed) list.Add("DANGER:warn_allow_unmasked_ai_access");
         if (AreExternalSystemsMockedIfUnreachable) list.Add("DANGER:warn_mock_external_systems_if_unreachable");
         if (IsAutoApproveEnabled) list.Add("DANGER:warn_auto_approve_access_requests");

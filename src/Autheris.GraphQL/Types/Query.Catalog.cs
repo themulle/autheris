@@ -128,7 +128,6 @@ public sealed partial class Query
     {
         var httpContext = httpContextAccessor?.HttpContext;
         var principal = httpContext?.User;
-        var isOpenSchema = options?.Value?.IsOpenSchemaAllowed == true;
 
         var acceptLanguage = httpContext?.Request?.Headers.AcceptLanguage.ToString();
         var requestedLang = !string.IsNullOrWhiteSpace(language) ? language : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
@@ -152,33 +151,6 @@ public sealed partial class Query
             httpContext.RequestServices?.GetService(typeof(Autheris.Application.Governance.Contracts.ISchemaContractManager)) is Autheris.Application.Governance.Contracts.ISchemaContractManager contractMgr)
         {
             contractDef = contractMgr.GetContract(contractName);
-        }
-
-        if (isOpenSchema)
-        {
-            var tables = await metadataRepository.GetAllTablesAsync(ct);
-            if (contractDef != null)
-            {
-                tables = Autheris.Application.Services.CatalogVisibility.FilterByContract(tables, contractDef);
-            }
-            var dtos = tables.Select(t =>
-            {
-                var resolved = targetLang != null ? t.Table.Texts.Resolve(targetLang) : null;
-                return new TableMetadataDto
-                {
-                    Domain = t.Identifier.Domain,
-                    Schema = t.Table.SchemaName,
-                    TableName = t.Table.TableName,
-                    DisplayName = resolved?.Title ?? t.Table.DisplayName,
-                    Sensitivity = t.Table.Sensitivity,
-                    Description = resolved?.Description ?? t.Table.Description,
-                    Columns = t.Columns.Select(c => c.ColumnName).ToList(),
-                    Tags = t.CatalogTags,
-                    AccessStatus = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, Array.Empty<Consent>(), null, isAdmin: true),
-                    Language = targetLang
-                };
-            });
-            return FilterAndPaginateCatalog(dtos, domain, search, tag, first, after);
         }
 
         if (principal?.Identity?.IsAuthenticated != true)
@@ -273,8 +245,7 @@ public sealed partial class Query
 
     /// <summary>
     /// Issue #111 shaping of one consent/tier-filtered row (<see cref="Autheris.Application.Services.CatalogViewShaping"/>): null when the row
-    /// does not exist for the caller (a non-administrator row without a recognised view), no columns for <c>Summary</c>. Not used by the
-    /// explicit OpenSchema branch.
+    /// does not exist for the caller (a non-administrator row without a recognised view), no columns for <c>Summary</c>.
     /// </summary>
     internal static TableMetadataDto? ToCatalogDto(TableMetadata t, bool isAdminView, string status, string? language = null)
     {

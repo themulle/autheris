@@ -68,10 +68,6 @@ public static partial class ODataEndpoints
 
         bool IsOpenApiAuthorized(HttpContext context)
         {
-            if (gatewayOptions.IsOpenSchemaAllowed)
-            {
-                return true;
-            }
             if (context.User?.Identity?.IsAuthenticated != true)
             {
                 return false;
@@ -94,16 +90,7 @@ public static partial class ODataEndpoints
 
         RouteHandlerBuilder ConfigureOpenApiAuth(RouteHandlerBuilder builder)
         {
-            if (!gatewayOptions.IsOpenSchemaAllowed)
-            {
-                builder.RequireAuthorization();
-            }
-            else
-            {
-                // SEC M-03: explicit opt-out of the authenticated-user fallback policy (OpenSchema docs only)
-                builder.AllowAnonymous();
-            }
-            return builder;
+            return builder.RequireAuthorization();
         }
 
         // Dynamic OpenAPI 3.1 & Swagger UI Explorer (F-)
@@ -245,7 +232,7 @@ public static partial class ODataEndpoints
             return Results.Content(GetSwaggerUiHtml(nonce), "text/html;charset=utf-8");
         }
 
-        // SEC M-03: handlers perform their own (OpenSchema/Dev/authenticated) check
+        // SEC M-03: handlers perform their own (Dev/authenticated) check
         app.MapGet("/ui/swagger", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
         app.MapGet("/odata/v4/$swagger", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
         app.MapGet("/docs", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");

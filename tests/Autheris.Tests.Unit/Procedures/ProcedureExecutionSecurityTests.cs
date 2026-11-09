@@ -818,7 +818,7 @@ public partial class ProcedureExecutionSecurityTests
         service.IsVisibleAsync(Arg.Is<RegisteredProcedure>(r => r.Definition.Name == "get_other"), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns<Task<bool>>(_ => throw new InvalidOperationException("evaluation failed"));
 
-        // anonymous in open-schema mode: empty paths, no evaluation at all
+        // anonymous: empty paths, no evaluation at all
         var anonymousHttp = new DefaultHttpContext { User = Anonymous() };
         var anon = await ProcedureEndpointRoutes.HandleOpenApi(anonymousHttp, new ProcedureCatalog(registry, service));
         ((Dictionary<string, object>)anon.ShouldBeOfType<Ok<Dictionary<string, object>>>().Value!["paths"]).ShouldBeEmpty();

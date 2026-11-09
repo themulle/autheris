@@ -36,19 +36,11 @@ public static partial class WebSqlEndpoints
         var webSql = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.WebSql);
         var trino = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Trino);
 
-        // OpenAPI description of the endpoint (documentation only, no data). Like the other specs it is anonymous only
-        // in OpenSchema mode.
-        var openApi = webSql.MapGet("/api/v1/sql/openapi.json", () => Results.Json(BuildOpenApiSpec(gatewayOptions)))
+        // OpenAPI description of the endpoint (documentation only, no data).
+        webSql.MapGet("/api/v1/sql/openapi.json", () => Results.Json(BuildOpenApiSpec(gatewayOptions)))
             .WithName("GetWebSqlOpenApiSpec")
+            .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        if (gatewayOptions?.IsOpenSchemaAllowed == true)
-        {
-            openApi.AllowAnonymous();
-        }
-        else
-        {
-            openApi.RequireAuthorization();
-        }
 
         webSql.MapPost("/api/v1/sql", HandleWebSqlRequest)
            .WithName("ExecuteGovernedWebSqlV1")

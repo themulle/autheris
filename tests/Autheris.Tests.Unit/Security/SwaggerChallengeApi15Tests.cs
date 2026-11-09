@@ -86,13 +86,12 @@ public sealed class SwaggerChallengeApi15Tests
     }
 
     [Fact]
-    public void CheckSwaggerAuth_DevelopmentOrOpenSchema_Allows()
+    public void CheckSwaggerAuth_Development_Allows_Production_ReturnsChallenge()
     {
         var anonymous = new DefaultHttpContext();
-        var openSchemaOptions = new GatewayOptions { OpenSchema = true };
 
         ODataEndpoints.CheckSwaggerAuth(new GatewayOptions(), Env(Environments.Development), anonymous).ShouldBeNull();
-        ODataEndpoints.CheckSwaggerAuth(openSchemaOptions, Env(Environments.Production), anonymous).ShouldBeNull();
+        ODataEndpoints.CheckSwaggerAuth(new GatewayOptions(), Env(Environments.Production), anonymous).ShouldNotBeNull();
     }
 
     [Fact]

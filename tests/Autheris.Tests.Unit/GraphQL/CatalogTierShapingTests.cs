@@ -23,7 +23,7 @@ using Xunit;
 
 /// <summary>
 /// Issue #111 WP-3 (A-4, A-1 G1, F-C9, F-C11, F-C12): GraphQL <c>catalog</c> shaping. Summary rows carry no columns, admin rows keep
-/// <see cref="CatalogView.Unmarked"/> and full output, the OpenSchema branch is not shaped, tags come from <c>CatalogTags</c>.
+/// <see cref="CatalogView.Unmarked"/> and full output, tags come from <c>CatalogTags</c>.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class CatalogTierShapingTests
@@ -43,10 +43,10 @@ public sealed class CatalogTierShapingTests
         Tier("hid_t", DatasetVisibility.Hidden, "internal")
     ];
 
-    private static GatewayOptions Opts(TenancyShape mode, bool openSchema = false) => new()
+    private static GatewayOptions Opts(TenancyShape mode) => new()
     {
         Tenancy = mode.Options(),
-        Catalog = new DataCatalogOptions { SharedTables = Shared, OpenSchema = openSchema }
+        Catalog = new DataCatalogOptions { SharedTables = Shared }
     };
 
     private static Task<IReadOnlyList<TableMetadataDto>> Catalog(ClaimsPrincipal user, GatewayOptions options, string? search = null, string? tag = null)
@@ -186,11 +186,10 @@ public sealed class CatalogTierShapingTests
     [Fact]
     public async Task OpenSchema_Branch_NotAffectedByTierShaping()
     {
-        // The operator opt-in lists every table, Summary and Hidden included, with columns (bypasses tiers and consents by design).
-        var result = await Catalog(Subject(), Opts(TenancyShape.Multi, openSchema: true));
+        // OpenSchema is removed (OD-19); subject follows tier shaping and hidden tables are absent.
+        var result = await Catalog(Subject(), Opts(TenancyShape.Multi));
 
-        result.Count.ShouldBe(3);
-        result.ShouldAllBe(r => r.Columns.Count == 2);
-        result.Single(r => r.TableName == "hid_t").Tags.ShouldBe(["internal"]);
+        result.Count.ShouldBe(2);
+        result.Any(r => r.TableName == "hid_t").ShouldBeFalse();
     }
 }

@@ -40,11 +40,14 @@ public static class LegacySwitchGuard
         };
 
     /// <summary>Removed keys (relative to <c>Gateway:</c>) without a replacement: the behaviour they enabled no longer exists.</summary>
-    public static IReadOnlyCollection<string> Removed { get; } =
-    [
-        "Insecure:warn_fallback_default_tenant_for_webhooks",
-        "Caching:Redis:FailClosedOnRevocationLookupError"
-    ];
+    public static IReadOnlyDictionary<string, string> Removed { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Insecure:warn_fallback_default_tenant_for_webhooks"] = "was removed together with the behaviour it enabled (unbound webhooks are always rejected); delete the key.",
+            ["Caching:Redis:FailClosedOnRevocationLookupError"] = "was removed together with the behaviour it enabled (a failed token revocation lookup always rejects the token); delete the key.",
+            ["OpenSchema"] = "OpenSchema was removed (OD-19). Authenticated users discover the catalog by default; anonymous catalog access is not supported. Remove the key.",
+            ["Catalog:OpenSchema"] = "OpenSchema was removed (OD-19). Authenticated users discover the catalog by default; anonymous catalog access is not supported. Remove the key."
+        };
 
     /// <summary>Returns one message per removed key that is present (any value).</summary>
     public static IReadOnlyList<string> FindViolations(IConfiguration configuration) =>
@@ -52,8 +55,8 @@ public static class LegacySwitchGuard
             .Where(r => configuration.GetSection(G + r.Key).Exists())
             .Select(r => $"'{G}{r.Key}' was removed; use '{G}{r.Value}' instead.")
             .Concat(Removed
-                .Where(k => configuration.GetSection(G + k).Exists())
-                .Select(k => $"'{G}{k}' was removed together with the behaviour it enabled (for example an unbound webhook is always rejected, a failed token revocation lookup always rejects the token); delete the key."))
+                .Where(r => configuration.GetSection(G + r.Key).Exists())
+                .Select(r => $"'{G}{r.Key}': {r.Value}"))
             .ToList();
 
     public static void ThrowIfLegacyKeysSet(IConfiguration configuration)

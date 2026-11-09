@@ -66,7 +66,6 @@ public class DevPresetAndGovernanceFailClosedSecurityTests
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv);
         });
 
-        options.IsOpenSchemaAllowed.ShouldBeTrue();
         options.IsIntrospectionForced.ShouldBeTrue();
         options.IsAllCorsAllowed.ShouldBeTrue();
     }

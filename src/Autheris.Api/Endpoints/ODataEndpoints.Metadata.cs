@@ -10,14 +10,14 @@ using Microsoft.Extensions.Hosting;
 
 public static partial class ODataEndpoints
 {
-    /// <summary>Swagger UI outside Development needs an authenticated caller unless OpenSchema is enabled.</summary>
+    /// <summary>Swagger UI outside Development needs an authenticated caller.</summary>
     internal static bool RequiresSwaggerChallenge(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context) =>
-        !gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
+        !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
 
     /// <summary>Evaluates Swagger UI authorization: challenge if unauthenticated outside Dev, forbid if authenticated non-admin.</summary>
     internal static IResult? CheckSwaggerAuth(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context)
     {
-        if (gatewayOptions.IsOpenSchemaAllowed || env.IsDevelopment())
+        if (env.IsDevelopment())
         {
             return null;
         }
@@ -34,7 +34,7 @@ public static partial class ODataEndpoints
 
     /// <summary>Metadata and service document outside Development require an authenticated caller (challenge).</summary>
     internal static bool RequiresMetadataChallenge(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context) =>
-        !gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
+        !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
 
     /// <summary>
     /// OData entity set query. F-DATA-01: with <c>Accept: application/vnd.apache.parquet</c> the governed rows of a

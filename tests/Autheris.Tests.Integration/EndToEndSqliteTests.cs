@@ -68,7 +68,6 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-                b.UseSetting("Gateway:OpenSchema", "true");
                 b.UseSetting("Gateway:Rebac:Enabled", "false");
 
                 // Echte Datenquelle: SQLite-Datei
