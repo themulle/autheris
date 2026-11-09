@@ -17,6 +17,7 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -37,6 +38,34 @@ public static partial class WebSqlEndpoints
     private static Task StatementNotFoundAsync(HttpContext httpContext) =>
         ApiProblems.Indistinguishable(StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "Statement not found or expired.").ExecuteAsync(httpContext);
 
+    internal static DataSourceTransportFlags ResolveIngress(HttpContext httpContext)
+    {
+        var ingressContext = httpContext.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>();
+        if (ingressContext != null && ingressContext.Current != DataSourceTransportFlags.None)
+        {
+            return ingressContext.Current;
+        }
+
+        var endpoint = httpContext.GetEndpoint();
+        if (endpoint != null)
+        {
+            var metadata = endpoint.Metadata.GetMetadata<IngressTransportMetadata>();
+            if (metadata != null)
+            {
+                return metadata.Transport;
+            }
+        }
+
+        if (ingressContext == null)
+        {
+            return httpContext.Request.Path.StartsWithSegments("/v1/statement", StringComparison.OrdinalIgnoreCase)
+                ? DataSourceTransportFlags.Trino
+                : DataSourceTransportFlags.WebSql;
+        }
+
+        return DataSourceTransportFlags.None;
+    }
+
     internal static async Task HandleWebSqlRequest(
         HttpContext httpContext,
         IGovernedSqlExecutionService sqlService,
@@ -46,6 +75,14 @@ public static partial class WebSqlEndpoints
         var logger = loggerFactory.CreateLogger("Autheris.Api.WebSql");
         var ct = httpContext.RequestAborted;
         var statementManager = httpContext.RequestServices?.GetService<IWebSqlStatementManager>();
+
+        var ingress = ResolveIngress(httpContext);
+        var transport = SqlTransports.ForIngress(ingress);
+        if (transport == null)
+        {
+            await WriteWebSqlErrorAsync(httpContext, new Autheris.Domain.Exceptions.TransportNotAllowedException(null, ingress), logger, ct);
+            return;
+        }
 
         // Content Length validation
         var maxBodySizeFeature = httpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
@@ -60,7 +97,7 @@ public static partial class WebSqlEndpoints
             return;
         }
 
-        if (httpContext.Request.Path.StartsWithSegments("/v1/statement") &&
+        if (ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino &&
             !httpContext.Request.Headers.ContainsKey("X-Trino-User"))
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Trino protocol violation: Missing required 'X-Trino-User' header.", ct);
@@ -116,22 +153,34 @@ public static partial class WebSqlEndpoints
         bool formatArrays = httpContext.Request.Query.TryGetValue("format", out var formatVal) &&
                             string.Equals(formatVal.ToString(), "arrays", StringComparison.OrdinalIgnoreCase);
 
-        // Check if Trino protocol or wait_timeout requested
-        bool isTrinoRoute = httpContext.Request.Path.StartsWithSegments("/v1/statement", StringComparison.OrdinalIgnoreCase);
-        var trinoWaitTimeout = TryParseWaitTimeout(httpContext.Request);
+        TimeSpan? waitTimeout = null;
+        if (ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino)
+        {
+            waitTimeout = TryParseWaitTimeout(httpContext.Request) ?? TimeSpan.FromSeconds(5);
+        }
+        else if (httpContext.Request.Query.TryGetValue("wait_timeout", out var queryVal) && !string.IsNullOrWhiteSpace(queryVal))
+        {
+            waitTimeout = ParseDuration(queryVal.ToString().Trim());
+        }
 
-        if (await RefuseDmlRequestAsync(httpContext, sql, isTrinoRoute, gatewayOptions.Value.IsWebSqlDmlAllowed, tenantId, logger, ct))
+        if (await RefuseDmlRequestAsync(httpContext, sql, ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino, gatewayOptions.Value.IsWebSqlDmlAllowed, tenantId, logger, ct))
         {
             return;
         }
 
-        // Check for X-Trino-Catalog if dataSource was not explicitly passed in body
-        if (string.IsNullOrWhiteSpace(dataSource) &&
+        // Check for X-Trino-Catalog on Trino ingress if dataSource was not explicitly passed in body
+        if (ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino &&
+            string.IsNullOrWhiteSpace(dataSource) &&
             httpContext.Request.Headers.TryGetValue("X-Trino-Catalog", out var trinoCatalogHeader) &&
             !string.IsNullOrWhiteSpace(trinoCatalogHeader))
         {
             dataSource = trinoCatalogHeader.ToString().Trim();
         }
+
+        var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
+        var rowLimit = ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino
+            ? SqlRowLimit.For(webSqlOptions, gatewayOptions.Value.RowLimits?.Trino)
+            : SqlRowLimit.For(webSqlOptions);
 
         var pageReq = bodyDto?.Page;
         var nextTok = bodyDto?.Next;
@@ -139,13 +188,12 @@ public static partial class WebSqlEndpoints
 
         if (isPagingRequested)
         {
-            if (isTrinoRoute || trinoWaitTimeout != null)
+            if (ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino || waitTimeout != null)
             {
                 await WriteWebSqlErrorAsync(httpContext, new TrinoSqlEngine.Ast.Emit.SqlPagingUnsupportedException(), logger, ct);
                 return;
             }
 
-            var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
             var maxAllowedRows = SqlRowLimit.For(webSqlOptions).MaxAllowedRows;
             if (pageReq != null)
             {
@@ -174,12 +222,13 @@ public static partial class WebSqlEndpoints
             sql,
             parameters,
             dataSource,
-            Transport: isTrinoRoute ? SqlTransports.Trino : SqlTransports.WebSql,
+            Transport: transport,
+            RowLimit: rowLimit,
             Page: pageWindow,
             NextToken: nextTok,
             OnPageOutcome: isPagingRequested ? outcome => pageOutcome = outcome : null);
 
-        if (isTrinoRoute || trinoWaitTimeout != null)
+        if (waitTimeout != null)
         {
             if (statementManager == null)
             {
@@ -194,17 +243,9 @@ public static partial class WebSqlEndpoints
             }
             var owner = new Sid(callerIdentity);
 
-            var timeout = trinoWaitTimeout ?? TimeSpan.FromSeconds(5);
             try
             {
-                var trinoRequest = governedRequest with
-                {
-                    RowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Trino),
-                    Transport = "Trino"
-                };
-                var status = await statementManager.SubmitOrWaitAsync(trinoRequest, user, owner, tenantId, timeout,
-                    httpContext.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Current
-                        ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None, ct);
+                var status = await statementManager.SubmitOrWaitAsync(governedRequest, user, owner, tenantId, waitTimeout.Value, ingress, ct);
                 await WriteTrinoStatementResponseAsync(httpContext, status, ct);
                 return;
             }
@@ -449,7 +490,7 @@ public static partial class WebSqlEndpoints
         }
     }
 
-    internal static async Task HandleTrinoQueuedStatementRequest(
+    internal static async Task HandleWebSqlStatementPollRequest(
         string statementId,
         HttpContext httpContext,
         IWebSqlStatementManager statementManager,
@@ -457,6 +498,14 @@ public static partial class WebSqlEndpoints
     {
         var logger = loggerFactory.CreateLogger("Autheris.Api.WebSql");
         var ct = httpContext.RequestAborted;
+
+        var ingress = ResolveIngress(httpContext);
+        var transport = SqlTransports.ForIngress(ingress);
+        if (transport == null)
+        {
+            await WriteWebSqlErrorAsync(httpContext, new Autheris.Domain.Exceptions.TransportNotAllowedException(null, ingress), logger, ct);
+            return;
+        }
 
         var user = httpContext.User;
         var securityContext = EndpointSecurity.GetSecurityContext(httpContext);
@@ -472,14 +521,25 @@ public static partial class WebSqlEndpoints
         // DT-A-3: the tenant is read after the identity check (an anonymous caller is 401, never a tenant error); no tenant, no default.
         var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
 
-        var waitTimeout = TryParseWaitTimeout(httpContext.Request) ?? TimeSpan.FromSeconds(5);
+        TimeSpan waitTimeout;
+        if (ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino)
+        {
+            waitTimeout = TryParseWaitTimeout(httpContext.Request) ?? TimeSpan.FromSeconds(5);
+        }
+        else if (httpContext.Request.Query.TryGetValue("wait_timeout", out var queryVal) && !string.IsNullOrWhiteSpace(queryVal))
+        {
+            waitTimeout = ParseDuration(queryVal.ToString().Trim());
+        }
+        else
+        {
+            waitTimeout = TimeSpan.FromSeconds(5);
+        }
 
         try
         {
             var status = await statementManager.GetStatusOrWaitAsync(
                 statementId, user, owner, tenantId, waitTimeout,
-                httpContext.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Current
-                    ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None,
+                ingress,
                 ct);
             await WriteTrinoStatementResponseAsync(httpContext, status, ct);
         }
@@ -500,12 +560,22 @@ public static partial class WebSqlEndpoints
         }
     }
 
-    internal static async Task HandleTrinoCancelStatementRequest(
+    internal static async Task HandleWebSqlStatementCancelRequest(
         string statementId,
         HttpContext httpContext,
         IWebSqlStatementManager statementManager)
     {
         var ct = httpContext.RequestAborted;
+
+        var ingress = ResolveIngress(httpContext);
+        var transport = SqlTransports.ForIngress(ingress);
+        if (transport == null)
+        {
+            var logger = httpContext.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger("Autheris.Api.WebSql") ?? Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+            await WriteWebSqlErrorAsync(httpContext, new Autheris.Domain.Exceptions.TransportNotAllowedException(null, ingress), logger, ct);
+            return;
+        }
+
         var user = httpContext.User;
         var securityContext = EndpointSecurity.GetSecurityContext(httpContext);
 
@@ -520,7 +590,7 @@ public static partial class WebSqlEndpoints
         // DT-A-3: the tenant is read after the identity check (an anonymous caller is 401, never a tenant error); no tenant, no default.
         var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
 
-        if (httpContext.Request.Path.StartsWithSegments("/v1/statement") &&
+        if (ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino &&
             !httpContext.Request.Headers.ContainsKey("X-Trino-User"))
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "Trino protocol violation: Missing required 'X-Trino-User' header.", ct);
@@ -544,4 +614,17 @@ public static partial class WebSqlEndpoints
             httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
         }
     }
+
+    internal static Task HandleTrinoQueuedStatementRequest(
+        string statementId,
+        HttpContext httpContext,
+        IWebSqlStatementManager statementManager,
+        ILoggerFactory loggerFactory) =>
+        HandleWebSqlStatementPollRequest(statementId, httpContext, statementManager, loggerFactory);
+
+    internal static Task HandleTrinoCancelStatementRequest(
+        string statementId,
+        HttpContext httpContext,
+        IWebSqlStatementManager statementManager) =>
+        HandleWebSqlStatementCancelRequest(statementId, httpContext, statementManager);
 }

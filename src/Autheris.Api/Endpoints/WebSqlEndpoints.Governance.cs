@@ -43,40 +43,41 @@ public static partial class WebSqlEndpoints
             return;
         }
 
-        switch (ex)
+        var failure = SqlFailureClassifier.Classify(ex);
+        switch (failure.Kind)
         {
-            case GatewayThrottledException throttledEx:
-                logger.Warning(throttledEx, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
-                await ApiProblems.WriteTooManyRequests(httpContext, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", throttledEx.RetryAfterSeconds, ct);
+            case SqlFailureKind.Throttled:
+                int retryAfter = (ex as GatewayThrottledException)?.RetryAfterSeconds ?? 5;
+                logger.Warning(ex, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
+                await ApiProblems.WriteTooManyRequests(httpContext, failure.Code ?? ApiErrorCodes.TooManyRequests, failure.FixedMessage, retryAfter, ct);
                 break;
 
-            case GatewayNotImplementedException notImplEx:
-                logger.Warning(notImplEx, "WebSQL Not Implemented. TraceId={TraceId}", httpContext.TraceIdentifier);
-                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status501NotImplemented, ApiErrorCodes.NotImplemented, "The requested feature or data source capability is not implemented.", ct);
+            case SqlFailureKind.NotSupported:
+                logger.Warning(ex, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status501NotImplemented, failure.Code ?? ApiErrorCodes.NotImplemented, failure.FixedMessage, ct);
                 break;
 
-            case NotSupportedException notSuppEx:
-                logger.Warning(notSuppEx, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
-                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status501NotImplemented, ApiErrorCodes.NotImplemented, "The requested operation is not supported.", ct);
-                break;
-
-            case GatewaySecurityException gatewayDenied:
+            case SqlFailureKind.PolicyDenied when ex is GatewaySecurityException gatewayDenied:
                 await Middleware.GatewayDenialStatusMapper.WriteWebSqlResponseAsync(httpContext, gatewayDenied, logger, ct);
                 break;
 
-            case Exception timeoutEx when IsExecutionTimeout(timeoutEx):
-                logger.Warning(timeoutEx, "WebSQL execution timed out. TraceId={TraceId}", httpContext.TraceIdentifier);
+            case SqlFailureKind.PolicyDenied:
+                logger.Warning(ex, "WebSQL Policy Denied. TraceId={TraceId}", httpContext.TraceIdentifier);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status403Forbidden, failure.Code ?? ApiErrorCodes.AccessDenied, failure.FixedMessage, ct);
+                break;
+
+            case SqlFailureKind.Timeout:
+                logger.Warning(ex, "WebSQL execution timed out. TraceId={TraceId}", httpContext.TraceIdentifier);
                 await WriteTimeoutProblemAsync(httpContext, FallbackTimeoutCode, ct);
                 break;
 
-            case ArgumentException argEx:
-                logger.Warning(argEx, "WebSQL Bad Request. TraceId={TraceId}", httpContext.TraceIdentifier);
-                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, GenericBadRequestMessage, ct);
+            case SqlFailureKind.InvalidQuery:
+                logger.Warning(ex, "WebSQL Bad Request. TraceId={TraceId}", httpContext.TraceIdentifier);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, failure.Code ?? ApiErrorCodes.BadRequest, failure.FixedMessage, ct);
                 break;
 
             default:
                 // SEC M-10: Never echo exception/database messages to the client
-                // type and trace id only above Debug; the message can quote staged data values.
                 logger.Error(ex, "WebSQL Execution Failed. TraceId={TraceId}", httpContext.TraceIdentifier);
                 await ApiProblems.WriteAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, GenericServerErrorMessage, ct);
                 break;
@@ -120,19 +121,7 @@ public static partial class WebSqlEndpoints
     }
 
     /// <summary>Database command timeouts (e.g. SqlException "Execution Timeout Expired") and TimeoutExceptions.</summary>
-    private static bool IsExecutionTimeout(Exception ex)
-    {
-        for (var current = ex; current != null; current = current.InnerException)
-        {
-            if (current is TimeoutException ||
-                (current is DbException && current.Message.Contains("Timeout", StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private static bool IsExecutionTimeout(Exception ex) => SqlFailureClassifier.IsExecutionTimeout(ex);
 
     /// <summary>OpenAPI 3.0 description of POST /api/v1/sql (request, result shape, dialect notes).</summary>
     private static Dictionary<string, object> BuildOpenApiSpec(GatewayOptions? gatewayOptions)
@@ -384,12 +373,7 @@ public static partial class WebSqlEndpoints
         object? trinoError = null;
         if (status.State == "FAILED")
         {
-            var msg = status.ErrorMessage ?? GenericServerErrorMessage;
-            bool isInternalError = msg.Contains("Contact support", StringComparison.OrdinalIgnoreCase) ||
-                                   msg.Equals(GenericServerErrorMessage, StringComparison.OrdinalIgnoreCase) ||
-                                   msg.Equals("Statement execution failed.", StringComparison.OrdinalIgnoreCase);
-
-            if (string.Equals(status.ErrorCode, Autheris.Domain.Exceptions.TransportNotAllowedException.Code, StringComparison.Ordinal))
+            if (status.Failure?.Kind == SqlFailureKind.TransportDenied)
             {
                 // Issue #447: fixed text and code; no source name, no sub-reason.
                 trinoError = new
@@ -402,6 +386,7 @@ public static partial class WebSqlEndpoints
             }
             else
             {
+                bool isInternalError = status.Failure == null || status.Failure.Kind == SqlFailureKind.Internal;
                 trinoError = new
                 {
                     // NL-SC-33: fixed message per denial class; the status text (SQL, table names, exception text) never reaches the protocol entry.
@@ -420,9 +405,12 @@ public static partial class WebSqlEndpoints
             ["stats"] = trinoStats
         };
 
-        if (!string.IsNullOrWhiteSpace(status.NextUri))
+        if (status.State is "QUEUED" or "RUNNING")
         {
-            responseObj["nextUri"] = status.NextUri;
+            var ingress = ResolveIngress(httpContext);
+            responseObj["nextUri"] = ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino
+                ? $"/v1/statement/queued/{status.StatementId}"
+                : $"/api/v1/sql/statements/{status.StatementId}";
         }
 
         if (trinoColumns != null)
