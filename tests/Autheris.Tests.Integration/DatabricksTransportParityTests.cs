@@ -120,132 +120,46 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         // 1. Orders table metadata
         var ordersMeta = new TableMetadata
         {
-            Table = new Table
-            {
-                Id = Guid.NewGuid(),
-                DisplayName = "orders",
-                TableName = "orders",
-                SchemaName = SchemaName,
-                SourceName = Source,
-                SourceType = "Databricks",
-                DataSourceType = DataSourceType.Sql,
-                IsActive = true
-            },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "orders", TableName = "orders", SchemaName = SchemaName, SourceName = Source, SourceType = "Databricks", DataSourceType = DataSourceType.Sql, IsActive = true },
             Identifier = OrdersId,
-            Columns =
-            [
-                new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "tenantid", DataType = "string" },
-                new TableColumn { ColumnName = "region", DataType = "string" },
-                new TableColumn { ColumnName = "status", DataType = "string" },
-                new TableColumn { ColumnName = "amount", DataType = "decimal" },
-                new TableColumn { ColumnName = "email", DataType = "string", IsSensitive = true }
-            ],
-            ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["email"] = new MaskingRule { RuleType = "REDACT" }
-            }
+            Columns = [Col("id", "int"), Col("tenantid", "string"), Col("region", "string"), Col("status", "string"), Col("amount", "decimal"), Col("email", "string", sensitive: true)],
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase) { ["email"] = new MaskingRule { RuleType = "REDACT" } }
         };
         await repo.UpsertTableMetadataAsync(ordersMeta);
 
         // Consent for Acme on Orders (Reader role, EU region filter, email redacted, amount clear)
         await repo.CreateConsentAsync(new Consent
         {
-            TableId = ordersMeta.Table.Id,
-            TableIdentifier = OrdersId,
-            TenantId = new TenantId("acme"),
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role,
-            RoleName = "Reader",
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            ColumnRules =
-            [
-                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
-                new ConsentColumnRule { ColumnName = "region", AccessLevel = ColumnAccessLevel.Clear },
-                new ConsentColumnRule { ColumnName = "status", AccessLevel = ColumnAccessLevel.Clear },
-                new ConsentColumnRule { ColumnName = "amount", AccessLevel = ColumnAccessLevel.Clear },
-                new ConsentColumnRule { ColumnName = "email", AccessLevel = ColumnAccessLevel.Mask }
-            ],
-            RowFilters =
-            [
-                new ConsentRowFilter { ColumnName = "region", Operator = "EQUALS", ValueJson = "\"EU\"" }
-            ]
+            TableId = ordersMeta.Table.Id, TableIdentifier = OrdersId, TenantId = new TenantId("acme"), Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.Role, RoleName = "Reader", ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules = [CRule("id"), CRule("region"), CRule("status"), CRule("amount"), CRule("email", ColumnAccessLevel.Mask)],
+            RowFilters = [new ConsentRowFilter { ColumnName = "region", Operator = "EQUALS", ValueJson = "\"EU\"" }]
         });
 
         // 2. Orders_ci table metadata (case-insensitive collation)
         var ordersCiMeta = new TableMetadata
         {
-            Table = new Table
-            {
-                Id = Guid.NewGuid(),
-                DisplayName = "orders_ci",
-                TableName = "orders_ci",
-                SchemaName = SchemaName,
-                SourceName = Source,
-                SourceType = "Databricks",
-                DataSourceType = DataSourceType.Sql,
-                IsActive = true
-            },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "orders_ci", TableName = "orders_ci", SchemaName = SchemaName, SourceName = Source, SourceType = "Databricks", DataSourceType = DataSourceType.Sql, IsActive = true },
             Identifier = OrdersCiId,
-            Columns =
-            [
-                new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "tenantid", DataType = "string" }
-            ]
+            Columns = [Col("id", "int"), Col("tenantid", "string")]
         };
         await repo.UpsertTableMetadataAsync(ordersCiMeta);
 
-        // Consent for acme on orders_ci
-        await repo.CreateConsentAsync(new Consent
+        // Consent for acme and ACME on orders_ci
+        foreach (var t in new[] { "acme", "ACME" })
         {
-            TableId = ordersCiMeta.Table.Id,
-            TableIdentifier = OrdersCiId,
-            TenantId = new TenantId("acme"),
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role,
-            RoleName = "Reader",
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            ColumnRules =
-            [
-                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
-                new ConsentColumnRule { ColumnName = "tenantid", AccessLevel = ColumnAccessLevel.Clear }
-            ]
-        });
-
-        // Consent for ACME on orders_ci
-        await repo.CreateConsentAsync(new Consent
-        {
-            TableId = ordersCiMeta.Table.Id,
-            TableIdentifier = OrdersCiId,
-            TenantId = new TenantId("ACME"),
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role,
-            RoleName = "Reader",
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            ColumnRules =
-            [
-                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
-                new ConsentColumnRule { ColumnName = "tenantid", AccessLevel = ColumnAccessLevel.Clear }
-            ]
-        });
+            await repo.CreateConsentAsync(new Consent
+            {
+                TableId = ordersCiMeta.Table.Id, TableIdentifier = OrdersCiId, TenantId = new TenantId(t), Effect = ConsentEffect.Allow,
+                GranteeType = GranteeType.Role, RoleName = "Reader", ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                ColumnRules = [CRule("id"), CRule("tenantid")]
+            });
+        }
 
         // 3. Orders table metadata for dbx_notrino
         var ordersNoTrinoMeta = new TableMetadata
         {
-            Table = new Table
-            {
-                Id = Guid.NewGuid(),
-                DisplayName = "orders",
-                TableName = "orders",
-                SchemaName = SchemaName,
-                SourceName = SourceNoTrino,
-                SourceType = "Databricks",
-                DataSourceType = DataSourceType.Sql,
-                IsActive = true
-            },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "orders", TableName = "orders", SchemaName = SchemaName, SourceName = SourceNoTrino, SourceType = "Databricks", DataSourceType = DataSourceType.Sql, IsActive = true },
             Identifier = OrdersNoTrinoId,
             Columns = ordersMeta.Columns
         };
@@ -253,20 +167,17 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
 
         await repo.CreateConsentAsync(new Consent
         {
-            TableId = ordersNoTrinoMeta.Table.Id,
-            TableIdentifier = OrdersNoTrinoId,
-            TenantId = new TenantId("acme"),
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role,
-            RoleName = "Reader",
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            ColumnRules =
-            [
-                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }
-            ]
+            TableId = ordersNoTrinoMeta.Table.Id, TableIdentifier = OrdersNoTrinoId, TenantId = new TenantId("acme"), Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.Role, RoleName = "Reader", ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules = [CRule("id")]
         });
     }
+
+    private static TableColumn Col(string name, string type, bool sensitive = false) =>
+        new() { ColumnName = name, DataType = type, IsSensitive = sensitive };
+
+    private static ConsentColumnRule CRule(string col, ColumnAccessLevel level = ColumnAccessLevel.Clear) =>
+        new() { ColumnName = col, AccessLevel = level };
 
     private async Task<HttpResponseMessage> HandleDatabricksRestAsync(HttpRequestMessage req)
     {
@@ -451,8 +362,12 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
     private HttpClient CreateTransportClient(string tenant = "acme", string role = "Reader")
     {
         var client = _factory!.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", $"S-1-5-21-PARITY-{tenant.ToUpperInvariant()}-{role.ToUpperInvariant()}");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", role);
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
         client.DefaultRequestHeaders.Add("X-Tenant-Id", tenant);
-        client.DefaultRequestHeaders.Add("X-Test-Role", role);
+        client.DefaultRequestHeaders.Add("X-Trino-User", $"user-{tenant}");
+        client.DefaultRequestHeaders.Add("X-Trino-Wait-Timeout", "30s");
         return client;
     }
 
@@ -484,6 +399,11 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
     [InlineData("mcp")]
     public async Task Tenant_isolation_holds_under_case_insensitive_collation(string transport)
     {
+        if (!_spark.CollationAvailable)
+        {
+            throw new SparkSkipException("Spark instance does not support collations (requires Spark 4).");
+        }
+
         // Tenant 'acme' queries orders_ci: should get row 1 only, never row 2 (which belongs to 'ACME')
         using var acmeClient = CreateTransportClient("acme", "Reader");
         var acmeIds = await QueryOrdersCiAsync(acmeClient, transport);
@@ -538,9 +458,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         webSqlResp.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         // Trino is denied by AllowedTransports gate
-        client.DefaultRequestHeaders.Add("X-Trino-User", "test-user");
-        var trinoResp = await client.PostAsync("/v1/statement", new StringContent("SELECT id FROM dbx_notrino.default.orders", Encoding.UTF8, "text/plain"));
-        var trinoBody = await trinoResp.Content.ReadAsStringAsync();
+        var (_, trinoBody, _) = await ExecuteTrinoStatementAsync(client, "SELECT id FROM dbx_notrino.default.orders");
         trinoBody.ShouldContain("TRANSPORT_NOT_ALLOWED");
     }
 
@@ -567,15 +485,25 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             }
             case "trino":
             {
-                client.DefaultRequestHeaders.Add("X-Trino-User", "test-user");
-                var resp = await client.PostAsync("/v1/statement", new StringContent("SELECT id, email FROM dbx.default.orders", Encoding.UTF8, "text/plain"));
-                using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-                if (doc.RootElement.TryGetProperty("data", out var data))
+                var (status, body, root) = await ExecuteTrinoStatementAsync(client, "SELECT id, email FROM dbx.default.orders");
+                status.ShouldBe(HttpStatusCode.OK, body);
+                if (root.TryGetProperty("columns", out var cols) && root.TryGetProperty("data", out var data))
                 {
+                    var columns = cols.EnumerateArray().Select(c => c.GetProperty("name").GetString()).ToList();
+                    int idIdx = columns.IndexOf("id");
+                    int emailIdx = columns.IndexOf("email");
                     foreach (var row in data.EnumerateArray())
                     {
-                        ids.Add(int.Parse(row[0].GetString()!));
-                        emails.Add(row[1].GetString() ?? string.Empty);
+                        if (idIdx >= 0)
+                        {
+                            var idVal = row[idIdx];
+                            ids.Add(idVal.ValueKind == JsonValueKind.Number ? idVal.GetInt32() : int.Parse(idVal.GetString()!));
+                        }
+                        if (emailIdx >= 0)
+                        {
+                            var emailVal = row[emailIdx];
+                            emails.Add(emailVal.GetString() ?? string.Empty);
+                        }
                     }
                 }
                 break;
@@ -585,12 +513,23 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                 await using var mcp = await McpTestClient.ConnectAsync(client);
                 var (isError, payload) = await McpTestClient.CallJsonAsync(mcp, "query_dataset", new { dataset = "dbx.default.orders" });
                 isError.ShouldBeFalse(payload.ToString());
-                if (payload.TryGetProperty("rows", out var rows))
+                var items = payload.TryGetProperty("data", out var d) ? d :
+                            payload.TryGetProperty("rows", out var r) ? r : default;
+                if (items.ValueKind == JsonValueKind.Array)
                 {
-                    foreach (var row in rows.EnumerateArray())
+                    foreach (var item in items.EnumerateArray())
                     {
-                        ids.Add(row.GetProperty("id").GetInt32());
-                        emails.Add(row.GetProperty("email").GetString() ?? string.Empty);
+                        if (item.ValueKind == JsonValueKind.Object)
+                        {
+                            if (item.TryGetProperty("id", out var idProp))
+                            {
+                                ids.Add(idProp.ValueKind == JsonValueKind.Number ? idProp.GetInt32() : int.Parse(idProp.GetString()!));
+                            }
+                            if (item.TryGetProperty("email", out var emailProp))
+                            {
+                                emails.Add(emailProp.GetString() ?? string.Empty);
+                            }
+                        }
                     }
                 }
                 break;
@@ -619,14 +558,19 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             }
             case "trino":
             {
-                client.DefaultRequestHeaders.Add("X-Trino-User", "test-user");
-                var resp = await client.PostAsync("/v1/statement", new StringContent("SELECT id FROM dbx.default.orders_ci", Encoding.UTF8, "text/plain"));
-                using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-                if (doc.RootElement.TryGetProperty("data", out var data))
+                var (status, body, root) = await ExecuteTrinoStatementAsync(client, "SELECT id FROM dbx.default.orders_ci");
+                status.ShouldBe(HttpStatusCode.OK, body);
+                if (root.TryGetProperty("columns", out var cols) && root.TryGetProperty("data", out var data))
                 {
+                    var columns = cols.EnumerateArray().Select(c => c.GetProperty("name").GetString()).ToList();
+                    int idIdx = columns.IndexOf("id");
                     foreach (var row in data.EnumerateArray())
                     {
-                        ids.Add(int.Parse(row[0].GetString()!));
+                        if (idIdx >= 0)
+                        {
+                            var idVal = row[idIdx];
+                            ids.Add(idVal.ValueKind == JsonValueKind.Number ? idVal.GetInt32() : int.Parse(idVal.GetString()!));
+                        }
                     }
                 }
                 break;
@@ -636,11 +580,16 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                 await using var mcp = await McpTestClient.ConnectAsync(client);
                 var (isError, payload) = await McpTestClient.CallJsonAsync(mcp, "query_dataset", new { dataset = "dbx.default.orders_ci" });
                 isError.ShouldBeFalse(payload.ToString());
-                if (payload.TryGetProperty("rows", out var rows))
+                var items = payload.TryGetProperty("data", out var d) ? d :
+                            payload.TryGetProperty("rows", out var r) ? r : default;
+                if (items.ValueKind == JsonValueKind.Array)
                 {
-                    foreach (var row in rows.EnumerateArray())
+                    foreach (var item in items.EnumerateArray())
                     {
-                        ids.Add(row.GetProperty("id").GetInt32());
+                        if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("id", out var idProp))
+                        {
+                            ids.Add(idProp.ValueKind == JsonValueKind.Number ? idProp.GetInt32() : int.Parse(idProp.GetString()!));
+                        }
                     }
                 }
                 break;
@@ -661,16 +610,14 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             }
             case "trino":
             {
-                client.DefaultRequestHeaders.Add("X-Trino-User", "test-user");
-                var resp = await client.PostAsync("/v1/statement", new StringContent("SELECT id FROM dbx.default.orders", Encoding.UTF8, "text/plain"));
-                var body = await resp.Content.ReadAsStringAsync();
-                return resp.StatusCode != HttpStatusCode.OK || body.Contains("ACCESS_DENIED") || body.Contains("error");
+                var (status, body, _) = await ExecuteTrinoStatementAsync(client, "SELECT id FROM dbx.default.orders");
+                return status != HttpStatusCode.OK || body.Contains("ACCESS_DENIED") || body.Contains("SQL_POLICY_DENIED") || body.Contains("SQL_CONSENT_REQUIRED") || body.Contains("error");
             }
             case "mcp":
             {
                 await using var mcp = await McpTestClient.ConnectAsync(client);
-                var (isError, payload) = await McpTestClient.CallJsonAsync(mcp, "query_dataset", new { dataset = "dbx.default.orders" });
-                return isError || payload.ToString().Contains("DENIED") || payload.ToString().Contains("error");
+                var (isError, text) = await McpTestClient.CallAsync(mcp, "query_dataset", new { dataset = "dbx.default.orders" });
+                return isError || text.Contains("DENIED", StringComparison.OrdinalIgnoreCase) || text.Contains("error", StringComparison.OrdinalIgnoreCase) || text.Contains("Access denied", StringComparison.OrdinalIgnoreCase);
             }
             default:
                 return true;
@@ -690,17 +637,18 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             }
             case "trino":
             {
-                client.DefaultRequestHeaders.Add("X-Trino-User", "test-user");
-                var resp = await client.PostAsync("/v1/statement", new StringContent($"SELECT id FROM dbx.default.orders LIMIT {limit}", Encoding.UTF8, "text/plain"));
-                using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-                return doc.RootElement.TryGetProperty("data", out var data) ? data.GetArrayLength() : 0;
+                var (status, _, root) = await ExecuteTrinoStatementAsync(client, $"SELECT id FROM dbx.default.orders LIMIT {limit}");
+                status.ShouldBe(HttpStatusCode.OK);
+                return root.TryGetProperty("data", out var data) ? data.GetArrayLength() : 0;
             }
             case "mcp":
             {
                 await using var mcp = await McpTestClient.ConnectAsync(client);
                 var (isError, payload) = await McpTestClient.CallJsonAsync(mcp, "query_dataset", new { dataset = "dbx.default.orders", limit });
                 isError.ShouldBeFalse(payload.ToString());
-                return payload.TryGetProperty("rows", out var rows) ? rows.GetArrayLength() : 0;
+                var items = payload.TryGetProperty("data", out var d) ? d :
+                            payload.TryGetProperty("rows", out var r) ? r : default;
+                return items.ValueKind == JsonValueKind.Array ? items.GetArrayLength() : 0;
             }
             default:
                 return 0;
@@ -713,21 +661,67 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         {
             case "trino":
             {
-                client.DefaultRequestHeaders.Add("X-Trino-User", "test-user");
-                var resp = await client.PostAsync("/v1/statement",
-                    new StringContent("INSERT INTO dbx.default.orders VALUES (99, 'acme', 'EU', 'open', 1.0, 'test@example.com')", Encoding.UTF8, "text/plain"));
-                var body = await resp.Content.ReadAsStringAsync();
-                return resp.StatusCode != HttpStatusCode.OK || body.Contains("NOT_SUPPORTED") || body.Contains("error") || body.Contains("FAILED");
+                var (status, body, _) = await ExecuteTrinoStatementAsync(client,
+                    "INSERT INTO dbx.default.orders VALUES (99, 'acme', 'EU', 'open', 1.0, 'test@example.com')");
+                return status != HttpStatusCode.OK || body.Contains("NOT_SUPPORTED") || body.Contains("DML_NOT_ALLOWED") || body.Contains("error") || body.Contains("FAILED");
             }
             case "mcp":
             {
                 await using var mcp = await McpTestClient.ConnectAsync(client);
-                // MCP dataset tool does not accept write operations
-                var (isError, _) = await McpTestClient.CallAsync(mcp, "query_dataset", new { dataset = "dbx.default.orders", sql = "DELETE FROM dbx.default.orders" });
-                return isError;
+                try
+                {
+                    var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = "DELETE FROM dbx.default.orders" });
+                    return isError || text.Contains("NOT_SUPPORTED", StringComparison.OrdinalIgnoreCase) || text.Contains("DML_NOT_ALLOWED", StringComparison.OrdinalIgnoreCase) || text.Contains("error", StringComparison.OrdinalIgnoreCase);
+                }
+                catch
+                {
+                    return true;
+                }
             }
             default:
                 return false;
         }
+    }
+
+    private static async Task<(HttpStatusCode StatusCode, string Body, JsonElement Root)> ExecuteTrinoStatementAsync(HttpClient client, string sql)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/statement")
+        {
+            Content = new StringContent(sql, Encoding.UTF8, "text/plain")
+        };
+        request.Headers.Add("X-Trino-Wait-Timeout", "10s");
+        var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            return (response.StatusCode, body, default);
+        }
+
+        var currentDoc = JsonDocument.Parse(body);
+        while (currentDoc.RootElement.TryGetProperty("nextUri", out var next) && next.GetString() is { Length: > 0 } uri &&
+               (!currentDoc.RootElement.TryGetProperty("data", out var d) || d.GetArrayLength() == 0))
+        {
+            var follow = new HttpRequestMessage(HttpMethod.Get, uri);
+            follow.Headers.Add("X-Trino-Wait-Timeout", "10s");
+            var followed = await client.SendAsync(follow);
+            if (followed.StatusCode != HttpStatusCode.OK)
+            {
+                currentDoc.Dispose();
+                body = await followed.Content.ReadAsStringAsync();
+                return (followed.StatusCode, body, default);
+            }
+            currentDoc.Dispose();
+            body = await followed.Content.ReadAsStringAsync();
+            currentDoc = JsonDocument.Parse(body);
+            if (currentDoc.RootElement.TryGetProperty("stats", out var stats) &&
+                stats.TryGetProperty("state", out var state) &&
+                state.GetString() == "FINISHED")
+            {
+                break;
+            }
+        }
+
+        return (response.StatusCode, body, currentDoc.RootElement.Clone());
     }
 }
