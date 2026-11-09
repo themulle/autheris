@@ -3,6 +3,7 @@ using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using NSubstitute;
@@ -189,26 +190,58 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         repo.ReplaceCalls.ShouldBe(0);
     }
 
-    [Theory]
-    [InlineData("hasgroups", "true")]
-    [InlineData("_claim_names", "{\"groups\":\"src1\"}")]
-    public async Task SR_M_10_GroupAllow_WithAnEntraGroupOverage_IsRefused_AlsoInDryRun(string claimType, string claimValue)
+    [Fact]
+    public async Task SR_M_10_GroupAllow_WithDegradedGroupStatus_IsRefused_AlsoInDryRun()
     {
-        var caller = Caller(new Claim(claimType, claimValue));
+        // The status is set by the identity pipeline (an Entra group overage without Graph resolves Degraded); a token claim never sets it.
+        var caller = Caller(GroupResolutionClaims.CreateStatus(GroupResolutionStatus.Degraded));
         var repo = new FakeConsentRepository();
 
         var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
             ApplyAsync(repo, Policy("Group", "S-1-5-21-1-2-3-2002"), caller, dryRun: true));
 
         ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
-        ex.Message.ShouldContain("group overage");
+        ex.Message.ShouldContain("group resolution degraded");
         repo.ReplaceCalls.ShouldBe(0);
     }
 
     [Fact]
-    public async Task SR_M_10_GroupDenyAndRoleGrant_WithAnEntraGroupOverage_StayAllowed()
+    public async Task Degraded_status_refuses_apply_not_skips_self_grant_check()
     {
-        var caller = Caller(new Claim("hasgroups", "true"));
+        var degraded = new SecurityPrincipalContext
+        {
+            UserSid = new Sid("S-1-5-21-ADMIN"),
+            GroupSids = new HashSet<Sid>(),
+            TenantRoles = new HashSet<string>(),
+            ClusterRoles = new HashSet<string>(),
+            AuthenticationScheme = "test",
+            GroupResolutionStatus = GroupResolutionStatus.Degraded
+        };
+        var repo = new FakeConsentRepository();
+
+        var refused = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+            ApplyAsync(repo, Policy("Group", "S-1-5-21-1-2-3-2002"), callerContext: degraded));
+        var allowed = await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2002"),
+            callerContext: degraded with { GroupResolutionStatus = GroupResolutionStatus.Complete });
+
+        refused.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
+        repo.ReplaceCalls.ShouldBe(0);
+        allowed.Applied.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Overage_claims_in_the_token_do_not_set_the_status()
+    {
+        // hasgroups / _claim_names are read by the group resolver only; the consent service trusts the pipeline status.
+        var caller = Caller(new Claim("hasgroups", "true"), new Claim("_claim_names", "{\"groups\":\"src1\"}"));
+
+        (await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2002"), caller)).Applied.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task SR_M_10_GroupDenyAndRoleGrant_WithDegradedGroupStatus_StayAllowed()
+    {
+        var caller = Caller(GroupResolutionClaims.CreateStatus(GroupResolutionStatus.Degraded));
 
         (await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2002", effect: "Deny"), caller)).Applied.ShouldBe(1);
         (await ApplyAsync(new FakeConsentRepository(), Policy("Role", "DataScientist"), caller)).Applied.ShouldBe(1);

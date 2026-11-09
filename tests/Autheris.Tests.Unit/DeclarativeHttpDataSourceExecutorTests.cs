@@ -265,6 +265,30 @@ public sealed class DeclarativeHttpDataSourceExecutorTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task ForwardAuth_identity_never_forwards_the_inbound_authorization_header()
+    {
+        var (executor, requests) = CreateExecutor(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("[]", Encoding.UTF8, "application/json")
+        });
+        var descriptor = new HttpEndpointDescriptor
+        {
+            BaseUrl = "https://api.crm.example.com",
+            PathTemplate = "/v1/customers",
+            AuthMode = HttpAuthMode.ForwardBearerToken
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1-2-3-1001")], "ForwardAuth"));
+        var context = CreateContext(CreateTestMetadata(descriptor), principal: principal,
+            requestHeaders: new Dictionary<string, string[]> { ["Authorization"] = ["Bearer proxy-passed-token"] });
+
+        await executor.ExecuteAsync(context);
+
+        requests.Count.ShouldBe(1);
+        requests[0].Headers.Authorization.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_AppliesApiKey_WhenAuthModeIsStaticApiKey()
     {
         var (executor, requests) = CreateExecutor(_ => new HttpResponseMessage(HttpStatusCode.OK)

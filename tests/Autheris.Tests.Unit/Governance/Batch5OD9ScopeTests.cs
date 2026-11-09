@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Tests.Unit.Security;
 using System.Security.Claims;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Security;
@@ -79,7 +80,7 @@ public sealed class Batch5OD9ScopeTests
         // A claim-less GovernanceAdmin token runs through the real claims transformation (the one default-assignment ingress).
         var registry = Substitute.For<IIdentityRealmRegistry>();
         var resolver = new TenantResolver(() => new TenancyOptions { DefaultTenantId = "dflt" }, registry, NullLogger<TenantResolver>.Instance);
-        var transformation = new EnterpriseClaimsTransformation(registry, tenantResolver: resolver);
+        var transformation = TestIdentityPipeline.Transformation(registry, tenantResolver: resolver);
 
         var principal = await transformation.TransformAsync(Principal(null, "GovernanceAdmin"));
 

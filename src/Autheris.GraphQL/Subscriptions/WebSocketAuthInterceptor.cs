@@ -341,6 +341,13 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             }
         }
 
+        // The groups of the connection are valid until the pipeline resolution expires; the connection closes then and the client
+        // reconnects (a new handshake re-resolves). The previous groups are never kept.
+        if (Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(principal) is { } groupsExpiry && groupsExpiry < expiry)
+        {
+            expiry = groupsExpiry;
+        }
+
         if (authPropertiesExpiresUtc is { } propertiesExpiry && propertiesExpiry < expiry)
         {
             expiry = propertiesExpiry;

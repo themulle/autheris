@@ -264,15 +264,16 @@ public sealed class CasbinPolicyParsingAndAuthHardeningTests
     {
         var identity = new ClaimsIdentity(
         [
-            new Claim("__EnterpriseTransformed", "1", ClaimValueTypes.String, "https://evil-issuer"),
+            new Claim(Autheris.Domain.Identity.GroupResolutionClaims.MarkerClaimType, "1", ClaimValueTypes.String, "https://evil-issuer"),
             new Claim("oid", "user-oid-1"),
             new Claim("roles", "DataOwner")
         ], "Bearer");
 
-        var result = await new EnterpriseClaimsTransformation().TransformAsync(new ClaimsPrincipal(identity));
+        var result = await TestIdentityPipeline.Transformation().TransformAsync(new ClaimsPrincipal(identity));
 
         result.FindFirst(ClaimTypes.PrimarySid)?.Value.ShouldBe("user-oid-1");
-        result.Claims.Where(c => c.Type == "__EnterpriseTransformed").ShouldAllBe(c => c.Issuer == EnterpriseClaimsTransformation.MarkerIssuer);
+        result.Claims.Where(c => c.Type == Autheris.Domain.Identity.GroupResolutionClaims.MarkerClaimType)
+            .ShouldAllBe(c => c.Issuer == Autheris.Domain.Common.IdentityClaimIssuers.Pipeline);
     }
 
     [Theory]
@@ -282,7 +283,7 @@ public sealed class CasbinPolicyParsingAndAuthHardeningTests
     {
         var identity = new ClaimsIdentity([new Claim("oid", "user-oid-2"), new Claim(ClaimTypes.Role, alias)], "Bearer");
 
-        var result = await new EnterpriseClaimsTransformation().TransformAsync(new ClaimsPrincipal(identity));
+        var result = await TestIdentityPipeline.Transformation().TransformAsync(new ClaimsPrincipal(identity));
 
         result.IsInRole("ClusterAdmin").ShouldBeFalse();
         Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(result).ShouldBeFalse();

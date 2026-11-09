@@ -113,6 +113,14 @@ public static class CdcSubscriptionPrincipal
         claims.AddRange(subscription.CreatedByGroupSids.Where(g => !string.IsNullOrWhiteSpace(g)).Select(g => Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g)));
         claims.AddRange(subscription.CreatedByRoles.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => new Claim(ClaimTypes.Role, r)));
 
+        // The snapshot is a stored pipeline result: marked as such, valid until the snapshot age limit.
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker());
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete));
+        if (options.CreatorSnapshotMaxAgeDays > 0)
+        {
+            claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateExpiresAt(subscription.CreatedAt.Value.AddDays(options.CreatorSnapshotMaxAgeDays)));
+        }
+
         principal = new ClaimsPrincipal(new ClaimsIdentity(claims, AuthenticationType));
         return CdcSnapshotDenial.None;
     }

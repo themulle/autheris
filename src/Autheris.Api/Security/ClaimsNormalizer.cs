@@ -10,48 +10,12 @@ using Autheris.Domain.Security;
 /// <summary>
 /// ADR-017 / K-K10: Canonical Normalizer for claims at the Gateway ingress edge.
 /// Unifies Active Directory Windows-SIDs, OIDC/OAuth2 identity claims, and mTLS client certificates
-/// into strongly-typed, canonical claims (ClaimTypes.PrimarySid, ClaimTypes.GroupSid, ClaimTypes.Role,
-/// ClaimTypes.NameIdentifier, tenant_id).
+/// into strongly-typed, canonical claims (ClaimTypes.PrimarySid, ClaimTypes.Role,
+/// ClaimTypes.NameIdentifier, tenant_id). Group claims are not produced here: the identity pipeline resolves them
+/// and is the only caller of <see cref="Normalize"/>.
 /// </summary>
 public static class ClaimsNormalizer
 {
-    public const string NormalizedMarkerClaimType = "__ClaimsNormalized";
-    public const string LegacyMarkerClaimType = "__EnterpriseTransformed";
-
-    public const string MiddlewareMarkerIssuer = "Autheris:ClaimsNormalizationMiddleware";
-    public const string LegacyMarkerIssuer = "Autheris:EnterpriseClaimsTransformation";
-
-    private static readonly string[] ProviderGroupClaimTypes =
-    [
-        ClaimTypes.GroupSid,
-        "groups",
-        "groupsid",
-        "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups",
-        "http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid"
-    ];
-
-    /// <summary>
-    /// Number of provider group values (token <c>groups</c>/<c>groupsid</c> claim types) that <see cref="Normalize"/> drops because they are
-    /// not canonical SIDs (for example Entra object ids). The caller marks the request degraded when the realm takes groups from the token.
-    /// </summary>
-    public static int CountDroppedProviderGroups(ClaimsPrincipal principal)
-    {
-        ArgumentNullException.ThrowIfNull(principal);
-        var count = 0;
-        foreach (var claimType in ProviderGroupClaimTypes)
-        {
-            foreach (var claim in principal.FindAll(c => c.Type == claimType && c.Issuer != IdentityClaimIssuers.Pipeline))
-            {
-                if (!SidFormat.IsCanonical(claim.Value?.Trim()))
-                {
-                    count++;
-                }
-            }
-        }
-
-        return count;
-    }
-
     public static ClaimsPrincipal Normalize(ClaimsPrincipal principal, X509Certificate2? clientCertificate = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
@@ -89,12 +53,6 @@ public static class ClaimsNormalizer
             identity.AddClaim(new Claim("client_cert_thumbprint", thumbprint));
             identity.AddClaim(new Claim("x509_subject", clientCertificate.Subject));
             identity.AddClaim(new Claim("x509_issuer", clientCertificate.Issuer));
-        }
-
-        // RR-L2-04: Strip any forged marker claims supplied by untrusted issuers
-        foreach (var forged in identity.FindAll(c => c.Type is NormalizedMarkerClaimType or LegacyMarkerClaimType).ToList())
-        {
-            identity.RemoveClaim(forged);
         }
 
         // 1. Ensure ClaimTypes.PrimarySid & ClaimTypes.NameIdentifier are populated (Windows SID / AD / OIDC)
@@ -137,27 +95,9 @@ public static class ClaimsNormalizer
             }
         }
 
-        // 3. The tenant is not decided here (DT-A-3): the claims transformation stamps the resolved tenant exactly once per ingress.
+        // The tenant is not decided here (DT-A-3): the claims transformation stamps the resolved tenant exactly once per ingress.
 
-        // 4. Ensure ClaimTypes.GroupSid is populated from any provider group claims (AD / Kerberos / OIDC)
-        // Interim producer until the group resolver is wired: canonical provider group SIDs are re-stamped with the pipeline issuer.
-        var existingGroups = identity.FindAll(c => c.Type == ClaimTypes.GroupSid && c.Issuer == IdentityClaimIssuers.Pipeline)
-            .Select(c => c.Value)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var claimType in ProviderGroupClaimTypes)
-        {
-            foreach (var claim in clonedPrincipal.FindAll(claimType).ToList())
-            {
-                var value = claim.Value?.Trim();
-                if (value is not null && SidFormat.IsCanonical(value) && existingGroups.Add(value))
-                {
-                    identity.AddClaim(IdentityClaimIssuers.CreateGroupSidClaim(value));
-                }
-            }
-        }
-
-        // 5. Ensure ClaimTypes.Role is populated from any provider role claims and canonical GatewayRoles
+        // 3. Ensure ClaimTypes.Role is populated from any provider role claims and canonical GatewayRoles
         var existingRoles = identity.FindAll(ClaimTypes.Role)
             .Select(c => c.Value)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -218,10 +158,6 @@ public static class ClaimsNormalizer
                 }
             }
         }
-
-        // 6. Attach trusted marker claims
-        identity.AddClaim(new Claim(NormalizedMarkerClaimType, "1", ClaimValueTypes.String, MiddlewareMarkerIssuer));
-        identity.AddClaim(new Claim(LegacyMarkerClaimType, "1", ClaimValueTypes.String, LegacyMarkerIssuer));
 
         return clonedPrincipal;
     }

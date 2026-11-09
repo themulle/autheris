@@ -60,6 +60,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
                 EntraId = new EntraIdAuthOptions
                 {
                     Enabled = true,
+                    TenantId = "tid-1",
                     ReadOnlyScopes = readOnlyScopes ?? ["Agent.Read", "api://app/Agent.Read"],
                     AppOnlyTokens = appOnlyTokens
                 }
@@ -89,9 +90,23 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
             gatewayOptions,
             env,
             NullLogger<JwtSocketTokenValidator>.Instance,
-            subjectResolver);
+            subjectResolver,
+            Autheris.Tests.Unit.Security.TestIdentityPipeline.Create(DefaultRealmRegistry(), options: options));
 
         return (validator, options, subjectResolver);
+    }
+
+    private static Autheris.Application.Identity.IIdentityRealmRegistry DefaultRealmRegistry()
+    {
+        var registry = Substitute.For<Autheris.Application.Identity.IIdentityRealmRegistry>();
+        var realm = new Autheris.Domain.Identity.IdentityRealm(
+            "ws-realm",
+            Autheris.Domain.Identity.IdentityRealmKind.EntraWorkforce,
+            Autheris.Domain.Identity.TenantBindingSpecification.Unbound(),
+            Autheris.Domain.Identity.RealmGroupSource.None);
+        registry.GetDefaultRealm().Returns(realm);
+        registry.GetRealm("ws-realm").Returns(realm);
+        return registry;
     }
 
     private string CreateJwt(IEnumerable<Claim> claims)
@@ -99,6 +114,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
         var descriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
+            Issuer = "https://login.microsoftonline.com/tid-1/v2.0",
             SigningCredentials = new SigningCredentials(_signingKey, SecurityAlgorithms.HmacSha256)
         };
 

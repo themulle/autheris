@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.Security;
 using Autheris.Tests.Common;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -197,7 +198,7 @@ public class AuthenticationSecurityTests
         identity.AddClaim(new Claim("roles", "SecurityAuditor"));
 
         var principal = new ClaimsPrincipal(identity);
-        var transformer = new EnterpriseClaimsTransformation();
+        var transformer = TestIdentityPipeline.Transformation();
 
         var transformed = await transformer.TransformAsync(principal);
 
@@ -219,7 +220,7 @@ public class AuthenticationSecurityTests
         identity.AddClaim(new Claim("role", "DataSteward"));
 
         var principal = new ClaimsPrincipal(identity);
-        var transformer = new EnterpriseClaimsTransformation();
+        var transformer = TestIdentityPipeline.Transformation();
 
         var transformed = await transformer.TransformAsync(principal);
 

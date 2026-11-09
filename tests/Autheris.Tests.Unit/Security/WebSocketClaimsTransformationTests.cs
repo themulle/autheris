@@ -32,7 +32,7 @@ public sealed class WebSocketClaimsTransformationTests
     private readonly SymmetricSecurityKey _signingKey = new(Encoding.UTF8.GetBytes("a-very-secret-test-key-of-at-least-256-bits-length!"));
 
     private JwtSocketTokenValidator CreateValidator(
-        IClaimsTransformation? claimsTransformation = null,
+        IIdentityPipeline? pipeline = null,
         IIdentitySubjectResolver? subjectResolver = null)
     {
         var jwtOptions = new JwtBearerOptions
@@ -60,8 +60,8 @@ public sealed class WebSocketClaimsTransformationTests
             gatewayOptions,
             env,
             NullLogger<JwtSocketTokenValidator>.Instance,
-            subjectResolver,
-            claimsTransformation);
+            subjectResolver ?? Substitute.For<IIdentitySubjectResolver>(),
+            pipeline ?? TestIdentityPipeline.Create());
     }
 
     private string GenerateToken(
@@ -121,8 +121,8 @@ public sealed class WebSocketClaimsTransformationTests
 
         realmRegistry.ResolveRealmByIssuer(issuer).Returns(corpRealm);
 
-        var transformer = new EnterpriseClaimsTransformation(realmRegistry);
-        var validator = CreateValidator(claimsTransformation: transformer);
+        var transformer = TestIdentityPipeline.Create(realmRegistry);
+        var validator = CreateValidator(pipeline: transformer);
 
         // Act
         var (isValid, principal) = await validator.ValidateTokenAsync(token);
@@ -164,15 +164,15 @@ public sealed class WebSocketClaimsTransformationTests
         var roleResolver = Substitute.For<IRoleResolver>();
         roleResolver.ResolveRolesAsync(Arg.Any<ResolvedIdentity>())
             .Returns(new RoleResolution(
-                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SecGroup" },
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "S-1-5-21-1-2-3-1100" },
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SecAnalystRole" },
                 new Dictionary<string, string>(),
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow.AddHours(1),
                 "test"));
 
-        var transformer = new EnterpriseClaimsTransformation(realmRegistry, roleResolver);
-        var validator = CreateValidator(claimsTransformation: transformer);
+        var transformer = TestIdentityPipeline.Create(realmRegistry, roleResolver);
+        var validator = CreateValidator(pipeline: transformer);
 
         // Act
         var (isValid, principal) = await validator.ValidateTokenAsync(token);
@@ -181,7 +181,7 @@ public sealed class WebSocketClaimsTransformationTests
         isValid.ShouldBeTrue();
         principal.ShouldNotBeNull();
         principal.IsInRole("SecAnalystRole").ShouldBeTrue();
-        principal.HasClaim("autheris:group", "SecGroup").ShouldBeTrue();
+        principal.GetGroupSids().ShouldContain(new Sid("S-1-5-21-1-2-3-1100"));
     }
 
     [Fact]
@@ -281,11 +281,11 @@ public sealed class WebSocketClaimsTransformationTests
         // Arrange: Claims transformation throws an exception
         var token = GenerateToken("user-broken");
 
-        var transformer = Substitute.For<IClaimsTransformation>();
-        transformer.TransformAsync(Arg.Any<ClaimsPrincipal>())
-            .Returns<Task<ClaimsPrincipal>>(_ => throw new InvalidOperationException("External identity provider offline"));
+        var transformer = Substitute.For<IIdentityPipeline>();
+        transformer.ProcessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<System.Security.Cryptography.X509Certificates.X509Certificate2?>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<ClaimsPrincipal>>(_ => throw new InvalidOperationException("External identity provider offline"));
 
-        var validator = CreateValidator(claimsTransformation: transformer);
+        var validator = CreateValidator(pipeline: transformer);
 
         // Act
         var (isValid, principal) = await validator.ValidateTokenAsync(token);

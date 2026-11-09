@@ -12,6 +12,7 @@ public static class IdentityGroupMetrics
     public const string SourceBasic = "basic";
     public const string SourceResolver = "resolver";
     public const string SourceForwardAuth = "forwardauth";
+    public const string SourcePlugin = "plugin";
 
     private static readonly Meter Meter = new("Autheris.Core");
 
@@ -22,6 +23,13 @@ public static class IdentityGroupMetrics
     private static readonly Counter<long> PublishFailed = Meter.CreateCounter<long>(
         "autheris_identity_group_invalidation_publish_failed_total",
         description: "Group cache invalidation events that could not be published; the entry expires with its TTL.");
+
+    private static readonly Counter<long> Resolutions = Meter.CreateCounter<long>(
+        "autheris_identity_group_resolution_total",
+        description: "Group resolutions by fixed source and status (complete, degraded).");
+
+    public static void RecordResolution(string source, bool degraded) =>
+        Resolutions.Add(1, new KeyValuePair<string, object?>("source", source), new KeyValuePair<string, object?>("status", degraded ? "degraded" : "complete"));
 
     public static void RecordPublishFailed() => PublishFailed.Add(1);
 

@@ -689,6 +689,14 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         switch (descriptor.AuthMode)
         {
             case HttpAuthMode.ForwardBearerToken:
+                // A ForwardAuth identity is asserted by headers of a trusted proxy; an Authorization header that such a proxy passes along is
+                // not the credential of that identity and is never relayed downstream.
+                if (string.Equals(context.Principal.Identity?.AuthenticationType, "ForwardAuth", StringComparison.Ordinal))
+                {
+                    _logger.LogWarning("Security: the inbound Authorization header is not forwarded for a ForwardAuth identity.");
+                    break;
+                }
+
                 if (context.RequestHeaders != null &&
                     context.RequestHeaders.TryGetValue("Authorization", out var authVals) &&
                     authVals.Length > 0 &&

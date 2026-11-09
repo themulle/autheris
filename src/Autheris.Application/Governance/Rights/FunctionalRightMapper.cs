@@ -43,7 +43,7 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
 
         var groupsAndRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Add groups
+        // Canonical effective group SIDs (pipeline issuer only); raw token group claims are never read here.
         foreach (var sid in principal.GetGroupSids())
         {
             groupsAndRoles.Add(sid.Value);
@@ -53,22 +53,6 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         foreach (var role in principal.GetUserRoles())
         {
             groupsAndRoles.Add(role);
-        }
-
-        // Add claims with type "group", "groups", "roles"
-        foreach (var c in principal.Claims)
-        {
-            if (string.Equals(c.Type, "group", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(c.Type, "groups", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(c.Type, "roles", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(c.Type, ClaimTypes.Role, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(c.Type, ClaimTypes.GroupSid, StringComparison.OrdinalIgnoreCase))
-            {
-                if (!string.IsNullOrWhiteSpace(c.Value))
-                {
-                    groupsAndRoles.Add(c.Value.Trim());
-                }
-            }
         }
 
         var rights = await GetRightsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles, ct).ConfigureAwait(false);

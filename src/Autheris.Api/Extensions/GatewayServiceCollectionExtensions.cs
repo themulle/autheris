@@ -133,6 +133,7 @@ public static partial class GatewayServiceCollectionExtensions
         IHostEnvironment environment)
     {
         services.AddSingleton<ITrustedProxyValidator, TrustedProxyValidator>();
+        services.AddSingleton<IIdentityPipeline, IdentityPipeline>();
         services.AddTransient<IClaimsTransformation, EnterpriseClaimsTransformation>();
 
         var authBuilder = services.AddAuthentication(options =>
@@ -291,11 +292,11 @@ public static partial class GatewayServiceCollectionExtensions
         {
             if (!string.IsNullOrWhiteSpace(entraConfig.TenantId))
             {
-                var instance = string.IsNullOrWhiteSpace(entraConfig.Instance)
-                    ? "https://login.microsoftonline.com/"
-                    : entraConfig.Instance.TrimEnd('/') + "/";
-                entraIssuers.Add($"{instance}{entraConfig.TenantId}/v2.0");
-                entraIssuers.Add($"https://sts.windows.net/{entraConfig.TenantId}/");
+                foreach (var entraIssuer in TokenPolicySelector.EntraIssuers(entraConfig))
+                {
+                    entraIssuers.Add(entraIssuer);
+                }
+
                 validIssuers.AddRange(entraIssuers);
             }
             if (!string.IsNullOrWhiteSpace(entraConfig.Audience)) validAudiences.Add(entraConfig.Audience);
@@ -330,12 +331,7 @@ public static partial class GatewayServiceCollectionExtensions
         {
             // Finding 3.3 / R13: scope and token-kind rules apply to Entra tokens only (AD FS may share this scheme);
             // AD FS tokens are checked against the AD FS client allowlist.
-            var adfsIssuers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (useAdfs && !string.IsNullOrWhiteSpace(adfsConfig.Authority))
-            {
-                adfsIssuers.Add(adfsConfig.Authority.TrimEnd('/'));
-                adfsIssuers.Add($"{adfsConfig.Authority.TrimEnd('/')}/services/trust");
-            }
+            IReadOnlySet<string> adfsIssuers = useAdfs ? TokenPolicySelector.AdfsIssuers(adfsConfig) : new HashSet<string>();
 
             options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
             options.Events.OnTokenValidated = ctx =>

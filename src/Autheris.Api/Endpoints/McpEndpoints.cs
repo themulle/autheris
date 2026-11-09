@@ -38,7 +38,9 @@ public static class McpEndpoints
         IReadOnlyList<string> GroupSids,
         string? ClientIp = null,
         bool IsReadOnly = false,
-        IReadOnlyDictionary<string, string>? AdditionalClaims = null);
+        IReadOnlyDictionary<string, string>? AdditionalClaims = null,
+        DateTimeOffset? GroupsExpireAt = null,
+        bool GroupsDegraded = false);
 
     public static IEndpointRouteBuilder MapMcpEndpoints(
         this IEndpointRouteBuilder app,
@@ -255,6 +257,8 @@ public static class McpEndpoints
             additionalClaims[CallerAttributeSchemeGate.MarkerClaimType] = "1";
         }
 
-        return new McpCaller(principalId, userSid, tenantId, roles, groupSids, clientIp, isReadOnly, additionalClaims);
+        var groupsDegraded = isAuthenticated && Autheris.Domain.Identity.GroupResolutionClaims.Read(principal) != Autheris.Domain.Identity.GroupResolutionStatus.Complete;
+        return new McpCaller(principalId, userSid, tenantId, roles, groupSids, clientIp, isReadOnly, additionalClaims,
+            Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(principal), groupsDegraded);
     }
 }

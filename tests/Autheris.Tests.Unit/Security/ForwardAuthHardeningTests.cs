@@ -21,9 +21,9 @@ public sealed class ForwardAuthHardeningTests
     private const string Secret = "0123456789abcdef0123456789abcdef-secret";
 
     private static async Task<(AuthenticateResult Result, ForwardAuthAuthenticationHandler Handler)> RunAsync(
-        ForwardAuthOptions forward, Action<IHeaderDictionary> headers, string peer = "10.0.0.1", bool development = true)
+        ForwardAuthOptions forward, Action<IHeaderDictionary> headers, string peer = "10.0.0.1", bool development = true, int maxGroups = 1024)
     {
-        var options = new GatewayOptions { Authentication = new AuthenticationOptions { Mode = AuthenticationMode.Upstream, ForwardAuth = forward } };
+        var options = new GatewayOptions { Authentication = new AuthenticationOptions { Mode = AuthenticationMode.Upstream, ForwardAuth = forward, MaxGroupSidsPerCaller = maxGroups } };
         var env = Substitute.For<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
         env.EnvironmentName.Returns(development ? "Development" : "Production");
         var handler = new ForwardAuthAuthenticationHandler(
@@ -220,7 +220,7 @@ public sealed class ForwardAuthHardeningTests
     [Trait("SecurityCondition", "SEC-AUTH-05f")]
     public async Task Header_groups_must_be_canonical_sids()
     {
-        var forward = new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], TrustUpstreamSids = true };
+        var forward = new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], TrustUpstreamSids = true, GroupSource = ForwardAuthGroupSource.Header };
 
         var (valid, _) = await RunAsync(forward, h =>
         {
@@ -256,5 +256,92 @@ public sealed class ForwardAuthHardeningTests
 
         result.Succeeded.ShouldBeTrue();
         result.Principal!.GetGroupSids().ShouldBeEmpty();
+    }
+
+    private static ForwardAuthOptions HeaderGroups() =>
+        new() { Enabled = true, TrustedProxies = ["10.0.0.1"], TrustUpstreamSids = true, GroupSource = ForwardAuthGroupSource.Header };
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-05f")]
+    public async Task Resolver_mode_ignores_group_header()
+    {
+        var forward = new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], TrustUpstreamSids = true };
+
+        var (result, _) = await RunAsync(forward, h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "S-1-5-21-1-2-3-1105,finance";
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Principal!.GetGroupSids().ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-05f")]
+    public async Task Header_group_count_over_cap_fails()
+    {
+        var (atCap, _) = await RunAsync(HeaderGroups(), h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "S-1-5-21-1-2-3-1105,S-1-5-21-1-2-3-1106";
+        }, maxGroups: 2);
+        var (overCap, _) = await RunAsync(HeaderGroups(), h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "S-1-5-21-1-2-3-1105,S-1-5-21-1-2-3-1106,S-1-5-21-1-2-3-1107";
+        }, maxGroups: 2);
+
+        atCap.Succeeded.ShouldBeTrue();
+        overCap.Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-05f")]
+    public async Task Pseudo_forward_group_form_is_rejected()
+    {
+        var (result, _) = await RunAsync(HeaderGroups(), h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "S-1-5-21-FORWARD-GRP-finance";
+        });
+
+        result.Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-05f")]
+    public async Task Joined_group_headers_fail()
+    {
+        var (result, _) = await RunAsync(HeaderGroups(), h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = new Microsoft.Extensions.Primitives.StringValues(["S-1-5-21-1-2-3-1105", "S-1-5-21-1-2-3-1106"]);
+        });
+
+        result.Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-05f")]
+    public async Task Forwarded_groups_ignored_unless_trusted_upstream()
+    {
+        // GroupSource=Header without TrustUpstreamSids: the header is not read; from an untrusted peer the request fails even with the secret.
+        var noTrust = new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], GroupSource = ForwardAuthGroupSource.Header };
+
+        var (ignored, _) = await RunAsync(noTrust, h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "S-1-5-21-1-2-3-1105";
+        });
+        var (untrusted, _) = await RunAsync(HeaderGroups(), h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "S-1-5-21-1-2-3-1105";
+        }, peer: "10.9.9.9");
+
+        ignored.Succeeded.ShouldBeTrue();
+        ignored.Principal!.GetGroupSids().ShouldBeEmpty();
+        untrusted.Succeeded.ShouldBeFalse();
     }
 }

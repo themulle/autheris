@@ -6,7 +6,14 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
+using System.Linq;
+using System.Threading;
 using Autheris.Api.Security;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Identity;
+using Autheris.Domain.Identity;
+using Autheris.Domain.Common;
+using Autheris.Tests.Unit.Security;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Hosting;
@@ -21,7 +28,24 @@ public sealed class JwtSocketTokenValidatorTests
 {
     private readonly SymmetricSecurityKey _signingKey = new(Encoding.UTF8.GetBytes("a-very-secret-test-key-of-at-least-256-bits-length!"));
 
-    private (JwtSocketTokenValidator Validator, IHostEnvironment Env) CreateValidator(bool isDev = false, bool enableTestAuth = false)
+    private static IIdentityRealmRegistry Registry(RealmGroupSource groupSource = RealmGroupSource.None)
+    {
+        var registry = Substitute.For<IIdentityRealmRegistry>();
+        var realm = new IdentityRealm(
+            "test-realm",
+            IdentityRealmKind.EntraWorkforce,
+            new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-test")),
+            groupSource: groupSource);
+        registry.GetDefaultRealm().Returns(realm);
+        registry.GetRealm("test-realm").Returns(realm);
+        return registry;
+    }
+
+    private (JwtSocketTokenValidator Validator, IHostEnvironment Env) CreateValidator(
+        bool isDev = false,
+        bool enableTestAuth = false,
+        IIdentityPipeline? pipeline = null,
+        AuthenticationOptions? authentication = null)
     {
         var jwtOptions = new JwtBearerOptions
         {
@@ -40,7 +64,7 @@ public sealed class JwtSocketTokenValidatorTests
 
         var gatewayOptions = Options.Create(new GatewayOptions
         {
-            Authentication = new AuthenticationOptions
+            Authentication = authentication ?? new AuthenticationOptions
             {
                 EnableTestAuthHandler = enableTestAuth
             }
@@ -53,12 +77,14 @@ public sealed class JwtSocketTokenValidatorTests
             jwtOptionsMonitor,
             gatewayOptions,
             env,
-            NullLogger<JwtSocketTokenValidator>.Instance);
+            NullLogger<JwtSocketTokenValidator>.Instance,
+            Substitute.For<IIdentitySubjectResolver>(),
+            pipeline ?? TestIdentityPipeline.Create(Registry(), options: gatewayOptions.Value));
 
         return (validator, env);
     }
 
-    private string GenerateToken(string sub, SecurityKey? key = null)
+    private string GenerateToken(string sub, SecurityKey? key = null, string? issuer = null, params Claim[] extra)
     {
         var keyToUse = key ?? _signingKey;
         var tokenHandler = new JwtSecurityTokenHandler();
@@ -68,8 +94,10 @@ public sealed class JwtSocketTokenValidatorTests
             [
                 new Claim(ClaimTypes.NameIdentifier, sub),
                 new Claim("sub", sub),
-                new Claim("tenant_id", "tenant-test")
+                new Claim("tenant_id", "tenant-test"),
+                .. extra
             ]),
+            Issuer = issuer,
             SigningCredentials = new SigningCredentials(keyToUse, SecurityAlgorithms.HmacSha256Signature)
         };
         var token = tokenHandler.CreateToken(descriptor);
@@ -145,11 +173,95 @@ public sealed class JwtSocketTokenValidatorTests
             jwtOptionsMonitor,
             gatewayOptions,
             env,
-            NullLogger<JwtSocketTokenValidator>.Instance);
+            NullLogger<JwtSocketTokenValidator>.Instance,
+            Substitute.For<IIdentitySubjectResolver>(),
+            TestIdentityPipeline.Create(Registry()));
 
         var token = GenerateToken("user-bob");
 
         var (isValid, principal) = await validator.ValidateTokenAsync(token);
+
+        isValid.ShouldBeFalse();
+        principal.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Websocket_validator_requires_policy_and_pipeline_dependencies()
+    {
+        var ctor = typeof(JwtSocketTokenValidator).GetConstructors().Single();
+        ctor.GetParameters().ShouldAllBe(p => !p.HasDefaultValue);
+        ctor.GetParameters().Select(p => p.ParameterType).ShouldContain(typeof(IIdentitySubjectResolver));
+        ctor.GetParameters().Select(p => p.ParameterType).ShouldContain(typeof(IIdentityPipeline));
+
+        var monitor = Substitute.For<IOptionsMonitor<JwtBearerOptions>>();
+        var env = Substitute.For<IHostEnvironment>();
+        Should.Throw<ArgumentNullException>(() => new JwtSocketTokenValidator(monitor, Options.Create(new GatewayOptions()), env,
+            NullLogger<JwtSocketTokenValidator>.Instance, null!, Substitute.For<IIdentityPipeline>()));
+        Should.Throw<ArgumentNullException>(() => new JwtSocketTokenValidator(monitor, Options.Create(new GatewayOptions()), env,
+            NullLogger<JwtSocketTokenValidator>.Instance, Substitute.For<IIdentitySubjectResolver>(), null!));
+    }
+
+    private static AuthenticationOptions EntraAndAdfs() => new()
+    {
+        EntraId = new EntraIdAuthOptions { Enabled = true, TenantId = "tid-1", ClientId = "api-client" },
+        Adfs = new AdfsAuthOptions { Enabled = true, Authority = "https://adfs.example.com/adfs", AllowedClientIds = ["adfs-client"] }
+    };
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Websocket_selects_entra_policy_by_issuer()
+    {
+        var (validator, _) = CreateValidator(authentication: EntraAndAdfs());
+
+        // An Entra-issued token without azp/appid is not an access token for the Entra policy.
+        var (isValid, _) = await validator.ValidateTokenAsync(GenerateToken("user-1", issuer: "https://login.microsoftonline.com/tid-1/v2.0"));
+
+        isValid.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Websocket_adfs_token_is_not_checked_against_entra_policy()
+    {
+        var (validator, _) = CreateValidator(authentication: EntraAndAdfs());
+
+        // The same shape (no azp, no scopes) passes the AD FS policy when the client is on the AD FS allowlist.
+        var (isValid, principal) = await validator.ValidateTokenAsync(
+            GenerateToken("user-1", issuer: "https://adfs.example.com/adfs", extra: new Claim("appid", "adfs-client")));
+
+        isValid.ShouldBeTrue();
+        principal.ShouldNotBeNull();
+
+        var (unlisted, _) = await validator.ValidateTokenAsync(
+            GenerateToken("user-1", issuer: "https://adfs.example.com/adfs", extra: new Claim("appid", "other-client")));
+        unlisted.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Websocket_closes_when_group_resolution_degrades()
+    {
+        // A token realm whose groups claim carries a value that is not a canonical SID resolves Degraded: the connection is refused.
+        var options = new GatewayOptions();
+        var validator = CreateValidator(pipeline: TestIdentityPipeline.Create(Registry(RealmGroupSource.Token), options: options)).Validator;
+
+        var (isValid, principal) = await validator.ValidateTokenAsync(GenerateToken("user-1", extra: new Claim("groups", "not-a-sid")));
+
+        isValid.ShouldBeFalse();
+        principal.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Websocket_pipeline_exception_rejects_token()
+    {
+        var pipeline = Substitute.For<IIdentityPipeline>();
+        pipeline.ProcessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<System.Security.Cryptography.X509Certificates.X509Certificate2?>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<ClaimsPrincipal>>(_ => throw new InvalidOperationException("provider offline"));
+        var (validator, _) = CreateValidator(pipeline: pipeline);
+
+        var (isValid, principal) = await validator.ValidateTokenAsync(GenerateToken("user-1"));
 
         isValid.ShouldBeFalse();
         principal.ShouldBeNull();

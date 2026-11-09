@@ -13,6 +13,7 @@ using Autheris.Application.Plugins.Auth;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -36,6 +37,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
     public const string TenantUnknownCode = "TENANT_UNKNOWN";
     public const string TenantRegistryUnavailableCode = "TENANT_REGISTRY_UNAVAILABLE";
     public const string TenantRegistrationRateLimitedCode = "TENANT_REGISTRATION_RATE_LIMITED";
+    public const string GroupsUnresolvedCode = "identity.groups_unresolved";
     public const string TenantUnresolvedCode = TenantUnresolvedException.Code;
     public const string TenantClaimInvalidCode = TenantClaimInvalidException.Code;
 
@@ -237,6 +239,15 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             }
         }
 
+        // SEC-AUTH-04a: a caller whose groups are unknown reaches no data transport (identity self-info endpoints carry no transport).
+        if (securityContext.IsAuthenticated &&
+            securityContext.GroupResolutionStatus != GroupResolutionStatus.Complete &&
+            context.GetEndpoint()?.Metadata.GetMetadata<Autheris.Api.Endpoints.IngressTransportMetadata>() is not null)
+        {
+            await WriteJsonAsync(context, StatusCodes.Status403Forbidden, "The groups of the caller could not be resolved.", GroupsUnresolvedCode).ConfigureAwait(false);
+            return;
+        }
+
         if (securityContext.ResolvedTenant is not null)
         {
             if (await DenyCollidingTenantAsync(context, securityContext).ConfigureAwait(false))
@@ -281,26 +292,8 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
                 return;
             }
 
-            if (enrichment.Result.AddedRoles.Count > 0 || enrichment.Result.AddedGroupSids.Count > 0)
-            {
-                var enrichedRoles = new HashSet<string>(securityContext.TenantRoles, StringComparer.OrdinalIgnoreCase);
-                foreach (var role in enrichment.Result.AddedRoles)
-                {
-                    enrichedRoles.Add(role);
-                }
-
-                var enrichedSids = new HashSet<Sid>(securityContext.GroupSids);
-                foreach (var sid in enrichment.Result.AddedGroupSids)
-                {
-                    enrichedSids.Add(sid);
-                }
-
-                securityContext = securityContext with
-                {
-                    TenantRoles = enrichedRoles,
-                    GroupSids = enrichedSids
-                };
-            }
+            // OD-31 / SEC-AZ-14: enrichment is control-plane input only. Its roles and SIDs never join the data-plane GroupSids or TenantRoles.
+            securityContext = securityContext with { ControlPlaneEnrichment = BuildControlPlaneEnrichment(enrichment.Result, authOptions) };
         }
 
         context.Items[SecurityPrincipalContext.ItemKey] = securityContext;
@@ -326,6 +319,30 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
 
             await next(context).ConfigureAwait(false);
         }
+    }
+
+    private static ControlPlaneEnrichment BuildControlPlaneEnrichment(PluginRoleEnrichmentResult result, Autheris.Domain.Options.Plugins.AuthPluginOptions options)
+    {
+        var maxSids = Math.Clamp(options.MaxEnrichedGroupSidsPerCaller, 1, 1024);
+        var sids = new HashSet<Sid>();
+        var dropped = 0;
+        foreach (var sid in result.AddedGroupSids)
+        {
+            if (!SidFormat.IsCanonical(sid.Value) || sids.Count >= maxSids)
+            {
+                dropped++;
+                continue;
+            }
+
+            sids.Add(sid);
+        }
+
+        if (dropped > 0)
+        {
+            Autheris.Application.Identity.IdentityGroupMetrics.RecordRejected(Autheris.Application.Identity.IdentityGroupMetrics.SourcePlugin, dropped);
+        }
+
+        return new ControlPlaneEnrichment(new HashSet<string>(result.AddedRoles, StringComparer.OrdinalIgnoreCase), sids);
     }
 
     private sealed class NoopScope : IDisposable

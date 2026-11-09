@@ -52,5 +52,7 @@ public sealed record McpSessionContext(
     IReadOnlyList<string>? GroupSids = null,
     string? ClientIp = null,
     bool IsReadOnly = false,
-    IReadOnlyDictionary<string, string>? AdditionalClaims = null
+    IReadOnlyDictionary<string, string>? AdditionalClaims = null,
+    DateTimeOffset? GroupsExpireAt = null,
+    bool GroupsDegraded = false
 );

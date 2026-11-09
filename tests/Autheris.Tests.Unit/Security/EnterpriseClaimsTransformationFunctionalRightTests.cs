@@ -52,7 +52,7 @@ public sealed class EnterpriseClaimsTransformationFunctionalRightTests
         var mapper = Substitute.For<IFunctionalRightMapper>();
         mapper.GetRightsForGroupsAndRolesAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlySet<FunctionalRight>>(new HashSet<FunctionalRight> { FunctionalRight.DataExport }));
-        var transformation = new EnterpriseClaimsTransformation(Registry(), Resolver(), mapper);
+        var transformation = TestIdentityPipeline.Transformation(Registry(), Resolver(), mapper);
 
         var result = await transformation.TransformAsync(Principal());
 
@@ -67,7 +67,7 @@ public sealed class EnterpriseClaimsTransformationFunctionalRightTests
         var mapper = Substitute.For<IFunctionalRightMapper>();
         mapper.GetRightsForGroupsAndRolesAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlySet<FunctionalRight>>(new HashSet<FunctionalRight>()));
-        var transformation = new EnterpriseClaimsTransformation(Registry(), Resolver(), mapper);
+        var transformation = TestIdentityPipeline.Transformation(Registry(), Resolver(), mapper);
 
         var result = await transformation.TransformAsync(Principal());
 
@@ -80,7 +80,7 @@ public sealed class EnterpriseClaimsTransformationFunctionalRightTests
         var mapper = Substitute.For<IFunctionalRightMapper>();
         mapper.GetRightsForGroupsAndRolesAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
             .Returns<Task<IReadOnlySet<FunctionalRight>>>(_ => throw new InvalidOperationException("store down"));
-        var transformation = new EnterpriseClaimsTransformation(Registry(), Resolver(), mapper);
+        var transformation = TestIdentityPipeline.Transformation(Registry(), Resolver(), mapper);
 
         var result = await transformation.TransformAsync(Principal());
 

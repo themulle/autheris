@@ -8,12 +8,6 @@ using System.Threading.Tasks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 
-public enum GroupResolutionStatus
-{
-    Complete = 1,
-    Degraded = 2
-}
-
 /// <summary>
 /// The effective group SIDs of a caller. <see cref="GroupSids"/> is empty when <see cref="Status"/> is <see cref="GroupResolutionStatus.Degraded"/>
 /// (never a truncated or partial set). <see cref="Source"/> is a fixed label, never a value.

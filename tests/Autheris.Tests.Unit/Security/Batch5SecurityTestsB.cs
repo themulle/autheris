@@ -536,7 +536,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         registry.ResolveRealmForScheme(Arg.Any<string?>(), Arg.Any<string?>()).Returns(realm);
 
         var resolver = Substitute.For<IRoleResolver>();
-        var transformation = new EnterpriseClaimsTransformation(registry, resolver);
+        var transformation = TestIdentityPipeline.Transformation(registry, resolver);
 
         // Client ID not in realm allowed clients -> marked Degraded
         var unlistedPrincipal = new ClaimsPrincipal(new ClaimsIdentity(

@@ -49,7 +49,32 @@ public sealed record SecurityPrincipalContext
         return true;
     }
 
+    /// <summary>
+    /// The effective group SIDs: token groups UNION SCIM groups as resolved by the identity pipeline. Never contains plugin-enriched
+    /// SIDs (see <see cref="ControlPlaneEnrichment"/>); empty when <see cref="GroupResolutionStatus"/> is Degraded.
+    /// </summary>
     public required IReadOnlySet<Sid> GroupSids { get; init; }
+
+    private readonly Autheris.Domain.Identity.GroupResolutionStatus? _groupResolutionStatus;
+
+    /// <summary>
+    /// Set only from the identity pipeline result. The default of every other construction path is Degraded for an authenticated caller,
+    /// so an unprocessed principal is never read as "member of no group".
+    /// </summary>
+    public Autheris.Domain.Identity.GroupResolutionStatus GroupResolutionStatus
+    {
+        get => _groupResolutionStatus ?? (IsAuthenticated
+            ? Autheris.Domain.Identity.GroupResolutionStatus.Degraded
+            : Autheris.Domain.Identity.GroupResolutionStatus.Complete);
+        init => _groupResolutionStatus = value;
+    }
+
+    /// <summary>The instant after which the group resolution is stale and must be repeated (long-lived transports); null when unknown.</summary>
+    public DateTimeOffset? GroupsExpireAt { get; init; }
+
+    /// <summary>Plugin enrichment output; read by control-plane authorization only, never by a data decision.</summary>
+    public ControlPlaneEnrichment? ControlPlaneEnrichment { get; init; }
+
     public required IReadOnlySet<string> TenantRoles { get; init; }
     public required IReadOnlySet<string> ClusterRoles { get; init; }
     public required string AuthenticationScheme { get; init; }
@@ -204,6 +229,8 @@ public sealed record SecurityPrincipalContext
             TenantClaimInvalid = claimInvalid,
             TenantSource = tenantId is null ? null : principal.FindFirst(Autheris.Domain.Tenancy.TenantSourceClaim.ClaimType)?.Value,
             GroupSids = groupSids,
+            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionClaims.Read(principal),
+            GroupsExpireAt = Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(principal),
             TenantRoles = tenantRoles,
             ClusterRoles = clusterRoles,
             AuthenticationScheme = authenticationScheme ?? principal.Identity?.AuthenticationType ?? "Token",
@@ -213,4 +240,13 @@ public sealed record SecurityPrincipalContext
             Claims = principal.Claims
         };
     }
+}
+
+/// <summary>
+/// Output of an authentication plugin (roles and canonical group SIDs). Control-plane authorization reads it; no data grant, deny, row
+/// filter, mask, write grant, usage accounting, Envoy decision or MCP session does.
+/// </summary>
+public sealed record ControlPlaneEnrichment(IReadOnlySet<string> Roles, IReadOnlySet<Sid> GroupSids)
+{
+    public static readonly ControlPlaneEnrichment Empty = new(new HashSet<string>(), new HashSet<Sid>());
 }
