@@ -782,6 +782,34 @@ public sealed class AsymmetricAuditAnchorSigner : IAuditAnchorSigner
 }
 
 /// <summary>SEC E-11: Builds the effective anchor store chain from <see cref="AuditOptions"/>.</summary>
+/// <summary>
+/// Dialect-neutral governance anchor store using the dialect.
+/// </summary>
+public sealed class GovernanceAuditChainAnchorStore : IAuditChainAnchorStore
+{
+    private readonly IAuditChainAnchorStore _inner;
+    private readonly Dialects.IGovernanceSqlDialect? _dialect;
+
+    internal GovernanceAuditChainAnchorStore(Dialects.IGovernanceSqlDialect dialect, IAuditChainAnchorStore inner)
+    {
+        _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
+        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+    }
+
+    public GovernanceAuditChainAnchorStore(IAuditChainAnchorStore inner)
+    {
+        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+    }
+
+    internal Dialects.IGovernanceSqlDialect? Dialect => _dialect;
+    public IAuditChainAnchorStore Inner => _inner;
+
+    public AuditChainAnchor? Load() => _inner.Load();
+    public void Save(AuditChainAnchor anchor) => _inner.Save(anchor);
+    public AuditPurgeCheckpoint? LoadPurgeCheckpoint() => _inner.LoadPurgeCheckpoint();
+    public void SavePurgeCheckpoint(AuditPurgeCheckpoint checkpoint) => _inner.SavePurgeCheckpoint(checkpoint);
+}
+
 public static class AuditChainAnchorStoreFactory
 {
     /// <param name="primary">Local anchor store (file or in-memory) as before.</param>
@@ -822,6 +850,20 @@ public static class AuditChainAnchorStoreFactory
         IAuditChainAnchorStore result = stores.Count == 1 ? primary : new CompositeAuditChainAnchorStore(stores);
 
         return signer == null ? result : new SigningAuditChainAnchorStore(result, signer);
+    }
+
+    internal static IAuditChainAnchorStore CreateForGovernance(
+        Dialects.IGovernanceSqlDialect dialect,
+        GatewayOptions options,
+        Microsoft.Extensions.Hosting.IHostEnvironment environment,
+        IKeyVaultSecretProvider secrets,
+        IAuditAnchorSigner? signer,
+        ILogger? logger,
+        IGatewayStatePaths? statePaths = null)
+    {
+        ArgumentNullException.ThrowIfNull(dialect);
+        var inner = CreateForGovernance(options, environment, secrets, signer, logger, statePaths);
+        return new GovernanceAuditChainAnchorStore(dialect, inner);
     }
 
     /// <summary>

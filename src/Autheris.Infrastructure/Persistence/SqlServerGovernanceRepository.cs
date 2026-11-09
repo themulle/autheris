@@ -25,29 +25,13 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
     /// <summary>Test seam: drops cached metadata after a test changed rows behind the repository.</summary>
 
     internal void InvalidateMetadataCacheForTesting() => _metadataCache.Clear();
-    private readonly SemaphoreSlim _auditLock = new(1, 1);
-    private volatile bool _isAuditPipelineFaulted = false;
-    public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted || Volatile.Read(ref _auditChainViolation) != null;
-
-    private readonly Channel<AuditLogEntry> _auditChannel;
-    private readonly CancellationTokenSource _auditCts = new();
-    private Task? _auditProcessorTask;
+    public bool IsAuditPipelineFaulted => _governanceRepository.IsAuditPipelineFaulted;
     private int _initialized;
-    private bool _shouldSeed;
-    private string _lastAuditHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
-    private static readonly byte[] ProcessEphemeralAuditHmacKey = RandomNumberGenerator.GetBytes(32);
-    private long _lastAuditSeq;
-    private readonly byte[] _auditHmacKey;
-    private readonly byte[] _auditAnchorKey;
-    private readonly IAuditChainAnchorStore? _auditAnchorStore;
-    private readonly bool _isDevOrTest;
+    private readonly bool _shouldSeed;
     private readonly string? _migrationConnectionString;
     internal string ConnectionString => _connectionString;
     internal string? MigrationConnectionString => _migrationConnectionString;
     private readonly ILogger<SqlServerGovernanceRepository>? _logger;
-    private string? _auditChainViolation;
-    private readonly GatewayOptions? _options;
-    private readonly ICallerContextProvider? _callerContextProvider;
 
     private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
 
@@ -72,8 +56,6 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
 
         _epochValidationService = epochValidationService;
         _logger = logger;
-        _options = options.Value;
-        _callerContextProvider = callerContextProvider;
 
         var connStr = options?.Value?.GovernanceDb?.ConnectionString;
         var transportEnv = environment.EnvironmentName;
@@ -120,117 +102,18 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
             options,
             logger: logger,
             materializationGuard: materializationGuard,
-            auditRecorder: (entry, tx, ct) => tx is not null ? RecordAuditEventAsync(entry, tx, ct) : RecordAuditEventAsync(entry, ct),
-            onTransactionCommitted: OnTransactionCommitted,
-            onTransactionRolledBack: OnTransactionRolledBack,
-            eventBus: eventBus);
+            auditRecorder: null,
+            onTransactionCommitted: null,
+            onTransactionRolledBack: null,
+            eventBus: eventBus,
+            auditAnchorStore: auditAnchorStore,
+            secretProvider: secretProvider,
+            environment: environment,
+            callerContextProvider: callerContextProvider);
 
-        // Bounded channel with backpressure to limit in-flight audit entries
-        var channelOptions = new BoundedChannelOptions(Math.Max(1, options?.Value?.Audit?.QueryAuditChannelCapacity ?? 5_000))
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
-            SingleWriter = false
-        };
-        _auditChannel = Channel.CreateBounded<AuditLogEntry>(channelOptions);
-
-        // Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging
-        byte[]? key = null;
-        var auditSecretRef = options?.Value?.GovernanceDb?.AuditHmacKeyVaultRef;
-        if (secretProvider != null && !string.IsNullOrWhiteSpace(auditSecretRef))
-        {
-            try
-            {
-                key = secretProvider.GetSecretBytes(auditSecretRef);
-            }
-            catch (Exception)
-            {
-                bool isDev = string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
-                if (!isDev)
-                {
-                    throw new InvalidOperationException("Security critical: Failed to load AuditHmacKeyVaultRef from Key Vault in non-development environment.");
-                }
-            }
-        }
-
-        // R-DEP-1: the length is checked here, where the key is used, not by its reference name.
         var envName = environment.EnvironmentName;
         bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
                            string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
-        if (key != null)
-        {
-            Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(key, "The audit HMAC key (AuditHmacKeyVaultRef)", isDevOrTest);
-        }
-
-        if (key == null && secretProvider != null && !string.IsNullOrWhiteSpace(options?.Value?.DataMasking?.HmacSecretKeyVaultRef))
-        {
-            byte[]? masterKey = null;
-            try
-            {
-                masterKey = secretProvider.GetSecretBytes(options.Value.DataMasking.HmacSecretKeyVaultRef);
-            }
-            catch
-            {
-                // Fallback below
-            }
-
-            if (masterKey != null && masterKey.Length > 0)
-            {
-                // R-DEP-1: HKDF does not add entropy; a short master key yields a weak audit key.
-                Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(masterKey, "The HMAC master key (HmacSecretKeyVaultRef)", isDevOrTest);
-            }
-
-            try
-            {
-                if (masterKey != null && masterKey.Length > 0)
-                {
-                    key = HKDF.DeriveKey(
-                        HashAlgorithmName.SHA256,
-                        masterKey,
-                        32,
-                        info: "Autheris:AuditChain:v1"u8.ToArray());
-                }
-            }
-            catch
-            {
-                // Fallback below
-            }
-        }
-
-
-        if (key == null || key.Length == 0)
-        {
-            if (!isDevOrTest)
-            {
-                throw new InvalidOperationException(
-                    "Security critical: No AuditHmacKeyVaultRef or HmacSecretKeyVaultRef configured in non-development environment. Cannot ensure audit log integrity.");
-            }
-
-            // AU-03: Process-ephemeral random key for Dev/Test - static fallback removed
-            key = ProcessEphemeralAuditHmacKey;
-        }
-
-        _auditHmacKey = key;
-
-        _auditAnchorKey = HKDF.DeriveKey(
-            HashAlgorithmName.SHA256,
-            _auditHmacKey,
-            32,
-            info: "Autheris:AuditAnchor:v1"u8.ToArray());
-
-        _isDevOrTest = isDevOrTest;
-
-        // AU-01 & AU-03 are enforced where the anchor store is built (AuditChainAnchorStoreFactory.CreateForGovernance).
-        // Defense in depth: an injected in-memory anchor store never protects a production chain.
-        if (!isDevOrTest && auditAnchorStore is InMemoryAuditChainAnchorStore)
-        {
-            throw new InvalidOperationException(
-                "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
-                "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
-                "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
-        }
-
-        _auditAnchorStore = auditAnchorStore;
 
         // No DDL and no database I/O here: the schema is created by the governance migration runner.
         _shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
@@ -250,14 +133,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
 
         try
         {
-            var (tailHash, tailSeq) = ReadAuditTail(null);
-            if (tailHash != null)
-            {
-                _lastAuditHash = tailHash;
-                _lastAuditSeq = tailSeq;
-            }
-
-            InitializeAuditChainAnchor();
+            _governanceRepository.InitializeAudit();
             if (_shouldSeed)
             {
                 _governanceRepository.SeedInitialCatalog();
@@ -265,9 +141,6 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
 
             // The store serves requests only from here on; a failed initialization leaves it closed.
             _ready = true;
-
-            // AU-12: Background processor starts only after keys and stores are completely initialized
-            _auditProcessorTask = Task.Run(ProcessAuditChannelAsync, CancellationToken.None);
         }
         catch
         {
@@ -365,32 +238,7 @@ public partial class SqlServerGovernanceRepository : IGovernanceRepository, ICon
     {
         if (Interlocked.Exchange(ref _isDisposed, 1) == 1) return;
 
-        try
-        {
-            _auditCts.Cancel();
-        }
-        catch (ObjectDisposedException) { }
-
-        try
-        {
-            if (_auditProcessorTask != null)
-            {
-                await _auditProcessorTask.ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error while draining audit channel during disposal.");
-        }
-
-        try
-        {
-            _auditCts.Dispose();
-        }
-        catch (ObjectDisposedException) { }
-
-        _auditLock.Dispose();
+        await _governanceRepository.DisposeAsync().ConfigureAwait(false);
         GC.SuppressFinalize(this);
     }
 }

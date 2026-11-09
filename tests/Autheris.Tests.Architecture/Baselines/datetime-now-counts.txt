@@ -121,12 +121,10 @@ src/Autheris.Infrastructure/Persistence/IdentityStore.cs|4
 src/Autheris.Infrastructure/Persistence/InMemoryAccessProfileRepository.cs|5
 src/Autheris.Infrastructure/Persistence/InMemoryDbtProposalRepository.cs|1
 src/Autheris.Infrastructure/Persistence/Migrations/GovernanceMigrationRunnerBase.cs|1
-src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Audit.cs|3
 src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.CdcWatermarks.cs|1
 src/Autheris.Infrastructure/Persistence/RecertificationStore.cs|1
 src/Autheris.Infrastructure/Persistence/RightsAndPoliciesStore.cs|1
 src/Autheris.Infrastructure/Persistence/RowFilterEvaluationStore.cs|2
-src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Audit.cs|3
 src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.CdcWatermarks.cs|1
 src/Autheris.Infrastructure/Persistence/TenantRegistryStore.cs|1
 src/Autheris.Infrastructure/Plugins/PluginManager.cs|2
