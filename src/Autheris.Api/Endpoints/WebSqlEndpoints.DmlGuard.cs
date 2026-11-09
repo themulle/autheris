@@ -5,6 +5,8 @@ using System.Text;
 using Autheris.Api.Errors;
 using Autheris.Application.Common;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Sql;
+using Autheris.Domain.Security;
 using Autheris.Domain.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -84,6 +86,15 @@ public static partial class WebSqlEndpoints
         if (statementClass != RequestStatementClass.Write)
         {
             return false;
+        }
+
+        // The read-only marking wins over the scope; without the explicit scope no key is validated or reserved.
+        if (httpContext.User.IsReadOnly() || !httpContext.User.HasScope(TokenAccessScope.WriteScope))
+        {
+            await WriteWebSqlErrorAsync(httpContext, new WebSqlPolicyException(
+                "This token only permits read access; DML statements are rejected.",
+                WebSqlPolicyException.ReadOnlyTokenCode), logger, ct);
+            return true;
         }
 
         var callerIdentity = EndpointSecurity.GetCallerIdentity(httpContext);

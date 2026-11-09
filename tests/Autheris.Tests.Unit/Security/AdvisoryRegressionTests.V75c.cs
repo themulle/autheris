@@ -38,7 +38,7 @@ public sealed partial class AdvisoryRegressionTests
                 ctx.Request.Headers["Idempotency-Key"] = key;
             }
 
-            ctx.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "user_1"), new Claim("tenant_id", "tenant_a")], "Test"));
+            ctx.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "user_1"), new Claim("tenant_id", "tenant_a"), new Claim("scp", "Sql.Write")], "Test"));
             ctx.Response.Body = new MemoryStream();
             await WebSqlEndpoints.HandleWebSqlRequest(ctx, sql, Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { AllowDml = true } }), NullLoggerFactory.Instance);
             return ctx.Response.StatusCode;

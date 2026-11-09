@@ -9,6 +9,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.Infrastructure.Idempotency;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,7 +25,7 @@ public sealed class WebSqlDmlIdempotencyTests
     private const string Insert = "INSERT INTO t (a) VALUES (1)";
 
     private static DefaultHttpContext Ctx(string sql, IIdempotencyStore? store, string? key, string path = "/api/v1/sql",
-        string sub = "user_1", string tenant = "tenant_a", bool authenticated = true)
+        string sub = "user_1", string tenant = "tenant_a", bool authenticated = true, string? scope = "Sql.Write", bool readOnly = false)
     {
         var services = new ServiceCollection();
         if (store != null)
@@ -49,8 +50,19 @@ public sealed class WebSqlDmlIdempotencyTests
             context.Request.Headers["X-Trino-User"] = sub;
         }
 
+        var identity = new ClaimsIdentity([new Claim("sub", sub), new Claim("tenant_id", tenant)], "Test");
+        if (scope != null)
+        {
+            identity.AddClaim(new Claim("scp", scope));
+        }
+
+        if (readOnly)
+        {
+            TokenAccessScope.MarkReadOnly(identity);
+        }
+
         context.User = authenticated
-            ? new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", sub), new Claim("tenant_id", tenant)], "Test"))
+            ? new ClaimsPrincipal(identity)
             : new ClaimsPrincipal(new ClaimsIdentity([new Claim("tenant_id", tenant)], "Test"));
         context.Response.Body = new MemoryStream();
         return context;
@@ -220,5 +232,26 @@ public sealed class WebSqlDmlIdempotencyTests
         (await Run(Ctx(Insert, store, "   "))).Status.ShouldBe(400);
         (await Run(Ctx(Insert, store, "a\u007fb"))).Status.ShouldBe(400);
         (await Run(Ctx(Insert, store, "a\tb"))).Status.ShouldBe(400);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("Sql.Read", false)]
+    [InlineData("Sql.Write", true)]
+    public async Task Caller_without_write_scope_or_read_only_never_reserves_a_key(string? scope, bool readOnly)
+    {
+        var store = Substitute.For<IIdempotencyStore>();
+        var ctx = Ctx(Insert, store, key: null, scope: scope, readOnly: readOnly);
+        var (status, sql) = await Run(ctx);
+        status.ShouldBe(403);
+        ReadBody(ctx).ShouldContain("SQL_POLICY_VIOLATION"); // the shared error mapper answers a policy refusal with this code
+        store.ReceivedCalls().ShouldBeEmpty();
+        ExecutorCalls(sql).ShouldBe(0);
+    }
+
+    private static string ReadBody(DefaultHttpContext ctx)
+    {
+        ctx.Response.Body.Position = 0;
+        return new StreamReader(ctx.Response.Body).ReadToEnd();
     }
 }
