@@ -111,7 +111,7 @@ public static class GatewaySqlEngineServiceExtensions
             services.AddSingleton<ProcedureDefinitionLoader>();
             services.AddSingleton<ProcedureConnectionProvider>();
             services.AddScoped<StoredProcedureCatalogValidator>();
-            services.AddSingleton<IProcedureInvoker, MssqlProcedureInvoker>();
+            services.AddSingleton<IProcedureInvoker, ProcedureInvoker>();
             services.AddSingleton<IProcedureRowScopeResolver, SqlProcedureRowScopeResolver>();
             services.AddSingleton<ProcedureDenialAuditLimiter>();
             services.AddScoped<IProcedureExecutionService, GovernedProcedureExecutionService>();

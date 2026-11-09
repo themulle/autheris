@@ -485,7 +485,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         new("sess-m17", "svc-agent", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-5-21-AGENT-USER");
 
     private static GatewayMcpQueryExecutor CreateMcpExecutor(IGatewayExecutionService executionService) =>
-        new(Substitute.For<IRequestExecutorProvider>(), executionService, NullLogger<GatewayMcpQueryExecutor>.Instance);
+        new(Substitute.For<IRequestExecutorProvider>(), executionService, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100));
 
     private static void AssertStructuredError(string json, string expectedCode)
     {

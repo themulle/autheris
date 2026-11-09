@@ -48,7 +48,6 @@ public sealed class TableIdentifierConsistencyTests
             ResultTable: "dbo.orders",
             ClearedResultColumns: [],
             RequiredRoles: [],
-            AllowDynamicSql: false,
             TimeoutSeconds: 30)
         {
             ReferencedTables = ["dbo.orders", "dbo.customers"]

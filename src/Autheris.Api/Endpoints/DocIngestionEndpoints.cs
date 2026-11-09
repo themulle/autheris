@@ -14,9 +14,12 @@ using Autheris.Application.Events;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Events;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Headless REST Ingestion API for multi-app documentation bundles,
@@ -31,6 +34,7 @@ public static class DocIngestionEndpoints
             string appId,
             HttpRequest request,
             IUniversalDocStore docStore,
+            IOptions<DocsOptions> docsOptions,
             CancellationToken ct) =>
         {
             // Cluster administrators publish official documentation; every other caller's bundle belongs to the caller's tenant
@@ -40,13 +44,14 @@ public static class DocIngestionEndpoints
                 return denied!;
             }
 
+            var maxRawSize = docsOptions.Value.MaxBundleBytes;
+
             if (!request.HasFormContentType)
             {
                 // Raw stream upload
-                const long maxRawSize = 50 * 1024 * 1024;
                 if (request.ContentLength > maxRawSize)
                 {
-                    return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Bundle archive exceeds maximum permitted size of 50 MB.", request.HttpContext);
+                    return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, $"Bundle archive exceeds maximum permitted size of {maxRawSize / (1024 * 1024)} MB.", request.HttpContext);
                 }
 
                 using var ms = new MemoryStream();
@@ -58,7 +63,7 @@ public static class DocIngestionEndpoints
                     totalBytes += bytesRead;
                     if (totalBytes > maxRawSize)
                     {
-                        return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Bundle archive exceeds maximum permitted size of 50 MB.", request.HttpContext);
+                        return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, $"Bundle archive exceeds maximum permitted size of {maxRawSize / (1024 * 1024)} MB.", request.HttpContext);
                     }
                     await ms.WriteAsync(buffer.AsMemory(0, bytesRead), ct).ConfigureAwait(false);
                 }
@@ -80,10 +85,10 @@ public static class DocIngestionEndpoints
                 return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "No documentation bundle file found in the request.", request.HttpContext);
             }
 
-            // Guard against oversized archives (e.g. 50 MB limit)
-            if (file.Length > 50 * 1024 * 1024)
+            // Guard against oversized archives
+            if (file.Length > maxRawSize)
             {
-                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Bundle archive exceeds maximum permitted size of 50 MB.", request.HttpContext);
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, $"Bundle archive exceeds maximum permitted size of {maxRawSize / (1024 * 1024)} MB.", request.HttpContext);
             }
 
             await using var stream = file.OpenReadStream();
@@ -292,30 +297,38 @@ internal static class DocEndpointAccess
         try
         {
             authorSid = EndpointSecurity.GetCallerIdentity(httpContext);
-            if (EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User))
+
+            string? tenant = null;
+            try
             {
-                return true;
+                tenant = EndpointSecurity.GetRequestTenant(httpContext).Value;
+            }
+            catch (Exception ex) when (ex is SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
+            {
+                // A malformed tenant claim or a rejected cross-tenant request fails closed.
             }
 
-            var tenant = EndpointSecurity.GetRequestTenant(httpContext).Value;
-            if (string.IsNullOrWhiteSpace(tenant))
+            var caller = new DocCaller(
+                IsCanonicalClusterAdmin: EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User),
+                IsGovernanceAdmin: GatewayPolicies.HasRole(httpContext.User, GatewayRole.GovernanceAdmin),
+                TenantId: tenant,
+                AuthorSid: authorSid,
+                HasSession: httpContext.User.Identity?.IsAuthenticated ?? false,
+                IsReadOnlySession: false);
+
+            var writer = DocAccessPolicy.ResolveWriter(caller, appId, out var policyDenial);
+            if (writer is null)
             {
-                denied = Forbidden("Depositing documentation requires a tenant-bound session.");
+                denied = Forbidden(policyDenial.Reason);
                 return false;
             }
 
-            if (IsGlobalApplication(appId))
-            {
-                denied = Forbidden("Depositing documentation for global application requires ClusterAdmin role.");
-                return false;
-            }
-
-            tenantId = tenant.Trim();
+            tenantId = writer.TenantId;
+            authorSid = writer.AuthorSid;
             return true;
         }
         catch (Exception ex) when (ex is SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
-            // A malformed tenant claim or a rejected cross-tenant request fails closed.
             authorSid = null;
             denied = Forbidden("Depositing documentation requires a tenant-bound session.");
             return false;
@@ -327,7 +340,25 @@ internal static class DocEndpointAccess
     {
         try
         {
-            return DocAccessScope.ForTenant(EndpointSecurity.GetRequestTenant(httpContext).Value);
+            string? tenant = null;
+            try
+            {
+                tenant = EndpointSecurity.GetRequestTenant(httpContext).Value;
+            }
+            catch (Exception ex) when (ex is SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
+            {
+                return DocAccessScope.OfficialOnly;
+            }
+
+            var caller = new DocCaller(
+                IsCanonicalClusterAdmin: EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User),
+                IsGovernanceAdmin: GatewayPolicies.HasRole(httpContext.User, GatewayRole.GovernanceAdmin),
+                TenantId: tenant,
+                AuthorSid: EndpointSecurity.GetCallerIdentity(httpContext),
+                HasSession: httpContext.User.Identity?.IsAuthenticated ?? false,
+                IsReadOnlySession: false);
+
+            return DocAccessPolicy.ResolveReader(caller);
         }
         catch (Exception ex) when (ex is SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
         {
@@ -336,9 +367,7 @@ internal static class DocEndpointAccess
     }
 
     public static bool IsGlobalApplication(string? appId) =>
-        string.Equals(appId, "autheris", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(appId, "global", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(appId, "system", StringComparison.OrdinalIgnoreCase);
+        DocumentRules.IsReservedAppId(appId);
 
     /// <summary>Never discloses the server's absolute file system path: the result carries a store-relative path only.</summary>
     public static DepositDocResult Scrub(DepositDocResult result) =>

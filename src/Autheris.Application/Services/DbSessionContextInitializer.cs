@@ -6,7 +6,6 @@ using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Procedures.Services;
 using Autheris.Domain.Common;
 
 /// <summary>
@@ -16,7 +15,7 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
 {
     public static DatabaseDialect ResolveDialect(string? provider)
     {
-        if (ProcedureConnectionProvider.TryResolveDialect(provider, out var dialect))
+        if (DataSourceProvider.TryResolveDialect(provider, out var dialect))
         {
             return dialect;
         }
