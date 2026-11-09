@@ -55,23 +55,24 @@ public sealed class SecretKeyLengthRDep1Tests
     }
 
     [Fact]
-    public async Task ForwardAuthSecret_FromKeyVaultRef_IsCheckedAtStartup()
+    public void ForwardAuthSecret_FromKeyVaultRef_IsCheckedAtStartup()
     {
-        var options = Options.Create(new GatewayOptions
+        var options = new GatewayOptions
         {
             Authentication = new AuthenticationOptions
             {
-                ForwardAuth = new ForwardAuthOptions { Enabled = true, SharedSecretKeyVaultRef = "kv-ref-7" }
+                Mode = AuthenticationMode.Upstream,
+                ForwardAuth = new ForwardAuthOptions { Enabled = true, SharedSecretKeyVaultRef = "kv-ref-7", TrustedProxies = ["10.0.0.1"] }
             }
-        });
+        };
 
-        var shortValidator = new ForwardAuthSecretStartupValidator(options, Env(Environments.Production), Provider("too-short"));
-        var longValidator = new ForwardAuthSecretStartupValidator(options, Env(Environments.Production), Provider(new string('k', 32)));
-        var devValidator = new ForwardAuthSecretStartupValidator(options, Env(Environments.Development), Provider("too-short"));
+        var shortValidator = new Autheris.Api.Configuration.Validation.AuthenticationModeOptionsValidator(Env(Environments.Production), Provider("too-short"));
+        var longValidator = new Autheris.Api.Configuration.Validation.AuthenticationModeOptionsValidator(Env(Environments.Production), Provider(new string('k', 32)));
+        var devValidator = new Autheris.Api.Configuration.Validation.AuthenticationModeOptionsValidator(Env(Environments.Development), Provider("too-short"));
 
-        await Should.ThrowAsync<InvalidOperationException>(() => shortValidator.StartAsync(CancellationToken.None));
-        await Should.NotThrowAsync(() => longValidator.StartAsync(CancellationToken.None));
-        await Should.NotThrowAsync(() => devValidator.StartAsync(CancellationToken.None));
+        shortValidator.Validate(null, options).Failed.ShouldBeTrue();
+        longValidator.Validate(null, options).Succeeded.ShouldBeTrue();
+        devValidator.Validate(null, options).Succeeded.ShouldBeTrue();
     }
 
     [Theory]

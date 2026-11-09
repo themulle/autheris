@@ -8,10 +8,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Common;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Internal;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TrinoSqlEngine.Ast.Emit;
 
@@ -163,5 +165,41 @@ public sealed partial class GovernedSqlExecutor
             ["padded_count"] = o.PaddedCount,
             ["age_seconds"] = o.AgeSeconds
         }).ToList();
+    }
+
+    internal static void AddDatabricksAuditFields(
+        Dictionary<string, object?> fields,
+        Autheris.Domain.Options.DatabricksDataSourceOptions db,
+        TenantId tenantId,
+        IKeyVaultSecretProvider? secrets = null,
+        IHostEnvironment? environment = null,
+        ILogger? logger = null)
+    {
+        fields["auth.mode"] = db.Auth.Mode.ToString();
+        if (db.Auth.Mode == Autheris.Domain.Options.DatabricksAuthMode.OAuthM2M)
+        {
+            var clientId = db.Auth.Tenants.TryGetValue(tenantId.Value, out var tp) && !string.IsNullOrWhiteSpace(tp.ClientId)
+                ? tp.ClientId
+                : db.Auth.ClientId;
+            if (!string.IsNullOrWhiteSpace(clientId))
+            {
+                fields["auth.clientId"] = clientId;
+            }
+        }
+        else if (db.Auth.Mode == Autheris.Domain.Options.DatabricksAuthMode.Pat)
+        {
+            var patRef = db.Auth.Tenants.TryGetValue(tenantId.Value, out var tp) && !string.IsNullOrWhiteSpace(tp.PatRef)
+                ? tp.PatRef
+                : db.Auth.PatRef;
+            if (!string.IsNullOrWhiteSpace(patRef))
+            {
+                var pat = Autheris.Application.Security.SecretReferenceResolver.Resolve(secrets, patRef, environment, allowPlaintextInDevelopment: false, logger, "Databricks PAT");
+                if (!string.IsNullOrWhiteSpace(pat))
+                {
+                    var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(pat)));
+                    fields["auth.tokenFingerprint"] = hash[..16].ToLowerInvariant();
+                }
+            }
+        }
     }
 }

@@ -153,6 +153,11 @@ public static partial class GatewayServiceCollectionExtensions
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<DuckDbOlapOptionsValidator>>()));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(_ => new ReadPathSwitchOptionsValidator(configuration));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
+            new AuthenticationModeOptionsValidator(
+                environment,
+                sp.GetService<Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider>(),
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<AuthenticationModeOptionsValidator>>()));
+        services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new BulkStreamSigningKeyOptionsValidator(
                 environment,
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<BulkStreamSigningKeyOptionsValidator>>()));

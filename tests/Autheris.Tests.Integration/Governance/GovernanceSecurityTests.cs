@@ -107,7 +107,7 @@ public class GovernanceSecurityTests : IDisposable
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
 
-        var ownerSid = new Sid("S-1-5-21-DATAOWNER-1");
+        var ownerSid = new Sid("S-1-5-21-1000-1000-1000-1001");
         var granteeSid = new Sid("S-1-5-21-GRANTEE-2");
 
         var consent = await _repository.CreateConsentAsync(new Consent
@@ -202,7 +202,7 @@ public class GovernanceSecurityTests : IDisposable
         meta.ShouldNotBeNull();
 
         var requesterSid = new Sid("S-1-5-21-REQ-SM");
-        var approverSid = new Sid("S-1-5-21-DATAOWNER-1");
+        var approverSid = new Sid("S-1-5-21-1000-1000-1000-1001");
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
@@ -265,7 +265,7 @@ public class GovernanceSecurityTests : IDisposable
         metaSales.ShouldNotBeNull();
 
         // DATAOWNER-1 owns finance_table_1 (seeded). Let's submit requests for finance and sales.
-        var ownerFinance = new Sid("S-1-5-21-DATAOWNER-1");
+        var ownerFinance = new Sid("S-1-5-21-1000-1000-1000-1001");
         var requester = new Sid("S-1-5-21-SOME-USER");
 
         var reqFinance = await _repository.CreateConsentRequestAsync(new ConsentRequest
@@ -440,7 +440,7 @@ public class GovernanceSecurityTests : IDisposable
     public async Task IsAuthorizedApprover_WhenDirectOwnerOrDelegatedOrUnauthorized()
     {
         var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var directOwnerSid = new Sid("S-1-5-21-DATAOWNER-1");
+        var directOwnerSid = new Sid("S-1-5-21-1000-1000-1000-1001");
         var delegateSid = new Sid("S-1-5-21-DELEGATE-TEST");
         var unrelatedSid = new Sid("S-1-5-21-RANDOM-USER");
 
@@ -478,7 +478,7 @@ public class GovernanceSecurityTests : IDisposable
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
 
-        var directOwnerSid = new Sid("S-1-5-21-DATAOWNER-1");
+        var directOwnerSid = new Sid("S-1-5-21-1000-1000-1000-1001");
         var delegateSid = new Sid("S-1-5-21-DELEGATE-APPROVE");
         var requesterSid = new Sid("S-1-5-21-REQUESTER-DELEGATE");
 
@@ -663,8 +663,8 @@ public class GovernanceSecurityTests : IDisposable
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
 
-        // The requester is also the owner of the table (S-1-5-21-DATAOWNER-1)
-        var ownerAndRequesterSid = new Sid("S-1-5-21-DATAOWNER-1");
+        // The requester is also the owner of the table (S-1-5-21-1000-1000-1000-1001)
+        var ownerAndRequesterSid = new Sid("S-1-5-21-1000-1000-1000-1001");
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
@@ -697,7 +697,7 @@ public class GovernanceSecurityTests : IDisposable
         meta.ShouldNotBeNull();
 
         var requesterSid = new Sid("S-1-5-21-REQ-1");
-        var approverSid = new Sid("S-1-5-21-DATAOWNER-1");
+        var approverSid = new Sid("S-1-5-21-1000-1000-1000-1001");
 
         // Request belongs to tenant-alpha
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
@@ -726,7 +726,7 @@ public class GovernanceSecurityTests : IDisposable
     [Fact]
     public async Task RejectConsentRequest_WithShortReason_ThrowsInvalidArgument()
     {
-        var approverSid = new Sid("S-1-5-21-DATAOWNER-1");
+        var approverSid = new Sid("S-1-5-21-1000-1000-1000-1001");
         var accessor = CreateAccessor(approverSid);
 
         var ex = await Should.ThrowAsync<GraphQLException>(async () =>
@@ -745,7 +745,7 @@ public class GovernanceSecurityTests : IDisposable
         meta.ShouldNotBeNull();
 
         var requesterSid = new Sid("S-1-5-21-REQ-2");
-        var approverSid = new Sid("S-1-5-21-DATAOWNER-1");
+        var approverSid = new Sid("S-1-5-21-1000-1000-1000-1001");
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
@@ -776,7 +776,7 @@ public class GovernanceSecurityTests : IDisposable
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
 
-        var ownerSid = new Sid("S-1-5-21-DATAOWNER-1");
+        var ownerSid = new Sid("S-1-5-21-1000-1000-1000-1001");
         var granteeSid = new Sid("S-1-5-21-GRANTEE-3");
 
         var consent = await _repository.CreateConsentAsync(new Consent
@@ -966,7 +966,7 @@ public class GovernanceSecurityTests : IDisposable
 
         // The data owner may not bypass the change board via GraphQL / direct repository call.
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            _repository.ApproveConsentRequestStepAsync(req.Id, new Sid("S-1-5-21-DATAOWNER-1")));
+            _repository.ApproveConsentRequestStepAsync(req.Id, new Sid("S-1-5-21-1000-1000-1000-1001")));
 
         (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
     }

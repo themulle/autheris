@@ -112,7 +112,8 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     private static ClaimsPrincipal User(string tenant, params string[] roles) =>
         new(new ClaimsIdentity(
             new[] { new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1-E2E"), new Claim("tenant_id", tenant) }
-                .Concat(roles.Select(r => new Claim(ClaimTypes.Role, r))), "Test"));
+                .Concat(roles.Select(r => new Claim(ClaimTypes.Role, r)))
+                .Concat(roles.Contains("Writer") ? [new Claim("scp", "Sql.Write")] : []), "Test"));
 
     private async Task<GovernedSqlResult> QueryAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? parameters = null, string[]? roles = null)
     {

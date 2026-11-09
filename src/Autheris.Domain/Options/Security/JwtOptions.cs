@@ -13,10 +13,28 @@ public sealed class AuthenticationOptions
     public bool IsKerberosConfigured => EnableKerberos;
     public bool EnableTestAuthHandler { get; init; }
 
+    /// <summary>
+    /// Deployment mode. Unset (<c>Unset</c>) behaves as <c>Direct</c> but is rejected
+    /// at startup when <c>ForwardAuth:Enabled</c> is true: a ForwardAuth deployment must name its mode explicitly.
+    /// </summary>
+    public AuthenticationMode Mode { get; init; } = AuthenticationMode.Unset;
+
+    /// <summary>The mode that applies to requests; an unset mode never selects ForwardAuth.</summary>
+    public AuthenticationMode EffectiveMode => Mode == AuthenticationMode.Unset ? AuthenticationMode.Direct : Mode;
+
     public BasicAuthOptions BasicAuth { get; init; } = new();
     public EntraIdAuthOptions EntraId { get; init; } = new();
     public AdfsAuthOptions Adfs { get; init; } = new();
     public ForwardAuthOptions ForwardAuth { get; init; } = new();
+}
+
+/// <summary>How callers reach Autheris: with their own credential, through a trusted upstream proxy, or both (never mixed per request).</summary>
+public enum AuthenticationMode
+{
+    Unset = 0,
+    Direct = 1,
+    Upstream = 2,
+    Both = 3
 }
 
 public sealed class ForwardAuthOptions
@@ -51,11 +69,37 @@ public sealed class ForwardAuthOptions
     public IReadOnlyList<string> GetEffectiveAllowedRoles() => AllowedRoles ?? (IReadOnlyList<string>)DefaultAllowedRoles;
 
     /// <summary>
-    /// RR-L2-02: When false (default), every group from the groups header is namespaced as
-    /// <c>S-1-5-21-FORWARD-GRP-&lt;name&gt;</c>, including values that look like Windows SIDs, so a header can never
-    /// impersonate a real AD group SID used in consents. Enable only if the upstream IdP asserts verified SIDs.
+    /// Header carrying the user SID asserted by the upstream proxy. Honoured only from a trusted ForwardAuth peer with
+    /// <c>TrustUpstreamSids</c> and only when the value is a canonical SID; otherwise it is ignored.
     /// </summary>
-    public bool TrustUpstreamGroupSids { get; init; } = false;
+    public string? UserSidHeader { get; init; }
+
+    /// <summary>
+    /// When false (default), raw SIDs from upstream headers are never accepted. Replaces the legacy <c>TrustUpstreamGroupSids</c> key.
+    /// </summary>
+    public bool? TrustUpstreamSids { get; init; }
+
+    /// <summary>Legacy key of <c>TrustUpstreamSids</c>, bound as an alias for one release (startup warns; conflicting values fail).</summary>
+    public bool? TrustUpstreamGroupSids { get; init; }
+
+    /// <summary>The effective upstream SID trust: the new key, else the legacy alias, else false.</summary>
+    public bool IsUpstreamSidTrusted => TrustUpstreamSids ?? TrustUpstreamGroupSids ?? false;
+
+    private string[]? _identityHeaderNames;
+    private HashSet<string>? _allowedRoleSet;
+    private byte[]? _sharedSecretDigest;
+
+    /// <summary>Configured, non-blank identity header names (user, email, groups, roles, tenant, user SID); computed once from options only.</summary>
+    public IReadOnlyList<string> IdentityHeaderNames => _identityHeaderNames ??=
+        [.. new[] { UserHeader, EmailHeader, GroupsHeader, RolesHeader, TenantHeader, UserSidHeader }.Where(h => !string.IsNullOrWhiteSpace(h))!];
+
+    /// <summary>The effective allowed roles as a case-insensitive set, built once.</summary>
+    public IReadOnlySet<string> AllowedRoleSet => _allowedRoleSet ??= new HashSet<string>(GetEffectiveAllowedRoles(), StringComparer.OrdinalIgnoreCase);
+
+    // SHA-256 of the plain shared secret (UTF-8), computed once; null when no plain secret is configured.
+    public byte[]? SharedSecretDigest => string.IsNullOrWhiteSpace(SharedSecret)
+        ? null
+        : _sharedSecretDigest ??= System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(SharedSecret));
 
     /// <summary>
     /// SEC H-1: When true, the proxy-asserted tenant header (X-Forwarded-Tenant) is honored, provided it is in AllowedTenantIds.
