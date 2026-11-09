@@ -27,7 +27,8 @@ public sealed class ReadOnlyTokenMiddleware
             "/api/v1/sql",
             "/api/sql",
             "/api/v1/queries",
-            "/api/v1/export/arrow"
+            "/api/v1/export/arrow",
+            "/v1/statement"
         ];
     }
 
@@ -44,11 +45,13 @@ public sealed class ReadOnlyTokenMiddleware
 
     private bool IsPermitted(HttpRequest request)
     {
-        // SG-17: When ext_authz or reverse proxies probe with GET/HEAD/OPTIONS, check original method headers
+        // SG-17: When ext_authz or reverse proxies probe with GET/HEAD/OPTIONS, check original method headers.
+        // #484: DELETE is accepted only on statement cancel paths.
         if (request.Headers.TryGetValue("X-Original-Method", out var origMethod) && !string.IsNullOrWhiteSpace(origMethod))
         {
             var om = origMethod.ToString().Trim().ToUpperInvariant();
-            if (om is not "GET" and not "HEAD" and not "OPTIONS")
+            if (om is not "GET" and not "HEAD" and not "OPTIONS" &&
+                !(om is "DELETE" && IsStatementCancelPath(request.Path.Value)))
             {
                 return false;
             }
@@ -56,7 +59,8 @@ public sealed class ReadOnlyTokenMiddleware
         if (request.Headers.TryGetValue("X-Forwarded-Method", out var fwdMethod) && !string.IsNullOrWhiteSpace(fwdMethod))
         {
             var fm = fwdMethod.ToString().Trim().ToUpperInvariant();
-            if (fm is not "GET" and not "HEAD" and not "OPTIONS")
+            if (fm is not "GET" and not "HEAD" and not "OPTIONS" &&
+                !(fm is "DELETE" && IsStatementCancelPath(request.Path.Value)))
             {
                 return false;
             }
@@ -69,6 +73,11 @@ public sealed class ReadOnlyTokenMiddleware
             return true;
         }
 
+        if (HttpMethods.IsDelete(request.Method))
+        {
+            return IsStatementCancelPath(request.Path.Value);
+        }
+
         if (!HttpMethods.IsPost(request.Method))
         {
             return false;
@@ -78,6 +87,14 @@ public sealed class ReadOnlyTokenMiddleware
         // only query executions on sub-paths like /api/v1/queries/{name} are allowed.
         if (request.Path.Equals("/api/v1/queries", StringComparison.OrdinalIgnoreCase) ||
             request.Path.Equals("/api/v1/queries/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // #484: POST to exactly /v1/statement or /v1/statement/ only; sub-paths stay 403.
+        if (request.Path.StartsWithSegments("/v1/statement", StringComparison.OrdinalIgnoreCase) &&
+            !request.Path.Equals("/v1/statement", StringComparison.OrdinalIgnoreCase) &&
+            !request.Path.Equals("/v1/statement/", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -104,6 +121,88 @@ public sealed class ReadOnlyTokenMiddleware
     }
 
     private const string GovernanceQueryAnalyzePath = "/api/v1/governance/queries/analyze";
+    private const string ApiV1SqlStatementsPrefix = "/api/v1/sql/statements";
+    private const string ApiSqlStatementsPrefix = "/api/sql/statements";
+    private const string V1StatementQueuedPrefix = "/v1/statement/queued";
+    private const string V1StatementExecutingPrefix = "/v1/statement/executing";
+
+    /// <summary>
+    /// #484: DELETE is permitted only on statement cancel paths:
+    /// raw path equals /api/v1/sql/statements/{seg}, /api/sql/statements/{seg},
+    /// or /v1/statement/(queued|executing)/{seg}/{seg}, where each seg is non-empty,
+    /// has no '/', ';', '%2F', '.' or '..'.
+    /// </summary>
+    private static bool IsStatementCancelPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
+        if (TryGetSingleSegmentRemainder(path, ApiV1SqlStatementsPrefix, out var seg1) ||
+            TryGetSingleSegmentRemainder(path, ApiSqlStatementsPrefix, out seg1))
+        {
+            return IsValidStatementSegment(seg1);
+        }
+
+        if (TryGetTwoSegmentRemainder(path, V1StatementQueuedPrefix, out var qSeg1, out var qSeg2) ||
+            TryGetTwoSegmentRemainder(path, V1StatementExecutingPrefix, out qSeg1, out qSeg2))
+        {
+            return IsValidStatementSegment(qSeg1) && IsValidStatementSegment(qSeg2);
+        }
+
+        return false;
+    }
+
+    private static bool TryGetSingleSegmentRemainder(string path, string prefix, out ReadOnlySpan<char> segment)
+    {
+        if (path.Length > prefix.Length + 1 &&
+            path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+            path[prefix.Length] == '/')
+        {
+            segment = path.AsSpan(prefix.Length + 1);
+            return true;
+        }
+
+        segment = default;
+        return false;
+    }
+
+    private static bool TryGetTwoSegmentRemainder(string path, string prefix, out ReadOnlySpan<char> seg1, out ReadOnlySpan<char> seg2)
+    {
+        if (path.Length > prefix.Length + 1 &&
+            path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+            path[prefix.Length] == '/')
+        {
+            var remainder = path.AsSpan(prefix.Length + 1);
+            var slashIndex = remainder.IndexOf('/');
+            if (slashIndex > 0)
+            {
+                seg1 = remainder[..slashIndex];
+                seg2 = remainder[(slashIndex + 1)..];
+                return true;
+            }
+        }
+
+        seg1 = default;
+        seg2 = default;
+        return false;
+    }
+
+    private static bool IsValidStatementSegment(ReadOnlySpan<char> seg)
+    {
+        if (seg.IsEmpty ||
+            seg.IndexOfAny('/', ';') >= 0 ||
+            seg.Contains("%2F", StringComparison.OrdinalIgnoreCase) ||
+            seg.SequenceEqual(".") ||
+            seg.SequenceEqual(".."))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private const string ProceduresPrefix = "/api/v1/procedures";
 
     /// <summary>
