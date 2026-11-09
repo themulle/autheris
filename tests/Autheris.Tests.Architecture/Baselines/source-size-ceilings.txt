@@ -1,5 +1,5 @@
 # ARCH-MNT-02: src files over 1000 lines. Format: path|ceiling. Ceilings may only fall.
-src/Autheris.Application/Governance/Services/AccessPlanningService.cs|1061
+src/Autheris.Application/Governance/Services/AccessPlanningService.cs|1052
 src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs|1319
 src/Autheris.Application/Procedures/Services/GovernedProcedureExecutionService.cs|1132
 src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs|1977

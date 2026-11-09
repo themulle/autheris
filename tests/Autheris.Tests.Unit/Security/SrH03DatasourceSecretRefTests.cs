@@ -45,7 +45,7 @@ public sealed class SrH03DatasourceSecretRefTests
     }
 
     private static CatalogDiscoveryService Discovery(IKeyVaultSecretProvider provider, IOpenApiIngestionService ingestion) =>
-        new(Substitute.For<ITableMetadataRepository>(), Substitute.For<IAuditLogRepository>(),
+        new(Substitute.For<ITableMetadataRepository>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions()), null,
             provider, ingestion, Substitute.For<ICatalogSearchEngine>(), NullLogger<CatalogDiscoveryService>.Instance);
 
@@ -120,7 +120,7 @@ public sealed class SrH03DatasourceSecretRefTests
     [Fact]
     public async Task SR_H_03_AccessPlanning_ForeignSecretRef_IsRejected()
     {
-        var service = new AccessPlanningService(Substitute.For<IAuditLogRepository>(), Substitute.For<ITableMetadataRepository>(),
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
             Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "ConnectionStrings:Default"));
@@ -131,7 +131,7 @@ public sealed class SrH03DatasourceSecretRefTests
     [Fact]
     public async Task SR_H_03_AccessPlanning_OwnNamespaceRef_IsAccepted()
     {
-        var service = new AccessPlanningService(Substitute.For<IAuditLogRepository>(), Substitute.For<ITableMetadataRepository>(),
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
             Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "vault://datasources/telemetry/crane/auth_secret"));
@@ -183,7 +183,7 @@ public sealed class SrH03DatasourceSecretRefTests
         factory.CreateClient("DeclarativeHttp").Returns(new HttpClient(new CapturingHandler(r => sentKey = r.Headers.TryGetValues("X-Api-Key", out var v) ? v.First() : null)));
         var claims = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
             [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "a"), new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "Admin"), new System.Security.Claims.Claim("tenant_id", "t")], "T"));
-        var service = new DatasourceTestingService(repo, factory, Substitute.For<IAuditLogRepository>(), secrets, Env("Development"),
+        var service = new DatasourceTestingService(repo, factory, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), secrets, Env("Development"),
             NullLogger<DatasourceTestingService>.Instance);
 
         await service.TestDatasourceAsync("crm.dbo.customers", new DatasourceTestRequest(), claims);

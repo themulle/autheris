@@ -216,7 +216,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
         // Catalog Discovery Search
         var discoveryService = new CatalogDiscoveryService(
             metaRepo,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance),
             Options.Create(new GatewayOptions()),
             visibilityService: visibility,
             procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService));

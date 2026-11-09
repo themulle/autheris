@@ -96,6 +96,12 @@ public static class AuditEventTypes
 
     // Plan 9: Datasources & Async Jobs
     public const string DatasourceTested = "DATASOURCE_TESTED";
+    public const string DatasourceTestRequested = "DATASOURCE_TEST_REQUESTED";
+    public const string DatasourceRegistered = "DATASOURCE_REGISTERED";
+    public const string AdminApplyAccess = "ADMIN_APPLY_ACCESS";
+    public const string AdminRegisterDatasource = "ADMIN_REGISTER_DATASOURCE";
+    public const string AdminSetDatasetState = "ADMIN_SET_DATASET_STATE";
+    public const string WebSqlDmlIntent = "WEBSQL_DML_INTENT";
     public const string AsyncJobSubmitted = "ASYNC_JOB_SUBMITTED";
     public const string AsyncJobCompleted = "ASYNC_JOB_COMPLETED";
     public const string AsyncJobDownloaded = "ASYNC_JOB_DOWNLOADED";

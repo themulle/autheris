@@ -13,6 +13,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Domain.Audit;
 using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Grants;
@@ -45,7 +46,7 @@ public class AccessPlanningService : IAccessPlanningService
 
     private readonly ITableMetadataRepository _tableRepo;
     private readonly IRebacStore _rebacStore;
-    private readonly IAuditLogRepository _auditRepo;
+    private readonly IAuditWriter _audit;
     private readonly ITotpVerificationService? _totpService;
     private readonly ITotpSecretStore? _totpSecretStore;
     private readonly IKeyVaultSecretProvider? _secretProvider;
@@ -127,7 +128,7 @@ public class AccessPlanningService : IAccessPlanningService
     ];
 
     public AccessPlanningService(
-        IAuditLogRepository auditLogRepository,
+        IAuditWriter auditWriter,
         ITableMetadataRepository? tableMetadataRepository = null,
         IRebacStore? rebacStore = null,
         ITotpVerificationService? totpVerificationService = null,
@@ -149,7 +150,7 @@ public class AccessPlanningService : IAccessPlanningService
     {
         _rowFilterEvaluationAdmin = rowFilterEvaluationAdmin;
         _grantPolicy = grantPolicy ?? new GrantPolicy();
-        _auditRepo = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
+        _audit = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
         _rebacStore = rebacStore ?? new NullRebacStore();
         _totpService = totpVerificationService;
@@ -346,6 +347,19 @@ public class AccessPlanningService : IAccessPlanningService
             tuples.Add(new RebacTuple(effectiveTenantId, canonicalPrincipal, RebacTableGate.Relation, RebacTableGate.ObjectId(tableId)) { ExpiresAt = grant.ValidUntil });
         }
 
+        // Write-ahead: the required record exists before the tuples are written.
+        await RecordAdminAuditAsync(
+            AuditEventTypes.AdminApplyAccess, new TenantId(effectiveTenantId), adminSid, stored.Request.DatasetId,
+            new
+            {
+                channel = "mcp",
+                planId = request.PlanId,
+                diffs = stored.Result.Diffs,
+                reason = stored.Request.Reason,
+                appliedTuplesCount = tuples.Count,
+                wormSignature = Guid.NewGuid().ToString("N")
+            }, ct).ConfigureAwait(false);
+
         await _rebacStore.AddTuplesAsync(tuples, ct).ConfigureAwait(false);
 
         if (_policyEpochRepo != null)
@@ -357,29 +371,6 @@ public class AccessPlanningService : IAccessPlanningService
         {
             await _policyEnforcement.ReloadPoliciesAsync(new TenantId(effectiveTenantId), ct).ConfigureAwait(false);
         }
-
-        var auditEntry = new AuditLogEntry
-        {
-            Id = Guid.NewGuid(),
-            TenantId = new TenantId(effectiveTenantId),
-            OccurredAt = DateTimeOffset.UtcNow,
-            EventType = "ADMIN_APPLY_ACCESS",
-            ActorSid = new Sid(adminSid),
-            TargetTable = stored.Request.DatasetId,
-            Decision = "ALLOW",
-            TraceId = stored.Request.DatasetId,
-            DetailsJson = JsonSerializer.Serialize(new
-            {
-                channel = "mcp",
-                planId = request.PlanId,
-                diffs = stored.Result.Diffs,
-                reason = stored.Request.Reason,
-                appliedTuplesCount = tuples.Count,
-                wormSignature = Guid.NewGuid().ToString("N")
-            })
-        };
-
-        await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
 
         if (_eventBus != null)
         {
@@ -732,6 +723,20 @@ public class AccessPlanningService : IAccessPlanningService
         }, ct).ConfigureAwait(false);
     }
 
+    private Task RecordAdminAuditAsync(string eventType, TenantId tenant, string adminSid, string target, object details, CancellationToken ct) =>
+        _audit.RecordRequiredAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant,
+            OccurredAt = DateTimeOffset.UtcNow,
+            EventType = eventType,
+            ActorSid = new Sid(adminSid),
+            TargetTable = target,
+            Decision = "ALLOW",
+            TraceId = target,
+            DetailsJson = JsonSerializer.Serialize(details)
+        }, ct);
+
     public async Task<AdminRegisterDatasourceResult> RegisterDatasourceAsync(
         AdminRegisterDatasourceRequest request,
         string adminSid,
@@ -745,6 +750,7 @@ public class AccessPlanningService : IAccessPlanningService
         DatasourceSecretRefPolicy.RequireOwnDomain(request.Domain, NormalizeTenant(tenantId), isClusterAdmin);
         var datasourceId = $"{request.Domain.ToLowerInvariant()}.{request.Name.ToLowerInvariant()}";
         string? secretRef = null;
+        IKeyVaultSecretProvider? inlineStore = null;
         var vaultPrefix = $"vault://datasources/{request.Domain.ToLowerInvariant()}/";
 
         // SR-H-03: a client-supplied SecretRef must lie inside this domain's datasource namespace.
@@ -760,32 +766,17 @@ public class AccessPlanningService : IAccessPlanningService
             }
 
             secretRef = DatasourceSecretRefPolicy.NewAuthSecretRef(_secretProvider, request.Domain, NormalizeTenant(tenantId), request.Name);
-            try
-            {
-                _secretProvider.SetSecret(secretRef, Encoding.UTF8.GetBytes(request.Auth.Secret));
-            }
-            catch (NotSupportedException ex)
-            {
-                throw new InvalidOperationException(
-                    "The configured secret provider is read-only and cannot store inline datasource secrets; supply Auth.SecretRef instead.", ex);
-            }
+            inlineStore = _secretProvider;
         }
         else if (!string.IsNullOrWhiteSpace(request.Auth?.SecretRef))
         {
             secretRef = request.Auth.SecretRef;
         }
 
-        var auditEntry = new AuditLogEntry
-        {
-            Id = Guid.NewGuid(),
-            TenantId = TenantId.TryParse(tenantId, out var auditTenant) ? auditTenant : TenantId.Platform,
-            OccurredAt = DateTimeOffset.UtcNow,
-            EventType = "ADMIN_REGISTER_DATASOURCE",
-            ActorSid = new Sid(adminSid),
-            TargetTable = datasourceId,
-            Decision = "ALLOW",
-            TraceId = datasourceId,
-            DetailsJson = JsonSerializer.Serialize(new
+        // Write-ahead: the required record exists before the secret is stored.
+        await RecordAdminAuditAsync(
+            AuditEventTypes.AdminRegisterDatasource, TenantId.TryParse(tenantId, out var auditTenant) ? auditTenant : TenantId.Platform, adminSid, datasourceId,
+            new
             {
                 datasourceId,
                 name = request.Name,
@@ -795,10 +786,20 @@ public class AccessPlanningService : IAccessPlanningService
                 secretRef,
                 baseUrl = request.BaseUrl,
                 dryRun = request.DryRun
-            })
-        };
+            }, ct).ConfigureAwait(false);
 
-        await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+        if (inlineStore != null)
+        {
+            try
+            {
+                inlineStore.SetSecret(secretRef!, Encoding.UTF8.GetBytes(request.Auth!.Secret!));
+            }
+            catch (NotSupportedException ex)
+            {
+                throw new InvalidOperationException(
+                    "The configured secret provider is read-only and cannot store inline datasource secrets; supply Auth.SecretRef instead.", ex);
+            }
+        }
 
         return new AdminRegisterDatasourceResult(
             DatasourceId: datasourceId,
@@ -840,28 +841,18 @@ public class AccessPlanningService : IAccessPlanningService
         string previousState = existing.Table.IsActive == false ? "inactive" : "active";
 
         var isActive = string.Equals(newState, "active", StringComparison.OrdinalIgnoreCase);
-        await _tableRepo.UpsertTableMetadataAsync(existing with { Table = existing.Table with { IsActive = isActive } }, ct).ConfigureAwait(false);
-
-        var auditEntry = new AuditLogEntry
-        {
-            Id = Guid.NewGuid(),
-            TenantId = TenantId.TryParse(tenantId, out var auditTenant) ? auditTenant : TenantId.Platform,
-            OccurredAt = DateTimeOffset.UtcNow,
-            EventType = "ADMIN_SET_DATASET_STATE",
-            ActorSid = new Sid(adminSid),
-            TargetTable = request.DatasetId,
-            Decision = "ALLOW",
-            TraceId = request.DatasetId,
-            DetailsJson = JsonSerializer.Serialize(new
+        // Write-ahead: the required record exists before the state change.
+        await RecordAdminAuditAsync(
+            AuditEventTypes.AdminSetDatasetState, TenantId.TryParse(tenantId, out var auditTenant) ? auditTenant : TenantId.Platform, adminSid, request.DatasetId,
+            new
             {
                 datasetId = request.DatasetId,
                 previousState,
                 newState,
                 reason = request.Reason
-            })
-        };
+            }, ct).ConfigureAwait(false);
 
-        await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+        await _tableRepo.UpsertTableMetadataAsync(existing with { Table = existing.Table with { IsActive = isActive } }, ct).ConfigureAwait(false);
 
         if (_eventBus != null)
         {

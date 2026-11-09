@@ -22,7 +22,7 @@ using Autheris.Tests.Unit.ConsentRequests;
 /// </summary>
 public sealed class ConsentDecisionResolverTests : IDisposable
 {
-    private const string OwnerSid = "S-1-5-21-DATAOWNER-1";
+    private const string OwnerSid = "S-1-5-21-1000-1000-1000-1001";
     private const string Reason = "Not needed for this purpose";
     private static readonly TableIdentifier Table = new("finance", "dbo", "finance_table_1");
     private static readonly TableIdentifier FourEyesTable = new("finance", "dbo", "finance_table_5");
@@ -165,7 +165,7 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         using var services = DecisionServices.Build();
         var req = await NewRequestAsync(FourEyesTable);
 
-        var step1 = await ApproveAsync(req.Id, DecisionPrincipals.Basic("S-1-5-21-APPROVER-A"), services);
+        var step1 = await ApproveAsync(req.Id, DecisionPrincipals.Basic("S-1-5-21-1000-1000-1000-1002"), services);
         step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         await ShouldBeDeniedAsync(() => ApproveAsync(req.Id, DecisionPrincipals.AppIdOnly("app-1", "GovernanceAdmin"), services), "DECISION_NOT_PERMITTED");

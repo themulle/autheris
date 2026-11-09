@@ -303,7 +303,7 @@ public sealed class CatalogVirtualTableVisibilityTests
         var options = Wp0.Options(TenancyShape.Multi);
         var service = CatalogVisibilityTestFactory.Create(tables, consents, options);
 
-        var rest = new CatalogDiscoveryService(tables, Substitute.For<IAuditLogRepository>(), Options.Create(options), service);
+        var rest = new CatalogDiscoveryService(tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Options.Create(options), service);
         var restNames = (await rest.ListDatasetsAsync(Wp0.Context(user))).Select(s => $"{s.Domain}.{s.Schema}.{s.Table}").Order().ToList();
         var mcp = new McpDatasetCatalog(
             tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
