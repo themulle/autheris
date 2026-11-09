@@ -30,10 +30,10 @@ public sealed class LakehouseModuleAbsentSecurityTests : IClassFixture<WebApplic
         using var client = host.CreateClient();
         var routes = new (HttpMethod Method, string Path)[]
         {
-            (HttpMethod.Get, "/v1/tenant-1/namespaces"),
-            (HttpMethod.Get, "/v1/tenant-1/namespaces/raw/tables"),
-            (HttpMethod.Get, "/v1/tenant-1/namespaces/raw/tables/orders"),
-            (HttpMethod.Post, "/v1/tenant-1/namespaces/raw/tables/orders/credentials")
+            (HttpMethod.Get, "/modules/lakehouse/iceberg/v1/tenant-1/namespaces"),
+            (HttpMethod.Get, "/modules/lakehouse/iceberg/v1/tenant-1/namespaces/raw/tables"),
+            (HttpMethod.Get, "/modules/lakehouse/iceberg/v1/tenant-1/namespaces/raw/tables/orders"),
+            (HttpMethod.Post, "/modules/lakehouse/iceberg/v1/tenant-1/namespaces/raw/tables/orders/credentials")
         };
 
         foreach (var (method, path) in routes)

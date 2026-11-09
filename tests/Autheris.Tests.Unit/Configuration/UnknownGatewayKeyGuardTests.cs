@@ -351,4 +351,19 @@ public sealed class UnknownGatewayKeyGuardTests
         "Gateway:RateLimiting:ClientTiers:ScopeTierMappings",
         "Gateway:WebSql:DataSourceMappings"
     ];
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Claimed_section_does_not_silence_other_sections()
+    {
+        var configuration = Config(
+            ("Gateway:Lakehouse:Enabled", "true"),
+            ("Gateway:Foo:Bar", "x"));
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration, ["lakehouse"], ["Gateway:Lakehouse"]));
+
+        ex.Message.ShouldContain("Gateway:Foo");
+        ex.Message.ShouldNotContain("Gateway:Lakehouse");
+    }
 }
