@@ -1,27 +1,131 @@
 namespace Autheris.Tests.Unit.Api;
 
+using System;
+using System.Collections.Generic;
+using System.Data.Common;
 using System.IO;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Security;
 using Autheris.Infrastructure.Idempotency;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
 [Trait("Category", "Security")]
 public sealed class WebSqlDmlIdempotencyTests
 {
+    private sealed class FakeSqlExecutionService : IGovernedSqlExecutionService
+    {
+        public int CallCount { get; private set; }
+
+        public Task ExecuteGovernedQueryAsync(
+            GovernedSqlQueryRequest request,
+            ClaimsPrincipal user,
+            TenantId tenantId,
+            Func<DbDataReader, CancellationToken, Task> rowWriter,
+            CancellationToken ct = default)
+        {
+            CallCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
+            GovernedSqlQueryRequest request,
+            ClaimsPrincipal user,
+            TenantId tenantId,
+            CancellationToken ct = default)
+        {
+            CallCount++;
+            return Task.FromResult(new GovernedSqlResult(request.Sql, [], [], 0, 0));
+        }
+
+        public Task ValidateAsync(
+            string rawSql,
+            ClaimsPrincipal user,
+            TenantId tenantId,
+            CancellationToken ct = default)
+        {
+            CallCount++;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeIdempotencyStore : IIdempotencyStore
+    {
+        public int SetIfNotExistsCalls { get; private set; }
+        public string? LastKey { get; private set; }
+        public Func<string, Task<bool>>? OnSetIfNotExists { get; set; }
+
+        public Task<T?> GetAsync<T>(string key, CancellationToken ct = default) where T : class => Task.FromResult<T?>(null);
+
+        public Task<bool> SetIfNotExistsAsync<T>(string key, T value, TimeSpan ttl, CancellationToken ct = default) where T : class
+        {
+            SetIfNotExistsCalls++;
+            LastKey = key;
+            if (OnSetIfNotExists != null)
+            {
+                return OnSetIfNotExists(key);
+            }
+            return Task.FromResult(true);
+        }
+    }
+
+    private sealed class FakeWebSqlStatementManager : IWebSqlStatementManager
+    {
+        public int CallCount { get; private set; }
+
+        public Task<StatementExecutionStatus> SubmitOrWaitAsync(
+            GovernedSqlQueryRequest request,
+            ClaimsPrincipal user,
+            Sid owner,
+            TenantId tenantId,
+            TimeSpan waitTimeout,
+            DataSourceTransportFlags ingress = DataSourceTransportFlags.None,
+            CancellationToken ct = default)
+        {
+            CallCount++;
+            return Task.FromResult(new StatementExecutionStatus("stmt-1", "FINISHED", [], [], null, null, 0));
+        }
+
+        public Task<StatementExecutionStatus> GetStatusOrWaitAsync(
+            string statementId,
+            ClaimsPrincipal user,
+            Sid owner,
+            TenantId tenantId,
+            TimeSpan waitTimeout,
+            DataSourceTransportFlags ingress = DataSourceTransportFlags.None,
+            CancellationToken ct = default)
+        {
+            CallCount++;
+            return Task.FromResult(new StatementExecutionStatus("stmt-1", "FINISHED", [], [], null, null, 0));
+        }
+
+        public Task<bool> CancelStatementAsync(
+            string statementId,
+            ClaimsPrincipal user,
+            Sid owner,
+            TenantId tenantId,
+            CancellationToken ct = default)
+        {
+            CallCount++;
+            return Task.FromResult(true);
+        }
+    }
+
     private const string Insert = "INSERT INTO t (a) VALUES (1)";
 
     private static DefaultHttpContext Ctx(string sql, IIdempotencyStore? store, string? key, string path = "/api/v1/sql",
@@ -68,16 +172,15 @@ public sealed class WebSqlDmlIdempotencyTests
         return context;
     }
 
-    private static async Task<(int Status, IGovernedSqlExecutionService Sql)> Run(DefaultHttpContext ctx, bool allowDml = true)
+    private static async Task<(int Status, FakeSqlExecutionService Sql)> Run(DefaultHttpContext ctx, bool allowDml = true)
     {
-        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        var sql = new FakeSqlExecutionService();
         var options = Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { AllowDml = allowDml } });
         await WebSqlEndpoints.HandleWebSqlRequest(ctx, sql, options, NullLoggerFactory.Instance);
         return (ctx.Response.StatusCode, sql);
     }
 
-    private static int ExecutorCalls(IGovernedSqlExecutionService sql) =>
-        sql.ReceivedCalls().Count();
+    private static int ExecutorCalls(FakeSqlExecutionService sql) => sql.CallCount;
 
     [Fact]
     public async Task Dml_without_idempotency_key_is_refused()
@@ -135,27 +238,27 @@ public sealed class WebSqlDmlIdempotencyTests
     [Fact]
     public async Task Key_is_not_reserved_for_unauthorized_caller()
     {
-        var store = Substitute.For<IIdempotencyStore>();
+        var store = new FakeIdempotencyStore();
         await Should.ThrowAsync<UnauthorizedAccessException>(() => Run(Ctx(Insert, store, "k-1", authenticated: false)));
-        await store.DidNotReceiveWithAnyArgs().SetIfNotExistsAsync<string>(default!, default!, default);
+        store.SetIfNotExistsCalls.ShouldBe(0);
     }
 
     [Fact]
     public async Task Reserved_key_is_stored_hashed()
     {
-        var store = Substitute.For<IIdempotencyStore>();
-        store.SetIfNotExistsAsync<string>(default!, default!, default, default).ReturnsForAnyArgs(true);
+        var store = new FakeIdempotencyStore();
         await Run(Ctx(Insert, store, "plain-secret-key"));
-        var call = store.ReceivedCalls().Single(c => c.GetMethodInfo().Name == "SetIfNotExistsAsync");
-        ((string)call.GetArguments()[0]!).ShouldNotContain("plain-secret-key");
+        store.LastKey.ShouldNotBeNull();
+        store.LastKey.ShouldNotContain("plain-secret-key");
     }
 
     [Fact]
     public async Task Idempotency_store_failure_refuses_dml()
     {
-        var store = Substitute.For<IIdempotencyStore>();
-        store.SetIfNotExistsAsync<string>(default!, default!, default, default)
-            .ReturnsForAnyArgs<Task<bool>>(_ => throw new InvalidOperationException("down"));
+        var store = new FakeIdempotencyStore
+        {
+            OnSetIfNotExists = _ => throw new InvalidOperationException("down")
+        };
         var (status, sql) = await Run(Ctx(Insert, store, "k-1"));
         status.ShouldBe(503);
         ExecutorCalls(sql).ShouldBe(0);
@@ -175,24 +278,24 @@ public sealed class WebSqlDmlIdempotencyTests
     [InlineData("DELETE FROM t")]
     public async Task Trino_route_dml_is_refused_without_query_id(string sql)
     {
-        var manager = Substitute.For<IWebSqlStatementManager>();
+        var manager = new FakeWebSqlStatementManager();
         var ctx = Ctx(sql, new InMemoryIdempotencyStore(), "k-1", path: "/v1/statement");
-        var services = new ServiceCollection().AddSingleton(manager).BuildServiceProvider();
+        var services = new ServiceCollection().AddSingleton<IWebSqlStatementManager>(manager).BuildServiceProvider();
         ctx.RequestServices = services;
         var (status, exec) = await Run(ctx);
         status.ShouldBe(400);
         ExecutorCalls(exec).ShouldBe(0);
-        manager.ReceivedCalls().ShouldBeEmpty();
+        manager.CallCount.ShouldBe(0);
     }
 
     [Fact]
     public async Task Guard_is_skipped_and_no_key_reserved_when_dml_is_disabled()
     {
-        var store = Substitute.For<IIdempotencyStore>();
+        var store = new FakeIdempotencyStore();
         var (status, sql) = await Run(Ctx(Insert, store, key: null), allowDml: false);
         status.ShouldNotBe(400);
         ExecutorCalls(sql).ShouldBeGreaterThan(0);
-        store.ReceivedCalls().ShouldBeEmpty();
+        store.SetIfNotExistsCalls.ShouldBe(0);
     }
 
     [Theory]
@@ -203,13 +306,13 @@ public sealed class WebSqlDmlIdempotencyTests
     [InlineData("INSERT INTO")]
     public async Task Trino_route_refuses_anything_that_is_not_a_plain_read(string sql)
     {
-        var manager = Substitute.For<IWebSqlStatementManager>();
+        var manager = new FakeWebSqlStatementManager();
         var ctx = Ctx(sql, new InMemoryIdempotencyStore(), "k-1", path: "/v1/statement");
-        ctx.RequestServices = new ServiceCollection().AddSingleton(manager).BuildServiceProvider();
+        ctx.RequestServices = new ServiceCollection().AddSingleton<IWebSqlStatementManager>(manager).BuildServiceProvider();
         var (status, exec) = await Run(ctx);
         status.ShouldBe(400);
         ExecutorCalls(exec).ShouldBe(0);
-        manager.ReceivedCalls().ShouldBeEmpty();
+        manager.CallCount.ShouldBe(0);
     }
 
     [Theory]
@@ -240,12 +343,12 @@ public sealed class WebSqlDmlIdempotencyTests
     [InlineData("Sql.Write", true)]
     public async Task Caller_without_write_scope_or_read_only_never_reserves_a_key(string? scope, bool readOnly)
     {
-        var store = Substitute.For<IIdempotencyStore>();
+        var store = new FakeIdempotencyStore();
         var ctx = Ctx(Insert, store, key: null, scope: scope, readOnly: readOnly);
         var (status, sql) = await Run(ctx);
         status.ShouldBe(403);
         ReadBody(ctx).ShouldContain("SQL_POLICY_VIOLATION"); // the shared error mapper answers a policy refusal with this code
-        store.ReceivedCalls().ShouldBeEmpty();
+        store.SetIfNotExistsCalls.ShouldBe(0);
         ExecutorCalls(sql).ShouldBe(0);
     }
 
