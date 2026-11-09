@@ -2,6 +2,7 @@ namespace Autheris.Api.Hosting;
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,16 +18,55 @@ using Autheris.Infrastructure.Modules.Trust;
 /// Loads managed assemblies exclusively from the in-memory <see cref="VerifiedModuleImage"/> buffers
 /// and delegates host/framework contracts to <see cref="AssemblyLoadContext.Default"/>.
 /// </summary>
+/// <remarks>
+/// The context is deliberately non-collectible: modules register services, routes and background
+/// work into the host for the life of the process and are never unloaded, so collectibility would only
+/// add leak-prone teardown paths without a supported unload scenario.
+/// </remarks>
 public sealed class ModuleAssemblyLoadContext : AssemblyLoadContext
 {
+    private static readonly string[] ReservedHostAssemblyNames =
+    [
+        "Autheris.Api",
+        "Autheris.Application",
+        "Autheris.Domain",
+        "Autheris.Infrastructure",
+        "Autheris.GraphQL",
+        "Autheris.Modules.Abstractions",
+        "FastSqlEngine",
+        "TrinoSqlEngine",
+        "netstandard",
+        "mscorlib",
+    ];
+
+    private static readonly Lazy<string> ProcessNativeRoot = new(CreateDefaultNativeRoot);
+
     private readonly VerifiedModuleImage _image;
     private readonly ConcurrentDictionary<string, Assembly> _loadedBySimpleName = new(StringComparer.OrdinalIgnoreCase);
+    private readonly FrozenSet<string> _delegatedHostAssemblies;
+    private readonly string? _nativeRootOverride;
+    private readonly Dictionary<string, string> _nativeCopies = new(StringComparer.Ordinal);
+    private readonly object _nativeLock = new();
+    private string? _nativeContextDirectory;
 
-    public ModuleAssemblyLoadContext(VerifiedModuleImage image)
+    public ModuleAssemblyLoadContext(VerifiedModuleImage image, string? nativeRootOverride = null)
         : base(name: $"AutherisModule:{image?.ModuleId ?? "unknown"}", isCollectible: false)
     {
         ArgumentNullException.ThrowIfNull(image);
         _image = image;
+        _nativeRootOverride = nativeRootOverride;
+
+        var delegated = new HashSet<string>(ReservedHostAssemblyNames, StringComparer.OrdinalIgnoreCase);
+        foreach (var loaded in Default.Assemblies)
+        {
+            var name = loaded.GetName().Name;
+            if (!string.IsNullOrEmpty(name))
+            {
+                delegated.Add(name);
+            }
+        }
+
+        _delegatedHostAssemblies = delegated.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     }
 
     public VerifiedModuleImage Image => _image;
@@ -43,6 +83,7 @@ public sealed class ModuleAssemblyLoadContext : AssemblyLoadContext
             .Select(n => n!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        var seenSimpleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (relativePath, bytes) in _image.Files)
         {
             if (!relativePath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
@@ -57,6 +98,13 @@ public sealed class ModuleAssemblyLoadContext : AssemblyLoadContext
             }
 
             var fileSimpleName = Path.GetFileNameWithoutExtension(relativePath);
+            if (!seenSimpleNames.Add(fileSimpleName))
+            {
+                throw new ModuleLoadException(
+                    _image.ModuleId,
+                    $"Module image contains duplicate assembly simple name '{fileSimpleName}' (file '{relativePath}').");
+            }
+
             if (IsCollidingWithHost(fileSimpleName, hostAssemblies))
             {
                 throw new ModuleLoadException(
@@ -99,7 +147,7 @@ public sealed class ModuleAssemblyLoadContext : AssemblyLoadContext
         }
 
         // Delegate shared contracts and framework assemblies to the default load context.
-        if (IsDelegatedToDefaultContext(simpleName))
+        if (IsDelegatedToHost(simpleName))
         {
             return null;
         }
@@ -160,24 +208,9 @@ public sealed class ModuleAssemblyLoadContext : AssemblyLoadContext
         {
             if (_image.TryGetFileBytes(relPath, out var verifiedBytes))
             {
-                var fullDiskPath = Path.Combine(
-                    _image.ModuleDirectory,
-                    relPath.Replace('/', Path.DirectorySeparatorChar));
-
-                if (!File.Exists(fullDiskPath))
-                {
-                    throw new ModuleLoadException(_image.ModuleId, $"Verified native library '{relPath}' is missing on disk.");
-                }
-
-                var currentDiskBytes = File.ReadAllBytes(fullDiskPath);
-                var expectedHash = IntegrityHashHelper.ComputeSha256HexLower(verifiedBytes);
-                var actualHash = IntegrityHashHelper.ComputeSha256Bytes(currentDiskBytes);
-                if (!IntegrityHashHelper.FixedTimeEqualsHex(expectedHash, actualHash))
-                {
-                    throw new ModuleLoadException(_image.ModuleId, $"Native library '{relPath}' failed integrity check prior to load.");
-                }
-
-                return LoadUnmanagedDllFromPath(fullDiskPath);
+                var copyPath = MaterializeVerifiedNative(relPath, verifiedBytes);
+                EnsureNativeCopyIntact(copyPath, relPath, verifiedBytes);
+                return LoadUnmanagedDllFromPath(copyPath);
             }
         }
 
@@ -212,28 +245,136 @@ public sealed class ModuleAssemblyLoadContext : AssemblyLoadContext
         return false;
     }
 
-    private static bool IsDelegatedToDefaultContext(string simpleName)
-    {
-        if (simpleName.StartsWith("Autheris.Domain", StringComparison.OrdinalIgnoreCase) ||
-            simpleName.StartsWith("Autheris.Application", StringComparison.OrdinalIgnoreCase) ||
-            simpleName.StartsWith("Autheris.Modules.Abstractions", StringComparison.OrdinalIgnoreCase) ||
-            simpleName.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase) ||
-            simpleName.StartsWith("System.", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(simpleName, "netstandard", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(simpleName, "mscorlib", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+    /// <summary>
+    /// True only for exact simple-name matches of host assemblies (reserved contract assemblies and everything
+    /// loaded into the default context when this context was created); similar prefixes are not delegated.
+    /// </summary>
+    internal bool IsDelegatedToHost(string simpleName) => _delegatedHostAssemblies.Contains(simpleName);
 
-        foreach (var loaded in Default.Assemblies)
+    /// <summary>
+    /// Writes the already verified native library bytes to a private, read-only copy and returns its path.
+    /// The copy lives in a per-context directory below the per-process private native root.
+    /// </summary>
+    internal string MaterializeVerifiedNative(string relativePath, ReadOnlySpan<byte> verifiedBytes)
+    {
+        lock (_nativeLock)
         {
-            if (string.Equals(loaded.GetName().Name, simpleName, StringComparison.OrdinalIgnoreCase))
+            if (_nativeCopies.TryGetValue(relativePath, out var existing))
             {
-                return true;
+                return existing;
+            }
+
+            try
+            {
+                var root = _nativeRootOverride ?? ProcessNativeRoot.Value;
+                EnsurePrivateDirectory(root);
+
+                _nativeContextDirectory ??= Path.Combine(root, Guid.NewGuid().ToString("N"));
+                EnsurePrivateDirectory(_nativeContextDirectory);
+
+                var copyPath = Path.Combine(_nativeContextDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                EnsurePrivateDirectory(Path.GetDirectoryName(copyPath)!);
+                using (var stream = new FileStream(copyPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    stream.Write(verifiedBytes);
+                }
+
+                if (OperatingSystem.IsWindows())
+                {
+                    File.SetAttributes(copyPath, FileAttributes.ReadOnly);
+                }
+                else
+                {
+                    File.SetUnixFileMode(copyPath, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                }
+
+                _nativeCopies[relativePath] = copyPath;
+                return copyPath;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new ModuleLoadException(_image.ModuleId, $"Native library '{relativePath}' could not be staged: {ex.Message}", ex);
             }
         }
+    }
 
-        return false;
+    /// <summary>
+    /// Re-hashes the private native copy and throws when it no longer matches the verified bytes.
+    /// </summary>
+    internal void EnsureNativeCopyIntact(string copyPath, string relativePath, ReadOnlySpan<byte> verifiedBytes)
+    {
+        byte[] currentBytes;
+        try
+        {
+            currentBytes = File.ReadAllBytes(copyPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new ModuleLoadException(_image.ModuleId, $"Native library '{relativePath}' failed integrity check prior to load.", ex);
+        }
+
+        var expectedHash = IntegrityHashHelper.ComputeSha256HexLower(verifiedBytes);
+        var actualHash = IntegrityHashHelper.ComputeSha256Bytes(currentBytes);
+        if (!IntegrityHashHelper.FixedTimeEqualsHex(expectedHash, actualHash))
+        {
+            throw new ModuleLoadException(_image.ModuleId, $"Native library '{relativePath}' failed integrity check prior to load.");
+        }
+    }
+
+    private static string CreateDefaultNativeRoot()
+    {
+        var parent = OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Autheris", "native")
+            : Path.GetTempPath();
+        var root = Path.Combine(parent, $"autheris-native-{Environment.ProcessId}");
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            try
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+            catch (Exception)
+            {
+                // Best-effort cleanup only.
+            }
+        };
+        return root;
+    }
+
+    private void EnsurePrivateDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(path);
+            return;
+        }
+
+        const UnixFileMode PrivateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        Directory.CreateDirectory(path, PrivateMode);
+
+        if (new DirectoryInfo(path).LinkTarget is not null)
+        {
+            throw new ModuleLoadException(_image.ModuleId, $"Native library root '{path}' must not be a symbolic link.");
+        }
+
+        if (File.GetUnixFileMode(path) != PrivateMode)
+        {
+            throw new ModuleLoadException(
+                _image.ModuleId,
+                $"Native library root '{path}' must have mode 0700 and be owned by the process user.");
+        }
+
+        var owner = UnixFileStat.TryGetOwnerUid(path);
+        var self = UnixFileStat.TryGetEffectiveUid();
+        if (owner is not { } o || self is not { } e || o != e)
+        {
+            throw new ModuleLoadException(
+                _image.ModuleId,
+                $"Native library root '{path}' must have mode 0700 and be owned by the process user.");
+        }
     }
 
     private static string? TryReadManagedAssemblySimpleName(byte[] peBytes)

@@ -252,20 +252,105 @@ public static class GatewayStartupValidator
 
                 if (db.Auth.Mode != DatabricksAuthMode.OAuthObo)
                 {
-                    throw new ValidationException($"Security violation (SEC-OBO238-04): Databricks data source '{name}' has EnforcementMode = '{connection.EnforcementMode}', but Auth.Mode is '{db.Auth.Mode}'. Delegated enforcement requires Auth.Mode = OAuthObo.");
+                    throw new ValidationException($"Security violation (SEC-SIMPL-96 / SEC-OBO238-04): Databricks data source '{name}' has EnforcementMode = '{connection.EnforcementMode}', but Auth.Mode is '{db.Auth.Mode}'. Delegated enforcement requires Auth.Mode = OAuthObo.");
                 }
             }
 
-            if (db.Auth.Mode == DatabricksAuthMode.Pat)
+            // Shared-identity modes (OAuthM2M, Pat) must use AutherisEnforced
+            if (db.Auth.Mode is DatabricksAuthMode.OAuthM2M or DatabricksAuthMode.Pat &&
+                connection.EnforcementMode != EnforcementMode.AutherisEnforced)
             {
-                if (!environment.IsDevelopment())
+                throw new ValidationException($"Security violation (SEC-SIMPL-96 / SEC-OBO238-04): Databricks data source '{name}' has EnforcementMode = '{connection.EnforcementMode}', but Auth.Mode is '{db.Auth.Mode}'. Delegated enforcement requires Auth.Mode = OAuthObo.");
+            }
+
+            // Optional custom TokenEndpoint is allowed only for OAuthM2M
+            if (!string.IsNullOrWhiteSpace(db.Auth.TokenEndpoint))
+            {
+                if (db.Auth.Mode != DatabricksAuthMode.OAuthM2M)
                 {
-                    throw new ValidationException($"Security violation: Databricks data source '{name}' uses Auth.Mode Pat, which is allowed in Development only.");
+                    throw new ValidationException($"Databricks data source '{name}': Auth.TokenEndpoint is only allowed with Auth.Mode OAuthM2M.");
                 }
 
-                if (string.IsNullOrWhiteSpace(db.Auth.PatRef))
+                if (!Uri.TryCreate(db.Auth.TokenEndpoint, UriKind.Absolute, out var tokenUri) ||
+                    !string.Equals(tokenUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                    !string.IsNullOrEmpty(tokenUri.UserInfo) ||
+                    !string.IsNullOrEmpty(tokenUri.Query) ||
+                    !string.IsNullOrEmpty(tokenUri.Fragment))
                 {
-                    throw new ValidationException($"Databricks data source '{name}': Auth.PatRef is required for Pat mode.");
+                    throw new ValidationException($"Databricks data source '{name}': Auth.TokenEndpoint must be an absolute HTTPS URL without user info, query parameters, or fragments.");
+                }
+
+                var allowedHosts = options.Databricks.AllowedAccountTokenHosts ?? [];
+                var hostAllowed = string.Equals(tokenUri.Host, db.Host, StringComparison.OrdinalIgnoreCase) ||
+                                  allowedHosts.Any(h => string.Equals(h, tokenUri.Host, StringComparison.OrdinalIgnoreCase));
+
+                if (!hostAllowed)
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Auth.TokenEndpoint host '{tokenUri.Host}' is not allowed. Host must equal the workspace host or be allowlisted in Gateway:Databricks:AllowedAccountTokenHosts (SEC-SIMPL-97).");
+                }
+            }
+
+            // Validate per-tenant principals
+            if (db.Auth.Tenants.Count > 0)
+            {
+                if (db.Auth.Mode == DatabricksAuthMode.OAuthObo)
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Per-tenant principals in Auth.Tenants are not supported with Auth.Mode OAuthObo.");
+                }
+
+                foreach (var (tenantId, tenantPrincipal) in db.Auth.Tenants)
+                {
+                    if (string.IsNullOrWhiteSpace(tenantId))
+                    {
+                        throw new ValidationException($"Databricks data source '{name}': Tenant identifier in Auth.Tenants cannot be empty.");
+                    }
+
+                    if (tenantPrincipal is null)
+                    {
+                        throw new ValidationException($"Databricks data source '{name}': Tenant configuration for '{tenantId}' cannot be null.");
+                    }
+
+                    if (db.Auth.Mode == DatabricksAuthMode.Pat)
+                    {
+                        if (string.IsNullOrWhiteSpace(tenantPrincipal.PatRef))
+                        {
+                            throw new ValidationException($"Databricks data source '{name}': Auth.Tenants['{tenantId}'].PatRef is required for Pat mode.");
+                        }
+
+                        if (!SecretReferenceResolver.IsReference(tenantPrincipal.PatRef))
+                        {
+                            throw new ValidationException($"Databricks data source '{name}': Auth.Tenants['{tenantId}'].PatRef must be a secret reference (e.g. 'kv://', 'vault:'), inline secrets are prohibited (SEC-SIMPL-95).");
+                        }
+                    }
+                    else if (db.Auth.Mode == DatabricksAuthMode.OAuthM2M)
+                    {
+                        if (string.IsNullOrWhiteSpace(tenantPrincipal.ClientId) || string.IsNullOrWhiteSpace(tenantPrincipal.ClientSecretRef))
+                        {
+                            throw new ValidationException($"Databricks data source '{name}': Auth.Tenants['{tenantId}'] requires ClientId and ClientSecretRef for OAuthM2M mode.");
+                        }
+
+                        if (!SecretReferenceResolver.IsReference(tenantPrincipal.ClientSecretRef))
+                        {
+                            throw new ValidationException($"Databricks data source '{name}': Auth.Tenants['{tenantId}'].ClientSecretRef must be a secret reference (e.g. 'kv://', 'vault:'), inline secrets are prohibited (SEC-SIMPL-95).");
+                        }
+                    }
+                }
+            }
+
+            // Per-mode fail-closed validation in all environments
+            if (db.Auth.Mode == DatabricksAuthMode.Pat)
+            {
+                if (db.Auth.Tenants.Count == 0 || db.Auth.FallbackToGlobalPrincipal || !string.IsNullOrWhiteSpace(db.Auth.PatRef))
+                {
+                    if (string.IsNullOrWhiteSpace(db.Auth.PatRef))
+                    {
+                        throw new ValidationException($"Databricks data source '{name}': Auth.PatRef is required for Pat mode.");
+                    }
+
+                    if (!SecretReferenceResolver.IsReference(db.Auth.PatRef))
+                    {
+                        throw new ValidationException($"Databricks data source '{name}': Auth.PatRef must be a secret reference (e.g. 'kv://', 'vault:'), inline secrets are prohibited (SEC-SIMPL-95).");
+                    }
                 }
             }
             else if (db.Auth.Mode == DatabricksAuthMode.OAuthObo)
@@ -278,14 +363,35 @@ public static class GatewayStartupValidator
                     throw new ValidationException($"Databricks data source '{name}': Auth.Obo.ClientId is required for OAuthObo mode.");
                 }
 
+                if (string.IsNullOrWhiteSpace(obo.Scopes))
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Auth.Obo.Scopes (token-exchange audience) is required.");
+                }
+
                 if (string.IsNullOrWhiteSpace(obo.ClientSecretRef) && string.IsNullOrWhiteSpace(obo.ClientCertificateRef))
                 {
                     throw new ValidationException($"Databricks data source '{name}': Auth.Obo requires either ClientSecretRef or ClientCertificateRef.");
                 }
+
+                if (!string.IsNullOrWhiteSpace(obo.ClientSecretRef) && !SecretReferenceResolver.IsReference(obo.ClientSecretRef))
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Auth.Obo.ClientSecretRef must be a secret reference (e.g. 'kv://', 'vault:'), inline secrets are prohibited (SEC-SIMPL-95).");
+                }
             }
-            else if (string.IsNullOrWhiteSpace(db.Auth.ClientId) || string.IsNullOrWhiteSpace(db.Auth.ClientSecretRef))
+            else
             {
-                throw new ValidationException($"Databricks data source '{name}': OAuthM2M requires Auth.ClientId and Auth.ClientSecretRef (Key Vault reference).");
+                if (db.Auth.Tenants.Count == 0 || db.Auth.FallbackToGlobalPrincipal || !string.IsNullOrWhiteSpace(db.Auth.ClientId) || !string.IsNullOrWhiteSpace(db.Auth.ClientSecretRef))
+                {
+                    if (string.IsNullOrWhiteSpace(db.Auth.ClientId) || string.IsNullOrWhiteSpace(db.Auth.ClientSecretRef))
+                    {
+                        throw new ValidationException($"Databricks data source '{name}': OAuthM2M requires Auth.ClientId and Auth.ClientSecretRef (Key Vault reference).");
+                    }
+
+                    if (!SecretReferenceResolver.IsReference(db.Auth.ClientSecretRef))
+                    {
+                        throw new ValidationException($"Databricks data source '{name}': Auth.ClientSecretRef must be a secret reference (e.g. 'kv://', 'vault:'), inline secrets are prohibited (SEC-SIMPL-95).");
+                    }
+                }
             }
         }
     }

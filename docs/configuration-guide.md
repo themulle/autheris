@@ -855,7 +855,7 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 | `Mcp:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den MCP-Server (Streamable HTTP unter `Mcp:EndpointPath`, offizielles MCP-C#-SDK, zustandslos). |
 | `Mcp:EndpointPath` | `string` | URL-Pfad | `"/mcp"` | Pfad des MCP-Endpunkts (Streamable HTTP). |
 | `Mcp:MaxTokensPerCall` | `int` | `256 .. 128000` | `4096` | Maximales Token-Budget pro Tool-Aufruf; verhindert Context-Window-Overflows. |
-| `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Maximale Ergebniszeilen pro Datenabfrage. |
+| `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Obergrenze der Ergebniszeilen je MCP-Datentool (`query_dataset`, `query_sql`, `call_procedure`, `sample_rows`, `query_graphql`; bei GraphQL je Liste). Ein kleineres `limit` der Anfrage bleibt erhalten, ein größeres hebt die Grenze nie an; ein ungültiges `limit` (0, negativ, keine Ganzzahl) wird abgelehnt. Wurden Zeilen gekürzt, trägt das Ergebnis `truncated: true` und `rowCap`. `sample_rows` bleibt zusätzlich auf 20 Zeilen begrenzt. Ein Wert `<= 0` fällt auf `100` zurück. |
 | `Mcp:AllowedOperations` | `string[]` | GraphQL Operationen | `[]` | Whitelist freigegebener Abfragen. |
 
 > `warn_allow_unmasked_ai_access` und `danger_bypass_mcp_auth` liegen ausschließlich unter `Insecure` (ADR-012, Phase 4).

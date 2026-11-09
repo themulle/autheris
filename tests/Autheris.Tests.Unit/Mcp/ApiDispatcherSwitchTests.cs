@@ -34,6 +34,7 @@ public sealed class ApiDispatcherSwitchTests
     private static GatewayOptions Opts(bool rest = true, bool catalog = true, bool query = true, bool api = true, bool access = true, string[]? disabled = null) =>
         new()
         {
+            SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true } },
             RestApi = new RestApiOptions { DataEndpoint = new RestDataEndpointOptions { Enabled = rest } },
             Mcp = new McpOptions { Tools = new McpToolGroupOptions { Catalog = catalog, Query = query, Api = api, Access = access }, DisabledTools = disabled?.ToList() }
         };

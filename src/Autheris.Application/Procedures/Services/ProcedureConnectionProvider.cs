@@ -10,7 +10,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// F-SQL-02 / ADR-018: Opens connections with the dedicated EXECUTE-only technical login. Phase 1 supports SQL Server only.
+/// F-SQL-02 / ADR-018: Opens connections with the dedicated EXECUTE-only technical login. SQL Server and PostgreSQL only.
 /// </summary>
 public sealed class ProcedureConnectionProvider
 {
@@ -38,33 +38,41 @@ public sealed class ProcedureConnectionProvider
             throw new InvalidOperationException($"No connection string is configured for the procedure data source '{name}'.");
         }
 
-        if (!TryResolveDialect(conn.Provider, out var dialect))
+        // closed dialect set (SQL Server, PostgreSQL); PostgreSQL only with table-valued functions.
+        string? rejection = CheckAdmission(_options.Value, name, definition.Kind);
+        if (rejection != null)
         {
-            throw new InvalidOperationException($"SQL provider '{conn.Provider}' is not supported for procedure endpoints.");
-        }
-
-        if (definition.ValidationMode == ProcedureValidationMode.Catalog && dialect != Autheris.Domain.Common.DatabaseDialect.SqlServer)
-        {
-            throw new InvalidOperationException("Stored procedure endpoints with catalog validation currently support SQL Server only. Use 'validation: declared' for other database providers.");
-        }
-
-        // Review P-6: only SQL Server (read-only SESSION_CONTEXT) and PostgreSQL (transaction-local set_config) can pass
-        // the security context to the database. Other providers would run without tenant isolation, which is only
-        // acceptable with an explicit 'rls: none' (Development only).
-        if (definition.RlsMode == ProcedureRlsMode.SessionContext && !SupportsSecurityContext(dialect))
-        {
-            throw new InvalidOperationException($"SQL provider '{conn.Provider}' cannot carry the security context (rls: session-context). Only SQL Server and PostgreSQL are supported.");
+            throw new InvalidOperationException(rejection);
         }
 
         return conn;
     }
 
-    /// <summary>Review P-6: dialects that receive tenant/user/purpose before the call.</summary>
-    public static bool SupportsSecurityContext(Autheris.Domain.Common.DatabaseDialect dialect) =>
+    /// <summary>the closed dialect set of procedure endpoints.</summary>
+    public static bool IsAdmittedDialect(Autheris.Domain.Common.DatabaseDialect dialect) =>
         dialect is Autheris.Domain.Common.DatabaseDialect.SqlServer or Autheris.Domain.Common.DatabaseDialect.PostgreSql;
 
-    public static bool TryResolveDialect(string? provider, out Autheris.Domain.Common.DatabaseDialect dialect) =>
-        Autheris.Domain.Common.DataSourceProvider.TryResolveDialect(provider, out dialect);
+    /// <summary>Fixed rejection text; names the data source, never the connection string.</summary>
+    public static string UnsupportedDialectMessage(string dataSourceName) =>
+        $"Stored procedure endpoints support SQL Server and PostgreSQL only (data source '{dataSourceName}').";
+
+    /// <summary>
+    /// null when the data source exists with an admitted dialect (and, for PostgreSQL, the declared kind is a
+    /// table-valued function); otherwise the fixed rejection text. Shared by startup, loader and connection provider.
+    /// </summary>
+    public static string? CheckAdmission(GatewayOptions options, string dataSourceName, ProcedureKind? kind = null)
+    {
+        var connections = options.DataSources?.Connections;
+        if (connections == null || !connections.TryGetValue(dataSourceName, out var conn) || string.IsNullOrWhiteSpace(conn.ConnectionString) ||
+            !Autheris.Domain.Common.DataSourceProvider.TryResolveDialect(conn.Provider, out var dialect) || !IsAdmittedDialect(dialect))
+        {
+            return UnsupportedDialectMessage(dataSourceName);
+        }
+
+        return dialect == Autheris.Domain.Common.DatabaseDialect.PostgreSql && kind is { } k && k != ProcedureKind.TableValuedFunction
+            ? $"PostgreSQL procedure endpoints support table-valued functions only (data source '{dataSourceName}')."
+            : null;
+    }
 
     public string ResolveName(ProcedureDefinition definition) =>
         string.IsNullOrWhiteSpace(definition.DataSource)

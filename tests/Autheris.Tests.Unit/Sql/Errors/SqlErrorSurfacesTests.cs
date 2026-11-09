@@ -209,7 +209,7 @@ public sealed class SqlErrorSurfacesTests
             .Returns<Task<string>>(_ => throw new SqlLimitExceededException(SqlLimitKind.InListItems, TargetSqlDialect.Oracle, 7, 5));
         var executor = new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
-            NullLogger<GatewayMcpQueryExecutor>.Instance, toolExecutionHandler: handler);
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), toolExecutionHandler: handler);
 
         var json = await executor.ExecuteOperationAsync(Tool("query_sql"), "{}", Session());
 
@@ -226,7 +226,7 @@ public sealed class SqlErrorSurfacesTests
             .Returns<Task<McpDatasetDescription>>(_ => throw new ArgumentException(HostileMarker));
         var executor = new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
-            NullLogger<GatewayMcpQueryExecutor>.Instance, datasetCatalog: catalog);
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog);
 
         var json = await executor.ExecuteOperationAsync(Tool(McpDatasetTools.DescribeDataset), """{"dataset":"a.b.c"}""", Session());
 
