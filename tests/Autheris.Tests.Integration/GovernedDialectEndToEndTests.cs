@@ -67,6 +67,7 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", Source);
             builder.UseSetting("Gateway:WebSql:AllowDml", "true");
+            builder.UseSetting("Gateway:DataSources:RequireTenantColumn", "true");
             builder.UseSetting("Gateway:WebSql:DmlWriterRoles:0", "Writer");
             builder.UseSetting("Gateway:WebSql:MaxAffectedRows", MaxAffectedRows.ToString());
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", target.Provider);
