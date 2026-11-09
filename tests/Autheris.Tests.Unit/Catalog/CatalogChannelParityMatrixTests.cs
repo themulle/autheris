@@ -84,7 +84,7 @@ public sealed class CatalogChannelParityMatrixTests
         var mcp = new McpDatasetCatalog(
             tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
             options: Options.Create(options), visibilityService: service);
-        var rest = new CatalogDiscoveryService(tables, Substitute.For<IAuditLogRepository>(), Options.Create(options), service);
+        var rest = new CatalogDiscoveryService(tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Options.Create(options), service);
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(new DefaultHttpContext { User = user });
         var context = Wp0.Context(user);

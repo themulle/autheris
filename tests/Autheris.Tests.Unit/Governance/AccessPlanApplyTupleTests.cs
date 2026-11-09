@@ -42,7 +42,7 @@ public sealed class AccessPlanApplyTupleTests
     public AccessPlanApplyTupleTests()
     {
         _service = new AccessPlanningService(
-            Substitute.For<IAuditLogRepository>(), _tableRepo, _store, _totp, _secrets);
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tableRepo, _store, _totp, _secrets);
         UseTable(sensitive: false);
     }
 
@@ -112,7 +112,7 @@ public sealed class AccessPlanApplyTupleTests
         var rebac = Substitute.For<IRebacStore>();
         IEnumerable<RebacTuple>? written = null;
         await rebac.AddTuplesAsync(Arg.Do<IEnumerable<RebacTuple>>(t => written = t.ToList()), Arg.Any<CancellationToken>());
-        var service = new AccessPlanningService(Substitute.For<IAuditLogRepository>(), _tableRepo, rebac, _totp, _secrets);
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tableRepo, rebac, _totp, _secrets);
         var plan = await service.PlanAccessAsync(Request("sales.public.orders"), AdminSid, Tenant);
         var enrollment = _totp.GenerateEnrollment(AdminSid, "admin@autheris.local");
         await _secrets.SetSecretAsync(AdminSid, enrollment.SecretBase32);

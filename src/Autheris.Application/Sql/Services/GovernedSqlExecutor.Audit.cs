@@ -55,7 +55,7 @@ public sealed partial class GovernedSqlExecutor
             fields["originalSqlHash"] = _digester.Anonymize(originalSql).OriginalSqlHash;
         }
 
-        await _auditWriter.RecordAsync(new AuditLogEntry
+        await _auditWriter.RecordRequiredAsync(new AuditLogEntry
         {
             TenantId = tenantId,
             EventType = eventType,

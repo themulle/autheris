@@ -36,7 +36,7 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
         { "POST", "/mcp", """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_datasets","arguments":{}}}""" },
         { "GET", "/api/v1/rebac/tuples", null },
         { "POST", "/api/v1/consents/bulk", """{"subject":"user:a","tables":[]}""" },
-        { "GET", "/v1/p/namespaces", null },
+        { "GET", "/modules/lakehouse/iceberg/v1/p/namespaces", null },
     };
 
     private static HttpRequestMessage Request(string method, string path, string? body, bool authenticated)

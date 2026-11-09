@@ -29,7 +29,7 @@ public sealed class CatalogDiscoveryWiringTests
         services.AddSingleton(Wp0.Tables(
             Wp0.Table("sales", "orders_a", "Orders", ["id"]),
             Wp0.Table("sales", "invoices_b", "Invoices", ["id"])));
-        services.AddSingleton(Substitute.For<IAuditLogRepository>());
+        services.AddAuditWriterOver(Substitute.For<IAuditLogRepository>());
         services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(options ?? Wp0.Options(TenancyShape.Multi)));
         if (withConsentRepository)
         {
@@ -70,6 +70,6 @@ public sealed class CatalogDiscoveryWiringTests
         var tables = Wp0.Tables();
         var audit = Substitute.For<IAuditLogRepository>();
 
-        Should.Throw<ArgumentNullException>(() => new CatalogDiscoveryService(tables, audit, null!));
+        Should.Throw<ArgumentNullException>(() => new CatalogDiscoveryService(tables, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit), null!));
     }
 }
