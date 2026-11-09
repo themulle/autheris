@@ -224,6 +224,7 @@ public sealed class McpAccessHintTests
         public bool RestDataEndpointEnabled => false;
         public bool BulkStreamEnabled => false;
         public bool QueryAnalysisEnabled => false;
+        public bool ProceduresEnabled => false;
         public bool IsGroupEnabled(McpToolGroup group) => false;
         public bool IsToolEnabled(string toolName) => false;
         public string? DisabledReason(string toolName) => null;
