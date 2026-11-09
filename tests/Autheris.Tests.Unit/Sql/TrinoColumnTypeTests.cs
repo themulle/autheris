@@ -156,7 +156,7 @@ public sealed class TrinoColumnTypeTests
     public async Task TrinoResponse_WritesTypeAndTypeSignature()
     {
         var status = new StatementExecutionStatus(
-            "q1", "FINISHED", ["_col0", "name", "amount"], [], null, null, 1,
+            "q1", "FINISHED", ["_col0", "name", "amount"], [], 1,
             ColumnTypes:
             [
                 TrinoColumnTypes.Map(new SqlResultColumn("_col0", typeof(long)), []),

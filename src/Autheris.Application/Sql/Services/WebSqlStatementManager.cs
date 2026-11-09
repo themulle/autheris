@@ -12,6 +12,7 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -219,11 +220,15 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                 scope.ServiceProvider.GetService<IIngressTransportContext>()?.Set(ingress);
             }
 
-            var metadataRepo = scope.ServiceProvider.GetService<ITableMetadataRepository>();
-            var consentRepo = scope.ServiceProvider.GetService<IConsentRepository>();
-            var consentResolver = scope.ServiceProvider.GetService<IConsentResolutionService>();
-            var metadataResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
-                request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, sessionCts.Token).ConfigureAwait(false);
+            GovernedSqlResult? metadataResult = null;
+            if (string.Equals(request.Transport, SqlTransports.Trino, StringComparison.Ordinal))
+            {
+                var metadataRepo = scope.ServiceProvider.GetService<ITableMetadataRepository>();
+                var consentRepo = scope.ServiceProvider.GetService<IConsentRepository>();
+                var consentResolver = scope.ServiceProvider.GetService<IConsentResolutionService>();
+                metadataResult = await TrinoMetadataQueryHandler.TryExecuteAsync(
+                    request.Sql, user, tenantId, metadataRepo, consentRepo, _gatewayOptions, consentResolver, sessionCts.Token).ConfigureAwait(false);
+            }
             if (metadataResult != null)
             {
                 if (request.Admission != null)
@@ -354,8 +359,8 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         catch (Autheris.Domain.Exceptions.TransportNotAllowedException)
         {
             return new StatementExecutionStatus(
-                session.StatementId, "FAILED", null, null, null, "Access denied.", session.Stopwatch.ElapsedMilliseconds,
-                ErrorCode: Autheris.Domain.Exceptions.TransportNotAllowedException.Code);
+                session.StatementId, "FAILED", null, null, session.Stopwatch.ElapsedMilliseconds,
+                Failure: new SqlFailure(SqlFailureKind.TransportDenied, "Access to the data source is not allowed over this transport.", Autheris.Domain.Exceptions.TransportNotAllowedException.Code));
         }
     }
 
@@ -407,36 +412,38 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         return BuildStatus(session);
     }
 
-    /// <summary>A transport denial, also when the governed pipeline wrapped it (the mapper walks the inner exception chain).</summary>
-    private static bool IsTransportDenial(Exception? ex) =>
-        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped) &&
-        string.Equals(mapped.Code, Autheris.Domain.Exceptions.TransportNotAllowedException.Code, StringComparison.Ordinal);
-
     private StatementExecutionStatus BuildStatus(StatementSession session)
     {
         long elapsedMillis = session.Stopwatch.ElapsedMilliseconds;
 
         if (session.IsCancelled)
         {
-            return new StatementExecutionStatus(session.StatementId, "CANCELED", null, null, null, "Query execution was canceled by the client.", elapsedMillis);
+            return new StatementExecutionStatus(
+                session.StatementId, "CANCELED", null, null, elapsedMillis,
+                Failure: new SqlFailure(SqlFailureKind.Canceled, SqlFailureClassifier.ClientCanceledMessage));
         }
 
         if (session.ExecutionTask.IsCanceled && CanceledGovernedError(session.ExecutionTask) is { } governedFailure)
         {
-            return new StatementExecutionStatus(session.StatementId, "FAILED", null, null, null, SanitizeErrorMessage(governedFailure), elapsedMillis);
+            return new StatementExecutionStatus(
+                session.StatementId, "FAILED", null, null, elapsedMillis,
+                Failure: SqlFailureClassifier.Classify(governedFailure));
         }
 
         if (session.ExecutionTask.IsCanceled)
         {
-            return new StatementExecutionStatus(session.StatementId, "CANCELED", null, null, null, "Query execution timed out or was canceled.", elapsedMillis);
+            return new StatementExecutionStatus(
+                session.StatementId, "CANCELED", null, null, elapsedMillis,
+                Failure: new SqlFailure(SqlFailureKind.Canceled, SqlFailureClassifier.GenericCanceledMessage));
         }
 
         if (session.ExecutionTask.IsFaulted)
         {
             var ex = session.ExecutionTask.Exception?.InnerException ?? session.ExecutionTask.Exception;
             _logger?.Error(ex, "WebSQL async execution faulted for statement {StatementId}", session.StatementId);
-            return new StatementExecutionStatus(session.StatementId, "FAILED", null, null, null, SanitizeErrorMessage(ex), elapsedMillis,
-                ErrorCode: IsTransportDenial(ex) ? Autheris.Domain.Exceptions.TransportNotAllowedException.Code : null);
+            return new StatementExecutionStatus(
+                session.StatementId, "FAILED", null, null, elapsedMillis,
+                Failure: SqlFailureClassifier.Classify(ex));
         }
 
         if (session.ExecutionTask.IsCompletedSuccessfully)
@@ -445,10 +452,14 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             var columns = result.Columns;
             var data = ConvertRowsTo2DArray(result.Columns, result.Rows);
             var columnTypes = EncodeTrinoTypes(result.ColumnDescriptions, columns, data);
-            return new StatementExecutionStatus(session.StatementId, "FINISHED", columns, data, null, null, elapsedMillis, columnTypes);
+            return new StatementExecutionStatus(
+                session.StatementId, "FINISHED", columns, data, elapsedMillis,
+                Failure: null,
+                Truncated: result.Truncated,
+                ColumnTypes: columnTypes);
         }
 
-        return new StatementExecutionStatus(session.StatementId, "RUNNING", null, null, $"/v1/statement/queued/{session.StatementId}", null, elapsedMillis);
+        return new StatementExecutionStatus(session.StatementId, "RUNNING", null, null, elapsedMillis);
     }
 
     private static IReadOnlyList<TrinoColumnType> EncodeTrinoTypes(
@@ -558,15 +569,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         }
     }
 
-    private static string SanitizeErrorMessage(Exception? ex)
-    {
-        if (ex == null) return "Statement execution failed.";
-        if (Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped)) return mapped.Title;
-        if (ex is OperationCanceledException or TimeoutException) return "Query execution timed out or was canceled.";
-        if (ex is Autheris.Domain.Exceptions.GatewayInvalidQueryException) return "The SQL request is invalid.";
-        if (ex is Autheris.Domain.Exceptions.GatewaySecurityException or SecurityException) return "Access denied.";
-        return "The SQL statement could not be executed. Contact support with the trace id.";
-    }
+
 
     private sealed class SourceHolder
     {

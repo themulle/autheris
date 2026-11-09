@@ -70,37 +70,37 @@ public static partial class WebSqlEndpoints
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        trino.MapGet("/v1/statement/queued/{statementId}", HandleTrinoQueuedStatementRequest)
+        trino.MapGet("/v1/statement/queued/{statementId}", HandleWebSqlStatementPollRequest)
            .WithName("GetTrinoQueuedStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        trino.MapGet("/v1/statement/executing/{statementId}", HandleTrinoQueuedStatementRequest)
+        trino.MapGet("/v1/statement/executing/{statementId}", HandleWebSqlStatementPollRequest)
            .WithName("GetTrinoExecutingStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        trino.MapDelete("/v1/statement/{statementId}", HandleTrinoCancelStatementRequest)
+        trino.MapDelete("/v1/statement/{statementId}", HandleWebSqlStatementCancelRequest)
            .WithName("CancelTrinoStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        webSql.MapGet("/api/v1/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
+        webSql.MapGet("/api/v1/sql/statements/{statementId}", HandleWebSqlStatementPollRequest)
            .WithName("GetWebSqlStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        webSql.MapGet("/api/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
+        webSql.MapGet("/api/sql/statements/{statementId}", HandleWebSqlStatementPollRequest)
            .WithName("GetWebSqlStatement")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        webSql.MapDelete("/api/v1/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
+        webSql.MapDelete("/api/v1/sql/statements/{statementId}", HandleWebSqlStatementCancelRequest)
            .WithName("CancelWebSqlStatementV1")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
-        webSql.MapDelete("/api/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
+        webSql.MapDelete("/api/sql/statements/{statementId}", HandleWebSqlStatementCancelRequest)
            .WithName("CancelWebSqlStatement")
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);

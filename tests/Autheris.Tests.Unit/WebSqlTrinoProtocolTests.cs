@@ -14,6 +14,7 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -32,6 +33,13 @@ public sealed class WebSqlTrinoProtocolTests
         new Claim("tid", "tenant-trino"),
         new Claim(ClaimTypes.Name, "TrinoUser")
     }, "TestAuth"));
+
+    private static Autheris.Application.DataSources.IIngressTransportContext TrinoIngress()
+    {
+        var ctx = new Autheris.Application.DataSources.IngressTransportContext();
+        ctx.Set(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Trino);
+        return ctx;
+    }
 
     [Theory]
     [InlineData("5s", 5000)]
@@ -72,6 +80,7 @@ public sealed class WebSqlTrinoProtocolTests
 
         var services = new ServiceCollection();
         services.AddSingleton<IWebSqlStatementManager>(statementManager);
+        services.AddSingleton<Autheris.Application.DataSources.IIngressTransportContext>(TrinoIngress());
         var sp = services.BuildServiceProvider();
 
         var context = new DefaultHttpContext
@@ -133,6 +142,7 @@ public sealed class WebSqlTrinoProtocolTests
 
         var services = new ServiceCollection();
         services.AddSingleton<IWebSqlStatementManager>(statementManager);
+        services.AddSingleton<Autheris.Application.DataSources.IIngressTransportContext>(TrinoIngress());
         var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider(), User = TestUser };
         context.Request.Path = "/v1/statement";
         context.Request.ContentType = "text/plain";
@@ -174,6 +184,7 @@ public sealed class WebSqlTrinoProtocolTests
 
         var services = new ServiceCollection();
         services.AddSingleton<IWebSqlStatementManager>(statementManager);
+        services.AddSingleton<Autheris.Application.DataSources.IIngressTransportContext>(TrinoIngress());
         var sp = services.BuildServiceProvider();
 
         var context = new DefaultHttpContext
@@ -266,10 +277,14 @@ public sealed class WebSqlTrinoProtocolTests
             TestUser,
             new Sid("user-trino"),
             TestTenant,
-            TimeSpan.FromMilliseconds(10));
+            TimeSpan.FromMilliseconds(10),
+            ingress: DataSourceTransportFlags.Trino);
 
+        var cancelServices = new ServiceCollection();
+        cancelServices.AddSingleton<Autheris.Application.DataSources.IIngressTransportContext>(TrinoIngress());
         var cancelContext = new DefaultHttpContext
         {
+            RequestServices = cancelServices.BuildServiceProvider(),
             User = TestUser
         };
         cancelContext.Request.Headers["X-Tenant-Id"] = TestTenant.Value;
@@ -310,10 +325,14 @@ public sealed class WebSqlTrinoProtocolTests
             TestUser,
             new Sid("user-trino"),
             TestTenant,
-            TimeSpan.FromMilliseconds(10));
+            TimeSpan.FromMilliseconds(10),
+            ingress: DataSourceTransportFlags.Trino);
 
+        var pollServices = new ServiceCollection();
+        pollServices.AddSingleton<Autheris.Application.DataSources.IIngressTransportContext>(TrinoIngress());
         var pollContext = new DefaultHttpContext
         {
+            RequestServices = pollServices.BuildServiceProvider(),
             User = TestUser
         };
         pollContext.Request.Headers["X-Tenant-Id"] = TestTenant.Value;
@@ -349,7 +368,13 @@ public sealed class WebSqlTrinoProtocolTests
     {
         // Arrange
         var sqlExecutionService = Substitute.For<IGovernedSqlExecutionService>();
-        var context = new DefaultHttpContext { User = TestUser };
+        var reqServices = new ServiceCollection();
+        reqServices.AddSingleton<Autheris.Application.DataSources.IIngressTransportContext>(TrinoIngress());
+        var context = new DefaultHttpContext
+        {
+            RequestServices = reqServices.BuildServiceProvider(),
+            User = TestUser
+        };
         context.Request.Path = "/v1/statement";
         context.Request.ContentType = "text/plain";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("SELECT 1"));

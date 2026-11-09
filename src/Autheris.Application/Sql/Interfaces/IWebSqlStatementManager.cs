@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Sql.Errors;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options.DataSources;
 
@@ -16,11 +17,14 @@ public sealed record StatementExecutionStatus(
     string State, // "QUEUED", "RUNNING", "FINISHED", "FAILED", "CANCELED"
     IReadOnlyList<string>? Columns,
     IReadOnlyList<IReadOnlyList<object?>>? Data,
-    string? NextUri,
-    string? ErrorMessage,
     long ElapsedTimeMillis,
-    IReadOnlyList<TrinoColumnType>? ColumnTypes = null,
-    string? ErrorCode = null);
+    SqlFailure? Failure = null,
+    bool Truncated = false,
+    IReadOnlyList<TrinoColumnType>? ColumnTypes = null)
+{
+    public string? ErrorMessage => Failure?.FixedMessage;
+    public string? ErrorCode => Failure?.Code;
+}
 
 /// <summary>
 /// Manages asynchronous and synchronous WebSQL statement executions, supporting the Trino HTTP client protocol

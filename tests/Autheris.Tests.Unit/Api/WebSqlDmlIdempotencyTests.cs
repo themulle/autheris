@@ -98,7 +98,7 @@ public sealed class WebSqlDmlIdempotencyTests
             CancellationToken ct = default)
         {
             CallCount++;
-            return Task.FromResult(new StatementExecutionStatus("stmt-1", "FINISHED", [], [], null, null, 0));
+            return Task.FromResult(new StatementExecutionStatus("stmt-1", "FINISHED", [], [], 0));
         }
 
         public Task<StatementExecutionStatus> GetStatusOrWaitAsync(
@@ -111,7 +111,7 @@ public sealed class WebSqlDmlIdempotencyTests
             CancellationToken ct = default)
         {
             CallCount++;
-            return Task.FromResult(new StatementExecutionStatus("stmt-1", "FINISHED", [], [], null, null, 0));
+            return Task.FromResult(new StatementExecutionStatus("stmt-1", "FINISHED", [], [], 0));
         }
 
         public Task<bool> CancelStatementAsync(

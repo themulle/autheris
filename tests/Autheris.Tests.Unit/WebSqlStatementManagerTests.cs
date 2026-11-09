@@ -6,6 +6,7 @@ using System.Security;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
@@ -86,8 +87,7 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         status.Data[0][1].ShouldBe("Alice");
         status.Data[1][0].ShouldBe(2);
         status.Data[1][1].ShouldBe("Bob");
-        status.NextUri.ShouldBeNull();
-        status.ErrorMessage.ShouldBeNull();
+        status.Failure.ShouldBeNull();
     }
 
     [Fact]
@@ -108,7 +108,6 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         status.State.ShouldBe("RUNNING");
         status.Columns.ShouldBeNull();
         status.Data.ShouldBeNull();
-        status.NextUri.ShouldBe($"/v1/statement/queued/{status.StatementId}");
 
         // Now complete the query and poll via statement ID
         var result = new GovernedSqlResult(
@@ -125,7 +124,6 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         polledStatus.Columns.ShouldBe(new[] { "val" });
         polledStatus.Data.ShouldNotBeNull();
         polledStatus.Data[0][0].ShouldBe(42);
-        polledStatus.NextUri.ShouldBeNull();
     }
 
     [Fact]
@@ -185,7 +183,9 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
 
         status.State.ShouldBe("FAILED");
-        status.ErrorMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.SyntaxError));
+        status.Failure.ShouldNotBeNull();
+        status.Failure.Kind.ShouldBe(SqlFailureKind.InvalidQuery);
+        status.Failure.FixedMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.SyntaxError));
     }
 
     [Fact]
@@ -199,7 +199,8 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
 
         status.State.ShouldBe("FAILED");
-        status.ErrorMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.LimitExceeded));
+        status.Failure.ShouldNotBeNull();
+        status.Failure.FixedMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.LimitExceeded));
     }
 
     [Fact]
@@ -231,9 +232,9 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         // Assert
         status.ShouldNotBeNull();
         status.State.ShouldBe("FAILED");
-        status.ErrorMessage.ShouldNotBeNull();
-        status.ErrorMessage.ShouldNotContain("SECRET_IBAN");
-        status.ErrorMessage.ShouldBe("The SQL statement could not be executed. Contact support with the trace id.");
+        status.Failure.ShouldNotBeNull();
+        status.Failure.FixedMessage.ShouldNotContain("SECRET_IBAN");
+        status.Failure.FixedMessage.ShouldBe("The SQL statement could not be executed. Contact support with the trace id.");
     }
 
     [Fact]
@@ -390,5 +391,58 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         await Autheris.Api.Endpoints.WebSqlEndpoints.HandleTrinoQueuedStatementRequest("stmt-1", anonymousContext, statementManager, NullLoggerFactory.Instance);
 
         anonymousContext.Response.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
+    }
+
+    [Fact]
+    public async Task MetadataEmulation_OnlyOnTrinoTransport()
+    {
+        _serviceProvider.GetService(typeof(Autheris.Application.Common.Interfaces.ITableMetadataRepository))
+            .Returns(new FakeTableMetadataRepository());
+
+        var trinoRequest = new GovernedSqlQueryRequest("SHOW CATALOGS", Transport: SqlTransports.Trino);
+        var statusTrino = await _manager.SubmitOrWaitAsync(trinoRequest, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
+
+        statusTrino.State.ShouldBe("FINISHED");
+        statusTrino.Columns.ShouldBe(new[] { "Catalog" });
+
+        var webSqlRequest = new GovernedSqlQueryRequest("SHOW CATALOGS", Transport: SqlTransports.WebSql);
+        _sqlExecutionService.ExecuteQueryBufferedAsync(webSqlRequest, TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new GovernedSqlResult("SHOW CATALOGS", ["col"], [], 0, 5)));
+
+        var statusWebSql = await _manager.SubmitOrWaitAsync(webSqlRequest, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
+        statusWebSql.State.ShouldBe("FINISHED");
+        statusWebSql.Columns.ShouldBe(new[] { "col" });
+    }
+
+    [Fact]
+    public async Task Truncated_IsCarriedIntoStatus()
+    {
+        var request = new GovernedSqlQueryRequest("SELECT 1");
+        var truncatedResult = new GovernedSqlResult("SELECT 1", ["id"], [], 0, 5, Truncated: true);
+        _sqlExecutionService.ExecuteQueryBufferedAsync(request, TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(truncatedResult));
+
+        var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
+        status.Truncated.ShouldBeTrue();
+
+        var nonTruncatedResult = new GovernedSqlResult("SELECT 1", ["id"], [], 0, 5, Truncated: false);
+        _sqlExecutionService.ExecuteQueryBufferedAsync(request, TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(nonTruncatedResult));
+
+        var statusNonTruncated = await _manager.SubmitOrWaitAsync(request, TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
+        statusNonTruncated.Truncated.ShouldBeFalse();
+    }
+
+    private sealed class FakeTableMetadataRepository : Autheris.Application.Common.Interfaces.ITableMetadataRepository
+    {
+        public Task<Autheris.Domain.Model.TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<Autheris.Domain.Model.TableMetadata?>(null);
+        public Task<IReadOnlyList<Autheris.Domain.Model.TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]);
+        public Task<Autheris.Domain.Model.TableMetadata> UpsertTableMetadataAsync(Autheris.Domain.Model.TableMetadata metadata, CancellationToken ct = default) => Task.FromResult(metadata);
+        public Task<Autheris.Domain.Model.TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table,
+            IReadOnlyList<string> primaryKey,
+            IReadOnlyList<Autheris.Domain.Model.TableIndexDefinition> indexes,
+            IReadOnlyList<Autheris.Domain.Model.KeyColumnDirection>? primaryKeyDirections = null,
+            CancellationToken ct = default) => Task.FromResult<Autheris.Domain.Model.TableKeyDefinitionChange?>(null);
     }
 }
