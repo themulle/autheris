@@ -191,18 +191,16 @@ public class DataPathSecurityTests : IDisposable
             HttpContext = new DefaultHttpContext()
         };
 
-        var catalog = await _query.GetCatalogAsync(_repository, anonymousAccessor, options, _visibility);
-        catalog.ShouldBeEmpty();
+        var ex = await Should.ThrowAsync<HotChocolate.GraphQLException>(() => _query.GetCatalogAsync(_repository, anonymousAccessor, options, _visibility));
+        ex.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
     }
 
     [Fact]
     public async Task Catalog_WhenDomainSpecifiedOrInScope_FiltersToDomain()
     {
         var options = Options.Create(new GatewayOptions());
-        var httpContext = new DefaultHttpContext();
-        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin"), new Claim(ClaimTypes.Role, "ClusterAdmin")], "TestAuth"));
-        httpContext.Items["Autheris.DomainScope"] = "finance";
-        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+        var accessor = CreateAccessor(Sid.New(), roles: ["ClusterAdmin"]);
+        accessor.HttpContext!.Items["Autheris.DomainScope"] = "finance";
 
         var catalogFromScope = await _query.GetCatalogAsync(domain: null, first: null, after: null, search: null,
             _repository, _repository, accessor, options, _visibility);
@@ -217,9 +215,7 @@ public class DataPathSecurityTests : IDisposable
     public async Task Catalog_WhenPaginationAndSearchSpecified_PaginatesAndFilters()
     {
         var options = Options.Create(new GatewayOptions());
-        var httpContext = new DefaultHttpContext();
-        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "admin"), new Claim(ClaimTypes.Role, "ClusterAdmin")], "TestAuth"));
-        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+        var accessor = CreateAccessor(Sid.New(), roles: ["ClusterAdmin"]);
 
         var searchResult = await _query.GetCatalogAsync(domain: null, first: 1, after: null, search: "finance_table_1",
             _repository, _repository, accessor, options, _visibility);
