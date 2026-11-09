@@ -103,7 +103,8 @@ public sealed class ProcedureDefinitionLoader
         foreach (string file in files.Where(IsSupportedProcedureFile))
         {
             present.Add(Path.GetFullPath(file));
-            if (IsUnchanged(file) || TryLoadFile(file, directory))
+            string? content = TryRead(file);
+            if ((content != null && IsUnchanged(file, content)) || TryLoadFile(file, directory, content))
             {
                 count++;
             }
@@ -120,7 +121,9 @@ public sealed class ProcedureDefinitionLoader
     }
 
     /// <summary>Parses and registers a single declaration file. Failures are logged and the file is skipped.</summary>
-    public bool TryLoadFile(string filePath, string rootDirectory)
+    public bool TryLoadFile(string filePath, string rootDirectory) => TryLoadFile(filePath, rootDirectory, null);
+
+    private bool TryLoadFile(string filePath, string rootDirectory, string? preRead)
     {
         try
         {
@@ -155,7 +158,7 @@ public sealed class ProcedureDefinitionLoader
             }
 
             string defaultName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(filePath));
-            string content = File.ReadAllText(filePath);
+            string content = preRead ?? File.ReadAllText(filePath);
             string contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
             var definition = ProcedureDefinitionParser.ParseYaml(content, defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds);
 
@@ -202,20 +205,26 @@ public sealed class ProcedureDefinitionLoader
         }
     }
 
-    /// <summary>An unchanged file that is still registered keeps its validated state instead of going back to Pending.</summary>
-    private bool IsUnchanged(string file)
+    /// <summary>Reads a declaration once (bounded); null when it is too large or unreadable, so the load path decides.</summary>
+    private static string? TryRead(string file)
     {
-        string full = Path.GetFullPath(file);
         try
         {
-            return _fileHash.TryGetValue(full, out var hash) && _fileToName.TryGetValue(full, out var name) &&
-                   _registry.TryGet(name, out _) &&
-                   string.Equals(hash, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(File.ReadAllText(file)))), StringComparison.Ordinal);
+            return new FileInfo(file).Length > MaxFileBytes ? null : File.ReadAllText(file);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return false;
+            return null;
         }
+    }
+
+    /// <summary>An unchanged file that is still registered keeps its validated state instead of going back to Pending.</summary>
+    private bool IsUnchanged(string file, string content)
+    {
+        string full = Path.GetFullPath(file);
+        return _fileHash.TryGetValue(full, out var hash) && _fileToName.TryGetValue(full, out var name) &&
+               _registry.TryGet(name, out _) &&
+               string.Equals(hash, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))), StringComparison.Ordinal);
     }
 
     private static bool HasLinkedDirectory(FileInfo file, string rootDirectory)
