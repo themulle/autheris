@@ -13,7 +13,8 @@ Parent spec: [WP-SIMPL-36-security-lane.md](WP-SIMPL-36-security-lane.md), secti
 - Phase 3 approved; Phase 5 approved after one fix round.
 - Local verification: solution build with `-warnaserror` is clean; the full unit suite and the architecture tests pass. Integration tests run in CI.
 
-## Decisions (default taken)
+## Decisions (owner-confirmed 2026-11-08)
+Owner-confirmed defaults: the regression tests move into `AdvisoryRegressionTests` as one theory per advisory as a follow-up in sub-package 1; the owner-level classification review stays restricted to canonical ClusterAdmin or DataOwner.
 - The renamed `Ghsa_*_regression` tests stay in `Batch5SecurityTestsA/B` rather than class `AdvisoryRegressionTests`, because private fixture members collide. Several old cases run from one public `[Fact]` per advisory, as private `Case_*` helpers. Follow-up: move or alias them into `AdvisoryRegressionTests` before the lane closes.
 - `GovernanceClassificationEndpoints` owner-capable review: canonical ClusterAdmin or DataOwner only. A GovernanceAdmin follows the normal path.
 - `IsTenantBoundGovernanceAdmin` has no production caller yet; sub-package 1 consumes it.

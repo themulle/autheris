@@ -2,6 +2,8 @@
 Status: Implemented, in review (PRs #567, #576, #582, #583, #584 and PR-D; stacked, merge in that order)
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-11-drop-sqlite-as-governance-store-od-1-req-simpl-12---persistence-lane-serial) | Issues: #515 (stage 1), #520 (hard dependency) | Owner decisions: OD-1 (binding), OD-2 (default taken), OD-12 | Security conditions: SEC-SIMPL-05, SEC-SIMPL-10..18
 
+Owner-confirmed defaults (2026-11-08): #520 is not merged before PR-B; integration tests use one cloned database per test class (CI wall time to be watched); compose keeps `GQL_PG_PASSWORD`; the compose stack runs in Development (benchmark use only).
+
 ## 1. Goal and outcome
 SQLite is no longer a governance/metadata store. After this WP: 0 `SqliteGovernanceRepository*` files (today 26), governance migration dialects 3 -> 2, `GovernanceDb:Provider=Sqlite` (or a SQLite-shaped connection string) fails host start before any repository is resolved, every shipped config defaults to PostgreSQL, and all governance tests that used in-memory SQLite run on one shared PostgreSQL Testcontainer per test assembly with a per-test-class database cloned from a migrated template.
 
