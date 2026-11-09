@@ -267,12 +267,6 @@ public sealed class ProcedureTransportGateTests
         gate.Sources.ShouldBe(["ds-ok", "src-ok"], ignoreOrder: true);
         await rig.Invoker.ReceivedWithAnyArgs(1).ExecuteReadAsync(default!, default!, default!, default, default);
     }
-}
-
-[CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class TransportGateFallbackCollection
-{
-    public const string Name = "TransportGateFallback";
 
     [Fact]
     [Trait("Category", "Security")]
@@ -287,4 +281,10 @@ public sealed class TransportGateFallbackCollection
         visibility.Visible.ShouldBeTrue();
         visibility.Decisions.Keys.Order(StringComparer.OrdinalIgnoreCase).ShouldBe(registered!.GovernedTableKeys().Order(StringComparer.OrdinalIgnoreCase));
     }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class TransportGateFallbackCollection
+{
+    public const string Name = "TransportGateFallback";
 }

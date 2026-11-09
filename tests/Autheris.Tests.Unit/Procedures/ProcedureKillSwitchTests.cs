@@ -34,6 +34,7 @@ public sealed class ProcedureKillSwitchTests
         services.AddSingleton(Microsoft.Extensions.Options.Options.Create(new GatewayOptions()));
         services.AddSingleton(Substitute.For<IProcedureRegistry>());
         services.AddSingleton(Substitute.For<IProcedureExecutionService>());
+        services.AddSingleton(Substitute.For<IProcedureCatalog>());
         var builder = new RouteBuilder(services.BuildServiceProvider());
         builder.MapProcedureEndpoints(options);
         return builder.DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>().ToList();

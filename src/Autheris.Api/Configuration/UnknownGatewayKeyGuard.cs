@@ -163,7 +163,7 @@ public static class UnknownGatewayKeyGuard
 
         if (configuration.AsEnumerable().Any(kv => string.Equals(kv.Key, RemovedProcedureHotReloadKey, StringComparison.OrdinalIgnoreCase)))
         {
-            unknown.Add("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); procedure definitions are re-scanned on every revalidation interval)");
+            unknown.Add("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); definitions are re-scanned each interval)");
         }
 
         // Removed sections and keys fail startup with any value (including false or empty).

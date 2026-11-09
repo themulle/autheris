@@ -438,6 +438,9 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
 
         procService.IsVisibleAsync(procUnconsented, Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(false);
+        // the executor's own visibility stage answers a hidden procedure like an unknown one
+        procService.ExecuteAsync("ProcUnconsented", Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns<GovernedProcedureResult>(_ => throw new KeyNotFoundException("Procedure endpoint not found."));
         procService.ExecuteAsync("ProcNonExistent", Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns<GovernedProcedureResult>(_ => throw new KeyNotFoundException("Procedure endpoint not found."));
 
@@ -518,6 +521,8 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
         var gatewayExec = Substitute.For<IGatewayExecutionService>();
         var procRegistry = Substitute.For<IProcedureRegistry>();
         var procService = Substitute.For<IProcedureExecutionService>();
+        procService.ExecuteAsync("ProcTenantA", Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ClaimsPrincipal>(), Arg.Is<TenantId>(t => t.Value == TenantB), Arg.Any<CancellationToken>())
+            .Returns<GovernedProcedureResult>(_ => throw new KeyNotFoundException("Procedure endpoint not found."));
 
         var procTenantA = CreateProcedure("ProcTenantA");
         procRegistry.GetAll().Returns([procTenantA]);

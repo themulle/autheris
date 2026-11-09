@@ -198,7 +198,7 @@ public sealed class RemovedConfigKeysTests
 
         var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(config));
 
-        ex.Message.ShouldContain("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); procedure definitions are re-scanned on every revalidation interval)");
+        ex.Message.ShouldContain("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); definitions are re-scanned each interval)");
         UnknownGatewayKeyGuard.FindUnknownKeys(config).Count.ShouldBe(1);
         UnknownGatewayKeyGuard.FindUnknownKeys(Config("Gateway:SqlEndpoints:Procedures:Enabled", "false")).ShouldBeEmpty();
     }
