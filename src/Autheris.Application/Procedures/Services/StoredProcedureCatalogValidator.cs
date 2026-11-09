@@ -247,9 +247,9 @@ public sealed class StoredProcedureCatalogValidator
         }
         else
         {
-            if (!definition.AllowDynamicSql && DynamicSqlRegex.IsMatch(definitionText))
+            if (DynamicSqlRegex.IsMatch(definitionText))
             {
-                errors.Add("The procedure appears to use dynamic SQL (sp_executesql / EXEC(...)). Declare '@allow-dynamic-sql' after a DBA review.");
+                errors.Add("The procedure appears to use dynamic SQL (sp_executesql / EXEC(...)). Dynamic SQL is not allowed.");
             }
 
             if (!string.IsNullOrWhiteSpace(definition.DdlHash))

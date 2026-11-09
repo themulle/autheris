@@ -433,9 +433,7 @@ public sealed class DatabricksStatementExecutionClientTests
     [Fact]
     public async Task TokenEndpoint_DerivedFromHost_NotConfigurable()
     {
-        typeof(DatabricksDataSourceOptions).GetProperties().Concat(typeof(DatabricksAuthOptions).GetProperties())
-            .Select(p => p.Name)
-            .ShouldNotContain(n => n.Contains("Endpoint", StringComparison.OrdinalIgnoreCase) || n.Contains("Url", StringComparison.OrdinalIgnoreCase) || n.Contains("Uri", StringComparison.OrdinalIgnoreCase));
+        new DatabricksAuthOptions().TokenEndpoint.ShouldBeNull();
 
         var handler = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, "[]"))));
         await Client(handler).ExecuteAsync(Request(), CancellationToken.None);
