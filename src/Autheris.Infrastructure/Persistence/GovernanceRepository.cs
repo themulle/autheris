@@ -52,7 +52,11 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         Action<string>? metadataInvalidator = null,
         Action<DbTransaction>? onTransactionCommitted = null,
         Action<DbTransaction>? onTransactionRolledBack = null,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        Autheris.Application.Audit.IAuditChainAnchorStore? auditAnchorStore = null,
+        IKeyVaultSecretProvider? secretProvider = null,
+        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
+        ICallerContextProvider? callerContextProvider = null)
     {
         _eventBus = eventBus;
         _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
@@ -64,6 +68,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         _metadataInvalidator = metadataInvalidator;
         _onTransactionCommitted = onTransactionCommitted;
         _onTransactionRolledBack = onTransactionRolledBack;
+        InitializeAuditFields(options, auditAnchorStore, secretProvider, environment, callerContextProvider);
     }
 
     internal IGovernanceSqlDialect Dialect => _dialect;
@@ -174,6 +179,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     {
         await tx.CommitAsync(ct).ConfigureAwait(false);
         _onTransactionCommitted?.Invoke(tx);
+        OnTransactionCommitted(tx);
     }
 
     internal async Task RollbackTransactionAsync(DbTransaction tx, CancellationToken ct = default)
@@ -185,6 +191,7 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         finally
         {
             _onTransactionRolledBack?.Invoke(tx);
+            OnTransactionRolledBack(tx);
         }
     }
 
@@ -192,14 +199,6 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     {
         _metadataCache.TryRemove(tableKey, out _);
         _metadataInvalidator?.Invoke(tableKey);
-    }
-
-    private async Task RecordAuditEventAsync(AuditLogEntry entry, DbTransaction? tx, CancellationToken ct)
-    {
-        if (_auditRecorder != null)
-        {
-            await _auditRecorder(entry, tx, ct).ConfigureAwait(false);
-        }
     }
 
     internal async Task<long> IncrementTableEpochInternalAsync(DbConnection conn, DbTransaction tx, TableIdentifier table, CancellationToken ct)

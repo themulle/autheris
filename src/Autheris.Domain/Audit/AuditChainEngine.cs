@@ -86,6 +86,7 @@ public static class AuditChainEngine
         {
             var entry = batch[i];
             currentSeq++;
+            entry.ChainSequence = currentSeq;
             entry.PrevHash = currentPrevHash;
             var effectiveTenantId = StoredTenant.RequireWritable(entry.TenantId);
 

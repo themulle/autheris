@@ -13,6 +13,8 @@ using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using System.Text.Json;
+using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Logging;
 
 /// <summary>Statements required for planning an audit purge prefix.</summary>
@@ -639,4 +641,256 @@ internal static class AuditSqlCore
 
         return new AuditChainVerificationResult(true, position, expectedPrevHash);
     }
+
+    public const long AuditChainAdvisoryLockKey = 0x41555448_41554454L; // "AUTH" "AUDT"
+    public const string AuditChainLockResource = "autheris:audit-chain";
+    public const int AuditChainLockTimeoutMs = 30000;
+
+    public static async Task AcquireAuditChainLockAsync(DbConnection conn, DbTransaction tx, IGovernanceSqlDialect dialect, CancellationToken ct)
+    {
+        if (dialect is PostgreSqlGovernanceDialect)
+        {
+            await using var lockCmd = conn.CreateCommand();
+            lockCmd.Transaction = tx;
+            lockCmd.CommandText = "SELECT pg_advisory_xact_lock(@k)";
+            lockCmd.AddBound("@k", AuditChainAdvisoryLockKey, System.Data.DbType.Int64);
+            await lockCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        else
+        {
+            await using var lockCmd = conn.CreateCommand();
+            lockCmd.Transaction = tx;
+            lockCmd.CommandText = "sp_getapplock";
+            lockCmd.CommandType = System.Data.CommandType.StoredProcedure;
+            lockCmd.AddBound("@Resource", AuditChainLockResource, System.Data.DbType.String);
+            lockCmd.AddBound("@LockMode", "Exclusive", System.Data.DbType.String);
+            lockCmd.AddBound("@LockOwner", "Transaction", System.Data.DbType.String);
+            lockCmd.AddBound("@LockTimeout", AuditChainLockTimeoutMs, System.Data.DbType.Int32);
+            var pRet = lockCmd.CreateParameter();
+            pRet.ParameterName = "@ret";
+            pRet.DbType = System.Data.DbType.Int32;
+            pRet.Direction = System.Data.ParameterDirection.ReturnValue;
+            lockCmd.Parameters.Add(pRet);
+            await lockCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            var lockResult = pRet.Value is int rc ? rc : -999;
+            if (lockResult < 0)
+            {
+                throw new AuditChainLockException(lockResult);
+            }
+        }
+    }
+
+    public static bool IsTransientWriteConflict(Exception ex, IGovernanceSqlDialect dialect)
+    {
+        if (ex is DbException dbEx && (dialect.IsTransient(dbEx) || dialect.IsUniqueViolation(dbEx)))
+        {
+            return true;
+        }
+
+        if (ex is AuditChainLockException lockEx && (lockEx.Code == -1 || lockEx.Code == -3))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    public static async Task InsertAuditRowsAsync(
+        DbConnection conn,
+        DbTransaction? tx,
+        IGovernanceSqlDialect dialect,
+        IReadOnlyList<AuditInsertRow> rows,
+        CancellationToken ct)
+    {
+        string tableName = dialect is SqlServerGovernanceDialect ? "dbo.AUDIT_LOG_ENTRIES" : "AUDIT_LOG_ENTRIES";
+        for (int offset = 0; offset < rows.Count; offset += AuditBatchInsertSql.MaxRowsPerStatement)
+        {
+            int count = Math.Min(AuditBatchInsertSql.MaxRowsPerStatement, rows.Count - offset);
+            await using var cmd = conn.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = AuditBatchInsertSql.Build(count, tableName);
+            for (int k = 0; k < count; k++)
+            {
+                var r = rows[offset + k];
+                cmd.AddBound(string.Concat("@id", k), r.Id, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@occ", k), r.OccurredAt, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@event", k), (object?)r.EventType ?? DBNull.Value, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@actor", k), (object?)r.ActorSid ?? DBNull.Value, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@target", k), (object?)r.TargetTable ?? DBNull.Value, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@col", k), (object?)r.TargetColumn ?? DBNull.Value, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@dec", k), (object?)r.Decision ?? DBNull.Value, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@trace", k), (object?)r.TraceId ?? DBNull.Value, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@det", k), (object?)r.DetailsJson ?? DBNull.Value, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@prev", k), r.PrevHash, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@hash", k), r.EntryHash, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@tenantId", k), r.TenantId, System.Data.DbType.String);
+                cmd.AddBound(string.Concat("@seq", k), r.Seq, System.Data.DbType.Int64);
+            }
+
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    public static async Task WriteToDeadLetterAsync(
+        DbConnection conn,
+        IGovernanceSqlDialect dialect,
+        IReadOnlyList<AuditLogEntry> batch,
+        string errorMessage,
+        ILogger? logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = dialect is SqlServerGovernanceDialect
+                ? "INSERT INTO dbo.AUDIT_DEAD_LETTER (id, batch_json, error_message, failed_at, tenant_id) VALUES (@id, @batch, @err, @failed, @tenant)"
+                : "INSERT INTO AUDIT_DEAD_LETTER (id, batch_json, error_message, failed_at, tenant_id) VALUES (@id, @batch, @err, @failed, @tenant)";
+            cmd.AddBound("@id", Guid.NewGuid().ToString("N"), System.Data.DbType.String);
+            cmd.AddBound("@batch", JsonSerializer.Serialize(batch), System.Data.DbType.String);
+            cmd.AddBound("@err", errorMessage, System.Data.DbType.String);
+            cmd.AddBound("@failed", TimeProvider.System.GetUtcNow().ToString("O"), System.Data.DbType.String);
+            cmd.AddBound("@tenant", batch.FirstOrDefault()?.TenantId.Value ?? TenantId.Platform.Value, System.Data.DbType.String);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception dlEx)
+        {
+            logger?.LogCritical(dlEx, "Failed to write audit batch to AUDIT_DEAD_LETTER table!");
+        }
+    }
+
+    public static async Task<int> ExecutePurgeBatchAsync(
+        DbConnection conn,
+        IGovernanceSqlDialect dialect,
+        long maxSequenceInclusive,
+        int batchSize,
+        CancellationToken ct)
+    {
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using (var authCmd = conn.CreateCommand())
+            {
+                authCmd.Transaction = tx;
+                authCmd.CommandText = dialect is SqlServerGovernanceDialect
+                    ? "EXEC sp_set_session_context @key = N'audit_purge_authorized', @value = 1;"
+                    : "SELECT set_config('autheris.audit_purge_authorized', 'true', true);";
+                await authCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            int rowsPurged;
+            await using (var delCmd = conn.CreateCommand())
+            {
+                delCmd.Transaction = tx;
+                delCmd.CommandText = dialect is SqlServerGovernanceDialect
+                    ? @"WITH CTE AS (
+                          SELECT TOP (@batchSize) id
+                          FROM dbo.AUDIT_LOG_ENTRIES
+                          WHERE seq <= @maxSeq
+                          ORDER BY seq ASC
+                      )
+                      DELETE FROM CTE;"
+                    : @"DELETE FROM AUDIT_LOG_ENTRIES
+                      WHERE ctid IN (
+                          SELECT ctid FROM AUDIT_LOG_ENTRIES
+                          WHERE seq <= @maxSeq
+                          ORDER BY seq ASC
+                          LIMIT @batchSize
+                      )";
+                delCmd.AddBound("@maxSeq", maxSequenceInclusive, System.Data.DbType.Int64);
+                delCmd.AddBound("@batchSize", batchSize, System.Data.DbType.Int32);
+                rowsPurged = await delCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            return rowsPurged;
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct).ConfigureAwait(false); } catch { }
+            throw;
+        }
+        finally
+        {
+            if (dialect is SqlServerGovernanceDialect)
+            {
+                try
+                {
+                    await using var resetCmd = conn.CreateCommand();
+                    resetCmd.CommandText = "EXEC sp_set_session_context @key = N'audit_purge_authorized', @value = NULL;";
+                    await resetCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+                catch { }
+            }
+        }
+    }
+
+    public static void LogAuditWriteConflict(Exception ex, int attempt, int max, ILogger? logger)
+    {
+        logger?.LogWarning(ex, "Audit chain write conflict (attempt {Attempt}/{Max}); retrying.", attempt, max);
+    }
+
+    public static void LogAnchorPersistError(Exception ex, long seq, ILogger? logger)
+    {
+        logger?.LogError(ex, "Failed to persist external audit chain anchor at seq {Sequence}.", seq);
+    }
+
+    public static void LogChainViolation(string reason, ILogger? logger)
+    {
+        logger?.LogCritical("AUDIT CHAIN INTEGRITY VIOLATION: {Reason}", reason);
+    }
+
+    public static void LogPipelineRecovered(ILogger? logger)
+    {
+        logger?.LogInformation("AU-05: Audit pipeline recovered successfully. Fault flag cleared.");
+    }
+
+    public static void LogBatchFlushError(Exception ex, int count, int attempt, int max, ILogger? logger)
+    {
+        logger?.LogError(ex, "Failed to flush audit batch of {Count} entries (attempt {Attempt}/{MaxRetries})", count, attempt, max);
+    }
+
+    public static void LogFatalBatchFailure(Exception ex, int count, ILogger? logger)
+    {
+        logger?.LogCritical(ex, "FATAL: Audit batch of {Count} entries failed permanently after 3 attempts. Setting audit pipeline to faulted (fail-closed). Diverting to dead-letter queue.", count);
+    }
+
+    public static void LogPipelineFaulted(string? table, ILogger? logger)
+    {
+        logger?.LogError("Audit pipeline is faulted; failing closed on Tier-B audit event for table {Table}.", table);
+    }
+
+    public static void LogChannelSaturated(string? table, ILogger? logger)
+    {
+        logger?.LogError("Audit channel saturated; failing closed on Tier-B audit event for table {Table}.", table);
+    }
+
+    public static void LogFaultEventError(Exception ex, ILogger? logger)
+    {
+        logger?.LogError(ex, "Failed to write the AUDIT_PIPELINE_FAULT event for the latched audit chain violation.");
+    }
+
+    public static void LogInMemoryAnchorWarning(ILogger? logger)
+    {
+        logger?.LogWarning("Audit chain anchor is only held in memory (no tamper protection across restarts); configure Audit:ChainAnchorPath on a separate, shared volume or WORM store.");
+    }
+
+    public static void LogSeedAnchorError(Exception ex, long seq, ILogger? logger)
+    {
+        logger?.LogError(ex, "Failed to seed initial external anchor for existing audit chain at seq {Sequence}.", seq);
+    }
+
+    public static void LogShutdownDrainError(Exception ex, int count, ILogger? logger)
+    {
+        logger?.LogError(ex, "Failed to flush audit batch of {Count} entries during shutdown drain; diverting to dead-letter queue.", count);
+    }
+
+    public static void LogDisposalDrainError(Exception ex, ILogger? logger)
+    {
+        logger?.LogError(ex, "Error while draining audit channel during disposal.");
+    }
+}
+
+public sealed class AuditChainLockException(int code) : Exception($"sp_getapplock failed for '{AuditSqlCore.AuditChainLockResource}' (return code {code}).")
+{
+    public int Code { get; } = code;
 }

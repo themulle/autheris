@@ -177,8 +177,7 @@ scope src/Autheris.Infrastructure/Health/CachedGatewayHealthCheckService.cs | ex
 scope src/Autheris.Infrastructure/Messaging/InProcessChannelEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Messaging/RedisEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Observability/ConsumerUsageFlushWorker.cs | exempt: usage flush; governance state only
-scope src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
-scope src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
+scope src/Autheris.Infrastructure/Persistence/GovernanceRepository.Audit.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/RateLimiting/InMemoryRateLimiterService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 
 # --- src files that reference executors or connector registries (new references need security approval) ---
