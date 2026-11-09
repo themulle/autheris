@@ -24,8 +24,8 @@ using static Autheris.Tests.Unit.Mcp.ScopeLevelTestKit;
 /// <summary>PLAN-GOV-158-INC1 WP-158-4: the stored consent description in the access explanation (decisions 5, 9, 10; SEC-GOV158I1-08..10, 14).</summary>
 public sealed class EffectiveAccessConsentDescriptionTests
 {
-    private const string Group = "S-1-GRP-MEMBER";
-    private const string ForeignGroup = "S-1-GRP-FOREIGN";
+    private const string Group = "S-1-5-21-1-2-3-1102";
+    private const string ForeignGroup = "S-1-5-21-1-2-3-1103";
     private static readonly DateTimeOffset Start = DateTimeOffset.UtcNow;
 
     private static Consent Grant(
@@ -42,7 +42,7 @@ public sealed class EffectiveAccessConsentDescriptionTests
     {
         var claims = new List<Claim> { new(ClaimTypes.PrimarySid, UserSid), new("tenant_id", Tenant) };
         claims.AddRange((roles ?? []).Select(r => new Claim(ClaimTypes.Role, r)));
-        claims.AddRange((groups ?? []).Select(g => new Claim(ClaimTypes.GroupSid, g)));
+        claims.AddRange((groups ?? []).Select(g => Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g)));
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "MCP"));
     }
 

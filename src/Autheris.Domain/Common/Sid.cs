@@ -139,12 +139,10 @@ public static class ClaimsPrincipalExtensions
     {
         if (principal == null) return [];
 
-        return principal.FindAll(System.Security.Claims.ClaimTypes.GroupSid)
-            .Concat(principal.FindAll("groups"))
-            .Concat(principal.FindAll("groupsid"))
-            .Concat(principal.FindAll("http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"))
-            .Concat(principal.FindAll("http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid"))
-            .Where(c => !string.IsNullOrWhiteSpace(c.Value))
+        // Only group SIDs minted by the identity pipeline count; token claim types and every other issuer are ignored.
+        return principal.FindAll(c => c.Type == System.Security.Claims.ClaimTypes.GroupSid
+                                      && string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal)
+                                      && SidFormat.IsCanonical(c.Value))
             .Select(c => new Sid(c.Value))
             .ToHashSet();
     }

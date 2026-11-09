@@ -323,20 +323,40 @@ public static partial class GatewayServiceCollectionExtensions
         };
         options.IncludeErrorDetails = false;
 
-        if (useEntra)
+        if (useEntra || useAdfs)
         {
-            // Finding 3.3 / R13: scope and token-kind rules apply to Entra tokens only (ADFS may share this scheme).
+            // Finding 3.3 / R13: scope and token-kind rules apply to Entra tokens only (AD FS may share this scheme);
+            // AD FS tokens are checked against the AD FS client allowlist.
+            var adfsIssuers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (useAdfs && !string.IsNullOrWhiteSpace(adfsConfig.Authority))
+            {
+                adfsIssuers.Add(adfsConfig.Authority.TrimEnd('/'));
+                adfsIssuers.Add($"{adfsConfig.Authority.TrimEnd('/')}/services/trust");
+            }
+
             options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
             options.Events.OnTokenValidated = ctx =>
             {
-                if (ctx.Principal != null && entraIssuers.Contains(ctx.SecurityToken?.Issuer ?? string.Empty))
+                var issuer = ctx.SecurityToken?.Issuer ?? string.Empty;
+                if (ctx.Principal == null)
+                {
+                    return Task.CompletedTask;
+                }
+
+                string? failure = null;
+                if (useEntra && entraIssuers.Contains(issuer))
                 {
                     var resolver = ctx.HttpContext.RequestServices.GetRequiredService<IIdentitySubjectResolver>();
-                    var failure = EntraTokenPolicy.Apply(ctx.Principal, entraConfig, resolver);
-                    if (failure != null)
-                    {
-                        ctx.Fail(failure);
-                    }
+                    failure = EntraTokenPolicy.Apply(ctx.Principal, entraConfig, resolver);
+                }
+                else if (useAdfs && adfsIssuers.Contains(issuer))
+                {
+                    failure = AdfsTokenPolicy.Apply(ctx.Principal, adfsConfig);
+                }
+
+                if (failure != null)
+                {
+                    ctx.Fail(failure);
                 }
 
                 return Task.CompletedTask;

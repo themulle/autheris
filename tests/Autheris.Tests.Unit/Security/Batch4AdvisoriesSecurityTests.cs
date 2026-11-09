@@ -176,9 +176,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     [Fact]
     public async Task IcebergRestCatalog_EnforcesTransportGate()
     {
-        var gate = Substitute.For<IDataSourceTransportGate>();
-        gate.EnsureCatalogSourceAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException(new TransportNotAllowedException("iceberg_src", DataSourceTransportFlags.Rest)));
+        var gate = new CatalogDenyingTransportGate(new TransportNotAllowedException("iceberg_src", DataSourceTransportFlags.Rest));
 
         var meta = Wp0.Table("iceberg_src", "orders", columns: ["id"]) with
         {
@@ -216,9 +214,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     [Fact]
     public async Task CdcSubscriptionGovernor_EnforcesTransportGate()
     {
-        var gate = Substitute.For<IDataSourceTransportGate>();
-        gate.EnsureCatalogSourceAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException(new TransportNotAllowedException("cdc_src", DataSourceTransportFlags.GraphQL)));
+        var gate = new CatalogDenyingTransportGate(new TransportNotAllowedException("cdc_src", DataSourceTransportFlags.GraphQL));
 
         var meta = Wp0.Table("cdc_src", "orders", columns: ["id"]) with
         {
@@ -239,9 +235,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     [Fact]
     public async Task StreamRlsPolicyEnforcer_EnforcesTransportGate()
     {
-        var gate = Substitute.For<IDataSourceTransportGate>();
-        gate.EnsureCatalogSourceAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromException(new TransportNotAllowedException("cdc_src", DataSourceTransportFlags.Rest)));
+        var gate = new CatalogDenyingTransportGate(new TransportNotAllowedException("cdc_src", DataSourceTransportFlags.Rest));
 
         var meta = Wp0.Table("cdc_src", "orders", columns: ["id"]) with
         {
@@ -276,5 +270,22 @@ public sealed class Batch4AdvisoriesSecurityTests
         decision.IsAllowed.ShouldBeFalse();
         decision.MaskedPayload.ShouldBeNull();
         decision.FilterReason.ShouldBe("Transport not allowed");
+    }
+
+    private sealed class CatalogDenyingTransportGate(Exception denial) : IDataSourceTransportGate
+    {
+        public IReadOnlyList<string> CheckedSources => [];
+
+        public DataSourceTransportFlags Ingress => default;
+
+        public Task EnsureAsync(string? dataSourceName, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task EnsureAllAsync(IEnumerable<string?> dataSourceNames, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task EnsureCatalogSourcesAsync(IEnumerable<string?> catalogSourceNames, CancellationToken ct = default) => Task.FromException(denial);
+
+        public Task EnsureCatalogSourceAsync(string? catalogSourceName, CancellationToken ct = default) => Task.FromException(denial);
+
+        public bool IsAllowed(string? dataSourceName) => false;
     }
 }
