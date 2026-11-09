@@ -57,7 +57,7 @@ public sealed class SqlDialectRegistryTests
     [InlineData(DatabaseDialect.PostgreSql, TargetSqlDialect.PostgreSql, true, true, true, "\"orders\"", "@p0")]
     [InlineData(DatabaseDialect.Sqlite, TargetSqlDialect.Sqlite, true, true, true, "\"orders\"", "@p0")]
     [InlineData(DatabaseDialect.Oracle, TargetSqlDialect.Oracle, true, false, false, "\"orders\"", ":p0")]
-    [InlineData(DatabaseDialect.Databricks, TargetSqlDialect.Databricks, false, false, false, "`orders`", "@p0")]
+    [InlineData(DatabaseDialect.Databricks, TargetSqlDialect.Databricks, true, false, false, "`orders`", "@p0")]
     public void Provider_ExposesExpectedCapabilitiesQuotingAndParameterFormatting(
         DatabaseDialect dialect,
         TargetSqlDialect expectedTarget,

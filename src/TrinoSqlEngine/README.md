@@ -198,7 +198,7 @@ the supported DML classes. A dialect without an entry cannot be compiled.
 | SQLite | Production |
 | Oracle | Production |
 | DuckDB | Production |
-| Databricks | Experimental |
+| Databricks | Production |
 
 A tier flip is a security decision, because it admits a dialect. An experimental dialect is rejected unless a test sets
 `CompileRequest.AllowExperimentalDialect`. The ANSI generator renders inline text only (policy rendering and tests); it has

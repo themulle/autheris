@@ -108,13 +108,16 @@ public sealed class GovernedCatalogProviderTests
     }
 
     [Fact]
-    public async Task Databricks_TableIsDenied_EvenWithAMappedDialectAndARegisteredReader_UntilX1Dbx()
+    [Trait("Category", "Security")]
+    public async Task Databricks_admission_follows_tier_only()
     {
         var (sut, reader, _) = Build("Databricks", TargetSqlDialect.Databricks, new[] { "id", "tenantid" },
             new DbColumnMetadata[] { new("id", "int", null), new("tenantid", "string", "UTF8_BINARY") });
 
-        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
-        reader.Calls.ShouldBe(0);
+        var catalog = await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
+        var entry = Resolve(catalog);
+        entry.ShouldNotBeNull();
+        reader.Calls.ShouldBe(1);
     }
 
     [Fact]

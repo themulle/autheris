@@ -487,7 +487,6 @@ public sealed class PolicyKeyQueryCompilerTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.Databricks)]
     [InlineData(TargetSqlDialect.Ansi)]
     public void DialectWithoutAProductionCapabilityEntry_IsDialectUnsupported(TargetSqlDialect dialect)
     {

@@ -19,15 +19,15 @@ public sealed class DialectAdmissionTests
     [Fact]
     public void Admission_ExactSet()
     {
-        // The admitted set is exactly these four. DuckDB, Databricks and Ansi are not admitted: a change of this list is a
+        // The admitted set is exactly these five. DuckDB and Ansi are not admitted: a change of this list is a
         // security decision (CODEOWNERS on DialectCapabilityTable.cs) and must change this test in the same commit.
         Enum.GetValues<DatabaseDialect>().Where(SqlDialectMapper.IsExecutable)
-            .ShouldBe([DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Sqlite, DatabaseDialect.Oracle], ignoreOrder: true);
+            .ShouldBe([DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Sqlite, DatabaseDialect.Oracle, DatabaseDialect.Databricks], ignoreOrder: true);
         SqlDialectMapper.AdmittedDialects.ShouldBe(
-            [DatabaseDialect.Oracle, DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Sqlite], ignoreOrder: true);
+            [DatabaseDialect.Oracle, DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Sqlite, DatabaseDialect.Databricks], ignoreOrder: true);
 
         // The target dialects that no database dialect maps to are not admitted by construction.
-        foreach (var target in new[] { TargetSqlDialect.DuckDb, TargetSqlDialect.Ansi, TargetSqlDialect.Databricks })
+        foreach (var target in new[] { TargetSqlDialect.DuckDb, TargetSqlDialect.Ansi })
         {
             Enum.GetValues<DatabaseDialect>()
                 .Where(d => SqlDialectMapper.TryToTargetDialect(d, out var t) && t == target)
@@ -38,10 +38,10 @@ public sealed class DialectAdmissionTests
     [Fact]
     public void Admission_IsDerivedFromTheCapabilityTier()
     {
-        // Databricks maps and connects: only its tier keeps it out. A flip to Production admits it (X1-DBX), and nothing else changes.
+        // Databricks maps and connects: its Production tier admits it. A flip to Experimental keeps it out, and nothing else changes.
         var table = DialectCapabilityTable.Default;
-        SqlDialectMapper.IsExecutable(DatabaseDialect.Databricks, table).ShouldBeFalse();
-        SqlDialectMapper.IsExecutable(DatabaseDialect.Databricks, new TierOverride(table, TargetSqlDialect.Databricks, DialectSupportTier.Production)).ShouldBeTrue();
+        SqlDialectMapper.IsExecutable(DatabaseDialect.Databricks, table).ShouldBeTrue();
+        SqlDialectMapper.IsExecutable(DatabaseDialect.Databricks, new TierOverride(table, TargetSqlDialect.Databricks, DialectSupportTier.Experimental)).ShouldBeFalse();
 
         // ... and an admitted dialect that loses its tier is no longer admitted.
         SqlDialectMapper.IsExecutable(DatabaseDialect.Oracle, new TierOverride(table, TargetSqlDialect.Oracle, DialectSupportTier.Experimental)).ShouldBeFalse();
@@ -79,6 +79,32 @@ public sealed class DialectAdmissionTests
     }
 
     [Fact]
+    public void Admission_DatabricksOnlyWithParityEvidence()
+    {
+        // WP-SIMPL-37 / OD-36 (SEC-X1-14): Databricks is admitted only because DatabricksTransportParityTests exists and covers
+        // parity across WebSQL, Trino, and MCP transports. If the evidence is removed, Databricks must be excluded again.
+        SqlDialectMapper.IsExecutable(DatabaseDialect.Databricks).ShouldBeTrue();
+
+        string evidence = Path.Combine(RepoRoot(), "tests", "Autheris.Tests.Integration", "DatabricksTransportParityTests.cs");
+        File.Exists(evidence).ShouldBeTrue("Databricks is admitted to WebSQL, Trino, and MCP, but its parity suite is missing.");
+        string text = File.ReadAllText(evidence);
+        foreach (var required in new[]
+                 {
+                     "SameCaller_SameRowsMasksAndColumnDenials_OnAllTransports",
+                     "Tenant_isolation_holds_under_case_insensitive_collation",
+                     "ConsentDenied_SameDenialShape_OnAllTransports",
+                     "RowLimit_AppliedPerTransportChannel",
+                     "Write_statement_rejected_on_Trino_and_Mcp"
+                 })
+        {
+            text.ShouldContain(required, customMessage: $"Databricks parity evidence test '{required}' is missing.");
+        }
+
+        // The Databricks capability entry carries the tier the admission derives from.
+        DialectCapabilityTable.Default.Get(TargetSqlDialect.Databricks).Tier.ShouldBe(DialectSupportTier.Production);
+    }
+
+    [Fact]
     public void ToTargetDialect_NeverDefaults_ForAnUnmappedDialect()
     {
         Should.Throw<NotSupportedException>(() => SqlDialectMapper.ToTargetDialect((DatabaseDialect)99));
@@ -95,8 +121,6 @@ public sealed class DialectAdmissionTests
             {
                 message.ShouldContain(SqlDialectMapper.DisplayName(dialect));
             }
-
-            message.ShouldNotContain("Databricks");
         }
     }
 

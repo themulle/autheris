@@ -160,21 +160,27 @@ public sealed class X1StartupTests
     {
         var log = new CapturingLogger<X1StartupTests>();
         var input = new PolicyLintInput(
-            [Orders(), Orders("Databricks") with { Table = new Table { SourceType = "Databricks", SourceName = "lake", SchemaName = "s", TableName = "events" }, Identifier = new TableIdentifier("lake", "s", "events") }],
+            [
+                Orders(),
+                Orders("Databricks") with { Table = new Table { SourceType = "Databricks", SourceName = "lake", SchemaName = "s", TableName = "events" }, Identifier = new TableIdentifier("lake", "s", "events") },
+                Orders("unsupported") with { Table = new Table { SourceType = "unsupported", SourceName = "ext", SchemaName = "s", TableName = "denied_table" }, Identifier = new TableIdentifier("ext", "s", "denied_table") }
+            ],
             [Profile("p-good", "region = 'EU'"), Profile("p-bad", $"region = '{SecretValue}' AND [name] = '{SecretValue}'")],
             [], []);
 
         var report = GatewayStartupValidator.ListDeniedTables(input, log);
 
-        // the unparsable predicate denies its table; the table of a dialect that WebSQL does not admit is denied as well
+        // the unparsable predicate denies its table; the table of a dialect that WebSQL does not admit is denied as well; Databricks is admitted (OD-36)
         report.ShouldContain(d => d.Table == "erp.main.orders" && d.PolicyId == "p-bad");
-        report.ShouldContain(d => d.Table == "lake.s.events" && d.Code == GatewayStartupValidator.DeniedDialectNotAdmitted);
+        report.ShouldContain(d => d.Table == "ext.s.denied_table" && d.Code == GatewayStartupValidator.DeniedDialectNotAdmitted);
+        report.ShouldNotContain(d => d.Table == "lake.s.events");
         report.ShouldNotContain(d => d.PolicyId == "p-good");
 
         var text = string.Join('\n', log.Lines);
         text.ShouldContain("erp.main.orders");
         text.ShouldContain("p-bad");
-        text.ShouldContain("lake.s.events");
+        text.ShouldContain("ext.s.denied_table");
+        text.ShouldNotContain("lake.s.events");
         text.ShouldNotContain(SecretValue);   // ids only: never predicate text, parameter values or column names of a predicate
         text.ShouldNotContain("region");
     }
