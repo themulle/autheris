@@ -11,6 +11,9 @@ using System.Security;
 /// </summary>
 public static class FileHashVerifier
 {
+    /// <summary>Upper bound for a single file inside a module folder.</summary>
+    public const long MaxModuleFileBytes = 64L * 1024 * 1024;
+
     /// <summary>
     /// Verifies all files under <paramref name="moduleDirectory"/> against <paramref name="manifest"/> and returns
     /// an in-memory <see cref="VerifiedModuleImage"/>.
@@ -64,6 +67,8 @@ public static class FileHashVerifier
         {
             EnsureNoSymlinkEscape(fullRoot, filePath);
 
+            EnsureRegularFile(filePath, manifest.Id);
+
             var fullFilePath = Path.GetFullPath(filePath);
             if (!fullFilePath.StartsWith(fullRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             {
@@ -82,7 +87,11 @@ public static class FileHashVerifier
             }
 
             // Read the file into memory once
-            byte[] fileBytes = File.ReadAllBytes(fullFilePath);
+            byte[] fileBytes;
+            using (var fileStream = new FileStream(fullFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                fileBytes = ReadCapped(fileStream, relPath, MaxModuleFileBytes);
+            }
 
             if (verifyHashes)
             {
@@ -127,6 +136,86 @@ public static class FileHashVerifier
         }
 
         return new VerifiedModuleImage(manifest.Id, fullRoot, manifest, loadedFiles);
+    }
+
+    /// <summary>
+    /// Reads <paramref name="stream"/> completely but rejects the file as soon as more than
+    /// <paramref name="maxBytes"/> bytes have actually been read, regardless of the reported length.
+    /// </summary>
+    internal static byte[] ReadCapped(Stream stream, string relativePath, long maxBytes)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        if (stream.CanSeek && stream.Length <= maxBytes)
+        {
+            var exact = new byte[Math.Max(stream.Length, 0)];
+            var filled = 0;
+            int n;
+            while (filled < exact.Length && (n = stream.Read(exact, filled, exact.Length - filled)) > 0)
+            {
+                filled += n;
+            }
+
+            // Anything beyond the reported length is read with the cap enforced on the bytes actually read.
+            var probe = new byte[1];
+            if (filled < exact.Length || stream.Read(probe, 0, 1) == 0)
+            {
+                return filled == exact.Length ? exact : exact[..filled];
+            }
+
+            using var rest = new MemoryStream();
+            rest.Write(exact, 0, filled);
+            rest.Write(probe, 0, 1);
+            return ReadRemainder(stream, rest, relativePath, maxBytes);
+        }
+
+        using var buffer = new MemoryStream();
+        return ReadRemainder(stream, buffer, relativePath, maxBytes);
+    }
+
+    private static byte[] ReadRemainder(Stream stream, MemoryStream buffer, string relativePath, long maxBytes)
+    {
+        var chunk = new byte[81920];
+        long total = buffer.Length;
+        int read;
+        while ((read = stream.Read(chunk, 0, chunk.Length)) > 0)
+        {
+            total += read;
+            if (total > maxBytes)
+            {
+                throw new SecurityException($"Module file '{relativePath}' exceeds the maximum size of {maxBytes} bytes.");
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
+    }
+
+    private static void EnsureRegularFile(string filePath, string moduleId)
+    {
+        var info = new FileInfo(filePath);
+        if ((info.Attributes & (FileAttributes.Device | FileAttributes.Directory)) != 0)
+        {
+            throw new SecurityException($"Module '{moduleId}' contains a non-regular file entry.");
+        }
+
+        // Links were already bounded to the module root by EnsureNoSymlinkEscape; the kind of the final target decides.
+        var kind = UnixFileStat.TryGetFileKind(filePath);
+        if (kind is { } k && k != UnixFileKind.Regular)
+        {
+            throw new SecurityException($"Module '{moduleId}' contains a non-regular file entry.");
+        }
+
+        EnsureSize(info);
+    }
+
+    private static void EnsureSize(FileInfo info)
+    {
+        if (info.Length > MaxModuleFileBytes)
+        {
+            throw new SecurityException($"Module file '{info.Name}' exceeds the maximum size of {MaxModuleFileBytes} bytes.");
+        }
     }
 
     public static void EnsureNoSymlinkEscape(string fullRoot, string candidatePath)

@@ -113,7 +113,7 @@ public static partial class GatewayServiceCollectionExtensions
         services.TryAddScoped<Autheris.Application.Policy.IAccessDecisionPoint, Autheris.Application.Policy.AccessDecisionPoint>();
         var hostContext = new ModuleHostContext(
             TimeProvider.System,
-            ModuleLoader.DefaultHostVersion,
+            ModuleLoader.ResolveHostVersion(),
             new GovernanceConnectionFactory(gatewayOptions.GovernanceDb));
         var logger = bootstrapLoggerFactory?.CreateLogger<ModuleLoader>();
         var loader = new ModuleLoader(logger: logger);

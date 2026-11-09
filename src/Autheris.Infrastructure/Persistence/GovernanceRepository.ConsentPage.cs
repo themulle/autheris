@@ -1,26 +1,31 @@
+namespace Autheris.Infrastructure.Persistence;
+
+using System;
+using System.Collections.Generic;
+using System.Data.Common;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Infrastructure.Persistence.Dialects;
 
-
-namespace Autheris.Infrastructure.Persistence;
-
-public partial class PostgreSqlGovernanceRepository
+public partial class GovernanceRepository
 {
-    /// <summary>
-    /// one keyset page (ordered by consent id) of the consents of ONE tenant. The tenant predicate is mandatory (an empty tenant
-    /// is refused, fail closed). Activity is not decided here; the caller applies <see cref="Consent.IsActive"/> at read time.
-    /// </summary>
+    private const string SelectConsentPagePrefix =
+        "SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to, c.is_revoked, c.tenant_id, c.renewal_count, t.source_name, t.schema_name, t.table_name FROM CONSENTS c JOIN TABLES t ON c.table_id = t.id WHERE ";
+
+    private const string SelectConsentPageSuffix =
+        " ORDER BY c.id OFFSET 0 ROWS FETCH NEXT @take ROWS ONLY";
+
     public async Task<ConsentPage> GetConsentPageAsync(ConsentPageQuery query, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        if (string.IsNullOrWhiteSpace(query.Tenant.Value))
-        {
-            throw new ArgumentException("A consent page query requires a tenant.", nameof(query));
-        }
+        TenantScope.RequireTenant(query.Tenant, nameof(GovernanceTable.Consents));
 
         var size = query.EffectivePageSize;
-        var where = new System.Text.StringBuilder("c.tenant_id = @tenantId");
+        var where = new StringBuilder("c.tenant_id = @tenantId");
         if (query.Table is not null)
         {
             where.Append(" AND LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)");
@@ -52,32 +57,32 @@ public partial class PostgreSqlGovernanceRepository
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = $"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to, c.is_revoked, c.tenant_id, c.renewal_count, t.source_name, t.schema_name, t.table_name FROM CONSENTS c JOIN TABLES t ON c.table_id = t.id WHERE {where} ORDER BY c.id LIMIT @take";
-            cmd.Parameters.AddWithValue("@tenantId", query.Tenant.Value);
-            cmd.Parameters.AddWithValue("@take", size + 1);
+            cmd.CommandText = SelectConsentPagePrefix + where.ToString() + SelectConsentPageSuffix;
+            cmd.AddBound("@tenantId", query.Tenant.Value);
+            cmd.AddBound("@take", size + 1);
             if (query.Table is { } table)
             {
-                cmd.Parameters.AddWithValue("@domain", table.Domain);
-                cmd.Parameters.AddWithValue("@schema", table.Schema);
-                cmd.Parameters.AddWithValue("@table", table.TableName);
+                cmd.AddBound("@domain", table.Domain);
+                cmd.AddBound("@schema", table.Schema);
+                cmd.AddBound("@table", table.TableName);
             }
 
             if (query.GranteeType is { } type)
             {
-                cmd.Parameters.AddWithValue("@gtype", type.ToString());
+                cmd.AddBound("@gtype", type.ToString());
             }
 
             if (granteeNorm != null)
             {
-                cmd.Parameters.AddWithValue("@gnorm", granteeNorm);
+                cmd.AddBound("@gnorm", granteeNorm);
             }
 
             if (query.AfterId is { } after)
             {
-                cmd.Parameters.AddWithValue("@after", after.ToString());
+                cmd.AddBound("@after", after.ToString());
             }
 
-            await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+            await using (var reader = await ExecuteReaderAsync(cmd, "ConsentPage.GetPage", ct).ConfigureAwait(false))
             {
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
@@ -109,6 +114,13 @@ public partial class PostgreSqlGovernanceRepository
         }
 
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
-        return new ConsentPage(consents, more ? consents[^1].Id : null);
+
+        Guid? nextCursor = null;
+        if (more && consents.Count > 0)
+        {
+            nextCursor = consents[^1].Id;
+        }
+
+        return new ConsentPage(consents, nextCursor);
     }
 }

@@ -24,7 +24,7 @@ using Microsoft.Extensions.Options;
 /// and typed parameters; no EXEC text is ever composed. Before the call the security context is written to the
 /// read-only SESSION_CONTEXT on the same connection so database-side RLS policies can evaluate it.
 /// </summary>
-public sealed class MssqlProcedureInvoker : IProcedureInvoker
+public sealed class ProcedureInvoker : IProcedureInvoker
 {
     private static readonly Regex DecimalPrecisionRegex = new(
         @"\((\d+)(?:,(\d+))?\)", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
@@ -33,7 +33,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
     private readonly IOptions<GatewayOptions> _options;
     private readonly IDbSessionContextInitializer _sessionInitializer;
 
-    public MssqlProcedureInvoker(
+    public ProcedureInvoker(
         ProcedureConnectionProvider connections,
         IOptions<GatewayOptions> options,
         IDbSessionContextInitializer? sessionInitializer = null)
@@ -61,53 +61,50 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
 
         await using (connection.ConfigureAwait(false))
         {
-            ProcedureConnectionProvider.TryResolveDialect(connOptions.Provider, out var dialect);
+            // closed dialect set; the connection provider already rejected anything else.
+            if (!DataSourceProvider.TryResolveDialect(connOptions.Provider, out var dialect) || !ProcedureConnectionProvider.IsAdmittedDialect(dialect))
+            {
+                throw new InvalidOperationException(ProcedureConnectionProvider.UnsupportedDialectMessage(_connections.ResolveName(definition)));
+            }
+
             DbTransaction? transaction = null;
             try
             {
                 // 1. Session settings + security context on the very same connection.
-                if (dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql)
+                if (!TenantId.TryParse(security.TenantId, out var validatedTenantId))
                 {
-                    if (!TenantId.TryParse(security.TenantId, out var validatedTenantId))
-                    {
-                        throw new GatewayForbiddenException("Invalid tenant identity.");
-                    }
-
-                    if (dialect == DatabaseDialect.SqlServer)
-                    {
-                        await using var init = connection.CreateCommand();
-                        init.CommandType = CommandType.Text;
-                        init.CommandTimeout = 30;
-                        init.CommandText =
-                            "SET XACT_ABORT ON; " +
-                            "SET LOCK_TIMEOUT " + settings.LockTimeoutMs.ToString(CultureInfo.InvariantCulture) + ";";
-                        await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-
-                        await _sessionInitializer.InitializeSessionAsync(
-                            connection,
-                            tx: null,
-                            dialect,
-                            validatedTenantId,
-                            userSid: security.UserSid,
-                            purpose: security.Purpose,
-                            ct: ct).ConfigureAwait(false);
-                    }
-                    else if (dialect == DatabaseDialect.PostgreSql)
-                    {
-                        transaction = await _sessionInitializer.InitializeSessionAsync(
-                            connection,
-                            dialect,
-                            validatedTenantId,
-                            userSid: security.UserSid,
-                            purpose: security.Purpose,
-                            requireTransaction: true,
-                            ct: ct).ConfigureAwait(false);
-                    }
+                    throw new GatewayForbiddenException("Invalid tenant identity.");
                 }
-                else if (definition.RlsMode == ProcedureRlsMode.SessionContext)
+
+                if (dialect == DatabaseDialect.SqlServer)
                 {
-                    // Review P-6: never run without the security context (the connection provider rejects this too).
-                    throw new InvalidOperationException("The database provider cannot carry the security context.");
+                    await using var init = connection.CreateCommand();
+                    init.CommandType = CommandType.Text;
+                    init.CommandTimeout = 30;
+                    init.CommandText =
+                        "SET XACT_ABORT ON; " +
+                        "SET LOCK_TIMEOUT " + settings.LockTimeoutMs.ToString(CultureInfo.InvariantCulture) + ";";
+                    await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                    await _sessionInitializer.InitializeSessionAsync(
+                        connection,
+                        tx: null,
+                        dialect,
+                        validatedTenantId,
+                        userSid: security.UserSid,
+                        purpose: security.Purpose,
+                        ct: ct).ConfigureAwait(false);
+                }
+                else if (dialect == DatabaseDialect.PostgreSql)
+                {
+                    transaction = await _sessionInitializer.InitializeSessionAsync(
+                        connection,
+                        dialect,
+                        validatedTenantId,
+                        userSid: security.UserSid,
+                        purpose: security.Purpose,
+                        requireTransaction: true,
+                        ct: ct).ConfigureAwait(false);
                 }
 
                 // 2. The procedure or table-valued function call.
@@ -116,7 +113,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                 cmd.CommandTimeout = Math.Max(1, Math.Min(definition.TimeoutSeconds, settings.MaxTimeoutSeconds));
                 TryEnableBindByName(cmd);
 
-                string paramPrefix = dialect == Autheris.Domain.Common.DatabaseDialect.Oracle ? ":" : "@";
+                const string paramPrefix = "@";
                 var paramPlaceholders = BuildArguments(cmd, definition, clientValues, security, dialect, paramPrefix);
 
                 EnsureIdentifier(definition.ProcedureName, allowSchema: true);
@@ -124,14 +121,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                 {
                     cmd.CommandType = CommandType.Text;
                     string args = string.Join(", ", paramPlaceholders);
-                    cmd.CommandText = dialect == Autheris.Domain.Common.DatabaseDialect.Oracle
-                        ? $"SELECT * FROM TABLE({definition.ProcedureName}({args}))"
-                        : $"SELECT * FROM {definition.ProcedureName}({args})";
-                }
-                else if (dialect is Autheris.Domain.Common.DatabaseDialect.Databricks)
-                {
-                    cmd.CommandType = CommandType.Text;
-                    cmd.CommandText = $"CALL {definition.ProcedureName}({string.Join(", ", paramPlaceholders)})";
+                    cmd.CommandText = $"SELECT * FROM {definition.ProcedureName}({args})";
                 }
                 else
                 {
