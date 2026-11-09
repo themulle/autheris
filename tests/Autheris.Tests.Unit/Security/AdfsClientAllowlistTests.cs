@@ -56,7 +56,7 @@ public sealed class AdfsClientAllowlistTests
         var entra = new EntraIdAuthOptions { Enabled = withEntra, TenantId = "tenant" };
         var options = new JwtBearerOptions();
         var method = typeof(GatewayServiceCollectionExtensions).GetMethod("ConfigureJwtBearer", BindingFlags.NonPublic | BindingFlags.Static)!;
-        method.Invoke(null, [options, entra, Options("client-a"), Substitute.For<IHostEnvironment>(), false, true]);
+        method.Invoke(null, [options, entra, Options("client-a"), new FakeHostEnvironment(), false, true]);
 
         async Task<TokenValidatedContext> Validate(string clientId)
         {

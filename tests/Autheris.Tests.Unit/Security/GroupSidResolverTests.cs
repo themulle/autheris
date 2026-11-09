@@ -43,11 +43,7 @@ public sealed class GroupSidResolverTests
 
     private static IRoleProvider Provider(string id, Func<ProviderRoleResult> result)
     {
-        var provider = Substitute.For<IRoleProvider>();
-        provider.ProviderId.Returns(id);
-        provider.GetRolesAsync(Arg.Any<ResolvedIdentity>(), Arg.Any<IdentityRealm>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult(result()));
-        return provider;
+        return new FakeRoleProvider(id, _ => result());
     }
 
     private static ProviderRoleResult Groups(params string[] groups) =>
@@ -96,16 +92,17 @@ public sealed class GroupSidResolverTests
     [Fact]
     public async Task Entra_overage_uses_graph()
     {
-        var adapter = Substitute.For<IGraphClientAdapter>();
-        adapter.GetTransitiveMemberOfAsync("user-oid-1", Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<string>>([SidA, ObjectId]));
-        adapter.GetAppRoleAssignmentsAsync("user-oid-1", Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<string>>([]));
+        var adapter = new FakeGraphAdapter
+        {
+            TransitiveMemberOf = key => Task.FromResult<IReadOnlyList<string>>(key == "user-oid-1" ? [SidA, ObjectId] : []),
+        };
         var sut = Resolver([new GraphRoleProvider(adapter)]);
 
         var result = await ResolveAsync(sut, Token(new Claim("hasgroups", "true")), Realm(RealmGroupSource.Token));
 
         result.Status.ShouldBe(GroupResolutionStatus.Complete);
         Values(result).ShouldBe([CloudSid, SidA]);
-        await adapter.Received(1).GetTransitiveMemberOfAsync("user-oid-1", Arg.Any<CancellationToken>());
+        adapter.TransitiveMemberOfCalls.ShouldBe(1);
     }
 
     [Theory]
@@ -122,26 +119,29 @@ public sealed class GroupSidResolverTests
     [Fact]
     public async Task Entra_overage_with_open_breaker_is_degraded()
     {
-        var adapter = Substitute.For<IGraphClientAdapter>();
-        adapter.GetTransitiveMemberOfAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns<Task<IReadOnlyList<string>>>(_ => throw new InvalidOperationException("down"));
+        var adapter = new FakeGraphAdapter
+        {
+            TransitiveMemberOf = _ => throw new InvalidOperationException("down"),
+        };
         var graph = new GraphRoleProvider(adapter, failureThreshold: 1);
         var sut = Resolver([graph]);
         var principal = Token(new Claim("hasgroups", "true"));
 
         (await ResolveAsync(sut, principal, Realm(RealmGroupSource.Token))).Status.ShouldBe(GroupResolutionStatus.Degraded);
         graph.IsCircuitBreakerOpen.ShouldBeTrue();
-        adapter.ClearReceivedCalls();
+        var callsWhenOpen = adapter.TransitiveMemberOfCalls;
 
         (await ResolveAsync(sut, principal, Realm(RealmGroupSource.Token))).Status.ShouldBe(GroupResolutionStatus.Degraded);
-        await adapter.DidNotReceiveWithAnyArgs().GetTransitiveMemberOfAsync(default!, default);
+        adapter.TransitiveMemberOfCalls.ShouldBe(callsWhenOpen);
     }
 
     [Fact]
     public async Task Graph_page_beyond_cap_is_degraded()
     {
-        var adapter = Substitute.For<IGraphClientAdapter>();
-        adapter.GetTransitiveMemberOfAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<string>>([SidA, SidB, SidC]));
-        adapter.GetAppRoleAssignmentsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<string>>([]));
+        var adapter = new FakeGraphAdapter
+        {
+            TransitiveMemberOf = _ => Task.FromResult<IReadOnlyList<string>>([SidA, SidB, SidC]),
+        };
         var sut = Resolver([new GraphRoleProvider(adapter, maxGroups: 2)], maxGroups: 2);
 
         var result = await ResolveAsync(sut, Token(new Claim("hasgroups", "true")), Realm(RealmGroupSource.Token));
@@ -185,11 +185,13 @@ public sealed class GroupSidResolverTests
     [Fact]
     public async Task Ldaps_tokenGroups_resolve_transitively()
     {
-        var adapter = Substitute.For<ILdapDirectoryAdapter>();
-        adapter.FindUserDnsAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<string>>(["CN=u,DC=corp"]));
         SidFormat.TryToBinary(SidA, out var a);
         SidFormat.TryToBinary(SidB, out var b);
-        adapter.ReadTokenGroupsAsync("CN=u,DC=corp", Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<byte[]>>([a, b]));
+        var adapter = new FakeLdapAdapter
+        {
+            FindUsers = _ => Task.FromResult<IReadOnlyList<string>>(["CN=u,DC=corp"]),
+            TokenGroups = [a, b],
+        };
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1-2-3-1001"), new Claim("sub", "krb-user")], "Kerberos"));
 
         var result = await ResolveAsync(Resolver([new LdapsRoleProvider(adapter)]), principal, Realm(RealmGroupSource.Token, LdapsRoleProvider.Id), "Negotiate");
