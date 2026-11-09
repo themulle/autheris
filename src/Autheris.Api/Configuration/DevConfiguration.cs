@@ -107,17 +107,17 @@ public static class DevConfiguration
 
                 [G + "Authentication:BasicAuth:Users:1:Username"] = "owner",
                 [G + "Authentication:BasicAuth:Users:1:Password"] = "dev",
-                [G + "Authentication:BasicAuth:Users:1:Sid"] = "S-1-5-21-DATAOWNER-1",
+                [G + "Authentication:BasicAuth:Users:1:Sid"] = "S-1-5-21-1000-1000-1000-1001",
                 [G + "Authentication:BasicAuth:Users:1:Roles:0"] = "DataOwner",
 
                 [G + "Authentication:BasicAuth:Users:2:Username"] = "approver-a",
                 [G + "Authentication:BasicAuth:Users:2:Password"] = "dev",
-                [G + "Authentication:BasicAuth:Users:2:Sid"] = "S-1-5-21-APPROVER-A",
+                [G + "Authentication:BasicAuth:Users:2:Sid"] = "S-1-5-21-1000-1000-1000-1002",
                 [G + "Authentication:BasicAuth:Users:2:Roles:0"] = "DataOwner",
 
                 [G + "Authentication:BasicAuth:Users:3:Username"] = "approver-b",
                 [G + "Authentication:BasicAuth:Users:3:Password"] = "dev",
-                [G + "Authentication:BasicAuth:Users:3:Sid"] = "S-1-5-21-APPROVER-B",
+                [G + "Authentication:BasicAuth:Users:3:Sid"] = "S-1-5-21-1000-1000-1000-1003",
                 [G + "Authentication:BasicAuth:Users:3:Roles:0"] = "DataOwner",
 
                 [G + "Authentication:BasicAuth:Users:4:Username"] = "analyst",

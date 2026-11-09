@@ -31,6 +31,17 @@ internal sealed class FakeDatabricksHandler(Func<RecordedRequest, HttpResponseMe
     }
 }
 
+internal sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler
+{
+    public FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> syncHandler)
+        : this((req, _) => Task.FromResult(syncHandler(req)))
+    {
+    }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        handler(request, cancellationToken);
+}
+
 internal static class DatabricksTestSupport
 {
     public const string Host = "adb-123.azuredatabricks.net";
