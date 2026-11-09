@@ -199,7 +199,7 @@ public class DataPathSecurityTests : IDisposable
     public async Task Catalog_WhenDomainSpecifiedOrInScope_FiltersToDomain()
     {
         var options = Options.Create(new GatewayOptions());
-        var accessor = CreateAccessor(Sid.New(), roles: ["ClusterAdmin"]);
+        var accessor = CreateAccessor(new Sid("S-1-5-21-ADMIN"), roles: ["ClusterAdmin"]);
         accessor.HttpContext!.Items["Autheris.DomainScope"] = "finance";
 
         var catalogFromScope = await _query.GetCatalogAsync(domain: null, first: null, after: null, search: null,
@@ -215,7 +215,7 @@ public class DataPathSecurityTests : IDisposable
     public async Task Catalog_WhenPaginationAndSearchSpecified_PaginatesAndFilters()
     {
         var options = Options.Create(new GatewayOptions());
-        var accessor = CreateAccessor(Sid.New(), roles: ["ClusterAdmin"]);
+        var accessor = CreateAccessor(new Sid("S-1-5-21-ADMIN"), roles: ["ClusterAdmin"]);
 
         var searchResult = await _query.GetCatalogAsync(domain: null, first: 1, after: null, search: "finance_table_1",
             _repository, _repository, accessor, options, _visibility);
