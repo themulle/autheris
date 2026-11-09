@@ -168,4 +168,12 @@ public sealed class LegacySwitchGuardTests
                 .ShouldNotBeNull($"{target} must exist");
         }
     }
+
+    [Fact]
+    public void Removed_itsm_switch_has_no_migration_target()
+    {
+        var config = Config(("Gateway:Itsm:danger_bypass_webhook_signature_validation", "true"));
+        var violations = LegacySwitchGuard.FindViolations(config);
+        violations.ShouldNotContain(v => v.Contains("Insecure", StringComparison.OrdinalIgnoreCase));
+    }
 }

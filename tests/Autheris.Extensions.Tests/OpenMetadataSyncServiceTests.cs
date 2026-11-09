@@ -500,4 +500,22 @@ public sealed class OpenMetadataSyncServiceTests
 
         createdConsents.ShouldNotContain(c => c.GranteeSid == new Sid("S-1-5-21-ALICE-SID"));
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Literal_bypassed_signature_is_rejected_when_bypass_off()
+    {
+        var options = CreateOptions();
+        options.Insecure.danger_bypass_webhook_signature_validation = false;
+        var syncService = new OpenMetadataSyncService(
+            _client,
+            _metadataRepo,
+            _consentRepo,
+            _epochRepo,
+            Options.Create(options),
+            NullLogger<OpenMetadataSyncService>.Instance);
+
+        var result = await syncService.HandleWebhookEventAsync("{}", "bypassed", CancellationToken.None);
+        result.ShouldBeFalse();
+    }
 }

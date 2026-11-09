@@ -30,7 +30,7 @@ print_help() {
     echo "Memory Profiles by Scenario:"
     echo "  minimal                ~1.5 GB RAM (PostgreSQL + Redis + Gateway)"
     echo "  lakehouse              ~1.8 GB RAM (Minimal + MinIO Iceberg S3 Storage)"
-    echo "  enterprise             ~1.8 GB RAM (Minimal + OpenMetadata / ITSM / dbt Mock)"
+    echo "  enterprise             ~1.8 GB RAM (Minimal + OpenMetadata / dbt Mock)"
     echo "  relational             ~2.0 GB RAM (Minimal + Azure SQL Edge CRM Engine)"
     echo "  full                   ~3.5 GB RAM (All Services & Extensions + Grafana/Prometheus)"
     exit 0
@@ -196,7 +196,7 @@ if [[ "${READY}" != "true" ]]; then
 fi
 log_success "All services healthy! (Reverse Proxy: :8080, Gateway: :5050)"
 
-# 4. Run Extensions Integration Tests (Lakehouse, OData, OpenMetadata, ITSM, dbt)
+# 4. Run Extensions Integration Tests (Lakehouse, OData, OpenMetadata, dbt)
 log "Executing GqlGateway Extensions integration tests (Scenario: ${SCENARIO})..."
 export TARGET_PROXY="http://localhost:8080"
 if command -v python3 &>/dev/null; then

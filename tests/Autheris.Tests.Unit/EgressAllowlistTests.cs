@@ -42,7 +42,7 @@ public sealed class EgressAllowlistTests
         string environment,
         string[]? hosts = null,
         string[]? networks = null,
-        string? integration = EgressIntegrations.Itsm)
+        string? integration = EgressIntegrations.OpenMetadata)
     {
         var options = Options.Create(new GatewayOptions
         {
@@ -142,7 +142,7 @@ public sealed class EgressAllowlistTests
         options.Egress.TrustedInternalHosts.ShouldBeEmpty();
         options.Egress.TrustedInternalNetworks.ShouldBeEmpty();
         options.Egress.TrustedIntegrations.ShouldBeNull();
-        string.Join(",", options.Egress.GetEffectiveTrustedIntegrations()).ShouldBe("Itsm,Catalog,OpenMetadata,Lineage");
+        string.Join(",", options.Egress.GetEffectiveTrustedIntegrations()).ShouldBe("OpenMetadata,Lineage");
     }
 
     [Fact]
@@ -153,13 +153,6 @@ public sealed class EgressAllowlistTests
         await Should.ThrowAsync<SecurityException>(async () =>
             await invoker.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://10.20.1.5/api"), CancellationToken.None));
         inner.Calls.ShouldBe(0);
-    }
-
-    [Fact]
-    public void INF_2_Shadowing_IsAllowlistCapable()
-    {
-        EgressIntegrations.Shadowing.ShouldBe("Shadowing");
-        EgressIntegrations.AllowlistCapable.ShouldContain(EgressIntegrations.Shadowing);
     }
 }
 

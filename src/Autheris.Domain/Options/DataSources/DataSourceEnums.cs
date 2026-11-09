@@ -30,6 +30,6 @@ public enum DataSourceTransportFlags
     OData = 1 << 3,
     Mcp = 1 << 4,
     Trino = 1 << 5,
-    ArrowFlight = 1 << 6,
-    All = WebSql | GraphQL | Rest | OData | Mcp | Trino | ArrowFlight
+    // Bit 6 (1 << 6) reserved: formerly ArrowFlight (removed)
+    All = WebSql | GraphQL | Rest | OData | Mcp | Trino
 }

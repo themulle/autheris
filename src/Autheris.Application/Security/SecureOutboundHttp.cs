@@ -16,7 +16,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// SEC E-03 / E-04: hardened outbound HTTP stack for all integration clients (ITSM, catalogs, OpenMetadata, OpenLineage,
+/// SEC E-03 / E-04: hardened outbound HTTP stack for all integration clients (OpenMetadata, OpenLineage,
 /// OpenJEV, lakehouse storage, audit WORM export, CDN purge).
 /// <list type="bullet">
 /// <item>Primary handler is a <see cref="SocketsHttpHandler"/> with <c>AllowAutoRedirect = false</c>: redirects are never

@@ -15,7 +15,6 @@ public enum AccessTransport
     Sql,
     WebSql,
     Mcp,
-    ArrowFlight,
     Lakehouse,
     Dbt,
     Cdc

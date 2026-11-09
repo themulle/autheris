@@ -214,6 +214,43 @@ public sealed class DocsIntegrityTests
             string.Join("\n", violations.Take(50)));
     }
 
+    private static readonly string[] ForbiddenRoutes =
+    [
+        "/api/schema-registry",
+        "/api/v1/flight",
+        "/api/webhooks/itsm",
+        "/api/webhooks/servicenow",
+        "/api/webhooks/jira",
+        "/api/webhooks/catalog"
+    ];
+
+    [Fact]
+    public void Removed_endpoints_not_documented()
+    {
+        var filesToScan = GetGatedMarkdownFiles()
+            .Concat(RepositoryScan.EnumerateFiles("deploy", "*.sh"))
+            .Concat(RepositoryScan.EnumerateFiles("deploy", "*.ps1"))
+            .ToList();
+
+        var violations = new List<string>();
+
+        foreach (var relativePath in filesToScan)
+        {
+            var text = RepositoryScan.ReadText(relativePath);
+            foreach (var route in ForbiddenRoutes)
+            {
+                if (text.Contains(route, StringComparison.OrdinalIgnoreCase))
+                {
+                    violations.Add($"{relativePath} contains forbidden removed route '{route}'");
+                }
+            }
+        }
+
+        violations.ShouldBeEmpty(
+            $"Found {violations.Count} references to removed endpoints in docs/deploy scripts:\n" +
+            string.Join("\n", violations));
+    }
+
     private static IReadOnlyList<string> GetAllMarkdownFiles() =>
         RepositoryScan.EnumerateFiles("", "*.md");
 

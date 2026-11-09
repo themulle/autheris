@@ -94,4 +94,47 @@ public sealed class DeletedFeaturesArchitectureTests
             matches.ShouldBeEmpty($"Types starting with '{prefix}' were found in {assembly.GetName().Name}: {string.Join(", ", matches)}");
         }
     }
+
+    [Fact]
+    public void No_itsm_identifiers_in_src_deploy()
+    {
+        // 1. deploy/ contains no itsm identifiers
+        var deployFiles = RepositoryScan.EnumerateFiles("deploy", "*.*");
+        var deployViolations = new List<string>();
+        foreach (var file in deployFiles)
+        {
+            var text = RepositoryScan.ReadText(file);
+            if (text.Contains("itsm", StringComparison.OrdinalIgnoreCase))
+            {
+                deployViolations.Add(file);
+            }
+        }
+        deployViolations.ShouldBeEmpty($"Found ITSM references in deploy: {string.Join(", ", deployViolations)}");
+
+        // 2. src/ deleted feature locations contain no itsm identifiers
+        string[] cleanedSourceFiles =
+        [
+            "src/Autheris.Infrastructure/Security/DefaultEnvironmentSecretProvider.cs",
+            "src/Autheris.Api/Middleware/ErrorSanitizingFilter.cs",
+            "src/Autheris.Application/Security/EgressAllowlist.cs",
+            "src/Autheris.Domain/Options/Security/OutboundEgressOptions.cs",
+            "src/Autheris.Domain/Diagnostics/GatewayDiagnostics.cs",
+            "src/Autheris.Api/Configuration/LegacySwitchGuard.cs",
+            "src/Autheris.Application/Security/SecureOutboundHttp.cs",
+            "src/Autheris.Application/Security/SsrfProtectionHandler.cs",
+            "src/Autheris.Domain/Options/Security/ApiKeyOptions.cs",
+            "src/Autheris.Api/Endpoints/WebhookEndpoints.cs"
+        ];
+
+        var srcViolations = new List<string>();
+        foreach (var file in cleanedSourceFiles)
+        {
+            var text = RepositoryScan.ReadText(file);
+            if (text.Contains("itsm", StringComparison.OrdinalIgnoreCase))
+            {
+                srcViolations.Add(file);
+            }
+        }
+        srcViolations.ShouldBeEmpty($"Found ITSM references in cleaned source files: {string.Join(", ", srcViolations)}");
+    }
 }

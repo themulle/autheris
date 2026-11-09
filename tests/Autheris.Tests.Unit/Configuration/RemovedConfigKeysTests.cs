@@ -95,6 +95,17 @@ public sealed class RemovedConfigKeysTests
     }
 
     [Theory]
+    [InlineData("Gateway:Garnet", "")]
+    [InlineData("Gateway:Garnet:Enabled", "true")]
+    [InlineData("Gateway:Garnet:Host", "127.0.0.1")]
+    public void Garnet_section_fails_with_removed_message(string key, string value)
+    {
+        var configuration = Config(key, value);
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration));
+        ex.Message.ShouldContain("Gateway:Garnet");
+    }
+
+    [Theory]
     [InlineData("Gateway:TrafficShadowing:Enabled", "true")]
     [InlineData("Gateway:TrafficShadowing:Enabled", "false")]
     [InlineData("Gateway:TrafficShadowing:TargetBaseUrl", "https://shadow.internal")]

@@ -42,4 +42,15 @@ public sealed class NoShadowEgressTests
 
         httpClientDescriptors.ShouldBeEmpty("No HttpClient should be registered for traffic shadowing.");
     }
+
+    [Fact]
+    public void Itsm_and_shadowing_are_not_egress_integrations()
+    {
+        typeof(Autheris.Application.Security.EgressIntegrations).GetField("Itsm").ShouldBeNull();
+        typeof(Autheris.Application.Security.EgressIntegrations).GetField("Shadowing").ShouldBeNull();
+        typeof(Autheris.Application.Security.EgressIntegrations).GetField("Catalog").ShouldBeNull();
+        Autheris.Application.Security.EgressIntegrations.AllowlistCapable.ShouldNotContain("Itsm");
+        Autheris.Application.Security.EgressIntegrations.AllowlistCapable.ShouldNotContain("Shadowing");
+        Autheris.Application.Security.EgressIntegrations.AllowlistCapable.ShouldNotContain("Catalog");
+    }
 }

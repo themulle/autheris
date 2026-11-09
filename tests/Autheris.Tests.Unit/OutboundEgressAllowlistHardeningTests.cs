@@ -68,7 +68,7 @@ public sealed class OutboundEgressAllowlistHardeningTests
 
     private static (HttpMessageInvoker Invoker, OkHandler Inner) CreateInvoker(
         OutboundEgressOptions egress,
-        string? integration = EgressIntegrations.Itsm,
+        string? integration = EgressIntegrations.OpenMetadata,
         Func<string, CancellationToken, Task<IPAddress[]>>? resolver = null,
         string environment = "Production")
     {
@@ -154,7 +154,7 @@ public sealed class OutboundEgressAllowlistHardeningTests
     public void E01_InvalidEntries_AreIgnoredByTheHandler_DefenseInDepth()
     {
         // Even if the startup validation were bypassed (e.g. options built in code), an over-broad network is not applied.
-        var allowlist = EgressAllowlist.Create(Egress(networks: ["0.0.0.0/0", "::/0", "127.0.0.0/8"]), EgressIntegrations.Itsm);
+        var allowlist = EgressAllowlist.Create(Egress(networks: ["0.0.0.0/0", "::/0", "127.0.0.0/8"]), EgressIntegrations.OpenMetadata);
 
         allowlist.IsEmpty.ShouldBeTrue();
     }
@@ -274,42 +274,42 @@ public sealed class OutboundEgressAllowlistHardeningTests
     {
         var egress = Egress(hosts: ["internal-lb.corp.local"], networks: ["10.0.0.0/8"]);
         var (lakehouse, lakehouseInner) = CreateInvoker(egress, EgressIntegrations.Lakehouse, Resolver("internal-lb.corp.local", "10.1.2.3"));
-        var (itsm, itsmInner) = CreateInvoker(egress, EgressIntegrations.Itsm, Resolver("internal-lb.corp.local", "10.1.2.3"));
+        var (om, omInner) = CreateInvoker(egress, EgressIntegrations.OpenMetadata, Resolver("internal-lb.corp.local", "10.1.2.3"));
 
         await Should.ThrowAsync<SecurityException>(async () =>
             await lakehouse.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://10.1.2.3/bucket/key"), CancellationToken.None));
         lakehouseInner.Calls.ShouldBe(0);
 
-        using var response = await itsm.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://10.1.2.3/api"), CancellationToken.None);
+        using var response = await om.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://10.1.2.3/api"), CancellationToken.None);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        itsmInner.Calls.ShouldBe(1);
+        omInner.Calls.ShouldBe(1);
     }
 
     [Fact]
     public void E02_Lakehouse_CanNeverBeConfiguredAsTrustedIntegration()
     {
-        var egress = Egress(networks: ["10.0.0.0/8"], integrations: ["Lakehouse", "Itsm"]);
+        var egress = Egress(networks: ["10.0.0.0/8"], integrations: ["Lakehouse", "OpenMetadata"]);
 
         EgressAllowlist.IsIntegrationPermitted(egress, EgressIntegrations.Lakehouse).ShouldBeFalse();
         EgressAllowlist.Create(egress, EgressIntegrations.Lakehouse).IsEmpty.ShouldBeTrue();
         EgressAllowlist.Validate(egress).ShouldContain(e => e.Contains("Lakehouse", StringComparison.Ordinal));
-        EgressAllowlist.Validate(Egress(integrations: ["Itsmm"])).ShouldNotBeEmpty();
+        EgressAllowlist.Validate(Egress(integrations: ["UnknownIntegration"])).ShouldNotBeEmpty();
     }
 
     [Fact]
     public async Task E02_IntegrationNotListedInTrustedIntegrations_DoesNotUseAllowlist()
     {
-        var egress = Egress(networks: ["10.20.0.0/16"], integrations: ["Catalog"]);
-        var (itsm, itsmInner) = CreateInvoker(egress, EgressIntegrations.Itsm);
-        var (catalog, catalogInner) = CreateInvoker(egress, EgressIntegrations.Catalog);
+        var egress = Egress(networks: ["10.20.0.0/16"], integrations: ["Lineage"]);
+        var (om, omInner) = CreateInvoker(egress, EgressIntegrations.OpenMetadata);
+        var (lineage, lineageInner) = CreateInvoker(egress, EgressIntegrations.Lineage);
 
         await Should.ThrowAsync<SecurityException>(async () =>
-            await itsm.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://10.20.1.5/api"), CancellationToken.None));
-        itsmInner.Calls.ShouldBe(0);
+            await om.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://10.20.1.5/api"), CancellationToken.None));
+        omInner.Calls.ShouldBe(0);
 
-        using var response = await catalog.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://10.20.1.5/api"), CancellationToken.None);
+        using var response = await lineage.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://10.20.1.5/api"), CancellationToken.None);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        catalogInner.Calls.ShouldBe(1);
+        lineageInner.Calls.ShouldBe(1);
     }
 
     [Theory]
@@ -401,13 +401,13 @@ public sealed class OutboundEgressAllowlistHardeningTests
         var egress = Egress(networks: ["10.20.0.0/16"]);
         var candidates = new[] { IPAddress.Parse("::ffff:10.20.1.5") };
 
-        var permitted = SecureOutboundHttp.SelectPermittedAddresses("jira.corp.local", candidates, false, EgressAllowlist.Create(egress, EgressIntegrations.Itsm));
+        var permitted = SecureOutboundHttp.SelectPermittedAddresses("openmetadata.corp.local", candidates, false, EgressAllowlist.Create(egress, EgressIntegrations.OpenMetadata));
         permitted.Single().ShouldBe(IPAddress.Parse("10.20.1.5"));
 
         Should.Throw<SecurityException>(() =>
             SecureOutboundHttp.SelectPermittedAddresses("lake.corp.local", candidates, false, EgressAllowlist.Create(egress, EgressIntegrations.Lakehouse)));
         Should.Throw<SecurityException>(() =>
-            SecureOutboundHttp.SelectPermittedAddresses("jira.corp.local", [IPAddress.Parse("10.30.0.1")], false, EgressAllowlist.Create(egress, EgressIntegrations.Itsm)));
+            SecureOutboundHttp.SelectPermittedAddresses("openmetadata.corp.local", [IPAddress.Parse("10.30.0.1")], false, EgressAllowlist.Create(egress, EgressIntegrations.OpenMetadata)));
     }
 
     [Fact]
@@ -517,5 +517,15 @@ public sealed class OutboundEgressAllowlistHardeningTests
         var primary = GetPrimaryHandler(handler).ShouldBeOfType<SocketsHttpHandler>(clientName);
         primary.AllowAutoRedirect.ShouldBeFalse(clientName);
         primary.ConnectCallback.ShouldNotBeNull(clientName);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void OpenApi_ingestion_is_not_trusted_by_default()
+    {
+        var options = new OutboundEgressOptions();
+        options.GetEffectiveTrustedIntegrations().ShouldNotContain(EgressIntegrations.OpenApiIngestion);
+        options.GetEffectiveTrustedIntegrations().ShouldBe(["OpenMetadata", "Lineage"]);
+        EgressIntegrations.AllowlistCapable.ShouldContain(EgressIntegrations.OpenApiIngestion);
     }
 }

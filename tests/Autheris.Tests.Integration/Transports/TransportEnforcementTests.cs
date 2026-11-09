@@ -233,7 +233,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         using var client = Client();
         const string sql = "SELECT id, name FROM src_s.main.s_items ORDER BY id";
 
-        SourceSAllows("Rest, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        SourceSAllows("Rest, GraphQL, OData, Mcp, Trino");
         var before = await TakeAsync();
         await AssertForbiddenCodeAsync(await client.SendAsync(WebSql(sql)));
         await AssertDeniedOnceAsync(before);
@@ -249,7 +249,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     {
         await EnsureSeededAsync();
         using var client = Client();
-        SourceSAllows("Rest, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        SourceSAllows("Rest, GraphQL, OData, Mcp, Trino");
 
         var before = await TakeAsync();
         var submit = await client.PostAsJsonAsync("/api/v1/jobs/query", new { query = "SELECT id, name FROM src_s.main.s_items", format = "json" });
@@ -277,7 +277,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     {
         await EnsureSeededAsync();
         using var client = Client();
-        SourceSAllows("Rest, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        SourceSAllows("Rest, GraphQL, OData, Mcp, Trino");
 
         var tBefore = _connections.ToT;
         var before = await TakeAsync();
@@ -302,7 +302,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     {
         await EnsureSeededAsync();
         using var client = Client();
-        SourceSAllows("Rest, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        SourceSAllows("Rest, GraphQL, OData, Mcp, Trino");
         var tBefore = _connections.ToT;
 
         var before = await TakeAsync();
@@ -347,7 +347,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         using var client = Client();
         const string sql = "SELECT id, name FROM src_s.main.s_items";
 
-        SourceSAllows("WebSql, Rest, GraphQL, OData, Mcp, ArrowFlight");
+        SourceSAllows("WebSql, Rest, GraphQL, OData, Mcp");
         var before = await TakeAsync();
         var denied = await client.SendAsync(Trino(sql));
         var body = await BodyAsync(denied);
@@ -389,7 +389,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         var statementId = firstDoc.RootElement.GetProperty("id").GetString()!;
 
         // the reload removes Trino from S: the next page of the running statement is re-checked and refused
-        SourceSAllows("WebSql, Rest, GraphQL, OData, Mcp, ArrowFlight");
+        SourceSAllows("WebSql, Rest, GraphQL, OData, Mcp");
         var before = await TakeAsync();
         var page = await BodyAsync(await client.GetAsync($"/v1/statement/queued/{statementId}"));
 
@@ -540,7 +540,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     {
         await EnsureSeededAsync();
         using var client = Client();
-        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino");
 
         var before = await TakeAsync();
         await AssertForbiddenCodeAsync(await client.GetAsync("/api/v1/data/src_s/main/s_items"));
@@ -604,7 +604,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         await using var mcp = await McpTestClient.ConnectAsync(http);
         const string sql = "SELECT id, name FROM src_s.main.s_items";
 
-        SourceSAllows("WebSql, Rest, GraphQL, OData, Trino, ArrowFlight");
+        SourceSAllows("WebSql, Rest, GraphQL, OData, Trino");
         var before = await TakeAsync();
         var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = sql });
         isError.ShouldBeTrue(text);
@@ -727,7 +727,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin,Reader");
         const string url = "/api/v1/catalog/datasets/src_s.main.s_items/sample-rows?count=2";
 
-        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino");
         var connectionsBefore = _connections.ToS;
         var denied = await client.GetAsync(url);
         var body = await BodyAsync(denied);
@@ -749,7 +749,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         using var client = Client();
         const string url = "/api/v1/data/src_s/main/s_items/change-token";
 
-        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino");
         var before = await TakeAsync();
         await AssertForbiddenCodeAsync(await client.GetAsync(url));
         await AssertDeniedOnceAsync(before);
@@ -766,7 +766,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         using var client = Client();
         const string url = "/api/v1/data/src_s/main/s_items/changes";
 
-        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino, ArrowFlight");
+        SourceSAllows("WebSql, GraphQL, OData, Mcp, Trino");
         var before = await TakeAsync();
         await AssertForbiddenCodeAsync(await client.PostAsJsonAsync(url, new { }));
         await AssertDeniedOnceAsync(before);

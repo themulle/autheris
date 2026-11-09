@@ -289,7 +289,6 @@ public sealed class AccessAuditMiddleware
     private static string ResolveChannel(string path, HttpContext context)
     {
         if (path.StartsWith("/graphql", StringComparison.OrdinalIgnoreCase)) return "GraphQL";
-        if (path.StartsWith("/api/v1/flight", StringComparison.OrdinalIgnoreCase)) return "Flight";
         if (path.StartsWith("/mcp", StringComparison.OrdinalIgnoreCase)) return "MCP";
         if (path.StartsWith("/odata", StringComparison.OrdinalIgnoreCase)) return "OData";
         if (path.StartsWith("/api/v1/websql", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/api/v1/sql", StringComparison.OrdinalIgnoreCase)) return "WebSQL";

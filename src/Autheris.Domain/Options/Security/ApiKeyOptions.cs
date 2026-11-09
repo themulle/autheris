@@ -33,7 +33,7 @@ public sealed class InsecureGettingStartedOptions
     public bool danger_allow_insecure_transport { get; init; } = false;
 
     /// <summary>
-    /// [DANGER] Bypasses HMAC-SHA256 signature verification for incoming webhooks (ITSM, OpenMetadata, etc.).
+    /// [DANGER] Bypasses HMAC-SHA256 signature verification for incoming webhooks (OpenMetadata, etc.).
     /// Webhooks without a signature or with an invalid signature are accepted.
     /// </summary>
     public bool danger_bypass_webhook_signature_validation { get; init; } = false;
