@@ -101,6 +101,19 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             }
         }
 
+        // Interim until the group resolver is wired (PR 3b): provider group values that are not canonical SIDs were dropped by the
+        // normalizer. When the realm takes groups from the token, the group set is incomplete: degraded, data access denied.
+        if (realm is null || realm.GroupSource == RealmGroupSource.Token)
+        {
+            var dropped = ClaimsNormalizer.CountDroppedProviderGroups(principal);
+            if (dropped > 0)
+            {
+                Autheris.Application.Identity.IdentityGroupMetrics.RecordRejected(Autheris.Application.Identity.IdentityGroupMetrics.SourceEntra, dropped);
+                MarkDegraded(identity, realmId, "group values that are not canonical SIDs were dropped");
+                return normalizedPrincipal;
+            }
+        }
+
         // DT-A-3 / DT-SC-05 / CRIT-01: the one tenant decision of the ingress.
         // Inbound tenant_source claims are removed, the resolved tenant is stamped.
         var isRealmBound = realm != null && !tenantByClaims;
@@ -158,7 +171,7 @@ public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
             foreach (var group in rolesResolution.Groups)
             {
                 identity.AddClaim(new System.Security.Claims.Claim("autheris:group", group));
-                identity.AddClaim(new System.Security.Claims.Claim(ClaimTypes.GroupSid, group));
+                identity.AddClaim(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(group));
             }
 
             foreach (var role in rolesResolution.Roles)

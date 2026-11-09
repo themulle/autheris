@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
 
 namespace Autheris.Api.Security;
 
@@ -53,25 +54,22 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        var headers = Request.Headers;
-
-        // 1. Identify User Header (Traefik or generic ingress - strictly configured or default)
-        string? username = null;
-        var userHeader = !string.IsNullOrWhiteSpace(forwardAuthOptions.UserHeader)
-            ? forwardAuthOptions.UserHeader
-            : "X-Forwarded-User";
-
-        if (headers.TryGetValue(userHeader, out var userVal) && !string.IsNullOrWhiteSpace(userVal))
-        {
-            username = userVal.ToString().Trim();
-        }
-
-        if (string.IsNullOrWhiteSpace(username))
+        // The mode is fixed by configuration; startup guarantees Enabled=false in Direct mode.
+        if (string.IsNullOrWhiteSpace(forwardAuthOptions.UserHeader))
         {
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        // 2. Zero-Trust Verification: Ensure request originates from a trusted reverse proxy / Ingress
+        var headers = Request.Headers;
+        var userHeader = forwardAuthOptions.UserHeader;
+
+        // Presence only: the value is parsed after the peer and the secret have been verified.
+        if (!headers.TryGetValue(userHeader, out var userVal) || StringValues.IsNullOrEmpty(userVal))
+        {
+            return Task.FromResult(AuthenticateResult.NoResult());
+        }
+
+        // 2. Zero-Trust Verification: the connection peer (never X-Forwarded-For) must be a ForwardAuth proxy
         if (forwardAuthOptions.RequireTrustedProxy)
         {
             var rawRemoteIp = TrustedProxyPeer.GetRawRemoteIp(Context);
@@ -83,10 +81,10 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
                 return Task.FromResult(AuthenticateResult.Fail("Remote client IP address could not be determined."));
             }
 
-            if (!_proxyValidator.IsProxyTrusted(remoteIp))
+            if (!_proxyValidator.IsForwardAuthPeerTrusted(remoteIp))
             {
                 Logger.LogWarning(
-                    "ForwardAuth rejected: Header spoofing attempt detected. Request came from untrusted IP '{RemoteIp}'.",
+                    "ForwardAuth rejected: identity headers from untrusted peer '{RemoteIp}'.",
                     remoteIp);
 
                 return Task.FromResult(AuthenticateResult.Fail("Untrusted proxy IP for ForwardAuth."));
@@ -122,13 +120,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
                 return Task.FromResult(AuthenticateResult.Fail("Configured ForwardAuth shared secret could not be resolved."));
             }
 
-            // R-DEP-1: a short shared secret is rejected whatever its reference is called.
-            if (!_isDevelopment && expectedBytes.Length < Autheris.Application.Security.SecretKeyRequirements.MinimumKeyBytes)
-            {
-                Logger.LogError("ForwardAuth rejected: the configured shared secret is shorter than {Min} bytes.", Autheris.Application.Security.SecretKeyRequirements.MinimumKeyBytes);
-                return Task.FromResult(AuthenticateResult.Fail("Configured ForwardAuth shared secret is too short."));
-            }
-
+            // The secret length is verified once at startup (AuthenticationModeOptionsValidator), not per request.
             var secretHeader = string.IsNullOrWhiteSpace(forwardAuthOptions.SharedSecretHeader)
                 ? "X-Forwarded-Secret"
                 : forwardAuthOptions.SharedSecretHeader;
@@ -148,7 +140,9 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             }
 
             var actualBytes = Encoding.UTF8.GetBytes(actualSecretStr);
-            var hashExpected = SHA256.HashData(expectedBytes);
+            var hashExpected = forwardAuthOptions.SharedSecretDigest is { } digest && ReferenceEquals(expectedBytes, _precomputedSharedSecretBytes)
+                ? digest
+                : SHA256.HashData(expectedBytes);
             var hashActual = SHA256.HashData(actualBytes);
 
             if (!CryptographicOperations.FixedTimeEquals(hashExpected, hashActual))
@@ -158,8 +152,27 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             }
         }
 
-        // 4. Construct Claims Principal - SEC M-8: Always namespace ForwardAuth user SIDs as USR to prevent SID collision or group spoofing
-        var userSid = $"S-1-5-21-FORWARD-USR-{username.ToUpperInvariant()}";
+        // 4. Username (strict ASCII charset, exactly one header value) and user SID
+        if (userVal.Count != 1 || !IsValidUsername(userVal[0]))
+        {
+            Logger.LogWarning("ForwardAuth rejected: the user header value is not a single valid username.");
+            return Task.FromResult(AuthenticateResult.Fail("Invalid ForwardAuth username."));
+        }
+
+        var username = userVal[0]!;
+        var userSid = $"S-1-5-21-FORWARD-USR-{username.ToLowerInvariant()}";
+        if (forwardAuthOptions.IsUpstreamSidTrusted &&
+            !string.IsNullOrWhiteSpace(forwardAuthOptions.UserSidHeader) &&
+            headers.TryGetValue(forwardAuthOptions.UserSidHeader, out var sidVal) && !StringValues.IsNullOrEmpty(sidVal))
+        {
+            if (sidVal.Count != 1 || !SidFormat.IsCanonical(sidVal[0]))
+            {
+                Logger.LogWarning("ForwardAuth rejected: the user SID header value is not a single canonical SID.");
+                return Task.FromResult(AuthenticateResult.Fail("Invalid ForwardAuth user SID."));
+            }
+
+            userSid = sidVal[0]!;
+        }
 
         var claims = new List<Claim>
         {
@@ -190,45 +203,20 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             groupsRaw = customGroupsVal.ToString();
         }
 
-        if (!string.IsNullOrWhiteSpace(groupsRaw))
+        // RR-L2-02: header groups are read only from an explicitly trusted upstream and must be canonical SIDs; one
+        // non-canonical value fails the request (a silently dropped group could drop a group-scoped restriction).
+        if (forwardAuthOptions.IsUpstreamSidTrusted && !string.IsNullOrWhiteSpace(groupsRaw))
         {
             var groups = groupsRaw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             foreach (var g in groups)
             {
-                // RR-L2-02: never accept raw SIDs from headers unless the upstream IdP is explicitly trusted for that.
-                var groupSid = forwardAuthOptions.TrustUpstreamGroupSids && g.StartsWith("S-1-5-", StringComparison.OrdinalIgnoreCase)
-                    ? g
-                    : $"S-1-5-21-FORWARD-GRP-{g}";
-                claims.Add(new Claim(ClaimTypes.GroupSid, groupSid));
-            }
-        }
-
-        // Extract Roles (strictly configured or default, comma or semicolon separated)
-        var rolesHeader = !string.IsNullOrWhiteSpace(forwardAuthOptions.RolesHeader)
-            ? forwardAuthOptions.RolesHeader
-            : "X-Forwarded-Roles";
-
-        string? rolesRaw = null;
-        if (headers.TryGetValue(rolesHeader, out var customRolesVal) && !string.IsNullOrWhiteSpace(customRolesVal))
-        {
-            rolesRaw = customRolesVal.ToString();
-        }
-
-        if (!string.IsNullOrWhiteSpace(rolesRaw))
-        {
-            var allowedRoles = new HashSet<string>(forwardAuthOptions.GetEffectiveAllowedRoles(), StringComparer.OrdinalIgnoreCase);
-            var roles = rolesRaw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            foreach (var r in roles)
-            {
-                // RR-L2-02: allowlist instead of denylist; administrative roles are never accepted from headers.
-                var colonIdx = r.LastIndexOf(':');
-                var baseRole = colonIdx >= 0 ? r[(colonIdx + 1)..].Trim() : r;
-                if (IsHeaderForbiddenRole(baseRole) || !allowedRoles.Contains(baseRole))
+                if (!SidFormat.IsCanonical(g))
                 {
-                    Logger.LogWarning("ForwardAuth: discarded role '{Role}' from header (not in ForwardAuth.AllowedRoles or administrative).", r);
-                    continue;
+                    Logger.LogWarning("ForwardAuth rejected: a group header value is not a canonical SID.");
+                    return Task.FromResult(AuthenticateResult.Fail("Invalid ForwardAuth group SID."));
                 }
-                claims.Add(new Claim(ClaimTypes.Role, r));
+
+                claims.Add(IdentityClaimIssuers.CreateGroupSidClaim(g));
             }
         }
 
@@ -250,13 +238,13 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
                 }
                 else
                 {
-                    Logger.LogWarning("ForwardAuth rejected: TrustUpstreamTenant is enabled but tenant '{Tenant}' is not in non-empty ForwardAuth.AllowedTenantIds.", candidateTenant);
+                    Logger.LogWarning("ForwardAuth rejected: the tenant header value is not in ForwardAuth.AllowedTenantIds.");
                     return Task.FromResult(AuthenticateResult.Fail("Tenant not permitted for ForwardAuth."));
                 }
             }
             else
             {
-                Logger.LogWarning("ForwardAuth rejected: TrustUpstreamTenant is enabled but missing required tenant header '{TenantHeader}'.", tenantHeader);
+                Logger.LogWarning("ForwardAuth rejected: TrustUpstreamTenant is enabled but the tenant header is missing.");
                 return Task.FromResult(AuthenticateResult.Fail("Missing required tenant header for ForwardAuth."));
             }
         }
@@ -270,8 +258,75 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             claims.Add(new Claim("tid", tenant));
         }
 
+        var hasRole = false;
+        // Extract Roles (comma or semicolon separated; count and total length are bounded)
+        var rolesHeader = !string.IsNullOrWhiteSpace(forwardAuthOptions.RolesHeader)
+            ? forwardAuthOptions.RolesHeader
+            : "X-Forwarded-Roles";
+
+        string? rolesRaw = null;
+        if (headers.TryGetValue(rolesHeader, out var customRolesVal) && !string.IsNullOrWhiteSpace(customRolesVal))
+        {
+            rolesRaw = customRolesVal.ToString();
+        }
+
+        if (!string.IsNullOrWhiteSpace(rolesRaw))
+        {
+            if (rolesRaw.Length > MaxRolesHeaderLength)
+            {
+                Logger.LogWarning("ForwardAuth rejected: the roles header exceeds the permitted length.");
+                return Task.FromResult(AuthenticateResult.Fail("ForwardAuth roles header too long."));
+            }
+
+            var allowedRoles = forwardAuthOptions.AllowedRoleSet;
+            var roles = rolesRaw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (roles.Length > MaxRoles)
+            {
+                Logger.LogWarning("ForwardAuth rejected: the roles header carries more than {Max} roles.", MaxRoles);
+                return Task.FromResult(AuthenticateResult.Fail("ForwardAuth roles header carries too many roles."));
+            }
+
+            foreach (var r in roles)
+            {
+                // A tenant prefix is honoured only for the resolved, trusted header tenant.
+                var colonIdx = r.LastIndexOf(':');
+                var baseRole = colonIdx >= 0 ? r[(colonIdx + 1)..].Trim() : r;
+                if (colonIdx >= 0)
+                {
+                    var prefix = r[..colonIdx].Trim();
+                    if (tenant is null)
+                    {
+                        DiscardRole("tenant_prefix_untrusted");
+                        continue;
+                    }
+
+                    if (!string.Equals(prefix, tenant, StringComparison.OrdinalIgnoreCase))
+                    {
+                        DiscardRole("tenant_mismatch");
+                        continue;
+                    }
+                }
+
+                // RR-L2-02: allowlist instead of denylist; administrative roles are never accepted from headers.
+                if (IsHeaderForbiddenRole(baseRole))
+                {
+                    DiscardRole("forbidden");
+                    continue;
+                }
+
+                if (!allowedRoles.Contains(baseRole))
+                {
+                    DiscardRole("not_allowed");
+                    continue;
+                }
+
+                claims.Add(new Claim(ClaimTypes.Role, r));
+                hasRole = true;
+            }
+        }
+
         // Map default enterprise user role if none assigned
-        if (!claims.Any(c => c.Type == ClaimTypes.Role))
+        if (!hasRole)
         {
             claims.Add(new Claim(ClaimTypes.Role, "GatewayUser"));
         }
@@ -281,6 +336,36 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
         var ticket = new AuthenticationTicket(principal, SchemeName);
 
         return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
+
+    private const int MaxRolesHeaderLength = 2048;
+    private const int MaxRoles = 32;
+
+    // The log line and the counter carry a fixed reason only, never the role value.
+    private void DiscardRole(string reason)
+    {
+        AuthMetrics.ForwardAuthRoleDiscarded.Add(1, new KeyValuePair<string, object?>("reason", reason));
+        Logger.LogWarning("ForwardAuth: discarded a header role ({Reason}).", reason);
+    }
+
+    /// <summary>1..256 ASCII characters of <c>[A-Za-z0-9._@\-\\]</c>, compared by code point, no normalization.</summary>
+    internal static bool IsValidUsername(string? value)
+    {
+        if (value is null || value.Length is 0 or > 256)
+        {
+            return false;
+        }
+
+        foreach (var c in value)
+        {
+            var ok = c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9' or '.' or '_' or '@' or '-' or '\\';
+            if (!ok)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static readonly HashSet<string> HeaderForbiddenRoles = new(StringComparer.OrdinalIgnoreCase)

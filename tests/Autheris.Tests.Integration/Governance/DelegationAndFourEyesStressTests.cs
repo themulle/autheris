@@ -131,8 +131,8 @@ public class DelegationAndFourEyesStressTests : IDisposable
         meta.Table.RequiresFourEyes.ShouldBeTrue();
 
         var requesterSid = new Sid("S-1-5-21-REQ-LIFECYCLE");
-        var approver1 = new Sid("S-1-5-21-APPROVER-A");
-        var approver2 = new Sid("S-1-5-21-APPROVER-B");
+        var approver1 = new Sid("S-1-5-21-1000-1000-1000-1002");
+        var approver2 = new Sid("S-1-5-21-1000-1000-1000-1003");
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
@@ -169,8 +169,8 @@ public class DelegationAndFourEyesStressTests : IDisposable
         meta.ShouldNotBeNull();
 
         var requesterSid = new Sid("S-1-5-21-REQ-REJ1");
-        var approver1 = new Sid("S-1-5-21-APPROVER-A");
-        var approver2 = new Sid("S-1-5-21-APPROVER-B");
+        var approver1 = new Sid("S-1-5-21-1000-1000-1000-1002");
+        var approver2 = new Sid("S-1-5-21-1000-1000-1000-1003");
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
@@ -232,7 +232,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
         meta.ShouldNotBeNull();
 
         // APPROVER-A is a table owner for finance_table_5
-        var ownerRequesterSid = new Sid("S-1-5-21-APPROVER-A");
+        var ownerRequesterSid = new Sid("S-1-5-21-1000-1000-1000-1002");
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
@@ -267,7 +267,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
         meta.ShouldNotBeNull();
 
         var requesterSid = new Sid("S-1-5-21-REQ-CONCURRENT");
-        var approver1 = new Sid("S-1-5-21-APPROVER-A");
+        var approver1 = new Sid("S-1-5-21-1000-1000-1000-1002");
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
@@ -314,8 +314,8 @@ public class DelegationAndFourEyesStressTests : IDisposable
         meta.ShouldNotBeNull();
 
         var requesterSid = new Sid("S-1-5-21-REQ-2APPROVERS");
-        var approver1 = new Sid("S-1-5-21-APPROVER-A");
-        var approver2 = new Sid("S-1-5-21-APPROVER-B");
+        var approver1 = new Sid("S-1-5-21-1000-1000-1000-1002");
+        var approver2 = new Sid("S-1-5-21-1000-1000-1000-1003");
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {

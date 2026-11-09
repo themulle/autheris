@@ -19,7 +19,7 @@ namespace Autheris.Tests.Unit.Governance;
 public sealed class ConsentDescriptionOptInLoadingTests
 {
     private const string UserSid = "S-1-5-21-OPTIN-USER";
-    private const string Group = "S-1-GRP-OPTIN";
+    private const string Group = "S-1-5-21-1-2-3-1101";
     private const string TenantName = "tenant-optin";
     private static readonly TableIdentifier Orders = new("sales", "crm", "orders");
     private static readonly DateTimeOffset Start = DateTimeOffset.UtcNow;
@@ -34,7 +34,7 @@ public sealed class ConsentDescriptionOptInLoadingTests
     private static ClaimsPrincipal Caller(string[]? groups = null)
     {
         var claims = new List<Claim> { new(ClaimTypes.PrimarySid, UserSid), new("tenant_id", TenantName) };
-        claims.AddRange((groups ?? []).Select(g => new Claim(ClaimTypes.GroupSid, g)));
+        claims.AddRange((groups ?? []).Select(g => Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g)));
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "MCP"));
     }
 

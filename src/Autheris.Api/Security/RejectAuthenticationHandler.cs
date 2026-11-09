@@ -1,6 +1,12 @@
 namespace Autheris.Api.Security;
 
 using System.Text.Encodings.Web;
+using System.Text.Json;
+using Autheris.Application.Audit;
+using Autheris.Domain.Audit;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
+using Microsoft.Extensions.DependencyInjection;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Logging;
@@ -16,8 +22,27 @@ public sealed class RejectAuthenticationHandler : AuthenticationHandler<Authenti
     {
     }
 
-    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        return Task.FromResult(AuthenticateResult.Fail("Authentication rejected. Unknown issuer or untrusted token."));
+        if (Context.Items.TryGetValue(GatewayAuthSchemeSelector.RejectReasonItemKey, out var reason) && reason is string code)
+        {
+            // Fixed reason code only: no header value reaches the audit record, the log or the response.
+            Logger.LogWarning("Authentication rejected: {Reason}.", code);
+            if (Context.RequestServices.GetService<IAuditWriter>() is { } audit)
+            {
+                await audit.RecordBestEffortAsync(new AuditLogEntry
+                {
+                    TenantId = TenantId.Platform,
+                    EventType = AuditEventTypes.AuthFailed,
+                    Decision = "DENY",
+                    TraceId = Context.TraceIdentifier,
+                    DetailsJson = JsonSerializer.Serialize(new { reason = code })
+                }, Context.RequestAborted).ConfigureAwait(false);
+            }
+
+            return AuthenticateResult.Fail(code);
+        }
+
+        return AuthenticateResult.Fail("Authentication rejected. Unknown issuer or untrusted token.");
     }
 }
