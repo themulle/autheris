@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Domain.Identity;
 using Autheris.Api.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
@@ -198,7 +199,7 @@ public class AuthenticationSecurityTests
         identity.AddClaim(new Claim("roles", "SecurityAuditor"));
 
         var principal = new ClaimsPrincipal(identity);
-        var transformer = TestIdentityPipeline.Transformation();
+        var transformer = TestIdentityPipeline.Transformation(TestIdentityPipeline.TokenRealm());
 
         var transformed = await transformer.TransformAsync(principal);
 
@@ -214,13 +215,13 @@ public class AuthenticationSecurityTests
     [Fact]
     public async Task EnterpriseClaimsTransformation_NormalizesAdfsClaims()
     {
-        var identity = new ClaimsIdentity("Bearer");
+        var identity = new ClaimsIdentity("BearerAdfs");
         identity.AddClaim(new Claim("primarysid", "S-1-5-21-ADFS-USER-999"));
         identity.AddClaim(new Claim("groupsid", "S-1-5-21-1-2-3-888"));
         identity.AddClaim(new Claim("role", "DataSteward"));
 
         var principal = new ClaimsPrincipal(identity);
-        var transformer = TestIdentityPipeline.Transformation();
+        var transformer = TestIdentityPipeline.Transformation(TestIdentityPipeline.TokenRealm(IdentityRealmKind.Adfs));
 
         var transformed = await transformer.TransformAsync(principal);
 
@@ -299,6 +300,7 @@ public class AuthenticationSecurityTests
                     TrustedProxies = ["10.0.0.1"],
                     // RR-L2-02: raw upstream SIDs and custom roles require explicit opt-in
                     TrustUpstreamSids = true,
+                    GroupSource = ForwardAuthGroupSource.Header,
                     AllowedRoles = ["FinanceReader", "Auditor"]
                 }
             }

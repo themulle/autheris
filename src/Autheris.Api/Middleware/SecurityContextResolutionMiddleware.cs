@@ -239,12 +239,12 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             }
         }
 
-        // SEC-AUTH-04a: a caller whose groups are unknown reaches no data transport (identity self-info endpoints carry no transport).
+        // A caller whose groups are unknown reaches no data transport (identity self-info endpoints carry no transport).
         if (securityContext.IsAuthenticated &&
             securityContext.GroupResolutionStatus != GroupResolutionStatus.Complete &&
             context.GetEndpoint()?.Metadata.GetMetadata<Autheris.Api.Endpoints.IngressTransportMetadata>() is not null)
         {
-            await WriteJsonAsync(context, StatusCodes.Status403Forbidden, "The groups of the caller could not be resolved.", GroupsUnresolvedCode).ConfigureAwait(false);
+            await WriteJsonAsync(context, StatusCodes.Status403Forbidden, GroupsUnresolvedCode + ": the groups of the caller could not be resolved.", GroupsUnresolvedCode).ConfigureAwait(false);
             return;
         }
 
@@ -292,7 +292,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
                 return;
             }
 
-            // OD-31 / SEC-AZ-14: enrichment is control-plane input only. Its roles and SIDs never join the data-plane GroupSids or TenantRoles.
+            // Enrichment is control-plane input only. Its roles and SIDs never join the data-plane GroupSids or TenantRoles.
             securityContext = securityContext with { ControlPlaneEnrichment = BuildControlPlaneEnrichment(enrichment.Result, authOptions) };
         }
 

@@ -16,6 +16,7 @@ public sealed class TenantIngressArchitectureTests
         ["src/Autheris.Api/Security/BasicAuthSession.cs"] = 1,                          // ingress (claims transformation stamps)
         ["src/Autheris.Api/Security/BasicAuthenticationHandler.cs"] = 1,                // ingress
         ["src/Autheris.Api/Security/ForwardAuthAuthenticationHandler.cs"] = 1,          // ingress
+        ["src/Autheris.Api/Security/IdentityPipeline.cs"] = 1,                          // ingress (one pipeline for HTTP and WebSocket; rebuilds the principal)
         ["src/Autheris.Api/Security/JwtSocketTokenValidator.cs"] = 1,                   // ingress (WebSocket, same transformation)
         ["src/Autheris.Api/Security/ScimAuthenticationHandler.cs"] = 1,                 // ingress (realm binding)
         ["src/Autheris.Api/Security/TenantStamping.cs"] = 1,                            // wraps the identity the resolver reads (claims transformation helper)

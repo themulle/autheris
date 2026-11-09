@@ -32,6 +32,8 @@ public sealed class DemoRootFieldsRemovedTests
         services.AddSingleton(Substitute.For<ITableMetadataRepository>());
         services.AddSingleton(Substitute.For<ITableRelationRepository>());
         services.AddSingleton(Substitute.For<IHttpContextAccessor>());
+        services.AddSingleton(Substitute.For<Autheris.Application.Common.Interfaces.IIdentitySubjectResolver>());
+        services.AddSingleton(Substitute.For<Autheris.Api.Security.IIdentityPipeline>());
         services.AddSingleton<IOptions<AnalyticsOptions>>(Options.Create(new AnalyticsOptions()));
         services.AddGatewayGraphQL(new GatewayOptions());
 

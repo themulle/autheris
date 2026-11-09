@@ -396,7 +396,7 @@ public sealed class McpOpenFindingsSecurityTests
         var http = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-CAROL"), new Claim("client_id", "shared-spa"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-4001"), new Claim("tenant_id", "tenant-a")],
+                [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-CAROL"), new Claim("client_id", "shared-spa"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-4001"), new Claim("tenant_id", "tenant-a"), Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(), Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)],
                 "Bearer"))
         };
         http.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");

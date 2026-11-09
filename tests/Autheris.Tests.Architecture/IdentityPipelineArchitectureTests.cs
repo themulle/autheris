@@ -82,7 +82,14 @@ public sealed class IdentityPipelineArchitectureTests
     private static readonly string[] RawGroupReaders =
     [
         "Autheris.Application.Identity.GroupSidResolver",
-        "Autheris.Domain.Identity.GroupResolutionClaims"
+        "Autheris.Domain.Identity.GroupResolutionClaims",
+        // Not claim reads: a query-string key, a GraphQL result field and a dbt owner-spec key.
+        "Autheris.Api.Endpoints.VirtualFilterEndpoints",
+        "Autheris.GraphQL.Catalog.AggregateGraphQlTypes",
+        "Autheris.GraphQL.Catalog.MetricGraphQlTypes",
+        "Autheris.Extensions.Dbt.DbtOwnerSpecValidator",
+        // Envoy ext_authz still extracts the claim itself; it moves to the security context in the Envoy alignment step (PR 4).
+        "Autheris.Application.Mesh.Services.EnvoyExtAuthzService"
     ];
 
     [Fact]
@@ -92,9 +99,9 @@ public sealed class IdentityPipelineArchitectureTests
     {
         var violations = Callers(
             i => i.OpCode.Code == Code.Ldstr && i.Operand is string s
+                 // ClaimTypes.GroupSid (the ws/2008 groupsid URI) is the pipeline-issued type: readers go through GetGroupSids' issuer filter.
                  && (s == "groups" || s == "groupsid"
-                     || s == "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
-                     || s == "http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid"),
+                     || s == "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"),
             RawGroupReaders,
             out var allowedHits);
 

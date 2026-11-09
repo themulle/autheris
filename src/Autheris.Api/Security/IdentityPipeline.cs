@@ -63,6 +63,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
     private readonly ITenantResolver _tenantResolver;
     private readonly IOptions<GatewayOptions>? _options;
     private readonly ILogger<IdentityPipeline> _logger;
+    private readonly TimeProvider _time;
 
     public IdentityPipeline(
         IIdentityRealmRegistry? realmRegistry,
@@ -71,8 +72,10 @@ public sealed class IdentityPipeline : IIdentityPipeline
         IFunctionalRightMapper? functionalRightMapper = null,
         ITenantResolver? tenantResolver = null,
         IOptions<GatewayOptions>? options = null,
-        ILogger<IdentityPipeline>? logger = null)
+        ILogger<IdentityPipeline>? logger = null,
+        TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
         _realmRegistry = realmRegistry;
         _groupResolver = groupResolver ?? throw new ArgumentNullException(nameof(groupResolver));
         _roleResolver = roleResolver;
@@ -158,7 +161,14 @@ public sealed class IdentityPipeline : IIdentityPipeline
         var source = "pipeline";
         if (degradedReason is null)
         {
+#if AUTHERIS_TEST_AUTH
+            // Test host only (compile-gated): the test handler states the groups itself, like the tenant.
+            var outcome = tenantByClaims
+                ? TestAuthGroups(normalized)
+                : await ResolveGroupsAsync(normalized, realm, resolution.Tenant, scheme, ct).ConfigureAwait(false);
+#else
             var outcome = await ResolveGroupsAsync(normalized, realm, resolution.Tenant, scheme, ct).ConfigureAwait(false);
+#endif
             source = outcome.Source;
             expiresAt = outcome.ExpiresAt;
             if (outcome.Status == GroupResolutionStatus.Complete)
@@ -244,10 +254,26 @@ public sealed class IdentityPipeline : IIdentityPipeline
             : null;
     }
 
+#if AUTHERIS_TEST_AUTH
+    private GroupResolution TestAuthGroups(ClaimsPrincipal normalized)
+    {
+        var sids = new HashSet<Sid>();
+        foreach (var claim in normalized.FindAll(c => c.Type == ClaimTypes.GroupSid && c.Issuer == IdentityClaimIssuers.Pipeline))
+        {
+            if (SidFormat.IsCanonical(claim.Value))
+            {
+                sids.Add(new Sid(claim.Value));
+            }
+        }
+
+        return new GroupResolution(sids, GroupResolutionStatus.Complete, "test-auth", _time.GetUtcNow().AddMinutes(1));
+    }
+#endif
+
     private async ValueTask<GroupResolution> ResolveGroupsAsync(
         ClaimsPrincipal normalized, IdentityRealm? realm, TenantId? tenant, string scheme, CancellationToken ct)
     {
-        var fallbackExpiry = DateTimeOffset.UtcNow.AddMinutes(1);
+        var fallbackExpiry = _time.GetUtcNow().AddMinutes(1);
         if (string.Equals(scheme, GatewayAuthSchemes.Scim, StringComparison.Ordinal))
         {
             // The SCIM machine scheme is path-bound and carries no user groups.

@@ -117,6 +117,7 @@ public sealed class WebSocketClaimsTransformationTests
             "corp-realm",
             IdentityRealmKind.EntraWorkforce,
             new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-a")),
+            groupSource: RealmGroupSource.Token,
             issuers: new[] { issuer });
 
         realmRegistry.ResolveRealmByIssuer(issuer).Returns(corpRealm);
@@ -162,8 +163,7 @@ public sealed class WebSocketClaimsTransformationTests
         realmRegistry.GetRealm("resolver-realm").Returns(resolverRealm); // DT-A-3: the tenant resolver looks the stamped realm up by id
 
         var roleResolver = Substitute.For<IRoleResolver>();
-        roleResolver.ResolveRolesAsync(Arg.Any<ResolvedIdentity>())
-            .Returns(new RoleResolution(
+        TestIdentityPipeline.StubResolution(roleResolver, new RoleResolution(
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "S-1-5-21-1-2-3-1100" },
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SecAnalystRole" },
                 new Dictionary<string, string>(),

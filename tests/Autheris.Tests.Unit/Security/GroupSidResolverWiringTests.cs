@@ -75,9 +75,10 @@ public sealed class GroupSidResolverWiringTests
         provider.GetRolesAsync(Arg.Any<ResolvedIdentity>(), Arg.Any<IdentityRealm>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new ProviderRoleResult(new HashSet<string> { GroupB }, new HashSet<string>(), new Dictionary<string, string>())));
         var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions());
-        var roleResolver = new RoleResolver([provider], new RoleResolverCache(), null, options);
+        var registry = Registry(RealmGroupSource.Resolver, IdentityRealmKind.Basic, "static-mapping");
+        var roleResolver = new RoleResolver(registry, [provider], new RoleResolverCache(), options);
         var pipeline = TestIdentityPipeline.Create(
-            Registry(RealmGroupSource.Resolver, IdentityRealmKind.Basic, "static-mapping"),
+            registry,
             roleResolver: roleResolver,
             groupResolver: new GroupSidResolver(roleResolver, [provider], options));
 

@@ -41,9 +41,10 @@ public sealed class CdcSubscriptionPrincipalTests
 
         p.FindFirst("tenant_id")!.Value.ShouldBe("tenant-a");
         p.Claims.Count(c => c.Type == "tenant_id").ShouldBe(1);
-        // No other claim types than sid, groups, roles, tenant (Casbin copies every claim into attributes).
+        // No other claim types than sid, groups, roles, tenant and the pipeline marker and status (Casbin copies every claim into attributes).
         p.Claims.Select(c => c.Type).Distinct().ShouldBe(
-            [ClaimTypes.PrimarySid, ClaimTypes.GroupSid, ClaimTypes.Role, "tenant_id"], ignoreOrder: true);
+            [ClaimTypes.PrimarySid, ClaimTypes.GroupSid, ClaimTypes.Role, "tenant_id",
+             Autheris.Domain.Identity.GroupResolutionClaims.MarkerClaimType, Autheris.Domain.Identity.GroupResolutionClaims.StatusClaimType, Autheris.Domain.Identity.GroupResolutionClaims.ExpiresAtClaimType], ignoreOrder: true);
     }
 
     [Theory]

@@ -551,8 +551,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         result.HasClaim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded).ShouldBeTrue();
 
         // Allowed client -> not degraded by client allowlist check
-        resolver.ResolveRolesAsync(Arg.Any<ResolvedIdentity>(), Arg.Any<CancellationToken>())
-            .Returns(new RoleResolution(
+        TestIdentityPipeline.StubResolution(resolver, new RoleResolution(
                 new HashSet<string>(), new HashSet<string>(), new Dictionary<string, string>(),
                 DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), "resolved"));
 

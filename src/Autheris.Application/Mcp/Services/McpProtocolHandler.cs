@@ -377,7 +377,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     /// marker). SR-M-08: the subject is the authenticated user of the session. A session without a user SID (app-only token) keeps the
     /// application identity, is marked with <see cref="IdentityKindClaimType"/> and carries no group SIDs, so no user-level consent applies.
     /// </summary>
-    public static System.Security.Claims.ClaimsPrincipal? BuildPrincipalFromSession(McpSessionContext? session)
+    public static System.Security.Claims.ClaimsPrincipal? BuildPrincipalFromSession(McpSessionContext? session, TimeProvider? timeProvider = null)
     {
         if (session == null) return null;
         var identity = new System.Security.Claims.ClaimsIdentity("MCP");
@@ -406,7 +406,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         // The session carries the group snapshot of one pipeline resolution. After its expiry (or when it was degraded) no group claim is
         // minted from the stored strings; the principal is then marked Degraded and data access is denied until the next request
         // re-resolves through the pipeline. The sliding session lifetime never extends group validity.
-        var groupsStale = session.GroupsDegraded || (session.GroupsExpireAt is { } groupsExpiry && groupsExpiry <= DateTimeOffset.UtcNow);
+        var groupsStale = session.GroupsDegraded || (session.GroupsExpireAt is { } groupsExpiry && groupsExpiry <= (timeProvider ?? TimeProvider.System).GetUtcNow());
         if (!isAppOnly && !groupsStale && session.GroupSids != null)
         {
             foreach (var g in session.GroupSids)

@@ -36,9 +36,8 @@ public sealed class EnterpriseClaimsTransformationFunctionalRightTests
     private static IRoleResolver Resolver()
     {
         var resolver = Substitute.For<IRoleResolver>();
-        resolver.ResolveRolesAsync(Arg.Any<ResolvedIdentity>(), Arg.Any<CancellationToken>())
-            .Returns(new RoleResolution(
-                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SecGroup" }, new HashSet<string>(),
+        TestIdentityPipeline.StubResolution(resolver, new RoleResolution(
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "S-1-5-21-1-2-3-1100" }, new HashSet<string>(),
                 new Dictionary<string, string>(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), "resolved"));
         return resolver;
     }

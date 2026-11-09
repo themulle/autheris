@@ -41,7 +41,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         user.FindFirst(ClaimTypes.NameIdentifier)?.Value.ShouldBe("S-1-5-21-123456789-500");
 
         // Group claims are not produced by the normalizer: the group resolver of the identity pipeline owns them.
-        user.FindAll(ClaimTypes.GroupSid).ShouldBeEmpty();
+        user.GetGroupSids().ShouldBeEmpty();
 
         user.FindAll(ClaimTypes.Role).Select(c => c.Value).ShouldContain("DataOwner");
     }

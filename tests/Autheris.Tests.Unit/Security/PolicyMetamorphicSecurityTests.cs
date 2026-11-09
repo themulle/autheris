@@ -34,20 +34,17 @@ public sealed class PolicyMetamorphicSecurityTests
     #region 2. Functional Right Mapper Metamorphic Invariants
 
     [Theory]
-    [InlineData("group")]
-    [InlineData("groups")]
-    [InlineData("roles")]
     [InlineData(ClaimTypes.Role)]
     [InlineData(ClaimTypes.GroupSid)]
     public async Task M_RIGHT_01_ClaimTypeIsomorphism_AnyClaimType_YieldsIdenticalMappedRights(string claimType)
     {
         // Axiom: Mapping a group/role name 'sec-operators' must yield bit-identical FunctionalRights,
-        // regardless of which claim type conveys the identifier ('group', 'groups', 'roles', Role, GroupSid).
+        // regardless of whether a role claim or a pipeline-issued group SID claim conveys the identifier.
         var repository = Substitute.For<IFunctionalRightRepository>();
         var realmRegistry = Substitute.For<IIdentityRealmRegistry>();
         var sut = new FunctionalRightMapper(repository, realmRegistry);
 
-        const string groupName = "sec-operators";
+        const string groupName = "S-1-5-21-1-2-3-1100";
         var expectedRight = FunctionalRight.DataExport;
 
         var mapping = new FunctionalRightMapping(
@@ -67,7 +64,7 @@ public sealed class PolicyMetamorphicSecurityTests
         var claims = new[]
         {
             new Claim(ClaimTypes.PrimarySid, "user-iso"),
-            new Claim(claimType, groupName)
+            claimType == ClaimTypes.GroupSid ? Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(groupName) : new Claim(claimType, groupName)
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
 
@@ -76,6 +73,23 @@ public sealed class PolicyMetamorphicSecurityTests
         // Metamorphic assertion
         rights.ShouldContain(expectedRight,
             $"Claim type '{claimType}' failed to resolve mapped functional right '{expectedRight.Value}'");
+    }
+
+    [Theory]
+    [InlineData("group")]
+    [InlineData("groups")]
+    public async Task M_RIGHT_01b_RawTokenGroupClaimTypes_NeverMapToRights(string claimType)
+    {
+        var repository = Substitute.For<IFunctionalRightRepository>();
+        var sut = new FunctionalRightMapper(repository, Substitute.For<IIdentityRealmRegistry>());
+        repository.GetApprovedMappingsForGroupsAndRolesAsync(TestTenant, TestRealm, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo => Task.FromResult<IReadOnlyList<FunctionalRightMapping>>(
+                callInfo.ArgAt<IReadOnlyCollection<string>>(2).Count == 0 ? [] : throw new InvalidOperationException("raw claim reached the mapper")));
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "user-iso"), new Claim(claimType, "S-1-5-21-1-2-3-1100"), new Claim(ClaimTypes.GroupSid, "S-1-5-21-1-2-3-1100")], "TestAuth"));
+
+        (await sut.GetRightsForCallerAsync(principal, TestTenant, TestRealm)).ShouldBeEmpty();
     }
 
     [Theory]
@@ -101,19 +115,19 @@ public sealed class PolicyMetamorphicSecurityTests
 
         // Poisoned database mappings attempt to give a customer group admin rights
         var adminMapping = new FunctionalRightMapping(
-            TestTenant.Value, "ext-customer", "ext-users", FunctionalRight.TenantAdmin,
+            TestTenant.Value, "ext-customer", "S-1-5-21-1-2-3-1100", FunctionalRight.TenantAdmin,
             ApprovedBy: "rogue-admin", ApprovedAt: DateTimeOffset.UtcNow,
             RecertClass: RecertClass.Privileged.ToString(), CreatedBy: "rogue-admin",
             CreatedAt: DateTimeOffset.UtcNow);
 
         var clusterMapping = new FunctionalRightMapping(
-            TestTenant.Value, "ext-customer", "ext-users", FunctionalRight.ClusterAdmin,
+            TestTenant.Value, "ext-customer", "S-1-5-21-1-2-3-1100", FunctionalRight.ClusterAdmin,
             ApprovedBy: "rogue-admin", ApprovedAt: DateTimeOffset.UtcNow,
             RecertClass: RecertClass.Privileged.ToString(), CreatedBy: "rogue-admin",
             CreatedAt: DateTimeOffset.UtcNow);
 
         var standardMapping = new FunctionalRightMapping(
-            TestTenant.Value, "ext-customer", "ext-users", FunctionalRight.Consumer,
+            TestTenant.Value, "ext-customer", "S-1-5-21-1-2-3-1100", FunctionalRight.Consumer,
             ApprovedBy: "admin", ApprovedAt: DateTimeOffset.UtcNow,
             RecertClass: RecertClass.Standard.ToString(), CreatedBy: "admin",
             CreatedAt: DateTimeOffset.UtcNow);
@@ -123,7 +137,7 @@ public sealed class PolicyMetamorphicSecurityTests
             .Returns(Task.FromResult<IReadOnlyList<FunctionalRightMapping>>([adminMapping, clusterMapping, standardMapping]));
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "cust-user"), new Claim(ClaimTypes.GroupSid, "ext-users")], "TestAuth"));
+            [new Claim(ClaimTypes.PrimarySid, "cust-user"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-1100")], "TestAuth"));
 
         var rights = await sut.GetRightsForCallerAsync(principal, TestTenant, "ext-customer");
 

@@ -157,7 +157,7 @@ public sealed class AuthenticationModeOptionsValidatorTests
     {
         Failure(Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, TrustUpstreamSids = false, TrustUpstreamGroupSids = true }))
             .ShouldContain("TrustUpstreamGroupSids (legacy alias)");
-        Failure(Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, TrustUpstreamSids = true, TrustUpstreamGroupSids = true })).ShouldBeEmpty();
+        Failure(Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, TrustUpstreamSids = true, TrustUpstreamGroupSids = true, GroupSource = ForwardAuthGroupSource.Header })).ShouldBeEmpty();
         new ForwardAuthOptions { TrustUpstreamGroupSids = true }.IsUpstreamSidTrusted.ShouldBeTrue();
     }
 
