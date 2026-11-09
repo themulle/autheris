@@ -48,7 +48,7 @@ public sealed class GovernedSqlExecutorX1Tests
     private const string RecursiveSql =
         "WITH RECURSIVE t(id) AS (SELECT id FROM orders WHERE id = 1 UNION ALL SELECT id + 1 FROM t WHERE id < 3) SELECT id FROM t";
 
-    private static ClaimsPrincipal Writer() =>
+    internal static ClaimsPrincipal Writer() =>
         new(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer")], "Test"));
 
@@ -68,7 +68,7 @@ public sealed class GovernedSqlExecutorX1Tests
         };
     }
 
-    private static GatewayOptions Gateway(string provider, long maxAffectedRows = 1000, bool storeCompiledSql = false, string? hmacRef = null, int timeoutSeconds = 30, bool allowRecursive = false) => new()
+    internal static GatewayOptions Gateway(string provider, long maxAffectedRows = 1000, bool storeCompiledSql = false, string? hmacRef = null, int timeoutSeconds = 30, bool allowRecursive = false) => new()
     {
         WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DmlWriterRoles = ["Writer"], DefaultDataSourceName = DataSource, MaxAffectedRows = maxAffectedRows, ExecutionTimeoutSeconds = timeoutSeconds, AllowRecursiveCte = allowRecursive },
         Audit = new AuditOptions { StoreCompiledSql = storeCompiledSql },
@@ -83,7 +83,7 @@ public sealed class GovernedSqlExecutorX1Tests
     };
 
     /// <summary>Compiles a statement through the real governed pipeline (catalog, policies, engine) for a source type.</summary>
-    private static async Task<CompiledSql> CompileAsync(string sourceType, string sql, ClaimsPrincipal? user = null, bool allowRecursive = false)
+    internal static async Task<CompiledSql> CompileAsync(string sourceType, string sql, ClaimsPrincipal? user = null, bool allowRecursive = false)
     {
         var table = Orders(sourceType);
         var repo = Substitute.For<ITableMetadataRepository>();
@@ -106,9 +106,9 @@ public sealed class GovernedSqlExecutorX1Tests
 
     private static GovernedRewrite Rewrite(CompiledSql compiled) => new(compiled, [], DataSource);
 
-    private static DmlAuditContext Dml() => new() { StatementType = TrinoSqlEngine.Analysis.SqlStatementType.Insert, Tables = ["orders"] };
+    internal static DmlAuditContext Dml() => new() { StatementType = TrinoSqlEngine.Analysis.SqlStatementType.Insert, Tables = ["orders"] };
 
-    private sealed class Harness
+    internal sealed class Harness
     {
         public required GovernedSqlExecutor Executor { get; init; }
         public required ISqlConnectionFactory Factory { get; init; }
@@ -117,7 +117,7 @@ public sealed class GovernedSqlExecutorX1Tests
         public required CapturingLogger<GovernedSqlExecutor> Log { get; init; }
     }
 
-    private static Harness CreateHarness(
+    internal static Harness CreateHarness(
         string provider,
         Func<FakeDbCommand>? commandFactory = null,
         bool sessionTransaction = false,
@@ -154,7 +154,7 @@ public sealed class GovernedSqlExecutorX1Tests
         return new Harness { Executor = executor, Factory = factory, Connection = connection, Audit = audit, Log = log };
     }
 
-    private static Task<string> ExecuteAsync(Harness h, CompiledSql compiled, GovernedSqlQueryRequest? request = null, DmlAuditContext? dml = null,
+    internal static Task<string> ExecuteAsync(Harness h, CompiledSql compiled, GovernedSqlQueryRequest? request = null, DmlAuditContext? dml = null,
         IReadOnlyDictionary<string, object?>? clientValues = null, Func<DbDataReader, CancellationToken, Task>? rowWriter = null) =>
         h.Executor.ExecuteRewrittenAsync(
             request ?? new GovernedSqlQueryRequest("SELECT 1"), Writer(), new TenantId(Tenant), Rewrite(compiled), dml ?? new DmlAuditContext(),
@@ -214,7 +214,7 @@ public sealed class GovernedSqlExecutorX1Tests
     {
         // M-1: a request failure after the commit would make the client retry (and duplicate) the DML.
         var compiled = await CompileAsync("Sqlite", "UPDATE orders SET amount = 1 WHERE id = 1");
-        var h = CreateHarness("Sqlite", auditSink: (_, _) => throw new InvalidOperationException("audit store down"));
+        var h = CreateHarness("Sqlite", auditSink: (e, _) => e.EventType == AuditEventTypes.WebSqlDmlExecuted ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
         long failures = 0;
         using var listener = new System.Diagnostics.Metrics.MeterListener();
         listener.InstrumentPublished = (instrument, l) =>

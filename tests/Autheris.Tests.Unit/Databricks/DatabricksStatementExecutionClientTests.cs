@@ -407,15 +407,59 @@ public sealed class DatabricksStatementExecutionClientTests
     }
 
     [Fact]
-    public async Task PatAuth_RejectedOutsideDevelopment()
+    public async Task Pat_AcceptedInProduction()
     {
         var handler = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, "[]"))));
         var client = Client(handler, Options(DatabricksAuthMode.Pat), environment: "Production");
 
+        var response = await client.ExecuteAsync(Request(), CancellationToken.None);
+
+        response.StatementId.ShouldBe(StatementId);
+        handler.Requests.Single().Authorization.ShouldBe($"Bearer {Pat}");
+    }
+
+    [Fact]
+    public async Task Unauthorized_ReResolvesSecret_AndRetriesOnce()
+    {
+        var attempts = 0;
+        var handler = new FakeDatabricksHandler(Router(r =>
+        {
+            if (r.Uri.AbsolutePath == "/api/2.0/sql/statements/")
+            {
+                attempts++;
+                return attempts == 1
+                    ? Json(HttpStatusCode.Unauthorized, "{}")
+                    : Ok(Succeeded(StatementId, "[]"));
+            }
+            return null;
+        }));
+        var client = Client(handler);
+
+        var result = await client.ExecuteAsync(Request(), CancellationToken.None);
+
+        result.StatementId.ShouldBe(StatementId);
+        attempts.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task SecondUnauthorized_FailsWithAuthFailed()
+    {
+        var attempts = 0;
+        var handler = new FakeDatabricksHandler(Router(r =>
+        {
+            if (r.Uri.AbsolutePath == "/api/2.0/sql/statements/")
+            {
+                attempts++;
+                return Json(HttpStatusCode.Unauthorized, "{}");
+            }
+            return null;
+        }));
+        var client = Client(handler);
+
         var ex = await CaptureAsync(() => client.ExecuteAsync(Request(), CancellationToken.None));
 
-        ex.ShouldBeOfType<DatabricksProviderException>().Code.ShouldBe(DatabricksErrorCodes.Configuration);
-        handler.Requests.ShouldBeEmpty();
+        ex.ShouldBeOfType<DatabricksProviderException>().Code.ShouldBe(DatabricksErrorCodes.AuthFailed);
+        attempts.ShouldBe(2);
     }
 
     [Fact]

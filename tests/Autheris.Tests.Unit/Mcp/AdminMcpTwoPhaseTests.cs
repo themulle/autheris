@@ -43,7 +43,7 @@ public sealed class AdminMcpTwoPhaseTests
     public AdminMcpTwoPhaseTests()
     {
         _totpService = new TotpVerificationService();
-        _service = new AccessPlanningService(_auditRepo, _tableRepo, _rebacStore, _totpService, _totpSecretStore);
+        _service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _rebacStore, _totpService, _totpSecretStore);
 
         var tableId = Guid.NewGuid();
         _mockMetadata = new TableMetadata
@@ -243,7 +243,7 @@ public sealed class AdminMcpTwoPhaseTests
     {
         // Arrange: inline secrets are written to a writable secret provider (WP-ARC-A-10), never kept by the service.
         var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
-        var service = new AccessPlanningService(_auditRepo, _tableRepo, _rebacStore, _totpService, _totpSecretStore, secretProvider: secretProvider);
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _rebacStore, _totpService, _totpSecretStore, secretProvider: secretProvider);
         const string cleartextSecret = "super-secret-vault-api-key-99999";
         var request = new AdminRegisterDatasourceRequest(
             Name: "sap_erp",
@@ -283,7 +283,7 @@ public sealed class AdminMcpTwoPhaseTests
     {
         var bus = Substitute.For<IGatewayEventBus>();
         var service = new AccessPlanningService(
-            _auditRepo, _tableRepo, _rebacStore, _totpService, _totpSecretStore, eventBus: bus);
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _rebacStore, _totpService, _totpSecretStore, eventBus: bus);
 
         var plan = await service.PlanAccessAsync(
             new AdminPlanAccessRequest(
@@ -344,7 +344,7 @@ public sealed class AdminMcpTwoPhaseTests
         var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         devEnv.EnvironmentName.Returns("Development");
         var service = new AccessPlanningService(
-            _auditRepo, _tableRepo, _rebacStore, _totpService, _totpSecretStore, hostEnvironment: devEnv);
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _rebacStore, _totpService, _totpSecretStore, hostEnvironment: devEnv);
 
         // Act: search with fuzzy query "philipp"
         var result = await service.ResolvePrincipalAsync(new AdminResolvePrincipalRequest("philipp"), AdminSid);

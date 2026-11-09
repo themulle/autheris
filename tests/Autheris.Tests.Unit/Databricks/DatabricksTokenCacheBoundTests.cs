@@ -79,4 +79,38 @@ public sealed class DatabricksTokenCacheBoundTests
 
         cache.EntryCount.ShouldBe(1);
     }
+
+    [Fact]
+    public void CacheKey_IncludesTenantModeAndPrincipal()
+    {
+        var key1 = DatabricksTokenCache.BuildKey("adb.corp.net", "tenant-a", DatabricksAuthMode.Pat, "pat-1", null);
+        var key2 = DatabricksTokenCache.BuildKey("adb.corp.net", "tenant-b", DatabricksAuthMode.Pat, "pat-1", null);
+        var key3 = DatabricksTokenCache.BuildKey("adb.corp.net", "tenant-a", DatabricksAuthMode.OAuthM2M, "pat-1", null);
+        var key4 = DatabricksTokenCache.BuildKey("adb.corp.net", "tenant-a", DatabricksAuthMode.Pat, "pat-2", null);
+
+        key1.ShouldNotBe(key2);
+        key1.ShouldNotBe(key3);
+        key1.ShouldNotBe(key4);
+        key1.ShouldContain("tenant-a");
+        key1.ShouldContain("Pat");
+        key1.ShouldContain("pat-1");
+    }
+
+    [Fact]
+    public void Evict_PerDataSourceAndTenant_OnlyEvictsMatchingGroup()
+    {
+        using var cache = new DatabricksTokenCache(maxEntries: 100);
+        var exp = DateTimeOffset.UtcNow.AddHours(1);
+        cache.Set("dbx1", "tenant-a", DatabricksAuthMode.Pat, "p1", null, "tok-a", exp);
+        cache.Set("dbx1", "tenant-b", DatabricksAuthMode.Pat, "p1", null, "tok-b", exp);
+        cache.Set("dbx2", "tenant-a", DatabricksAuthMode.Pat, "p1", null, "tok-c", exp);
+
+        cache.Evict("dbx1", "tenant-a");
+
+        cache.TryGet("dbx1", "tenant-a", DatabricksAuthMode.Pat, "p1", null, DateTimeOffset.UtcNow, out _).ShouldBeFalse();
+        cache.TryGet("dbx1", "tenant-b", DatabricksAuthMode.Pat, "p1", null, DateTimeOffset.UtcNow, out var tokB).ShouldBeTrue();
+        tokB.ShouldBe("tok-b");
+        cache.TryGet("dbx2", "tenant-a", DatabricksAuthMode.Pat, "p1", null, DateTimeOffset.UtcNow, out var tokC).ShouldBeTrue();
+        tokC.ShouldBe("tok-c");
+    }
 }

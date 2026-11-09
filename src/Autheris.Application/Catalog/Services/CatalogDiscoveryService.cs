@@ -1,6 +1,8 @@
 namespace Autheris.Application.Catalog.Services;
 
+using Autheris.Application.Audit;
 using Autheris.Application.Tenancy;
+using Autheris.Domain.Audit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -26,7 +28,7 @@ using Microsoft.Extensions.Options;
 public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 {
     private readonly ITableMetadataRepository _metadataRepository;
-    private readonly IAuditLogRepository _auditLogRepository;
+    private readonly IAuditWriter _auditWriter;
     private readonly GatewayOptions _gatewayOptions;
     private readonly ICatalogVisibilityService? _visibility;
     private readonly IKeyVaultSecretProvider? _secretProvider;
@@ -48,7 +50,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     /// </summary>
     public CatalogDiscoveryService(
         ITableMetadataRepository metadataRepository,
-        IAuditLogRepository auditLogRepository,
+        IAuditWriter auditWriter,
         IOptions<GatewayOptions> gatewayOptions,
         ICatalogVisibilityService? visibilityService = null,
         IKeyVaultSecretProvider? secretProvider = null,
@@ -70,7 +72,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _consentRepository = consentRepository;
         _maxSpecDownloadBytes = options?.Value.MaxSpecDownloadBytes ?? new CatalogDiscoveryOptions().MaxSpecDownloadBytes;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
-        _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
+        _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _gatewayOptions = (gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions))).Value
             ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _visibility = visibilityService;
@@ -793,6 +795,33 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
              !string.IsNullOrEmpty(request.Auth.ClientSecret) ||
              !string.IsNullOrEmpty(request.Auth.SecretRef));
 
+        var datasourceId = $"ds-{Guid.NewGuid():N}";
+
+        if (!request.DryRun)
+        {
+            // Write-ahead: the required record exists before the secret is stored and the spec is ingested.
+            // SEC REVIEW G5 / R-55: Never leak raw secrets in AuditLog
+            var auditEntry = new AuditLogEntry
+            {
+                TenantId = context.TenantId,
+                ActorSid = context.SubjectId,
+                EventType = AuditEventTypes.DatasourceRegistered,
+                TargetTable = $"{request.Domain}.*",
+                Decision = "ALLOW",
+                TraceId = context.CorrelationId ?? Guid.NewGuid().ToString("N"),
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    DatasourceId = datasourceId,
+                    DatasourceName = request.Name,
+                    Domain = request.Domain,
+                    IsConfigured = isConfigured,
+                    AuthType = request.Auth?.Type
+                })
+            };
+
+            await _auditWriter.RecordRequiredAsync(auditEntry, ct).ConfigureAwait(false);
+        }
+
         // R-55 / SEC REVIEW G5: Securely vault credentials in IKeyVaultSecretProvider and strip plaintext
         var effectiveAuth = request.Auth;
         if (!request.DryRun && request.Auth != null && _secretProvider != null)
@@ -817,33 +846,6 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             dryRun: request.DryRun,
             ct: ct
         ).ConfigureAwait(false);
-
-        var datasourceId = $"ds-{Guid.NewGuid():N}";
-
-        if (!request.DryRun && _auditLogRepository != null)
-        {
-            // SEC REVIEW G5 / R-55: Never leak raw secrets in AuditLog
-            var auditEntry = new AuditLogEntry
-            {
-                TenantId = context.TenantId,
-                ActorSid = context.SubjectId,
-                EventType = "DATASOURCE_REGISTERED",
-                TargetTable = $"{request.Domain}.*",
-                Decision = "ALLOW",
-                TraceId = context.CorrelationId ?? Guid.NewGuid().ToString("N"),
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    DatasourceId = datasourceId,
-                    DatasourceName = request.Name,
-                    Domain = request.Domain,
-                    IsConfigured = isConfigured,
-                    AuthType = request.Auth?.Type,
-                    CreatedDatasetsCount = ingestionResult.IngestedTablesCount
-                })
-            };
-
-            await _auditLogRepository.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
-        }
 
         return new DatasourceRegistrationResult(
             DatasourceId: datasourceId,

@@ -250,7 +250,7 @@ public static class CatalogApiEndpoints
             }
         })
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.DatasourceTested);
+        .WithAudit(AuditLevel.Delegated, AuditEventTypes.DatasourceTested);
 
         // Issue #427: POST /api/v1/catalog/datasources/{id}/refresh-physical-keys
         group.MapPost("/datasources/{id}/refresh-physical-keys", RefreshDatasourcePhysicalKeysHandler)

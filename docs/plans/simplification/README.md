@@ -9,7 +9,7 @@ Each spec has the same structure: goal, preconditions, scope, verified current s
 | Order | Lane | Work packages | Gate before start |
 |---|---|---|---|
 | 0 | CI | #516 (CI hang), #517 (timeouts, hang dumps) | none - nothing else is measurable before these land |
-| 0 | Security (parallel to all stages) | [WP-SIMPL-36](WP-SIMPL-36-security-lane.md) | sub-package 0 first: finish fix/security-batch-5 and align it with OD-9 |
+| 0 | Security (parallel to all stages) | [WP-SIMPL-36](WP-SIMPL-36-security-lane.md) | sub-package 0 first: finish fix/security-batch-5 and align it with OD-9; sub-packages 0 and 1 merged; sub-package 2 delivered 2026-11-08 ([addendum](WP-SIMPL-36-sp2-sp3-addendum.md)); sub-package 3 in progress |
 | 1 | Stage 0 quick wins | [01](WP-SIMPL-01-remove-readytorun.md), [02](WP-SIMPL-02-version-from-git-tag.md) `[WF]`, [03](WP-SIMPL-03-remove-performance-claims.md), [04](WP-SIMPL-04-docs-nonexistent-components.md), [05](WP-SIMPL-05-docs-hygiene-checks.md), [06](WP-SIMPL-06-unconsumed-options-config-reference.md) | #516/#517 |
 | 1 | Stage 0 program | [07](WP-SIMPL-07-freeze-ratchets.md) `[WF]`, [08](WP-SIMPL-08-codeowners-identity.md), [09](WP-SIMPL-09-agent-definitions-cleanup.md) (after 03), [10](WP-SIMPL-10-measurement-baselines.md) (PR 1 before 01; PR 2 after #516, #517, 01) | |
 | 2 | Stage 1 persistence | [11](WP-SIMPL-11-drop-sqlite-governance-store.md), then [12](WP-SIMPL-12-delete-catalog-connectors-backstage-itsm.md) | #520 (test-host reuse) merged; #504 (security trait) merged |

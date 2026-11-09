@@ -138,7 +138,7 @@ public sealed class Issue390OutputDirectionTests
         var options = Wp0.Options(Autheris.Tests.Common.TenancyShape.Single);
         var service = new CatalogDiscoveryService(
             repo,
-            Substitute.For<IAuditLogRepository>(),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             Microsoft.Extensions.Options.Options.Create(options),
             Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(repo, consents, options, Substitute.For<IRebacEvaluator>()),
             Substitute.For<IKeyVaultSecretProvider>(),

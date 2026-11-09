@@ -519,7 +519,7 @@ public sealed class McpOpenFindingsSecurityTests
             .Returns(new TableMetadata { Identifier = Orders, Table = new Table { TableName = "orders", SchemaName = "public", IsActive = true } });
         ITotpSecretStore secrets = new InMemoryTotpSecretStore();
         ITotpVerificationService totp = new TotpVerificationService();
-        var service = new AccessPlanningService(Substitute.For<IAuditLogRepository>(), tableRepo, Substitute.For<IRebacStore>(), totp, secrets);
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), tableRepo, Substitute.For<IRebacStore>(), totp, secrets);
         const string args = """{"datasetId":"sales.public.orders","state":"quarantined","reason":"drift"}""";
 
         // Phase 1: plan only.
