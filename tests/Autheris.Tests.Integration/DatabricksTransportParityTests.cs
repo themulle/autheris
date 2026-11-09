@@ -98,9 +98,11 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             builder.UseSetting("Gateway:WebSql:MaxAllowedRows", "500");
 
             builder.UseSetting("Gateway:Mcp:Enabled", "true");
+            builder.UseSetting("Gateway:Rebac:Enabled", "false");
 
             builder.ConfigureTestServices(services =>
             {
+                services.AddSingleton<ITenantRegistry>(new PassThroughTenantRegistry());
                 services.AddSingleton<IKeyVaultSecretProvider>(new FakeSecretProvider(new Dictionary<string, string>
                 {
                     ["kv://dbx-pat"] = "test-token-parity-123"
@@ -163,7 +165,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         {
             Table = new Table { Id = Guid.NewGuid(), DisplayName = "orders", TableName = "orders", SchemaName = SchemaName, SourceName = SourceNoTrino, SourceType = "Databricks", DataSourceType = DataSourceType.Sql, IsActive = true },
             Identifier = OrdersNoTrinoId,
-            Columns = ordersMeta.Columns
+            Columns = [Col("id", "int"), Col("tenantid", "string"), Col("region", "string"), Col("status", "string"), Col("amount", "decimal"), Col("email", "string", sensitive: true)]
         };
         await repo.UpsertTableMetadataAsync(ordersNoTrinoMeta);
 
@@ -361,6 +363,21 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
     {
         public byte[] GetSecretBytes(string secretRef) =>
             secrets.TryGetValue(secretRef, out var s) ? Encoding.UTF8.GetBytes(s) : new byte[32];
+    }
+
+    private sealed class PassThroughTenantRegistry : ITenantRegistry
+    {
+        public ValueTask<TenantRegistration> RegisterOrGetAsync(TenantId tenant, string? issuer, CancellationToken ct) =>
+            new(TenantRegistration.Registered);
+
+        public ValueTask<TenantRegistration?> TryGetAsync(TenantId tenant, CancellationToken ct) =>
+            new(TenantRegistration.Existing);
+
+        public ValueTask<TenantCollisionResolution> ResolveCollisionAsync(TenantId keep, string? expectedCurrent, CancellationToken ct) =>
+            new(new TenantCollisionResolution(TenantCollisionResolutionStatus.Resolved, null));
+
+        public ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct) =>
+            ValueTask.CompletedTask;
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
