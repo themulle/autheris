@@ -34,7 +34,7 @@ public static class SqliteExecutionGuard
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(work);
-        if (connection is not SqliteConnection sqlite)
+        if ((connection is MetadataGuardedConnection guarded ? guarded.Inner : connection) is not SqliteConnection sqlite)
         {
             throw new NotSupportedException("The execution guard interrupts SQLite statements only.");
         }

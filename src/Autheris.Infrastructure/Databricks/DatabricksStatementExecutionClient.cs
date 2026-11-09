@@ -413,7 +413,7 @@ public sealed partial class DatabricksStatementExecutionClient(
                     ? c
                     : "UNKNOWN";
                 logger?.LogWarning("Databricks statement failed with error code {ErrorCode}.", code);
-                throw new DatabricksProviderException(DatabricksErrorCodes.StatementFailed, $"The Databricks statement failed (error code {code}).");
+                throw new DatabricksProviderException(DatabricksErrorCodes.StatementFailed, $"The Databricks statement failed (error code {code}).") { ErrorClass = code };
             case "CANCELED" or "CLOSED":
                 throw new DatabricksProviderException(DatabricksErrorCodes.StatementFailed, $"The Databricks statement ended in state {state}.");
             default:

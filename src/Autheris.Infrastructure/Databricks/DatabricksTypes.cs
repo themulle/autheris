@@ -28,6 +28,9 @@ public sealed record DatabricksStatementResult(
 public class DatabricksProviderException(string code, string message) : Exception(message)
 {
     public string Code { get; } = code;
+
+    /// <summary>The Databricks error class of a failed statement (validated token), for drift classification; never shown to clients.</summary>
+    public string? ErrorClass { get; init; }
 }
 
 /// <summary>The result exceeded the configured byte limit (fail closed, no partial data returned).</summary>

@@ -90,6 +90,12 @@ public static class SqlCompilerErrorMapper
             case DataAccessErrorKind.Unavailable:
                 mapping = Of(503, GovernedSqlErrorCodes.SourceUnavailable);
                 return true;
+            case DataAccessErrorKind.SourceSchemaMismatch:
+                mapping = new SqlErrorMapping(502, SourceDriftErrors.SchemaMismatchCode, SourceDriftErrors.SchemaMismatchMessage, null);
+                return true;
+            case DataAccessErrorKind.SourcePermissionDenied:
+                mapping = new SqlErrorMapping(502, SourceDriftErrors.PermissionDeniedCode, SourceDriftErrors.PermissionDeniedMessage, null);
+                return true;
             default:
                 mapping = default;
                 return false;

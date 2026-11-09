@@ -170,6 +170,8 @@ tests/Autheris.Tests.Architecture/Golden/GovernanceSteps/**                  @th
 src/Autheris.Infrastructure/Persistence/**  @themulle
 src/Autheris.Application/**/Security*/**  @themulle
 src/Autheris.Application/**/*Security*.cs  @themulle
+tests/Autheris.Tests.Architecture/ArchitectureNoSourceMetadataReadsTests.cs  @themulle
+src/Autheris.Application/Sql/SourceMetadataGuard.cs  @themulle
 src/TrinoSqlEngine/Ast/Security/**  @themulle
 tests/Autheris.Tests.Fuzz/**  @themulle
 src/Autheris.Api/Hosting/**  @themulle

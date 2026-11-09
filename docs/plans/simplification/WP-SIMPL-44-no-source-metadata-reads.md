@@ -371,3 +371,14 @@ Grant per governed object, never per database or catalog. The data login below i
 - D7 Lakehouse: reading the Delta log or Iceberg metadata is reading the table format and is out of scope. The module must still reject columns that are not declared.
 - D8 Drift: no auto-discovery and no cache-repair read. Mismatch and permission errors map to 502 with stable codes. The fix is a new upload.
 - D9 This WP uses the condition ids SEC-SIMPL-140..147, a range no other WP uses.
+
+## Changelog
+- 2026-11-09 (PR 1 re-verification against origin/main 56acd454; WP-12, WP-17 and WP-39 PR 1-3 merged):
+  - Section 4 facts hold. The reader, validator, row-scope and CDC locations are unchanged.
+  - Open-question default taken: the spec's recommendation.
+  - Step 1: the architecture test uses a temporary allowlist ("removed in PR 2-4") for the 10 reader/validator/row-scope files instead of `Skip`, so the test stays a required, green check. Entries leave the list when their file is deleted. `DuckDbColumnMetadataReader.cs` and `SqliteColumnMetadataReader.cs` are listed as well because the patterns match them. `SqlFunctionAllowlists.cs` and `DatabaseOptions.cs` do not match any pattern and are not allowlisted (a stale entry fails the test). `CasbinEnforcementService.Columns.cs` and `EffectiveFilterInspector.cs` (audit label literal) are permanent denylist/label entries.
+  - Step 1 pattern `\bsys\.[a-z_]+` excludes `sys.sp_set_session_context` (session setter used by `DbSessionContextInitializer`); the runtime guard allows the same call.
+  - Step 3: `SqliteProviderExecutionGuard` unwraps the guarded connection internally (internal `Inner`, no public `Unwrap`) because it must find the SQLite driver connection to interrupt a statement.
+  - Step 5: the Databricks error class is carried by the new `DatabricksProviderException.ErrorClass`; the 502 mapping lives in `SqlCompilerErrorMapper` (the path every status mapper consults first).
+  - CODEOWNERS: the architecture test and `SourceMetadataGuard.cs` are listed as security-owned paths.
+  - Runtime note: until PR 2-4 delete them, the PostgreSQL/SQL Server/Oracle/Databricks column readers, the key readers, `StoredProcedureCatalogValidator` and the row-scope uniqueness query are blocked by the guard when they run against a real source.
