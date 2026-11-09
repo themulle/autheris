@@ -122,15 +122,19 @@ internal static class DatabricksTestSupport
         return env;
     }
 
-    /// <summary>Key Vault that resolves the known references to distinct secrets.</summary>
-    public static IKeyVaultSecretProvider Vault()
+    private sealed class FakeTestVault : IKeyVaultSecretProvider
     {
-        var vault = Substitute.For<IKeyVaultSecretProvider>();
-        vault.GetSecretBytes("kv://dbx-sp-secret").Returns(Encoding.UTF8.GetBytes(ClientSecret));
-        vault.GetSecretBytes("kv://dbx-pat").Returns(Encoding.UTF8.GetBytes(Pat));
-        vault.GetSecretBytes("kv://dbx-obo-secret").Returns(Encoding.UTF8.GetBytes(ClientSecret));
-        return vault;
+        public byte[] GetSecretBytes(string secretRef) => secretRef switch
+        {
+            "kv://dbx-sp-secret" => Encoding.UTF8.GetBytes(ClientSecret),
+            "kv://dbx-pat" => Encoding.UTF8.GetBytes(Pat),
+            "kv://dbx-obo-secret" => Encoding.UTF8.GetBytes(ClientSecret),
+            _ => throw new KeyNotFoundException(secretRef)
+        };
     }
+
+    /// <summary>Key Vault that resolves the known references to distinct secrets.</summary>
+    public static IKeyVaultSecretProvider Vault() => new FakeTestVault();
 
     public static DatabricksStatementExecutionClient Client(
         FakeDatabricksHandler handler,
