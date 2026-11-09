@@ -15,8 +15,9 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Unit.Governance;
+using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -172,30 +173,16 @@ public sealed class AccessDecisionPointTests
             ColumnRules = Array.Empty<ConsentColumnRule>()
         };
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(meta));
-
-        var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetActiveConsentsForSubjectsAsync(
-                Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([consent]));
-
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.HasPolicies(Arg.Any<TenantId>()).Returns(abac != null);
-        if (abac != null)
-        {
-            policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-                .Returns(new ValueTask<TableAccessDecision>(abac));
-        }
+        var consentRepo = new FakeConsentRepository();
+        await consentRepo.CreateConsentAsync(consent);
 
         var adp = new AccessDecisionPoint(
             Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } }),
-            policy,
+            new StubPolicyEnforcementService(abac),
             new ConsentResolutionService(),
             consentRepo,
-            metadataRepo: metadataRepo,
-            transportGate: Substitute.For<IDataSourceTransportGate>());
+            metadataRepo: new StubTableMetadataRepository(meta),
+            transportGate: AllowAllTransportGate.Instance);
 
         return await adp.DecideAsync(new AccessRequest(
             principal ?? Analyst(),
@@ -205,5 +192,35 @@ public sealed class AccessDecisionPointTests
             ["id", "name", "secret"],
             AccessTransport.Lakehouse,
             TableMetadata: meta));
+    }
+
+    private sealed class StubPolicyEnforcementService(TableAccessDecision? decision) : IPolicyEnforcementService
+    {
+        public ValueTask<TableAccessDecision> EvaluatePolicyAsync(SecurityEvaluationContext context, CancellationToken ct = default) =>
+            decision is null ? throw new InvalidOperationException("No ABAC decision configured.") : ValueTask.FromResult(decision);
+
+        public bool HasPolicies(TenantId tenant) => decision is not null;
+
+        public Task ReloadPoliciesAsync(TenantId tenant, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class StubTableMetadataRepository(TableMetadata metadata) : ITableMetadataRepository
+    {
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<TableMetadata?>(metadata);
+
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TableMetadata>>([metadata]);
+
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table,
+            IReadOnlyList<string> primaryKey,
+            IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 }
