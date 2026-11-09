@@ -21,7 +21,7 @@ using Xunit;
 public sealed class TrinoMetadataColumnDenyTests
 {
     private const string UserSid = "S-1-5-21-USER";
-    private const string GroupSid = "S-1-5-21-GROUP-FINANCE";
+    private const string GroupSid = "S-1-5-21-1-2-3-1001";
     private const string Role = "Analyst";
 
     private static readonly TenantId Tenant = Wp0.TenantA;
@@ -40,7 +40,7 @@ public sealed class TrinoMetadataColumnDenyTests
     };
 
     private static ClaimsPrincipal Caller() => Wp0.User(
-        UserSid, Tenant.Value, [Role], "Bearer", new Claim(ClaimTypes.GroupSid, GroupSid));
+        UserSid, Tenant.Value, [Role], "Bearer", Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(GroupSid));
 
     private static IConsentRepository Repository(params Consent[] consents)
     {

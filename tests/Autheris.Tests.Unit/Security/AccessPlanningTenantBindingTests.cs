@@ -63,7 +63,7 @@ public sealed class AccessPlanningTenantBindingTests
         secretProvider.GetSecretBytes(Arg.Any<string>()).Returns(Encoding.UTF8.GetBytes("key-32-bytes-long-for-hmac-sha256!"));
 
         var service = new AccessPlanningService(
-            Substitute.For<IAuditLogRepository>(),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             tableMetadataRepository: tableRepo,
             rebacStore: store,
             totpVerificationService: totpService,
@@ -174,7 +174,7 @@ public sealed class AccessPlanningTenantBindingTests
             .Returns(new RowFilterEvaluationPreview(orders, stored));
 
         var service = new AccessPlanningService(
-            Substitute.For<IAuditLogRepository>(),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             tableMetadataRepository: tableRepo,
             rebacStore: store,
             totpVerificationService: totpService,

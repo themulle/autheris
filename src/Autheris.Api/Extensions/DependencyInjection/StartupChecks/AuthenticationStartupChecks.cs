@@ -162,5 +162,10 @@ internal static class AuthenticationStartupChecks
         {
             throw new ValidationException("Security violation: Outside Development, Adfs.Audience and Authority must be configured.");
         }
+
+        if (options.Authentication.Adfs.Enabled && !options.Authentication.Adfs.AllowedClientIds.Exists(id => !string.IsNullOrWhiteSpace(id)))
+        {
+            throw new ValidationException("Security violation: Outside Development, Adfs requires AllowedClientIds to be configured with at least one authorized client ID.");
+        }
     }
 }

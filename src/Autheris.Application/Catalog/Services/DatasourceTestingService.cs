@@ -9,12 +9,14 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -31,7 +33,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
 
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IAuditLogRepository _auditLogRepository;
+    private readonly IAuditWriter _auditWriter;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly IHostEnvironment? _environment;
     private readonly ILogger<DatasourceTestingService> _logger;
@@ -42,7 +44,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
     public DatasourceTestingService(
         ITableMetadataRepository metadataRepository,
         IHttpClientFactory httpClientFactory,
-        IAuditLogRepository auditLogRepository,
+        IAuditWriter auditWriter,
         IKeyVaultSecretProvider? secretProvider = null,
         IHostEnvironment? environment = null,
         ILogger<DatasourceTestingService>? logger = null,
@@ -55,7 +57,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         _sqlSourceDescriber = sqlSourceDescriber;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
+        _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _secretProvider = secretProvider;
         _environment = environment;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<DatasourceTestingService>.Instance;
@@ -127,6 +129,8 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         {
             var dsType = matchedTable.Table.DataSourceType;
 
+            await AppendAuditAsync(AuditEventTypes.DatasourceTestRequested, datasourceId, user, isSuccess: true, null, ct).ConfigureAwait(false);
+
             if (dsType == DataSourceType.HttpDeclarative || dsType == DataSourceType.HttpPlugin)
             {
                 return await TestHttpDatasourceAsync(datasourceId, matchedTable, request, user, ct).ConfigureAwait(false);
@@ -157,6 +161,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
 
             if (configuredConnection != null)
             {
+                await AppendAuditAsync(AuditEventTypes.DatasourceTestRequested, datasourceId, user, isSuccess: true, null, ct).ConfigureAwait(false);
                 return await TestSqlDatasourceAsync(datasourceId, null, request, user, ct).ConfigureAwait(false);
             }
         }
@@ -247,7 +252,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         {
             _logger.LogWarning(secEx, "SSRF attempt blocked for datasource test on {Uri}", LogSanitizer.Sanitize(probeUri.ToString()));
             var redactedMsg = SecretScrubber.Redact(secEx.Message);
-            await AppendAuditAsync(datasourceId, user, isSuccess: false, redactedMsg, ct).ConfigureAwait(false);
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: false, redactedMsg, ct).ConfigureAwait(false);
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
                 Type: table.Table.DataSourceType,
@@ -386,7 +391,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
 
             string? errorMsg = isSuccess ? null : $"Target returned HTTP {statusCode} ({response.ReasonPhrase})";
 
-            await AppendAuditAsync(datasourceId, user, isSuccess, errorMsg, ct).ConfigureAwait(false);
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess, errorMsg, ct).ConfigureAwait(false);
 
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
@@ -401,7 +406,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         {
             sw.Stop();
             var timeoutMsg = $"Connection probe timed out after {timeout.TotalSeconds}s.";
-            await AppendAuditAsync(datasourceId, user, isSuccess: false, timeoutMsg, ct).ConfigureAwait(false);
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: false, timeoutMsg, ct).ConfigureAwait(false);
 
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
@@ -420,11 +425,11 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
                     SecretResolutionStatus: secretStatus,
                     ProbeDetails: new Dictionary<string, string> { ["Timeout"] = $"{timeout.TotalSeconds}s" }));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not AuditUnavailableException)
         {
             sw.Stop();
             var sanitized = SecretScrubber.Redact(ex.Message);
-            await AppendAuditAsync(datasourceId, user, isSuccess: false, sanitized, ct).ConfigureAwait(false);
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: false, sanitized, ct).ConfigureAwait(false);
 
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
@@ -481,7 +486,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         if (_sqlConnectionFactory is null || connection is null)
         {
             const string notConfigured = "The data source has no configured connection; nothing was tested.";
-            await AppendAuditAsync(datasourceId, user, isSuccess: false, notConfigured, ct).ConfigureAwait(false);
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: false, notConfigured, ct).ConfigureAwait(false);
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
                 Type: dsType,
@@ -525,7 +530,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         {
             await using var opened = await _sqlConnectionFactory.CreateOpenConnectionAsync(connection, cts.Token).ConfigureAwait(false);
             sw.Stop();
-            await AppendAuditAsync(datasourceId, user, isSuccess: true, null, ct).ConfigureAwait(false);
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: true, null, ct).ConfigureAwait(false);
 
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
@@ -541,10 +546,10 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             sw.Stop();
             string timeoutMsg = $"Connection probe timed out after {timeout.TotalSeconds}s.";
             details["Category"] = "Timeout";
-            await AppendAuditAsync(datasourceId, user, isSuccess: false, timeoutMsg, ct).ConfigureAwait(false);
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: false, timeoutMsg, ct).ConfigureAwait(false);
             return SqlFailure(datasourceId, dsType, sw, timeoutMsg, description, details);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not (OperationCanceledException or AuditUnavailableException))
         {
             sw.Stop();
             // Classified exceptions carry a credential-free message; any other driver message is redacted and only the type is reported.
@@ -569,7 +574,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             // The id comes from the route: strip line breaks so it cannot forge log entries (CodeQL log injection).
             var safeDatasourceId = LogSanitizer.Sanitize(datasourceId);
             _logger.LogWarning("Datasource test failed for {DatasourceId} ({Category}, {ExceptionType}).", safeDatasourceId, details["Category"], ex.GetType().Name);
-            await AppendAuditAsync(datasourceId, user, isSuccess: false, message, ct).ConfigureAwait(false);
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: false, message, ct).ConfigureAwait(false);
             return SqlFailure(datasourceId, dsType, sw, message, description, details);
         }
     }
@@ -609,41 +614,46 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
             ErrorMessage: message,
             Diagnostics: BuildSqlDiagnostics(description, connected: false, details));
 
-    private async Task AppendAuditAsync(string datasourceId, ClaimsPrincipal user, bool isSuccess, string? error, CancellationToken ct)
+    private async Task AppendAuditAsync(string eventType, string datasourceId, ClaimsPrincipal user, bool isSuccess, string? error, CancellationToken ct)
     {
-        try
+        // Required write: a failing audit store refuses the probe or withholds its result (AuditUnavailableException propagates).
+        var tenant = ResolveAuditTenant(user);
+        var sidStr = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "system";
+
+        var entry = new AuditLogEntry
         {
-            // DT-SC-03: the audit belongs to the caller's resolved tenant; a caller without a valid tenant claim gets no audit row (never a "default" bucket).
-            if (Autheris.Domain.Tenancy.TenantClaimReader.Read(user) is not { Kind: Autheris.Domain.Tenancy.ClaimTenantKind.Valid } callerTenant)
+            Id = Guid.NewGuid(),
+            TenantId = tenant,
+            OccurredAt = DateTimeOffset.UtcNow,
+            EventType = eventType,
+            ActorSid = new Sid(sidStr),
+            TargetTable = $"datasource:{datasourceId}",
+            Decision = isSuccess ? "ALLOW" : "DENY",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
             {
-                _logger.LogWarning("Datasource testing audit skipped for {DatasourceId}: the caller has no valid tenant claim.", LogSanitizer.Sanitize(datasourceId));
-                return;
-            }
+                DatasourceId = datasourceId,
+                Success = isSuccess,
+                Error = error
+            })
+        };
 
-            var sidStr = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "system";
+        await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
+    }
 
-            var entry = new AuditLogEntry
-            {
-                Id = Guid.NewGuid(),
-                TenantId = callerTenant.Tenant,
-                OccurredAt = DateTimeOffset.UtcNow,
-                EventType = AuditEventTypes.DatasourceTested,
-                ActorSid = new Sid(sidStr),
-                TargetTable = $"datasource:{datasourceId}",
-                Decision = isSuccess ? "ALLOW" : "DENY",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    DatasourceId = datasourceId,
-                    Success = isSuccess,
-                    Error = error
-                })
-            };
-
-            await _auditLogRepository.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
+    /// <summary>
+    /// DT-SC-03: the audit belongs to the caller's tenant claim; only a deterministic default tenant (single-tenant mode) fills an absent claim.
+    /// Never request input, never a guessed bucket: anything else refuses the probe before any outbound connection.
+    /// </summary>
+    private TenantId ResolveAuditTenant(ClaimsPrincipal user)
+    {
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(user);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
         {
-            _logger.LogError(ex, "Failed to append datasource testing audit log for {DatasourceId}", LogSanitizer.Sanitize(datasourceId));
+            throw new TenantClaimInvalidException();
         }
+
+        var resolution = Autheris.Application.Tenancy.TenantResolver.Decide(
+            claim, Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_gateway?.Value.Tenancy));
+        return resolution.Tenant is { } tenant ? tenant : throw new TenantUnresolvedException();
     }
 }

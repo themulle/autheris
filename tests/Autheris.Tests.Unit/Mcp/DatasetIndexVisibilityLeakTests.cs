@@ -101,7 +101,7 @@ public sealed class DatasetIndexVisibilityLeakTests
         var options = Wp0.Options(TenancyShape.Single);
         return new CatalogDiscoveryService(
             repo,
-            Substitute.For<IAuditLogRepository>(),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             Options.Create(options),
             CatalogVisibilityTestFactory.Create(repo, consents, options, Substitute.For<IRebacEvaluator>()),
             Substitute.For<IKeyVaultSecretProvider>(),
@@ -251,7 +251,7 @@ public sealed class DatasetIndexVisibilityLeakTests
         var options = Wp0.Options(TenancyShape.Multi);
         var service = new CatalogDiscoveryService(
             tables,
-            Substitute.For<IAuditLogRepository>(),
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             Options.Create(options),
             CatalogVisibilityTestFactory.Create(tables, consents, options, Substitute.For<IRebacEvaluator>()),
             Substitute.For<IKeyVaultSecretProvider>(),

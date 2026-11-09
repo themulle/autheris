@@ -47,7 +47,7 @@ public sealed class RoleResolverDegradedTests
     [Fact]
     public async Task ProviderThrows_ResolutionDegraded_NotCached()
     {
-        var sut = new RoleResolver([Provider("p1", () => throw new InvalidOperationException("down")), Provider("p2", () => Groups("g"))], _cache);
+        var sut = new RoleResolver([Provider("p1", () => throw new InvalidOperationException("down")), Provider("p2", () => Groups("S-1-5-21-1-2-3-4002"))], _cache);
 
         var resolution = await sut.ResolveAsync(Identity, Realm);
 
@@ -87,12 +87,12 @@ public sealed class RoleResolverDegradedTests
     [Fact]
     public async Task MixedProviders_OneFails_Degraded()
     {
-        var sut = new RoleResolver([Provider("p1", () => ProviderRoleResult.FailedResult), Provider("p2", () => Groups("g"))], _cache);
+        var sut = new RoleResolver([Provider("p1", () => ProviderRoleResult.FailedResult), Provider("p2", () => Groups("S-1-5-21-1-2-3-4002"))], _cache);
 
         var resolution = await sut.ResolveAsync(Identity, Realm);
 
         resolution.Status.ShouldBe(RoleResolutionStatus.Degraded);
-        resolution.Groups.ShouldContain("customer-b2b|g");
+        resolution.Groups.ShouldContain("S-1-5-21-1-2-3-4002");
         await _cache.DidNotReceiveWithAnyArgs().SetAsync(default!, default!, default!, default);
     }
 

@@ -52,8 +52,8 @@ public class FourEyesAndDelegationIntegrationTests : IClassFixture<WebApplicatio
     public async Task FourEyesPrinciple_StepByStep_FullLifecycleFlow()
     {
         var requesterSid = new Sid("S-1-5-21-FOUR-EYES-REQ-1");
-        var approver1Sid = new Sid("S-1-5-21-APPROVER-A");
-        var approver2Sid = new Sid("S-1-5-21-APPROVER-B");
+        var approver1Sid = new Sid("S-1-5-21-1000-1000-1000-1002");
+        var approver2Sid = new Sid("S-1-5-21-1000-1000-1000-1003");
 
         var requesterClient = CreateClient(requesterSid);
 
@@ -165,8 +165,8 @@ public class FourEyesAndDelegationIntegrationTests : IClassFixture<WebApplicatio
     public async Task FourEyesPrinciple_StepTwoRejection_AccessRemainsForbidden()
     {
         var requesterSid = new Sid("S-1-5-21-FOUR-EYES-REJ-REQ");
-        var approver1Sid = new Sid("S-1-5-21-APPROVER-A");
-        var approver2Sid = new Sid("S-1-5-21-APPROVER-B");
+        var approver1Sid = new Sid("S-1-5-21-1000-1000-1000-1002");
+        var approver2Sid = new Sid("S-1-5-21-1000-1000-1000-1003");
 
         var requesterClient = CreateClient(requesterSid);
 

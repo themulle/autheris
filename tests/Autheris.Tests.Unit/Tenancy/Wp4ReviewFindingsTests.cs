@@ -45,7 +45,7 @@ public sealed class Wp4ReviewFindingsTests
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var service = new DatasourceTestingService(
-            Substitute.For<ITableMetadataRepository>(), Substitute.For<IHttpClientFactory>(), audit,
+            Substitute.For<ITableMetadataRepository>(), Substitute.For<IHttpClientFactory>(), global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit),
             Substitute.For<IKeyVaultSecretProvider>(), env, NullLogger<DatasourceTestingService>.Instance);
         var caller = Principal(new Claim(ClaimTypes.NameIdentifier, "u"), new Claim(ClaimTypes.Role, "Admin"));
 

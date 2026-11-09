@@ -30,6 +30,7 @@ using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Security;
 using Autheris.Infrastructure.Streaming;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 public static partial class GatewayGovernanceServiceExtensions
 {
@@ -44,7 +45,23 @@ public static partial class GatewayGovernanceServiceExtensions
             registry.Initialize(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>>().Value);
             return registry;
         });
-        services.AddSingleton<Autheris.Application.Identity.Caching.IRoleResolverCache, Autheris.Application.Identity.Caching.RoleResolverCache>();
+        // The node-local cache plus its broadcasting decorator: invalidations also go out on IEventBus (best effort; the TTL is the backstop).
+        services.AddSingleton<Autheris.Application.Identity.Caching.RoleResolverCache>();
+        services.AddSingleton<Autheris.Application.Identity.Caching.IRoleResolverCache, Autheris.Application.Identity.Caching.BroadcastingRoleResolverCache>();
+        services.AddHostedService<Autheris.Application.Identity.Caching.IdentityGroupsChangedSubscriber>();
+        // The provider chain the group resolution relies on. No production Graph or LDAP adapter ships yet: without one the
+        // Graph and LDAPS providers answer "failed" and the resolution is degraded (never an empty group set).
+        services.AddSingleton<Autheris.Application.Identity.IRoleProvider, Autheris.Application.Identity.Providers.ScimStoreRoleProvider>();
+        services.AddSingleton<Autheris.Application.Identity.IRoleProvider, Autheris.Application.Identity.Providers.StaticMappingRoleProvider>();
+        services.AddSingleton<Autheris.Application.Identity.IRoleProvider, Autheris.Application.Identity.Providers.EntraAppRoleProvider>();
+        services.TryAddSingleton<Autheris.Application.Identity.Providers.IGraphClientAdapter, Autheris.Application.Identity.Providers.UnconfiguredGraphClientAdapter>();
+        services.AddSingleton<Autheris.Application.Identity.IRoleProvider>(sp => new Autheris.Application.Identity.Providers.GraphRoleProvider(
+            sp.GetRequiredService<Autheris.Application.Identity.Providers.IGraphClientAdapter>(),
+            maxGroups: sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.Authentication.MaxGroupSidsPerCaller));
+        services.AddSingleton<Autheris.Application.Identity.IRoleProvider>(sp => new Autheris.Application.Identity.Providers.LdapsRoleProvider(
+            sp.GetService<Autheris.Application.Identity.Providers.ILdapDirectoryAdapter>(),
+            maxGroups: sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.Authentication.MaxGroupSidsPerCaller));
+        services.AddSingleton<Autheris.Application.Identity.IGroupSidResolver, Autheris.Application.Identity.GroupSidResolver>();
         services.AddSingleton<Autheris.Application.Identity.IRoleResolver, Autheris.Application.Identity.RoleResolver>();
         services.AddSingleton<Autheris.Application.Identity.Services.IRedisLockPubSubChannel, Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel>();
         services.AddHostedService<Autheris.Application.Identity.Services.LockRoleCacheInvalidationHostedService>();

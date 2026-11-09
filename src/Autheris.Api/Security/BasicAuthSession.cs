@@ -280,7 +280,7 @@ public static class BasicAuthPrincipalFactory
 
         foreach (var group in user.GroupSids)
         {
-            claims.Add(new Claim(ClaimTypes.GroupSid, group));
+            claims.Add(IdentityClaimIssuers.CreateGroupSidClaim(group));
         }
 
         return claims;

@@ -33,7 +33,7 @@ public partial class GovernanceRepository
         using var trans = conn.BeginTransaction();
         try
         {
-            var ownerSid = "S-1-5-21-DATAOWNER-1";
+            var ownerSid = "S-1-5-21-1000-1000-1000-1001";
             var ownerId = Guid.NewGuid().ToString();
             using (var cmd = conn.CreateCommand())
             {
@@ -81,7 +81,7 @@ public partial class GovernanceRepository
                 cmd.ExecuteNonQuery();
             }
 
-            var approverASid = "S-1-5-21-APPROVER-A";
+            var approverASid = "S-1-5-21-1000-1000-1000-1002";
             var approverAId = Guid.NewGuid().ToString();
             using (var cmd = conn.CreateCommand())
             {
@@ -97,7 +97,7 @@ public partial class GovernanceRepository
                 cmd.ExecuteNonQuery();
             }
 
-            var approverBSid = "S-1-5-21-APPROVER-B";
+            var approverBSid = "S-1-5-21-1000-1000-1000-1003";
             var approverBId = Guid.NewGuid().ToString();
             using (var cmd = conn.CreateCommand())
             {
@@ -466,11 +466,11 @@ public partial class GovernanceRepository
                 return ResolveOwnerIdSqlServer(conn, trans, sid, string.Empty);
             }
 
-            var ownerId = EnsureOwner("S-1-5-21-DATAOWNER-1", "CORP\\dataowner", "Chief Finance Data Owner", "dataowner@corp.local");
+            var ownerId = EnsureOwner("S-1-5-21-1000-1000-1000-1001", "CORP\\dataowner", "Chief Finance Data Owner", "dataowner@corp.local");
             var salesOwnerId = EnsureOwner("S-1-5-21-DATAOWNER-APPROVER", "CORP\\salesowner", "Chief Sales Data Owner", "salesowner@corp.local");
             var approverId = EnsureOwner("S-1-5-21-APPROVER", "CORP\\approver", "Finance Approver", "approver@corp.local");
-            var approverAId = EnsureOwner("S-1-5-21-APPROVER-A", "CORP\\approver-a", "Finance Approver A", "approver-a@corp.local");
-            var approverBId = EnsureOwner("S-1-5-21-APPROVER-B", "CORP\\approver-b", "Finance Approver B", "approver-b@corp.local");
+            var approverAId = EnsureOwner("S-1-5-21-1000-1000-1000-1002", "CORP\\approver-a", "Finance Approver A", "approver-a@corp.local");
+            var approverBId = EnsureOwner("S-1-5-21-1000-1000-1000-1003", "CORP\\approver-b", "Finance Approver B", "approver-b@corp.local");
 
             foreach (var domain in domains)
             {

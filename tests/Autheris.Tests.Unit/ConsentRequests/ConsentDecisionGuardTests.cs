@@ -18,7 +18,7 @@ namespace Autheris.Tests.Unit.ConsentRequests;
 public class ConsentDecisionGuardTests
 {
     private static readonly ConsentDecisionGuard Guard = new(new IdentitySubjectResolver());
-    private const string Sid = "S-1-5-21-DATAOWNER-1";
+    private const string Sid = "S-1-5-21-1000-1000-1000-1001";
 
     public static TheoryData<string, ClaimsPrincipal> InteractivePrincipals => new()
     {

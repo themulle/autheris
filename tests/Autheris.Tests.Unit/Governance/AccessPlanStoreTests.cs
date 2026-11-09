@@ -46,7 +46,7 @@ public sealed class AccessPlanStoreTests
 
     private AccessPlanningService Node(IAccessPlanStore store, IKeyVaultSecretProvider? provider = null, AccessPlanOptions? options = null)
         => new(
-            _audit,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_audit),
             Substitute.For<ITableMetadataRepository>(),
             _rebac,
             _totp,
@@ -200,7 +200,7 @@ public sealed class AccessPlanStoreTests
         var topology = new ClusterStateTopology(ClusterStateMode.External);
 
         Should.Throw<InvalidOperationException>(() => new AccessPlanningService(
-            _audit,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_audit),
             options: null,
             planOptions: Options.Create(new AccessPlanOptions()),
             clusterTopology: topology));

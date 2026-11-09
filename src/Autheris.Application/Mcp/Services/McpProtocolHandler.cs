@@ -122,7 +122,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         };
     }
 
-    private static string HandleInitialize(object? id)
+    private string HandleInitialize(object? id)
     {
         return $$"""
         {
@@ -134,7 +134,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
               "name": "Autheris.McpServer",
               "version": "1.4.0"
             },
-            "instructions": "{{EscapeJson(McpDatasetTools.ServerInstructions)}}",
+            "instructions": "{{EscapeJson(McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(_options)))}}",
             "capabilities": {
               "tools": { "listChanged": false },
               "resources": { "subscribe": false, "listChanged": false }
@@ -405,7 +405,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         {
             foreach (var g in session.GroupSids)
             {
-                identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.GroupSid, g));
+                identity.AddClaim(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g));
             }
         }
         if (session.AdditionalClaims != null)

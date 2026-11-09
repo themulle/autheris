@@ -379,7 +379,7 @@ public sealed class McpOpenFindingsSecurityTests
         var http = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim("client_id", "shared-app"), new Claim("appid", "shared-app"), new Claim("idtyp", "app"), new Claim("oid", "app-oid"), new Claim(ClaimTypes.GroupSid, "S-1-5-21-GROUP"), new Claim("tenant_id", "tenant-a")],
+                [new Claim("client_id", "shared-app"), new Claim("appid", "shared-app"), new Claim("idtyp", "app"), new Claim("oid", "app-oid"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-4001"), new Claim("tenant_id", "tenant-a")],
                 "Bearer"))
         };
         http.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
@@ -396,7 +396,7 @@ public sealed class McpOpenFindingsSecurityTests
         var http = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-CAROL"), new Claim("client_id", "shared-spa"), new Claim(ClaimTypes.GroupSid, "S-1-5-21-GROUP"), new Claim("tenant_id", "tenant-a")],
+                [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-CAROL"), new Claim("client_id", "shared-spa"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-4001"), new Claim("tenant_id", "tenant-a")],
                 "Bearer"))
         };
         http.Items[SecurityPrincipalContext.TenantIdItemKey] = new TenantId("tenant-a");
@@ -404,13 +404,13 @@ public sealed class McpOpenFindingsSecurityTests
         var caller = McpEndpoints.ResolveCaller(http, allowOpenMcp: false);
 
         caller.UserSid.ShouldBe("S-1-5-21-CAROL");
-        caller.GroupSids.ShouldContain("S-1-5-21-GROUP");
+        caller.GroupSids.ShouldContain("S-1-5-21-1-2-3-4001");
     }
 
     [Fact]
     public void QueryExecutorPrincipal_AppOnlySession_IsMarkedAndHasNoGroups()
     {
-        var principal = GatewayMcpQueryExecutor.BuildPrincipal(AppOnlySession(["S-1-5-21-GROUP"]));
+        var principal = GatewayMcpQueryExecutor.BuildPrincipal(AppOnlySession(["S-1-5-21-1-2-3-4001"]));
 
         principal.FindAll(ClaimTypes.GroupSid).ShouldBeEmpty();
         principal.FindFirst(McpProtocolHandler.IdentityKindClaimType)?.Value.ShouldBe(McpProtocolHandler.ApplicationIdentityKind);
@@ -421,12 +421,12 @@ public sealed class McpOpenFindingsSecurityTests
     [Fact]
     public void QueryExecutorPrincipal_UserSession_KeepsGroupsAndSeparatesTheClient()
     {
-        var principal = GatewayMcpQueryExecutor.BuildPrincipal(UserSession(["S-1-5-21-GROUP"]) with
+        var principal = GatewayMcpQueryExecutor.BuildPrincipal(UserSession(["S-1-5-21-1-2-3-4001"]) with
         {
             AdditionalClaims = new Dictionary<string, string> { ["sub"] = "token-sub", [McpProtocolHandler.IdentityKindClaimType] = "user" }
         });
 
-        principal.FindAll(ClaimTypes.GroupSid).Select(c => c.Value).ShouldBe(["S-1-5-21-GROUP"]);
+        principal.FindAll(ClaimTypes.GroupSid).Select(c => c.Value).ShouldBe(["S-1-5-21-1-2-3-4001"]);
         principal.FindFirst(McpProtocolHandler.IdentityKindClaimType).ShouldBeNull();
         principal.FindAll("sub").Select(c => c.Value).ShouldBe(["S-1-USER"]);
         principal.FindFirst("client_id")?.Value.ShouldBe("agent");
@@ -441,13 +441,13 @@ public sealed class McpOpenFindingsSecurityTests
             .Returns(ci => ValueTask.FromResult(TableAccessDecision.Allowed(ci.Arg<SecurityEvaluationContext>().TargetTable, new Dictionary<string, ColumnAccessLevel>())));
         var guardrail = Guardrail(policy, Executor("""{"datasets":[]}"""));
 
-        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.ListDatasets, "{}"), AppOnlySession(["S-1-5-21-GROUP"]));
-        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.ListDatasets, "{}"), UserSession(["S-1-5-21-GROUP"]));
+        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.ListDatasets, "{}"), AppOnlySession(["S-1-5-21-1-2-3-4001"]));
+        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.ListDatasets, "{}"), UserSession(["S-1-5-21-1-2-3-4001"]));
 
         captured.Count.ShouldBe(2);
         captured[0].UserSid.Value.ShouldBe("app-client");
         captured[0].GroupSids.ShouldBeEmpty();
-        captured[1].GroupSids.Select(g => g.Value).ShouldBe(["S-1-5-21-GROUP"]);
+        captured[1].GroupSids.Select(g => g.Value).ShouldBe(["S-1-5-21-1-2-3-4001"]);
     }
 
     // ---- 4. Mutating admin tools: two-phase confirmation, audit row, fixed errors ----------------------------------------------
@@ -519,7 +519,7 @@ public sealed class McpOpenFindingsSecurityTests
             .Returns(new TableMetadata { Identifier = Orders, Table = new Table { TableName = "orders", SchemaName = "public", IsActive = true } });
         ITotpSecretStore secrets = new InMemoryTotpSecretStore();
         ITotpVerificationService totp = new TotpVerificationService();
-        var service = new AccessPlanningService(Substitute.For<IAuditLogRepository>(), tableRepo, Substitute.For<IRebacStore>(), totp, secrets);
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), tableRepo, Substitute.For<IRebacStore>(), totp, secrets);
         const string args = """{"datasetId":"sales.public.orders","state":"quarantined","reason":"drift"}""";
 
         // Phase 1: plan only.

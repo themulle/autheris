@@ -24,12 +24,7 @@ public sealed class UnknownGatewayKeyGuardTests
         return new ConfigurationBuilder().AddInMemoryCollection(map).Build();
     }
 
-    private static IHostEnvironment Env(string name)
-    {
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(name);
-        return env;
-    }
+    private static IHostEnvironment Env(string name) => new Security.FakeHostEnvironment(name);
 
     [Theory]
     [Trait("Category", "Security")]
@@ -250,7 +245,6 @@ public sealed class UnknownGatewayKeyGuardTests
     [InlineData("Gateway:QueryCost:NestedDepthFactor")]
     [InlineData("Gateway:Rebac:OpenFgaApiUrl")]
     [InlineData("Gateway:Rebac:OpenFgaStoreId")]
-    [InlineData("Gateway:Authentication:GroupCacheTtlMinutes")]
     [InlineData("Gateway:DataSources:Connections:testSource:Databricks:Auth:Obo:AllowLongRunning")]
     [InlineData("Gateway:CatalogSearch:FieldWeights")]
     [InlineData("Gateway:DataMasking:MaskingCacheTtlHours")]
@@ -351,4 +345,19 @@ public sealed class UnknownGatewayKeyGuardTests
         "Gateway:RateLimiting:ClientTiers:ScopeTierMappings",
         "Gateway:WebSql:DataSourceMappings"
     ];
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Claimed_section_does_not_silence_other_sections()
+    {
+        var configuration = Config(
+            ("Gateway:Lakehouse:Enabled", "true"),
+            ("Gateway:Foo:Bar", "x"));
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration, ["lakehouse"], ["Gateway:Lakehouse"]));
+
+        ex.Message.ShouldContain("Gateway:Foo");
+        ex.Message.ShouldNotContain("Gateway:Lakehouse");
+    }
 }

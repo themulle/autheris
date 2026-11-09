@@ -168,6 +168,32 @@ public sealed partial class ModuleBoundaryArchitectureTests
         }
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Module_host_context_exposes_no_governance_connection()
+    {
+        var members = typeof(IModuleHostContext).GetProperties()
+            .Select(p => (p.Name, TypeName: p.PropertyType.Name))
+            .Concat(typeof(IModuleHostContext).GetMethods().Where(m => !m.IsSpecialName)
+                .Select(m => (m.Name, TypeName: m.ReturnType.Name)))
+            .ToList();
+
+        members.Where(m => m.Name.Contains("Connection", StringComparison.OrdinalIgnoreCase) ||
+                           m.TypeName.Contains("Connection", StringComparison.OrdinalIgnoreCase))
+            .ShouldBeEmpty("A module must not receive a raw governance connection (WP-SIMPL-50 B13).");
+    }
+
+    [Fact]
+    public void No_module_graphql_extension_point()
+    {
+        var abstractionsTypes = typeof(IModuleHostContext).Assembly.GetTypes().Select(t => t.Name).ToList();
+        abstractionsTypes.ShouldNotContain("IAutherisGraphQLModule");
+        abstractionsTypes.ShouldNotContain("IModuleGraphQLRegistrar");
+
+        typeof(ModuleLoader).Assembly.GetTypes().Select(t => t.Name).ShouldNotContain("ModuleGraphQLRegistrar");
+        typeof(ModuleLoadResult).GetMethod("ConfigureGraphQL").ShouldBeNull();
+    }
+
     private static List<string> ExtractProjectReferences(string csprojContent) =>
         ProjectReferenceRegex()
             .Matches(csprojContent)

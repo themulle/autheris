@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.TestDoubles;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Mcp.Services;
@@ -122,7 +123,7 @@ public sealed class ProcedureKillSwitchTests
         var user = Autheris.Tests.Unit.Catalog.Wp0.User("S-1", "tenant-a");
         var mcp = new McpDatasetCatalog(tables, consents, Substitute.For<Autheris.Application.Common.Interfaces.IGatewayExecutionService>(),
             Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>(), options: Microsoft.Extensions.Options.Options.Create(new GatewayOptions()));
-        var rest = new Autheris.Application.Catalog.Services.CatalogDiscoveryService(tables, Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>(),
+        var rest = new Autheris.Application.Catalog.Services.CatalogDiscoveryService(tables, AuditWriterTestServices.Over(Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>()),
             Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), null);
 
         var list = await mcp.ListDatasetsAsync(user, null, null, CancellationToken.None);
