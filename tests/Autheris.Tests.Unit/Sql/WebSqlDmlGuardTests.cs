@@ -176,4 +176,33 @@ public sealed class WebSqlDmlGuardTests
 
         ex.Code.ShouldBe(GovernedSqlErrorCodes.PolicyViolation);
     }
+
+    [Theory]
+    [InlineData("INSERT INTO orders (id, amount, tenant_id) SELECT id, 1, 'tenant_a' FROM plain")]
+    [InlineData("UPDATE orders SET amount = (SELECT COUNT(*) FROM plain) WHERE id = 1")]
+    public async Task SEC_36_SP3b_01_Tenantless_table_in_insert_select_and_set_subquery_is_refused(string sql)
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: true, plainTable: true);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => Run(service, Principal("WebSqlWriter"), sql));
+
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.PolicyViolation);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
+    }
+
+    // The DML parser does not accept these multi-table shapes at all (rejected before any table is resolved), which is fail-closed.
+    [Theory]
+    [InlineData("UPDATE orders SET amount = 0 FROM plain WHERE orders.id = plain.id")]
+    [InlineData("DELETE FROM orders USING plain WHERE orders.id = plain.id")]
+    [InlineData("WITH p AS (SELECT id FROM plain) DELETE FROM orders WHERE id IN (SELECT id FROM p)")]
+    public async Task SEC_36_SP3b_01_Unsupported_multi_table_dml_shapes_are_rejected_without_executing(string sql)
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: true, plainTable: true);
+
+        await Should.ThrowAsync<System.ArgumentException>(() => Run(service, Principal("WebSqlWriter"), sql));
+
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
+    }
 }

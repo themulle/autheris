@@ -274,6 +274,7 @@ public static class SimApiHostMain
             {
                 // SEC M-20: DML needs explicitly authorized roles; only the throwaway write-phase host allows it.
                 b.UseSetting("Gateway:WebSql:DmlWriterRoles:0", "GovernanceAdmin");
+                b.UseSetting("Gateway:DataSources:RequireTenantColumn", "true");
             }
 
             b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
