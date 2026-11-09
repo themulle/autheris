@@ -599,7 +599,6 @@ public sealed class QueryAnalysisAndValueProfilingTests
             ResultTable: null,
             ClearedResultColumns: Array.Empty<string>(),
             RequiredRoles: Array.Empty<string>(),
-            AllowDynamicSql: false,
             TimeoutSeconds: 30)
         {
             ReferencedTables = new[] { "sales.public.orders" }

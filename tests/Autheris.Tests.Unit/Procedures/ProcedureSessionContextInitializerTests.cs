@@ -23,7 +23,7 @@ public sealed class ProcedureSessionContextInitializerTests
     private static readonly Sid UserSid = new("S-1-5-21-999");
 
     [Fact]
-    public async Task R_SQL_6_MssqlProcedureInvoker_InitializesSessionViaInitializer()
+    public async Task R_SQL_6_ProcedureInvoker_InitializesSessionViaInitializer()
     {
         var mockConn = Substitute.For<DbConnection>();
         mockConn.State.Returns(ConnectionState.Open);
@@ -51,7 +51,7 @@ public sealed class ProcedureSessionContextInitializerTests
 
         var connProvider = new ProcedureConnectionProvider(sqlConnFactory, Options.Create(gatewayOptions));
 
-        var invoker = new MssqlProcedureInvoker(connProvider, Options.Create(gatewayOptions), mockSessionInit);
+        var invoker = new ProcedureInvoker(connProvider, Options.Create(gatewayOptions), mockSessionInit);
 
         var def = new ProcedureDefinition(
             Name: "usp_Test",
@@ -65,7 +65,6 @@ public sealed class ProcedureSessionContextInitializerTests
             ResultTable: null,
             ClearedResultColumns: [],
             RequiredRoles: [],
-            AllowDynamicSql: false,
             TimeoutSeconds: 30);
 
         var sec = new ProcedureSecurityContext(Tenant.Value, UserSid.Value, Purpose: "audit");
@@ -94,7 +93,7 @@ public sealed class ProcedureSessionContextInitializerTests
     {
         var sqlConnFactory = Substitute.For<ISqlConnectionFactory>();
         var connProvider = new ProcedureConnectionProvider(sqlConnFactory, Options.Create(new GatewayOptions()));
-        var invoker = new MssqlProcedureInvoker(connProvider, Options.Create(new GatewayOptions()));
+        var invoker = new ProcedureInvoker(connProvider, Options.Create(new GatewayOptions()));
         invoker.ShouldNotBeNull();
     }
 }

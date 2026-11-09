@@ -8,7 +8,7 @@ using StackExchange.Redis;
 
 namespace Autheris.Infrastructure.Messaging;
 
-public sealed class RedisEventBus : IEventBus, IDisposable
+public sealed class RedisEventBus : IEventBus, IEventBusDeliveryFailures, IDisposable
 {
     private readonly IConnectionMultiplexer _multiplexer;
     private readonly ILogger<RedisEventBus> _logger;
@@ -19,6 +19,7 @@ public sealed class RedisEventBus : IEventBus, IDisposable
     private bool _disposed;
 
     public event Action? ConnectionRestored;
+    public event Action<string>? DeliveryFailed;
 
     public RedisEventBus(
         IConnectionMultiplexer multiplexer,
@@ -101,6 +102,18 @@ public sealed class RedisEventBus : IEventBus, IDisposable
         }
     }
 
+    private void RaiseDeliveryFailed(string channel)
+    {
+        try
+        {
+            DeliveryFailed?.Invoke(channel);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "A delivery-failure callback threw for channel {Channel}", LogSanitizer.Sanitize(channel));
+        }
+    }
+
     public IDisposable Subscribe<T>(string channel, Func<T, Task> handler)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -121,9 +134,14 @@ public sealed class RedisEventBus : IEventBus, IDisposable
                     {
                         await handler(msg).ConfigureAwait(false);
                     }
+                    else
+                    {
+                        RaiseDeliveryFailed(channel);
+                    }
                 }
                 catch (Exception ex)
                 {
+                    RaiseDeliveryFailed(channel);
                     GatewayDiagnostics.EventBusHandlerFailedCounter.Add(1, new KeyValuePair<string, object?>("message_type", typeof(T).Name));
                     _logger.LogError(ex, "Error processing Redis subscription event for channel {Channel}", LogSanitizer.Sanitize(channel));
                 }

@@ -3,10 +3,13 @@ namespace Autheris.Tests.Unit.Hosting;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions;
 using Autheris.Api.Hosting;
+using Autheris.Application.Audit;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Options.DataSources;
 using Autheris.Infrastructure.Modules.Trust;
@@ -18,6 +21,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -97,65 +101,6 @@ public sealed class ModuleEndpointSecurityTests
     }
 
     [Fact]
-    public void Module_graphql_type_without_authorization_fails_startup()
-    {
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"autheris-mod-gql-{Guid.NewGuid():N}");
-        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-
-        try
-        {
-            var modDir = Path.Combine(tempRoot, "gql-unprotected");
-            Directory.CreateDirectory(modDir);
-
-            var dllBytes = ModulePackageBuilder.GetValidModuleDllBytes();
-            var dllSha = IntegrityHashHelper.ComputeSha256HexLower(dllBytes);
-            File.WriteAllBytes(Path.Combine(modDir, "Sample.TestModule01.dll"), dllBytes);
-
-            var manifest = ModulePackageBuilder.CreateSignedManifest(
-                ecdsa,
-                moduleId: "gql-unprotected",
-                entryType: typeof(UnprotectedGraphQLModule).FullName!,
-                files: [new ModuleManifestFile("Sample.TestModule01.dll", dllSha)]);
-            File.WriteAllText(Path.Combine(modDir, "module.json"), ModulePackageBuilder.SerializeManifestJson(manifest));
-
-            var services = new ServiceCollection();
-            var config = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Gateway:Modules:Path"] = tempRoot,
-                    ["Gateway:Modules:Enabled:0"] = "gql-unprotected",
-                })
-                .Build();
-            var env = new FakeHostEnvironment { EnvironmentName = Environments.Production };
-            var loader = new ModuleLoader(publicKeyOverride: ecdsa, isDirectoryWritableOverride: _ => false);
-
-            var loadResult = loader.LoadAndConfigureServices(services, config, env);
-
-            var ex = Should.Throw<ModuleLoadException>(() =>
-                loadResult.ConfigureGraphQL());
-
-            ex.ModuleId.ShouldBe("gql-unprotected");
-            ex.Message.ShouldContain("[Authorize]");
-        }
-        finally
-        {
-            ModulePackageBuilder.RestoreWritablePermissionsRecursively(tempRoot);
-            if (Directory.Exists(tempRoot))
-            {
-                Directory.Delete(tempRoot, recursive: true);
-            }
-        }
-    }
-
-    [Fact]
-    public void ModuleGraphQLRegistrar_accepts_type_with_ExtendObjectType_and_Authorize()
-    {
-        var registrar = new ModuleGraphQLRegistrar("sample");
-        registrar.AddTypeExtension(typeof(ProtectedGraphQLExtension));
-        registrar.RegisteredTypeExtensions.ShouldContain(typeof(ProtectedGraphQLExtension));
-    }
-
-    [Fact]
     [Trait("Category", "Security")]
     public void Audit_details_escape_request_path()
     {
@@ -202,5 +147,242 @@ public sealed class ModuleEndpointSecurityTests
         var longTarget = "/" + new string('y', 2048);
         var cappedTarget = ModuleEndpointRegistrar.CapAuditString(longTarget, 512);
         cappedTarget.Length.ShouldBeLessThanOrEqualTo(512);
+    }
+
+    // ---- B4: route namespace (SEC-50-08) ----
+
+    [Fact]
+    public void Module_route_outside_prefix_is_rejected()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        var registrar = new ModuleEndpointRegistrar(app, "sample");
+
+        var ex = Should.Throw<ModuleLoadException>(() => registrar.MapGroup("/api/x"));
+        ex.ModuleId.ShouldBe("sample");
+        Should.Throw<ModuleLoadException>(() => registrar.MapGroup("/modules/other/x"));
+        Should.Throw<ModuleLoadException>(() => registrar.MapGroup("/modules/samplex/x"));
+        Should.Throw<ModuleLoadException>(() => registrar.MapGroup("/modules/Sample/x"));
+        Should.NotThrow(() => registrar.MapGroup("/modules/sample/x"));
+    }
+
+    [Theory]
+    [InlineData("/modules/sample/../api")]
+    [InlineData("/modules/sample/./x")]
+    [InlineData("/modules/sample//x")]
+    public void Module_route_with_dot_segments_is_rejected(string prefix)
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        var registrar = new ModuleEndpointRegistrar(app, "sample");
+
+        Should.Throw<ModuleLoadException>(() => registrar.MapGroup(prefix));
+    }
+
+    [Fact]
+    public void Endpoint_without_module_ownership_fails_validation()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+        var before = ModuleEndpointRegistrar.CaptureEndpointSnapshot(endpoints);
+
+        endpoints.MapGet("/modules/sample/unowned", () => Results.Ok());
+
+        var ex = Should.Throw<ModuleLoadException>(() =>
+            ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "sample", before));
+        ex.ModuleId.ShouldBe("sample");
+    }
+
+    [Fact]
+    public void Endpoint_owned_by_another_module_fails_validation()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+        var before = ModuleEndpointRegistrar.CaptureEndpointSnapshot(endpoints);
+
+        endpoints.MapGet("/modules/sample/x", () => Results.Ok()).WithMetadata(new ModuleEndpointMetadata("other"));
+
+        Should.Throw<ModuleLoadException>(() =>
+            ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "sample", before));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-08")]
+    public void Encoded_dot_segment_route_is_rejected()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        var registrar = new ModuleEndpointRegistrar(app, "sample");
+
+        Should.Throw<ModuleLoadException>(() => registrar.MapGroup("/modules/sample/%2e%2e/api"));
+        Should.Throw<ModuleLoadException>(() => registrar.MapGroup("/modules/sample/%2E%2E%2fapi"));
+        Should.Throw<ModuleLoadException>(() => registrar.MapGroup("/modules/sample%2f..%2fapi"));
+
+        // The same rules apply to the raw pattern of every endpoint a module added.
+        IEndpointRouteBuilder endpoints = app;
+        var before = ModuleEndpointRegistrar.CaptureEndpointSnapshot(endpoints);
+        endpoints.MapGet("/modules/sample/%2e%2e/api", () => Results.Ok()).WithMetadata(new ModuleEndpointMetadata("sample"));
+        Should.Throw<ModuleLoadException>(() =>
+            ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "sample", before));
+    }
+
+    [Fact]
+    public void Preexisting_endpoint_lookalike_does_not_pass_ownership_check()
+    {
+        using var app = new FakeEndpointRouteBuilder();
+        IEndpointRouteBuilder endpoints = app;
+#pragma warning disable ASP0022 // the duplicate route is the point of the test
+        endpoints.MapGet("/modules/sample/dup", () => Results.Ok());
+        var before = ModuleEndpointRegistrar.CaptureEndpointSnapshot(endpoints);
+
+        // Same method, route and display name as an endpoint that already existed, but a different instance without ownership.
+        endpoints.MapGet("/modules/sample/dup", () => Results.Ok());
+#pragma warning restore ASP0022
+
+        Should.Throw<ModuleLoadException>(() =>
+            ModuleEndpointRegistrar.VerifyModuleEndpoints(endpoints, "sample", before));
+    }
+
+    // ---- B11: audit decision (SEC-50-09) ----
+
+    private static (DefaultEndpointFilterInvocationContext Context, FakeAuditWriter Writer) NewFilterContext(
+        bool authenticated = true,
+        bool withTenant = true,
+        Autheris.Application.Common.Interfaces.IRateLimiterService? rateLimiter = null)
+    {
+        var writer = new FakeAuditWriter();
+        var collection = new ServiceCollection().AddSingleton<IAuditWriter>(writer);
+        if (rateLimiter is not null)
+        {
+            collection.AddSingleton(rateLimiter);
+        }
+
+        var services = collection.BuildServiceProvider();
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, "S-1-5-21-1") };
+        if (withTenant)
+        {
+            claims.Add(new Claim("tenant_id", "tenant-a"));
+        }
+
+        var identity = authenticated
+            ? new ClaimsIdentity(claims, authenticationType: "TestAuth")
+            : new ClaimsIdentity();
+        var httpContext = new DefaultHttpContext { RequestServices = services, User = new ClaimsPrincipal(identity) };
+        httpContext.Request.Path = "/modules/sample/x";
+        return (new DefaultEndpointFilterInvocationContext(httpContext), writer);
+    }
+
+    private static EndpointFilterDelegate Returning(object? value) => _ => ValueTask.FromResult(value);
+
+    [Fact]
+    public async Task Forbidden_result_is_audited_as_deny()
+    {
+        var (context, writer) = NewFilterContext();
+
+        await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+            "sample", context, Returning(Results.StatusCode(StatusCodes.Status403Forbidden)));
+
+        writer.Entries.Count.ShouldBe(1);
+        writer.Entries[0].Decision.ShouldBe("DENY");
+    }
+
+    [Fact]
+    public async Task Throwing_handler_is_audited_as_error()
+    {
+        var (context, writer) = NewFilterContext();
+
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+                "sample", context, _ => throw new InvalidOperationException("boom")));
+
+        writer.Entries.Count.ShouldBe(1);
+        writer.Entries[0].Decision.ShouldBe("ERROR");
+    }
+
+    [Fact]
+    public async Task Unauthenticated_request_is_audited_as_deny()
+    {
+        var (context, writer) = NewFilterContext(authenticated: false);
+        var reached = false;
+
+        var result = await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+            "sample", context, _ => { reached = true; return ValueTask.FromResult<object?>(null); });
+
+        reached.ShouldBeFalse();
+        var statusResult = result.ShouldBeAssignableTo<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>().ShouldNotBeNull();
+        statusResult.StatusCode.ShouldBe(StatusCodes.Status401Unauthorized);
+        writer.Entries.Count.ShouldBe(1);
+        writer.Entries[0].Decision.ShouldBe("DENY");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-09")]
+    public async Task Error_audit_has_no_exception_message()
+    {
+        var (context, writer) = NewFilterContext();
+
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+                "sample", context, _ => throw new InvalidOperationException("secret-value-123")));
+
+        var entry = writer.Entries.ShouldHaveSingleItem();
+        entry.DetailsJson.ShouldNotContain("secret-value-123");
+        entry.DetailsJson.ShouldContain(nameof(InvalidOperationException));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-09")]
+    public async Task Audit_written_once_per_request()
+    {
+        var (ok, okWriter) = NewFilterContext();
+        await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync("sample", ok, Returning(Results.Ok()));
+        okWriter.Entries.ShouldHaveSingleItem().Decision.ShouldBe("ALLOW");
+
+        var (denied, deniedWriter) = NewFilterContext();
+        await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+            "sample", denied, Returning(Results.StatusCode(StatusCodes.Status403Forbidden)));
+        deniedWriter.Entries.ShouldHaveSingleItem().Decision.ShouldBe("DENY");
+
+        var (thrown, thrownWriter) = NewFilterContext();
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+                "sample", thrown, _ => throw new InvalidOperationException("x")));
+        thrownWriter.Entries.ShouldHaveSingleItem().Decision.ShouldBe("ERROR");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-09")]
+    public async Task Rate_limited_request_is_audited_once_as_deny()
+    {
+        var limiter = NSubstitute.Substitute.For<Autheris.Application.Common.Interfaces.IRateLimiterService>();
+        limiter.CheckPostAuthSidAsync(
+                Arg.Any<string>(),
+                Arg.Any<Autheris.Domain.Options.PostAuthSidRateLimitOptions>(),
+                Arg.Any<System.Threading.CancellationToken>())
+            .Returns(Task.FromResult(new Autheris.Application.Common.Interfaces.RateLimitResult(false, 30)));
+        var (context, writer) = NewFilterContext(rateLimiter: limiter);
+
+        var result = await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+            "sample", context, Returning(Results.Ok()));
+
+        result.ShouldBeAssignableTo<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>()!
+            .StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+        writer.Entries.ShouldHaveSingleItem().Decision.ShouldBe(Autheris.Domain.Audit.AuditDecisions.Deny);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    [Trait("SecurityCondition", "SEC-50-09")]
+    public async Task Unresolved_tenant_is_audited_once_as_deny()
+    {
+        var (context, writer) = NewFilterContext(withTenant: false);
+
+        var result = await ModuleEndpointRegistrar.ExecuteModuleSecurityFilterAsync(
+            "sample", context, Returning(Results.Ok()));
+
+        result.ShouldBeAssignableTo<Microsoft.AspNetCore.Http.IStatusCodeHttpResult>()!
+            .StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        writer.Entries.ShouldHaveSingleItem().Decision.ShouldBe(Autheris.Domain.Audit.AuditDecisions.Deny);
     }
 }

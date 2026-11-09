@@ -83,7 +83,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
                 }
             ]
         });
-        var stored = (await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow, null)).Single(c => c.Id == consent.Id);
+        var stored = (await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow)).Single(c => c.Id == consent.Id);
         return (table, stored.RowFilters.Single().Id);
     }
 
@@ -189,7 +189,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
         body.ShouldNotContain(unknown.ToString("D"));
 
         var repo = _factory.Services.GetRequiredService<IGovernanceRepository>();
-        var consents = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow, null);
+        var consents = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow);
         consents.Single().RowFilters.Single().KeySetStrategy.ShouldBeNull();
     }
 
@@ -220,7 +220,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await repo.GetTableEpochAsync(table)).ShouldBe(epoch);
-        var consents = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow, null);
+        var consents = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow);
         consents.Single().RowFilters.Single().KeySetStrategy.ShouldBeNull();
     }
 

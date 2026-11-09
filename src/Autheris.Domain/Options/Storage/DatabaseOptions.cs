@@ -219,14 +219,29 @@ public enum EnforcementMode
 /// <summary>Authentication modes of the Databricks Statement Execution client.</summary>
 public enum DatabricksAuthMode
 {
-    /// <summary>OAuth machine-to-machine (service principal client credentials). Default and the only mode outside Development.</summary>
+    /// <summary>OAuth machine-to-machine (service principal client credentials).</summary>
     OAuthM2M = 0,
 
-    /// <summary>Personal access token. Development only (09 item 4).</summary>
+    /// <summary>Personal access token.</summary>
     Pat = 1,
 
     /// <summary>OAuth 2.0 On-Behalf-Of (OBO) token exchange for Azure Databricks (Issue #238).</summary>
     OAuthObo = 2
+}
+
+/// <summary>
+/// Per-tenant Databricks principal configuration.
+/// </summary>
+public sealed class DatabricksTenantPrincipalOptions
+{
+    /// <summary>OAuth M2M: tenant-specific service principal application id.</summary>
+    public string? ClientId { get; init; }
+
+    /// <summary>OAuth M2M: secret reference for tenant-specific service principal secret.</summary>
+    public string? ClientSecretRef { get; init; }
+
+    /// <summary>PAT mode: secret reference for tenant-specific personal access token.</summary>
+    public string? PatRef { get; init; }
 }
 
 /// <summary>
@@ -260,19 +275,29 @@ public sealed class DatabricksAuthOptions
     /// <summary>OAuth M2M: service principal application id.</summary>
     public string? ClientId { get; init; }
 
-    /// <summary>OAuth M2M: Key Vault reference of the service principal secret (plaintext only in Development).</summary>
+    /// <summary>OAuth M2M: secret reference of the service principal secret.</summary>
     public string? ClientSecretRef { get; init; }
 
-    /// <summary>PAT mode (Development only): Key Vault reference or plaintext token.</summary>
+    /// <summary>PAT mode: secret reference for the personal access token.</summary>
     public string? PatRef { get; init; }
 
     /// <summary>OAuth OBO settings (Issue #238).</summary>
     public DatabricksOboOptions? Obo { get; init; }
+
+    /// <summary>Optional custom OAuth token endpoint for OAuthM2M mode.</summary>
+    public string? TokenEndpoint { get; init; }
+
+    /// <summary>Optional per-tenant Databricks principal configurations.</summary>
+    public IReadOnlyDictionary<string, DatabricksTenantPrincipalOptions> Tenants { get; init; } =
+        new Dictionary<string, DatabricksTenantPrincipalOptions>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>When true, tenants without an entry in <see cref="Tenants"/> fall back to global principal credentials.</summary>
+    public bool FallbackToGlobalPrincipal { get; init; } = false;
 }
 
 /// <summary>
-/// Settings of one Databricks SQL warehouse data source (design §6.3). The OAuth token endpoint is NOT configurable: it is
-/// always <c>https://{Host}/oidc/v1/token</c>(09 item 3).
+/// Settings of one Databricks SQL warehouse data source. The default OAuth token endpoint is
+/// <c>https://{Host}/oidc/v1/token</c>; an optional custom endpoint may be configured via <see cref="DatabricksAuthOptions.TokenEndpoint"/>.
 /// </summary>
 public sealed class DatabricksDataSourceOptions
 {

@@ -32,12 +32,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     public const int MaxSampleRows = 20;
     private const int ExampleColumns = 10;
 
-    /// <summary>Returned with every dataset list: GraphQL is the preferred query path.</summary>
-    public const string Guidance =
-        "Query data with GraphQL: call the query_graphql tool (or POST the query to the GraphQL endpoint). " +
-        "describe_dataset returns the GraphQL field, the filter and sort types and an example query for each dataset. " +
-        "The other endpoints are listed for clients that need a specific protocol.";
-
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IConsentRepository _consentRepository;
     private readonly IGatewayExecutionService _gatewayExecutionService;
@@ -58,6 +52,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
     private readonly Autheris.Application.Catalog.Localization.ILanguageNegotiator? _languageNegotiator;
     private readonly IOptions<CatalogLocalizationOptions>? _localizationOptions;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
+    private readonly McpAccessHints _hints;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public McpDatasetCatalog(
@@ -80,7 +76,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
-        IOptions<CatalogLocalizationOptions>? localizationOptions = null)
+        IOptions<CatalogLocalizationOptions>? localizationOptions = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        IReadPathSwitches? switches = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -103,6 +101,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._procedureExecutionService = procedureExecutionService;
         this._languageNegotiator = languageNegotiator;
         this._localizationOptions = localizationOptions;
+        this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
+        _hints = new McpAccessHints(switches, options?.Value.Mcp.Enabled ?? false);
     }
 
     public McpDatasetCatalog(
@@ -124,7 +124,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
-        IOptions<CatalogLocalizationOptions>? localizationOptions = null)
+        IOptions<CatalogLocalizationOptions>? localizationOptions = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        IReadPathSwitches? switches = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -146,6 +148,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._procedureExecutionService = procedureExecutionService;
         this._languageNegotiator = languageNegotiator;
         this._localizationOptions = localizationOptions;
+        this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
+        _hints = new McpAccessHints(switches, options?.Value.Mcp.Enabled ?? false);
     }
 
     public Task<McpDatasetList> ListDatasetsAsync(
@@ -230,7 +234,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 Datasets: [],
                 Total: matching.Count,
                 Truncated: false,
-                Guidance: $"Catalog contains {matching.Count} tables across {domainCounts.Count} domains. Use 'domain' parameter in list_datasets, or use 'find_relevant_tables' / 'search_catalog' for natural language table discovery.",
+                Guidance: _hints.OverviewGuidance(matching.Count, domainCounts.Count),
                 Endpoints: null,
                 Offset: 0,
                 Limit: 0,
@@ -364,10 +368,11 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         int? nextOffset = hasMore ? effectiveOffset + pagedSummaries.Count : null;
 
         var isCompact = string.Equals(format, "compact", StringComparison.OrdinalIgnoreCase);
-        var guidance = Guidance;
+        var guidance = _hints.Guidance();
         if (total > 100)
         {
-            guidance += $" [Tip: Catalog contains {total} datasets. For token-efficient querying, use 'find_relevant_tables' or 'search_catalog' for natural language discovery, and 'get_table_schema' or 'describe_dataset(brief: true)' for concise schemas.]";
+            var tip = _hints.Tip(total);
+            guidance = guidance is null ? tip.TrimStart() is { Length: > 0 } t ? t : null : guidance + tip;
         }
 
         // Token efficiency: omit redundant access paths when compact is requested or when paginating past page 0
@@ -664,6 +669,13 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         {
             throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
         }
+
+        // describing a procedure is gated like calling it (definition source plus the result table's source).
+        await _transportGate.EnsureCatalogSourcesAsync(
+            [
+                string.IsNullOrWhiteSpace(def.DataSource) ? options?.Value.SqlEndpoints.Procedures.ConnectionName : def.DataSource,
+                string.IsNullOrWhiteSpace(resMeta.Table.SourceName) ? resId.Value.Domain : resMeta.Table.SourceName
+            ], ct).ConfigureAwait(false);
 
         var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
         var accessStatus = options?.Value.IsMcpAuthBypassed == true
@@ -1072,7 +1084,10 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 "OpenAPI 3.1 description of the REST routes of this domain."));
         }
 
-        paths.Add(new("MCP sample_rows", "MCP", SampleRows, "A few rows of this dataset, for a first look."));
+        if (_hints.Tool(SampleRows))
+        {
+            paths.Add(new("MCP sample_rows", "MCP", SampleRows, "A few rows of this dataset, for a first look."));
+        }
 
         if (o.Arrow.Enabled)
         {
@@ -1090,7 +1105,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var endpoints = new List<McpAccessPath>
         {
             new("GraphQL", "POST", GraphQlEndpoint,
-                "Preferred query path: query, filter, sort, page and follow relations between datasets in one request. Use the query_graphql tool.",
+                _hints.GraphQlEndpointDescription(),
                 Preferred: true)
         };
 
@@ -1132,7 +1147,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         if (o.Lakehouse.Enabled)
         {
-            endpoints.Add(new("Iceberg REST Catalog", "GET", "/v1/namespaces", "Apache Iceberg REST Catalog protocol endpoint."));
+            endpoints.Add(new("Iceberg REST Catalog", "GET", "/modules/lakehouse/iceberg/v1/{prefix}/namespaces", "Apache Iceberg REST Catalog protocol endpoint."));
         }
 
         return endpoints;

@@ -206,8 +206,8 @@ public sealed class ProcedureRowScopeConsumer : IParityConsumer
             }
         });
         var resolver = new SqlProcedureRowScopeResolver(new GateConnectionFactory(env.Database), options);
-        var definition = ProcedureDefinitionParser.Parse(
-            $"-- @name p\n-- @procedure dbo.usp_P\n-- @result-table {env.Context.Schema}.orders\n-- @row-scope-key id", "x", false, 60) with { DataSource = ParityData.Source };
+        var definition = ProcedureDefinitionParser.ParseYaml(
+            $"name: p\nprocedure: dbo.usp_P\nresult_table: {env.Context.Schema}.orders\nrow_scope_key: id", "x", false, 60) with { DataSource = ParityData.Source };
         var ids = GateModel.Rows.Where(r => r.Table == "orders").Select(r => r.Id).ToList();
         var byKey = ids.ToDictionary(i => RowScopeKeys.Normalize([i])!, i => i, StringComparer.Ordinal);
         try

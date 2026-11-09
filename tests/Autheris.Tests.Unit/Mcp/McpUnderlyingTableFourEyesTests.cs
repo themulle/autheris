@@ -101,7 +101,6 @@ public sealed class McpUnderlyingTableFourEyesTests
             ResultTable: resultTable,
             ClearedResultColumns: [],
             RequiredRoles: [],
-            AllowDynamicSql: false,
             TimeoutSeconds: 30);
 
         var registry = new InMemoryProcedureRegistry();

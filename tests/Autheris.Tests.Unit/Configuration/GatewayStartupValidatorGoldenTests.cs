@@ -63,6 +63,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("OracleRuntime_PlaintextPassword", ("DataSources:Connections:ora:Provider", "Oracle"), ("DataSources:Connections:ora:ConnectionString", "User Id=app;Password=secret;Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCPS)(HOST=db.example.org)(PORT=2484))(CONNECT_DATA=(SERVICE_NAME=svc)))")),
             Prod("SqlServerWindowsAuth_InvalidConnectionString", ("DataSources:Connections:sql:Provider", "SqlServer"), ("DataSources:Connections:sql:ConnectionString", "this is not a connection string")),
             Prod("Databricks_MissingSection", ("DataSources:Connections:dbx:Provider", "Databricks")),
+            Dev("ProcedureDialectAdmission_MissingConnection", ("SqlEndpoints:Procedures:Enabled", "true"), ("SqlEndpoints:Procedures:ConnectionName", "absent")),
             Prod("DefaultSchemas_InvalidSchema", ("DataSources:Connections:pg:Provider", "PostgreSql"), ("DataSources:Connections:pg:ConnectionString", "Host=h;Database=d"), ("DataSources:Connections:pg:DefaultSchema", "bad schema;")),
             Prod("TenantCollisions_StrictMode", ("TenantIsolation:StrictCollisionStartup", "true"), ("Authentication:ForwardAuth:AllowedTenantIds:0", "Acme"), ("Authentication:ForwardAuth:AllowedTenantIds:1", "ACME")),
             Prod("WebhookSubscriptions_MissingId", ("Webhooks:Subscriptions:0:Url", "https://example.org/hook")),
@@ -160,6 +161,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("ProductionAuthentication_TruncatedHash", user("$argon2id$v=19$m=65536,t=3,p=1$AAAA$AAAA")),
             Prod("ProductionAuthentication_EntraIdIncomplete", ("Authentication:EntraId:Enabled", "true")),
             Prod("ProductionAuthentication_AdfsIncomplete", ("Authentication:Adfs:Enabled", "true")),
+            Prod("ProductionAuthentication_AdfsWithoutAllowedClients", ("Authentication:Adfs:Enabled", "true"), ("Authentication:Adfs:Authority", "https://adfs.example.org/adfs"), ("Authentication:Adfs:Audience", "urn:autheris")),
             Prod("ProductionAuthentication_WellFormedHashAccepted", user(Hash)),
 
             // 18 ProductionStorageAndAudit

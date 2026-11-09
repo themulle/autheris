@@ -44,18 +44,26 @@ public sealed class ProcedureRegistrationService : BackgroundService
         _logger = logger;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <summary>
+    /// Loads the declarations synchronously so a legacy <c>*.proc.sql</c> file stops the host start.
+    /// Any other load failure only logs; no endpoint is registered then (fail-closed).
+    /// </summary>
+    public override Task StartAsync(CancellationToken cancellationToken)
     {
         try
         {
             _loader.LoadFromDirectory();
         }
-        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or InvalidOperationException))
         {
-            // Review P-3: a broken procedure directory must not stop the host; no endpoint is registered (fail-closed).
             _logger?.LogError(ex, "Stored procedure declarations could not be loaded.");
         }
 
+        return base.StartAsync(cancellationToken);
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
         using var timer = new PeriodicTimer(PollInterval);
         do
         {

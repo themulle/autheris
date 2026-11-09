@@ -40,7 +40,7 @@ CSRF Protection: Mandatory for GraphQL; required for REST when browser indicator
 | **ReBAC (Zanzibar / OpenFGA)** | `/api/v1/rebac/{tuples,check,batch-check}` | Authenticated | Always active | `ZanzibarRebacTests` |
 | **Arrow IPC Endpoints & Export** | `/api/v1/export/arrow`, `/api/v1/flight/sql/{info,tables,stream}` | Authenticated | Always active | Unit tests |
 | **DuckDB In-Memory OLAP** | `POST /api/v1/olap/query` | Authenticated | `DuckDbOlap.Enabled` | Unit tests |
-| **Apache Iceberg Lakehouse** | `/v1/{prefix}/namespaces/...` | Authenticated | `Lakehouse:Enabled` | `LakehouseIntegration` |
+| **Apache Iceberg Lakehouse** | `/modules/lakehouse/iceberg/v1/{prefix}/namespaces/...` | Authenticated | `Lakehouse:Enabled` | `LakehouseIntegration` |
 | **Envoy ext_authz** | `/api/v1/envoy/{authz,check,export/*.yaml}` | Authenticated | Always active | Unit tests |
 
 Total: **135+ mapped endpoints** across REST, GraphQL, OData, MCP, Arrow IPC, and WebSockets.

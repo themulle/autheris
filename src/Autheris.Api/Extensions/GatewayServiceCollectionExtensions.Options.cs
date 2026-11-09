@@ -142,6 +142,7 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayResilienceOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, CdcStreamOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, SqlParserCacheOptionsValidator>();
+        services.AddSingleton<IValidateOptions<GatewayOptions>, WebSqlDmlOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new CrossSourceOptionsValidator(
                 configuration,
@@ -151,6 +152,11 @@ public static partial class GatewayServiceCollectionExtensions
                 environment,
                 sp.GetService<Microsoft.Extensions.Logging.ILogger<DuckDbOlapOptionsValidator>>()));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(_ => new ReadPathSwitchOptionsValidator(configuration));
+        services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
+            new AuthenticationModeOptionsValidator(
+                environment,
+                sp.GetService<Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider>(),
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<AuthenticationModeOptionsValidator>>()));
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new BulkStreamSigningKeyOptionsValidator(
                 environment,

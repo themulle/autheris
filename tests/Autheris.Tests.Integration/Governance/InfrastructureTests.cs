@@ -242,8 +242,8 @@ public class InfrastructureTests : IDisposable
         sensitiveTable.Table.RequiresFourEyes.ShouldBeTrue();
 
         var requesterSid = new Sid("S-1-5-21-REQ-4EYES");
-        var approver1 = new Sid("S-1-5-21-APPROVER-A");
-        var approver2 = new Sid("S-1-5-21-APPROVER-B");
+        var approver1 = new Sid("S-1-5-21-1000-1000-1000-1002");
+        var approver2 = new Sid("S-1-5-21-1000-1000-1000-1003");
 
         var request = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {

@@ -5,6 +5,7 @@ ObjectGraph_RangeViolation [Development]: ValidationException: The field Shutdow
 OracleRuntime_PlaintextPassword [Production]: ValidationException: Security violation: Oracle data source 'ora' has a plaintext password in its connection string. Outside Development the password must come from Key Vault (DataSources:Connections:ora:PasswordKeyVaultRef).
 SqlServerWindowsAuth_InvalidConnectionString [Production]: ValidationException: SQL Server data source 'sql' has an invalid connection string: Format of the initialization string does not conform to specification starting at index 0.
 Databricks_MissingSection [Production]: ValidationException: Databricks data source 'dbx' requires a DataSources:Connections:dbx:Databricks section.
+ProcedureDialectAdmission_MissingConnection [Development]: ValidationException: Stored procedure endpoints support SQL Server and PostgreSQL only (data source 'absent').
 DefaultSchemas_InvalidSchema [Production]: ValidationException: Security violation: DataSources:Connections:pg:DefaultSchema must match ^[A-Za-z_][A-Za-z0-9_$#]{0,127}$.
 TenantCollisions_StrictMode [Production]: ValidationException: Security violation (B-1): tenant ids that differ only in case are configured (ACME / Acme). Strict mode refuses the start; rename one of them.
 WebhookSubscriptions_MissingId [Production]: ValidationException: Gateway:Webhooks:Subscriptions:0:Id is required (a stable, unique id of at most 128 characters).
@@ -72,6 +73,7 @@ ProductionAuthentication_WeakPbkdf2 [Production]: ValidationException: Security 
 ProductionAuthentication_TruncatedHash [Production]: ValidationException: Security violation (API-05): Outside Development, BasicAuth hashes must carry a salt of at least 16 bytes and a 32-byte hash (truncated value?).
 ProductionAuthentication_EntraIdIncomplete [Production]: ValidationException: Security violation: Outside Development, EntraId requires Audience or ClientId, plus TenantId (issuer), to be configured.
 ProductionAuthentication_AdfsIncomplete [Production]: ValidationException: Security violation: Outside Development, Adfs.Audience and Authority must be configured.
+ProductionAuthentication_AdfsWithoutAllowedClients [Production]: ValidationException: Security violation: Outside Development, Adfs requires AllowedClientIds to be configured with at least one authorized client ID.
 ProductionAuthentication_WellFormedHashAccepted [Production]: OK
 ProductionStorage_WormWithoutS3Keys [Production]: ValidationException: Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.
 ProductionStorage_FallbackAuditKey [Production]: ValidationException: CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.

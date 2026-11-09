@@ -91,7 +91,8 @@ public sealed class McpDatasetCatalogTests
 
     private McpDatasetCatalog Catalog(GatewayOptions? options = null) =>
         new(_metadata, _consents, _gateway, _golden, Options.Create(options ?? new GatewayOptions()), _graphQl,
-            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadata.ServeSingleReadsFromCatalog(), _consents, options ?? new GatewayOptions()));
+            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadata.ServeSingleReadsFromCatalog(), _consents, options ?? new GatewayOptions()),
+            switches: ReadPathSwitches.From(options ?? new GatewayOptions()));
 
     private void MapOrdersToGraphQl() =>
         _graphQl.GetTableAsync(Orders, Arg.Any<CancellationToken>()).Returns(new GraphQlTableMapping(
@@ -107,7 +108,7 @@ public sealed class McpDatasetCatalogTests
     public async Task ListDatasets_PointsToGraphQlFirst_AndListsTheEnabledProtocols()
     {
         MapOrdersToGraphQl();
-        var options = new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true }, DuckDbOlap = new DuckDbOlapOptions { Enabled = false } };
+        var options = new GatewayOptions { Mcp = new McpOptions { Enabled = true }, WebSql = new WebSqlOptions { Enabled = true }, DuckDbOlap = new DuckDbOlapOptions { Enabled = false } };
 
         var result = await Catalog(options).ListDatasetsAsync(User(), null, null);
 

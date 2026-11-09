@@ -36,7 +36,7 @@ public class AuthenticationSecurityTests
                             Password = "secretPassword123",
                             Sid = "S-1-5-21-1111-ALICE",
                             Roles = ["FinanceReader", "GovernanceAdmin"],
-                            GroupSids = ["S-1-5-21-GROUPS-100"]
+                            GroupSids = ["S-1-5-21-1-2-3-100"]
                         },
                         new BasicAuthUserConfig
                         {
@@ -44,7 +44,7 @@ public class AuthenticationSecurityTests
                             Password = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("hashedSecret456"))),
                             Sid = "S-1-5-21-2222-BOB",
                             Roles = ["HrReader"],
-                            GroupSids = ["S-1-5-21-GROUPS-200"]
+                            GroupSids = ["S-1-5-21-1-2-3-200"]
                         }
                     ]
                 }
@@ -115,7 +115,7 @@ public class AuthenticationSecurityTests
         roles.ShouldContain("GovernanceAdmin");
 
         var groups = result.Principal.GetGroupSids();
-        groups.Select(g => g.Value).ShouldContain("S-1-5-21-GROUPS-100");
+        groups.Select(g => g.Value).ShouldContain("S-1-5-21-1-2-3-100");
     }
 
     [Fact]
@@ -193,7 +193,7 @@ public class AuthenticationSecurityTests
         var identity = new ClaimsIdentity("Bearer");
         identity.AddClaim(new Claim("oid", "00000000-0000-0000-0000-000000000001"));
         identity.AddClaim(new Claim("preferred_username", "user@corp.onmicrosoft.com"));
-        identity.AddClaim(new Claim("groups", "azure-ad-group-uuid-123"));
+        identity.AddClaim(new Claim("groups", "S-1-5-21-1-2-3-123"));
         identity.AddClaim(new Claim("roles", "SecurityAuditor"));
 
         var principal = new ClaimsPrincipal(identity);
@@ -206,7 +206,7 @@ public class AuthenticationSecurityTests
         userSid.Value.Value.ShouldBe("00000000-0000-0000-0000-000000000001");
 
         transformed.FindFirst(ClaimTypes.PrimarySid)?.Value.ShouldBe("00000000-0000-0000-0000-000000000001");
-        transformed.GetGroupSids().Select(g => g.Value).ShouldContain("azure-ad-group-uuid-123");
+        transformed.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-1-2-3-123");
         transformed.GetUserRoles().ShouldContain("SecurityAuditor");
     }
 
@@ -215,7 +215,7 @@ public class AuthenticationSecurityTests
     {
         var identity = new ClaimsIdentity("Bearer");
         identity.AddClaim(new Claim("primarysid", "S-1-5-21-ADFS-USER-999"));
-        identity.AddClaim(new Claim("groupsid", "S-1-5-21-ADFS-GROUP-888"));
+        identity.AddClaim(new Claim("groupsid", "S-1-5-21-1-2-3-888"));
         identity.AddClaim(new Claim("role", "DataSteward"));
 
         var principal = new ClaimsPrincipal(identity);
@@ -228,7 +228,7 @@ public class AuthenticationSecurityTests
         userSid.Value.Value.ShouldBe("S-1-5-21-ADFS-USER-999");
 
         transformed.FindFirst(ClaimTypes.PrimarySid)?.Value.ShouldBe("S-1-5-21-ADFS-USER-999");
-        transformed.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-ADFS-GROUP-888");
+        transformed.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-1-2-3-888");
         transformed.GetUserRoles().ShouldContain("DataSteward");
     }
 
@@ -297,7 +297,7 @@ public class AuthenticationSecurityTests
                     RequireTrustedProxy = true,
                     TrustedProxies = ["10.0.0.1"],
                     // RR-L2-02: raw upstream SIDs and custom roles require explicit opt-in
-                    TrustUpstreamGroupSids = true,
+                    TrustUpstreamSids = true,
                     AllowedRoles = ["FinanceReader", "Auditor"]
                 }
             }
@@ -306,7 +306,7 @@ public class AuthenticationSecurityTests
         var (handler, context) = CreateForwardAuthHandler(options);
         context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("10.0.0.1");
         context.Request.Headers["X-Forwarded-User"] = "k8s_service_user";
-        context.Request.Headers["X-Forwarded-Groups"] = "S-1-5-21-K8S-GRP1,S-1-5-21-K8S-GRP2";
+        context.Request.Headers["X-Forwarded-Groups"] = "S-1-5-21-1-2-3-301,S-1-5-21-1-2-3-302";
         context.Request.Headers["X-Forwarded-Roles"] = "FinanceReader,Auditor";
         context.Request.Headers["X-Forwarded-Email"] = "k8s@corp.local";
 
@@ -315,8 +315,8 @@ public class AuthenticationSecurityTests
         result.Succeeded.ShouldBeTrue();
         result.Principal.ShouldNotBeNull();
         result.Principal.Identity?.Name.ShouldBe("k8s_service_user");
-        result.Principal.GetUserSid()?.Value.ShouldBe("S-1-5-21-FORWARD-USR-K8S_SERVICE_USER");
-        result.Principal.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-K8S-GRP1");
+        result.Principal.GetUserSid()?.Value.ShouldBe("S-1-5-21-FORWARD-USR-k8s_service_user");
+        result.Principal.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-1-2-3-301");
         result.Principal.GetUserRoles().ShouldContain("FinanceReader");
     }
 
@@ -346,10 +346,7 @@ public class AuthenticationSecurityTests
         var result = await handler.AuthenticateAsync();
 
         result.Succeeded.ShouldBeTrue();
-        var groups = result.Principal!.GetGroupSids().Select(g => g.Value).ToList();
-        groups.ShouldNotContain("S-1-5-21-1004336348-1177238915-682003330-512");
-        groups.ShouldContain("S-1-5-21-FORWARD-GRP-S-1-5-21-1004336348-1177238915-682003330-512");
-        groups.ShouldContain("S-1-5-21-FORWARD-GRP-finance");
+        result.Principal!.GetGroupSids().ShouldBeEmpty();
 
         var roles = result.Principal.GetUserRoles();
         roles.ShouldContain("Analyst");

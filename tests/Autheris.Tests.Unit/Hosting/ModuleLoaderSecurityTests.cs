@@ -3,12 +3,14 @@ namespace Autheris.Tests.Unit.Hosting;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using Autheris.Api.Hosting;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Infrastructure.Modules.Trust;
 using Autheris.Infrastructure.Security;
+using Autheris.Modules.Abstractions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
@@ -18,7 +20,7 @@ using Shouldly;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed class ModuleLoaderSecurityTests : IDisposable
+public sealed partial class ModuleLoaderSecurityTests : IDisposable
 {
     private readonly string _tempRoot;
 
@@ -290,6 +292,219 @@ public sealed class ModuleLoaderSecurityTests : IDisposable
         ex.ModuleId.ShouldBe("sample");
         ex.Reason.ShouldContain("unsigned");
     }
+
+    private string CreateModuleWithOptions(
+        ECDsa signingKey,
+        string moduleId = "sample",
+        string version = "1.2.0",
+        string? keyIdOverride = null,
+        bool unsigned = false,
+        bool emptyFiles = false)
+    {
+        var moduleDir = Path.Combine(_tempRoot, moduleId);
+        Directory.CreateDirectory(moduleDir);
+
+        var dllBytes = ModulePackageBuilder.GetValidModuleDllBytes();
+        File.WriteAllBytes(Path.Combine(moduleDir, "Sample.TestModule01.dll"), dllBytes);
+
+        var manifest = ModulePackageBuilder.CreateSignedManifest(
+            signingKey,
+            moduleId: moduleId,
+            version: version,
+            keyIdOverride: keyIdOverride,
+            files: emptyFiles ? [] : [new ModuleManifestFile("Sample.TestModule01.dll", IntegrityHashHelper.ComputeSha256HexLower(dllBytes))],
+            signatureOverride: unsigned ? string.Empty : null);
+
+        File.WriteAllText(Path.Combine(moduleDir, "module.json"), ModulePackageBuilder.SerializeManifestJson(manifest));
+        return moduleDir;
+    }
+
+    private IConfiguration BuildConfigWith(string moduleId, params (string Key, string Value)[] extra)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["Gateway:Modules:Path"] = _tempRoot,
+            ["Gateway:Modules:Enabled:0"] = moduleId,
+        };
+        foreach (var (k, v) in extra)
+        {
+            values[k] = v;
+        }
+
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+    }
+
+    private static ModuleLoader NewLoader(params ECDsa[] keys)
+    {
+        var keyring = new Dictionary<string, ECDsa>(StringComparer.Ordinal);
+        foreach (var k in keys)
+        {
+            keyring[ManifestSignatureVerifier.ComputeKeyId(k)] = k;
+        }
+
+        return new ModuleLoader(keyring: keyring, isDirectoryWritableOverride: _ => false);
+    }
+
+    private static readonly FakeHostEnvironment Production = new() { EnvironmentName = Environments.Production };
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Unsigned_dev_manifest_with_empty_files_is_rejected()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateModuleWithOptions(key, unsigned: true, emptyFiles: true);
+        var config = BuildConfigWith("sample", ("Gateway:Modules:AllowUnsignedInDevelopment", "true"));
+        var env = new FakeHostEnvironment { EnvironmentName = Environments.Development };
+
+        var ex = Should.Throw<ModuleLoadException>(
+            () => NewLoader(key).LoadAndConfigureServices(new ServiceCollection(), config, env));
+
+        ex.Reason.ShouldContain("Files");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Older_signed_version_below_floor_is_rejected()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateModuleWithOptions(key, version: "1.9.0");
+        var config = BuildConfigWith("sample", ("Gateway:Modules:MinVersions:sample", "2.0.0"));
+
+        var ex = Should.Throw<ModuleLoadException>(
+            () => NewLoader(key).LoadAndConfigureServices(new ServiceCollection(), config, Production));
+
+        ex.Reason.ShouldContain("minimum", Case.Insensitive);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Version_at_or_above_floor_is_accepted()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateModuleWithOptions(key, version: "2.0.0");
+        var config = BuildConfigWith("sample", ("Gateway:Modules:MinVersions:sample", "2.0.0"));
+
+        var result = NewLoader(key).LoadAndConfigureServices(new ServiceCollection(), config, Production, TestHostContext());
+
+        result.Modules.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Revoked_key_is_rejected()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var other = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateModuleWithOptions(key);
+        var config = BuildConfigWith(
+            "sample",
+            ("Gateway:Modules:RevokedKeyIds:0", ManifestSignatureVerifier.ComputeKeyId(key)));
+
+        var ex = Should.Throw<ModuleLoadException>(
+            () => NewLoader(key, other).LoadAndConfigureServices(new ServiceCollection(), config, Production));
+
+        ex.Reason.ShouldContain("revoked", Case.Insensitive);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Second_embedded_key_is_accepted()
+    {
+        using var first = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var second = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateModuleWithOptions(second);
+        var config = BuildConfigWith("sample");
+
+        var result = NewLoader(first, second).LoadAndConfigureServices(new ServiceCollection(), config, Production, TestHostContext());
+
+        result.Modules.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Embedded_keyring_contains_the_release_key()
+    {
+        using var keyring = ModuleLoader.LoadEmbeddedKeyring();
+
+        keyring.Keys.Count.ShouldBeGreaterThanOrEqualTo(1);
+        using var release = ModuleLoader.LoadEmbeddedReleasePublicKey();
+        keyring.Keys.ContainsKey(ManifestSignatureVerifier.ComputeKeyId(release)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Host_version_matches_informational_version()
+    {
+        var informational = typeof(ModuleLoader).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .Cast<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .Single()
+            .InformationalVersion;
+        var expected = informational.Split('+')[0];
+
+        ModuleLoader.ResolveHostVersion().ShouldBe(expected);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Prerelease_below_floor_is_rejected()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateModuleWithOptions(key, version: "2.0.0-rc.1");
+        var config = BuildConfigWith("sample", ("Gateway:Modules:MinVersions:sample", "2.0.0"));
+
+        var ex = Should.Throw<ModuleLoadException>(
+            () => NewLoader(key).LoadAndConfigureServices(new ServiceCollection(), config, Production));
+
+        ex.Reason.ShouldContain("minimum", Case.Insensitive);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("2.x", "1.0.0")]
+    [InlineData("2.0.0", "2.x")]
+    [InlineData("01.2.3", "1.0.0")]
+    public void Unparseable_version_is_rejected(string manifestVersion, string floor)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateModuleWithOptions(key, version: manifestVersion);
+        var config = BuildConfigWith("sample", ("Gateway:Modules:MinVersions:sample", floor));
+
+        Should.Throw<ModuleLoadException>(
+            () => NewLoader(key).LoadAndConfigureServices(new ServiceCollection(), config, Production));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void All_keys_revoked_rejects_signed_module()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CreateModuleWithOptions(key);
+        var config = BuildConfigWith(
+            "sample",
+            ("Gateway:Modules:RevokedKeyIds:0", ManifestSignatureVerifier.ComputeKeyId(key)));
+
+        var ex = Should.Throw<ModuleLoadException>(
+            () => NewLoader(key).LoadAndConfigureServices(new ServiceCollection(), config, Production));
+
+        ex.Reason.ShouldContain("keyring is empty", Case.Insensitive);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Manifest_without_key_id_is_rejected()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var manifest = ModulePackageBuilder.CreateSignedManifest(key, keyIdOverride: string.Empty);
+        var keyring = new Dictionary<string, ECDsa>(StringComparer.Ordinal)
+        {
+            [ManifestSignatureVerifier.ComputeKeyId(key)] = key,
+        };
+
+        ManifestSignatureVerifier.VerifyManifest(manifest, keyring, out var reason).ShouldBeFalse();
+        reason.ShouldNotBeNull().ShouldContain("keyId");
+    }
+
+    private static IModuleHostContext TestHostContext() =>
+        new ModuleHostContext(TimeProvider.System, ModuleLoader.ResolveHostVersion());
 
     private IConfiguration BuildConfig(string moduleId) =>
         new ConfigurationBuilder()

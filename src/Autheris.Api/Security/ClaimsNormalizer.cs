@@ -21,6 +21,37 @@ public static class ClaimsNormalizer
     public const string MiddlewareMarkerIssuer = "Autheris:ClaimsNormalizationMiddleware";
     public const string LegacyMarkerIssuer = "Autheris:EnterpriseClaimsTransformation";
 
+    private static readonly string[] ProviderGroupClaimTypes =
+    [
+        ClaimTypes.GroupSid,
+        "groups",
+        "groupsid",
+        "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups",
+        "http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid"
+    ];
+
+    /// <summary>
+    /// Number of provider group values (token <c>groups</c>/<c>groupsid</c> claim types) that <see cref="Normalize"/> drops because they are
+    /// not canonical SIDs (for example Entra object ids). The caller marks the request degraded when the realm takes groups from the token.
+    /// </summary>
+    public static int CountDroppedProviderGroups(ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        var count = 0;
+        foreach (var claimType in ProviderGroupClaimTypes)
+        {
+            foreach (var claim in principal.FindAll(c => c.Type == claimType && c.Issuer != IdentityClaimIssuers.Pipeline))
+            {
+                if (!SidFormat.IsCanonical(claim.Value?.Trim()))
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
     public static ClaimsPrincipal Normalize(ClaimsPrincipal principal, X509Certificate2? clientCertificate = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
@@ -109,17 +140,20 @@ public static class ClaimsNormalizer
         // 3. The tenant is not decided here (DT-A-3): the claims transformation stamps the resolved tenant exactly once per ingress.
 
         // 4. Ensure ClaimTypes.GroupSid is populated from any provider group claims (AD / Kerberos / OIDC)
-        var existingGroups = identity.FindAll(ClaimTypes.GroupSid)
+        // Interim producer until the group resolver is wired: canonical provider group SIDs are re-stamped with the pipeline issuer.
+        var existingGroups = identity.FindAll(c => c.Type == ClaimTypes.GroupSid && c.Issuer == IdentityClaimIssuers.Pipeline)
             .Select(c => c.Value)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var allGroupSids = clonedPrincipal.GetGroupSids();
-        foreach (var groupSid in allGroupSids)
+        foreach (var claimType in ProviderGroupClaimTypes)
         {
-            if (!existingGroups.Contains(groupSid.Value))
+            foreach (var claim in clonedPrincipal.FindAll(claimType).ToList())
             {
-                identity.AddClaim(new Claim(ClaimTypes.GroupSid, groupSid.Value));
-                existingGroups.Add(groupSid.Value);
+                var value = claim.Value?.Trim();
+                if (value is not null && SidFormat.IsCanonical(value) && existingGroups.Add(value))
+                {
+                    identity.AddClaim(IdentityClaimIssuers.CreateGroupSidClaim(value));
+                }
             }
         }
 

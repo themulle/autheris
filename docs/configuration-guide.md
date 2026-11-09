@@ -274,7 +274,7 @@ SQL table reads (GraphQL, OData, MCP, connectors) run through the governed SQL p
 | `DataSources:Connections:{sourceName}:Provider` | `string` | `"SqlServer"`, `"PostgreSql"`, `"Sqlite"` | `"Sqlite"` | Datenbank-Treiber für die Ziel-Datenquelle. |
 | `DataSources:Connections:{sourceName}:ConnectionString` | `string` | ADO.NET ConnStr | `""` | Verbindungszeichenfolge zur Zieldatenbank. DEP-7: außerhalb von Development verlangt der Start bei PostgreSQL `SSL Mode=VerifyFull` (oder `VerifyCA`), bei SQL Server `Encrypt=Mandatory`/`Strict` ohne `TrustServerCertificate=true`. |
 | `DataSources:RequireTenantColumn` | `bool` | `true`, `false` | `false` | Review E-5: when `true`, a table without a tenant column (`tenant_id`, `TenantId`, ...) is refused fail-closed instead of being read unscoped. |
-| `DataSources:TenantColumnExemptTables` | `string[]` | `schema.table` or `table` | `[]` | Tables that are deliberately shared across tenants and therefore exempt from `RequireTenantColumn`. |
+| `DataSources:TenantColumnExemptTables` | `string[]` | `schema.table` or `table` | `[]` | Tables that are deliberately shared across tenants and therefore exempt from `RequireTenantColumn`. For WebSQL DML an entry exempts a table only by its exact `schema.table` name (case-insensitive); a bare table name or a suffix never matches, and DML on any other table without a tenant column is refused. |
 
 ```json
 "DataSources": {
@@ -855,7 +855,7 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 | `Mcp:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den MCP-Server (Streamable HTTP unter `Mcp:EndpointPath`, offizielles MCP-C#-SDK, zustandslos). |
 | `Mcp:EndpointPath` | `string` | URL-Pfad | `"/mcp"` | Pfad des MCP-Endpunkts (Streamable HTTP). |
 | `Mcp:MaxTokensPerCall` | `int` | `256 .. 128000` | `4096` | Maximales Token-Budget pro Tool-Aufruf; verhindert Context-Window-Overflows. |
-| `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Maximale Ergebniszeilen pro Datenabfrage. |
+| `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Obergrenze der Ergebniszeilen je MCP-Datentool (`query_dataset`, `query_sql`, `call_procedure`, `sample_rows`, `query_graphql`; bei GraphQL je Liste). Ein kleineres `limit` der Anfrage bleibt erhalten, ein größeres hebt die Grenze nie an; ein ungültiges `limit` (0, negativ, keine Ganzzahl) wird abgelehnt. Wurden Zeilen gekürzt, trägt das Ergebnis `truncated: true` und `rowCap`. `sample_rows` bleibt zusätzlich auf 20 Zeilen begrenzt. Ein Wert `<= 0` fällt auf `100` zurück. |
 | `Mcp:AllowedOperations` | `string[]` | GraphQL Operationen | `[]` | Whitelist freigegebener Abfragen. |
 
 > `warn_allow_unmasked_ai_access` und `danger_bypass_mcp_auth` liegen ausschließlich unter `Insecure` (ADR-012, Phase 4).
@@ -1009,7 +1009,7 @@ Autheris bietet eine integrierte, abgesicherte WebSQL-Schnittstelle, die 100% ko
 | `WebSql:DefaultMaxRows` | `long` | `1000` | Zeilen einer Abfrage ohne `LIMIT` (`POST /api/v1/sql`). |
 | `WebSql:MaxAllowedRows` | `long` | `10000` | Obergrenze für ein explizites `LIMIT` (`0` = keine Obergrenze). |
 | `WebSql:ExecutionTimeoutSeconds` | `int` | `30` | Maximaler Timeout für die Abfrageausführung im Backend. |
-| `WebSql:AllowDml` | `bool` | `false` | Erlaubt schreibende Operationen (`INSERT`, `UPDATE`, `DELETE`). Erfordert einen clusterweiten Idempotency-Store (`Caching:Redis:Enabled = true`); sonst bricht der Start ab. DML auf `/api/v1/sql` verlangt den Header `Idempotency-Key`. |
+| `WebSql:AllowDml` | `bool` | `false` | Erlaubt schreibende Operationen (`INSERT`, `UPDATE`, `DELETE`). Startup fails unless `DataSources:RequireTenantColumn=true`, `WebSql:MaxAffectedRows` is greater than 0, and a cluster-wide idempotency store (`Caching:Redis:Enabled = true`) is configured. DML on `/api/v1/sql` requires the `Idempotency-Key` header. |
 | `WebSql:DmlWriterRoles` | `string[]` | `[]` | Rollen, die DML ausführen dürfen (Pflicht, wenn `AllowDml = true`). |
 | `WebSql:MaxAffectedRows` | `long` | `1000` | Maximal erlaubte Zeilenanzahl bei DML; Überschreitung triggert automatischen Rollback. |
 | `WebSql:RejectUnfilteredDml` | `bool` | `true` | Verhindert ungefilterte `UPDATE`/`DELETE`-Statements (`WHERE 1=1`, `WHERE true`). |

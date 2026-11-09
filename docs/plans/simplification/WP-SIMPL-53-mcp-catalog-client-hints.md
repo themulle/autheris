@@ -2,7 +2,7 @@
 
 Parent: [plan](../2026-11-05-plan-project-simplification.md#4-work-packages) | Issues: [#578](https://github.com/themulle/autheris/issues/578), [#579](https://github.com/themulle/autheris/issues/579), [#572](https://github.com/themulle/autheris/issues/572), [#573](https://github.com/themulle/autheris/issues/573) | Related: [WP-SIMPL-41](WP-SIMPL-41-authorized-data-discovery.md), [WP-SIMPL-44](WP-SIMPL-44-no-source-metadata-reads.md), [WP-SIMPL-51](WP-SIMPL-51-websql-client-contract.md)
 
-Status: Draft (Phase 2, 2026-11-08); Phase 3 review pending.
+Status: Draft (Phase 2, 2026-11-08); Phase 3 review done for PR 1 and PR 2 (2026-11-08), PR 3-5 pending.
 
 ## 1. Goal and outcome
 Query clients (mostly LLM agents) get only what the operator allows and only hints that are true: `Mcp:MaxResultRows` caps every row-reading MCP tool (#578), catalog hints name only enabled tools and routes (#579), datasets carry a coarse size class from ingested metadata (#572), and aggregations and WebSQL statements without a usable index are priced like unindexed root lists and say so (#573).
@@ -11,7 +11,7 @@ Query clients (mostly LLM agents) get only what the operator allows and only hin
 - PR 1, PR 2: none (bug fixes on core paths, allowed under the freeze, PRD 5.1). PR 2 rebases on WP-SIMPL-16 if the Arrow branch of `DatasetAccess` is already deleted.
 - PR 3: after the WP-41 discovery DTO PR (same output types). Size data only from ingestion (OD-25, WP-44 "Do NOT compute statistics, row counts or samples from sources").
 - PR 4: after WP-44 (index usability on declared indexes only). PR 5: after WP-51 PR 1 (`SqlStatementCostEstimator`) and PR 4.
-- PR 3-5 add response fields: carried under `freeze-exception` with the issue link (Q23, default taken).
+- PR 3-5 add response fields: carried under `freeze-exception` with the issue link (Q23, owner-confirmed 2026-11-08).
 
 ## 3. Current state (verified on `origin/main` 13411f71, 2026-11-08)
 - `McpOptions.MaxResultRows` (`Domain/Options/Protocols/McpOptions.cs:10`, `[Range(1, 10000)]`, default 100) has no consumer. Own limits: `query_dataset` `limit` max 1000 (`McpDatasetTools.cs:283`), `call_procedure` `max_rows` default 100 clamp 1000 (`McpToolExecutionHandler.cs:533`), `sample_rows` `MaxSampleRows = 20` (`McpDatasetCatalog.cs:32`), `query_graphql` only `first` and `GraphQL:MaxResponseRows`. Dispatch: `GatewayMcpQueryExecutor.cs:313`.
@@ -39,10 +39,48 @@ PR 1 ~160, PR 2 ~170, PR 3 ~180, PR 4 ~200, PR 5 ~150. PR 1 and PR 2 any time, i
 ## 7. Threat notes for Phase 3
 Row cap is data minimisation towards model providers: a client value can only lower it. Size class leaks table cardinality including rows hidden by row policies; coarse classes only, visible datasets only (Q24). Index hints must not reveal Deny columns or index names of hidden objects. Hint builder reads configuration only, never request data.
 
-## 8. Decisions (defaults taken; owner may change)
+## 8. Decisions (defaults owner-confirmed 2026-11-08, with Q23 and Q24)
 - D-53a `Mcp:MaxResultRows` is enforced, not deleted (issue option 1).
 - D-53b Size class instead of exact count; buckets as in step 3.
 - D-53c Aggregations without a usable index reuse `UnindexedRootListSurchargeMultiplier`; behaviour change accepted (no production yet).
 
 ## 9. Estimate
 PR 1 1.5 pd, PR 2 1.5 pd, PR 3 1.5 pd, PR 4 1.5 pd, PR 5 1 pd: about 7 pd.
+
+## Phase 3 binding conditions (PR 1, PR 2)
+
+Verdict: APPROVED WITH CONDITIONS (PR 1 #578, PR 2 #579). PR 3-5 not yet reviewed. Current-state references in section 3 were spot-checked and hold (`McpOptions.MaxResultRows` unread, `IReadPathSwitches`, `DisabledTools` validator).
+
+### PR 1: row cap
+- SEC-53-01 The cap is the minimum of the option value and the client value; a client value can never raise it. Applies to all five tools, including `query_sql` (cap applied after any client `LIMIT`, by trimming or by wrapping/limiting in the executor, never by trusting statement text) and `query_graphql`.
+- SEC-53-02 Fail closed on bad client limits: null uses the cap; zero, negative, non-numeric, NaN or overflowing values are rejected with a validation error (or clamped to the cap), never treated as "unlimited" and never as a larger value. Use `long`/checked parsing, no `int` overflow wrap.
+- SEC-53-03 The effective cap is `Math.Clamp(option, 1, 10000)` re-read per call from `IOptionsMonitor`/options snapshot; a misconfigured value (<= 0) falls back to the default 100, never to unbounded. `sample_rows` also respects `MaxSampleRows`; the lower value wins.
+- SEC-53-04 GraphQL: the trim applies to every list in the response tree (root lists and nested lists, aliases, fragments, and aggregation/edge/node lists), not only root lists. Trim happens before serialization into the tool result and before audit/log payloads; it must also bound the serialized size (a trimmed list of huge rows is still bounded by existing byte limits, which stay).
+- SEC-53-05 `truncated`/`rowCap` leak nothing about hidden rows: `truncated` is true only if the already policy-filtered result exceeded the cap, with no total count, no "N more rows", and no probing of an extra row past `cap+1` beyond what the engine already returned. `rowCap` equals the public effective cap only.
+- SEC-53-06 The cap is applied after row policies and column masking; it must not change which rows are returned first (same ordering as without cap), and must not bypass guardrail/governance checks that run on the full request.
+- SEC-53-07 Tool input schema `maximum` is informational only; enforcement is server-side regardless of schema (schema is client-controlled input).
+- SEC-53-08 Logs/audit record the cap and the returned count only, never row values.
+
+### PR 2: truthful hints
+- SEC-53-09 `AccessHints` reads `IReadPathSwitches` and options only; no request, principal, tenant or dataset data enters hint text. Descriptions are built per instance from configuration; no static/shared mutable cache keyed across instances or tenants.
+- SEC-53-10 A tool, group, GraphQL route, WebSQL or Trino endpoint is named only if its switch is on at build time. A `DisabledTools` entry, `Mcp:Enabled=false`, an `AllowedOperations` exclusion, or a disabled group removes it from `Guidance`, `Endpoints()`, `DatasetAccess()`, the `list_datasets` description and the server instructions. Unknown or null switch state means "disabled" (fail closed).
+- SEC-53-11 Hints are never replaced by an alternative route that is not itself enabled; an empty hint list is dropped, not filled with a default string.
+- SEC-53-12 Hints must not reveal the existence of a disabled feature (no "X is disabled" text, no route URLs of disabled endpoints). Enabled route URLs come from configuration, not from the `Host`/`X-Forwarded-*` request headers.
+- SEC-53-13 If switches can change at runtime, descriptions are rebuilt on change or the builder is documented as startup-only; a stale description naming a now-disabled tool is a defect. The execution path still enforces `IsToolEnabled` independently of hints (hints never grant access).
+
+### Mandatory tests (`[Trait("Category","Security")]`)
+- `McpRowCapTests.Larger_client_limit_does_not_raise_cap` (all five tools, Theory)
+- `McpRowCapTests.Invalid_client_limit_is_rejected_or_clamped` (0, -1, int.MaxValue, long overflow, non-numeric)
+- `McpRowCapTests.QuerySql_client_LIMIT_above_cap_is_trimmed`
+- `McpRowCapTests.GraphQl_nested_list_and_alias_trimmed_to_cap`
+- `McpRowCapTests.Truncated_flag_carries_no_hidden_row_count`
+- `McpRowCapTests.Cap_applies_after_row_policy` (hidden rows do not consume or reveal cap)
+- `McpRowCapTests.Misconfigured_option_falls_back_to_default_not_unbounded`
+- `McpAccessHintTests.Disabled_tool_never_named_in_any_hint_surface` (Theory over every surface and every switch)
+- `McpAccessHintTests.Hints_do_not_depend_on_request_or_principal`
+- `McpAccessHintTests.Disabled_feature_not_mentioned_by_name_or_route`
+- `McpAccessHintTests.Hint_naming_a_disabled_tool_cannot_enable_it` (execution still returns not-enabled)
+
+### Owner questions (defaults)
+- Q1 `query_sql` cap by trimming rows in the MCP executor (default) vs rewriting SQL; trimming is safer and engine-independent.
+- Q2 Invalid client limit rejects with a validation error (default) vs silent clamp.

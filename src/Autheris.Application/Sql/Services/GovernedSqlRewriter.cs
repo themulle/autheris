@@ -531,10 +531,20 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 throw SqlDataSourceResolver.TableDenied(target);
             }
 
-            string? tenantColumn = TableMetadata.RequireTenantColumnOrThrow(
-                tableMeta,
-                _options.Value.DataSources?.RequireTenantColumn == true,
-                _options.Value.DataSources?.TenantColumnExemptTables);
+            // Check order of the DML block: tenant column (every referenced table), dependency set, write decision.
+            bool dmlWithoutTenantColumn = isDml && tableMeta.TenantColumnName is null;
+            if (dmlWithoutTenantColumn && !IsDmlTenantExempt(resolvedId, _options.Value.DataSources?.TenantColumnExemptTables))
+            {
+                _logger?.LogWarning("WebSQL DML on table {Table} without a tenant column is refused.", target.FullName);
+                throw new WebSqlPolicyException("WebSQL DML on a table without a tenant column is not permitted.", GovernedSqlErrorCodes.PolicyViolation);
+            }
+
+            string? tenantColumn = dmlWithoutTenantColumn
+                ? null
+                : TableMetadata.RequireTenantColumnOrThrow(
+                    tableMeta,
+                    _options.Value.DataSources?.RequireTenantColumn == true,
+                    _options.Value.DataSources?.TenantColumnExemptTables);
             if (tenantColumn != null)
             {
                 if (!System.Text.RegularExpressions.Regex.IsMatch(tenantColumn, "^[A-Za-z_][A-Za-z0-9_]{0,127}$"))
@@ -546,7 +556,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
             if (isDml)
             {
-                // Check order of the DML block: dependency set, then the write decision (deny-all), which stays the last check.
+                // Then the dependency set, then the write decision (deny-all), which stays the last check.
                 dependencyScan ??= new DmlDependencyScan(_tableRepository!, DecideTableAsync, effectiveDataSourceName);
                 if (await dependencyScan.IsReadAsync(resolvedId, ct).ConfigureAwait(false))
                 {
@@ -848,6 +858,13 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             _logger?.Warning(ex, "WebSQL statement rejected by the SQL compiler.");
             throw;
         }
+    }
+
+    // A DML target without a tenant column is exempt only by its exact schema-qualified name (case-insensitive, never by suffix or bare table name).
+    private static bool IsDmlTenantExempt(TableIdentifier id, IEnumerable<string>? exemptTables)
+    {
+        string qualified = id.ToQualifiedName();
+        return exemptTables != null && exemptTables.Any(e => string.Equals(e?.Trim(), qualified, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsRetryableLimit(SqlLimitKind kind) => kind is SqlLimitKind.BindParameters or SqlLimitKind.PolicyExpansionFactor;

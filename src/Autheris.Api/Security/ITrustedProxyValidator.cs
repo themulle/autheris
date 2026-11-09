@@ -6,12 +6,13 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Security;
 
 /// <summary>
-/// Singleton validator to determine whether incoming remote IP addresses belong to trusted reverse proxies or CIDR blocks.
+/// Singleton validator to determine whether a connection peer is a trusted ForwardAuth proxy. Only the ForwardAuth-specific
+/// <c>TrustedProxies</c> and <c>TrustedNetworks</c> count (they are not merged with <c>ReverseProxy</c> lists).
 /// Pre-parses and caches all IP addresses and networks at startup to avoid per-request heap allocations.
 /// </summary>
 public interface ITrustedProxyValidator
 {
-    bool IsProxyTrusted(IPAddress remoteIp);
+    bool IsForwardAuthPeerTrusted(IPAddress remoteIp);
 }
 
 public sealed class TrustedProxyValidator(IOptions<GatewayOptions> gatewayOptions) : ITrustedProxyValidator
@@ -22,10 +23,9 @@ public sealed class TrustedProxyValidator(IOptions<GatewayOptions> gatewayOption
     private static HashSet<IPAddress> ParseTrustedProxies(GatewayOptions options)
     {
         var fwd = options.Authentication.ForwardAuth;
-        var rp = options.ReverseProxy;
 
         var proxies = new HashSet<IPAddress>();
-        foreach (var p in fwd.TrustedProxies.Concat(rp.KnownProxies))
+        foreach (var p in fwd.TrustedProxies)
         {
             if (IPAddress.TryParse(p, out var ip))
             {
@@ -38,10 +38,9 @@ public sealed class TrustedProxyValidator(IOptions<GatewayOptions> gatewayOption
     private static IPNetwork[] ParseTrustedNetworks(GatewayOptions options)
     {
         var fwd = options.Authentication.ForwardAuth;
-        var rp = options.ReverseProxy;
 
         List<IPNetwork> networks = [];
-        foreach (var net in fwd.TrustedNetworks.Concat(rp.GetEffectiveKnownNetworks()))
+        foreach (var net in fwd.TrustedNetworks)
         {
             if (IPNetwork.TryParse(net, out var network))
             {
@@ -51,7 +50,7 @@ public sealed class TrustedProxyValidator(IOptions<GatewayOptions> gatewayOption
         return [.. networks];
     }
 
-    public bool IsProxyTrusted(IPAddress remoteIp)
+    public bool IsForwardAuthPeerTrusted(IPAddress remoteIp)
     {
         ArgumentNullException.ThrowIfNull(remoteIp);
 
@@ -100,13 +99,5 @@ public static class TrustedProxyPeer
         }
 
         return context.Connection.RemoteIpAddress;
-    }
-
-    /// <summary>True only when the raw TCP peer is known and a configured trusted proxy (fail closed).</summary>
-    public static bool IsRawPeerTrusted(this ITrustedProxyValidator validator, HttpContext context)
-    {
-        ArgumentNullException.ThrowIfNull(validator);
-        var remoteIp = GetRawRemoteIp(context);
-        return remoteIp != null && validator.IsProxyTrusted(remoteIp);
     }
 }

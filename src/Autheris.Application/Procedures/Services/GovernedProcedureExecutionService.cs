@@ -171,11 +171,13 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             // 5. Input validation (unknown and context-bound parameters are rejected, never ignored)
             var values = ValidateInputs(definition, rawInputs, out int? requestedLimit);
 
-            // Transport gate check
-            string sourceName = string.IsNullOrWhiteSpace(definition.DataSource)
-                ? _options.Value.SqlEndpoints.Procedures.ConnectionName
-                : definition.DataSource;
-            await _transportGate.EnsureCatalogSourceAsync(sourceName, ct).ConfigureAwait(false);
+            // Transport gate: one check of the definition source and every governed table's source before any database access; a blank one is denied.
+            var sources = new List<string?>(decisions.Count + 1)
+            {
+                string.IsNullOrWhiteSpace(definition.DataSource) ? _options.Value.SqlEndpoints.Procedures.ConnectionName : definition.DataSource
+            };
+            sources.AddRange(decisions.Values.Select(d => string.IsNullOrWhiteSpace(d.Meta.Table.SourceName) ? d.Meta.Identifier.Domain : d.Meta.Table.SourceName));
+            await _transportGate.EnsureCatalogSourcesAsync(sources, ct).ConfigureAwait(false);
 
             // 6. Call (security context goes into the read-only SESSION_CONTEXT)
             var context = new ProcedureSecurityContext(

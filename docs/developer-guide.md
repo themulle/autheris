@@ -65,7 +65,7 @@ In Development the gateway prints a banner with the useful links (hub, GraphQL, 
 | User | Role | Purpose |
 |---|---|---|
 | `dev-admin` | ClusterAdmin | administration |
-| `owner` | DataOwner (`S-1-5-21-DATAOWNER-1`) | primary owner of the demo tables `finance_table_1` / `_5` |
+| `owner` | DataOwner (`S-1-5-21-1000-1000-1000-1001`) | primary owner of the demo tables `finance_table_1` / `_5` |
 | `approver-a`, `approver-b` | DataOwner | delegates of `finance_table_5` (four-eyes approval) |
 | `analyst` | Analyst | regular user |
 | `analyst-b` | Analyst, tenant `tenant-b` | tests across tenant boundaries |

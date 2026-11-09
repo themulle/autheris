@@ -30,14 +30,9 @@ public static class McpDatasetTools
     public const string InvokeApi = "invoke_api";
     public const string CallProcedure = "call_procedure";
 
-    /// <summary>Sent as MCP <c>instructions</c> on initialize: how an agent finds and queries data.</summary>
-    public const string ServerInstructions =
-        "Autheris is a governed data gateway with 10,000+ datasets. For token-efficient AI workflows (Report & App Generation): " +
-        "1) call find_relevant_tables or search_catalog to find candidate tables and foreign key join conditions for your use-case, " +
-        "2) call get_table_schema or describe_dataset(brief: true) to fetch concise schemas without consuming token budget, " +
-        "3) query data with query_sql, query_dataset or query_graphql. " +
-        "Use list_datasets(overview: true) for domain summaries. sample_rows inspects sample records. " +
-        "Results are filtered and masked for your identity; hidden datasets and columns do not appear.";
+    /// <summary>Sent as MCP <c>instructions</c> on initialize: how an agent finds and queries data, naming only tools the switches leave on.</summary>
+    public static string BuildServerInstructions(Autheris.Application.Mcp.Interfaces.IReadPathSwitches? switches)
+        => new McpAccessHints(switches).ServerInstructions();
 
     /// <summary>ABAC object for catalog listings (like <c>query_data_catalog</c>).</summary>
     public static readonly TableIdentifier CatalogTable = new("governance", "catalog", "datasets");
@@ -165,9 +160,21 @@ public static class McpDatasetTools
         var dataClosed = switches is not null && !(switches.RestDataEndpointEnabled && switches.IsGroupEnabled(McpToolGroup.Query));
         foreach (var tool in Definitions())
         {
-            yield return dataClosed && string.Equals(tool.Name, DescribeApi, StringComparison.Ordinal)
-                ? tool with { InputJsonSchema = tool.InputJsonSchema.Replace("'/api/v1/data/{domain}/{table}'", "'/api/v1/catalog/datasets'", StringComparison.Ordinal) }
-                : tool;
+            if (switches is not null && !switches.ProceduresEnabled && tool.Name == CallProcedure)
+            {
+                continue;
+            }
+
+            if (switches is not null && string.Equals(tool.Name, ListDatasets, StringComparison.Ordinal))
+            {
+                yield return tool with { Description = new McpAccessHints(switches).ListDatasetsDescription() };
+            }
+            else
+            {
+                yield return dataClosed && string.Equals(tool.Name, DescribeApi, StringComparison.Ordinal)
+                    ? tool with { InputJsonSchema = tool.InputJsonSchema.Replace("'/api/v1/data/{domain}/{table}'", "'/api/v1/catalog/datasets'", StringComparison.Ordinal) }
+                    : tool;
+            }
         }
     }
 

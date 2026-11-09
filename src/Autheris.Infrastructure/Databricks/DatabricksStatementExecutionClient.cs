@@ -179,11 +179,6 @@ public sealed partial class DatabricksStatementExecutionClient(
             throw Config("The Databricks warehouse id is missing.");
         }
 
-        if (db.Auth.Mode == DatabricksAuthMode.Pat && !(environment?.IsDevelopment() ?? false))
-        {
-            throw Config("Auth.Mode Pat is allowed in Development only.");
-        }
-
         return new Settings(db, match.CommandTimeoutSeconds);
     }
 
@@ -225,7 +220,10 @@ public sealed partial class DatabricksStatementExecutionClient(
 
     // ---- HTTP ----
 
-    private async Task<JsonDocument> SendAsync(DatabricksDataSourceOptions db, string token, HttpMethod method, string path, string? body, DelegationContext? delegation, CancellationToken ct)
+    private Task<JsonDocument> SendAsync(DatabricksDataSourceOptions db, string token, HttpMethod method, string path, string? body, DelegationContext? delegation, CancellationToken ct) =>
+        SendInternalAsync(db, token, method, path, body, delegation, retryAllowed: true, ct);
+
+    private async Task<JsonDocument> SendInternalAsync(DatabricksDataSourceOptions db, string token, HttpMethod method, string path, string? body, DelegationContext? delegation, bool retryAllowed, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(method, new Uri($"https://{db.Host}{path}"));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -243,7 +241,20 @@ public sealed partial class DatabricksStatementExecutionClient(
 
         if (!response.IsSuccessStatusCode)
         {
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                _credentialProvider.EvictToken(db, delegation);
+                if (retryAllowed)
+                {
+                    _credentialProvider.InvalidateSecret(db, delegation?.TenantId?.Value);
+                    var refreshedToken = await _credentialProvider.AcquireTokenAsync(db, delegation, ct).ConfigureAwait(false);
+                    return await SendInternalAsync(db, refreshedToken, method, path, body, delegation, retryAllowed: false, ct).ConfigureAwait(false);
+                }
+
+                throw new DatabricksProviderException(DatabricksErrorCodes.AuthFailed, $"Databricks rejected the credentials (HTTP {status}).");
+            }
+
+            if (response.StatusCode == HttpStatusCode.Forbidden)
             {
                 _credentialProvider.EvictToken(db, delegation);
                 throw new DatabricksProviderException(DatabricksErrorCodes.AuthFailed, $"Databricks rejected the credentials (HTTP {status}).");

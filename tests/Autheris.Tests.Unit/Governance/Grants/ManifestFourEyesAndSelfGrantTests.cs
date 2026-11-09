@@ -198,7 +198,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         var repo = new FakeConsentRepository();
 
         var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(repo, Policy("Group", "S-1-5-21-GRP-OTHERS"), caller, dryRun: true));
+            ApplyAsync(repo, Policy("Group", "S-1-5-21-1-2-3-2002"), caller, dryRun: true));
 
         ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
         ex.Message.ShouldContain("group overage");
@@ -210,17 +210,17 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     {
         var caller = Caller(new Claim("hasgroups", "true"));
 
-        (await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-GRP-OTHERS", effect: "Deny"), caller)).Applied.ShouldBe(1);
+        (await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2002", effect: "Deny"), caller)).Applied.ShouldBe(1);
         (await ApplyAsync(new FakeConsentRepository(), Policy("Role", "DataScientist"), caller)).Applied.ShouldBe(1);
     }
 
     [Fact]
     public async Task SR_M_10_GrantToAGroupTheActorBelongsTo_IsRefused_AlsoInDryRun()
     {
-        var caller = Caller(new Claim(ClaimTypes.GroupSid, "S-1-5-21-GRP-ANALYSTS"));
+        var caller = Caller(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-2001"));
 
         var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-GRP-ANALYSTS"), caller, dryRun: true));
+            ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2001"), caller, dryRun: true));
 
         ex.Message.ShouldContain("Self-grant prohibited");
     }
@@ -241,14 +241,14 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         {
             UserSid = new Sid("S-1-5-21-ADMIN"),
             TenantId = Autheris.Tests.Common.TestTenants.Default,
-            GroupSids = new HashSet<Sid> { new("S-1-5-21-GRP-ENRICHED") },
+            GroupSids = new HashSet<Sid> { new("S-1-5-21-1-2-3-2003") },
             TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "EnrichedRole" },
             ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             AuthenticationScheme = "test"
         };
 
         await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-GRP-ENRICHED"), callerContext: context));
+            ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2003"), callerContext: context));
         await Should.ThrowAsync<GrantPolicyViolationException>(() =>
             ApplyAsync(new FakeConsentRepository(), Policy("Role", "EnrichedRole"), callerContext: context));
     }
@@ -256,10 +256,10 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     [Fact]
     public async Task SR_M_10_DenyForAGroupTheActorBelongsTo_StaysAllowed()
     {
-        var caller = Caller(new Claim(ClaimTypes.GroupSid, "S-1-5-21-GRP-ANALYSTS"));
+        var caller = Caller(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-2001"));
         var repo = new FakeConsentRepository();
 
-        var result = await ApplyAsync(repo, Policy("Group", "S-1-5-21-GRP-ANALYSTS", effect: "Deny"), caller);
+        var result = await ApplyAsync(repo, Policy("Group", "S-1-5-21-1-2-3-2001", effect: "Deny"), caller);
 
         result.Applied.ShouldBe(1);
     }
@@ -267,9 +267,9 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     [Fact]
     public async Task SR_M_10_GrantToAGroupOrRoleTheActorDoesNotHold_IsApplied()
     {
-        var caller = Caller(new Claim(ClaimTypes.GroupSid, "S-1-5-21-GRP-ANALYSTS"));
+        var caller = Caller(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-2001"));
 
-        (await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-GRP-OTHERS"), caller)).Applied.ShouldBe(1);
+        (await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2002"), caller)).Applied.ShouldBe(1);
         (await ApplyAsync(new FakeConsentRepository(), Policy("Role", "DataScientist"), caller)).Applied.ShouldBe(1);
     }
 }
