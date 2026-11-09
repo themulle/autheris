@@ -21,7 +21,7 @@ public sealed class CdcSubscriptionPrincipalTests
     private static CloudEventWebhookSubscription Sub(
         string? sid = "S-1-5-21-1", string[]? groups = null, string[]? roles = null, DateTimeOffset? createdAt = null, string tenant = "tenant-a") =>
         new("sub-1", tenant, "https://example.test/h", "*", [], "secret",
-            CreatedBySid: sid, CreatedByGroupSids: groups ?? ["G1", "G2"], CreatedByRoles: roles ?? ["Admin"], CreatedAt: createdAt ?? Now);
+            CreatedBySid: sid, CreatedByGroupSids: groups ?? ["S-1-5-21-1-2-3-3101", "S-1-5-21-1-2-3-3102"], CreatedByRoles: roles ?? ["Admin"], CreatedAt: createdAt ?? Now);
 
     [Fact]
     public void TryBuild_BuildsPrincipalFromSnapshot()
@@ -30,7 +30,7 @@ public sealed class CdcSubscriptionPrincipalTests
 
         p.ShouldNotBeNull();
         p.GetUserSid()!.Value.Value.ShouldBe("S-1-5-21-1");
-        p.GetGroupSids().Select(g => g.Value).OrderBy(x => x).ShouldBe(["G1", "G2"]);
+        p.GetGroupSids().Select(g => g.Value).OrderBy(x => x).ShouldBe(["S-1-5-21-1-2-3-3101", "S-1-5-21-1-2-3-3102"]);
         p.GetUserRoles().ShouldBe(["Admin"], ignoreOrder: true);
     }
 
@@ -83,8 +83,9 @@ public sealed class CdcSubscriptionPrincipalTests
         var admin = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.PrimarySid, "S-ADMIN"),
-            new Claim(ClaimTypes.GroupSid, "G-A"),
-            new Claim("groups", "G-B"),
+            Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-3103"),
+            new Claim("groups", "S-1-5-21-1-2-3-3104"),
+            new Claim(ClaimTypes.GroupSid, "S-1-5-21-1-2-3-3105"),
             new Claim(ClaimTypes.Role, "Admin"),
             new Claim("tenant_id", "tenant-a"),
             new Claim("email", "x@y.z")
@@ -94,7 +95,8 @@ public sealed class CdcSubscriptionPrincipalTests
 
         capture.IsSuccess.ShouldBeTrue();
         capture.Sid.ShouldBe("S-ADMIN");
-        capture.GroupSids!.OrderBy(x => x).ShouldBe(["G-A", "G-B"]);
+        // Only the pipeline-stamped group counts; token claim types and foreign-issuer group claims are not captured.
+        capture.GroupSids!.ShouldBe(["S-1-5-21-1-2-3-3103"]);
         capture.Roles.ShouldBe(["Admin"]);
     }
 
@@ -110,7 +112,7 @@ public sealed class CdcSubscriptionPrincipalTests
     {
         var options = new CdcWebhooksOptions { MaxSnapshotGroups = 2 };
         var admin = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S"), new Claim(ClaimTypes.GroupSid, "1"), new Claim(ClaimTypes.GroupSid, "2"), new Claim(ClaimTypes.GroupSid, "3")], "test"));
+            [new Claim(ClaimTypes.PrimarySid, "S"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-1"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-2"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-3")], "test"));
 
         var capture = CdcSubscriptionPrincipal.Capture(admin, options);
 

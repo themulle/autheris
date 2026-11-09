@@ -10,7 +10,6 @@ Autheris.Domain.Options.AuditOptions.CatalogReadMode
 Autheris.Domain.Options.AuditOptions.CatalogSummaryWindowSeconds
 Autheris.Domain.Options.AuditOptions.ElasticsearchSinkUrl
 Autheris.Domain.Options.AuditOptions.TierBAggregationWindowSeconds
-Autheris.Domain.Options.AuthenticationOptions.GroupCacheTtlMinutes
 Autheris.Domain.Options.BackstageIntegrationOptions.DefaultLifecycle
 Autheris.Domain.Options.BackstageIntegrationOptions.DefaultOwner
 Autheris.Domain.Options.BackstageIntegrationOptions.Enabled

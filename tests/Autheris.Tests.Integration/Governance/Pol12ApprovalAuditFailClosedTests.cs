@@ -26,7 +26,7 @@ public sealed class Pol12ApprovalAuditFailClosedTests
         var meta = await repo.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
 
-        var approver = new Sid("S-1-5-21-DATAOWNER-1");
+        var approver = new Sid("S-1-5-21-1000-1000-1000-1001");
         var requester = new Sid("S-1-5-21-REQUESTER-1");
 
         var req = await repo.CreateConsentRequestAsync(new ConsentRequest

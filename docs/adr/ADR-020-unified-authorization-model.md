@@ -82,6 +82,10 @@ Adopt **option B**.
 
 Precedence is unchanged: precondition > explicit deny (including hard-policy denies; for a data product only denies on the product itself) > grant (row-scope union, then hard policies, then narrowing inputs) > default deny.
 
+## Note 2026-11-08 (WP-SIMPL-50 B15)
+
+Read paths use `TableAccessPolicy.DecideAsync` until WP-SIMPL-46 moves them onto `IAccessDecisionPoint`. The decision point applies the ABAC row filter and masking rules to every operation and merges them with the consent result (most restrictive column level wins). A caller that receives a row filter or a non-`Clear` column level it cannot enforce must deny; the Iceberg catalog service does so.
+
 ## Consequences
 
 ### Positive

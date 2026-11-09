@@ -26,6 +26,13 @@ public static class InertOptionWarnings
                 "governed aggregations, procedures, change detection).");
         }
 
+        if (options.WebSql.DmlWriterRoles.Count > 0)
+        {
+            warnings.Add(
+                "Gateway:WebSql:DmlWriterRoles has no effect: every WebSQL DML statement is denied until a dedicated write decision exists. " +
+                "The setting stays required while Gateway:WebSql:AllowDml is true.");
+        }
+
         return warnings;
     }
 }

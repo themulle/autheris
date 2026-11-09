@@ -110,7 +110,7 @@ public static class CdcSubscriptionPrincipal
             new(ClaimTypes.PrimarySid, subscription.CreatedBySid),
             new(TenantClaimType, subscription.TenantId)
         };
-        claims.AddRange(subscription.CreatedByGroupSids.Where(g => !string.IsNullOrWhiteSpace(g)).Select(g => new Claim(ClaimTypes.GroupSid, g)));
+        claims.AddRange(subscription.CreatedByGroupSids.Where(g => !string.IsNullOrWhiteSpace(g)).Select(g => Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g)));
         claims.AddRange(subscription.CreatedByRoles.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => new Claim(ClaimTypes.Role, r)));
 
         principal = new ClaimsPrincipal(new ClaimsIdentity(claims, AuthenticationType));

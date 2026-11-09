@@ -1,152 +1,25 @@
+namespace Autheris.Infrastructure.Persistence;
+
+using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Data.Common;
+using System.Globalization;
+using System.Linq;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Catalog;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
-using Microsoft.Extensions.Logging;
-using Npgsql;
 using Autheris.Infrastructure.Persistence.Catalog;
+using Autheris.Infrastructure.Persistence.Dialects;
+using Microsoft.Extensions.Logging;
 
-namespace Autheris.Infrastructure.Persistence;
-
-public partial class PostgreSqlGovernanceRepository
+public partial class GovernanceRepository
 {
-    private static class CatalogSql
-    {
-        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal
-FROM TABLES
-WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
-
-        public const string SelectActiveTableSummariesSql = "SELECT id, source_name, schema_name, table_name FROM TABLES WHERE is_active = 1";
-
-        public const string SelectActiveTableEntitiesSql = @"SELECT id, source_type, source_name, schema_name, table_name,
-       display_name, sensitivity, requires_four_eyes, is_active,
-       data_source_type, http_endpoint_json, plugin_name,
-       description, long_description, doc_source,
-       required_filter_columns_json, texts_json,
-       min_group_size, non_personal
-FROM TABLES
-WHERE is_active = 1";
-
-        public const string SelectTableColumnsSql = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
-       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
-       c.description, c.long_description, c.meta_json, c.doc_source,
-       c.display_name, c.texts_json
-FROM TABLE_COLUMNS c
-LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-WHERE c.table_id = @tableId
-ORDER BY c.ctid"; // TABLE_COLUMNS has no ordinal/serial/timestamp (id is a GUID): heap order is the only registration order until an ordinal column is added by a new migration step (follow-up); the natural-key unique index would otherwise return the columns by name
-
-        public const string SelectActiveBatchTableColumnsSql = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
-       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
-       c.description, c.long_description, c.meta_json, c.doc_source,
-       c.display_name, c.texts_json
-FROM TABLE_COLUMNS c
-LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-INNER JOIN TABLES t ON c.table_id = t.id
-WHERE t.is_active = 1
-ORDER BY c.ctid"; // registration (heap) order, see SelectTableColumnsSql
-
-        public const string SelectTableForUpdateSql = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES
-WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
-FOR UPDATE";
-
-        public const string UpsertTableSql = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal)
-VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal)
-ON CONFLICT (id) DO UPDATE SET
-    source_type = EXCLUDED.source_type,
-    source_name = EXCLUDED.source_name,
-    schema_name = EXCLUDED.schema_name,
-    table_name = EXCLUDED.table_name,
-    display_name = EXCLUDED.display_name,
-    sensitivity = EXCLUDED.sensitivity,
-    requires_four_eyes = EXCLUDED.requires_four_eyes,
-    is_active = EXCLUDED.is_active,
-    data_source_type = EXCLUDED.data_source_type,
-    http_endpoint_json = EXCLUDED.http_endpoint_json,
-    plugin_name = EXCLUDED.plugin_name,
-    description = COALESCE(EXCLUDED.description, TABLES.description),
-    long_description = COALESCE(EXCLUDED.long_description, TABLES.long_description),
-    doc_source = COALESCE(EXCLUDED.doc_source, TABLES.doc_source),
-    required_filter_columns_json = EXCLUDED.required_filter_columns_json,
-    texts_json = EXCLUDED.texts_json,
-    min_group_size = EXCLUDED.min_group_size,
-    non_personal = EXCLUDED.non_personal";
-
-        public const string InsertColumnSql = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json)
-VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson)
-ON CONFLICT (id) DO UPDATE SET
-    data_type = EXCLUDED.data_type,
-    is_sensitive = EXCLUDED.is_sensitive,
-    description = COALESCE(EXCLUDED.description, TABLE_COLUMNS.description),
-    long_description = COALESCE(EXCLUDED.long_description, TABLE_COLUMNS.long_description),
-    doc_source = COALESCE(EXCLUDED.doc_source, TABLE_COLUMNS.doc_source),
-    meta_json = COALESCE(EXCLUDED.meta_json, TABLE_COLUMNS.meta_json),
-    display_name = EXCLUDED.display_name,
-    texts_json = EXCLUDED.texts_json";
-
-        public const string ActiveTableIdentifierSql = "SELECT source_name, schema_name, table_name FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) AND is_active = 1";
-
-        public const string TableEpochSql = @"SELECT epoch FROM POLICY_EPOCHS
-WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
-
-        public const string RelationsForParentTableSql = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
-       tp.source_name, tp.schema_name, tp.table_name,
-       tc.source_name, tc.schema_name, tc.table_name,
-       k.key_ordinal, k.parent_column, k.child_column,
-       COALESCE(r.allow_cross_data_source, FALSE)
-FROM TABLE_RELATIONS r
-JOIN TABLES tp ON r.parent_table_id = tp.id
-JOIN TABLES tc ON r.child_table_id = tc.id
-LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
-WHERE LOWER(tp.source_name) = LOWER(@pDomain) AND LOWER(tp.schema_name) = LOWER(@pSchema) AND LOWER(tp.table_name) = LOWER(@pTable)
-ORDER BY r.id, k.key_ordinal";
-
-        public const string AllRelationsSql = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
-       COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
-       COALESCE(tc.source_name, 'default'), tc.schema_name, tc.table_name,
-       k.key_ordinal, k.parent_column, k.child_column,
-       COALESCE(r.allow_cross_data_source, FALSE)
-FROM TABLE_RELATIONS r
-JOIN TABLES tp ON r.parent_table_id = tp.id
-JOIN TABLES tc ON r.child_table_id = tc.id
-LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
-ORDER BY r.id, k.key_ordinal";
-
-        public const string InsertRelationSql = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, cardinality, allow_cross_data_source)
-VALUES (@id, @pId, @cId, @relName, @card, @allowCross)
-ON CONFLICT (parent_table_id, child_table_id, relation_name) DO UPDATE SET cardinality = EXCLUDED.cardinality
-RETURNING id, (xmax = 0) AS inserted";
-
-        public const string ResolveActiveTableIdSql = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) AND is_active = 1";
-
-        public const string DataOwnersForTableSql = @"SELECT o.id, o.ad_sid, o.ad_account, o.display_name, o.email, o.is_active
-FROM DATA_OWNERS o
-JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
-JOIN TABLES t ON tow.table_id = t.id
-WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table) AND o.is_active = 1";
-
-        public const string ResolveDataOwnerIdsSql = @"SELECT id FROM DATA_OWNERS
-WHERE LOWER(ad_sid) = LOWER(@p) OR LOWER(ad_account) = LOWER(@p) OR LOWER(email) = LOWER(@p)";
-
-        public const string InsertDelegationSql = @"INSERT INTO DATA_OWNER_DELEGATIONS (id, data_owner_id, delegate_sid, valid_from, valid_to, reason)
-VALUES (@id, @ownerId, @delegateSid, @validFrom, @validTo, @reason)
-ON CONFLICT (id) DO UPDATE SET
-    delegate_sid = EXCLUDED.delegate_sid,
-    valid_from = EXCLUDED.valid_from,
-    valid_to = EXCLUDED.valid_to,
-    reason = EXCLUDED.reason";
-
-        public const string CatalogVersionSql = "SELECT structure_version, content_version FROM catalog_state WHERE id = 1;";
-
-        public const string BumpCatalogVersionSql = @"UPDATE catalog_state
-SET structure_version = structure_version + @structureDelta,
-    content_version = content_version + @contentDelta,
-    updated_at = @now::timestamptz
-WHERE id = 1
-RETURNING structure_version, content_version;";
-    }
-
     public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
     {
         var structural = await GetTableMetadataCoreAsync(table, null, ct).ConfigureAwait(false);
@@ -158,7 +31,7 @@ RETURNING structure_version, content_version;";
         // Issue #111 (A-6): tier and tags are never part of the cached entry; a fresh read is overlaid on every call, without mutating the cached record.
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         var overlay = await DatasetCatalogStore.ReadOverlayAsync(
-            conn, null, CatalogKeyDefinitionStore.PostgreSql, structural.Table.Id, _logger, ct).ConfigureAwait(false);
+            conn, null, KeyDialect, structural.Table.Id, _logger, ct).ConfigureAwait(false);
         return DatasetCatalogStore.Apply(structural, overlay);
     }
 
@@ -168,7 +41,7 @@ RETURNING structure_version, content_version;";
         CancellationToken ct)
     {
         var cacheKey = table.ToString().ToLowerInvariant();
-        var nowTicks = DateTime.UtcNow.Ticks;
+        var nowTicks = TimeProvider.System.GetUtcNow().UtcTicks;
         if (_metadataCache.TryGetValue(cacheKey, out var entry) && entry.Metadata != null && (nowTicks - entry.CachedAtTicks < MetadataCacheTtlTicks))
         {
             // PERS-17: a hit is served only while the table epoch is unchanged (a write on another replica bumps it); an unreadable
@@ -195,7 +68,7 @@ RETURNING structure_version, content_version;";
                 await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 if (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    tableEntity = CatalogSqlCore.ReadTableEntity(reader, _logger);
+                    tableEntity = ReadTableEntity(reader, _logger);
                     tableId = tableEntity.Id;
                 }
             }
@@ -210,7 +83,7 @@ RETURNING structure_version, content_version;";
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger?.LogWarning(ex, "The table epoch could not be read; the loaded metadata is not cached.");
+                LogCatalogNotice("The table epoch could not be read; the loaded metadata is not cached.");
             }
 
             List<TableColumn> columns;
@@ -218,9 +91,9 @@ RETURNING structure_version, content_version;";
 
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = CatalogSql.SelectTableColumnsSql;
+                cmd.CommandText = SelectTableColumnsSql;
                 cmd.AddBound("@tableId", tableId.Value.ToString());
-                (columns, maskingRules) = await CatalogSqlCore.LoadTableColumnsAsync(cmd, _logger, ct).ConfigureAwait(false);
+                (columns, maskingRules) = await LoadTableColumnsAsync(cmd, _logger, ct).ConfigureAwait(false);
             }
 
             IReadOnlyList<string> pkColumns;
@@ -229,20 +102,20 @@ RETURNING structure_version, content_version;";
             try
             {
                 (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
-                    conn, null, CatalogKeyDefinitionStore.PostgreSql, table, tableId.Value, columns, ct,
+                    conn, null, KeyDialect, table, tableId.Value, columns, ct,
                     _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tableId.Value, out var keyRows) ? keyRows : null).ConfigureAwait(false);
             }
             catch (TableMetadataUnavailableException)
             {
-                _logger?.LogWarning("Table metadata is unavailable: a declared key or index definition is invalid (the table is named by the rethrown TableMetadataUnavailableException).");
+                LogCatalogNotice("Table metadata is unavailable: a declared key or index definition is invalid.");
                 throw;
             }
 
             var physicalIndexes = await CatalogPhysicalIndexStore.ReadAsync(
-                conn, null, CatalogKeyDefinitionStore.PostgreSql, tableId.Value, columns, ct).ConfigureAwait(false);
+                conn, null, KeyDialect, tableId.Value, columns, ct).ConfigureAwait(false);
 
             var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
-                conn, null, CatalogKeyDefinitionStore.PostgreSql, tableId.Value, ct).ConfigureAwait(false);
+                conn, null, KeyDialect, tableId.Value, ct).ConfigureAwait(false);
 
             var result = new TableMetadata
             {
@@ -265,24 +138,12 @@ RETURNING structure_version, content_version;";
 
             if (loadedEpoch.HasValue)
             {
-                _metadataCache[cacheKey] = (result, DateTime.UtcNow.Ticks, loadedEpoch.Value);
+                _metadataCache[cacheKey] = (result, TimeProvider.System.GetUtcNow().UtcTicks, loadedEpoch.Value);
             }
 
             return result;
         }
     }
-
-    // PERS-17: epoch rows are matched by the natural key (domain, schema, table): a write inserts the row with its own id, which is not TABLES.id.
-    public const string EpochJoin = CatalogSqlCore.EpochJoin;
-    internal const string EpochByTableIdSql = CatalogSqlCore.EpochByTableIdSql;
-    internal const string AllEpochsSql = CatalogSqlCore.AllEpochsSql;
-
-    // PERS-17: the table epoch (POLICY_EPOCHS) authorises cache hits across replicas; -1 means the table has no epoch row yet.
-    internal static Task<long> ReadTableEpochAsync(System.Data.Common.DbConnection conn, Guid tableId, CancellationToken ct) =>
-        CatalogSqlCore.ReadTableEpochAsync(conn, tableId, ct);
-
-    internal static Task<Dictionary<Guid, long>> ReadAllTableEpochsAsync(System.Data.Common.DbConnection conn, CancellationToken ct) =>
-        CatalogSqlCore.ReadAllTableEpochsAsync(conn, ct);
 
     /// <summary>The current epoch, or null when it cannot be read (the cache is then bypassed and the table is loaded from the database).</summary>
     private async Task<long?> TryReadTableEpochAsync(Guid tableId, CancellationToken ct)
@@ -294,7 +155,7 @@ RETURNING structure_version, content_version;";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger?.LogWarning(ex, "The table epoch could not be read; the metadata cache is bypassed (fail-closed).");
+            LogCatalogNotice("The table epoch could not be read; the metadata cache is bypassed (fail-closed).");
             return null;
         }
     }
@@ -315,9 +176,9 @@ RETURNING structure_version, content_version;";
                     {
                         tables.Add((Guid.Parse(reader.GetString(0)), new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3))));
                     }
-                    catch (ArgumentException ex)
+                    catch (ArgumentException)
                     {
-                        _logger?.LogWarning(ex, "Catalog table has an invalid identifier and was skipped.");
+                        LogCatalogNotice("Catalog table has an invalid identifier and was skipped.");
                     }
                 }
             }
@@ -332,7 +193,7 @@ RETURNING structure_version, content_version;";
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger?.LogWarning(ex, "The table epochs could not be read; the metadata cache is bypassed (fail-closed).");
+            LogCatalogNotice("The table epochs could not be read; the metadata cache is bypassed (fail-closed).");
         }
 
         bool TryGetValidCached(Guid tableId, string key, out TableMetadata? metadata)
@@ -341,7 +202,7 @@ RETURNING structure_version, content_version;";
             if (epochs != null &&
                 _metadataCache.TryGetValue(key, out var hit) &&
                 hit.Metadata != null &&
-                DateTime.UtcNow.Ticks - hit.CachedAtTicks < MetadataCacheTtlTicks &&
+                TimeProvider.System.GetUtcNow().UtcTicks - hit.CachedAtTicks < MetadataCacheTtlTicks &&
                 (epochs.TryGetValue(tableId, out var current) ? current : -1) == hit.Epoch)
             {
                 metadata = hit.Metadata;
@@ -376,7 +237,7 @@ RETURNING structure_version, content_version;";
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = CatalogSql.SelectActiveTableEntitiesSql;
-                activeTables = await CatalogSqlCore.LoadActiveTablesAsync(cmd, _logger, ct).ConfigureAwait(false);
+                activeTables = await LoadActiveTablesAsync(cmd, ct).ConfigureAwait(false);
             }
 
             Dictionary<Guid, List<TableColumn>> columnsByTable;
@@ -385,28 +246,28 @@ RETURNING structure_version, content_version;";
 
             await using (var cmd = conn.CreateCommand())
             {
-                cmd.CommandText = CatalogSql.SelectActiveBatchTableColumnsSql;
-                (columnsByTable, maskingRulesByTable, corruptedTableIds) = await CatalogSqlCore.LoadBatchTableColumnsAsync(cmd, _logger, ct).ConfigureAwait(false);
+                cmd.CommandText = SelectActiveBatchTableColumnsSql;
+                (columnsByTable, maskingRulesByTable, corruptedTableIds) = await LoadBatchTableColumnsAsync(cmd, ct).ConfigureAwait(false);
             }
 
             Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys = null;
             Dictionary<Guid, List<CatalogPhysicalIndexStore.Row>>? prefetchedPhysical = null;
             var allActiveTableIds = activeTables.Select(t => t.Id).ToList();
-            if (await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, ct, _keyTables).ConfigureAwait(false))
+            if (await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, KeyDialect, ct, _keyTables).ConfigureAwait(false))
             {
-                prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, allActiveTableIds, ct).ConfigureAwait(false);
-                prefetchedPhysical = await CatalogPhysicalIndexStore.ReadBatchAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, allActiveTableIds, ct).ConfigureAwait(false);
+                prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
+                prefetchedPhysical = await CatalogPhysicalIndexStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
             }
 
             var rowFilterStrategies = await RowFilterEvaluationStore.ReadBatchObjectAsync(
-                conn, null, CatalogKeyDefinitionStore.PostgreSql, ct).ConfigureAwait(false);
+                conn, null, KeyDialect, ct).ConfigureAwait(false);
 
             result = new List<TableMetadata>(activeTables.Count);
             foreach (var (tid, identifier, tableEntity) in activeTables)
             {
                 if (corruptedTableIds.Contains(tid))
                 {
-                    _logger?.LogWarning("Catalog table {Table} was omitted: its column or masking rule definition is invalid (fail-closed).", identifier);
+                    LogCatalogNotice("A catalog table was omitted: its column or masking rule definition is invalid (fail-closed).");
                     continue;
                 }
 
@@ -428,12 +289,12 @@ RETURNING structure_version, content_version;";
                 try
                 {
                     (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
-                        conn, null, CatalogKeyDefinitionStore.PostgreSql, identifier, tid, columns, ct,
+                        conn, null, KeyDialect, identifier, tid, columns, ct,
                         _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tid, out var keyRows) ? keyRows : null).ConfigureAwait(false);
                 }
                 catch (TableMetadataUnavailableException)
                 {
-                    _logger?.LogWarning("Catalog table {Table} was omitted: its declared key or index definition is invalid.", identifier);
+                    LogCatalogNotice("A catalog table was omitted: its declared key or index definition is invalid.");
                     continue;
                 }
 
@@ -456,15 +317,15 @@ RETURNING structure_version, content_version;";
                 {
                     meta.ValidateRequiredFilterColumns();
                 }
-                catch (CatalogValidationException ex)
+                catch (CatalogValidationException)
                 {
-                    _logger?.LogWarning(ex, "Catalog table {Table} was omitted: required filter column definition is invalid.", identifier);
+                    LogCatalogNotice("A catalog table was omitted: its required filter column definition is invalid.");
                     continue;
                 }
 
                 if (epochs != null)
                 {
-                    _metadataCache[cacheKey] = (meta, DateTime.UtcNow.Ticks, epochs.TryGetValue(tid, out var loaded) ? loaded : -1);
+                    _metadataCache[cacheKey] = (meta, TimeProvider.System.GetUtcNow().UtcTicks, epochs.TryGetValue(tid, out var loaded) ? loaded : -1);
                 }
 
                 result.Add(meta);
@@ -480,7 +341,7 @@ RETURNING structure_version, content_version;";
         await using (var overlayConn = await OpenConnectionAsync(ct).ConfigureAwait(false))
         {
             var overlay = await DatasetCatalogStore.ReadOverlayAsync(
-                overlayConn, null, CatalogKeyDefinitionStore.PostgreSql, null, _logger, ct).ConfigureAwait(false);
+                overlayConn, null, KeyDialect, null, _logger, ct).ConfigureAwait(false);
             for (var i = 0; i < result.Count; i++)
             {
                 result[i] = DatasetCatalogStore.Apply(result[i], overlay);
@@ -507,12 +368,12 @@ RETURNING structure_version, content_version;";
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
             var tableExisted = false;
             var structuralChange = false;
-            var docs = new CatalogSqlCore.TableDocumentation(metadata.Table.Description, metadata.Table.LongDescription, metadata.Table.DocumentationSource);
+            var docs = new TableDocumentation(metadata.Table.Description, metadata.Table.LongDescription, metadata.Table.DocumentationSource);
 
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
-                cmd.CommandText = CatalogSql.SelectTableForUpdateSql;
+                cmd.CommandText = SelectTableForUpdateSql;
                 cmd.AddBound("@domain", metadata.Identifier.Domain);
                 cmd.AddBound("@schema", metadata.Identifier.Schema);
                 cmd.AddBound("@table", metadata.Identifier.TableName);
@@ -522,7 +383,7 @@ RETURNING structure_version, content_version;";
                 {
                     tableId = Guid.Parse(reader.GetString(0));
                     tableExisted = true;
-                    (structuralChange, docs) = CatalogSqlCore.ReadExistingTableForUpsert(reader, metadata.Table, _options?.Catalog?.DocumentationSourcePrecedence);
+                    (structuralChange, docs) = ReadExistingTableForUpsert(reader, metadata.Table, _options?.Catalog?.DocumentationSourcePrecedence);
                 }
                 else
                 {
@@ -537,7 +398,7 @@ RETURNING structure_version, content_version;";
             await using (var upsertCmd = conn.CreateCommand())
             {
                 upsertCmd.Transaction = tx;
-                upsertCmd.CommandText = CatalogSql.UpsertTableSql;
+                upsertCmd.CommandText = UpsertTableSql;
                 upsertCmd.AddBound("@id", tableId.ToString());
                 upsertCmd.AddBound("@sourceType", metadata.Table.SourceType);
                 upsertCmd.AddBound("@domain", metadata.Identifier.Domain);
@@ -563,16 +424,16 @@ RETURNING structure_version, content_version;";
             // Issue #111 (A-10): the configured default tier is given to a NEW table only; the Hidden default writes no row.
             if (!tableExisted && _options?.Catalog?.DefaultVisibility == DatasetVisibility.Summary)
             {
-                await DatasetCatalogStore.InsertDefaultAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, tableId, DatasetVisibility.Summary, ct).ConfigureAwait(false);
+                await DatasetCatalogStore.InsertDefaultAsync(conn, tx, KeyDialect, tableId, DatasetVisibility.Summary, ct).ConfigureAwait(false);
             }
 
-            var (existingColsByName, existingMaskingRules, colIdByName) = await CatalogSqlCore.LoadExistingColumnsAndMaskingRulesAsync(conn, tx, tableId, ct).ConfigureAwait(false);
-            if (CatalogSqlCore.HasMaskingRulesChanged(existingMaskingRules, metadata.ColumnMaskingRules))
+            var (existingColsByName, existingMaskingRules, colIdByName) = await LoadExistingColumnsAndMaskingRulesAsync(conn, tx, tableId, ct).ConfigureAwait(false);
+            if (HasMaskingRulesChanged(existingMaskingRules, metadata.ColumnMaskingRules))
             {
                 structuralChange = true;
             }
 
-            if (await CatalogSqlCore.UpsertColumnsAndMaskingRulesAsync(conn, tx, CatalogSql.InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, (existing, incoming) => CatalogSqlCore.ShouldOverwriteDocumentation(_options?.Catalog?.DocumentationSourcePrecedence, existing, incoming)).ConfigureAwait(false))
+            if (await UpsertColumnsAndMaskingRulesAsync(conn, tx, InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, (existing, incoming) => ShouldOverwriteDocumentation(_options?.Catalog?.DocumentationSourcePrecedence, existing, incoming)).ConfigureAwait(false))
             {
                 structuralChange = true;
             }
@@ -580,7 +441,7 @@ RETURNING structure_version, content_version;";
             if (metadata.ReplaceKeyDefinition)
             {
                 structuralChange = true;
-                await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
+                await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, KeyDialect, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
             }
 
             await IncrementTableEpochInternalAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);
@@ -596,8 +457,7 @@ RETURNING structure_version, content_version;";
             throw;
         }
 
-        _metadataCache.TryRemove(metadata.Identifier.ToString().ToLowerInvariant(), out _);
-        await _epochValidationService.InvalidateEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
+        await InvalidateTableEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
 
         try
         {
@@ -624,7 +484,7 @@ RETURNING structure_version, content_version;";
             try
             {
                 change = await CatalogKeyDefinitionStore.ReplaceNarrowAsync(
-                    conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, primaryKey, indexes, primaryKeyDirections,
+                    conn, tx, KeyDialect, table, primaryKey, indexes, primaryKeyDirections,
                     () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {
@@ -643,8 +503,7 @@ RETURNING structure_version, content_version;";
             }
         }
 
-        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
-        await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
+        await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
         return change;
     }
 
@@ -658,7 +517,7 @@ RETURNING structure_version, content_version;";
             try
             {
                 change = await RowFilterEvaluationStore.SetObjectAsync(
-                    conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, settings, actor,
+                    conn, tx, KeyDialect, table, settings, actor,
                     () => IncrementTableEpochInternalAsync(conn, tx, table, ct), ct).ConfigureAwait(false);
                 if (change is null)
                 {
@@ -677,47 +536,46 @@ RETURNING structure_version, content_version;";
             }
         }
 
-        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
-        await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
+        await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
         return change;
     }
 
     public async Task<DatasetVisibilityCounts> GetDatasetVisibilityCountsAsync(CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await DatasetCatalogStore.CountByVisibilityAsync(conn, null, CatalogKeyDefinitionStore.PostgreSql, ct).ConfigureAwait(false);
+        return await DatasetCatalogStore.CountByVisibilityAsync(conn, null, KeyDialect, ct).ConfigureAwait(false);
     }
 
     public async Task<DatasetCatalogSettings?> GetDatasetCatalogSettingsAsync(TableIdentifier table, bool strict = true, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         return await DatasetCatalogStore.ReadSettingsAsync(
-            conn, null, CatalogKeyDefinitionStore.PostgreSql, table, strict, _logger, ct).ConfigureAwait(false);
+            conn, null, KeyDialect, table, strict, _logger, ct).ConfigureAwait(false);
     }
 
     public Task<DatasetCatalogChange?> ReplaceDatasetTagsAsync(
         TableIdentifier table, IReadOnlyList<string> tags, DatasetTagSource source, Sid actor, CancellationToken ct = default) =>
         WriteCatalogSettingsAsync(table, (conn, tx) =>
-            DatasetCatalogStore.ReplaceTagsAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, tags, source, actor, ct), ct);
+            DatasetCatalogStore.ReplaceTagsAsync(conn, tx, KeyDialect, table, tags, source, actor, ct), ct);
 
     public Task<DatasetCatalogChange?> ChangeDatasetTagsAsync(
         TableIdentifier table, IReadOnlyList<string> add, IReadOnlyList<string> remove, Sid actor, CancellationToken ct = default) =>
         WriteCatalogSettingsAsync(table, (conn, tx) =>
-            DatasetCatalogStore.ChangeTagsAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, add, remove, actor, ct), ct);
+            DatasetCatalogStore.ChangeTagsAsync(conn, tx, KeyDialect, table, add, remove, actor, ct), ct);
 
     public Task<DatasetCatalogChange?> SetDatasetVisibilityAsync(
         TableIdentifier table, DatasetVisibility visibility, Sid actor, CancellationToken ct = default) =>
         WriteCatalogSettingsAsync(table, (conn, tx) =>
-            DatasetCatalogStore.SetVisibilityAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, visibility, actor, ct), ct);
+            DatasetCatalogStore.SetVisibilityAsync(conn, tx, KeyDialect, table, visibility, actor, ct), ct);
 
     public Task<DatasetCatalogChange?> SetDatasetPrivacyAsync(
         TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default) =>
         WriteCatalogSettingsAsync(table, (conn, tx) =>
-            DatasetCatalogStore.SetPrivacyAsync(conn, tx, CatalogKeyDefinitionStore.PostgreSql, table, minGroupSize, nonPersonal, actor, ct), ct);
+            DatasetCatalogStore.SetPrivacyAsync(conn, tx, KeyDialect, table, minGroupSize, nonPersonal, actor, ct), ct);
 
     /// <summary>Issue #111: one transaction (locked before read, write, after read); no epoch (tags are not policy inputs); the local metadata entry is dropped after the commit.</summary>
     private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(
-        TableIdentifier table, Func<NpgsqlConnection, NpgsqlTransaction, Task<DatasetCatalogChange?>> write, CancellationToken ct)
+        TableIdentifier table, Func<DbConnection, DbTransaction, Task<DatasetCatalogChange?>> write, CancellationToken ct)
     {
         DatasetCatalogChange? change;
         await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
@@ -753,7 +611,7 @@ RETURNING structure_version, content_version;";
 
         if (change.Changed)
         {
-            _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
+            InvalidateTableMetadata(table.ToString().ToLowerInvariant());
         }
 
         return change;
@@ -762,19 +620,19 @@ RETURNING structure_version, content_version;";
     public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await CatalogSqlCore.GetActiveTableIdentifierAsync(conn, CatalogSql.ActiveTableIdentifierSql, table, ct).ConfigureAwait(false);
+        return await GetActiveTableIdentifierAsync(conn, CatalogSql.ActiveTableIdentifierSql, table, ct).ConfigureAwait(false);
     }
 
     public async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(Guid tableId, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await CatalogSqlCore.GetActiveTableIdentifierByIdAsync(conn, tableId, ct).ConfigureAwait(false);
+        return await GetActiveTableIdentifierByIdAsync(conn, tableId, ct).ConfigureAwait(false);
     }
 
     public async Task<long> GetTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await CatalogSqlCore.GetTableEpochAsync(conn, CatalogSql.TableEpochSql, table, ct).ConfigureAwait(false);
+        return await GetTableEpochAsync(conn, CatalogSql.TableEpochSql, table, ct).ConfigureAwait(false);
     }
 
     public async Task<long> IncrementTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
@@ -786,8 +644,7 @@ RETURNING structure_version, content_version;";
             var newEpoch = await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
 
-            _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
-            await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
+            await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
             return newEpoch;
         }
         catch
@@ -800,7 +657,7 @@ RETURNING structure_version, content_version;";
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await CatalogSqlCore.GetRelationsForTableAsync(conn, CatalogSql.RelationsForParentTableSql, parentTable, _logger, ct).ConfigureAwait(false);
+        return await GetRelationsForTableAsync(conn, RelationsForParentTableSql, parentTable, _logger, ct).ConfigureAwait(false);
     }
 
     public async Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
@@ -823,20 +680,20 @@ RETURNING structure_version, content_version;";
         await using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
-            cmd.CommandText = CatalogSql.InsertRelationSql;
+            cmd.CommandText = InsertRelationSql;
             cmd.AddBound("@id", relation.Id.ToString());
             cmd.AddBound("@pId", parentTableId);
             cmd.AddBound("@cId", childTableId);
             cmd.AddBound("@relName", relation.RelationName);
             cmd.AddBound("@card", relation.Cardinality.ToString());
-            cmd.AddBound("@allowCross", relation.AllowCrossDataSource);
+            cmd.AddBound("@allowCross", IsPostgreSql ? relation.AllowCrossDataSource : (relation.AllowCrossDataSource ? 1 : 0));
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             await reader.ReadAsync(ct).ConfigureAwait(false);
             storedId = reader.GetString(0);
-            created = reader.GetBoolean(1);
+            created = IsPostgreSql ? reader.GetBoolean(1) : string.Equals(reader.GetString(1), "INSERT", StringComparison.OrdinalIgnoreCase);
         }
 
-        var keysChanged = await CatalogSqlCore.ReplaceRelationKeysAsync(conn, tx, storedId, created, parentKeys, childKeys, ct).ConfigureAwait(false);
+        var keysChanged = await ReplaceRelationKeysAsync(conn, tx, storedId, created, parentKeys, childKeys, ct).ConfigureAwait(false);
 
         ct.ThrowIfCancellationRequested();
         var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
@@ -846,16 +703,13 @@ RETURNING structure_version, content_version;";
     }
 
     /// <summary>Resolves an active table id from its identifier: zero or several matches throw (no LIMIT 1).</summary>
-    private static Task<string> ResolveActiveTableIdAsync(NpgsqlConnection conn, NpgsqlTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
-        => CatalogSqlCore.ResolveActiveTableIdAsync(conn, tx, CatalogSql.ResolveActiveTableIdSql, relationName, table, ct);
-
-    private static Task<List<string>> LoadColumnNamesAsync(NpgsqlConnection conn, NpgsqlTransaction tx, string tableId, CancellationToken ct)
-        => CatalogSqlCore.LoadColumnNamesAsync(conn, tx, tableId, ct);
+    private static Task<string> ResolveActiveTableIdAsync(DbConnection conn, DbTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
+        => ResolveActiveTableIdAsync(conn, tx, CatalogSql.ResolveActiveTableIdSql, relationName, table, ct);
 
     public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await CatalogSqlCore.GetDataOwnersForTableAsync(conn, CatalogSql.DataOwnersForTableSql, table, ct).ConfigureAwait(false);
+        return await GetDataOwnersForTableAsync(conn, CatalogSql.DataOwnersForTableSql, table, ct).ConfigureAwait(false);
     }
 
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
@@ -864,34 +718,10 @@ RETURNING structure_version, content_version;";
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct = default) =>
         IsAuthorizedApproverForTableInternalAsync(table, approverSid, itsmApproverAccount, ct);
 
-    /// <summary>Review R4-4 (rest): resolves SID, account or e-mail spellings to stable DATA_OWNERS ids.</summary>
-    private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await CatalogSqlCore.ResolveDataOwnerIdsInternalAsync(conn, CatalogSql.ResolveDataOwnerIdsSql, identifiers, ct).ConfigureAwait(false);
-    }
-
-    private async Task<IReadOnlyCollection<string>> ResolveRequesterOwnerIdsInternalAsync(ConsentRequest req, CancellationToken ct)
-    {
-        var identifiers = ConsentApprovalPolicy.IdentifierCandidates(req.RequesterSid.Value).ToList();
-        if (req.RequesterIdentifiers != null)
-        {
-            identifiers.AddRange(req.RequesterIdentifiers);
-        }
-
-        return await ResolveDataOwnerIdsInternalAsync(identifiers, ct).ConfigureAwait(false);
-    }
-
-    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await IsAuthorizedApproverForTableInternalAsync(conn, null, table, approverSid, itsmApproverAccount, ct).ConfigureAwait(false);
-    }
-
     public async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await CatalogSqlCore.GetTransitiveRolesAsync(conn, subjectSid, ct).ConfigureAwait(false);
+        return await GetTransitiveRolesAsync(conn, subjectSid, ct).ConfigureAwait(false);
     }
 
     public async Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default)
@@ -902,7 +732,7 @@ RETURNING structure_version, content_version;";
         {
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = tx;
-            cmd.CommandText = CatalogSql.InsertDelegationSql;
+            cmd.CommandText = InsertDelegationSql;
             cmd.AddBound("@id", delegation.Id.ToString());
             cmd.AddBound("@ownerId", delegation.DataOwnerId.ToString());
             cmd.AddBound("@delegateSid", delegation.DelegateSid.Value);
@@ -929,7 +759,7 @@ RETURNING structure_version, content_version;";
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
-            var updated = await CatalogSqlCore.UpdateRelationCrossDataSourceAsync(conn, tx, relationId, allowCrossDataSource, ct).ConfigureAwait(false);
+            var updated = await UpdateRelationCrossDataSourceAsync(conn, tx, relationId, IsPostgreSql ? allowCrossDataSource : (allowCrossDataSource ? 1 : 0), ct).ConfigureAwait(false);
             if (updated)
             {
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
@@ -951,30 +781,30 @@ RETURNING structure_version, content_version;";
     public async Task<Autheris.Application.Catalog.CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await CatalogSqlCore.GetCatalogVersionAsync(conn, CatalogSql.CatalogVersionSql, ct).ConfigureAwait(false);
+        return await GetCatalogVersionAsync(conn, CatalogVersionSql, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await CatalogSqlCore.GetAllRelationsAsync(conn, CatalogSql.AllRelationsSql, _logger, ct).ConfigureAwait(false);
+        return await GetAllRelationsAsync(conn, AllRelationsSql, _logger, ct).ConfigureAwait(false);
     }
 
     private async Task<Autheris.Application.Catalog.CatalogVersion> BumpCatalogVersionInternalAsync(
-        NpgsqlConnection conn,
-        NpgsqlTransaction tx,
+        DbConnection conn,
+        DbTransaction tx,
         long structureDelta,
         long contentDelta,
         CancellationToken ct)
     {
-        CatalogSqlCore.ValidateVersionDeltas(structureDelta, contentDelta);
+        ValidateVersionDeltas(structureDelta, contentDelta);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = CatalogSql.BumpCatalogVersionSql;
+        cmd.CommandText = BumpCatalogVersionSql;
         cmd.AddBound("@structureDelta", structureDelta);
         cmd.AddBound("@contentDelta", contentDelta);
-        cmd.Parameters.Add(new NpgsqlParameter("now", NpgsqlTypes.NpgsqlDbType.TimestampTz) { Value = DateTimeOffset.UtcNow });
+        cmd.AddBound("@now", TimeProvider.System.GetUtcNow(), System.Data.DbType.DateTimeOffset);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -984,6 +814,5 @@ RETURNING structure_version, content_version;";
         return new Autheris.Application.Catalog.CatalogVersion(1, 1);
     }
 
-    private Task PublishCatalogChangedEventAsync(Autheris.Application.Catalog.CatalogVersion version, CancellationToken ct)
-        => CatalogSqlCore.PublishCatalogChangedEventAsync(_eventBus, _logger, version, DateTimeOffset.UtcNow, ct);
+    private void LogCatalogNotice(string message) => _logger?.LogWarning("Catalog notice: {Notice}", message);
 }

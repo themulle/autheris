@@ -94,6 +94,11 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             return Array.Empty<TableMetadata>();
         }
 
+        if (principal.GetUserSid() is not { } userSid)
+        {
+            return Array.Empty<TableMetadata>();
+        }
+
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var tenantTables = allTables
             .Where(t => string.Equals(t.Identifier.Domain, tenantId, StringComparison.OrdinalIgnoreCase))
@@ -112,7 +117,6 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
 
         if (RebacTableGate.IsEnforcedOnQueryPaths(_options.Value))
         {
-            var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
             var filtered = new List<TableMetadata>(visible.Count);
             foreach (var table in visible)
             {
@@ -141,6 +145,8 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         CancellationToken ct = default)
         => VendCredentialAsync(tenantId, table.Schema, table.TableName, principal, ct);
 
+    private const string MissingSubjectReason = "missing subject identifier";
+
     public async ValueTask<IcebergLoadTableResponse> LoadTableAsync(
         string tenantId,
         string @namespace,
@@ -153,7 +159,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
         ArgumentNullException.ThrowIfNull(principal);
 
-        var actorSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
+        var target = $"{tenantId}.{@namespace}.{table}";
 
         if (principal.Identity?.IsAuthenticated != true)
         {
@@ -162,16 +168,14 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
                 LogSanitizer.Sanitize(@namespace),
                 LogSanitizer.Sanitize(table),
                 LogSanitizer.Sanitize(tenantId));
-            await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
-            {
-                TenantId = new TenantId(tenantId),
-                EventType = "Iceberg.LoadTable",
-                ActorSid = actorSid,
-                TargetTable = $"{tenantId}.{@namespace}.{table}",
-                Decision = "DENY",
-                DetailsJson = "{\"reason\":\"Unauthenticated caller\"}"
-            }, ct).ConfigureAwait(false);
+            await AuditDenyAsync("Iceberg.LoadTable", tenantId, principal, target, "Unauthenticated caller", ct).ConfigureAwait(false);
             throw new SecurityException($"Unauthorized access to table '{@namespace}.{table}'.");
+        }
+
+        if (principal.GetUserSid() is not { } actorSid)
+        {
+            await AuditDenyAsync("Iceberg.LoadTable", tenantId, principal, target, MissingSubjectReason, ct).ConfigureAwait(false);
+            throw new SecurityException(MissingSubjectReason);
         }
 
         TableMetadata tableMeta;
@@ -181,15 +185,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         }
         catch (SecurityException ex)
         {
-            await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
-            {
-                TenantId = new TenantId(tenantId),
-                EventType = "Iceberg.LoadTable",
-                ActorSid = actorSid,
-                TargetTable = $"{tenantId}.{@namespace}.{table}",
-                Decision = "DENY",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = ex.Message })
-            }, ct).ConfigureAwait(false);
+            await AuditDenyAsync("Iceberg.LoadTable", tenantId, principal, target, ex.Message, ct).ConfigureAwait(false);
             throw;
         }
 
@@ -231,22 +227,31 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
         ArgumentNullException.ThrowIfNull(principal);
 
+        var target = $"{tenantId}.{@namespace}.{table}";
+
         if (principal.Identity?.IsAuthenticated != true)
         {
+            await AuditDenyAsync("Iceberg.VendCredential", tenantId, principal, target, "Unauthenticated caller", ct).ConfigureAwait(false);
             throw new SecurityException($"Unauthorized access to table '{@namespace}.{table}'.");
         }
 
-        await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, AccessOperation.VendCredentials, ct).ConfigureAwait(false);
-
-        await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
+        if (principal.GetUserSid() is null)
         {
-            TenantId = new TenantId(tenantId),
-            EventType = "Iceberg.VendCredential",
-            ActorSid = principal.GetUserSid() ?? new Sid("anonymous"),
-            TargetTable = $"{tenantId}.{@namespace}.{table}",
-            Decision = "DENY",
-            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = "Direct credential vending not supported." })
-        }, ct).ConfigureAwait(false);
+            await AuditDenyAsync("Iceberg.VendCredential", tenantId, principal, target, MissingSubjectReason, ct).ConfigureAwait(false);
+            throw new SecurityException(MissingSubjectReason);
+        }
+
+        try
+        {
+            await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, AccessOperation.VendCredentials, ct).ConfigureAwait(false);
+        }
+        catch (SecurityException ex)
+        {
+            await AuditDenyAsync("Iceberg.VendCredential", tenantId, principal, target, ex.Message, ct).ConfigureAwait(false);
+            throw;
+        }
+
+        await AuditDenyAsync("Iceberg.VendCredential", tenantId, principal, target, "Direct credential vending not supported.", ct).ConfigureAwait(false);
 
         throw new NotSupportedException("Direct storage STS/SAS credential vending is not supported; access lakehouse datasets via governed SQL endpoints.");
     }
@@ -278,6 +283,13 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             throw new SecurityException(reason);
         }
 
+        // The catalog path cannot enforce row filters or column restrictions; deny rather than ignore them.
+        if (!string.IsNullOrWhiteSpace(decision.RowFilterSql)
+            || decision.ColumnAccess.Values.Any(level => level != ColumnAccessLevel.Clear))
+        {
+            throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
+        }
+
         if (tableMeta == null || !tableMeta.Table.IsActive)
         {
             throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
@@ -285,6 +297,23 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
 
         return tableMeta;
     }
+
+    private Task AuditDenyAsync(
+        string eventType,
+        string tenantId,
+        ClaimsPrincipal principal,
+        string target,
+        string reason,
+        CancellationToken ct) =>
+        _auditRepository.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = new TenantId(tenantId),
+            EventType = eventType,
+            ActorSid = principal.GetUserSid() ?? new Sid("anonymous"),
+            TargetTable = target,
+            Decision = "DENY",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason })
+        }, ct);
 
     private async ValueTask<IcebergTableMetadata?> LoadDeclaredColumnMetadataAsync(
         TableMetadata tableMeta,

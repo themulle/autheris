@@ -15,6 +15,9 @@ public static class TokenAccessScope
     public const string ReadOnlyValue = "read";
     public const string Issuer = "Autheris:TokenAccessScope";
 
+    /// <summary>Capability scope a token must carry for DML (read from validated claims only); it is not a data scope.</summary>
+    public const string WriteScope = "Sql.Write";
+
     private static readonly string[] ScopeClaimTypes =
     [
         "scp",
@@ -33,6 +36,9 @@ public static class TokenAccessScope
         var bareTarget = ScopeNames.ToBareName(scope.Trim());
         return GetScopes(principal).Any(s => string.Equals(ScopeNames.ToBareName(s), bareTarget, StringComparison.OrdinalIgnoreCase));
     }
+
+    private static bool IsWriteScope(string scope) =>
+        string.Equals(ScopeNames.ToBareName(scope), WriteScope, StringComparison.OrdinalIgnoreCase);
 
     public static void MarkReadOnly(ClaimsIdentity identity)
     {
@@ -56,7 +62,7 @@ public static class TokenAccessScope
     public static IReadOnlySet<string> GetScopeSet(ClaimsPrincipal? principal)
     {
         if (principal == null) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        return new HashSet<string>(GetScopes(principal), StringComparer.OrdinalIgnoreCase);
+        return WithoutWriteScope(new HashSet<string>(GetScopes(principal), StringComparer.OrdinalIgnoreCase));
     }
 
     public static IReadOnlySet<string> GetScopeSet(IEnumerable<Claim>? claims)
@@ -75,6 +81,13 @@ public static class TokenAccessScope
                 }
             }
         }
-        return set;
+        return WithoutWriteScope(set);
+    }
+
+    // Fail closed: filtering must never turn a delegated (non-empty) set into an empty, "unrestricted" one.
+    private static HashSet<string> WithoutWriteScope(HashSet<string> set)
+    {
+        var filtered = new HashSet<string>(set.Where(s => !IsWriteScope(s)), StringComparer.OrdinalIgnoreCase);
+        return filtered.Count == 0 ? set : filtered;
     }
 }

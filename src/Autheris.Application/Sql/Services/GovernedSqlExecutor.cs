@@ -64,6 +64,7 @@ public sealed partial class GovernedSqlExecutor
     private readonly IProviderExecutionGuard _executionGuard;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec _pageTokenCodec;
+    private readonly IKeyVaultSecretProvider? _secrets;
 
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
@@ -89,6 +90,7 @@ public sealed partial class GovernedSqlExecutor
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _connectionFactory = connectionFactory;
         _environment = environment;
+        _secrets = secretProvider;
         _logger = logger;
         _concurrencyGate = concurrencyGate;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
@@ -439,6 +441,8 @@ public sealed partial class GovernedSqlExecutor
 
             admission ??= await AdmitCostAsync(request, user, rewrite.Metadata, ct).ConfigureAwait(false);
 
+            var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
+
             if (!dmlContext.IsDml)
             {
                 var (redactedOriginalSql, originalSqlHash) = _digester.Anonymize(request.Sql);
@@ -459,6 +463,10 @@ public sealed partial class GovernedSqlExecutor
                         ["tier"] = admission.Policy.Tier.ToString()
                     };
                 }
+                if (connOptions?.Databricks is { } db)
+                {
+                    AddDatabricksAuditFields(fields, db, tenantId, _secrets, _environment, _logger);
+                }
                 AddCallerAttributeAuditFields(fields, rewrite, compiled);
                 AddCompiledAuditFields(fields, compiled, clientValues);
                 AddKeySetAuditFields(fields, rewrite);
@@ -474,9 +482,7 @@ public sealed partial class GovernedSqlExecutor
                 }, ct).ConfigureAwait(false);
             }
 
-        var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
-
-        if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
+        if (connOptions == null || (string.IsNullOrWhiteSpace(connOptions.ConnectionString) && !DataSourceProvider.Is(connOptions.Provider, DatabaseDialect.Databricks)) || _connectionFactory == null)
         {
             bool isDev = _environment != null &&
                          string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
