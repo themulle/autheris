@@ -28,8 +28,17 @@ public sealed class RoleResolverCache : IRoleResolverCache
         _hmacKey = hmacKey ?? RandomNumberGenerator.GetBytes(32);
     }
 
+    private static bool IsWithinBounds(string realmId, string userKey) =>
+        !string.IsNullOrEmpty(realmId) && !string.IsNullOrEmpty(userKey)
+        && realmId.Length <= IdentityGroupsChangedChannel.MaxKeyLength && userKey.Length <= IdentityGroupsChangedChannel.MaxKeyLength;
+
     public ValueTask<RoleResolution?> GetAsync(string realmId, string userKey, CancellationToken ct = default)
     {
+        if (!IsWithinBounds(realmId, userKey))
+        {
+            return ValueTask.FromResult<RoleResolution?>(null);
+        }
+
         var key = (realmId, userKey);
         if (_l1Cache.TryGet(key, out var resolution))
         {
@@ -48,6 +57,12 @@ public sealed class RoleResolverCache : IRoleResolverCache
     public ValueTask SetAsync(string realmId, string userKey, RoleResolution resolution, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(resolution);
+
+        // Over-long or empty keys are never cached (bounded key space; nothing to log raw).
+        if (!IsWithinBounds(realmId, userKey) || resolution.IsDegraded)
+        {
+            return ValueTask.CompletedTask;
+        }
 
         var key = (realmId, userKey);
         _l1Cache.AddOrUpdate(key, resolution);

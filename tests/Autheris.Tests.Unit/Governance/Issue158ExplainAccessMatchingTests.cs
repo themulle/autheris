@@ -29,8 +29,8 @@ public sealed class Issue158ExplainAccessMatchingTests
 {
     private const string RoleA = "role-analyst";
     private const string RoleB = "role-FOREIGN-secret";
-    private const string GroupMember = "S-1-GRP-MEMBER";
-    private const string GroupForeign = "S-1-GRP-FOREIGN";
+    private const string GroupMember = "S-1-5-21-1-2-3-1104";
+    private const string GroupForeign = "S-1-5-21-1-2-3-1105";
     private const string LinkedSid = "S-1-LINKED";
 
     private static readonly DateTimeOffset Start = DateTimeOffset.UtcNow;
@@ -69,7 +69,7 @@ public sealed class Issue158ExplainAccessMatchingTests
     {
         var claims = new List<Claim> { new(ClaimTypes.PrimarySid, UserSid), new("tenant_id", Tenant) };
         claims.AddRange((roles ?? []).Select(r => new Claim(ClaimTypes.Role, r)));
-        claims.AddRange((groups ?? []).Select(g => new Claim(ClaimTypes.GroupSid, g)));
+        claims.AddRange((groups ?? []).Select(g => Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g)));
         claims.AddRange((linked ?? []).Select(l => new Claim("oid", l)));
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "MCP"));
     }

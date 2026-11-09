@@ -72,13 +72,7 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
         var auth = db.Auth;
         if (auth.Mode == DatabricksAuthMode.Pat)
         {
-            if (_environment?.IsDevelopment() == false)
-            {
-                throw new DatabricksProviderException(DatabricksErrorCodes.Configuration, "Auth.Mode Pat is allowed in Development only.");
-            }
-
-            return SecretReferenceResolver.Resolve(_secrets, auth.PatRef, _environment, true, _logger, "Databricks PAT")
-                   ?? throw new DatabricksProviderException(DatabricksErrorCodes.Configuration, "The Databricks PAT reference is missing.");
+            return AcquirePatToken(db, context);
         }
 
         if (auth.Mode == DatabricksAuthMode.OAuthObo)
@@ -87,7 +81,57 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
         }
 
         // Default: OAuthM2M
-        return await AcquireM2MTokenAsync(db, ct).ConfigureAwait(false);
+        return await AcquireM2MTokenAsync(db, context, ct).ConfigureAwait(false);
+    }
+
+    internal static (string? ClientId, string SecretRef, string PrincipalId) ResolvePrincipal(DatabricksDataSourceOptions db, string? tenantId)
+    {
+        var auth = db.Auth;
+        if (!string.IsNullOrWhiteSpace(tenantId) && auth.Tenants.TryGetValue(tenantId, out var tenantPrincipal))
+        {
+            if (auth.Mode == DatabricksAuthMode.Pat)
+            {
+                var patRef = tenantPrincipal.PatRef ?? string.Empty;
+                return (null, patRef, patRef);
+            }
+
+            var clientId = tenantPrincipal.ClientId ?? string.Empty;
+            var clientSecretRef = tenantPrincipal.ClientSecretRef ?? string.Empty;
+            return (clientId, clientSecretRef, clientId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(tenantId) && auth.Tenants.Count > 0 && !auth.FallbackToGlobalPrincipal)
+        {
+            throw new DatabricksProviderException(DatabricksErrorCodes.Configuration, "No Databricks principal configured for the tenant.");
+        }
+
+        if (auth.Mode == DatabricksAuthMode.Pat)
+        {
+            var patRef = auth.PatRef ?? string.Empty;
+            return (null, patRef, patRef);
+        }
+
+        var globalClientId = auth.ClientId ?? string.Empty;
+        var globalSecretRef = auth.ClientSecretRef ?? string.Empty;
+        return (globalClientId, globalSecretRef, globalClientId);
+    }
+
+    private string AcquirePatToken(DatabricksDataSourceOptions db, DelegationContext? context)
+    {
+        var tenant = context?.TenantId?.Value;
+        var (_, secretRef, principalId) = ResolvePrincipal(db, tenant);
+        var now = _time.GetUtcNow();
+
+        if (_tokenCache.TryGet(db.Host, tenant, DatabricksAuthMode.Pat, principalId, string.Empty, now, out var cached))
+        {
+            return cached;
+        }
+
+        var pat = SecretReferenceResolver.Resolve(_secrets, secretRef, _environment, allowPlaintextInDevelopment: false, _logger, "Databricks PAT")
+               ?? throw new DatabricksProviderException(DatabricksErrorCodes.Configuration, "The Databricks PAT reference is missing.");
+
+        _tokenCache.Set(db.Host, tenant, DatabricksAuthMode.Pat, principalId, string.Empty, pat, now.AddHours(1));
+        return pat;
     }
 
     public Task<string> GetCredentialAsync(string dataSourceName, DelegationContext context, CancellationToken ct)
@@ -137,8 +181,16 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
         try
         {
             var auth = db?.Auth;
-            if (auth is null || auth.Mode == DatabricksAuthMode.Pat)
+            if (auth is null)
             {
+                return;
+            }
+
+            var tenant = context?.TenantId?.Value;
+            if (auth.Mode == DatabricksAuthMode.Pat)
+            {
+                var (_, _, principalId) = ResolvePrincipal(db!, tenant);
+                _tokenCache.Remove(db!.Host, tenant, DatabricksAuthMode.Pat, principalId, string.Empty);
                 return;
             }
 
@@ -151,15 +203,31 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
                     return;
                 }
 
-                _tokenCache.Remove(db!.Host, obo.ClientId, hash);
+                _tokenCache.Remove(db!.Host, tenant, DatabricksAuthMode.OAuthObo, obo.ClientId, hash);
                 return;
             }
 
-            _tokenCache.Remove(db!.Host, auth.ClientId ?? string.Empty, string.Empty);
+            var (_, _, m2mPrincipalId) = ResolvePrincipal(db!, tenant);
+            _tokenCache.Remove(db!.Host, tenant, DatabricksAuthMode.OAuthM2M, m2mPrincipalId, string.Empty);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Eviction is best effort; the original 401/403 is what propagates.
+        }
+    }
+
+    /// <inheritdoc />
+    public void InvalidateSecret(DatabricksDataSourceOptions db, string? tenantId = null)
+    {
+        try
+        {
+            if (db is not null)
+            {
+                _tokenCache.Evict(db.Host, tenantId);
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
         }
     }
 
@@ -205,12 +273,13 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
 
         // Partition cache by SHA-256 hash of caller assertion
         var assertionHash = HashAssertion(rawToken);
-        if (_tokenCache.TryGet(db.Host, obo.ClientId, assertionHash, now, out var cached))
+        var tenant = context?.TenantId?.Value;
+        if (_tokenCache.TryGet(db.Host, tenant, DatabricksAuthMode.OAuthObo, obo.ClientId, assertionHash, now, out var cached))
         {
             return cached;
         }
 
-        var secret = SecretReferenceResolver.Resolve(_secrets, obo.ClientSecretRef, _environment, true, _logger, "Databricks OBO client secret");
+        var secret = SecretReferenceResolver.Resolve(_secrets, obo.ClientSecretRef, _environment, allowPlaintextInDevelopment: false, _logger, "Databricks OBO client secret");
         if (string.IsNullOrWhiteSpace(secret) && string.IsNullOrWhiteSpace(obo.ClientCertificateRef))
         {
             throw new DatabricksProviderException(
@@ -221,8 +290,8 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
         string authority = obo.Authority ?? string.Empty;
         if (string.IsNullOrWhiteSpace(authority))
         {
-            var tenant = !string.IsNullOrWhiteSpace(obo.TenantId) ? obo.TenantId : "common";
-            authority = $"https://login.microsoftonline.com/{tenant}";
+            var oboTenant = !string.IsNullOrWhiteSpace(obo.TenantId) ? obo.TenantId : "common";
+            authority = $"https://login.microsoftonline.com/{oboTenant}";
         }
 
         authority = authority.TrimEnd('/');
@@ -295,33 +364,37 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
             effectiveExp = now.AddSeconds(30);
         }
 
-        _tokenCache.Set(db.Host, obo.ClientId, assertionHash, accessToken, effectiveExp);
+        _tokenCache.Set(db.Host, tenant, DatabricksAuthMode.OAuthObo, obo.ClientId, assertionHash, accessToken, effectiveExp);
         return accessToken;
     }
 
-    private async Task<string> AcquireM2MTokenAsync(DatabricksDataSourceOptions db, CancellationToken ct)
+    private async Task<string> AcquireM2MTokenAsync(DatabricksDataSourceOptions db, DelegationContext? context, CancellationToken ct)
     {
-        var auth = db.Auth;
-        if (string.IsNullOrWhiteSpace(auth.ClientId) || string.IsNullOrWhiteSpace(auth.ClientSecretRef))
+        var tenant = context?.TenantId?.Value;
+        var (clientId, secretRef, principalId) = ResolvePrincipal(db, tenant);
+        if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(secretRef))
         {
             throw new DatabricksProviderException(DatabricksErrorCodes.Configuration, "OAuthM2M requires Auth.ClientId and Auth.ClientSecretRef.");
         }
 
         var now = _time.GetUtcNow();
-        if (_tokenCache.TryGet(db.Host, auth.ClientId, string.Empty, now, out var cached))
+        if (_tokenCache.TryGet(db.Host, tenant, DatabricksAuthMode.OAuthM2M, principalId, string.Empty, now, out var cached))
         {
             return cached;
         }
 
-        var secret = SecretReferenceResolver.Resolve(_secrets, auth.ClientSecretRef, _environment, true, _logger, "Databricks client secret")
+        var secret = SecretReferenceResolver.Resolve(_secrets, secretRef, _environment, allowPlaintextInDevelopment: false, _logger, "Databricks client secret")
                      ?? throw new DatabricksProviderException(DatabricksErrorCodes.Configuration, "The Databricks client secret could not be resolved.");
 
-        // 09 item 3: the token endpoint is derived from the host, never configurable.
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"https://{db.Host}/oidc/v1/token"))
+        var endpoint = !string.IsNullOrWhiteSpace(db.Auth.TokenEndpoint)
+            ? new Uri(db.Auth.TokenEndpoint)
+            : new Uri($"https://{db.Host}/oidc/v1/token");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["grant_type"] = "client_credentials", ["scope"] = "all-apis" })
         };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{auth.ClientId}:{secret}")));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{secret}")));
 
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
@@ -338,7 +411,7 @@ public sealed class DatabricksOboTokenProvider : IDatabricksCredentialProvider, 
 
         var token = tokenEl.GetString()!;
         var lifetime = doc.RootElement.TryGetProperty("expires_in", out var exp) && exp.TryGetInt32(out var seconds) ? seconds : 300;
-        _tokenCache.Set(db.Host, auth.ClientId, string.Empty, token, now.AddSeconds(Math.Max(30, lifetime - 60)));
+        _tokenCache.Set(db.Host, tenant, DatabricksAuthMode.OAuthM2M, principalId, string.Empty, token, now.AddSeconds(Math.Max(30, lifetime - 60)));
         return token;
     }
 

@@ -22,6 +22,19 @@ public sealed class AuthenticationOptions
     /// <summary>The mode that applies to requests; an unset mode never selects ForwardAuth.</summary>
     public AuthenticationMode EffectiveMode => Mode == AuthenticationMode.Unset ? AuthenticationMode.Direct : Mode;
 
+    /// <summary>
+    /// Lifetime of a cached group resolution in minutes (1..60). Group changes at the directory become effective for a
+    /// cached user after at most this time; the invalidation event of a SCIM write only accelerates it. Token-borne groups
+    /// change at token refresh.
+    /// </summary>
+    public int GroupCacheTtlMinutes { get; init; } = 5;
+
+    /// <summary>
+    /// Upper bound of the group SIDs of one caller (1..4096). A larger set makes the resolution degraded with an empty
+    /// set (never truncated: a dropped group could carry a deny).
+    /// </summary>
+    public int MaxGroupSidsPerCaller { get; init; } = 1024;
+
     public BasicAuthOptions BasicAuth { get; init; } = new();
     public EntraIdAuthOptions EntraId { get; init; } = new();
     public AdfsAuthOptions Adfs { get; init; } = new();
@@ -271,6 +284,12 @@ public sealed class AdfsAuthOptions
     public string Audience { get; init; } = string.Empty;
     public bool RequireHttpsMetadata { get; init; } = true;
     public string RolesClaimType { get; init; } = "role";
+
+    /// <summary>
+    /// Client application ids (<c>appid</c>, <c>azp</c> or <c>client_id</c> claim) of the AD FS farm that may call the API.
+    /// Required outside Development when AD FS is enabled; a token from any other client is not authenticated.
+    /// </summary>
+    public List<string> AllowedClientIds { get; init; } = [];
 }
 
 /// <summary>

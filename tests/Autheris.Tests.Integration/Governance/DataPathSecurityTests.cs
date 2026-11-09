@@ -115,7 +115,7 @@ public class DataPathSecurityTests : IDisposable
         {
             foreach (var g in groupSids)
             {
-                claims.Add(new Claim(ClaimTypes.GroupSid, g.Value));
+                claims.Add(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g.Value));
             }
         }
 

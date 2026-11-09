@@ -215,4 +215,46 @@ public sealed class ForwardAuthHardeningTests
         result.Principal.Claims.ShouldNotContain(c => c.Type == "access_token" || c.Type == "authorization");
         result.Principal.GetUserSid()?.Value.ShouldBe("S-1-5-21-FORWARD-USR-alice");
     }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-05f")]
+    public async Task Header_groups_must_be_canonical_sids()
+    {
+        var forward = new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], TrustUpstreamSids = true };
+
+        var (valid, _) = await RunAsync(forward, h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "S-1-5-21-1-2-3-1105,S-1-5-21-1-2-3-1106";
+        });
+        var (prefixOnly, _) = await RunAsync(forward, h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "S-1-5-21-1-2-3-1105,S-1-5-finance";
+        });
+        var (pseudo, _) = await RunAsync(forward, h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "finance";
+        });
+
+        valid.Succeeded.ShouldBeTrue();
+        valid.Principal!.GetGroupSids().Select(g => g.Value).ShouldBe(["S-1-5-21-1-2-3-1105", "S-1-5-21-1-2-3-1106"], ignoreOrder: true);
+        prefixOnly.Succeeded.ShouldBeFalse();
+        pseudo.Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-05f")]
+    public async Task Header_groups_are_ignored_without_trust_upstream_sids()
+    {
+        var (result, _) = await RunAsync(Forward(), h =>
+        {
+            h["X-Forwarded-User"] = "alice";
+            h["X-Forwarded-Groups"] = "S-1-5-21-1-2-3-1105,finance";
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Principal!.GetGroupSids().ShouldBeEmpty();
+    }
 }

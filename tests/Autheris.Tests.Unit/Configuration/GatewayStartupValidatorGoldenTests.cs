@@ -161,6 +161,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("ProductionAuthentication_TruncatedHash", user("$argon2id$v=19$m=65536,t=3,p=1$AAAA$AAAA")),
             Prod("ProductionAuthentication_EntraIdIncomplete", ("Authentication:EntraId:Enabled", "true")),
             Prod("ProductionAuthentication_AdfsIncomplete", ("Authentication:Adfs:Enabled", "true")),
+            Prod("ProductionAuthentication_AdfsWithoutAllowedClients", ("Authentication:Adfs:Enabled", "true"), ("Authentication:Adfs:Authority", "https://adfs.example.org/adfs"), ("Authentication:Adfs:Audience", "urn:autheris")),
             Prod("ProductionAuthentication_WellFormedHashAccepted", user(Hash)),
 
             // 18 ProductionStorageAndAudit

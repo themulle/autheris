@@ -155,7 +155,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
         var c = host.CreateClient();
         c.DefaultRequestHeaders.Add("X-Test-User-Sid", sid);
         c.DefaultRequestHeaders.Add("X-Test-Roles", roles);
-        c.DefaultRequestHeaders.Add("X-Test-Group-Sids", "S-1-5-E2E-GROUP");
+        c.DefaultRequestHeaders.Add("X-Test-Group-Sids", "S-1-5-21-1-2-3-9001");
         c.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
         return c;
     }
