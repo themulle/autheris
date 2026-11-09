@@ -135,6 +135,36 @@ public sealed class MetadataGuardedConnectionTests
     }
 
     [Fact]
+    public async Task SEC_SIMPL_141_Suppress_AllowsMetadataQueriesInsideScopeOnly()
+    {
+        var inner = new CountingConnection();
+        await using var connection = new MetadataGuardedConnection(inner, DatabaseDialect.PostgreSql);
+        await using var command = connection.CreateCommand();
+        command.CommandText = Catalog;
+
+        using (SourceMetadataGuard.Suppress())
+        {
+            await command.ExecuteScalarAsync();
+            inner.Executions.ShouldBe(1);
+        }
+
+        // Outside suppression, guard is active again
+        await Should.ThrowAsync<SourceMetadataAccessDeniedException>(() => command.ExecuteScalarAsync());
+        inner.Executions.ShouldBe(1);
+    }
+
+    [Fact]
+    public void SEC_SIMPL_141_OracleCommand_ExposesBindByName()
+    {
+        var inner = new FakeOracleCommand();
+        var guardedConn = new MetadataGuardedConnection(new CountingConnection(), DatabaseDialect.Oracle);
+        var guardedCmd = new MetadataGuardedCommand(inner, guardedConn);
+
+        OracleBindByName.Enable(guardedCmd);
+        guardedCmd.BindByName.ShouldBeTrue();
+    }
+
+    [Fact]
     public void PostgreSql_ConnectionString_UsesNoTypeLoading()
     {
         var connectionString = SqlConnectionFactory.WithNoTypeLoading("Host=h;Database=d;Username=u");
@@ -189,5 +219,25 @@ public sealed class MetadataGuardedConnectionTests
         public override int ExecuteNonQuery() => owner.Executions++;
         public override object? ExecuteScalar() { owner.Executions++; return 1L; }
         protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) { owner.Executions++; throw new NotSupportedException(); }
+    }
+
+    private sealed class FakeOracleCommand : DbCommand
+    {
+        public bool BindByName { get; set; }
+        [AllowNull]
+        public override string CommandText { get; set; } = string.Empty;
+        public override int CommandTimeout { get; set; }
+        public override CommandType CommandType { get; set; }
+        public override bool DesignTimeVisible { get; set; }
+        public override UpdateRowSource UpdatedRowSource { get; set; }
+        protected override DbConnection? DbConnection { get; set; }
+        protected override DbParameterCollection DbParameterCollection => throw new NotSupportedException();
+        protected override DbTransaction? DbTransaction { get; set; }
+        public override void Cancel() { }
+        public override void Prepare() { }
+        protected override DbParameter CreateDbParameter() => throw new NotSupportedException();
+        public override int ExecuteNonQuery() => 0;
+        public override object? ExecuteScalar() => null;
+        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => throw new NotSupportedException();
     }
 }

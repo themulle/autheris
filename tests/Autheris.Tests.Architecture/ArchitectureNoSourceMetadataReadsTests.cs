@@ -5,7 +5,7 @@ using Xunit;
 namespace Autheris.Tests.Architecture;
 
 /// <summary>
-/// Autheris reads data from data sources and never their metadata. Production code does not send a statement that reads a
+/// Issue #94 (SEC-94, SEC-94-10, WP-SIMPL-44): Autheris reads data from data sources and never their metadata. Production code does not send a statement that reads a
 /// schema or system catalog (information_schema, sys.*, metadata functions, pg_*, Oracle dictionary views, SHOW/DESCRIBE) to a
 /// source, so the source login needs <c>SELECT</c> on the governed tables and nothing else. Column types, keys and indexes come
 /// from the declared catalog. The runtime guard (<c>SourceMetadataGuard</c>) is the second line of defence.

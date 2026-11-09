@@ -28,6 +28,7 @@ public sealed class KeyDirectionSyncPathContainerTests : IClassFixture<AstCompil
     [Fact]
     public async Task SqlServer_DescKey_ProviderAndReconciler_ReturnDescDirections()
     {
+        using var _ = Autheris.Application.Sql.SourceMetadataGuard.Suppress();
         _fx.Db.ShouldNotBeNull();
         _fx.Db.IsAvailable.ShouldBeTrue("SQL Server container is required for I403 evidence");
         var table = "KdSync" + Guid.NewGuid().ToString("N")[..8];

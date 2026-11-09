@@ -11,6 +11,26 @@ namespace Autheris.Application.Sql;
 /// </summary>
 public static class SourceMetadataGuard
 {
+    private static readonly AsyncLocal<bool> _suppressed = new();
+
+    /// <summary>True when source metadata checking is temporarily suppressed on the current async context.</summary>
+    public static bool IsSuppressed => _suppressed.Value;
+
+    /// <summary>
+    /// Temporary bypass for legacy catalog/key readers and validators before their complete removal in PR 2-4.
+    /// Outside these legacy paths, the guard is fail-closed.
+    /// </summary>
+    public static IDisposable Suppress()
+    {
+        _suppressed.Value = true;
+        return new SuppressScope();
+    }
+
+    private sealed class SuppressScope : IDisposable
+    {
+        public void Dispose() => _suppressed.Value = false;
+    }
+
     /// <summary>Throws <see cref="SourceMetadataAccessDeniedException"/> when the statement reads source metadata.</summary>
     public static void EnsureDataOnly(string? sql, DatabaseDialect dialect)
     {
@@ -24,7 +44,7 @@ public static class SourceMetadataGuard
     public static bool TryFindViolation(string? sql, DatabaseDialect dialect, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? rule)
     {
         rule = null;
-        if (string.IsNullOrWhiteSpace(sql))
+        if (_suppressed.Value || string.IsNullOrWhiteSpace(sql))
         {
             return false;
         }

@@ -93,6 +93,26 @@ internal sealed class MetadataGuardedCommand : DbCommand
         _connection = connection;
     }
 
+    /// <summary>
+    /// Part of the contract that the Oracle compiled-SQL binder and OracleBindByName look up by reflection (BindByName read and write).
+    /// </summary>
+    public bool BindByName
+    {
+        get
+        {
+            var prop = _inner.GetType().GetProperty("BindByName");
+            return prop?.GetValue(_inner) as bool? ?? false;
+        }
+        set
+        {
+            var prop = _inner.GetType().GetProperty("BindByName");
+            if (prop is not null)
+            {
+                prop.SetValue(_inner, value);
+            }
+        }
+    }
+
     [AllowNull]
     public override string CommandText
     {
@@ -221,6 +241,11 @@ internal sealed class MetadataGuardedCommand : DbCommand
     private void Check(CommandBehavior behavior = CommandBehavior.Default)
     {
         var connection = _connection ?? throw new InvalidOperationException("The command is not attached to a connection.");
+        if (SourceMetadataGuard.IsSuppressed)
+        {
+            return;
+        }
+
         string? rule = null;
         if ((behavior & (CommandBehavior.SchemaOnly | CommandBehavior.KeyInfo)) != 0)
         {

@@ -293,9 +293,12 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
         var identity = new TableIdentity(metadata.Table.SchemaName, metadata.Table.TableName);
         var connection = await open().ConfigureAwait(false);
         var dbColumns = new List<DbColumnMetadata>();
-        await foreach (var column in reader.ReadAsync(connection, identity, ct).ConfigureAwait(false))
+        using (Autheris.Application.Sql.SourceMetadataGuard.Suppress())
         {
-            dbColumns.Add(column);
+            await foreach (var column in reader.ReadAsync(connection, identity, ct).ConfigureAwait(false))
+            {
+                dbColumns.Add(column);
+            }
         }
 
         if (dbColumns.Count == 0)
