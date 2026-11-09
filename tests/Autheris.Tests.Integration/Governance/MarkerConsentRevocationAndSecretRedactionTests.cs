@@ -109,8 +109,8 @@ public sealed class MarkerConsentRevocationAndSecretRedactionTests : IDisposable
     [Fact]
     public void EX16_UnresolvedInstanceSecret_ExceptionMessage_DoesNotContainReference()
     {
-        const string reference = "itsm:webhook-secret:r4-instance-xyz";
-        var provider = CreateSecretProvider(Environments.Development);
+        const string reference = "instance:webhook-secret:r4-instance-xyz";
+        var provider = CreateSecretProvider(Environments.Production);
 
         var ex = Should.Throw<InvalidOperationException>(() => provider.GetSecretBytes(reference));
 
