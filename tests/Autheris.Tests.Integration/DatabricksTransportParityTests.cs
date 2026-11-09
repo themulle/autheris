@@ -626,7 +626,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             case "mcp":
             {
                 await using var mcp = await McpTestClient.ConnectAsync(client);
-                var (isError, payload) = await McpTestClient.CallJsonAsync(mcp, "query_dataset", new { dataset = "dbx.default.orders_ci" });
+                var (isError, payload) = await McpTestClient.CallJsonAsync(mcp, "query_sql", new { query = "SELECT id FROM dbx.default.orders_ci" });
                 isError.ShouldBeFalse(payload.ToString());
                 var items = payload.TryGetProperty("data", out var d) ? d :
                             payload.TryGetProperty("rows", out var r) ? r : default;
