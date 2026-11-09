@@ -41,6 +41,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Unit.Procedures;
 
 /// <summary>Review G4: E-3, D-1, D-2, D-3, D-4 and the related Low findings of the governed data paths.</summary>
 public sealed class GovernedDataPathsG4Tests
@@ -174,14 +175,18 @@ public sealed class GovernedDataPathsG4Tests
     // ------------------------------------------------------------------ D-2 (result column sources)
 
     private const string Header = """
-        -- @name get_orders
-        -- @procedure api.usp_GetOrders
-        -- @mode read
-        -- @param customer_id int required Customer number
-        -- @context tenant_id -> @TenantId
-        -- @context user_sid  -> @ActorSid
-        -- @result-table sales.orders
-        -- @result-column order_id clear
+        name: get_orders
+        procedure: api.usp_GetOrders
+        mode: read
+        parameters:
+          - name: customer_id
+            type: int
+            description: Customer number
+        context:
+          tenant_id: TenantId
+          user_sid: ActorSid
+        result_table: sales.orders
+        cleared_columns: [order_id]
         """;
 
     private sealed class ProcFixture
@@ -219,7 +224,7 @@ public sealed class GovernedDataPathsG4Tests
         bool markActive = true)
     {
         var f = new ProcFixture();
-        var def = ProcedureDefinitionParser.Parse(Header, "x", false, 60);
+        var def = TestProcedureYaml.Definition(Header, "x", false, 60);
         if (tweak != null) def = tweak(def);
         f.Registry.Register(def);
         if (markActive)

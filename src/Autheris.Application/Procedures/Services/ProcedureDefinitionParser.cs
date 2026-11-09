@@ -11,16 +11,11 @@ using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
 /// <summary>
-/// F-SQL-02: Parses the header comments of a <c>*.proc.sql</c> declaration. Only the header is evaluated; the gateway
-/// never executes any SQL text from the file, it calls the procedure via <c>CommandType.StoredProcedure</c>.
+/// Parses a <c>*.proc.yaml</c> procedure declaration. The gateway never executes SQL text from the file, it calls the
+/// procedure via <c>CommandType.StoredProcedure</c>.
 /// </summary>
 public static partial class ProcedureDefinitionParser
 {
-    private static readonly Regex HeaderRegex = new(
-        @"^[ \t]*--[ \t]*@([a-zA-Z0-9_-]+)(?:[:\s][ \t]*(.*))?$",
-        RegexOptions.Compiled | RegexOptions.Multiline,
-        TimeSpan.FromMilliseconds(100));
-
     private static readonly Regex EndpointNameRegex = new(
         @"\A[A-Za-z][A-Za-z0-9_-]{0,63}\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
@@ -35,241 +30,10 @@ public static partial class ProcedureDefinitionParser
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
-    private static readonly Regex ContextRegex = new(
-        @"\A(tenant_id|user_sid|purpose)[ \t]*->[ \t]*@?([A-Za-z_][A-Za-z0-9_]{0,127})\z",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase,
-        TimeSpan.FromMilliseconds(100));
-
-    private static readonly Regex ResultColumnRegex = new(
-        @"\A([A-Za-z_][A-Za-z0-9_]{0,127})[ \t]+clear\z",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase,
-        TimeSpan.FromMilliseconds(100));
-
     private static readonly Regex ResultTableRegex = new(
         @"\A[A-Za-z_][A-Za-z0-9_]{0,127}\.[A-Za-z_][A-Za-z0-9_]{0,127}\z",
         RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(100));
-
-    /// <summary>
-    /// Parses a declaration. Throws <see cref="FormatException"/> for anything that is not understood (fail-closed).
-    /// </summary>
-    /// <param name="content">File content.</param>
-    /// <param name="defaultName">Endpoint name if <c>@name</c> is missing.</param>
-    /// <param name="allowRlsNone">Whether <c>@rls none</c> is permitted (Development only).</param>
-    /// <param name="maxTimeoutSeconds">Upper bound for <c>@timeout</c>.</param>
-    public static ProcedureDefinition Parse(string content, string defaultName, bool allowRlsNone, int maxTimeoutSeconds)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(content);
-
-        string name = defaultName;
-        string summary = string.Empty;
-        string? procedure = null;
-        var mode = ProcedureMode.Read;
-        string? dataSource = null;
-        var rls = ProcedureRlsMode.SessionContext;
-        string? resultTable = null;
-        bool allowDynamicSql = false;
-        int timeout = 30;
-        var parameters = new List<ProcedureParameter>();
-        var contexts = new List<ProcedureContextBinding>();
-        var cleared = new List<string>();
-        var roles = new List<string>();
-        var validationMode = ProcedureValidationMode.Catalog;
-        var declaredOutputs = new List<string>();
-        var kind = ProcedureKind.Procedure;
-        var argumentOrder = new List<string>();
-        var rowScopeKey = new List<string>();
-
-        foreach (Match match in HeaderRegex.Matches(content))
-        {
-            string key = match.Groups[1].Value.ToLowerInvariant();
-            string val = StripTrailingComment(match.Groups[2].Success ? match.Groups[2].Value : string.Empty);
-
-            switch (key)
-            {
-                case "kind" or "type":
-                    kind = val.ToLowerInvariant() switch
-                    {
-                        "tvf" or "function" or "table-valued-function" => ProcedureKind.TableValuedFunction,
-                        "procedure" or "proc" or "sp" => ProcedureKind.Procedure,
-                        _ => throw new FormatException($"@kind must be 'procedure' or 'tvf', got '{val}'.")
-                    };
-                    break;
-                case "validation":
-                    validationMode = val.ToLowerInvariant() switch
-                    {
-                        "declared" => ProcedureValidationMode.Declared,
-                        "catalog" => ProcedureValidationMode.Catalog,
-                        _ => throw new FormatException($"@validation must be 'declared' or 'catalog', got '{val}'.")
-                    };
-                    break;
-                case "output" or "outputs":
-                    foreach (string output in val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    {
-                        declaredOutputs.Add(RequireIdentifier(output, "@output column"));
-                    }
-
-                    break;
-                case "name":
-                    name = val;
-                    break;
-                case "summary" or "description":
-                    summary = Sanitize(val);
-                    break;
-                case "procedure":
-                    procedure = val;
-                    break;
-                case "mode":
-                    mode = val.ToLowerInvariant() switch
-                    {
-                        "read" => ProcedureMode.Read,
-                        "write" => ProcedureMode.Write,
-                        _ => throw new FormatException($"@mode must be 'read' or 'write', got '{val}'.")
-                    };
-                    break;
-                case "datasource" or "data_source":
-                    dataSource = val;
-                    break;
-                case "rls":
-                    rls = val.ToLowerInvariant() switch
-                    {
-                        "session-context" => ProcedureRlsMode.SessionContext,
-                        "none" when allowRlsNone => ProcedureRlsMode.None,
-                        "none" => throw new FormatException("@rls none is only permitted in the Development environment."),
-                        _ => throw new FormatException($"@rls must be 'session-context' or 'none', got '{val}'.")
-                    };
-                    break;
-                case "result-table":
-                    if (!ResultTableRegex.IsMatch(val))
-                    {
-                        throw new FormatException("@result-table must have the form schema.table.");
-                    }
-
-                    resultTable = val;
-                    break;
-                case "row-scope-key":
-                    foreach (string keyColumn in val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    {
-                        rowScopeKey.Add(keyColumn);
-                    }
-
-                    break;
-                case "result-column":
-                    var rc = ResultColumnRegex.Match(val);
-                    if (!rc.Success)
-                    {
-                        throw new FormatException("@result-column must have the form '<column> clear'.");
-                    }
-
-                    cleared.Add(rc.Groups[1].Value);
-                    break;
-                case "param":
-                    var parsedParameter = ParseParameter(val);
-                    parameters.Add(parsedParameter);
-                    argumentOrder.Add(parsedParameter.Name);
-                    break;
-                case "context":
-                    var cm = ContextRegex.Match(val);
-                    if (!cm.Success)
-                    {
-                        throw new FormatException("@context must have the form 'tenant_id|user_sid|purpose -> @Parameter'.");
-                    }
-
-                    contexts.Add(new ProcedureContextBinding(
-                        cm.Groups[1].Value.ToLowerInvariant() switch
-                        {
-                            "tenant_id" => ProcedureContextKey.TenantId,
-                            "user_sid" => ProcedureContextKey.UserSid,
-                            _ => ProcedureContextKey.Purpose
-                        },
-                        cm.Groups[2].Value));
-                    argumentOrder.Add(cm.Groups[2].Value);
-                    break;
-                case "roles":
-                    var headerRoles = val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    if (headerRoles.Length == 0)
-                    {
-                        // Review R4-7: an empty @roles directive must not open the endpoint.
-                        throw new FormatException("@roles needs at least one role.");
-                    }
-
-                    roles.AddRange(headerRoles);
-                    break;
-                case "allow-dynamic-sql":
-                    allowDynamicSql = true;
-                    break;
-                case "approval":
-                    if (!string.Equals(val, "none", StringComparison.OrdinalIgnoreCase))
-                    {
-                        throw new FormatException("@approval four-eyes/hitl is not supported yet (write procedures are planned for phase 2).");
-                    }
-
-                    break;
-                case "timeout":
-                    if (!int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out timeout) || timeout < 1)
-                    {
-                        throw new FormatException("@timeout must be a positive integer (seconds).");
-                    }
-
-                    break;
-                default:
-                    throw new FormatException($"Unknown header '@{key}'.");
-            }
-        }
-
-        if (!EndpointNameRegex.IsMatch(name))
-        {
-            throw new FormatException("Endpoint name must match [A-Za-z][A-Za-z0-9_-]{0,63}.");
-        }
-
-        if (procedure == null || !ProcedureNameRegex.IsMatch(procedure))
-        {
-            throw new FormatException("@procedure is required and must have the form schema.name (no database, linked server or quoting).");
-        }
-
-        RejectReservedNames(parameters, contexts);
-
-        var duplicate = parameters.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
-        if (duplicate != null)
-        {
-            throw new FormatException($"Parameter '{duplicate.Key}' is declared more than once.");
-        }
-
-        var bound = contexts.Select(c => c.ParameterName).ToList();
-        if (bound.Distinct(StringComparer.OrdinalIgnoreCase).Count() != bound.Count ||
-            contexts.Select(c => c.Key).Distinct().Count() != contexts.Count)
-        {
-            throw new FormatException("Each context value and each procedure parameter can be bound only once.");
-        }
-
-        if (parameters.Any(p => bound.Contains(p.Name, StringComparer.OrdinalIgnoreCase)))
-        {
-            throw new FormatException("A parameter bound via @context must not also be declared as client @param.");
-        }
-
-        return new ProcedureDefinition(
-            Name: name,
-            Summary: summary,
-            ProcedureName: procedure,
-            Mode: mode,
-            DataSource: string.IsNullOrWhiteSpace(dataSource) ? null : dataSource,
-            Parameters: parameters,
-            ContextBindings: contexts,
-            RlsMode: rls,
-            ResultTable: resultTable,
-            ClearedResultColumns: cleared,
-            RequiredRoles: roles,
-            AllowDynamicSql: allowDynamicSql,
-            TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)),
-            ValidationMode: validationMode,
-            DeclaredOutputs: declaredOutputs,
-            Kind: kind)
-        {
-            ArgumentOrder = argumentOrder,
-            RowScopeKey = ValidateRowScopeKey(SplitRowScopeKey(rowScopeKey, out var scopeTableColumns), resultTable, validationMode, declaredOutputs),
-            RowScopeKeyTable = scopeTableColumns
-        };
-    }
 
     /// <summary>
     /// <c>limit</c> is the reserved row-limit input of the endpoint; no parameter or context binding may use
@@ -336,17 +100,6 @@ public static partial class ProcedureDefinitionParser
         return new ProcedureParameter(name, sqlType, clr, required, maxLength, desc);
     }
 
-    private static string StripTrailingComment(string value)
-    {
-        int idx = value.IndexOf(" --", StringComparison.Ordinal);
-        if (idx >= 0)
-        {
-            value = value[..idx];
-        }
-
-        return value.Trim();
-    }
-
     private static string Sanitize(string value)
     {
         var sb = new System.Text.StringBuilder(Math.Min(value.Length, 512));
@@ -364,7 +117,7 @@ public static partial class ProcedureDefinitionParser
     }
 
     /// <summary>
-    /// Contract-First: Parses a YAML declaration (*.proc.yaml / *.proc.yml). Like the header format it is fail-closed:
+    /// Contract-First: Parses a YAML declaration (*.proc.yaml / *.proc.yml). It is fail-closed:
     /// unknown keys, unknown context values and invalid identifiers raise <see cref="FormatException"/> (review P-4/P-5).
     /// </summary>
     public static ProcedureDefinition ParseYaml(string yamlContent, string defaultName, bool allowRlsNone, int maxTimeoutSeconds)
@@ -436,7 +189,7 @@ public static partial class ProcedureDefinitionParser
             var other => throw new FormatException($"kind must be 'procedure' or 'tvf', got '{other}'.")
         };
 
-        int timeout = model.TimeoutSeconds ?? model.Timeout ?? 30;
+        int timeout = model.Timeout ?? 30;
         if (timeout < 1)
         {
             throw new FormatException("timeout must be a positive integer (seconds).");
@@ -471,7 +224,7 @@ public static partial class ProcedureDefinitionParser
             }
         }
 
-        bool hasSeparateContext = model.Context is { Count: > 0 } || model.ContextBindings is { Count: > 0 };
+        bool hasSeparateContext = model.Context is { Count: > 0 };
         if (kind == ProcedureKind.TableValuedFunction && hasSeparateContext)
         {
             // Review P-2: function arguments are positional; their order must be explicit.
@@ -493,22 +246,7 @@ public static partial class ProcedureDefinitionParser
             }
         }
 
-        if (model.ContextBindings != null)
-        {
-            foreach (var cb in model.ContextBindings)
-            {
-                if (cb == null || string.IsNullOrWhiteSpace(cb.Key) || string.IsNullOrWhiteSpace(cb.Parameter))
-                {
-                    throw new FormatException("Every entry in 'context_bindings' needs 'key' and 'parameter'.");
-                }
-
-                string pName = RequireIdentifier(cb.Parameter.Trim().TrimStart('@'), "context parameter name");
-                contexts.Add(new ProcedureContextBinding(MapContextKey(cb.Key), pName));
-                argumentOrder.Add(pName);
-            }
-        }
-
-        var rawRoles = model.RequiredRoles ?? model.Roles;
+        var rawRoles = model.Roles;
         var roles = (rawRoles ?? [])
             .Where(r => !string.IsNullOrWhiteSpace(r))
             .Select(r => r.Trim())
@@ -517,7 +255,7 @@ public static partial class ProcedureDefinitionParser
         // authenticated user (omit the key for "any authenticated user").
         if (rawRoles != null && roles.Count == 0)
         {
-            throw new FormatException("'required_roles' is present but contains no role; remove the key or list at least one role.");
+            throw new FormatException("'roles' is present but contains no role; remove the key or list at least one role.");
         }
 
         var outputs = ParseYamlOutputs(model.Outputs, out var outputTypes, out var outputSources);
@@ -574,7 +312,6 @@ public static partial class ProcedureDefinitionParser
             ResultTable: resultTable,
             ClearedResultColumns: cleared,
             RequiredRoles: roles,
-            AllowDynamicSql: model.AllowDynamicSql,
             TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)),
             ValidationMode: validationMode,
             DeclaredOutputs: outputs,
@@ -905,19 +642,15 @@ public sealed class ProcedureYamlModel
     public string? Rls { get; set; }
     public string? ResultTable { get; set; }
     public int? Timeout { get; set; }
-    public int? TimeoutSeconds { get; set; }
-    public bool AllowDynamicSql { get; set; }
     public List<string>? Roles { get; set; }
-    public List<string>? RequiredRoles { get; set; }
     public List<ProcedureParameterYamlModel>? Parameters { get; set; }
     public Dictionary<string, string>? Context { get; set; }
-    public List<ProcedureContextYamlModel>? ContextBindings { get; set; }
     public List<object>? Outputs { get; set; }
     public List<string>? ClearedColumns { get; set; }
     /// <summary>A column name or a list of column names.</summary>
     public object? RowScopeKey { get; set; }
 
-    /// <summary>Declared business error map (YAML only; the SQL header format has no error codes).</summary>
+    /// <summary>Declared business error map .</summary>
     public List<ProcedureErrorCodeYamlModel>? ErrorCodes { get; set; }
 
     /// <summary>Explicit list of physical tables referenced by the procedure.</summary>
@@ -948,10 +681,4 @@ public sealed class ProcedureParameterYamlModel
     public bool? IsRequired { get; set; }
     public string? Description { get; set; }
     public string? Context { get; set; }
-}
-
-public sealed class ProcedureContextYamlModel
-{
-    public string Key { get; set; } = string.Empty;
-    public string Parameter { get; set; } = string.Empty;
 }

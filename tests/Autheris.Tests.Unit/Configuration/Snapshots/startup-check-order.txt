@@ -2,6 +2,7 @@ ObjectGraph
 OracleRuntime
 SqlServerWindowsAuth
 Databricks
+ProcedureDialectAdmission
 DefaultSchemas
 TenantCollisions
 WebhookSubscriptions

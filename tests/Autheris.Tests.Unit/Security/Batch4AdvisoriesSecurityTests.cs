@@ -126,7 +126,7 @@ public sealed class Batch4AdvisoriesSecurityTests
     public async Task GovernedProcedureExecution_EnforcesTransportGate()
     {
         var gate = Substitute.For<IDataSourceTransportGate>();
-        gate.EnsureCatalogSourceAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+        gate.EnsureCatalogSourcesAsync(Arg.Any<IEnumerable<string?>>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException(new TransportNotAllowedException("test_source", DataSourceTransportFlags.Rest)));
 
         var registry = Substitute.For<IProcedureRegistry>();
@@ -142,7 +142,6 @@ public sealed class Batch4AdvisoriesSecurityTests
             ResultTable: "dbo.orders",
             ClearedResultColumns: [],
             RequiredRoles: [],
-            AllowDynamicSql: false,
             TimeoutSeconds: 30);
 
         var validation = new ProcedureValidationResult(true, [], [], [], new Dictionary<string, string>(), null);

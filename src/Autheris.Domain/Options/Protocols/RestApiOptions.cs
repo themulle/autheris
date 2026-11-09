@@ -265,7 +265,7 @@ public sealed class ProcedureEndpointsOptions
 {
     public bool Enabled { get; init; } = false;
 
-    /// <summary>Directory containing <c>*.proc.sql</c> declaration files.</summary>
+    /// <summary>Directory containing <c>*.proc.yaml</c> and <c>*.proc.yml</c> declaration files.</summary>
     public string Directory { get; init; } = "procedures";
 
     /// <summary>Key in <c>DataSources.Connections</c> of the EXECUTE-only technical login.</summary>

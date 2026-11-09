@@ -1,6 +1,7 @@
 namespace Autheris.Infrastructure.Modules.Trust;
 
 using System;
+using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -73,6 +74,39 @@ public static class ManifestSignatureVerifier
             HashAlgorithmName.SHA256,
             DSASignatureFormat.Rfc3279DerSequence);
         return Convert.ToBase64String(sig);
+    }
+
+    /// <summary>
+    /// Verifies <paramref name="manifest"/> against the key of <paramref name="keyring"/> selected by the manifest
+    /// <c>keyId</c>. An empty keyring and a missing or unknown <c>keyId</c> are rejected.
+    /// </summary>
+    public static bool VerifyManifest(
+        ModuleManifest manifest,
+        IReadOnlyDictionary<string, ECDsa> keyring,
+        out string? failureReason)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(keyring);
+
+        if (keyring.Count == 0)
+        {
+            failureReason = "module signing keyring is empty: no trusted signing key is available";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(manifest.KeyId))
+        {
+            failureReason = "manifest has no keyId";
+            return false;
+        }
+
+        if (!keyring.TryGetValue(manifest.KeyId, out var publicKey))
+        {
+            failureReason = $"unknown or mismatched keyId '{manifest.KeyId}'";
+            return false;
+        }
+
+        return VerifyManifest(manifest, publicKey, out failureReason);
     }
 
     /// <summary>

@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Unit.Procedures;
 
 namespace Autheris.Tests.Unit;
 
@@ -20,10 +21,10 @@ namespace Autheris.Tests.Unit;
 public class ProcedureRowScopeTests
 {
     private const string Header = """
-        -- @name get_cranes
-        -- @procedure tem.usp_Cranes
-        -- @result-table md.crane
-        -- @row-scope-key serial_number
+        name: get_cranes
+        procedure: tem.usp_Cranes
+        result_table: md.crane
+        row_scope_key: serial_number
         """;
 
     private static readonly TenantId Tenant = new("tenant-a");
@@ -31,9 +32,9 @@ public class ProcedureRowScopeTests
     // ---------- parser ----------
 
     [Fact]
-    public void Parse_Header_ReadsCompositeKey()
+    public void Parse_Definition_ReadsCompositeKey()
     {
-        var def = ProcedureDefinitionParser.Parse(Header.Replace("serial_number", "client_id, serial_number"), "x", false, 60);
+        var def = TestProcedureYaml.Definition(Header.Replace("serial_number", "[client_id, serial_number]"), "x", false, 60);
         def.RowScopeKey.ShouldBe(["client_id", "serial_number"]);
     }
 
@@ -61,7 +62,7 @@ public class ProcedureRowScopeTests
     [Fact]
     public async Task Execute_MappedKey_ReadsResultColumnAndMatchesTableColumn()
     {
-        var f = Active(Header.Replace("-- @row-scope-key serial_number", "-- @row-scope-key serial=serial_number"));
+        var f = Active(Header.Replace("row_scope_key: serial_number", "row_scope_key: serial=serial_number"));
         f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
                 ["serial", "name"],
@@ -167,7 +168,7 @@ public class ProcedureRowScopeTests
         string rowFilter = "[autheris_target].[is_delivered] IS NULL")
     {
         var f = new Fixture();
-        var def = ProcedureDefinitionParser.Parse(header, "x", false, 60);
+        var def = TestProcedureYaml.Definition(header, "x", false, 60);
         f.Registry.Register(def);
         f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["serial_number", "name"], ["md.crane"], new Dictionary<string, string>()));
 
@@ -238,7 +239,7 @@ public class ProcedureRowScopeTests
     [Fact]
     public async Task Execute_CompositeKey_IsPassedInDeclaredOrder()
     {
-        var f = Active(Header.Replace("serial_number", "name, serial_number"));
+        var f = Active(Header.Replace("serial_number", "[name, serial_number]"));
         f.RowScope.GetAllowedKeysAsync(
                 Arg.Any<ProcedureDefinition>(), Arg.Any<TableMetadata>(), Arg.Any<TableAccessDecision>(), Arg.Any<IReadOnlyList<string>>(),
                 Arg.Any<IReadOnlyList<object?[]>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
@@ -253,7 +254,7 @@ public class ProcedureRowScopeTests
     [Fact]
     public async Task Execute_RowFilterWithoutScopeKey_StillDenies()
     {
-        var f = Active(Header.Replace("-- @row-scope-key serial_number", string.Empty));
+        var f = Active(Header.Replace("row_scope_key: serial_number", string.Empty));
 
         await Should.ThrowAsync<KeyNotFoundException>(() => f.Create().ExecuteAsync("get_cranes", null, User(), Tenant));
         await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);

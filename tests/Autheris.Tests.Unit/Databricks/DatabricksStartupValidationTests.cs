@@ -11,16 +11,52 @@ using static Autheris.Tests.Unit.Databricks.DatabricksTestSupport;
 public sealed class DatabricksStartupValidationTests
 {
     [Fact]
-    public void PatAuth_RejectedOutsideDevelopment_AtStartup()
+    public void PatAuth_WithSecretReference_AllowedInProduction_AtStartup()
     {
-        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDatabricks(Options(DatabricksAuthMode.Pat), Env("Production")))
-            .Message.ShouldContain("Pat");
+        Should.NotThrow(() => GatewayStartupValidator.ValidateDatabricks(Options(DatabricksAuthMode.Pat), Env("Production")));
     }
 
     [Fact]
     public void PatAuth_AllowedInDevelopment_AtStartup()
     {
         Should.NotThrow(() => GatewayStartupValidator.ValidateDatabricks(Options(DatabricksAuthMode.Pat), Env("Development")));
+    }
+
+    [Fact]
+    public void TokenEndpoint_OnAllowlistedAccountHost_Passes()
+    {
+        var options = new GatewayOptions
+        {
+            Databricks = new DatabricksOptions
+            {
+                AllowedAccountTokenHosts = ["accounts.azuredatabricks.net"]
+            },
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["dbx"] = new()
+                    {
+                        Provider = "databricks",
+                        CommandTimeoutSeconds = 30,
+                        Databricks = new DatabricksDataSourceOptions
+                        {
+                            Host = Host,
+                            WarehouseId = "wh-1",
+                            Auth = new DatabricksAuthOptions
+                            {
+                                Mode = DatabricksAuthMode.OAuthM2M,
+                                ClientId = "sp-id",
+                                ClientSecretRef = "kv://dbx-sp-secret",
+                                TokenEndpoint = "https://accounts.azuredatabricks.net/oidc/accounts/123/v1/token"
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        Should.NotThrow(() => GatewayStartupValidator.ValidateDatabricks(options, Env("Production")));
     }
 
     [Theory]
