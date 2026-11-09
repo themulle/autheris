@@ -119,7 +119,7 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
             var groups = groupSidsVal.ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             foreach (var g in groups)
             {
-                claims.Add(new Claim(ClaimTypes.GroupSid, g));
+                claims.Add(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g));
             }
         }
 

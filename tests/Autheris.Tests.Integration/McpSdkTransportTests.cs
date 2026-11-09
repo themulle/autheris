@@ -44,6 +44,7 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
                 b.UseSetting("Gateway:Authentication:Adfs:Enabled", "true");
                 b.UseSetting("Gateway:Authentication:Adfs:Authority", Authority);
                 b.UseSetting("Gateway:Authentication:Adfs:Audience", "api://autheris");
+                b.UseSetting("Gateway:Authentication:Adfs:AllowedClientIds:0", "autheris-test-client");
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
