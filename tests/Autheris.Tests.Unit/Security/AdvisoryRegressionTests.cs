@@ -292,4 +292,36 @@ public sealed partial class AdvisoryRegressionTests
         members.ShouldNotBeEmpty();
         members.ShouldAllBe(e => JsonDocument.Parse(e.DetailsJson!).RootElement.GetProperty("inDbMaskingExecuted").GetBoolean() == false);
     }
+
+    [Theory]
+    [InlineData("definition_connection_gated")]
+    [InlineData("definition_data_source_gated")]
+    [InlineData("table_source_gated")]
+    [InlineData("empty_table_source_still_gated")]
+    [InlineData("denied_source_never_reaches_invoker")]
+    public async Task Ghsa_92vp_pp52_regression(string bullet)
+    {
+        switch (bullet)
+        {
+            case "definition_connection_gated":
+                await Procedures.ProcedureTransportGateTests.AssertSourceDeniedBeforeInvokeAsync("definition_connection");
+                break;
+            case "definition_data_source_gated":
+                await Procedures.ProcedureTransportGateTests.AssertSourceDeniedBeforeInvokeAsync("definition_data_source");
+                break;
+            case "table_source_gated":
+                await Procedures.ProcedureTransportGateTests.AssertSourceDeniedBeforeInvokeAsync("table_source");
+                break;
+            case "empty_table_source_still_gated":
+                await Procedures.ProcedureTransportGateTests.AssertSourceDeniedBeforeInvokeAsync("empty_table_source_uses_domain");
+                await Procedures.ProcedureTransportGateTests.AssertEmptySourceNameStillGatedAsync();
+                break;
+            case "denied_source_never_reaches_invoker":
+                // Every denial case above asserts the invoker and the row-scope resolver were not called.
+                await Procedures.ProcedureTransportGateTests.AssertSourceDeniedBeforeInvokeAsync("table_source");
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(bullet));
+        }
+    }
 }

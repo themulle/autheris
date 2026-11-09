@@ -24,14 +24,16 @@ public sealed class ReadPathSwitches : IReadPathSwitches
     private readonly bool _query;
     private readonly bool _api;
     private readonly bool _access;
+    private readonly bool _procedures;
     private readonly FrozenSet<string> _disabledTools;
     private readonly ConcurrentDictionary<string, byte> _dropped = new(StringComparer.OrdinalIgnoreCase);
 
-    private ReadPathSwitches(bool restData, bool bulkStream, bool queryAnalysis, McpToolGroupOptions tools, IEnumerable<string> disabled)
+    private ReadPathSwitches(bool restData, bool bulkStream, bool queryAnalysis, bool procedures, McpToolGroupOptions tools, IEnumerable<string> disabled)
     {
         RestDataEndpointEnabled = restData;
         BulkStreamEnabled = bulkStream;
         QueryAnalysisEnabled = queryAnalysis;
+        _procedures = procedures;
         _catalog = tools.Catalog;
         _query = tools.Query;
         _api = tools.Api;
@@ -55,6 +57,7 @@ public sealed class ReadPathSwitches : IReadPathSwitches
             restData,
             bulkStream,
             queryAnalysis,
+            options.SqlEndpoints?.Procedures?.Enabled == true,
             mcp.Tools ?? new McpToolGroupOptions(),
             disabled);
     }
@@ -62,6 +65,7 @@ public sealed class ReadPathSwitches : IReadPathSwitches
     public bool RestDataEndpointEnabled { get; }
     public bool BulkStreamEnabled { get; }
     public bool QueryAnalysisEnabled { get; }
+    public bool ProceduresEnabled => _procedures;
 
     /// <summary>Number of remembered dropped names (test and diagnostics aid).</summary>
     public int DroppedCount => _dropped.Count;
@@ -79,6 +83,7 @@ public sealed class ReadPathSwitches : IReadPathSwitches
     {
         if (toolName is null) return false;
         var name = toolName.Trim();
+        if (!ProceduresEnabled && string.Equals(name, McpDatasetTools.CallProcedure, StringComparison.Ordinal)) return false;
         return !_disabledTools.Contains(name) && IsGroupEnabled(McpToolGroups.Of(name));
     }
 

@@ -19,6 +19,7 @@ public sealed class ReadPathSwitchesTests
     private static ReadPathSwitches From(McpToolGroupOptions? tools = null, string[]? disabled = null, bool restData = true) =>
         ReadPathSwitches.From(new GatewayOptions
         {
+            SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true } },
             Mcp = new McpOptions { Tools = tools ?? new McpToolGroupOptions(), DisabledTools = disabled?.ToList() },
             RestApi = new RestApiOptions { DataEndpoint = new RestDataEndpointOptions { Enabled = restData } }
         });

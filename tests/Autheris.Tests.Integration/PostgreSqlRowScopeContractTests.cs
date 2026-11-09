@@ -88,7 +88,7 @@ INSERT INTO md.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     };
 
     private static ProcedureDefinition Definition() =>
-        ProcedureDefinitionParser.Parse("-- @name p\n-- @procedure md.usp_P\n-- @result-table md.crane\n-- @row-scope-key serial_number", "x", false, 60)
+        ProcedureDefinitionParser.ParseYaml("name: p\nprocedure: md.usp_P\nresult_table: md.crane\nrow_scope_key: serial_number", "x", false, 60)
         with { DataSource = "erp" };
 
     private static TableAccessDecision Decision(string? filter) =>
