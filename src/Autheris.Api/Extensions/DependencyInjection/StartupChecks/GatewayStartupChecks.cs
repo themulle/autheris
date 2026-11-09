@@ -31,6 +31,7 @@ internal static class GatewayStartupChecks
         new("OracleRuntime", GatewayStartupChecks.OracleRuntime),
         new("SqlServerWindowsAuth", GatewayStartupChecks.SqlServerWindowsAuth),
         new("Databricks", GatewayStartupChecks.Databricks),
+        new("ProcedureDialectAdmission", ProcedureStartupChecks.DialectAdmission),
         new("DefaultSchemas", GatewayStartupChecks.DefaultSchemas),
         new("TenantCollisions", GatewayStartupChecks.TenantCollisions),
         new("WebhookSubscriptions", GatewayStartupChecks.WebhookSubscriptions),

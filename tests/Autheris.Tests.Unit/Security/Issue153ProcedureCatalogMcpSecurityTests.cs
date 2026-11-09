@@ -71,7 +71,6 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             ResultTable: resultTable,
             ClearedResultColumns: [],
             RequiredRoles: [],
-            AllowDynamicSql: false,
             TimeoutSeconds: 30)
         {
             Description = $"{name} description"
@@ -145,7 +144,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
         var executor = new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(),
             gatewayExec,
-            NullLogger<GatewayMcpQueryExecutor>.Instance,
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
             datasetCatalog: catalog);
 
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.DescribeDataset);

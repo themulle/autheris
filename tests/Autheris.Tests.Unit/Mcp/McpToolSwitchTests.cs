@@ -33,6 +33,7 @@ public sealed class McpToolSwitchTests
     private static GatewayOptions Opts(McpToolGroupOptions? tools = null, string[]? disabled = null, string[]? allowed = null, bool bypass = false) =>
         new()
         {
+            SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true } },
             Mcp = new McpOptions { Tools = tools ?? new McpToolGroupOptions(), DisabledTools = disabled?.ToList(), AllowedOperations = [.. allowed ?? []] },
             Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = bypass }
         };

@@ -230,7 +230,7 @@ public sealed class UniversalDocStoreTests : IDisposable
         }
         """;
 
-        var depositJson = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, depositArgs);
+        var depositJson = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, depositArgs, DocSession("ClusterAdmin"));
         depositJson.ShouldContain("\"success\": true");
 
         // 2. List via MCP execution handler

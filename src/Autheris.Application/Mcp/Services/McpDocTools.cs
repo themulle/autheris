@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Docs.Interfaces;
+using Autheris.Application.Docs.Services;
 using Autheris.Domain.Model;
 
 public static class McpDocTools
@@ -42,8 +43,23 @@ public static class McpDocTools
     /// <summary>
     /// Official documentation plus the documents of the session's tenant; official documentation only without a session.
     /// </summary>
-    private static DocAccessScope ScopeOf(McpSessionContext? sessionContext) =>
-        sessionContext is null ? DocAccessScope.OfficialOnly : DocAccessScope.ForTenant(sessionContext.TenantId);
+    private static DocAccessScope ScopeOf(McpSessionContext? sessionContext)
+    {
+        if (sessionContext is null)
+        {
+            return DocAccessScope.OfficialOnly;
+        }
+
+        var caller = new DocCaller(
+            IsCanonicalClusterAdmin: IsClusterAdmin(sessionContext),
+            IsGovernanceAdmin: (sessionContext.Roles ?? []).Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase),
+            TenantId: sessionContext.TenantId,
+            AuthorSid: !string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId,
+            HasSession: true,
+            IsReadOnlySession: sessionContext.IsReadOnly);
+
+        return DocAccessPolicy.ResolveReader(caller);
+    }
 
     private static bool IsClusterAdmin(McpSessionContext sessionContext) =>
         (sessionContext.Roles ?? []).Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase);
@@ -489,19 +505,6 @@ public static class McpDocTools
             }
             appId = aProp.GetString()!;
 
-            if (sessionContext != null)
-            {
-                var roles = sessionContext.Roles ?? [];
-                var isGlobalApp = string.Equals(appId, "autheris", StringComparison.OrdinalIgnoreCase) ||
-                                  string.Equals(appId, "global", StringComparison.OrdinalIgnoreCase) ||
-                                  string.Equals(appId, "system", StringComparison.OrdinalIgnoreCase);
-
-                if (isGlobalApp && !roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase))
-                {
-                    return McpToolError.Serialize("FORBIDDEN", "Depositing documentation for global application requires ClusterAdmin role.");
-                }
-            }
-
             if (root.TryGetProperty("category", out var cProp) && cProp.ValueKind == JsonValueKind.String)
             {
                 if (Enum.TryParse<DocCategory>(cProp.GetString(), true, out var parsedCat))
@@ -547,31 +550,66 @@ public static class McpDocTools
             return McpToolError.Serialize("INVALID_JSON", "Arguments must be valid JSON.");
         }
 
-        // Documents deposited by a tenant administrator belong to that tenant: they are served only to the same tenant and are
-        // marked as untrusted user content. Only cluster administrators (and callers without a session) deposit official documentation.
-        string? depositTenantId = null;
-        string? authorSid = null;
-        if (sessionContext != null)
+        var caller = sessionContext == null
+            ? new DocCaller(
+                IsCanonicalClusterAdmin: false,
+                IsGovernanceAdmin: false,
+                TenantId: null,
+                AuthorSid: null,
+                HasSession: false,
+                IsReadOnlySession: false)
+            : new DocCaller(
+                IsCanonicalClusterAdmin: IsClusterAdmin(sessionContext),
+                IsGovernanceAdmin: (sessionContext.Roles ?? []).Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase),
+                TenantId: sessionContext.TenantId,
+                AuthorSid: !string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId,
+                HasSession: true,
+                IsReadOnlySession: sessionContext.IsReadOnly);
+
+        var writer = DocAccessPolicy.ResolveWriter(caller, appId, out var denial);
+        if (writer is null)
         {
-            authorSid = !string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId;
-            if (!IsClusterAdmin(sessionContext))
-            {
-                depositTenantId = sessionContext.TenantId.Trim();
-            }
+            return McpToolError.Serialize(denial.Code, denial.Reason);
         }
 
-        var request = new DepositDocRequest(appId, category, title, content, docId, errorCode, tags, depositTenantId, authorSid);
-
-        // A tenant administrator may add documents but never replace an existing one (of any application, official or of another
-        // tenant). Session roles carry "ClusterAdmin" only for canonical cluster administrators.
-        if (sessionContext != null)
+        if (!DocumentRules.IsValidAppId(appId))
         {
-            var roles = sessionContext.Roles ?? [];
-            if (!roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) &&
-                await docStore.DocumentExistsAsync(request, ct).ConfigureAwait(false))
-            {
-                return McpToolError.Serialize("FORBIDDEN", "Overwriting an existing document requires ClusterAdmin role.");
-            }
+            return McpToolError.Serialize("INVALID_PARAMS", "Invalid appId format.");
+        }
+
+        if (docId != null && !DocumentRules.IsValidDocId(docId))
+        {
+            return McpToolError.Serialize("INVALID_PARAMS", "Invalid docId format.");
+        }
+
+        if (errorCode != null && !DocumentRules.IsValidErrorCode(errorCode))
+        {
+            return McpToolError.Serialize("INVALID_PARAMS", "Invalid errorCode format.");
+        }
+
+        SanitizedMarkdown sanitized;
+        try
+        {
+            sanitized = UntrustedMarkdownSanitizer.Sanitize(content, 1_048_576);
+        }
+        catch (DocValidationException ex)
+        {
+            return McpToolError.Serialize(ex.Code, ex.Message);
+        }
+
+        title = UntrustedMarkdownSanitizer.SanitizeTitle(title, 200);
+        if (tags != null)
+        {
+            tags = UntrustedMarkdownSanitizer.SanitizeTags(tags, 20, 64).ToList();
+        }
+
+        docId ??= DocumentRules.GenerateDocId(title, sanitized.Text);
+
+        var request = new DepositDocRequest(appId, category, title, sanitized.Text, docId, errorCode, tags, writer.TenantId, writer.AuthorSid);
+
+        if (writer.TenantId != null && await docStore.DocumentExistsAsync(request, ct).ConfigureAwait(false))
+        {
+            return McpToolError.Serialize("FORBIDDEN", "Forbidden: Overwriting an existing document requires ClusterAdmin role.");
         }
 
         var result = await docStore.DepositDocumentAsync(request, ct).ConfigureAwait(false);

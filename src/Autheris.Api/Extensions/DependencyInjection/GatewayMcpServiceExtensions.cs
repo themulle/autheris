@@ -24,7 +24,20 @@ public static class GatewayMcpServiceExtensions
             null,
             sp.GetRequiredService<Autheris.Application.Docs.Interfaces.IDocSearchService>(),
             sp.GetRequiredService<Autheris.Application.Docs.Interfaces.IDocIngestor>(),
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Infrastructure.Docs.FileSystemUniversalDocStore>>()));
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Infrastructure.Docs.FileSystemUniversalDocStore>>(),
+            sp.GetService<Microsoft.Extensions.Options.IOptions<DocsOptions>>()));
+        services.AddOptions<DocsOptions>()
+            .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) =>
+            {
+                var section = cfg.GetSection(DocsOptions.SectionName);
+                if (!section.Exists())
+                {
+                    section = cfg.GetSection($"Gateway:{DocsOptions.SectionName}");
+                }
+                Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(section, o);
+            })
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<DocsOptions>, Autheris.Application.Docs.Services.DocsOptionsValidator>();
         services.AddSingleton<IGoldenQueryService, GoldenQueryService>();
         services.AddScoped<ISemanticMcpCompiler, SemanticMcpCompiler>();
         services.AddScoped<IMcpDatasetCatalog, McpDatasetCatalog>();
