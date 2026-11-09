@@ -155,7 +155,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
                 Arg.Any<IReadOnlySet<string>>(),
                 Arg.Any<TableIdentifier>(),
                 Arg.Any<IReadOnlyList<Consent>>(),
-                Arg.Any<DatabaseDialect>())
+                Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci => decisionFactory(ci.ArgAt<TableIdentifier>(3)));
         return resolution;
     }

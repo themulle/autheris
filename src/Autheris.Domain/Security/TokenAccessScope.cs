@@ -62,7 +62,7 @@ public static class TokenAccessScope
     public static IReadOnlySet<string> GetScopeSet(ClaimsPrincipal? principal)
     {
         if (principal == null) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        return new HashSet<string>(GetScopes(principal).Where(s => !IsWriteScope(s)), StringComparer.OrdinalIgnoreCase);
+        return WithoutWriteScope(new HashSet<string>(GetScopes(principal), StringComparer.OrdinalIgnoreCase));
     }
 
     public static IReadOnlySet<string> GetScopeSet(IEnumerable<Claim>? claims)
@@ -77,10 +77,17 @@ public static class TokenAccessScope
                 var parts = claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 foreach (var part in parts)
                 {
-                    if (!IsWriteScope(part)) set.Add(part);
+                    set.Add(part);
                 }
             }
         }
-        return set;
+        return WithoutWriteScope(set);
+    }
+
+    // Fail closed: filtering must never turn a delegated (non-empty) set into an empty, "unrestricted" one.
+    private static HashSet<string> WithoutWriteScope(HashSet<string> set)
+    {
+        var filtered = new HashSet<string>(set.Where(s => !IsWriteScope(s)), StringComparer.OrdinalIgnoreCase);
+        return filtered.Count == 0 ? set : filtered;
     }
 }

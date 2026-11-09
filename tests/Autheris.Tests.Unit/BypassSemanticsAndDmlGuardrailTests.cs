@@ -513,7 +513,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 Arg.Any<IReadOnlySet<string>>(),
                 Arg.Any<TableIdentifier>(),
                 Arg.Any<IReadOnlyList<Consent>>(),
-                Arg.Any<DatabaseDialect>())
+                Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci =>
             {
                 var allowed = TableAccessDecision.Allowed(

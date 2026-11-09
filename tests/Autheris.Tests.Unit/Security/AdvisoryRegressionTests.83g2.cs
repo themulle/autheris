@@ -59,10 +59,21 @@ public sealed partial class AdvisoryRegressionTests
     [Fact]
     public void WriteScope_IsACapability_NotADataScope()
     {
-        var principal = BypassSemanticsAndDmlGuardrailTests.CreateWriter();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim("scp", "Agent.Read Sql.Write")], "Test"));
 
         principal.HasScope(TokenAccessScope.WriteScope).ShouldBeTrue();
-        TokenAccessScope.GetScopeSet(principal).ShouldBeEmpty();
-        TokenAccessScope.GetScopeSet(principal.Claims).ShouldBeEmpty();
+        TokenAccessScope.GetScopeSet(principal).ShouldBe(["Agent.Read"], ignoreOrder: true);
+        TokenAccessScope.GetScopeSet(principal.Claims).ShouldBe(["Agent.Read"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void WriteScopeAlone_DoesNotWidenTheScopeSet()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim("scp", "Sql.Write")], "Test"));
+
+        // A delegated token stays delegated: the set must never collapse to "no scopes" (unrestricted).
+        TokenAccessScope.GetScopeSet(principal).ShouldNotBeEmpty();
+        TokenAccessScope.GetScopeSet(principal.Claims).ShouldNotBeEmpty();
+        principal.HasScope(TokenAccessScope.WriteScope).ShouldBeTrue();
     }
 }
