@@ -20,7 +20,7 @@ using Shouldly;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed class ModuleLoaderSecurityTests : IDisposable
+public sealed partial class ModuleLoaderSecurityTests : IDisposable
 {
     private readonly string _tempRoot;
 
@@ -504,10 +504,7 @@ public sealed class ModuleLoaderSecurityTests : IDisposable
     }
 
     private static IModuleHostContext TestHostContext() =>
-        new ModuleHostContext(
-            TimeProvider.System,
-            ModuleLoader.ResolveHostVersion(),
-            new GovernanceConnectionFactory(new Autheris.Domain.Options.GovernanceDbOptions()));
+        new ModuleHostContext(TimeProvider.System, ModuleLoader.ResolveHostVersion());
 
     private IConfiguration BuildConfig(string moduleId) =>
         new ConfigurationBuilder()
