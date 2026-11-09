@@ -28,5 +28,6 @@ Sql
 State
 Streaming
 Tenancy
+Usage
 VirtualFilters
 Webhooks

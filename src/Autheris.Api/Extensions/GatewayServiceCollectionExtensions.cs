@@ -111,10 +111,7 @@ public static partial class GatewayServiceCollectionExtensions
         ILoggerFactory? bootstrapLoggerFactory = null)
     {
         services.TryAddScoped<Autheris.Application.Policy.IAccessDecisionPoint, Autheris.Application.Policy.AccessDecisionPoint>();
-        var hostContext = new ModuleHostContext(
-            TimeProvider.System,
-            ModuleLoader.DefaultHostVersion,
-            new GovernanceConnectionFactory(gatewayOptions.GovernanceDb));
+        var hostContext = new ModuleHostContext(TimeProvider.System, ModuleLoader.ResolveHostVersion());
         var logger = bootstrapLoggerFactory?.CreateLogger<ModuleLoader>();
         var loader = new ModuleLoader(logger: logger);
         var moduleLoadResult = loader.LoadAndConfigureServices(services, configuration, environment, hostContext);

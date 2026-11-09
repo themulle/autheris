@@ -41,6 +41,13 @@ public sealed class ReleaseSurfaceTests : IClassFixture<WebApplicationFactory<Pr
             builder.UseSetting("Gateway:Authentication:Adfs:Authority", "https://adfs.example.test/adfs");
             builder.UseSetting("Gateway:Authentication:Adfs:Audience", "api://autheris");
             builder.UseSetting("Gateway:Authentication:Adfs:AllowedClientIds:0", "autheris-test-client");
+            builder.ConfigureServices(services => services.PostConfigure<Autheris.Domain.Options.Security.IdentityRealmsOptions>(options =>
+                options.Realms["adfs-release"] = new Autheris.Domain.Options.Security.IdentityRealmConfigOptions
+                {
+                    Kind = Autheris.Domain.Identity.IdentityRealmKind.Adfs,
+                    FixedTenantId = "tenant_release",
+                    Provisioning = Autheris.Domain.Identity.RealmProvisioningMode.None
+                }));
         });
     }
 

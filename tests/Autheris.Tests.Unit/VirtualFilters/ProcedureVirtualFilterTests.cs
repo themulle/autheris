@@ -19,6 +19,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Unit.Procedures;
 
 /// <summary>
 /// Virtual filters, phase 8: a procedure result cannot be wrapped in SQL. The virtual filter of the result table is
@@ -28,10 +29,10 @@ using Xunit;
 public sealed class ProcedureVirtualFilterTests
 {
     private const string Header = """
-        -- @name get_cranes
-        -- @procedure tem.usp_Cranes
-        -- @result-table md.crane
-        -- @row-scope-key serial_number
+        name: get_cranes
+        procedure: tem.usp_Cranes
+        result_table: md.crane
+        row_scope_key: serial_number
         """;
 
     private static readonly TenantId Tenant = new("tenant-a");
@@ -76,7 +77,7 @@ public sealed class ProcedureVirtualFilterTests
     private static Fixture Active(string header = Header)
     {
         var f = new Fixture();
-        var def = ProcedureDefinitionParser.Parse(header, "x", false, 60);
+        var def = TestProcedureYaml.Definition(header, "x", false, 60);
         f.Registry.Register(def);
         f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["serial_number", "name"], ["md.crane"], new Dictionary<string, string>()));
         f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new TableMetadata
@@ -122,7 +123,7 @@ public sealed class ProcedureVirtualFilterTests
     [Fact]
     public async Task WithoutRowScopeKey_IsDenied()
     {
-        var f = Active(Header.Replace("-- @row-scope-key serial_number", string.Empty));
+        var f = Active(Header.Replace("row_scope_key: serial_number", string.Empty));
 
         await Should.ThrowAsync<KeyNotFoundException>(() => f.Create(new RecordingResolver(Applied)).ExecuteAsync("get_cranes", null, User(), Tenant));
         await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default, default);

@@ -15,7 +15,9 @@ using System.Threading.Tasks;
 using Autheris.Application.Docs.Interfaces;
 using Autheris.Application.Docs.Services;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Filesystem-backed, air-gapped implementation of <see cref="IUniversalDocStore"/>.
@@ -26,6 +28,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
     private static readonly Regex SafeIdentifierRegex = new(@"^[a-zA-Z0-9_\-\.]+$", RegexOptions.Compiled);
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
+    private readonly DocsOptions _options;
     private readonly string _rootPath;
     private readonly IDocSearchService _searchService;
     private readonly IDocIngestor _ingestor;
@@ -36,8 +39,10 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         string? rootPath,
         IDocSearchService searchService,
         IDocIngestor ingestor,
-        ILogger<FileSystemUniversalDocStore> logger)
+        ILogger<FileSystemUniversalDocStore> logger,
+        IOptions<DocsOptions>? docsOptions = null)
     {
+        _options = docsOptions?.Value ?? new DocsOptions();
         _rootPath = string.IsNullOrWhiteSpace(rootPath)
             ? Path.Combine(AppContext.BaseDirectory, "shared-docs")
             : Path.GetFullPath(rootPath);
@@ -156,13 +161,29 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
     public async Task<DepositDocResult> DepositDocumentAsync(DepositDocRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var (safeAppId, safeDocId, categoryName, targetCategoryDir, filePath) = ResolveDocumentPath(request);
+
+        SanitizedMarkdown sanitized;
+        try
+        {
+            sanitized = UntrustedMarkdownSanitizer.Sanitize(request.Content, _options.MaxDocumentBytes);
+        }
+        catch (DocValidationException ex)
+        {
+            return new DepositDocResult(
+                Success: false,
+                ChunkId: null,
+                FilePath: null,
+                Message: ex.Message,
+                ErrorCode: ex.Code);
+        }
+
+        var (safeAppId, safeDocId, categoryName, targetCategoryDir, filePath) = ResolveDocumentPath(request, sanitized.Text);
 
         Directory.CreateDirectory(targetCategoryDir);
 
         // A tenant deposit records its tenant and author as a provenance block in the same write as the content, so the
         // document keeps its owner across restarts (startup sync) and is never promoted to official documentation.
-        var fileContent = DocProvenance.Compose(request.Content, request.TenantId, request.AuthorSid);
+        var fileContent = DocProvenance.Compose(sanitized.Text, request.TenantId, request.AuthorSid);
         await File.WriteAllTextAsync(filePath, fileContent, ct).ConfigureAwait(false);
 
         // Index exactly what a later sync of the file would index (same body, same provenance).
@@ -218,18 +239,18 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         Directory.CreateDirectory(targetDir);
 
         using var archive = new ZipArchive(zipStream, ZipArchiveMode.Read, leaveOpen: true);
-        const int MaxEntries = 1000;
-        const long MaxTotalUncompressedBytes = 100 * 1024 * 1024; // 100 MB
+        var maxEntries = _options.MaxBundleEntries;
+        var maxTotalUncompressedBytes = _options.MaxBundleUncompressedBytes;
 
-        if (archive.Entries.Count > MaxEntries)
+        if (archive.Entries.Count > maxEntries)
         {
             _logger.LogError("Zip Bomb detected: entry count {Count} exceeds limit {MaxEntries} for bundle '{AppId}'",
-                archive.Entries.Count, MaxEntries, SanitizeForLog(appId));
+                archive.Entries.Count, maxEntries, SanitizeForLog(appId));
             return new DepositDocResult(
                 Success: false,
                 ChunkId: null,
                 FilePath: null,
-                Message: $"Security violation: Archive entry count ({archive.Entries.Count}) exceeds maximum allowed threshold of {MaxEntries} (Zip bomb protection).",
+                Message: $"Security violation: Archive entry count ({archive.Entries.Count}) exceeds maximum allowed threshold of {maxEntries} (Zip bomb protection).",
                 ErrorCode: "ZIP_BOMB_DETECTED");
         }
 
@@ -251,15 +272,15 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         foreach (var entry in archive.Entries)
         {
             cumulativeUncompressedBytes += entry.Length;
-            if (cumulativeUncompressedBytes > MaxTotalUncompressedBytes)
+            if (cumulativeUncompressedBytes > maxTotalUncompressedBytes)
             {
                 _logger.LogError("Zip Bomb detected: cumulative size {Bytes} exceeds limit {MaxBytes} for bundle '{AppId}'",
-                    cumulativeUncompressedBytes, MaxTotalUncompressedBytes, SanitizeForLog(appId));
+                    cumulativeUncompressedBytes, maxTotalUncompressedBytes, SanitizeForLog(appId));
                 return new DepositDocResult(
                     Success: false,
                     ChunkId: null,
                     FilePath: null,
-                    Message: "Security violation: Archive uncompressed size exceeds maximum allowed threshold of 100MB (Zip bomb protection).",
+                    Message: $"Security violation: Archive uncompressed size exceeds maximum allowed threshold of {maxTotalUncompressedBytes / (1024 * 1024)}MB (Zip bomb protection).",
                     ErrorCode: "ZIP_BOMB_DETECTED");
             }
 
@@ -370,8 +391,6 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             Message: $"Bundle applied successfully: {extractedFiles.Count} files unpacked, {allChunks.Count} sections indexed.");
     }
 
-    private const long MaxTenantDocumentBytes = 5 * 1024 * 1024; // 5 MB per tenant document
-
     private static bool IsMarkdownFile(string name) => name.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
@@ -384,7 +403,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         foreach (var entry in archive.Entries)
         {
             cumulativeUncompressedBytes += entry.Length;
-            if (cumulativeUncompressedBytes > 100L * 1024 * 1024)
+            if (cumulativeUncompressedBytes > _options.MaxBundleUncompressedBytes)
             {
                 _logger.LogError("Zip Bomb detected: cumulative size {Bytes} exceeds limit for tenant bundle '{AppId}'",
                     cumulativeUncompressedBytes, SanitizeForLog(appId));
@@ -392,7 +411,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                     Success: false,
                     ChunkId: null,
                     FilePath: null,
-                    Message: "Security violation: Archive uncompressed size exceeds maximum allowed threshold of 100MB (Zip bomb protection).",
+                    Message: $"Security violation: Archive uncompressed size exceeds maximum allowed threshold of {_options.MaxBundleUncompressedBytes / (1024 * 1024)}MB (Zip bomb protection).",
                     ErrorCode: "ZIP_BOMB_DETECTED");
             }
 
@@ -416,13 +435,13 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 continue;
             }
 
-            if (entry.Length > MaxTenantDocumentBytes)
+            if (entry.Length > _options.MaxDocumentBytes)
             {
                 return new DepositDocResult(
                     Success: false,
                     ChunkId: null,
                     FilePath: null,
-                    Message: "A document in the bundle exceeds the maximum permitted size of 5 MB.",
+                    Message: $"A document in the bundle exceeds the maximum permitted size of {_options.MaxDocumentBytes} bytes.",
                     ErrorCode: "DOC_TOO_LARGE");
             }
 
@@ -445,7 +464,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
     /// Writes one document of a tenant bundle with the tenant provenance block, failing instead of replacing an existing file.
     /// Returns null on success, otherwise the failure result.
     /// </summary>
-    private static async Task<DepositDocResult?> WriteTenantDocumentAsync(ZipArchiveEntry entry, string destinationPath, string tenantId, string? authorSid, CancellationToken ct)
+    private async Task<DepositDocResult?> WriteTenantDocumentAsync(ZipArchiveEntry entry, string destinationPath, string tenantId, string? authorSid, CancellationToken ct)
     {
         string text;
         using (var memory = new MemoryStream())
@@ -456,13 +475,13 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
                 int read;
                 while ((read = await entryStream.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
                 {
-                    if (memory.Length + read > MaxTenantDocumentBytes)
+                    if (memory.Length + read > _options.MaxDocumentBytes)
                     {
                         return new DepositDocResult(
                             Success: false,
                             ChunkId: null,
                             FilePath: null,
-                            Message: "A document in the bundle exceeds the maximum permitted size of 5 MB.",
+                            Message: $"A document in the bundle exceeds the maximum permitted size of {_options.MaxDocumentBytes} bytes.",
                             ErrorCode: "DOC_TOO_LARGE");
                     }
 
@@ -473,7 +492,22 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             text = new UTF8Encoding(false).GetString(memory.GetBuffer(), 0, (int)memory.Length);
         }
 
-        var fileContent = DocProvenance.Compose(text, tenantId, authorSid);
+        SanitizedMarkdown sanitized;
+        try
+        {
+            sanitized = UntrustedMarkdownSanitizer.Sanitize(text, _options.MaxDocumentBytes);
+        }
+        catch (DocValidationException ex)
+        {
+            return new DepositDocResult(
+                Success: false,
+                ChunkId: null,
+                FilePath: null,
+                Message: ex.Message,
+                ErrorCode: ex.Code);
+        }
+
+        var fileContent = DocProvenance.Compose(sanitized.Text, tenantId, authorSid);
         try
         {
             // CreateNew: never replaces a file that appeared after the preflight check.
@@ -551,18 +585,34 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
     /// The validated target of a deposit (shared by <see cref="DepositDocumentAsync"/> and <see cref="DocumentExistsAsync"/>, so the
     /// existence check sees exactly the file a deposit would write).
     /// </summary>
-    private (string SafeAppId, string SafeDocId, string CategoryName, string CategoryDir, string FilePath) ResolveDocumentPath(DepositDocRequest request)
+    private (string SafeAppId, string SafeDocId, string CategoryName, string CategoryDir, string FilePath) ResolveDocumentPath(DepositDocRequest request, string? sanitizedContent = null)
     {
-        ValidateSafeIdentifier(request.AppId, nameof(request.AppId));
+        ValidateSafeIdentifier(request.AppId, nameof(request.AppId), DocumentRules.MaxAppIdLength);
 
-        var docId = !string.IsNullOrWhiteSpace(request.DocId)
-            ? request.DocId.Trim()
-            : Slugify(request.Title);
-
-        ValidateSafeIdentifier(docId, nameof(docId));
+        string safeDocId;
+        if (!string.IsNullOrWhiteSpace(request.DocId))
+        {
+            ValidateSafeIdentifier(request.DocId.Trim(), nameof(request.DocId), DocumentRules.MaxDocIdLength);
+            safeDocId = Path.GetFileName(request.DocId.Trim());
+        }
+        else
+        {
+            var targetCategory = Path.GetFileName(request.Category.ToString().ToLowerInvariant());
+            var candidateSlug = Slugify(request.Title);
+            var candidateExistingPath = Path.Combine(_rootPath, Path.GetFileName(request.AppId), targetCategory, $"{candidateSlug}.md");
+            if (File.Exists(candidateExistingPath))
+            {
+                safeDocId = candidateSlug;
+            }
+            else
+            {
+                var contentForHash = sanitizedContent ?? request.Content ?? string.Empty;
+                safeDocId = DocumentRules.GenerateDocId(request.Title, contentForHash);
+            }
+            ValidateSafeIdentifier(safeDocId, nameof(safeDocId), DocumentRules.MaxDocIdLength);
+        }
 
         var safeAppId = Path.GetFileName(request.AppId);
-        var safeDocId = Path.GetFileName(docId);
         var categoryName = Path.GetFileName(request.Category.ToString().ToLowerInvariant());
 
         var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
@@ -636,22 +686,17 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         return DocCategory.Guide;
     }
 
-    private static void ValidateSafeIdentifier(string identifier, string paramName)
+    private static void ValidateSafeIdentifier(string identifier, string paramName, int maxLength = 128)
     {
         if (string.IsNullOrWhiteSpace(identifier) ||
-            !SafeIdentifierRegex.IsMatch(identifier) ||
-            identifier.Contains("..", StringComparison.Ordinal))
+            !DocumentRules.IsValidIdentifier(identifier, maxLength))
         {
             throw new ArgumentException($"Invalid identifier '{identifier}'. Only alphanumeric characters, dashes, underscores, and dots are permitted, and path traversal ('..') is prohibited.", paramName);
         }
     }
 
-    private static string Slugify(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return "untitled";
-        var slug = Regex.Replace(text.ToLowerInvariant(), @"[^a-z0-9\-]+", "-").Trim('-');
-        return string.IsNullOrWhiteSpace(slug) ? "untitled" : slug;
-    }
+    private static string Slugify(string text) =>
+        DocumentRules.Slugify(text);
 
     private static string SanitizeForLog(string? input)
     {

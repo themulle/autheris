@@ -17,6 +17,9 @@ public interface IReadPathSwitches
     /// <summary>Issue #240: Dedicated switch for query analysis endpoint (POST /api/v1/governance/queries/analyze).</summary>
     bool QueryAnalysisEnabled { get; }
 
+    /// <summary>the procedure kill switch (<c>SqlEndpoints:Procedures:Enabled</c>, default off). Off hides <c>call_procedure</c>.</summary>
+    bool ProceduresEnabled { get; }
+
     bool IsGroupEnabled(McpToolGroup group);
 
     /// <summary>False when the tool's group is off or the name is listed in <c>Mcp:DisabledTools</c>. Unknown (dynamic) names follow <see cref="McpToolGroup.Query"/>.</summary>

@@ -298,5 +298,9 @@ The owner confirmed every default of this WP (D-51a..l) and the Phase 3 recommen
 - D-51m (new, from Phase 3): statements denied by policy are charged the failure fee (SEC-51-11); syntax and token-guard errors are not charged.
 - D-51g confirmed: the page-token key is derived from the audit key with a distinct HKDF label; audit-key rotation invalidates open page tokens (at most their lifetime of 15 minutes).
 - D-51l confirmed: statements with their own root LIMIT/FETCH/OFFSET are not paged (`statement_has_limit`).
+
+### Owner-confirmed defaults (2026-11-08)
+- Trino statements are admitted and charged at submit (SEC-51-09), so an empty bucket returns 429 instead of 403 (fail-closed).
+- A recursive CTE statement costs more than the default Standard capacity (D-51i); accepted as is.
 - D-51n (owner decision 2026-11-07, resolves SEC-51-17 vs the former 5.5.6): the page offset is rendered as a bind parameter (`ParameterOrigin.PageOffset` slot) and filled after template lookup; it is not part of the template key. Only the value-free flag `BindPageOffset` and the existing `EnforcedMaxRows = size + 1` (probe row) are key components. Proven by `Offsets_DoNotGrowTemplateCacheUnbounded` (1,000 offsets -> one cache entry). Details in 5.5.6.
 - Implementation is not started by this confirmation; it starts on an explicit owner go and after the WP-SIMPL-45 gates in section 9.

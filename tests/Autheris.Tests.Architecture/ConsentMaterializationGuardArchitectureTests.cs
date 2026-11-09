@@ -13,7 +13,7 @@ namespace Autheris.Tests.Architecture;
 [Trait("Category", "Security")]
 public sealed class ConsentMaterializationGuardArchitectureTests
 {
-    private static readonly string[] Providers = ["PostgreSql", "SqlServer"];
+    private static readonly string[] RepositoryFiles = ["GovernanceRepository.Consent.cs"];
 
     // Shared insert helper used by CreateConsentAsync / the atomic approval; the seam (decorator or the atomic method) guards it.
     private const string SharedInsert = "InsertConsentCoreAsync";
@@ -63,19 +63,19 @@ public sealed class ConsentMaterializationGuardArchitectureTests
         var root = FindRepositoryRoot();
         var violations = new List<string>();
 
-        foreach (var provider in Providers)
+        foreach (var repoFile in RepositoryFiles)
         {
-            var file = Path.Combine(root, "src", "Autheris.Infrastructure", "Persistence", $"{provider}GovernanceRepository.Consent.cs");
+            var file = Path.Combine(root, "src", "Autheris.Infrastructure", "Persistence", repoFile);
             var methods = Methods(file);
 
             var insertSites = methods.Where(kv => kv.Value.Contains("INSERT INTO CONSENTS", StringComparison.Ordinal)).Select(kv => kv.Key).ToList();
-            insertSites.ShouldContain(SharedInsert, $"{provider}: the shared consent insert helper was not found (rename the architecture rule together with it).");
+            insertSites.ShouldContain(SharedInsert, $"{repoFile}: the shared consent insert helper was not found (rename the architecture rule together with it).");
 
             foreach (var site in insertSites.Where(s => s != SharedInsert))
             {
                 if (!methods[site].Contains("EnsureMayMaterializeAsync(", StringComparison.Ordinal))
                 {
-                    violations.Add($"{provider}: {site} inserts into CONSENTS without calling the materialisation guard");
+                    violations.Add($"{repoFile}: {site} inserts into CONSENTS without calling the materialisation guard");
                 }
             }
 
@@ -84,7 +84,7 @@ public sealed class ConsentMaterializationGuardArchitectureTests
             {
                 if (!entry.Value.Contains("EnsureMayMaterializeAsync(", StringComparison.Ordinal))
                 {
-                    violations.Add($"{provider}: {entry.Key} reaches {SharedInsert} without calling the materialisation guard");
+                    violations.Add($"{repoFile}: {entry.Key} reaches {SharedInsert} without calling the materialisation guard");
                 }
             }
         }
