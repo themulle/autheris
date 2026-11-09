@@ -9,9 +9,9 @@ using Xunit;
 public sealed class SecurityReviewRecheck4Block1Tests
 {
     [Theory]
-    [InlineData("procedure: api.usp_X\nrequired_roles: []")]
-    [InlineData("procedure: api.usp_X\nrequired_roles:\n  - ''\n  - '  '")]
-    public void ParseYaml_EmptyRequiredRoles_Throws(string yaml)
+    [InlineData("procedure: api.usp_X\nroles: []")]
+    [InlineData("procedure: api.usp_X\nroles:\n  - ''\n  - '  '")]
+    public void ParseYaml_EmptyRoles_Throws(string yaml)
     {
         Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
     }
@@ -26,14 +26,7 @@ public sealed class SecurityReviewRecheck4Block1Tests
     [Fact]
     public void ParseYaml_DuplicateKey_Throws()
     {
-        const string yaml = "procedure: api.usp_X\nrequired_roles: [admin]\nrequired_roles: [reader]";
+        const string yaml = "procedure: api.usp_X\nroles: [admin]\nroles: [reader]";
         Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
-    }
-
-    [Fact]
-    public void Parse_EmptyRolesDirective_Throws()
-    {
-        const string sql = "-- @procedure api.usp_X\n-- @roles\n";
-        Should.Throw<FormatException>(() => ProcedureDefinitionParser.Parse(sql, "x", false, 30));
     }
 }

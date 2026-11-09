@@ -71,7 +71,6 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             ResultTable: resultTable,
             ClearedResultColumns: [],
             RequiredRoles: [],
-            AllowDynamicSql: false,
             TimeoutSeconds: 30)
         {
             Description = $"{name} description"
