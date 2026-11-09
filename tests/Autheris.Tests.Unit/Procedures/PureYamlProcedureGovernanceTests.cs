@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
-using Autheris.Application.Procedures.Tools;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -435,52 +434,5 @@ public class PureYamlProcedureGovernanceTests
         result.Rows.Count.ShouldBe(1);
         result.Rows[0]["order_id"].ShouldBe(100);
         result.Rows[0]["sensitive_note"].ShouldBe("***MASKED***"); // SEC-PROC152-09: an explicit Mask is never lifted
-    }
-
-    [Fact]
-    public void ProcedureYamlGenerator_GeneratesValidYaml_MatchingParser()
-    {
-        var generator = new ProcedureYamlGenerator();
-        var request = new ProcedureGenerationRequest(
-            Name: "get_customer_metrics",
-            ProcedureName: "api.usp_GetCustomerMetrics",
-            Summary: "Calculates customer KPIs",
-            Parameters:
-            [
-                new ProcedureParameter("customer_id", "int", typeof(int), IsRequired: true, Description: "Customer ID")
-            ],
-            ContextBindings:
-            [
-                new ProcedureContextBinding(ProcedureContextKey.TenantId, "@tenant_id")
-            ],
-            Outputs:
-            [
-                new ProcedureOutputColumnInfo("customer_id", "int", "sales", "customers", "id"),
-                new ProcedureOutputColumnInfo("lifetime_value", "decimal(18,2)", "sales", "orders", "total_amount")
-            ],
-            ReferencedTables: ["sales.customers", "sales.orders"],
-            ResultTable: "sales.customers",
-            DdlHash: "sha256:fedcba9876543210",
-            TimeoutSeconds: 45,
-            RequiredRoles: ["Analyst", "Admin"]);
-
-        string yaml = generator.GenerateYaml(request);
-
-        yaml.ShouldContain("name: get_customer_metrics");
-        yaml.ShouldContain("procedure: api.usp_GetCustomerMetrics");
-        yaml.ShouldContain("validation: declared");
-        yaml.ShouldContain("ddl_hash: \"sha256:fedcba9876543210\"");
-        yaml.ShouldContain("source_table: sales.customers");
-        yaml.ShouldContain("source_column: id");
-
-        // Verify that the generated YAML can be parsed cleanly by ProcedureDefinitionParser
-        var def = ProcedureDefinitionParser.ParseYaml(yaml, "fallback", allowRlsNone: false, maxTimeoutSeconds: 60);
-        def.Name.ShouldBe("get_customer_metrics");
-        def.ValidationMode.ShouldBe(ProcedureValidationMode.Declared);
-        def.DdlHash.ShouldBe("sha256:fedcba9876543210");
-        def.ReferencedTables.ShouldBe(["sales.customers", "sales.orders"]);
-        def.DeclaredOutputs.ShouldBe(["customer_id", "lifetime_value"]);
-        def.DeclaredOutputSources["customer_id"].Column.ShouldBe("id");
-        def.DeclaredOutputSources["lifetime_value"].Table.ShouldBe("orders");
     }
 }

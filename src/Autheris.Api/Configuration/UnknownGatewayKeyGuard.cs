@@ -19,6 +19,8 @@ public static class UnknownGatewayKeyGuard
     public const int MaxListedKeys = 20;
     public const int MaxKeyLength = 128;
 
+    private const string RemovedProcedureHotReloadKey = GatewayConfigurationSchema.Root + ":SqlEndpoints:Procedures:EnableHotReload";
+
     private static readonly string[] RemovedSimpl12Prefixes =
     [
         GatewayConfigurationSchema.Root + ":Itsm",
@@ -159,6 +161,11 @@ public static class UnknownGatewayKeyGuard
             }
         }
 
+        if (configuration.AsEnumerable().Any(kv => string.Equals(kv.Key, RemovedProcedureHotReloadKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            unknown.Add("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); procedure definitions are re-scanned on every revalidation interval)");
+        }
+
         // Removed sections and keys fail startup with any value (including false or empty).
         foreach (var removedPrefix in RemovedSimpl12Prefixes)
         {
@@ -180,6 +187,11 @@ public static class UnknownGatewayKeyGuard
             }
 
             var fullKey = GatewayConfigurationSchema.Root + ":" + entry.Key;
+            if (string.Equals(fullKey, RemovedProcedureHotReloadKey, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             if (claimedModuleSections is not null && IsClaimedByLoadedModule(fullKey, claimedModuleSections))
             {
                 continue;

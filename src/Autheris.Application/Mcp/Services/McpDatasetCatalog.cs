@@ -54,8 +54,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly Autheris.Domain.Interfaces.IConsentResolutionService consentResolution;
     private readonly ILogger<McpDatasetCatalog>? logger;
     private readonly ICatalogVisibilityService? visibility;
-    private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
-    private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
+    private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
     private readonly Autheris.Application.Catalog.Localization.ILanguageNegotiator? _languageNegotiator;
     private readonly IOptions<CatalogLocalizationOptions>? _localizationOptions;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
@@ -78,8 +77,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         ILogger<McpDatasetCatalog>? logger = null,
         ICatalogVisibilityService? visibilityService = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         IOptions<CatalogLocalizationOptions>? localizationOptions = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
@@ -101,8 +99,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this.consentResolution = consentResolution ?? new ConsentResolutionService();
         this.logger = logger;
         this.visibility = visibilityService;
-        this._procedureRegistry = procedureRegistry;
-        this._procedureExecutionService = procedureExecutionService;
+        this._procedureCatalog = procedureCatalog;
         this._languageNegotiator = languageNegotiator;
         this._localizationOptions = localizationOptions;
         this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
@@ -124,8 +121,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
         ILogger<McpDatasetCatalog>? logger = null,
         ICatalogVisibilityService? visibilityService = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         IOptions<CatalogLocalizationOptions>? localizationOptions = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
@@ -146,8 +142,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this.consentResolution = consentResolution ?? new ConsentResolutionService();
         this.logger = logger;
         this.visibility = visibilityService;
-        this._procedureRegistry = procedureRegistry;
-        this._procedureExecutionService = procedureExecutionService;
+        this._procedureCatalog = procedureCatalog;
         this._languageNegotiator = languageNegotiator;
         this._localizationOptions = localizationOptions;
         this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
@@ -260,39 +255,31 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         }
 
         var candidateProcedures = new List<(string Id, RegisteredProcedure Proc)>();
-        if (_procedureRegistry != null && _procedureExecutionService != null)
+        if (_procedureCatalog != null)
         {
-            var tenantId = principal.GetTenantId();
-            foreach (var proc in _procedureRegistry.GetAll())
+            var visibleProcedures = await _procedureCatalog.ListVisibleAsync(principal, principal.GetTenantId(), ct).ConfigureAwait(false);
+            foreach (var proc in visibleProcedures.Where(p => p.Definition.Mode == ProcedureMode.Read && !string.IsNullOrWhiteSpace(p.Definition.ResultTable)))
             {
-                if (proc.State == ProcedureState.Active &&
-                    proc.Definition.Mode == ProcedureMode.Read &&
-                    !string.IsNullOrWhiteSpace(proc.Definition.ResultTable))
+                var def = proc.Definition;
+                var procId = $"procedure:{def.Name}";
+
+                if (!string.IsNullOrWhiteSpace(domain) && !string.Equals(def.CatalogDomain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!string.IsNullOrWhiteSpace(tag))
+                    continue;
+                if (!string.IsNullOrWhiteSpace(search))
                 {
-                    if (await _procedureExecutionService.IsVisibleAsync(proc, principal, tenantId, ct).ConfigureAwait(false))
-                    {
-                        var def = proc.Definition;
-                        var procId = $"procedure:{def.Name}";
-
-                        if (!string.IsNullOrWhiteSpace(domain) && !string.Equals(def.CatalogDomain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
-                            continue;
-                        if (!string.IsNullOrWhiteSpace(tag))
-                            continue;
-                        if (!string.IsNullOrWhiteSpace(search))
-                        {
-                            var s = search.Trim();
-                            bool matches = procId.Contains(s, StringComparison.OrdinalIgnoreCase) ||
-                                           def.Name.Contains(s, StringComparison.OrdinalIgnoreCase) ||
-                                           def.Summary.Contains(s, StringComparison.OrdinalIgnoreCase) ||
-                                           (def.Description?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                                           def.Parameters.Any(p => p.Name.Contains(s, StringComparison.OrdinalIgnoreCase));
-                            if (!matches)
-                                continue;
-                        }
-
-                        candidateProcedures.Add((procId, proc));
-                    }
+                    var s = search.Trim();
+                    bool matches = procId.Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                                   def.Name.Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                                   def.Summary.Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                                   (def.Description?.Contains(s, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                                   def.Parameters.Any(p => p.Name.Contains(s, StringComparison.OrdinalIgnoreCase));
+                    if (!matches)
+                        continue;
                 }
+
+                candidateProcedures.Add((procId, proc));
             }
         }
 
@@ -632,27 +619,16 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private async Task<McpDatasetDescription> DescribeProcedureDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct)
     {
         var procName = dataset["procedure:".Length..].Trim();
-        if (string.IsNullOrWhiteSpace(procName) || _procedureRegistry == null || _procedureExecutionService == null)
+        if (string.IsNullOrWhiteSpace(procName) || _procedureCatalog == null)
         {
             throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName ?? string.Empty));
         }
 
-        if (!_procedureRegistry.TryGet(procName, out var registered) || registered == null)
-        {
-            throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
-        }
-
-        // Fail-closed checks (OQ-35 / Decision D-153-1)
-        if (registered.State != ProcedureState.Active ||
+        // Fail-closed checks (OQ-35 / Decision D-153-1): unknown, inactive, invisible, non-read and result-less look alike.
+        var registered = await _procedureCatalog.FindVisibleAsync(procName, principal, principal.GetTenantId(), ct).ConfigureAwait(false);
+        if (registered == null ||
             registered.Definition.Mode != ProcedureMode.Read ||
             string.IsNullOrWhiteSpace(registered.Definition.ResultTable))
-        {
-            throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
-        }
-
-        var tenantId = principal.GetTenantId();
-        var isVisible = await _procedureExecutionService.IsVisibleAsync(registered, principal, tenantId, ct).ConfigureAwait(false);
-        if (!isVisible)
         {
             throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
         }

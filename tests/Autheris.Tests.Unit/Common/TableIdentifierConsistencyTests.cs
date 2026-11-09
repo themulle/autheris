@@ -56,9 +56,10 @@ public sealed class TableIdentifierConsistencyTests
         proc.ResultTableIdentifier.ShouldNotBeNull();
         proc.ResultTableIdentifier.Value.ShouldBe(new TableIdentifier("analytics", "dbo", "orders"));
 
-        proc.ReferencedTableIdentifiers.Count.ShouldBe(2);
-        proc.ReferencedTableIdentifiers[0].ShouldBe(new TableIdentifier("analytics", "dbo", "orders"));
-        proc.ReferencedTableIdentifiers[1].ShouldBe(new TableIdentifier("analytics", "dbo", "customers"));
+        proc.TryResolveTable("dbo.orders", out var orders).ShouldBeTrue();
+        orders.ShouldBe(new TableIdentifier("analytics", "dbo", "orders"));
+        proc.TryResolveTable("dbo.customers", out var customers).ShouldBeTrue();
+        customers.ShouldBe(new TableIdentifier("analytics", "dbo", "customers"));
     }
 
     [Fact]

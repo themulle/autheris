@@ -9,7 +9,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Procedures.Services;
-using Autheris.Application.Procedures.Tools;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Model;
@@ -84,7 +83,7 @@ public class ArchitectureAndCleanCodeTests
     }
 
     [Fact]
-    public void DiContainer_ResolvesISqlSecurityValidatorAndIProcedureYamlGenerator()
+    public void DiContainer_ResolvesISqlSecurityValidator()
     {
         var services = new ServiceCollection();
         var options = new GatewayOptions
@@ -103,11 +102,9 @@ public class ArchitectureAndCleanCodeTests
         services.AddLogging();
         services.AddSingleton<TrinoSqlEngine.ISqlEngine, TrinoSqlEngine.FastSqlEngine>();
         services.AddSingleton<ISqlSecurityValidator, DefaultSqlSecurityValidator>();
-        services.AddSingleton<IProcedureYamlGenerator, ProcedureYamlGenerator>();
 
         var provider = services.BuildServiceProvider();
 
         provider.GetService<ISqlSecurityValidator>().ShouldNotBeNull();
-        provider.GetService<IProcedureYamlGenerator>().ShouldNotBeNull();
     }
 }

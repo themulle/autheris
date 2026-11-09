@@ -29,6 +29,7 @@ public sealed class ProcedureRegistrationService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<ProcedureRegistrationService>? _logger;
+    private DateTimeOffset _lastScan = DateTimeOffset.MinValue;
 
     public ProcedureRegistrationService(
         ProcedureDefinitionLoader loader,
@@ -79,11 +80,18 @@ public sealed class ProcedureRegistrationService : BackgroundService
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
     }
 
-    /// <summary>Validates all pending entries and all entries whose last validation is older than the configured interval.</summary>
+    /// <summary>Re-scans the directory, then validates all pending entries and all entries whose last validation is older than the configured interval.</summary>
     internal async Task ValidateDueAsync(CancellationToken ct)
     {
+        // the directory is re-scanned once per revalidation interval, before validating: new and changed declarations
+        // enter Pending, removed ones leave the registry.
         var interval = TimeSpan.FromMinutes(_options.Value.SqlEndpoints.Procedures.RevalidationIntervalMinutes);
         var now = DateTimeOffset.UtcNow;
+        if (now - _lastScan >= interval)
+        {
+            _lastScan = now;
+            _loader.Rescan();
+        }
 
         var due = _registry.GetAll()
             .Where(r => r.State == ProcedureState.Pending
@@ -196,7 +204,7 @@ public sealed class ProcedureRegistrationService : BackgroundService
 
             if (!_registry.TryMarkDisabled(entry.Definition, reason))
             {
-                continue; // replaced or removed (hot reload) while validating; the new entry is validated next round
+                continue; // replaced or removed (directory re-scan) while validating; the new entry is validated next round
             }
 
             if (!wasAlreadyDisabled)

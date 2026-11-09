@@ -6,7 +6,6 @@ using System.Text.Json;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
-using Autheris.Application.Procedures.Tools;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -779,30 +778,6 @@ public class ProcedureRowBudgetAndScanCapTests
         registered!.State.ShouldNotBe(ProcedureState.Active);
     }
 
-    [Theory]
-    [InlineData(null, true)]
-    [InlineData("sha256:abc12345", false)]
-    public void T_PROC152I2_WPE_Generator_DeclaredWithoutDdlHash_EmitsDiscoverableWarningComment(string? hash, bool warns)
-    {
-        var request = new ProcedureGenerationRequest(
-            "x", "api.usp_X", null, [], [], [new ProcedureOutputColumnInfo("a", "int", null, null, null)], [],
-            ResultTable: "md.crane", DdlHash: hash);
-
-        string yaml = new global::Autheris.Application.Procedures.Tools.ProcedureYamlGenerator().GenerateYaml(request);
-
-        const string warning = "# WARNING: integrity.ddl_hash is required for 'validation: declared' outside Development.";
-        if (warns)
-        {
-            yaml.ShouldContain(warning);
-        }
-        else
-        {
-            yaml.ShouldNotContain("WARNING");
-        }
-
-        ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30).Name.ShouldBe("x");
-    }
-
     // ---------- WP-B: OpenAPI ----------
 
     [Fact]
@@ -827,7 +802,7 @@ public class ProcedureRowBudgetAndScanCapTests
             SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { MaxRows = 321, MaxScanRows = 4321 } }
         });
 
-        var result = await Autheris.Api.Endpoints.ProcedureEndpointRoutes.HandleOpenApi(http, registry, service, options);
+        var result = await Autheris.Api.Endpoints.ProcedureEndpointRoutes.HandleOpenApi(http, new ProcedureCatalog(registry, service), options);
 
         var ok = result.ShouldBeOfType<Microsoft.AspNetCore.Http.HttpResults.Ok<Dictionary<string, object>>>();
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
@@ -1198,7 +1173,6 @@ public class ProcedureRowBudgetAndScanCapTests
                     Enabled = true,
                     Directory = dir,
                     AllowedSchemas = ["api"],
-                    EnableHotReload = false,
                     AllowDeclaredValidation = true,
                     RequireDdlHashForDeclared = requireDdlHash
                 }

@@ -820,16 +820,16 @@ public class ProcedureExecutionSecurityTests
 
         // anonymous in open-schema mode: empty paths, no evaluation at all
         var anonymousHttp = new DefaultHttpContext { User = Anonymous() };
-        var anon = await ProcedureEndpointRoutes.HandleOpenApi(anonymousHttp, registry, service);
+        var anon = await ProcedureEndpointRoutes.HandleOpenApi(anonymousHttp, new ProcedureCatalog(registry, service));
         ((Dictionary<string, object>)anon.ShouldBeOfType<Ok<Dictionary<string, object>>>().Value!["paths"]).ShouldBeEmpty();
 
         // authenticated: only the visible procedure; the failing one is omitted, the response is not failed
         var http = new DefaultHttpContext { User = User() };
-        var open = await ProcedureEndpointRoutes.HandleOpenApi(http, registry, service);
+        var open = await ProcedureEndpointRoutes.HandleOpenApi(http, new ProcedureCatalog(registry, service));
         var paths = (Dictionary<string, object>)open.ShouldBeOfType<Ok<Dictionary<string, object>>>().Value!["paths"];
         paths.Keys.ShouldBe(["/api/v1/procedures/get_orders"]);
 
-        var list = await ProcedureEndpointRoutes.HandleList(http, registry, service);
+        var list = await ProcedureEndpointRoutes.HandleList(http, new ProcedureCatalog(registry, service));
         var items = list.ShouldBeOfType<Ok<List<object>>>().Value!;
         items.Count.ShouldBe(1);
     }
@@ -842,9 +842,9 @@ public class ProcedureExecutionSecurityTests
         service.IsVisibleAsync(default!, default!, default, default).ReturnsForAnyArgs(Task.FromResult(false));
         var http = new DefaultHttpContext { User = User() };
 
-        var open = await ProcedureEndpointRoutes.HandleOpenApi(http, registry, service);
+        var open = await ProcedureEndpointRoutes.HandleOpenApi(http, new ProcedureCatalog(registry, service));
         ((Dictionary<string, object>)open.ShouldBeOfType<Ok<Dictionary<string, object>>>().Value!["paths"]).ShouldBeEmpty();
-        (await ProcedureEndpointRoutes.HandleList(http, registry, service)).ShouldBeOfType<Ok<List<object>>>().Value!.ShouldBeEmpty();
+        (await ProcedureEndpointRoutes.HandleList(http, new ProcedureCatalog(registry, service))).ShouldBeOfType<Ok<List<object>>>().Value!.ShouldBeEmpty();
     }
 
     // ---------- route level ----------

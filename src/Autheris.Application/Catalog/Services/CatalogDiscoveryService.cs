@@ -39,8 +39,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
     private readonly long _maxSpecDownloadBytes;
     private readonly IHttpClientFactory? _httpClientFactory;
-    private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
-    private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
+    private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
 
     /// <summary>
     /// The gateway options are required: the caller class and the visible set depend on them, so a
@@ -57,8 +56,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ILogger<CatalogDiscoveryService>? logger = null,
         IOptions<CatalogDiscoveryOptions>? options = null,
         IHttpClientFactory? httpClientFactory = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
         IConsentResolutionService? consentResolution = null,
         IConsentRepository? consentRepository = null,
         TimeProvider? timeProvider = null,
@@ -79,8 +77,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _searchEngine = searchEngine;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<CatalogDiscoveryService>.Instance;
         _httpClientFactory = httpClientFactory;
-        _procedureRegistry = procedureRegistry;
-        _procedureExecutionService = procedureExecutionService;
+        _procedureCatalog = procedureCatalog;
     }
 
     private TenantId? CatalogOwner => TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
@@ -101,21 +98,15 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
         if (string.Equals(table.Schema, "procedure", StringComparison.OrdinalIgnoreCase))
         {
-            if (_procedureRegistry == null || _procedureExecutionService == null)
+            if (_procedureCatalog == null)
             {
                 return null;
             }
 
-            if (!_procedureRegistry.TryGet(table.TableName, out var proc) || proc == null ||
-                proc.State != ProcedureState.Active ||
+            var proc = await _procedureCatalog.FindVisibleAsync(table.TableName, context.User, context.TenantId, ct).ConfigureAwait(false);
+            if (proc == null ||
                 proc.Definition.Mode != ProcedureMode.Read ||
                 string.IsNullOrWhiteSpace(proc.Definition.ResultTable))
-            {
-                return null;
-            }
-
-            var isVisible = await _procedureExecutionService.IsVisibleAsync(proc, context.User, context.TenantId, ct).ConfigureAwait(false);
-            if (!isVisible)
             {
                 return null;
             }
@@ -284,26 +275,13 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
 
     private async Task<IReadOnlyList<RegisteredProcedure>> GetVisibleProceduresAsync(RequestContext context, CancellationToken ct)
     {
-        if (_procedureRegistry == null || _procedureExecutionService == null)
+        if (_procedureCatalog == null)
         {
             return [];
         }
 
-        var visible = new List<RegisteredProcedure>();
-        foreach (var proc in _procedureRegistry.GetAll())
-        {
-            if (proc.State == ProcedureState.Active &&
-                proc.Definition.Mode == ProcedureMode.Read &&
-                !string.IsNullOrWhiteSpace(proc.Definition.ResultTable))
-            {
-                if (await _procedureExecutionService.IsVisibleAsync(proc, context.User, context.TenantId, ct).ConfigureAwait(false))
-                {
-                    visible.Add(proc);
-                }
-            }
-        }
-
-        return visible;
+        var visible = await _procedureCatalog.ListVisibleAsync(context.User, context.TenantId, ct).ConfigureAwait(false);
+        return visible.Where(p => p.Definition.Mode == ProcedureMode.Read && !string.IsNullOrWhiteSpace(p.Definition.ResultTable)).ToList();
     }
 
     public async Task<IReadOnlyList<CatalogDatasetSummary>> SearchCatalogAsync(string query, string? domain, RequestContext context, CancellationToken ct = default)

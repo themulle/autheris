@@ -2,9 +2,11 @@ namespace Autheris.Application.Procedures.Services;
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
+using System.Security.Cryptography;
+using System.Text;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -16,9 +18,8 @@ using Microsoft.Extensions.Options;
 /// F-SQL-02: Loads <c>*.proc.yaml</c> declarations into the <see cref="IProcedureRegistry"/> (state Pending).
 /// Activation happens only after <see cref="StoredProcedureCatalogValidator"/> accepted the declaration.
 /// </summary>
-public sealed class ProcedureDefinitionLoader : IDisposable
+public sealed class ProcedureDefinitionLoader
 {
-    internal const string FilePattern = "*.proc.*";
     internal const string LegacySqlHeaderMessage = "SQL-header procedure declarations (*.proc.sql) are no longer supported; convert them to *.proc.yaml.";
     internal const string WriteModeRejectedMessage = "Write procedures are enabled with data products (WP-SIMPL-49).";
     private const long MaxFileBytes = 64 * 1024;
@@ -32,8 +33,7 @@ public sealed class ProcedureDefinitionLoader : IDisposable
     private readonly IHostEnvironment? _environment;
     private readonly ILogger<ProcedureDefinitionLoader>? _logger;
     private readonly ConcurrentDictionary<string, string> _fileToName = new(StringComparer.OrdinalIgnoreCase);
-    private FileSystemWatcher? _watcher;
-    private bool _disposed;
+    private readonly ConcurrentDictionary<string, string> _fileHash = new(StringComparer.OrdinalIgnoreCase);
 
     public ProcedureDefinitionLoader(
         IProcedureRegistry registry,
@@ -55,7 +55,15 @@ public sealed class ProcedureDefinitionLoader : IDisposable
     private bool AllowRlsNone => _environment?.IsDevelopment() == true;
 
     /// <summary>Loads all declarations of the configured directory. Returns the number of registered procedures.</summary>
-    public int LoadFromDirectory()
+    public int LoadFromDirectory() => Scan(failOnLegacyFiles: true);
+
+    /// <summary>
+    /// Re-reads the configured directory (no other path): new or changed declarations are registered as Pending, files that
+    /// disappeared or no longer load are removed, a <c>*.proc.sql</c> file is rejected and logged.
+    /// </summary>
+    public int Rescan() => Scan(failOnLegacyFiles: false);
+
+    private int Scan(bool failOnLegacyFiles)
     {
         if (Settings.RequireDdlHashForDeclared == false && _environment?.IsDevelopment() != true)
         {
@@ -63,35 +71,48 @@ public sealed class ProcedureDefinitionLoader : IDisposable
         }
 
         string directory = Settings.Directory;
-        if (string.IsNullOrWhiteSpace(directory))
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
         {
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                _logger?.LogInformation("Procedure directory '{Directory}' does not exist; no stored procedure endpoints loaded.", directory);
+            }
+
+            foreach (string known in _fileToName.Keys.ToList())
+            {
+                ForgetFile(known);
+            }
+
             return 0;
         }
 
-        if (!Directory.Exists(directory))
-        {
-            _logger?.LogInformation("Procedure directory '{Directory}' does not exist; no stored procedure endpoints loaded.", directory);
-            return 0;
-        }
-
-        string[] files = Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories);
+        var enumeration = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
+        string[] files = Directory.GetFiles(directory, "*.*", enumeration);
         if (files.Any(f => f.EndsWith(".proc.sql", StringComparison.OrdinalIgnoreCase)))
         {
-            throw new InvalidOperationException(LegacySqlHeaderMessage);
+            if (failOnLegacyFiles)
+            {
+                throw new InvalidOperationException(LegacySqlHeaderMessage);
+            }
+
+            _logger?.LogError("{Message}", LegacySqlHeaderMessage);
         }
 
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int count = 0;
-        foreach (string file in files)
+        foreach (string file in files.Where(IsSupportedProcedureFile))
         {
-            if (IsSupportedProcedureFile(file) && TryLoadFile(file, directory))
+            present.Add(Path.GetFullPath(file));
+            if (IsUnchanged(file) || TryLoadFile(file, directory))
             {
                 count++;
             }
         }
 
-        if (Settings.EnableHotReload && _watcher == null)
+        // a deleted, moved or linked file removes its entry.
+        foreach (string known in _fileToName.Keys.Where(k => !present.Contains(k)).ToList())
         {
-            SetupWatcher(directory);
+            ForgetFile(known);
         }
 
         _logger?.LogInformation("Loaded {Count} stored procedure declaration(s) from '{Directory}' (pending validation).", count, directory);
@@ -135,6 +156,7 @@ public sealed class ProcedureDefinitionLoader : IDisposable
 
             string defaultName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(filePath));
             string content = File.ReadAllText(filePath);
+            string contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
             var definition = ProcedureDefinitionParser.ParseYaml(content, defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds);
 
             string fullPath = Path.GetFullPath(filePath);
@@ -167,14 +189,31 @@ public sealed class ProcedureDefinitionLoader : IDisposable
 
             _registry.Register(definition);
             _fileToName[fullPath] = definition.Name;
+            _fileHash[fullPath] = contentHash;
             return true;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Review P-3: every parse error (incl. YamlException, NullReferenceException) only skips this file;
-            // it must never stop the host or crash the file watcher thread. The endpoint is removed (fail-closed).
+            // it must never stop the host. The endpoint is removed (fail-closed).
             _logger?.LogWarning(ex, "Procedure declaration '{File}' is invalid and was skipped.", filePath);
-            SafeForget(filePath);
+            ForgetFile(filePath);
+            return false;
+        }
+    }
+
+    /// <summary>An unchanged file that is still registered keeps its validated state instead of going back to Pending.</summary>
+    private bool IsUnchanged(string file)
+    {
+        string full = Path.GetFullPath(file);
+        try
+        {
+            return _fileHash.TryGetValue(full, out var hash) && _fileToName.TryGetValue(full, out var name) &&
+                   _registry.TryGet(name, out _) &&
+                   string.Equals(hash, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(File.ReadAllText(file)))), StringComparison.Ordinal);
+        }
+        catch (IOException)
+        {
             return false;
         }
     }
@@ -196,26 +235,6 @@ public sealed class ProcedureDefinitionLoader : IDisposable
         }
 
         return false;
-    }
-
-    private void SafeForget(string filePath)
-    {
-        try
-        {
-            ForgetFile(filePath);
-
-            // Review P-8: a deleted or renamed directory raises no events for the files below it; all declarations
-            // loaded from that subtree are switched off (fail-closed).
-            string prefix = Path.GetFullPath(filePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            foreach (var key in _fileToName.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
-            {
-                ForgetFile(key);
-            }
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            _logger?.LogDebug(ex, "Could not resolve '{File}' while unregistering it.", filePath);
-        }
     }
 
     /// <summary>Static policy checks that need no database access.</summary>
@@ -283,86 +302,11 @@ public sealed class ProcedureDefinitionLoader : IDisposable
     /// <summary>Fail-closed: a deleted or no longer valid declaration is removed from the registry.</summary>
     private void ForgetFile(string filePath)
     {
-        if (_fileToName.TryRemove(Path.GetFullPath(filePath), out var name))
+        string full = Path.GetFullPath(filePath);
+        _fileHash.TryRemove(full, out _);
+        if (_fileToName.TryRemove(full, out var name))
         {
             _registry.Unregister(name);
         }
-    }
-
-    private void SetupWatcher(string directory)
-    {
-        try
-        {
-            _watcher = new FileSystemWatcher(directory)
-            {
-                IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite,
-                EnableRaisingEvents = true
-            };
-
-            // Review P-3/P-8: handlers run on thread-pool threads; an exception there would terminate the process.
-            _watcher.Created += (_, e) => OnWatcherEvent(() =>
-            {
-                if (IsSupportedProcedureFile(e.FullPath))
-                {
-                    TryLoadFile(e.FullPath, directory);
-                }
-                else if (Directory.Exists(e.FullPath))
-                {
-                    foreach (var f in Directory.EnumerateFiles(e.FullPath, "*", SearchOption.AllDirectories).Where(IsSupportedProcedureFile))
-                    {
-                        TryLoadFile(f, directory);
-                    }
-                }
-            });
-            _watcher.Changed += (_, e) => OnWatcherEvent(() => { if (IsSupportedProcedureFile(e.FullPath)) TryLoadFile(e.FullPath, directory); });
-            _watcher.Deleted += (_, e) => OnWatcherEvent(() => SafeForget(e.FullPath));
-            _watcher.Renamed += (_, e) => OnWatcherEvent(() =>
-            {
-                // Renaming x.proc.yaml to x.proc.yaml.disabled must switch the endpoint off; atomic saves (temp + rename)
-                // must load the new content.
-                SafeForget(e.OldFullPath);
-                if (IsSupportedProcedureFile(e.FullPath))
-                {
-                    TryLoadFile(e.FullPath, directory);
-                }
-                else if (Directory.Exists(e.FullPath))
-                {
-                    // A directory moved into the watched tree: load its declarations.
-                    foreach (var f in Directory.EnumerateFiles(e.FullPath, "*", SearchOption.AllDirectories).Where(IsSupportedProcedureFile))
-                    {
-                        TryLoadFile(f, directory);
-                    }
-                }
-            });
-        }
-        catch (Exception ex) when (ex is IOException or ArgumentException or PlatformNotSupportedException)
-        {
-            _logger?.LogWarning(ex, "Could not start the file watcher on '{Directory}'. Hot reload disabled.", directory);
-        }
-    }
-
-    private void OnWatcherEvent(Action action)
-    {
-        try
-        {
-            action();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger?.LogError(ex, "Procedure hot reload failed.");
-        }
-    }
-
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        _watcher?.Dispose();
-        _watcher = null;
     }
 }
