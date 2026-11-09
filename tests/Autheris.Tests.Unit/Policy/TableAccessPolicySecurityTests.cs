@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.Policy;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
+using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance;
 using Autheris.Domain.Model;
@@ -14,7 +15,8 @@ using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Options;
 using Autheris.Application.Common.Interfaces;
-using NSubstitute;
+using Autheris.Domain.Common;
+using Autheris.Tests.Unit.Governance;
 using Shouldly;
 using Xunit;
 
@@ -25,7 +27,7 @@ public sealed class TableAccessPolicySecurityTests
     [Trait("Category", "Security")]
     public void Constructor_without_policy_service_throws()
     {
-        var repo = Substitute.For<IConsentRepository>();
+        var repo = new FakeConsentRepository();
         var resolution = new ConsentResolutionService();
         var cache = NullConsentCacheService.Instance;
         var rebac = NullRebacEvaluator.Instance;
@@ -55,15 +57,14 @@ public sealed class TableAccessPolicySecurityTests
     [Trait("Category", "Security")]
     public async Task SEC_36_SP3a_02_CanWriteTable_is_false_without_write_decision(bool allowDml, bool writerRole, bool consentBypass, bool clusterAdmin)
     {
-        var enforcement = Substitute.For<IPolicyEnforcementService>();
-        enforcement.HasPolicies(Arg.Any<TenantId>()).Returns(true);
+        var enforcement = new PoliciesPresentEnforcement();
         var options = new GatewayOptions
         {
             WebSql = new WebSqlOptions { AllowDml = allowDml, DmlWriterRoles = writerRole ? ["Writer"] : [] },
             Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = consentBypass }
         };
         var policy = new TableAccessPolicy(
-            Substitute.For<IConsentRepository>(), new ConsentResolutionService(), NullConsentCacheService.Instance, enforcement,
+            new FakeConsentRepository(), new ConsentResolutionService(), NullConsentCacheService.Instance, enforcement,
             NullRebacEvaluator.Instance, clientIpResolver: null, options, NullMandatoryRowFilterResolver.Instance);
         var roles = new List<Claim> { new(ClaimTypes.NameIdentifier, "u1"), new(ClaimTypes.Role, "Writer") };
         if (clusterAdmin)
@@ -76,5 +77,15 @@ public sealed class TableAccessPolicySecurityTests
 
         (await policy.CanWriteTableAsync(user, new TenantId("t1"), new TableMetadata { Identifier = id })).ShouldBeFalse();
         (await policy.CanWriteTableAsync(user, new TenantId("t1"), id)).ShouldBeFalse();
+    }
+
+    private sealed class PoliciesPresentEnforcement : IPolicyEnforcementService
+    {
+        public ValueTask<TableAccessDecision> EvaluatePolicyAsync(SecurityEvaluationContext context, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public bool HasPolicies(TenantId tenant) => true;
+
+        public Task ReloadPoliciesAsync(TenantId tenant, CancellationToken ct = default) => Task.CompletedTask;
     }
 }
