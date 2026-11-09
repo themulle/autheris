@@ -201,6 +201,8 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     [Fact]
     public async Task Dml_IsTenantScoped_ThroughTheCheckedExecutor()
     {
+        // Test-only seam: the production write decision denies every DML target; these tests prove executor-level behaviour.
+        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         if (!await EnsureHostAsync()) return;
 
         int audited = await CompiledAuditCountAsync();
@@ -217,6 +219,8 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     [Fact]
     public async Task Dml_AboveMaxAffectedRows_IsRejectedAndRolledBack()
     {
+        // Test-only seam: the production write decision denies every DML target; these tests prove executor-level behaviour.
+        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         if (!await EnsureHostAsync()) return;
 
         // acme has three rows; the limit of this host is two
@@ -224,6 +228,15 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
 
         ex.Code.ShouldBe("DML_AFFECTED_ROWS_LIMIT");
         Ids(await QueryAsync($"SELECT id FROM {Ref} WHERE region = 'QQ'", "acme")).ShouldBeEmpty();   // rolled back
+    }
+
+    [Fact]
+    public async Task Dml_IsRefused_WithoutAWriteDecision()
+    {
+        if (!await EnsureHostAsync()) return;
+
+        await Should.ThrowAsync<Autheris.Application.Sql.WebSqlTableDeniedException>(() => QueryAsync($"UPDATE {Ref} SET region = 'ZZ' WHERE id = 1", "acme", roles: ["Writer"]));
+        Ids(await QueryAsync($"SELECT id FROM {Ref} WHERE region = 'ZZ'", "acme")).ShouldBeEmpty();
     }
 
     [Fact]
