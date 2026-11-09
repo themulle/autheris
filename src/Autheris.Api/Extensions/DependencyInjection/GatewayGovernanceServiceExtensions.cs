@@ -27,6 +27,7 @@ using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Governance;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Dialects;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Security;
 using Autheris.Infrastructure.Streaming;
@@ -83,13 +84,17 @@ public static partial class GatewayGovernanceServiceExtensions
 
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
-            RegisterGovernanceAggregateStores<PostgreSqlGovernanceRepository, PostgreSqlGovernanceMigrationRunner>(
+            services.AddSingleton<IGovernanceSqlDialect>(sp => new PostgreSqlGovernanceDialect(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.GovernanceDb.ConnectionString));
+            RegisterGovernanceAggregateStores<GovernanceRepository, PostgreSqlGovernanceMigrationRunner>(
                 services,
                 cdcWebhooksEnabled);
         }
         else if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.SqlServer))
         {
-            RegisterGovernanceAggregateStores<SqlServerGovernanceRepository, SqlServerGovernanceMigrationRunner>(
+            services.AddSingleton<IGovernanceSqlDialect>(sp => new SqlServerGovernanceDialect(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.GovernanceDb.ConnectionString));
+            RegisterGovernanceAggregateStores<GovernanceRepository, SqlServerGovernanceMigrationRunner>(
                 services,
                 cdcWebhooksEnabled);
         }

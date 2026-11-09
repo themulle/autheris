@@ -40,7 +40,7 @@ public sealed class CatalogVisibilityServiceArchitectureTests
     private static IEnumerable<ModuleDefinition> ProductionModules()
     {
         yield return CecilModuleCache.For(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly);
-        yield return CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
+        yield return CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly);
         yield return CecilModuleCache.For(typeof(Autheris.GraphQL.Types.Mutation).Assembly);
         yield return CecilModuleCache.For(typeof(Autheris.Api.Security.GatewayAuthSchemes).Assembly);
         yield return CecilModuleCache.For(typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly);

@@ -12,7 +12,7 @@ using Microsoft.Data.SqlClient;
 /// <summary>
 /// SQL Server implementation of the governance SQL dialect.
 /// </summary>
-internal sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
+public sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
 {
     private readonly Func<DbConnection> _connectionFactory;
 

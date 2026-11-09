@@ -30,10 +30,10 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
 
     private static readonly GovernanceSchemaShapeVerifier Verifier = new("postgresql", new PostgreSqlSchemaCatalogReader());
 
-    private readonly PostgreSqlGovernanceRepository _repository;
+    private readonly GovernanceRepository _repository;
 
     public PostgreSqlGovernanceMigrationRunner(
-        PostgreSqlGovernanceRepository repository,
+        GovernanceRepository repository,
         IOptions<GatewayOptions> options,
         ILogger<PostgreSqlGovernanceMigrationRunner>? logger = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
@@ -88,7 +88,7 @@ public sealed class PostgreSqlGovernanceMigrationRunner : GovernanceMigrationRun
         // Mode=Verify only reads: it runs with the runtime login, never with the DDL login (least privilege, plan D-12).
         if (verifyOnly || string.IsNullOrWhiteSpace(_repository.MigrationConnectionString))
         {
-            return await _repository.DataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await _repository.OpenConnectionAsync(ct).ConfigureAwait(false);
         }
 
         // Review PG-7: DDL with a separate migration role when configured (the runtime role then needs no DDL rights).

@@ -188,7 +188,7 @@ public sealed class GovernanceContractCoverageTests
         }
 
         var closed = method.MakeGenericMethod(
-            typeof(PostgreSqlGovernanceRepository),
+            typeof(Autheris.Infrastructure.Persistence.GovernanceRepository),
             typeof(PostgreSqlGovernanceMigrationRunner));
         var services = new ServiceCollection();
         closed.Invoke(null, [services, true]);

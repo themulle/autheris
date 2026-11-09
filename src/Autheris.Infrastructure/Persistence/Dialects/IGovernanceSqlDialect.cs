@@ -8,7 +8,7 @@ using Autheris.Domain.Interfaces;
 /// Engine-specific SQL fragment and connection provider for the unified governance repository.
 /// Has exactly the 11 divergence members mandated by the architecture spec.
 /// </summary>
-internal interface IGovernanceSqlDialect
+public interface IGovernanceSqlDialect
 {
     string Upsert(GovernanceTable table, ReadOnlySpan<string> keyColumns, ReadOnlySpan<string> valueColumns);
     string InsertReturning(string column);

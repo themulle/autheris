@@ -18,13 +18,48 @@ using Microsoft.Extensions.Logging;
 
 public partial class GovernanceRepository
 {
+    internal static class ConsentGrantPostgreSql
+    {
+        public static string ActiveRoleConsents(bool withTenant) => @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
+                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                       c.is_revoked, c.tenant_id
+                                FROM CONSENTS c
+                                JOIN TABLES t ON c.table_id = t.id
+                                WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
+                                  AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
+                                  AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
+
+        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
+                                FROM CONSENTS c 
+                                JOIN TABLES t ON c.table_id = t.id
+                                WHERE c.id = @id
+                                FOR UPDATE OF c";
+    }
+
+    internal static class ConsentGrantSqlServer
+    {
+        public static string ActiveRoleConsents(bool withTenant) => @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
+                                       c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
+                                       c.is_revoked, c.tenant_id
+                                FROM CONSENTS c
+                                JOIN TABLES t ON c.table_id = t.id
+                                WHERE t.source_name_lc = LOWER(@domain) AND t.schema_name_lc = LOWER(@schema) AND t.table_name_lc = LOWER(@table)
+                                  AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
+                                  AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
+
+        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
+                                FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)
+                                JOIN TABLES t ON c.table_id = t.id
+                                WHERE c.id = @id";
+    }
+
     private string RevokeTargetSql => _dialect is PostgreSqlGovernanceDialect
-        ? PostgreSqlGovernanceRepository.ConsentGrantSql.RevokeTarget
-        : SqlServerGovernanceRepository.ConsentGrantSql.RevokeTarget;
+        ? ConsentGrantPostgreSql.RevokeTarget
+        : ConsentGrantSqlServer.RevokeTarget;
 
     private string ActiveRoleConsentsSql(bool withTenant) => _dialect is PostgreSqlGovernanceDialect
-        ? PostgreSqlGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(withTenant)
-        : SqlServerGovernanceRepository.ConsentGrantSql.ActiveRoleConsents(withTenant);
+        ? ConsentGrantPostgreSql.ActiveRoleConsents(withTenant)
+        : ConsentGrantSqlServer.ActiveRoleConsents(withTenant);
 
     public async Task<IReadOnlyList<Consent>> GetActiveRoleConsentsAsync(
         TableIdentifier table,

@@ -43,7 +43,7 @@ public class ArchitectureTests
     [Fact]
     public void Infrastructure_ShouldNotHaveDependencyOnApi()
     {
-        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
+        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly)
             .ShouldNot()
             .HaveDependencyOnAny(ApiNamespace)
             .GetResult();
@@ -85,7 +85,7 @@ public class ArchitectureTests
         {
             typeof(Autheris.Domain.Common.Sid).Assembly,
             typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-            typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
+            typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly,
             typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly
         };
 
@@ -132,7 +132,7 @@ public class ArchitectureTests
         {
             typeof(Autheris.Domain.Common.Sid).Assembly,
             typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-            typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
+            typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly,
             typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly
         };
 
@@ -264,7 +264,7 @@ public class ArchitectureTests
     [Trait("Category", "Security")]
     public void No_Sqlite_governance_types_or_steps_folder()
     {
-        var infrastructure = typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly;
+        var infrastructure = typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly;
         var api = typeof(Autheris.Api.Configuration.GovernanceProviderGuard).Assembly;
 
         FindSqliteGovernanceTypes(infrastructure.GetTypes().Concat(api.GetTypes())).ShouldBeEmpty(
@@ -370,13 +370,7 @@ public class ArchitectureTests
     public void SEC_A20_09_Tenantless_consent_overloads_used_only_from_allowlisted_files()
     {
         // SEC-A20-09: the tenant-less (cross-tenant) overloads have exactly these src callers (the dialect facades forwarding to the unified repository; the attribute-validating wrapper passes tenantId: null to the fail-closed typed overload); every other caller passes a tenant.
-        var expected = new[]
-        {
-            "src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs|GetActiveConsentsForSubjectsAsync|1",
-            "src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.Consent.cs|GetAllActiveConsentsForSubjectsAsync|1",
-            "src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Consent.cs|GetActiveConsentsForSubjectsAsync|1",
-            "src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository.Consent.cs|GetAllActiveConsentsForSubjectsAsync|1",
-        };
+        var expected = Array.Empty<string>();
 
         var actual = RepositoryScan.ProductionFiles
             .SelectMany(f => GovernanceSqlConstructionScanner.TenantlessConsentCalls(f.RelativePath, f.Text))
@@ -393,7 +387,7 @@ public class ArchitectureTests
     [Trait("Category", "Security")]
     public void No_Sqlite_governance_types_detector_flags_a_dummy_type_and_spares_data_source_guards()
     {
-        var infrastructure = typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly;
+        var infrastructure = typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly;
         var guards = infrastructure.GetTypes()
             .Where(t => t.Name is "SqliteExecutionGuard" or "SqliteProviderExecutionGuard")
             .ToList();

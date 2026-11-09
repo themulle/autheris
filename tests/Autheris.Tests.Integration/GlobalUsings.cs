@@ -1,0 +1,2 @@
+global using PostgreSqlGovernanceRepository = Autheris.Infrastructure.Persistence.GovernanceRepository;
+global using SqlServerGovernanceRepository = Autheris.Infrastructure.Persistence.GovernanceRepository;

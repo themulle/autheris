@@ -148,7 +148,7 @@ public class PostgreSqlGovernanceProviderTests
         services.AddGatewayInfrastructure(options);
 
         // Verify service descriptors without attempting live socket connection to localhost:5432
-        services.Any(d => d.ServiceType == typeof(PostgreSqlGovernanceRepository)).ShouldBeTrue();
+        services.Any(d => d.ServiceType == typeof(GovernanceRepository)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(IGovernanceRepository)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(ITableMetadataRepository)).ShouldBeTrue();
         services.Any(d => d.ServiceType == typeof(IConsentRepository)).ShouldBeTrue();
