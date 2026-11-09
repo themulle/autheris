@@ -101,4 +101,108 @@ public sealed class WebSqlDmlGuardTests
 
         ex.ShouldNotBeOfType<WebSqlTableDeniedException>();
     }
+
+    [Theory]
+    [InlineData("DELETE FROM plain WHERE id = 1")]
+    [InlineData("UPDATE plain SET id = 2 WHERE id = 1")]
+    [InlineData("INSERT INTO plain (id) VALUES (9)")]
+    public async Task SEC_36_SP3b_01_Dml_on_table_without_tenant_column_is_refused_with_its_own_code(string sql)
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: true, plainTable: true);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => Run(service, Principal("WebSqlWriter"), sql));
+
+        ex.ShouldNotBeOfType<WebSqlTableDeniedException>();
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.PolicyViolation);
+    }
+
+    [Theory]
+    [InlineData("DELETE FROM orders WHERE id IN (SELECT id FROM plain)")]
+    [InlineData("UPDATE orders SET amount = 0 WHERE id IN (SELECT id FROM plain)")]
+    public async Task SEC_36_SP3b_01_Every_referenced_table_is_checked_in_a_multi_table_statement(string sql)
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: true, plainTable: true);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => Run(service, Principal("WebSqlWriter"), sql));
+
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.PolicyViolation);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
+    }
+
+    [Theory]
+    [InlineData("plain")]
+    [InlineData("other.main.plain")]
+    [InlineData("xmain.plain")]
+    [InlineData("main.plain2")]
+    public async Task SEC_36_SP3b_01_Exempt_entry_is_not_matched_by_suffix_or_bare_name(string entry)
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: true, plainTable: true, exemptTables: [entry]);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => Run(service, Principal("WebSqlWriter"), "DELETE FROM plain WHERE id = 1"));
+
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.PolicyViolation);
+    }
+
+    [Theory]
+    [InlineData("main.plain")]
+    [InlineData("MAIN.Plain")]
+    public async Task SEC_36_SP3b_01_Exact_qualified_exempt_entry_passes_case_insensitively(string entry)
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: true, plainTable: true, exemptTables: [entry]);
+
+        await Run(service, Principal("WebSqlWriter"), "DELETE FROM plain WHERE id = 1");
+    }
+
+    [Fact]
+    public async Task SEC_36_ORDER_01_Write_decision_is_the_last_check_for_an_exempt_table()
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: false, plainTable: true, exemptTables: ["main.plain"]);
+
+        await Should.ThrowAsync<WebSqlTableDeniedException>(() => Run(service, Principal("WebSqlWriter"), "DELETE FROM plain WHERE id = 1"));
+    }
+
+    [Fact]
+    public async Task SEC_36_ORDER_01_Tenant_column_refusal_is_observable_while_the_write_decision_denies()
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: false, plainTable: true);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => Run(service, Principal("WebSqlWriter"), "DELETE FROM plain WHERE id = 1"));
+
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.PolicyViolation);
+    }
+
+    [Theory]
+    [InlineData("INSERT INTO orders (id, amount, tenant_id) SELECT id, 1, 'tenant_a' FROM plain")]
+    [InlineData("UPDATE orders SET amount = (SELECT COUNT(*) FROM plain) WHERE id = 1")]
+    public async Task SEC_36_SP3b_01_Tenantless_table_in_insert_select_and_set_subquery_is_refused(string sql)
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: true, plainTable: true);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => Run(service, Principal("WebSqlWriter"), sql));
+
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.PolicyViolation);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
+    }
+
+    // The DML parser does not accept these multi-table shapes at all (rejected before any table is resolved), which is fail-closed.
+    [Theory]
+    [InlineData("UPDATE orders SET amount = 0 FROM plain WHERE orders.id = plain.id")]
+    [InlineData("DELETE FROM orders USING plain WHERE orders.id = plain.id")]
+    [InlineData("WITH p AS (SELECT id FROM plain) DELETE FROM orders WHERE id IN (SELECT id FROM p)")]
+    public async Task SEC_36_SP3b_01_Unsupported_multi_table_dml_shapes_are_rejected_without_executing(string sql)
+    {
+        await using var fixture = await BypassSemanticsAndDmlGuardrailTests.DmlFixture.CreateAsync();
+        var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, permissiveWrite: true, plainTable: true);
+
+        await Should.ThrowAsync<System.ArgumentException>(() => Run(service, Principal("WebSqlWriter"), sql));
+
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
+    }
 }
