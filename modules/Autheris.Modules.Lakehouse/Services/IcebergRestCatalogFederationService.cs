@@ -94,6 +94,11 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             return Array.Empty<TableMetadata>();
         }
 
+        if (principal.GetUserSid() is not { } userSid)
+        {
+            return Array.Empty<TableMetadata>();
+        }
+
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var tenantTables = allTables
             .Where(t => string.Equals(t.Identifier.Domain, tenantId, StringComparison.OrdinalIgnoreCase))
@@ -112,7 +117,6 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
 
         if (RebacTableGate.IsEnforcedOnQueryPaths(_options.Value))
         {
-            var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
             var filtered = new List<TableMetadata>(visible.Count);
             foreach (var table in visible)
             {

@@ -292,6 +292,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         return merged;
     }
 
+    // Relies on the enum order Deny < Mask < Clear (pinned by a unit test).
     private static void Restrict(Dictionary<string, ColumnAccessLevel> merged, string column, ColumnAccessLevel level)
     {
         if (!merged.TryGetValue(column, out var existing) || level < existing)
@@ -302,10 +303,11 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
 
     private static string? ResolvePurpose(IEnumerable<Claim> claims)
     {
-        var values = DistinctClaimValues(claims, "purpose");
+        var list = claims as IReadOnlyCollection<Claim> ?? claims.ToList();
+        var values = DistinctClaimValues(list, "purpose");
         if (values.Count == 0)
         {
-            values = DistinctClaimValues(claims, "purpose_id");
+            values = DistinctClaimValues(list, "purpose_id");
         }
 
         return values.Count == 1 ? values[0] : null;

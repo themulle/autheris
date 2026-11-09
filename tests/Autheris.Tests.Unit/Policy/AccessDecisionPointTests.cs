@@ -117,6 +117,15 @@ public sealed class AccessDecisionPointTests
 
         decision.IsAllowed.ShouldBeFalse();
         decision.DeniedReasons.ShouldContain("missing subject identifier");
+        decision.RowFilterSql.ShouldBeNull();
+        decision.ColumnAccess.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Column_access_levels_are_ordered_from_most_to_least_restrictive()
+    {
+        (ColumnAccessLevel.Deny < ColumnAccessLevel.Mask).ShouldBeTrue();
+        (ColumnAccessLevel.Mask < ColumnAccessLevel.Clear).ShouldBeTrue();
     }
 
     private static TableAccessDecision Abac(
