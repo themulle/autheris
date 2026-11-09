@@ -1,5 +1,6 @@
 namespace Autheris.Infrastructure.Persistence;
 
+using System.Data;
 using System.Data.Common;
 
 /// <summary>
@@ -23,12 +24,17 @@ internal static class SqlCoreBinding
         }
     }
 
-    public static DbParameter AddBound(this DbCommand cmd, string name, object? value)
+    public static DbParameter AddBound(this DbCommand cmd, string name, object? value, DbType? dbType = null)
     {
         GuardTenantParameter(name, value);
         var parameter = cmd.CreateParameter();
         parameter.ParameterName = name;
-        parameter.Value = value;
+        parameter.Value = value ?? DBNull.Value;
+        if (dbType.HasValue)
+        {
+            parameter.DbType = dbType.Value;
+        }
+
         cmd.Parameters.Add(parameter);
         return parameter;
     }

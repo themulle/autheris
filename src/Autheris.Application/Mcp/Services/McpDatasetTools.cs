@@ -160,6 +160,11 @@ public static class McpDatasetTools
         var dataClosed = switches is not null && !(switches.RestDataEndpointEnabled && switches.IsGroupEnabled(McpToolGroup.Query));
         foreach (var tool in Definitions())
         {
+            if (switches is not null && !switches.ProceduresEnabled && tool.Name == CallProcedure)
+            {
+                continue;
+            }
+
             if (switches is not null && string.Equals(tool.Name, ListDatasets, StringComparison.Ordinal))
             {
                 yield return tool with { Description = new McpAccessHints(switches).ListDatasetsDescription() };

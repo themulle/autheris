@@ -52,6 +52,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
     private readonly Autheris.Application.Catalog.Localization.ILanguageNegotiator? _languageNegotiator;
     private readonly IOptions<CatalogLocalizationOptions>? _localizationOptions;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly McpAccessHints _hints;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
@@ -76,6 +77,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         IOptions<CatalogLocalizationOptions>? localizationOptions = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         IReadPathSwitches? switches = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -99,6 +101,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._procedureExecutionService = procedureExecutionService;
         this._languageNegotiator = languageNegotiator;
         this._localizationOptions = localizationOptions;
+        this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _hints = new McpAccessHints(switches, options?.Value.Mcp.Enabled ?? false);
     }
 
@@ -122,6 +125,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         IOptions<CatalogLocalizationOptions>? localizationOptions = null,
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         IReadPathSwitches? switches = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -144,6 +148,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._procedureExecutionService = procedureExecutionService;
         this._languageNegotiator = languageNegotiator;
         this._localizationOptions = localizationOptions;
+        this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _hints = new McpAccessHints(switches, options?.Value.Mcp.Enabled ?? false);
     }
 
@@ -664,6 +669,13 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         {
             throw new TableNotFoundException(new TableIdentifier("procedure", "dbo", procName));
         }
+
+        // describing a procedure is gated like calling it (definition source plus the result table's source).
+        await _transportGate.EnsureCatalogSourcesAsync(
+            [
+                string.IsNullOrWhiteSpace(def.DataSource) ? options?.Value.SqlEndpoints.Procedures.ConnectionName : def.DataSource,
+                string.IsNullOrWhiteSpace(resMeta.Table.SourceName) ? resId.Value.Domain : resMeta.Table.SourceName
+            ], ct).ConfigureAwait(false);
 
         var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
         var accessStatus = options?.Value.IsMcpAuthBypassed == true

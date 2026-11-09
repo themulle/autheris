@@ -31,11 +31,17 @@ public class ProcedureExecutionSecurityTests
     private static readonly TenantId Tenant = new("tenant-a");
 
     private const string Header = """
-        -- @name get_orders
-        -- @procedure api.usp_GetOrders
-        -- @param customer_id int required Customer number
-        -- @param note nvarchar(40) optional Free text
-        -- @result-table sales.orders
+        name: get_orders
+        procedure: api.usp_GetOrders
+        parameters:
+          - name: customer_id
+            type: int
+            description: Customer number
+          - name: note
+            type: nvarchar(40)
+            required: false
+            description: Free text
+        result_table: sales.orders
         """;
 
     // ---------- test doubles ----------
@@ -154,7 +160,7 @@ public class ProcedureExecutionSecurityTests
         bool markActive = true)
     {
         var e = new Env();
-        var def = ProcedureDefinitionParser.Parse(Header, "x", false, 60);
+        var def = TestProcedureYaml.Definition(Header, "x", false, 60);
         if (tweak != null)
         {
             def = tweak(def);
@@ -624,10 +630,10 @@ public class ProcedureExecutionSecurityTests
         ActivitySource.AddActivityListener(listener);
 
         // business error: the invoker converts the DbException into number/SQLSTATE only
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlException(50001, secret), out var number, out var sqlState).ShouldBeTrue();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlException(50001, secret), out var number, out var sqlState).ShouldBeTrue();
         number.ShouldBe(50001);
         sqlState.ShouldBeNull();
-        MssqlProcedureInvoker.TryGetBusinessError(new FakeSqlException(1205, secret), out _, out _).ShouldBeFalse();
+        ProcedureInvoker.TryGetBusinessError(new FakeSqlException(1205, secret), out _, out _).ShouldBeFalse();
 
         var business = Active();
         business.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ThrowsAsyncForAnyArgs(new ProcedureBusinessException(50001, null));
@@ -793,7 +799,7 @@ public class ProcedureExecutionSecurityTests
         registry = new InMemoryProcedureRegistry();
         foreach (var name in new[] { "get_orders", "get_other" })
         {
-            var def = ProcedureDefinitionParser.Parse(Header.Replace("get_orders", name), "x", false, 60);
+            var def = TestProcedureYaml.Definition(Header.Replace("get_orders", name), "x", false, 60);
             registry.Register(def);
             registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id"], ["sales.orders"], new Dictionary<string, string>()));
         }

@@ -86,7 +86,7 @@ public abstract class RowFilterEvaluationRepositoryContractTestsBase : IAsyncLif
 
     private async Task<ConsentRowFilter> StoredFilterAsync(TableIdentifier table, Guid consentId)
     {
-        var consents = await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow, null);
+        var consents = await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow);
         return consents.Single(c => c.Id == consentId).RowFilters.Single();
     }
 
