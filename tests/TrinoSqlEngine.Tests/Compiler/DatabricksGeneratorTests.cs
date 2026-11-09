@@ -19,7 +19,7 @@ public class DatabricksCapabilityTests
     [Fact]
     public void Databricks_HasTheDocumentedValues()
     {
-        Assert.Equal(DialectSupportTier.Experimental, Caps.Tier);
+        Assert.Equal(DialectSupportTier.Production, Caps.Tier);
         Assert.Equal(1000, Caps.MaxBindParameters);           // provisional fail-closed budget until the live probe (WP-C5)
         Assert.Null(Caps.MaxInListItems);
         Assert.Equal(255, Caps.MaxIdentifierLength);
