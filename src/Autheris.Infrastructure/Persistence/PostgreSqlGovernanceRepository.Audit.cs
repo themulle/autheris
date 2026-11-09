@@ -53,6 +53,9 @@ public partial class PostgreSqlGovernanceRepository
     public Task RecordAuditEventAsync(AuditLogEntry entry, DbTransaction existingTx, CancellationToken ct = default) =>
         _governanceRepository.RecordAuditEventAsync(entry, existingTx, ct);
 
+    internal Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct, DbTransaction? existingTx = null) =>
+        _governanceRepository.RecordAuditEventInternalAsync(entry, ct, existingTx);
+
     public void OnTransactionCommitted(DbTransaction tx) =>
         _governanceRepository.OnTransactionCommitted(tx);
 
