@@ -182,7 +182,7 @@ public sealed class McpServerTests
         var executor = new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(),
             Substitute.For<IGatewayExecutionService>(),
-            NullLogger<GatewayMcpQueryExecutor>.Instance,
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
             datasetCatalog: datasetCatalog);
 
         var tool = new McpToolDefinition("query_data_catalog", "Query data catalog", "{}", "query_data_catalog");
