@@ -16,9 +16,4 @@ public interface IModuleHostContext
     /// Semantic version of the running Autheris host binary.
     /// </summary>
     string HostVersion { get; }
-
-    /// <summary>
-    /// Factory that opens connections exclusively to the governance persistence store.
-    /// </summary>
-    IGovernanceConnectionFactory GovernanceConnections { get; }
 }

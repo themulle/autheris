@@ -38,12 +38,11 @@ public sealed class ModuleHostTests
             })
             .Build();
         var env = new FakeHostEnvironment();
-        var connFactory = new GovernanceConnectionFactory(services.BuildServiceProvider());
         var beforeAssemblies = AppDomain.CurrentDomain.GetAssemblies()
             .Select(a => a.GetName().Name ?? string.Empty)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var result = ModuleLoader.LoadModules(services, config, env, connFactory, NullLogger<ModuleLoader>.Instance);
+        var result = ModuleLoader.LoadModules(services, config, env, NullLogger<ModuleLoader>.Instance);
         result.Modules.ShouldBeEmpty();
 
         var loadedAssemblies = AppDomain.CurrentDomain.GetAssemblies()
@@ -174,8 +173,8 @@ public sealed class ModuleEndpointTests
             .OfType<RouteEndpoint>()
             .ToList();
 
-        var pingEndpoint = endpoints.Single(e => e.RoutePattern.RawText == "/api/v1/sample/ping");
-        var adminEndpoint = endpoints.Single(e => e.RoutePattern.RawText == "/api/v1/sample/admin");
+        var pingEndpoint = endpoints.Single(e => e.RoutePattern.RawText == "/modules/sample/ping");
+        var adminEndpoint = endpoints.Single(e => e.RoutePattern.RawText == "/modules/sample/admin");
 
         return (app, pingEndpoint, adminEndpoint);
     }
@@ -226,7 +225,7 @@ public sealed class ModuleEndpointTests
         await using (app)
         {
             var anonymousUser = new ClaimsPrincipal(new ClaimsIdentity());
-            var statusCode = await InvokeEndpointAsync(app, pingEndpoint, anonymousUser, "/api/v1/sample/ping");
+            var statusCode = await InvokeEndpointAsync(app, pingEndpoint, anonymousUser, "/modules/sample/ping");
             statusCode.ShouldBe(StatusCodes.Status401Unauthorized);
         }
     }
@@ -238,7 +237,7 @@ public sealed class ModuleEndpointTests
         await using (app)
         {
             var nonAdminUser = CreateAuthenticatedPrincipal(role: "Viewer");
-            var statusCode = await InvokeEndpointAsync(app, adminEndpoint, nonAdminUser, "/api/v1/sample/admin");
+            var statusCode = await InvokeEndpointAsync(app, adminEndpoint, nonAdminUser, "/modules/sample/admin");
             statusCode.ShouldBe(StatusCodes.Status403Forbidden);
         }
     }
@@ -251,7 +250,7 @@ public sealed class ModuleEndpointTests
         await using (app)
         {
             var user = CreateAuthenticatedPrincipal(sid: "S-1-5-21-777", tenantId: "tenant-audit");
-            var statusCode = await InvokeEndpointAsync(app, pingEndpoint, user, "/api/v1/sample/ping");
+            var statusCode = await InvokeEndpointAsync(app, pingEndpoint, user, "/modules/sample/ping");
 
             statusCode.ShouldBe(StatusCodes.Status200OK);
             auditWriter.Entries.Count.ShouldBe(1);
@@ -269,7 +268,7 @@ public sealed class ModuleEndpointTests
         await using (app)
         {
             var user = CreateAuthenticatedPrincipal();
-            var statusCode = await InvokeEndpointAsync(app, pingEndpoint, user, "/api/v1/sample/ping");
+            var statusCode = await InvokeEndpointAsync(app, pingEndpoint, user, "/modules/sample/ping");
             statusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
         }
     }
@@ -281,11 +280,11 @@ public sealed class ModuleEndpointTests
         await using (app)
         {
             var userWithoutTenant = CreateAuthenticatedPrincipal(tenantId: null);
-            var deniedStatus = await InvokeEndpointAsync(app, pingEndpoint, userWithoutTenant, "/api/v1/sample/ping");
+            var deniedStatus = await InvokeEndpointAsync(app, pingEndpoint, userWithoutTenant, "/modules/sample/ping");
             deniedStatus.ShouldBe(StatusCodes.Status403Forbidden);
 
             var userWithTenant = CreateAuthenticatedPrincipal(tenantId: "tenant-verified");
-            var allowedStatus = await InvokeEndpointAsync(app, pingEndpoint, userWithTenant, "/api/v1/sample/ping");
+            var allowedStatus = await InvokeEndpointAsync(app, pingEndpoint, userWithTenant, "/modules/sample/ping");
             allowedStatus.ShouldBe(StatusCodes.Status200OK);
         }
     }

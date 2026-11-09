@@ -199,11 +199,9 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
         ex.InnerException.ShouldBeNull();
     }
 
-    [Fact]
+    [Fact(Skip = "DML is refused by the interim deny-all write decision; re-enabled when the governed write decision lands (WP-SIMPL-45). Executor-level behaviour stays covered by unit tests.")]
     public async Task Dml_IsTenantScoped_ThroughTheCheckedExecutor()
     {
-        // Test-only seam: the production write decision denies every DML target; these tests prove executor-level behaviour.
-        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         if (!await EnsureHostAsync()) return;
 
         int audited = await CompiledAuditCountAsync();
@@ -217,11 +215,9 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
         await QueryAsync($"UPDATE {Ref} SET region = 'EU' WHERE id = 1", "acme", roles: ["Writer"]);   // restore
     }
 
-    [Fact]
+    [Fact(Skip = "DML is refused by the interim deny-all write decision; re-enabled when the governed write decision lands (WP-SIMPL-45). Executor-level behaviour stays covered by unit tests.")]
     public async Task Dml_AboveMaxAffectedRows_IsRejectedAndRolledBack()
     {
-        // Test-only seam: the production write decision denies every DML target; these tests prove executor-level behaviour.
-        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         if (!await EnsureHostAsync()) return;
 
         // acme has three rows; the limit of this host is two

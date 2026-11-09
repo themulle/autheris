@@ -2,7 +2,7 @@
 
 Parent: [plan](../2026-11-05-plan-project-simplification.md#4-work-packages) | Issue: [#580](https://github.com/themulle/autheris/issues/580) | Related: [WP-SIMPL-28](WP-SIMPL-28-module-dbt-openmetadata.md), [WP-SIMPL-41](WP-SIMPL-41-authorized-data-discovery.md), [WP-SIMPL-52](WP-SIMPL-52-governance-data-model.md) (catalog text of masked columns)
 
-Status: Draft (Phase 2, 2026-11-08); scheduled after the feature freeze (Stage 3 exit, Q26 default); Phase 3 review pending.
+Status: Draft (Phase 2, 2026-11-08); scheduled after the feature freeze (Stage 3 exit, Q26 owner-confirmed 2026-11-08); Phase 3 review pending.
 
 ## 1. Goal and outcome
 Data owners maintain example queries per dataset in dbt `meta.golden_queries`; a dbt sync stores them in the governance store, and `describe_dataset.examples` and `get_golden_queries` serve them without a gateway restart. Removing them in dbt removes them on the next sync. `Gateway:GoldenQueries:InitialQueries` stays for demos and tests.
@@ -29,7 +29,7 @@ PR 1 ~280 src (+SQL), PR 2 ~260, PR 3 ~200.
 ## 7. Threat notes for Phase 3
 Catalog text injection towards LLM clients (#500 sanitiser); examples as a disclosure channel for hidden relations or columns (per-caller filter); cross-tenant leakage (tenant column, tenant-scoped reads); ingestion flooding (per-dataset cap, size limits).
 
-## 8. Decisions (defaults taken; owner may change)
+## 8. Decisions (owner-confirmed 2026-11-08: Q26, Q27)
 - D-54a dbt meta only (issue option 1); a per-dataset catalog REST API (option 2) is not built (Q27).
 - D-54b Store table in the governance DB; sync replaces the set per table and source.
 

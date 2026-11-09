@@ -11,7 +11,7 @@ Query clients (mostly LLM agents) get only what the operator allows and only hin
 - PR 1, PR 2: none (bug fixes on core paths, allowed under the freeze, PRD 5.1). PR 2 rebases on WP-SIMPL-16 if the Arrow branch of `DatasetAccess` is already deleted.
 - PR 3: after the WP-41 discovery DTO PR (same output types). Size data only from ingestion (OD-25, WP-44 "Do NOT compute statistics, row counts or samples from sources").
 - PR 4: after WP-44 (index usability on declared indexes only). PR 5: after WP-51 PR 1 (`SqlStatementCostEstimator`) and PR 4.
-- PR 3-5 add response fields: carried under `freeze-exception` with the issue link (Q23, default taken).
+- PR 3-5 add response fields: carried under `freeze-exception` with the issue link (Q23, owner-confirmed 2026-11-08).
 
 ## 3. Current state (verified on `origin/main` 13411f71, 2026-11-08)
 - `McpOptions.MaxResultRows` (`Domain/Options/Protocols/McpOptions.cs:10`, `[Range(1, 10000)]`, default 100) has no consumer. Own limits: `query_dataset` `limit` max 1000 (`McpDatasetTools.cs:283`), `call_procedure` `max_rows` default 100 clamp 1000 (`McpToolExecutionHandler.cs:533`), `sample_rows` `MaxSampleRows = 20` (`McpDatasetCatalog.cs:32`), `query_graphql` only `first` and `GraphQL:MaxResponseRows`. Dispatch: `GatewayMcpQueryExecutor.cs:313`.
@@ -39,7 +39,7 @@ PR 1 ~160, PR 2 ~170, PR 3 ~180, PR 4 ~200, PR 5 ~150. PR 1 and PR 2 any time, i
 ## 7. Threat notes for Phase 3
 Row cap is data minimisation towards model providers: a client value can only lower it. Size class leaks table cardinality including rows hidden by row policies; coarse classes only, visible datasets only (Q24). Index hints must not reveal Deny columns or index names of hidden objects. Hint builder reads configuration only, never request data.
 
-## 8. Decisions (defaults taken; owner may change)
+## 8. Decisions (defaults owner-confirmed 2026-11-08, with Q23 and Q24)
 - D-53a `Mcp:MaxResultRows` is enforced, not deleted (issue option 1).
 - D-53b Size class instead of exact count; buckets as in step 3.
 - D-53c Aggregations without a usable index reuse `UnindexedRootListSurchargeMultiplier`; behaviour change accepted (no production yet).
