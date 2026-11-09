@@ -55,7 +55,8 @@ public sealed class DatabricksFacadeTests
 
         await using var connection = await factory.CreateOpenConnectionAsync(options.DataSources.Connections["dbx"]);
 
-        connection.ShouldBeOfType<DatabricksDbConnection>();
+        connection.ShouldBeOfType<Autheris.Infrastructure.Persistence.MetadataGuardedConnection>()
+            .Inner.ShouldBeOfType<DatabricksDbConnection>();
         connection.State.ShouldBe(ConnectionState.Open);
     }
 

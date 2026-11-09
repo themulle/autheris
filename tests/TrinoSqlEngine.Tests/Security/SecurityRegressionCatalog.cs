@@ -150,7 +150,7 @@ internal static class SecurityRegressionCatalog
         new("SEC-94", LegacyIdKind.Application, "issue #94 key definitions, schema shape verification and read ordering (SEC-94-nn of its plan)", Array.Empty<string>(),
             new[]
             {
-                "Autheris.Tests.Architecture/ArchitectureNoSourceKeyCatalogQueriesTests.cs",
+                "Autheris.Tests.Architecture/ArchitectureNoSourceMetadataReadsTests.cs",
                 "Autheris.Tests.Integration/CatalogKeyDefinitionContractTestsBase.cs",
                 "Autheris.Tests.Integration/CatalogKeysEndpointAuthIntegrationTests.cs",
                 "Autheris.Tests.Integration/PostgreSqlGovernanceLeastPrivilegeTests.cs",

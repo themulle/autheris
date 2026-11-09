@@ -1,7 +1,10 @@
 using System.Data.Common;
+using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Databricks;
 using Microsoft.Data.SqlClient;
@@ -66,7 +69,8 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         if (DataSourceProvider.Is(options.Provider, DatabaseDialect.Databricks))
         {
             // WP-X0j: no ADO.NET driver and no connection string; the facade sends every statement through the hardened REST client.
-            return await CreateDatabricksConnectionAsync(options, ct).ConfigureAwait(false);
+            var databricks = await CreateDatabricksConnectionAsync(options, ct).ConfigureAwait(false);
+            return new MetadataGuardedConnection(databricks, DatabaseDialect.Databricks, rule => ReportViolation(DatabaseDialect.Databricks, rule));
         }
 
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
@@ -118,7 +122,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         {
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
             DatabaseDialect.SqlServer => CreateSqlServerConnection(connectionString, sqlServerSspiProvider),
-            DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(connectionString),
+            DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(WithNoTypeLoading(connectionString)),
             // CR-ADG-07: the raw driver connection never leaves this factory; every command is created with BindByName = true.
             DatabaseDialect.Oracle => new BindByNameOracleConnection(new OracleConnection(connectionString)),
             _ => throw UnsupportedProvider(options.Provider)
@@ -224,12 +228,42 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 }, isDeterministic: true);
             }
 
-            return connection;
+            // the raw driver connection never leaves this factory: every statement is checked for source metadata reads first.
+            return new MetadataGuardedConnection(connection, dialect, rule => ReportViolation(dialect, rule));
         }
         catch
         {
             await connection.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    /// <summary>Npgsql loads types from <c>pg_type</c>/<c>pg_catalog</c> on first open; that is a metadata read on Autheris's behalf and stays off.</summary>
+    internal static string WithNoTypeLoading(string connectionString)
+    {
+        // the connection string keeps Npgsql's own pooling per connection string; the data-source builder would need a cached data source per string.
+#pragma warning disable CS0618
+        return new Npgsql.NpgsqlConnectionStringBuilder(connectionString) { ServerCompatibilityMode = Npgsql.ServerCompatibilityMode.NoTypeLoading }.ConnectionString;
+#pragma warning restore CS0618
+    }
+
+    /// <summary>Warning and audit event for a blocked statement: dialect and rule id only, never the statement.</summary>
+    private void ReportViolation(DatabaseDialect dialect, string rule)
+    {
+        _logger?.LogWarning("SourceMetadataReadBlocked: a statement for a {Dialect} data source was blocked by rule {Rule}.", dialect, rule);
+        try
+        {
+            var writer = _services?.GetService<IAuditWriter>();
+            _ = writer?.RecordBestEffortAsync(new AuditLogEntry
+            {
+                EventType = AuditEventTypes.SourceMetadataReadBlocked,
+                Decision = "DENY",
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { rule, dialect = dialect.ToString() })
+            });
+        }
+        catch (Exception)
+        {
+            // best effort: the statement is blocked either way.
         }
     }
 

@@ -55,6 +55,7 @@ public sealed partial class GovernedCatalogProvider
             var rows = new List<DbKeyIndexColumn>();
             var nonUniqueNames = new HashSet<string>(StringComparer.Ordinal);
             var nonUniqueOverflow = false;
+            using var _ = Autheris.Application.Sql.SourceMetadataGuard.Suppress();
             await foreach (var row in reader.ReadAsync(connection, identity, timeout.Token).ConfigureAwait(false))
             {
                 if (rows.Count >= MaxPhysicalKeyRows)

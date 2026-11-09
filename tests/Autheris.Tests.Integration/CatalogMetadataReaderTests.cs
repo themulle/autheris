@@ -25,6 +25,7 @@ internal static class ReaderHelper
 {
     public static async Task<List<DbColumnMetadata>> ReadAsync(IColumnMetadataReader reader, DbConnection connection, TableIdentity table)
     {
+        using var _ = Autheris.Application.Sql.SourceMetadataGuard.Suppress();
         var list = new List<DbColumnMetadata>();
         await foreach (var column in reader.ReadAsync(connection, table, CancellationToken.None))
         {
@@ -36,6 +37,7 @@ internal static class ReaderHelper
 
     public static async Task ExecAsync(DbConnection connection, string sql)
     {
+        using var _ = Autheris.Application.Sql.SourceMetadataGuard.Suppress();
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync();
@@ -197,6 +199,7 @@ public sealed class OracleColumnMetadataReaderTests : IClassFixture<AstCompilerO
     [Fact]
     public async Task Oracle_ReadsCharUsedAndCollation()
     {
+        using var _ = Autheris.Application.Sql.SourceMetadataGuard.Suppress();
         await using var conn = await Open();
         await ReaderHelper.ExecAsync(conn, """
             CREATE TABLE AUTH_APP.X0C_TYPES (
@@ -229,6 +232,7 @@ public sealed class OracleColumnMetadataReaderTests : IClassFixture<AstCompilerO
     [Fact]
     public async Task Oracle_ReaderUsesSysQualifiedView_ShadowingTableIgnored()
     {
+        using var _ = Autheris.Application.Sql.SourceMetadataGuard.Suppress();
         await using var conn = await Open();
         await ReaderHelper.ExecAsync(conn, """
             CREATE TABLE AUTH_APP.ALL_TAB_COLUMNS (
@@ -256,6 +260,7 @@ public sealed class OracleColumnMetadataReaderTests : IClassFixture<AstCompilerO
     [Fact]
     public async Task Oracle_UnknownTableAndHostileName_ReturnNothing()
     {
+        using var _ = Autheris.Application.Sql.SourceMetadataGuard.Suppress();
         await using var conn = await Open();
 
         (await ReaderHelper.ReadAsync(new OracleColumnMetadataReader(), conn, new TableIdentity("AUTH_APP", "NOPE"))).ShouldBeEmpty();

@@ -104,6 +104,7 @@ public sealed class RowFilterKeySetSqlServerTests : IClassFixture<RowFilterKeySe
     public async Task KeyQuery_RunsReadCommitted_EvenWithReadUncommitted_SEC_RF107_12()
     {
         if (!_f.Db!.IsAvailable) return;
+        using var _ = Autheris.Application.Sql.SourceMetadataGuard.Suppress();
         const string isolation = "SELECT CAST(transaction_isolation_level AS nvarchar(10)) FROM sys.dm_exec_sessions WHERE session_id = @@SPID";
 
         // Control: the factory applies READ UNCOMMITTED (1) to a user session of this data source.

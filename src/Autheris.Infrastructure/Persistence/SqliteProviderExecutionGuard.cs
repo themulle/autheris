@@ -15,7 +15,7 @@ public sealed class SqliteProviderExecutionGuard : IProviderExecutionGuard
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(work);
-        return connection is SqliteConnection
+        return (connection is MetadataGuardedConnection guarded ? guarded.Inner : connection) is SqliteConnection
             ? SqliteExecutionGuard.RunAsync(connection, timeout, work, ct)
             : work();
     }

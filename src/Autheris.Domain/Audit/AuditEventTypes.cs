@@ -76,6 +76,9 @@ public static class AuditEventTypes
     // Issue #111 (A-9): aggregated count of probe attempts on datasets the caller cannot manage (one entry per principal and window).
     public const string CatalogProbeSuppressed = "CATALOG_PROBE_SUPPRESSED";
 
+    /// <summary>A statement bound for a data source referenced source metadata and was blocked before execution (rule id only, never the SQL).</summary>
+    public const string SourceMetadataReadBlocked = "SOURCE_METADATA_READ_BLOCKED";
+
     // System Lifecycle
     public const string ServiceStarted = "SERVICE_STARTED";
     public const string ServiceStopped = "SERVICE_STOPPED";

@@ -64,6 +64,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.CatalogTagsChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogMinGroupSizeChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogProbeSuppressed] = AuditFailurePolicy.BestEffort,
+        [AuditEventTypes.SourceMetadataReadBlocked] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.ServiceStarted] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.ServiceStopped] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.ConsentRequested] = AuditFailurePolicy.FailClosed,

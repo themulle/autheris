@@ -9,7 +9,20 @@ public enum DataAccessErrorKind
     /// <summary>The statement exceeded its time limit (504).</summary>
     Timeout = 1,
     /// <summary>The data source is temporarily unavailable or overloaded: deadlock, failover, pool exhausted (503).</summary>
-    Unavailable = 2
+    Unavailable = 2,
+    /// <summary>The data source rejected a statement because a declared table, column or routine no longer matches it (502, drift).</summary>
+    SourceSchemaMismatch = 3,
+    /// <summary>The source login lacks a privilege the governed statement needs (502).</summary>
+    SourcePermissionDenied = 4
+}
+
+/// <summary>Stable codes of the drift errors. The messages are generic: no object or column names, no SQL.</summary>
+public static class SourceDriftErrors
+{
+    public const string SchemaMismatchCode = "SOURCE_SCHEMA_MISMATCH";
+    public const string PermissionDeniedCode = "SOURCE_PERMISSION_DENIED";
+    public const string SchemaMismatchMessage = "The data source no longer matches the declared catalog definition. Upload the current definition.";
+    public const string PermissionDeniedMessage = "The data source login lacks a privilege that the governed statement needs.";
 }
 
 /// <summary>
@@ -22,6 +35,13 @@ public static class DataAccessErrorClassifier
     // SQL Server: deadlock, login/database unavailable, Azure SQL throttling and failover, broken connections.
     private static readonly HashSet<int> SqlServerUnavailableNumbers =
         [1205, 4060, 40613, 40501, 40197, 40540, 40143, 49918, 49919, 49920, 10928, 10929, 10053, 10054, 10060, 233, 64, 53, -1];
+
+    private static readonly HashSet<int> SqlServerMismatchNumbers = [207, 208, 2812, 201, 8144];
+    private static readonly HashSet<int> SqlServerPermissionNumbers = [229, 230, 262];
+    private static readonly HashSet<int> OracleMismatchNumbers = [942, 904, 6550, 6553];
+    private static readonly HashSet<string> PostgreSqlMismatchStates = ["42P01", "42703", "42883", "42804"];
+    private static readonly HashSet<string> DatabricksMismatchClasses = ["TABLE_OR_VIEW_NOT_FOUND", "UNRESOLVED_COLUMN", "UNRESOLVED_ROUTINE"];
+    private static readonly HashSet<string> DatabricksPermissionClasses = ["PERMISSION_DENIED", "INSUFFICIENT_PERMISSIONS"];
 
     private const int SqlServerTimeoutNumber = -2;
     private const int Win32WaitTimeout = 258;
@@ -37,6 +57,10 @@ public static class DataAccessErrorClassifier
                 return kind;
             }
             if (kind == DataAccessErrorKind.Unavailable)
+            {
+                result = kind;
+            }
+            else if (kind > DataAccessErrorKind.Unavailable && result == DataAccessErrorKind.Other)
             {
                 result = kind;
             }
@@ -58,8 +82,36 @@ public static class DataAccessErrorClassifier
                 // SqlClient/Npgsql: pool exhausted -> overload, not a slow statement
                 return DataAccessErrorKind.Unavailable;
             default:
-                return DataAccessErrorKind.Other;
+                // the Databricks facade surfaces the REST error class (read by name; Application stays provider-neutral)
+                return ex.GetType().GetProperty("ErrorClass")?.GetValue(ex) is string errorClass ? ClassifyDatabricks(errorClass) : DataAccessErrorKind.Other;
         }
+    }
+
+    private static DataAccessErrorKind ClassifyDatabricks(string errorClass) =>
+        DatabricksMismatchClasses.Contains(errorClass) ? DataAccessErrorKind.SourceSchemaMismatch
+        : DatabricksPermissionClasses.Contains(errorClass) ? DataAccessErrorKind.SourcePermissionDenied
+        : DataAccessErrorKind.Other;
+
+    private static DataAccessErrorKind ClassifyDrift(DbException db, int? number, string? sqlState)
+    {
+        if (number is { } n)
+        {
+            var oracle = db.GetType().FullName?.StartsWith("Oracle.", StringComparison.Ordinal) == true;
+            if (oracle ? OracleMismatchNumbers.Contains(n) : SqlServerMismatchNumbers.Contains(n))
+            {
+                return DataAccessErrorKind.SourceSchemaMismatch;
+            }
+
+            if (oracle ? n == 1031 : SqlServerPermissionNumbers.Contains(n))
+            {
+                return DataAccessErrorKind.SourcePermissionDenied;
+            }
+        }
+
+        return sqlState is null ? DataAccessErrorKind.Other
+            : PostgreSqlMismatchStates.Contains(sqlState) ? DataAccessErrorKind.SourceSchemaMismatch
+            : sqlState == "42501" ? DataAccessErrorKind.SourcePermissionDenied
+            : DataAccessErrorKind.Other;
     }
 
     private static DataAccessErrorKind ClassifyDbException(DbException db)
@@ -92,6 +144,12 @@ public static class DataAccessErrorClassifier
                 // lock not available, connection exceptions
                 return DataAccessErrorKind.Unavailable;
             }
+        }
+
+        var drift = ClassifyDrift(db, number, sqlState);
+        if (drift != DataAccessErrorKind.Other)
+        {
+            return drift;
         }
 
         if (db.IsTransient)

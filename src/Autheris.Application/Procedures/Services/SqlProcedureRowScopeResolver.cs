@@ -140,7 +140,10 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
 
         await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
 
-        await EnsureUniqueKeyAsync(connection, dialect, connectionName, table, keyColumns, timeout, ct).ConfigureAwait(false);
+        using (Autheris.Application.Sql.SourceMetadataGuard.Suppress())
+        {
+            await EnsureUniqueKeyAsync(connection, dialect, connectionName, table, keyColumns, timeout, ct).ConfigureAwait(false);
+        }
 
         // PostgreSQL: transaction-local settings need a transaction; the lookup is read-only and is never committed.
         await using DbTransaction? tx = dialect == DatabaseDialect.PostgreSql
