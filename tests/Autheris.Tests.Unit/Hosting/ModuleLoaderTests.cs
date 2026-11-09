@@ -77,7 +77,7 @@ public sealed class ModuleLoaderTests : IDisposable
             {
                 ["Gateway:Modules:Path"] = _tempRoot,
                 ["Gateway:Modules:Enabled:0"] = "sample",
-                ["Gateway:SampleModule:Endpoint"] = "https://catalog.example.internal",
+                ["Gateway:Sample:Endpoint"] = "https://catalog.example.internal",
             })
             .Build();
         var env = new FakeHostEnvironment { EnvironmentName = Environments.Production };

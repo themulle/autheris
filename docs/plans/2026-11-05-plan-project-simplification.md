@@ -659,11 +659,11 @@ All owner decisions are recorded in PRD section 2.0 (OD-1..OD-45, binding); this
 
 | ID | Question | Default taken |
 |---|---|---|
-| Q23 | Freeze status of WP-SIMPL-53 PR 3-5 (new response fields for #572, #573) | Carried under `freeze-exception` with the issue link, like WP-51 (client-guidance gaps on core paths); if the owner declines, PR 3-5 move after Stage 3 exit. Owner decision open |
-| Q24 | Table size exposure (#572) | Coarse size class with source and age, visible datasets only, never exact counts, also for datasets with row policies. Owner decision open |
-| Q25 | Granularity of the masked-column catalog-text setting (#571) | Per classification rule with per-column override, default VISIBLE; no per-grant or per-scope setting. Owner decision open |
-| Q26 | When to build golden queries from dbt (#580) | After the feature freeze (WP-SIMPL-54, new table and ingestion path, dbt module first). Owner decision open |
-| Q27 | Golden-query catalog REST API (#580 option 2) | Not built; dbt meta is the only owner-maintained source. Owner decision open |
+| Q23 | Freeze status of WP-SIMPL-53 PR 3-5 (new response fields for #572, #573) | Carried under `freeze-exception` with the issue link, like WP-51 (client-guidance gaps on core paths); if the owner declines, PR 3-5 move after Stage 3 exit. Owner-confirmed 2026-11-08 |
+| Q24 | Table size exposure (#572) | Coarse size class with source and age, visible datasets only, never exact counts, also for datasets with row policies. Owner-confirmed 2026-11-08 |
+| Q25 | Granularity of the masked-column catalog-text setting (#571) | Per classification rule with per-column override, default VISIBLE; no per-grant or per-scope setting. Owner-confirmed 2026-11-08 |
+| Q26 | When to build golden queries from dbt (#580) | After the feature freeze (WP-SIMPL-54, new table and ingestion path, dbt module first). Owner-confirmed 2026-11-08 |
+| Q27 | Golden-query catalog REST API (#580 option 2) | Not built; dbt meta is the only owner-maintained source. Owner-confirmed 2026-11-08 |
 | Q1 | Where do modules live? | Same repo under `modules/`, same tag and version as the host |
 | Q2 | Module release cadence | Same as host (deviation from PRD "own cadence"; single version source wins); revisit after first production release |
 | Q3 | Third-party/custom modules | Not supported; only first-party signed modules; custom code uses the existing plugin interfaces |
