@@ -67,8 +67,11 @@ public partial class GovernanceRepository : IAuditLogRepository, IAuditChainExpo
         };
         _auditChannel = Channel.CreateBounded<AuditLogEntry>(channelOptions);
 
-        var envName = environment?.EnvironmentName;
-        _isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
+        var envName = environment?.EnvironmentName ??
+                      Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+                      Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        _isDevOrTest = environment == null ||
+                       string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
                        string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
 
         byte[]? key = null;
