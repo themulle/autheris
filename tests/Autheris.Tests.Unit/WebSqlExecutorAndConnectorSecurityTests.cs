@@ -61,7 +61,8 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         var claims = new List<Claim>
         {
             new(ClaimTypes.PrimarySid, "S-1-5-21-WEBSQL-USER"),
-            new("tenant_id", Tenant)
+            new("tenant_id", Tenant),
+            new("scp", "Sql.Write")
         };
         foreach (var role in roles)
         {
@@ -154,7 +155,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
                 Arg.Any<IReadOnlySet<string>>(),
                 Arg.Any<TableIdentifier>(),
                 Arg.Any<IReadOnlyList<Consent>>(),
-                Arg.Any<DatabaseDialect>())
+                Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci => decisionFactory(ci.ArgAt<TableIdentifier>(3)));
         return resolution;
     }
@@ -212,8 +213,15 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         IPolicyEnforcementService? casbin = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IAuditLogRepository? auditLog = null,
-        bool withConsentServices = true)
+        bool withConsentServices = true,
+        bool permissiveWrite = true)
     {
+        if (permissiveWrite)
+        {
+            // Test-only seam: the production write decision denies every DML target.
+            Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
+        }
+
         var repo = repository ?? CreateRepository(CreateEmployeesMetadata(), CreateOrdersMetadata());
         var gatewayOptions = Options.Create(options ?? CreateOptions());
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
@@ -626,19 +634,18 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     // =========================================================================
 
     [Fact]
-    public async Task M20_Dml_WithoutWriterRole_IsRejected()
+    public async Task M20_Dml_WithoutWriteDecision_IsRejected_ForAnyRole()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
+        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]), permissiveWrite: false);
 
-        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
-            service.RewriteSqlAsync("DELETE FROM orders WHERE id = 1", CreateUser(), new TenantId(Tenant)));
-        ex.Message.ShouldContain("writer role");
+        await Should.ThrowAsync<WebSqlTableDeniedException>(() =>
+            service.RewriteSqlAsync("DELETE FROM orders WHERE id = 1", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
     }
 
     [Fact]
     public async Task M20_Dml_WithNoWriterRolesConfigured_IsRejected()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true));
+        var service = CreateService(options: CreateOptions(allowDml: true), permissiveWrite: false);
 
         await Should.ThrowAsync<WebSqlPolicyException>(() =>
             service.RewriteSqlAsync("DELETE FROM orders WHERE id = 1", CreateUser("WebSqlWriter"), new TenantId(Tenant)));

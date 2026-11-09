@@ -368,10 +368,10 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     // DML guardrails (GovernedSqlExecutionService against SQLite in-memory)
     // =========================================================================
 
-    private const string Tenant = "tenant_a";
-    private const string WriterRole = "WebSqlWriter";
+    internal const string Tenant = "tenant_a";
+    internal const string WriterRole = "WebSqlWriter";
 
-    private sealed class DmlFixture : IAsyncDisposable
+    internal sealed class DmlFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _keepAlive;
 
@@ -423,17 +423,30 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         return connection;
     }
 
-    private static ClaimsPrincipal CreateWriter() =>
-        new(new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-DML-WRITER"),
-                new Claim("tenant_id", Tenant),
-                new Claim(ClaimTypes.Role, WriterRole)
-            ],
-            "Test"));
-
-    private static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000)
+    internal static ClaimsPrincipal CreateWriter(bool withWriteScope = true)
     {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.PrimarySid, "S-1-5-21-DML-WRITER"),
+            new("tenant_id", Tenant),
+            new(ClaimTypes.Role, WriterRole)
+        };
+        if (withWriteScope)
+        {
+            claims.Add(new Claim("scp", "Sql.Write"));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+    }
+
+    internal static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000, bool permissiveWrite = true, bool withDependency = false, bool columnlessHolder = false, bool plainTable = false, bool requireTenantColumn = false)
+    {
+        if (permissiveWrite)
+        {
+            // Test-only seam: the production write decision denies every DML target.
+            Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
+        }
+
         var options = new GatewayOptions
         {
             WebSql = new WebSqlOptions
@@ -447,6 +460,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             },
             DataSources = new SqlDataSourceOptions
             {
+                RequireTenantColumn = requireTenantColumn,
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["default"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = fixture.ConnectionString }
@@ -466,9 +480,32 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             ]
         };
 
+        // withDependency: `orders` carries a row policy that reads `main.consents`, which is then a policy dependency table.
+        var consents = new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "main", "consents"),
+            Table = new Table { TableName = "consents", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]
+        };
+        // columnlessHolder: an active catalog table without columns whose row policy reads `main.consents`; plainTable: a table without a tenant column.
+        var holder = new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "main", "holder"),
+            Table = new Table { TableName = "holder", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Columns = []
+        };
+        var plain = new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "main", "plain"),
+            Table = new Table { TableName = "plain", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+        var known = withDependency || columnlessHolder ? new[] { orders, consents } : plainTable ? new[] { orders, plain } : new[] { orders };
+        TableMetadata[] catalog = columnlessHolder ? [.. known, holder] : known;
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult<TableMetadata?>(ci.Arg<TableIdentifier>().Equals(orders.Identifier) ? orders : null));
+            .Returns(ci => Task.FromResult<TableMetadata?>(known.FirstOrDefault(t => t.Identifier.Equals(ci.Arg<TableIdentifier>()))));
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(catalog));
 
         var consentRepository = Substitute.For<IConsentRepository>();
         consentRepository.GetActiveConsentsForSubjectsAsync(
@@ -486,12 +523,18 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 Arg.Any<IReadOnlySet<string>>(),
                 Arg.Any<TableIdentifier>(),
                 Arg.Any<IReadOnlyList<Consent>>(),
-                Arg.Any<DatabaseDialect>())
-            .Returns(ci => TableAccessDecision.Allowed(
-                ci.ArgAt<TableIdentifier>(3),
-                new Dictionary<string, ColumnAccessLevel>(),
-                null,
-                hasUnconstrainedColumnAllow: true));
+                Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
+            .Returns(ci =>
+            {
+                var allowed = TableAccessDecision.Allowed(
+                    ci.ArgAt<TableIdentifier>(3),
+                    new Dictionary<string, ColumnAccessLevel>(),
+                    null,
+                    hasUnconstrainedColumnAllow: true);
+                return (columnlessHolder ? ci.ArgAt<TableIdentifier>(3).Equals(holder.Identifier) : withDependency && ci.ArgAt<TableIdentifier>(3).Equals(orders.Identifier))
+                    ? allowed with { RowPolicy = Autheris.Tests.Unit.GraphQL.SecuredTreeHarness.ExistsPolicy() }
+                    : allowed;
+            });
 
         var audit = Substitute.For<IAuditLogRepository>();
         audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e =>
@@ -522,7 +565,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             secretProvider: null);
     }
 
-    private static Task ExecuteAsync(GovernedSqlExecutionService service, string sql) =>
+    internal static Task ExecuteAsync(GovernedSqlExecutionService service, string sql) =>
         service.ExecuteGovernedQueryAsync(
             new GovernedSqlQueryRequest(sql),
             CreateWriter(),

@@ -46,7 +46,7 @@ public sealed class GovernedPipelineCachePoisoningTests
     };
 
     private static ClaimsPrincipal User(string sid) =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer")], "Test"));
+        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer"), new Claim("scp", "Sql.Write")], "Test"));
 
     private static Consent RegionConsent(string sid, string region, TableMetadata table) => new()
     {
@@ -64,6 +64,8 @@ public sealed class GovernedPipelineCachePoisoningTests
     private GovernedSqlExecutionService CreateService(
         Func<TableMetadata> table, Func<IReadOnlyList<Consent>>? consents = null, bool allowDml = false, ISqlEngine? engine = null)
     {
+        // Test-only seam: the production write decision denies every DML target.
+        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(OrdersId.Equals(ci.Arg<TableIdentifier>()) ? table() : null));
@@ -78,7 +80,7 @@ public sealed class GovernedPipelineCachePoisoningTests
         if (consents is null)
         {
             resolution = Substitute.For<IConsentResolutionService>();
-            resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
+            resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
                 .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
         }
         else

@@ -50,7 +50,7 @@ public sealed class GovernedSqlExecutorX1Tests
 
     internal static ClaimsPrincipal Writer() =>
         new(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer")], "Test"));
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer"), new Claim("scp", "Sql.Write")], "Test"));
 
     private static TableMetadata Orders(string sourceType)
     {
@@ -85,6 +85,8 @@ public sealed class GovernedSqlExecutorX1Tests
     /// <summary>Compiles a statement through the real governed pipeline (catalog, policies, engine) for a source type.</summary>
     internal static async Task<CompiledSql> CompileAsync(string sourceType, string sql, ClaimsPrincipal? user = null, bool allowRecursive = false)
     {
+        // Test-only seam: the production write decision denies every DML target.
+        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         var table = Orders(sourceType);
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -93,7 +95,7 @@ public sealed class GovernedSqlExecutorX1Tests
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
         var resolution = Substitute.For<IConsentResolutionService>();
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
+        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(Gateway(sourceType == "PostgreSQL" ? "PostgreSql" : sourceType, allowRecursive: allowRecursive)), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
@@ -572,7 +574,7 @@ public sealed class GovernedSqlExecutorX1Tests
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
         var resolution = Substitute.For<IConsentResolutionService>();
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
+        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
