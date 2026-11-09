@@ -53,6 +53,13 @@ public sealed class SourceMetadataGuardTests
     public void SEC_SIMPL_141_Rejects_OracleDictionary(string sql) =>
         Rule(sql, DatabaseDialect.Oracle).ShouldBe("R4");
 
+    [Fact]
+    public void SEC_SIMPL_141_Allows_OracleUtlRawTenantComparison()
+    {
+        Rule("SELECT id FROM orders WHERE (\"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(tenant_id) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(:p1))", DatabaseDialect.Oracle).ShouldBeNull();
+        Rule("SELECT id FROM orders WHERE (SYS.UTL_RAW.CAST_TO_RAW(tenant_id) = SYS.UTL_RAW.CAST_TO_RAW(:p1))", DatabaseDialect.Oracle).ShouldBeNull();
+    }
+
     [Theory]
     [InlineData("SELECT * FROM system.information_schema.tables", "R5")]
     [InlineData("SELECT * FROM system.access.audit", "R5")]
@@ -86,6 +93,7 @@ public sealed class SourceMetadataGuardTests
     [InlineData("SELECT * FROM orders_stats", DatabaseDialect.PostgreSql)]
     [InlineData("SELECT * FROM system_events", DatabaseDialect.Databricks)]
     [InlineData("SELECT * FROM dbo.sysadmin_notes", DatabaseDialect.SqlServer)]
+    [InlineData("SELECT * FROM \"AUTH_APP\".\"ORDERS\" WHERE \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(\"TenantId\") = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(:p1)", DatabaseDialect.Oracle)]
     public void SEC_SIMPL_141_Allows_UserTablesNamedLikeUsersOrderStats(string sql, DatabaseDialect dialect) =>
         Rule(sql, dialect).ShouldBeNull();
 

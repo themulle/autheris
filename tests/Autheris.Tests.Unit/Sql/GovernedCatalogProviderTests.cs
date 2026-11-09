@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Runtime.CompilerServices;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Sql;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -348,6 +349,37 @@ public sealed class GovernedCatalogProviderTests
         compiled.Sql.ShouldNotContain(collation, Case.Insensitive);
         compiled.Sql.ShouldNotContain("COLLATE", Case.Insensitive);
         compiled.Parameters.ShouldAllBe(p => !string.Equals(p.Value as string, collation, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SEC_SIMPL_141_OracleCompiledSql_DoesNotTripGuard()
+    {
+        var orders = new TableIdentity("AUTH_APP", "ORDERS");
+        var catalog = new InMemoryTableCatalog(new[]
+        {
+            new TableCatalogEntry(orders, System.Collections.Immutable.ImmutableArray.Create(
+                new CatalogColumn("ID", "NUMBER(10)"), new CatalogColumn("TENANT_ID", "VARCHAR2(64)"), new CatalogColumn("REGION", "VARCHAR2(20)"),
+                new CatalogColumn("STATUS", "VARCHAR2(20)"), new CatalogColumn("AMOUNT", "NUMBER(18,2)"), new CatalogColumn("EMAIL", "VARCHAR2(200)")),
+                "TENANT_ID", 1)
+        }, "AUTH_APP");
+
+        var request = new CompileRequest
+        {
+            TargetDialect = TargetSqlDialect.Oracle,
+            AllowRecursiveCte = true,
+            TokenGuards = SqlTokenSecurityOptions.Strict,
+            Policy = new GovernancePolicy
+            {
+                RowFilters = new NoPolicies(),
+                Masks = new NoPolicies(),
+                Catalog = catalog,
+                Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
+            }
+        };
+
+        var compiled = new FastSqlEngine().Compile("SELECT id, email FROM AUTH_APP.orders".AsMemory(), request, CancellationToken.None);
+        var violated = SourceMetadataGuard.TryFindViolation(compiled.Sql, DatabaseDialect.Oracle, out var rule);
+        violated.ShouldBeFalse($"SQL was: '{compiled.Sql}', Rule was: '{rule}'");
     }
 
     private sealed class NoPolicies : IPolicyPredicateProvider, IColumnMaskProvider

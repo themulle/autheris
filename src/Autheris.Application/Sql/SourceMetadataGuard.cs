@@ -294,7 +294,7 @@ public static class SourceMetadataGuard
             {
                 DatabaseDialect.SqlServer => SqlServerRule(sql, tokens, n, word, next),
                 DatabaseDialect.PostgreSql => PostgreSqlRule(tokens, n, word, next),
-                DatabaseDialect.Oracle => OracleRule(word, next),
+                DatabaseDialect.Oracle => OracleRule(sql, tokens, n, word, next),
                 DatabaseDialect.Databricks => word.Equals("system", StringComparison.OrdinalIgnoreCase) && next == Kind.Dot
                     && n + 3 < tokens.Count && tokens[n + 2].Kind == Kind.Word && tokens[n + 3].Kind == Kind.Dot ? "R5" : null,
                 _ => null
@@ -370,13 +370,22 @@ public static class SourceMetadataGuard
         return null;
     }
 
-    private static string? OracleRule(ReadOnlySpan<char> word, Kind next)
+    private static string? OracleRule(string sql, List<Token> tokens, int n, ReadOnlySpan<char> word, Kind next)
     {
         if (word.StartsWith("v$", StringComparison.OrdinalIgnoreCase) || word.StartsWith("gv$", StringComparison.OrdinalIgnoreCase)
-            || word.Equals("dbms_metadata", StringComparison.OrdinalIgnoreCase)
-            || (word.Equals("sys", StringComparison.OrdinalIgnoreCase) && next == Kind.Dot))
+            || word.Equals("dbms_metadata", StringComparison.OrdinalIgnoreCase))
         {
             return "R4";
+        }
+
+        if (word.Equals("sys", StringComparison.OrdinalIgnoreCase) && next == Kind.Dot)
+        {
+            // SYS.UTL_RAW.CAST_TO_RAW is Autheris's byte-exact tenant comparison; it reads no metadata.
+            var utlRaw = n + 2 < tokens.Count && sql.AsSpan(tokens[n + 2].Start, tokens[n + 2].Length).Equals("utl_raw", StringComparison.OrdinalIgnoreCase);
+            if (!utlRaw)
+            {
+                return "R4";
+            }
         }
 
         var underscore = word.IndexOf('_');

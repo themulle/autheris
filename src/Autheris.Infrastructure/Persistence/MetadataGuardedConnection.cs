@@ -108,7 +108,14 @@ internal sealed class MetadataGuardedCommand : DbCommand
             var prop = _inner.GetType().GetProperty("BindByName");
             if (prop is not null)
             {
-                prop.SetValue(_inner, value);
+                try
+                {
+                    prop.SetValue(_inner, value);
+                }
+                catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is not null)
+                {
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                }
             }
         }
     }

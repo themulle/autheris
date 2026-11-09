@@ -162,6 +162,10 @@ public sealed class MetadataGuardedConnectionTests
 
         OracleBindByName.Enable(guardedCmd);
         guardedCmd.BindByName.ShouldBeTrue();
+
+        var ex = Should.Throw<System.Reflection.TargetInvocationException>(
+            () => guardedCmd.GetType().GetProperty("BindByName")!.SetValue(guardedCmd, false));
+        ex.InnerException.ShouldBeOfType<System.Security.SecurityException>();
     }
 
     [Fact]
@@ -223,7 +227,19 @@ public sealed class MetadataGuardedConnectionTests
 
     private sealed class FakeOracleCommand : DbCommand
     {
-        public bool BindByName { get; set; }
+        private bool _bindByName;
+        public bool BindByName
+        {
+            get => _bindByName;
+            set
+            {
+                if (!value)
+                {
+                    throw new System.Security.SecurityException("Positional binding is not permitted on Oracle commands; BindByName cannot be disabled.");
+                }
+                _bindByName = value;
+            }
+        }
         [AllowNull]
         public override string CommandText { get; set; } = string.Empty;
         public override int CommandTimeout { get; set; }
