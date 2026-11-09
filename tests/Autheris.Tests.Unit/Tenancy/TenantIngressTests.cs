@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Tenancy;
 
+using Autheris.Tests.Unit.Security;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -64,7 +65,7 @@ public sealed class TenantIngressTests
             registry.ResolveRealmForScheme(Arg.Any<string?>(), Arg.Any<string?>()).Returns(realm);
         }
 
-        var transformation = new EnterpriseClaimsTransformation(registry, tenantResolver: Resolver(defaultTenant, registry));
+        var transformation = TestIdentityPipeline.Transformation(registry, tenantResolver: Resolver(defaultTenant, registry));
         return await transformation.TransformAsync(principal);
     }
 

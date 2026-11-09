@@ -50,8 +50,21 @@ public enum AuthenticationMode
     Both = 3
 }
 
+/// <summary>Where the groups of a ForwardAuth caller come from.</summary>
+public enum ForwardAuthGroupSource
+{
+    /// <summary>The group header is ignored; the realm provider chain resolves the groups by user key.</summary>
+    Resolver = 0,
+
+    /// <summary>The group header carries canonical SIDs; honoured only from a trusted peer with a valid secret and <c>TrustUpstreamSids</c>.</summary>
+    Header = 1
+}
+
 public sealed class ForwardAuthOptions
 {
+    /// <summary>Gateway:Authentication:ForwardAuth:GroupSource. Default <see cref="ForwardAuthGroupSource.Resolver"/>.</summary>
+    public ForwardAuthGroupSource GroupSource { get; init; } = ForwardAuthGroupSource.Resolver;
+
     public bool Enabled { get; init; } = false;
     public string UserHeader { get; init; } = "X-Forwarded-User";
     public string EmailHeader { get; init; } = "X-Forwarded-Email";

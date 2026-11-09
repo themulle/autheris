@@ -28,10 +28,12 @@ public sealed class DemoRootFieldsRemovedTests
         services.AddSingleton(Substitute.For<Autheris.Application.Governance.Interfaces.ISchemaSunsettingService>());
         services.AddSingleton(Substitute.For<Autheris.Application.Catalog.Semantic.IDbtHealthCircuitBreaker>());
         services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
-        services.AddSingleton(Substitute.For<IHostEnvironment>());
+        services.AddSingleton<IHostEnvironment>(new Autheris.Tests.Unit.Security.FakeHostEnvironment());
         services.AddSingleton(Substitute.For<ITableMetadataRepository>());
         services.AddSingleton(Substitute.For<ITableRelationRepository>());
         services.AddSingleton(Substitute.For<IHttpContextAccessor>());
+        services.AddSingleton<Autheris.Application.Common.Interfaces.IIdentitySubjectResolver>(new Autheris.Tests.Unit.Security.FakeIdentitySubjectResolver());
+        services.AddSingleton<Autheris.Api.Security.IIdentityPipeline>(new Autheris.Tests.Unit.Security.FakeIdentityPipeline());
         services.AddSingleton<IOptions<AnalyticsOptions>>(Options.Create(new AnalyticsOptions()));
         services.AddGatewayGraphQL(new GatewayOptions());
 

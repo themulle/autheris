@@ -86,8 +86,6 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<TokenRevocationMiddleware>();
         // F-AUTH-DX: issue the session cookie after a Basic login (no-op unless BasicAuth.Session is allowed)
         app.UseMiddleware<BasicAuthSessionMiddleware>();
-        // ADR-017 / K-K10: Canonicalize AD Windows SIDs, OIDC claims, client certs, and GatewayRoles before authorization
-        app.UseMiddleware<ClaimsNormalizationMiddleware>();
         // 115 A-9: only while the REST data family is switched off (no pipeline element otherwise).
         if (!ResolveReadPathSwitches(app.Services, gatewayOptions).RestDataEndpointEnabled)
         {

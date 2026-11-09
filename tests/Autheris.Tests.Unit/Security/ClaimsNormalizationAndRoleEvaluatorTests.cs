@@ -7,7 +7,6 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
-using Autheris.Api.Middleware;
 using Autheris.Api.Security;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
@@ -22,7 +21,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
     private readonly IGatewayRoleEvaluator _evaluator = new GatewayRoleEvaluator();
 
     [Fact]
-    public async Task Middleware_NormalizesActiveDirectoryWindowsSids()
+    public void Normalizer_NormalizesActiveDirectoryWindowsSids()
     {
         var identity = new ClaimsIdentity("Kerberos");
         identity.AddClaim(new Claim("primarysid", "S-1-5-21-123456789-500"));
@@ -35,23 +34,20 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
             User = new ClaimsPrincipal(identity)
         };
 
-        var middleware = new ClaimsNormalizationMiddleware(next: (ctx) => Task.CompletedTask);
-        await middleware.InvokeAsync(context);
+        context.User = ClaimsNormalizer.Normalize(context.User, context.Connection.ClientCertificate);
 
         var user = context.User;
         user.FindFirst(ClaimTypes.PrimarySid)?.Value.ShouldBe("S-1-5-21-123456789-500");
         user.FindFirst(ClaimTypes.NameIdentifier)?.Value.ShouldBe("S-1-5-21-123456789-500");
 
-        var groupSids = user.FindAll(ClaimTypes.GroupSid).Select(c => c.Value).ToList();
-        groupSids.ShouldContain("S-1-5-21-123456789-512");
-        groupSids.ShouldContain("S-1-5-21-123456789-513");
+        // Group claims are not produced by the normalizer: the group resolver of the identity pipeline owns them.
+        user.GetGroupSids().ShouldBeEmpty();
 
         user.FindAll(ClaimTypes.Role).Select(c => c.Value).ShouldContain("DataOwner");
-        user.FindFirst("__ClaimsNormalized")?.Issuer.ShouldBe(ClaimsNormalizer.MiddlewareMarkerIssuer);
     }
 
     [Fact]
-    public async Task Middleware_NormalizesOidcClaimsAndTenantRoles()
+    public void Normalizer_NormalizesOidcClaimsAndTenantRoles()
     {
         var identity = new ClaimsIdentity("Bearer");
         identity.AddClaim(new Claim("sub", "oidc-user-999"));
@@ -64,8 +60,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
             User = new ClaimsPrincipal(identity)
         };
 
-        var middleware = new ClaimsNormalizationMiddleware(next: (ctx) => Task.CompletedTask);
-        await middleware.InvokeAsync(context);
+        context.User = ClaimsNormalizer.Normalize(context.User, context.Connection.ClientCertificate);
 
         var user = context.User;
         user.FindFirst(ClaimTypes.NameIdentifier)?.Value.ShouldBe("oidc-user-999");
@@ -75,11 +70,10 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         roles.ShouldContain("tenant-eu-west:DataOwner");
         roles.ShouldContain("SecurityAuditor");
 
-        user.FindFirst("__ClaimsNormalized")?.Issuer.ShouldBe(ClaimsNormalizer.MiddlewareMarkerIssuer);
     }
 
     [Fact]
-    public async Task Middleware_NormalizesClientCertificate_WhenConnectionPresentsMTLS()
+    public void Normalizer_NormalizesClientCertificate_WhenConnectionPresentsMTLS()
     {
         using var rsa = RSA.Create(2048);
         var req = new CertificateRequest("CN=test-gateway-client, O=Autheris, C=DE", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -89,8 +83,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         context.User = new ClaimsPrincipal(new ClaimsIdentity("Certificate"));
         context.Connection.ClientCertificate = cert;
 
-        var middleware = new ClaimsNormalizationMiddleware(next: (ctx) => Task.CompletedTask);
-        await middleware.InvokeAsync(context);
+        context.User = ClaimsNormalizer.Normalize(context.User, context.Connection.ClientCertificate);
 
         var user = context.User;
         user.Identity.ShouldNotBeNull();
@@ -105,7 +98,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
     }
 
     [Fact]
-    public async Task Middleware_DoesNotAuthenticate_WhenClientCertificatePresentsOnUnauthenticatedConnection()
+    public void Normalizer_DoesNotAuthenticate_WhenClientCertificatePresentsOnUnauthenticatedConnection()
     {
         using var rsa = RSA.Create(2048);
         var req = new CertificateRequest("CN=attacker, O=Untrusted", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -114,31 +107,9 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         var context = new DefaultHttpContext();
         context.Connection.ClientCertificate = cert;
 
-        var middleware = new ClaimsNormalizationMiddleware(next: (ctx) => Task.CompletedTask);
-        await middleware.InvokeAsync(context);
+        context.User = ClaimsNormalizer.Normalize(context.User, context.Connection.ClientCertificate);
 
         context.User.Identity?.IsAuthenticated.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task Middleware_StripsForgedMarkerClaims()
-    {
-        var identity = new ClaimsIdentity("Bearer");
-        identity.AddClaim(new Claim("__ClaimsNormalized", "1", ClaimValueTypes.String, "https://forged.attacker.com"));
-        identity.AddClaim(new Claim("__EnterpriseTransformed", "1", ClaimValueTypes.String, "https://forged.attacker.com"));
-        identity.AddClaim(new Claim("sub", "valid-user"));
-
-        var context = new DefaultHttpContext
-        {
-            User = new ClaimsPrincipal(identity)
-        };
-
-        var middleware = new ClaimsNormalizationMiddleware(next: (ctx) => Task.CompletedTask);
-        await middleware.InvokeAsync(context);
-
-        var markers = context.User.FindAll(c => c.Type is "__ClaimsNormalized" or "__EnterpriseTransformed").ToList();
-        markers.Count.ShouldBe(2);
-        markers.ShouldAllBe(c => c.Issuer == ClaimsNormalizer.MiddlewareMarkerIssuer || c.Issuer == ClaimsNormalizer.LegacyMarkerIssuer);
     }
 
     [Fact]

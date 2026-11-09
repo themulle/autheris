@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Tenancy;
 
+using Autheris.Tests.Unit.Security;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -159,7 +160,7 @@ public sealed class Wp4ReviewFindingsTests
     {
         var registry = Substitute.For<IIdentityRealmRegistry>();
         var resolver = new TenantResolver(() => new TenancyOptions { DefaultTenantId = "dflt" }, registry, NullLogger<TenantResolver>.Instance);
-        var transformation = new EnterpriseClaimsTransformation(registry, tenantResolver: resolver);
+        var transformation = TestIdentityPipeline.Transformation(registry, tenantResolver: resolver);
         var principal = Principal(new Claim("sub", "u"));
 
         var transformed1 = await transformation.TransformAsync(principal);
@@ -175,7 +176,7 @@ public sealed class Wp4ReviewFindingsTests
     {
         var registry = Substitute.For<IIdentityRealmRegistry>();
         var resolver = new TenantResolver(() => new TenancyOptions { DefaultTenantId = "dflt" }, registry, NullLogger<TenantResolver>.Instance);
-        var transformation = new EnterpriseClaimsTransformation(registry, tenantResolver: resolver);
+        var transformation = TestIdentityPipeline.Transformation(registry, tenantResolver: resolver);
         var principal = Principal(new Claim("sub", "u"), new Claim(TenantSourceClaim.ClaimType, TenantSourceClaim.Realm));
 
         var transformed = await transformation.TransformAsync(principal);

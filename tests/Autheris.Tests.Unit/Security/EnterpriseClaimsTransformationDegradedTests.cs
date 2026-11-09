@@ -39,7 +39,7 @@ public sealed class EnterpriseClaimsTransformationDegradedTests
     public async Task EmptyUserKey_MarksDegraded_NoSharedCacheEntry()
     {
         var resolver = Substitute.For<IRoleResolver>();
-        var transformation = new EnterpriseClaimsTransformation(Registry(), resolver);
+        var transformation = TestIdentityPipeline.Transformation(Registry(), resolver);
 
         var result = await transformation.TransformAsync(Principal(new Claim("tenant_id", "tenant-a")));
 
@@ -51,12 +51,11 @@ public sealed class EnterpriseClaimsTransformationDegradedTests
     public async Task DegradedResolution_AddsDegradedClaim()
     {
         var resolver = Substitute.For<IRoleResolver>();
-        resolver.ResolveRolesAsync(Arg.Any<ResolvedIdentity>(), Arg.Any<CancellationToken>())
-            .Returns(new RoleResolution(
+        TestIdentityPipeline.StubResolution(resolver, new RoleResolution(
                 new HashSet<string>(), new HashSet<string>(), new Dictionary<string, string>(),
                 DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), "degraded")
             { Status = RoleResolutionStatus.Degraded });
-        var transformation = new EnterpriseClaimsTransformation(Registry(), resolver);
+        var transformation = TestIdentityPipeline.Transformation(Registry(), resolver);
 
         var result = await transformation.TransformAsync(Principal(new Claim("oid", "user-1"), new Claim("tenant_id", "tenant-a")));
 
@@ -67,11 +66,10 @@ public sealed class EnterpriseClaimsTransformationDegradedTests
     public async Task ResolvedResolution_DoesNotAddDegradedClaim()
     {
         var resolver = Substitute.For<IRoleResolver>();
-        resolver.ResolveRolesAsync(Arg.Any<ResolvedIdentity>(), Arg.Any<CancellationToken>())
-            .Returns(new RoleResolution(
+        TestIdentityPipeline.StubResolution(resolver, new RoleResolution(
                 new HashSet<string>(), new HashSet<string>(), new Dictionary<string, string>(),
                 DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(1), "resolved"));
-        var transformation = new EnterpriseClaimsTransformation(Registry(), resolver);
+        var transformation = TestIdentityPipeline.Transformation(Registry(), resolver);
 
         var result = await transformation.TransformAsync(Principal(new Claim("oid", "user-1"), new Claim("tenant_id", "tenant-a")));
 

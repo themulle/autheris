@@ -192,31 +192,41 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             claims.Add(new Claim(ClaimTypes.Email, emailVal.ToString().Trim()));
         }
 
-        // Extract Groups (strictly configured or default, comma or semicolon separated)
-        var groupsHeader = !string.IsNullOrWhiteSpace(forwardAuthOptions.GroupsHeader)
-            ? forwardAuthOptions.GroupsHeader
-            : "X-Forwarded-Groups";
-
-        string? groupsRaw = null;
-        if (headers.TryGetValue(groupsHeader, out var customGroupsVal) && !string.IsNullOrWhiteSpace(customGroupsVal))
+        // Groups: read only with GroupSource=Header from a trusted upstream (peer and secret were verified above). With Resolver
+        // (default) the header is not read at all and the realm provider chain resolves the groups.
+        if (forwardAuthOptions.GroupSource == ForwardAuthGroupSource.Header && forwardAuthOptions.IsUpstreamSidTrusted)
         {
-            groupsRaw = customGroupsVal.ToString();
-        }
+            var groupsHeader = !string.IsNullOrWhiteSpace(forwardAuthOptions.GroupsHeader)
+                ? forwardAuthOptions.GroupsHeader
+                : "X-Forwarded-Groups";
 
-        // RR-L2-02: header groups are read only from an explicitly trusted upstream and must be canonical SIDs; one
-        // non-canonical value fails the request (a silently dropped group could drop a group-scoped restriction).
-        if (forwardAuthOptions.IsUpstreamSidTrusted && !string.IsNullOrWhiteSpace(groupsRaw))
-        {
-            var groups = groupsRaw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            foreach (var g in groups)
+            if (headers.TryGetValue(groupsHeader, out var groupValues) && !StringValues.IsNullOrEmpty(groupValues))
             {
-                if (!SidFormat.IsCanonical(g))
+                // Joined headers (several values) are refused: the proxy sends exactly one list.
+                if (groupValues.Count != 1)
                 {
-                    Logger.LogWarning("ForwardAuth rejected: a group header value is not a canonical SID.");
-                    return Task.FromResult(AuthenticateResult.Fail("Invalid ForwardAuth group SID."));
+                    return Task.FromResult(RejectGroups("the group header was sent more than once"));
                 }
 
-                claims.Add(IdentityClaimIssuers.CreateGroupSidClaim(g));
+                var maxGroups = Math.Clamp(_gatewayOptions.Authentication.MaxGroupSidsPerCaller, 1, 4096);
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var g in groupValues[0]!.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!SidFormat.IsCanonical(g))
+                    {
+                        return Task.FromResult(RejectGroups("a group header value is not a canonical SID"));
+                    }
+
+                    if (seen.Add(g) && seen.Count > maxGroups)
+                    {
+                        return Task.FromResult(RejectGroups("the group header exceeds the group cap"));
+                    }
+                }
+
+                foreach (var g in seen)
+                {
+                    claims.Add(IdentityClaimIssuers.CreateGroupSidClaim(g));
+                }
             }
         }
 
@@ -379,4 +389,11 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
         HeaderForbiddenRoles.Contains(role) ||
         (Autheris.Domain.Security.GatewayRoleExtensions.TryParseRole(role, out var canonical) &&
          canonical is Autheris.Domain.Security.GatewayRole.ClusterAdmin or Autheris.Domain.Security.GatewayRole.GovernanceAdmin);
+
+    private AuthenticateResult RejectGroups(string reason)
+    {
+        // The reason is a fixed phrase; header values never reach logs or the failure.
+        Logger.LogWarning("ForwardAuth rejected: {Reason}.", reason);
+        return AuthenticateResult.Fail("Invalid ForwardAuth group SID.");
+    }
 }

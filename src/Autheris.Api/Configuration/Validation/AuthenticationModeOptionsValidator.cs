@@ -19,7 +19,10 @@ namespace Autheris.Api.Configuration.Validation;
 public sealed class AuthenticationModeOptionsValidator(
     IHostEnvironment environment,
     IKeyVaultSecretProvider? secretProvider = null,
-    ILogger<AuthenticationModeOptionsValidator>? logger = null) : IValidateOptions<GatewayOptions>
+    ILogger<AuthenticationModeOptionsValidator>? logger = null,
+    IOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>? realms = null,
+    IEnumerable<Autheris.Application.Identity.IRoleProvider>? providers = null,
+    bool? isWindowsHost = null) : IValidateOptions<GatewayOptions>
 {
     public ValidateOptionsResult Validate(string? name, GatewayOptions options)
     {
@@ -47,6 +50,16 @@ public sealed class AuthenticationModeOptionsValidator(
         if (auth.MaxGroupSidsPerCaller is < 1 or > 4096)
         {
             failures.Add("Security violation: Gateway:Authentication:MaxGroupSidsPerCaller must be between 1 and 4096.");
+        }
+
+        if (fwd.IsUpstreamSidTrusted && fwd.GroupSource != ForwardAuthGroupSource.Header)
+        {
+            failures.Add("Security violation: Gateway:Authentication:ForwardAuth:TrustUpstreamSids requires Gateway:Authentication:ForwardAuth:GroupSource=Header.");
+        }
+
+        if (auth.EnableKerberos && !(isWindowsHost ?? OperatingSystem.IsWindows()) && !HasLdapsKerberosRealm())
+        {
+            failures.Add("Security violation: Gateway:Authentication:EnableKerberos on a non-Windows host requires an Authentication:Realms entry of kind Kerberos with GroupSource=Resolver and an ldaps-ad provider in its ResolverChain.");
         }
 
         if (fwd.TrustUpstreamTenant && fwd.AllowedTenantIds.Count == 0)
@@ -89,6 +102,15 @@ public sealed class AuthenticationModeOptionsValidator(
         }
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
+    }
+
+    private bool HasLdapsKerberosRealm()
+    {
+        var registered = providers?.Any(p => string.Equals(p.ProviderId, Autheris.Application.Identity.Providers.LdapsRoleProvider.Id, StringComparison.Ordinal)) == true;
+        return registered && realms?.Value.Realms.Values.Any(r =>
+            r.Kind == Autheris.Domain.Identity.IdentityRealmKind.Kerberos
+            && r.GroupSource == Autheris.Domain.Identity.RealmGroupSource.Resolver
+            && r.ResolverChain.Contains(Autheris.Application.Identity.Providers.LdapsRoleProvider.Id, StringComparer.Ordinal)) == true;
     }
 
     private static void ValidateHeaderNames(ForwardAuthOptions fwd, List<string> failures)

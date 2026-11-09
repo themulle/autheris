@@ -50,8 +50,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
             }
         };
 
-        var jwtOptionsMonitor = Substitute.For<IOptionsMonitor<JwtBearerOptions>>();
-        jwtOptionsMonitor.Get(Arg.Any<string>()).Returns(jwtOptions);
+        var jwtOptionsMonitor = new Autheris.Tests.Unit.Security.FakeOptionsMonitor<JwtBearerOptions>(jwtOptions);
 
         var options = new GatewayOptions
         {
@@ -60,6 +59,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
                 EntraId = new EntraIdAuthOptions
                 {
                     Enabled = true,
+                    TenantId = "tid-1",
                     ReadOnlyScopes = readOnlyScopes ?? ["Agent.Read", "api://app/Agent.Read"],
                     AppOnlyTokens = appOnlyTokens
                 }
@@ -67,31 +67,37 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
         };
 
         var gatewayOptions = Options.Create(options);
-        var env = Substitute.For<IHostEnvironment>();
-        var subjectResolver = Substitute.For<IIdentitySubjectResolver>();
-
-        // Default: delegated user subject
-        subjectResolver.ResolveSubject(Arg.Any<ClaimsPrincipal>())
-            .Returns(callInfo =>
-            {
-                var principal = callInfo.Arg<ClaimsPrincipal>();
-                var isAppOnly = !principal.HasClaim(c => c.Type == "scp" || c.Type == "http://schemas.microsoft.com/identity/claims/scope");
-                return new SubjectIdentity(
-                    principal.FindFirst("sub")?.Value ?? "user-1",
-                    isAppOnly ? SubjectType.ServicePrincipal : SubjectType.User,
-                    IdentityProviderType.EntraId,
-                    "user@example.com",
-                    Autheris.Tests.Common.TestTenants.Default);
-            });
+        var env = new Autheris.Tests.Unit.Security.FakeHostEnvironment();
+        var subjectResolver = new Autheris.Tests.Unit.Security.FakeIdentitySubjectResolver(principal =>
+        {
+            var isAppOnly = principal?.HasClaim(c => c.Type == "scp" || c.Type == "http://schemas.microsoft.com/identity/claims/scope") != true;
+            return new SubjectIdentity(
+                principal?.FindFirst("sub")?.Value ?? "user-1",
+                isAppOnly ? SubjectType.ServicePrincipal : SubjectType.User,
+                IdentityProviderType.EntraId,
+                "user@example.com",
+                Autheris.Tests.Common.TestTenants.Default);
+        });
 
         var validator = new JwtSocketTokenValidator(
             jwtOptionsMonitor,
             gatewayOptions,
             env,
             NullLogger<JwtSocketTokenValidator>.Instance,
-            subjectResolver);
+            subjectResolver,
+            Autheris.Tests.Unit.Security.TestIdentityPipeline.Create(DefaultRealmRegistry(), options: options));
 
         return (validator, options, subjectResolver);
+    }
+
+    private static Autheris.Application.Identity.IIdentityRealmRegistry DefaultRealmRegistry()
+    {
+        var realm = new Autheris.Domain.Identity.IdentityRealm(
+            "ws-realm",
+            Autheris.Domain.Identity.IdentityRealmKind.EntraWorkforce,
+            Autheris.Domain.Identity.TenantBindingSpecification.Unbound(),
+            Autheris.Domain.Identity.RealmGroupSource.None);
+        return new Autheris.Tests.Unit.Security.FakeIdentityRealmRegistry(realm);
     }
 
     private string CreateJwt(IEnumerable<Claim> claims)
@@ -99,6 +105,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
         var descriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
+            Issuer = "https://login.microsoftonline.com/tid-1/v2.0",
             SigningCredentials = new SigningCredentials(_signingKey, SecurityAlgorithms.HmacSha256)
         };
 

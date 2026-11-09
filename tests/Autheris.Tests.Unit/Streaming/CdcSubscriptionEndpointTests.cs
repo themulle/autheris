@@ -88,6 +88,8 @@ public sealed class CdcSubscriptionEndpointTests
         }
 
         claims.AddRange((groups ?? ["S-1-5-21-1-2-3-3003", "S-1-5-21-1-2-3-3004"]).Select(g => Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g)));
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker());
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete));
         context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
         return new Harness(context, store, protector);
     }

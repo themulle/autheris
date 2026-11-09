@@ -120,6 +120,15 @@ public static class SecurityContextFactory
         bool selectedByHeader)
     {
         var user = context.User;
+
+        // A principal that did not pass the identity pipeline (or whose resolution is degraded) has no known groups: Degraded with an empty
+        // set, never "member of no group".
+        var groupStatus = Autheris.Domain.Identity.GroupResolutionClaims.Read(user);
+        if (groupStatus != Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+        {
+            groupSids = new HashSet<Sid>();
+        }
+
         // 6. Extract Client IP
         var clientIp = context.RequestServices?.GetService(typeof(Autheris.Application.Common.Interfaces.IClientIpResolver)) is Autheris.Application.Common.Interfaces.IClientIpResolver ipResolver
             ? ipResolver.ResolveClientIp()
@@ -132,6 +141,8 @@ public static class SecurityContextFactory
             TenantClaimInvalid = claimInvalid,
             TenantSource = source,
             GroupSids = groupSids,
+            GroupResolutionStatus = groupStatus,
+            GroupsExpireAt = Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(user),
             TenantRoles = tenantRoles,
             ClusterRoles = clusterRoles,
             AuthenticationScheme = user.Identity?.AuthenticationType ?? "Unknown",

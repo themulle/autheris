@@ -2,217 +2,70 @@ namespace Autheris.Api.Security;
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using Autheris.Application.Identity;
-using Autheris.Domain.Common;
-using Autheris.Domain.Identity;
-using Autheris.Application.Governance.Rights;
-using Autheris.Domain.Interfaces;
-using Autheris.Application.Tenancy;
-using Autheris.Domain.Options;
-using Autheris.Domain.Tenancy;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.AspNetCore.Http;
 
-public sealed class EnterpriseClaimsTransformation : IClaimsTransformation
+/// <summary>
+/// Thin <see cref="IClaimsTransformation"/> adapter over <see cref="IIdentityPipeline"/>. ASP.NET invokes the transformation on every
+/// authenticate call, so the result is cached per request and input principal: the pipeline (and with it the group resolution) runs
+/// once per request, and an already processed principal is returned as is by the pipeline.
+/// </summary>
+public sealed class EnterpriseClaimsTransformation(IIdentityPipeline pipeline, IHttpContextAccessor? httpContextAccessor = null) : IClaimsTransformation
 {
-    internal const string TransformedMarkerClaimType = ClaimsNormalizer.LegacyMarkerClaimType;
+    private const string CacheItemKey = "Autheris.IdentityPipeline.Results";
 
-    /// <summary>RR-L2-04: Issuer of the marker claim. Claims from tokens carry the token issuer and are never trusted.</summary>
-    internal const string MarkerIssuer = ClaimsNormalizer.LegacyMarkerIssuer;
-
-    private readonly IIdentityRealmRegistry? _realmRegistry;
-    private readonly IRoleResolver? _roleResolver;
-    private readonly IFunctionalRightMapper? _functionalRightMapper;
-    private readonly ILogger<EnterpriseClaimsTransformation>? _logger;
-    private readonly ITenantResolver _tenantResolver;
-
-    // A transformation built without the DI resolver (unit tests) resolves realm bindings and claims but assigns no default tenant.
-    private static readonly TenancyOptions NoDefaultTenancy = new();
-
-    public EnterpriseClaimsTransformation(
-        IIdentityRealmRegistry? realmRegistry = null,
-        IRoleResolver? roleResolver = null,
-        IFunctionalRightMapper? functionalRightMapper = null,
-        ILogger<EnterpriseClaimsTransformation>? logger = null,
-        ITenantResolver? tenantResolver = null)
+    public Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
     {
-        _logger = logger;
-        _realmRegistry = realmRegistry;
-        _roleResolver = roleResolver;
-        _functionalRightMapper = functionalRightMapper;
-        _tenantResolver = tenantResolver ?? new TenantResolver(static () => NoDefaultTenancy, realmRegistry, NullLogger<TenantResolver>.Instance);
+        ArgumentNullException.ThrowIfNull(principal);
+        if (principal.Identity is not ClaimsIdentity { IsAuthenticated: true })
+        {
+            return Task.FromResult(principal);
+        }
+
+        var context = httpContextAccessor?.HttpContext;
+        if (context is null)
+        {
+            return RunAsync(principal, null);
+        }
+
+        var cache = context.Items.TryGetValue(CacheItemKey, out var existing) && existing is Dictionary<ClaimsPrincipal, Task<ClaimsPrincipal>> found
+            ? found
+            : new Dictionary<ClaimsPrincipal, Task<ClaimsPrincipal>>(ReferenceEqualityComparer.Instance);
+        context.Items[CacheItemKey] = cache;
+        lock (cache)
+        {
+            if (!cache.TryGetValue(principal, out var task))
+            {
+                task = RunAsync(principal, context);
+                cache[principal] = task;
+            }
+
+            return task;
+        }
     }
 
-    public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
+    private async Task<ClaimsPrincipal> RunAsync(ClaimsPrincipal principal, HttpContext? context) =>
+        await pipeline.ProcessAsync(principal, SchemeOf(principal), context?.Connection.ClientCertificate, context?.RequestAborted ?? default).ConfigureAwait(false);
+
+    /// <summary>The authentication scheme of a principal, from its authentication type (handler identities) or its token issuer (JWT).</summary>
+    internal static string SchemeOf(ClaimsPrincipal principal)
     {
-        if (principal.Identity is not ClaimsIdentity originalIdentity || !originalIdentity.IsAuthenticated)
+        var type = principal.Identity?.AuthenticationType;
+        switch (type)
         {
-            return principal;
-        }
-
-        // Clone first to avoid mutating input principal in place (MED-06)
-        var normalizedPrincipal = ClaimsNormalizer.Normalize(principal);
-        var identity = (ClaimsIdentity)normalizedPrincipal.Identity!;
-
-        // 1. Strip any client-supplied autheris:realm claim (AppSec requirement K-1)
-        var clientRealmClaims = identity.FindAll(c => string.Equals(c.Type, "autheris:realm", StringComparison.OrdinalIgnoreCase)).ToList();
-        foreach (var c in clientRealmClaims)
-        {
-            identity.RemoveClaim(c);
-        }
-
-        // 2. Resolve authoritative realm deterministically from scheme or issuer (CRIT-01)
-        var issuer = identity.FindFirst("iss")?.Value;
-        IdentityRealm? realm = (!string.IsNullOrWhiteSpace(issuer) ? _realmRegistry?.ResolveRealmByIssuer(issuer) : null)
-            ?? _realmRegistry?.ResolveRealmForScheme(issuer, identity.AuthenticationType)
-            ?? _realmRegistry?.GetDefaultRealm();
-
-        var realmId = realm?.RealmId ?? "workforce-entra";
-
-        // Test host only (compile-gated): a TestAuth principal is not an identity-provider token, so its tenant claims are the tenant statement
-        // (the realm binding does not replace them); the realm claim is stamped after the tenant decision, like for a realm-less principal.
+            case GatewayAuthSchemes.Basic or "BasicSession" or GatewayAuthSchemes.ForwardAuth or GatewayAuthSchemes.Scim:
+                return type;
 #if AUTHERIS_TEST_AUTH
-        var tenantByClaims = identity.AuthenticationType == TestAuthHandler.SchemeName;
-#else
-        const bool tenantByClaims = false;
+            case TestAuthHandler.SchemeName:
+                // The test handler mints pipeline-issuer group claims like the Basic handler does.
+                return GatewayAuthSchemes.Basic;
 #endif
-        if (realm != null && !tenantByClaims)
-        {
-            // An unregistered fallback id is not stamped: the tenant resolver treats a non-blank realm claim as an authoritative realm.
-            identity.AddClaim(new Claim("autheris:realm", realmId));
+            case "Negotiate" or "Kerberos" or "NTLM":
+                return "Negotiate";
+            default:
+                return principal.FindFirst("iss") is not null ? GatewayAuthSchemes.JwtBearer : type ?? "unknown";
         }
-
-        // GHSA-hw85-rqjh-cwxx: realm client allowlist
-        if (realm?.AllowedClientIds is { Count: > 0 } allowedClients)
-        {
-            var clientId = identity.FindFirst("azp")?.Value
-                ?? identity.FindFirst("appid")?.Value
-                ?? identity.FindFirst("client_id")?.Value;
-
-            if (string.IsNullOrWhiteSpace(clientId) ||
-                !allowedClients.Contains(clientId, StringComparer.OrdinalIgnoreCase))
-            {
-                MarkDegraded(identity, realmId, $"client '{clientId}' not in realm allowed clients");
-                return normalizedPrincipal;
-            }
-        }
-
-        // Interim until the group resolver is wired (PR 3b): provider group values that are not canonical SIDs were dropped by the
-        // normalizer. When the realm takes groups from the token, the group set is incomplete: degraded, data access denied.
-        if (realm is null || realm.GroupSource == RealmGroupSource.Token)
-        {
-            var dropped = ClaimsNormalizer.CountDroppedProviderGroups(principal);
-            if (dropped > 0)
-            {
-                Autheris.Application.Identity.IdentityGroupMetrics.RecordRejected(Autheris.Application.Identity.IdentityGroupMetrics.SourceEntra, dropped);
-                MarkDegraded(identity, realmId, "group values that are not canonical SIDs were dropped");
-                return normalizedPrincipal;
-            }
-        }
-
-        // DT-A-3 / DT-SC-05 / CRIT-01: the one tenant decision of the ingress.
-        // Inbound tenant_source claims are removed, the resolved tenant is stamped.
-        var isRealmBound = realm != null && !tenantByClaims;
-        var resolution = TenantStamping.Apply(identity, _tenantResolver, isRealmBound);
-        if (realm == null || tenantByClaims)
-        {
-            // The unregistered fallback id is stamped after the tenant decision (the resolver must not treat it as a realm); route-realm guards read it.
-            identity.AddClaim(new Claim("autheris:realm", realmId));
-        }
-
-        // 3. Resolve groups/roles if resolver mode
-        if (realm != null && realm.GroupSource == RealmGroupSource.Resolver && _roleResolver != null)
-        {
-            var userKey = identity.FindFirst("oid")?.Value
-                ?? identity.FindFirst("sub")?.Value
-                ?? principal.GetUserSid()?.Value
-                ?? string.Empty;
-
-            // GOV-08: without a user key there is nothing to resolve; an empty key would otherwise share one cache entry between
-            // all such callers. The request is marked degraded and the PDP denies data access.
-            if (string.IsNullOrWhiteSpace(userKey))
-            {
-                MarkDegraded(identity, realmId, "no user key");
-                return normalizedPrincipal;
-            }
-
-            // The tenant of the role/right lookup is the resolved one; without a tenant (S6, ClusterAdmin only passes the gate later) the
-            // lookup is skipped and the request is marked degraded (fail closed: data access is denied).
-            if (resolution.Tenant is not { } tenantId || tenantId.Value is null)
-            {
-                MarkDegraded(identity, realmId, "tenant unresolved");
-                return normalizedPrincipal;
-            }
-
-            var upn = identity.FindFirst("upn")?.Value ?? identity.FindFirst(ClaimTypes.Upn)?.Value;
-            var name = identity.FindFirst("name")?.Value ?? identity.FindFirst(ClaimTypes.Name)?.Value;
-            var email = identity.FindFirst("email")?.Value ?? identity.FindFirst(ClaimTypes.Email)?.Value;
-
-            var resolvedIdentity = new ResolvedIdentity(
-                userKey,
-                upn,
-                name,
-                email,
-                tenantId,
-                realmId,
-                principal.Claims.ToList()
-            );
-
-            var rolesResolution = await _roleResolver.ResolveRolesAsync(resolvedIdentity).ConfigureAwait(false);
-            if (rolesResolution.IsDegraded)
-            {
-                MarkDegraded(identity, realmId, "role provider unavailable");
-            }
-
-            foreach (var group in rolesResolution.Groups)
-            {
-                identity.AddClaim(new System.Security.Claims.Claim("autheris:group", group));
-                identity.AddClaim(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(group));
-            }
-
-            foreach (var role in rolesResolution.Roles)
-            {
-                identity.AddClaim(new System.Security.Claims.Claim(ClaimTypes.Role, role));
-            }
-
-            // PERS-09: functional-right claims come only from FunctionalRightMapper (four-eyes for privileged rights, customer-realm
-            // ceiling); a mapper failure yields no functional-right claims (fail closed).
-            if (_functionalRightMapper != null)
-            {
-                var groupsAndRoles = rolesResolution.Groups.Concat(rolesResolution.Roles).Distinct().ToList();
-                try
-                {
-                    var rights = await _functionalRightMapper.GetRightsForGroupsAndRolesAsync(tenantId, realmId, groupsAndRoles).ConfigureAwait(false);
-                    foreach (var right in rights)
-                    {
-                        identity.AddClaim(new System.Security.Claims.Claim(RequireFunctionalRightHandler.FunctionalRightClaimType, right.Name));
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger?.LogError(ex, "Functional right mapping failed for realm {RealmId}; no functional-right claims are issued (fail-closed).", realmId);
-                }
-            }
-        }
-
-        return normalizedPrincipal;
-    }
-
-    private void MarkDegraded(ClaimsIdentity identity, string realmId, string reason)
-    {
-        // Any client-supplied value is replaced: the claim only ever restricts access.
-        foreach (var existing in identity.FindAll(RoleResolutionClaims.ClaimType).ToList())
-        {
-            identity.RemoveClaim(existing);
-        }
-
-        identity.AddClaim(new Claim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded));
-        Autheris.Domain.Diagnostics.GatewayDiagnostics.RoleResolutionDegradedCounter.Add(
-            1, new KeyValuePair<string, object?>("realm", realmId));
-        _logger?.LogWarning("Group and role resolution is degraded for realm {RealmId} ({Reason}); data access is denied for this request (fail-closed).", realmId, reason);
     }
 }

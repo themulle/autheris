@@ -235,9 +235,13 @@ public sealed class AuthPluginRoleProviderTests
 
         nextCalled.ShouldBeTrue();
         resolvedContext.ShouldNotBeNull();
-        resolvedContext.TenantRoles.ShouldContain("CustomEnrichedRole");
+        // Enrichment is control-plane input only: it never joins the data-plane roles or groups.
         resolvedContext.TenantRoles.ShouldContain("BaseRole");
-        resolvedContext.GroupSids.ShouldContain(new Sid("S-1-5-21-999-999-999-1"));
+        resolvedContext.TenantRoles.ShouldNotContain("CustomEnrichedRole");
+        resolvedContext.GroupSids.ShouldNotContain(new Sid("S-1-5-21-999-999-999-1"));
+        resolvedContext.ControlPlaneEnrichment.ShouldNotBeNull();
+        resolvedContext.ControlPlaneEnrichment.Roles.ShouldContain("CustomEnrichedRole");
+        resolvedContext.ControlPlaneEnrichment.GroupSids.ShouldContain(new Sid("S-1-5-21-999-999-999-1"));
     }
 
     [Fact]

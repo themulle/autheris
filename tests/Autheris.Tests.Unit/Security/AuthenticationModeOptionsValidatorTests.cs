@@ -1,7 +1,11 @@
 using Autheris.Api.Configuration.Validation;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Identity;
+using Autheris.Domain.Identity;
+using Autheris.Domain.Options.Security;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -153,7 +157,7 @@ public sealed class AuthenticationModeOptionsValidatorTests
     {
         Failure(Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, TrustUpstreamSids = false, TrustUpstreamGroupSids = true }))
             .ShouldContain("TrustUpstreamGroupSids (legacy alias)");
-        Failure(Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, TrustUpstreamSids = true, TrustUpstreamGroupSids = true })).ShouldBeEmpty();
+        Failure(Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, TrustUpstreamSids = true, TrustUpstreamGroupSids = true, GroupSource = ForwardAuthGroupSource.Header })).ShouldBeEmpty();
         new ForwardAuthOptions { TrustUpstreamGroupSids = true }.IsUpstreamSidTrusted.ShouldBeTrue();
     }
 
@@ -170,4 +174,59 @@ public sealed class AuthenticationModeOptionsValidatorTests
     public void Duplicate_header_names_fail_startup() =>
         Failure(Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, GroupsHeader = "x-forwarded-roles" }))
             .ShouldContain("duplicates another ForwardAuth header name");
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-05f")]
+    public void Trust_upstream_sids_without_header_group_source_fails()
+    {
+        var withoutHeader = Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, TrustUpstreamSids = true });
+        var legacyAlias = Upstream(f => new ForwardAuthOptions { Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, TrustUpstreamGroupSids = true });
+        var withHeader = Upstream(f => new ForwardAuthOptions
+        {
+            Enabled = true, TrustedProxies = ["10.0.0.1"], SharedSecret = Secret, TrustUpstreamSids = true, GroupSource = ForwardAuthGroupSource.Header
+        });
+
+        Failure(withoutHeader).ShouldContain("TrustUpstreamSids requires Gateway:Authentication:ForwardAuth:GroupSource=Header");
+        Failure(legacyAlias).ShouldContain("GroupSource=Header");
+        Failure(withHeader).ShouldBeEmpty();
+    }
+
+    private static IRoleProvider Provider(string id)
+    {
+        var provider = Substitute.For<IRoleProvider>();
+        provider.ProviderId.Returns(id);
+        return provider;
+    }
+
+    private static IOptions<IdentityRealmsOptions> Realms(IdentityRealmKind kind, RealmGroupSource source, params string[] chain) =>
+        Microsoft.Extensions.Options.Options.Create(new IdentityRealmsOptions
+        {
+            Realms = new Dictionary<string, IdentityRealmConfigOptions>
+            {
+                ["kdc"] = new() { Kind = kind, GroupSource = source, ResolverChain = [.. chain] }
+            }
+        });
+
+    private static string KerberosFailure(IOptions<IdentityRealmsOptions>? realms, IEnumerable<IRoleProvider>? providers, bool windows)
+    {
+        var options = new GatewayOptions { Authentication = new AuthenticationOptions { Mode = AuthenticationMode.Direct, EnableKerberos = true } };
+        return new AuthenticationModeOptionsValidator(Env(), null, null, realms, providers, windows).Validate(null, options) is { Failed: true } r
+            ? string.Join("|", r.Failures!)
+            : string.Empty;
+    }
+
+    [Fact]
+    [Trait("SecurityCondition", "SEC-AUTH-01c")]
+    public void Kerberos_on_linux_without_ldaps_resolver_fails()
+    {
+        var ldaps = new[] { Provider("ldaps-ad") };
+
+        KerberosFailure(null, null, windows: false).ShouldContain("EnableKerberos on a non-Windows host");
+        KerberosFailure(Realms(IdentityRealmKind.Kerberos, RealmGroupSource.Resolver, "ldaps-ad"), null, windows: false).ShouldContain("EnableKerberos");
+        KerberosFailure(Realms(IdentityRealmKind.Kerberos, RealmGroupSource.Token, "ldaps-ad"), ldaps, windows: false).ShouldContain("EnableKerberos");
+        KerberosFailure(Realms(IdentityRealmKind.Kerberos, RealmGroupSource.Resolver, "scim-store"), ldaps, windows: false).ShouldContain("EnableKerberos");
+        KerberosFailure(Realms(IdentityRealmKind.EntraWorkforce, RealmGroupSource.Resolver, "ldaps-ad"), ldaps, windows: false).ShouldContain("EnableKerberos");
+        KerberosFailure(Realms(IdentityRealmKind.Kerberos, RealmGroupSource.Resolver, "ldaps-ad"), ldaps, windows: false).ShouldBeEmpty();
+        KerberosFailure(null, null, windows: true).ShouldBeEmpty();
+    }
 }

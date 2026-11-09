@@ -15,7 +15,8 @@ public enum CdcSnapshotCaptureError
     None = 0,
     MissingSid,
     TooLarge,
-    RestrictedScope
+    RestrictedScope,
+    GroupsUnresolved
 }
 
 /// <summary>Why <see cref="CdcSubscriptionPrincipal.Evaluate"/> denied.</summary>
@@ -58,6 +59,12 @@ public static class CdcSubscriptionPrincipal
         if (sid is null || string.IsNullOrWhiteSpace(sid.Value.Value) || sid.Value.Value.Length > 256)
         {
             return new CdcSnapshotCapture(null, null, null, CdcSnapshotCaptureError.MissingSid);
+        }
+
+        // A creator whose groups are unknown (Degraded or unmarked) would snapshot an empty set that delivery later treats as complete.
+        if (Autheris.Domain.Identity.GroupResolutionClaims.Read(admin) != Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+        {
+            return new CdcSnapshotCapture(null, null, null, CdcSnapshotCaptureError.GroupsUnresolved);
         }
 
         var groups = admin.GetGroupSids().Select(g => g.Value).Distinct(StringComparer.Ordinal).ToList();
@@ -112,6 +119,14 @@ public static class CdcSubscriptionPrincipal
         };
         claims.AddRange(subscription.CreatedByGroupSids.Where(g => !string.IsNullOrWhiteSpace(g)).Select(g => Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g)));
         claims.AddRange(subscription.CreatedByRoles.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => new Claim(ClaimTypes.Role, r)));
+
+        // The snapshot is a stored pipeline result: marked as such, valid until the snapshot age limit.
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker());
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete));
+        // Without an age limit the principal is still rebuilt per delivery, so its groups are valid for that delivery window only.
+        claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateExpiresAt(options.CreatorSnapshotMaxAgeDays > 0
+            ? subscription.CreatedAt.Value.AddDays(options.CreatorSnapshotMaxAgeDays)
+            : time.GetUtcNow().AddMinutes(5)));
 
         principal = new ClaimsPrincipal(new ClaimsIdentity(claims, AuthenticationType));
         return CdcSnapshotDenial.None;

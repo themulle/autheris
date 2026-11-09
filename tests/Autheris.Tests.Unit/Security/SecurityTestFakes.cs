@@ -1,10 +1,15 @@
 using System.Reflection;
+using System.Security.Claims;
+using System.Security.Cryptography.X509Certificates;
+using Autheris.Api.Security;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Identity;
 using Autheris.Application.Identity.Providers;
 using Autheris.Domain.Identity;
+using Autheris.Domain.Model;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 namespace Autheris.Tests.Unit.Security;
@@ -139,6 +144,122 @@ internal static class FakeRedis
                 return Task.CompletedTask;
             }
 
+            return returnType.IsValueType && returnType != typeof(void) ? Activator.CreateInstance(returnType) : null;
+        }
+    }
+}
+
+/// <summary>Options monitor backed by a fixed instance or factory.</summary>
+internal sealed class FakeOptionsMonitor<T>(T currentValue) : IOptionsMonitor<T> where T : class
+{
+    public T CurrentValue => currentValue;
+    public T Get(string? name) => currentValue;
+    public IDisposable? OnChange(Action<T, string?> listener) => null;
+}
+
+/// <summary>In-memory realm registry resolving a default realm or mapped realms.</summary>
+internal sealed class FakeIdentityRealmRegistry : IIdentityRealmRegistry
+{
+    private readonly Dictionary<string, IdentityRealm> _realms = new(StringComparer.OrdinalIgnoreCase);
+    private IdentityRealm? _defaultRealm;
+
+    public FakeIdentityRealmRegistry(IdentityRealm? defaultRealm = null)
+    {
+        _defaultRealm = defaultRealm;
+        if (defaultRealm is not null)
+        {
+            _realms[defaultRealm.RealmId] = defaultRealm;
+        }
+    }
+
+    public FakeIdentityRealmRegistry(IEnumerable<IdentityRealm> realms, IdentityRealm? defaultRealm = null)
+    {
+        _defaultRealm = defaultRealm;
+        foreach (var realm in realms)
+        {
+            _realms[realm.RealmId] = realm;
+            _defaultRealm ??= realm;
+        }
+    }
+
+    public IdentityRealm? DefaultRealm
+    {
+        get => _defaultRealm;
+        set
+        {
+            _defaultRealm = value;
+            if (value is not null)
+            {
+                _realms[value.RealmId] = value;
+            }
+        }
+    }
+
+    public IdentityRealm? ResolveByIssuer(string issuer) =>
+        _realms.Values.FirstOrDefault(r => r.Issuers.Contains(issuer, StringComparer.OrdinalIgnoreCase)) ?? _defaultRealm;
+
+    public IdentityRealm? ResolveRealmForScheme(string? issuer, string? authenticationType) =>
+        (issuer != null ? ResolveByIssuer(issuer) : null) ?? _defaultRealm;
+
+    public IdentityRealm? GetRealm(string realmId) => _realms.GetValueOrDefault(realmId) ?? _defaultRealm;
+    public IdentityRealm? GetDefaultRealm() => _defaultRealm;
+    public IReadOnlyList<IdentityRealm> GetAllRealms() => _realms.Values.ToList();
+    public void RegisterRealm(IdentityRealm realm)
+    {
+        _realms[realm.RealmId] = realm;
+        _defaultRealm ??= realm;
+    }
+    public bool TryGetRealm(string realmId, out IdentityRealm? realm) => _realms.TryGetValue(realmId, out realm);
+}
+
+/// <summary>Resolves a caller subject identity from principal or delegate.</summary>
+internal sealed class FakeIdentitySubjectResolver(Func<ClaimsPrincipal?, SubjectIdentity>? resolver = null) : IIdentitySubjectResolver
+{
+    public SubjectIdentity ResolveSubject(ClaimsPrincipal? principal) =>
+        resolver != null
+            ? resolver(principal)
+            : new SubjectIdentity(
+                principal?.FindFirst("sub")?.Value ?? principal?.Identity?.Name ?? "test-user",
+                SubjectType.User,
+                IdentityProviderType.EntraId);
+}
+
+/// <summary>Identity pipeline double returning raw principal or executing a custom handler.</summary>
+internal sealed class FakeIdentityPipeline : IIdentityPipeline
+{
+    public Func<ClaimsPrincipal, string, X509Certificate2?, CancellationToken, ValueTask<ClaimsPrincipal>>? Handler { get; set; }
+
+    public ValueTask<ClaimsPrincipal> ProcessAsync(ClaimsPrincipal raw, string scheme, X509Certificate2? clientCert, CancellationToken ct) =>
+        Handler != null ? Handler(raw, scheme, clientCert, ct) : ValueTask.FromResult(raw);
+}
+
+/// <summary>Generic dispatch-proxy fake returning default values for all interface members.</summary>
+internal static class NullFake
+{
+    public static T Create<T>() where T : class => DispatchProxy.Create<T, NullProxy>();
+
+#pragma warning disable CA1852
+    public class NullProxy : DispatchProxy
+#pragma warning restore CA1852
+    {
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod is null) return null;
+            var returnType = targetMethod.ReturnType;
+            if (returnType == typeof(Task)) return Task.CompletedTask;
+            if (returnType == typeof(ValueTask)) return ValueTask.CompletedTask;
+            if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
+            {
+                var resultType = returnType.GetGenericArguments()[0];
+                var defaultVal = resultType.IsValueType ? Activator.CreateInstance(resultType) : null;
+                return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(resultType).Invoke(null, [defaultVal]);
+            }
+            if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ValueTask<>))
+            {
+                var resultType = returnType.GetGenericArguments()[0];
+                var defaultVal = resultType.IsValueType ? Activator.CreateInstance(resultType) : null;
+                return Activator.CreateInstance(returnType, defaultVal);
+            }
             return returnType.IsValueType && returnType != typeof(void) ? Activator.CreateInstance(returnType) : null;
         }
     }

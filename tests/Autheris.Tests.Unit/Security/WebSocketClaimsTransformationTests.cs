@@ -32,7 +32,7 @@ public sealed class WebSocketClaimsTransformationTests
     private readonly SymmetricSecurityKey _signingKey = new(Encoding.UTF8.GetBytes("a-very-secret-test-key-of-at-least-256-bits-length!"));
 
     private JwtSocketTokenValidator CreateValidator(
-        IClaimsTransformation? claimsTransformation = null,
+        IIdentityPipeline? pipeline = null,
         IIdentitySubjectResolver? subjectResolver = null)
     {
         var jwtOptions = new JwtBearerOptions
@@ -47,21 +47,17 @@ public sealed class WebSocketClaimsTransformationTests
             }
         };
 
-        var jwtOptionsMonitor = Substitute.For<IOptionsMonitor<JwtBearerOptions>>();
-        jwtOptionsMonitor.Get(Arg.Any<string>()).Returns(jwtOptions);
-
+        var jwtOptionsMonitor = new FakeOptionsMonitor<JwtBearerOptions>(jwtOptions);
         var gatewayOptions = Options.Create(new GatewayOptions());
-
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        var env = new FakeHostEnvironment(Environments.Production);
 
         return new JwtSocketTokenValidator(
             jwtOptionsMonitor,
             gatewayOptions,
             env,
             NullLogger<JwtSocketTokenValidator>.Instance,
-            subjectResolver,
-            claimsTransformation);
+            subjectResolver ?? new FakeIdentitySubjectResolver(),
+            pipeline ?? TestIdentityPipeline.Create());
     }
 
     private string GenerateToken(
@@ -112,17 +108,16 @@ public sealed class WebSocketClaimsTransformationTests
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER1")
             });
 
-        var realmRegistry = Substitute.For<IIdentityRealmRegistry>();
         var corpRealm = new IdentityRealm(
             "corp-realm",
             IdentityRealmKind.EntraWorkforce,
             new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-a")),
+            groupSource: RealmGroupSource.Token,
             issuers: new[] { issuer });
+        var realmRegistry = new FakeIdentityRealmRegistry(corpRealm);
 
-        realmRegistry.ResolveRealmByIssuer(issuer).Returns(corpRealm);
-
-        var transformer = new EnterpriseClaimsTransformation(realmRegistry);
-        var validator = CreateValidator(claimsTransformation: transformer);
+        var transformer = TestIdentityPipeline.Create(realmRegistry);
+        var validator = CreateValidator(pipeline: transformer);
 
         // Act
         var (isValid, principal) = await validator.ValidateTokenAsync(token);
@@ -150,29 +145,25 @@ public sealed class WebSocketClaimsTransformationTests
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ANALYST1")
             });
 
-        var realmRegistry = Substitute.For<IIdentityRealmRegistry>();
         var resolverRealm = new IdentityRealm(
             "resolver-realm",
             IdentityRealmKind.EntraWorkforce,
             new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-a")),
             groupSource: RealmGroupSource.Resolver,
             issuers: new[] { issuer });
-
-        realmRegistry.ResolveRealmByIssuer(issuer).Returns(resolverRealm);
-        realmRegistry.GetRealm("resolver-realm").Returns(resolverRealm); // DT-A-3: the tenant resolver looks the stamped realm up by id
+        var realmRegistry = new FakeIdentityRealmRegistry(resolverRealm);
 
         var roleResolver = Substitute.For<IRoleResolver>();
-        roleResolver.ResolveRolesAsync(Arg.Any<ResolvedIdentity>())
-            .Returns(new RoleResolution(
-                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SecGroup" },
+        TestIdentityPipeline.StubResolution(roleResolver, new RoleResolution(
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "S-1-5-21-1-2-3-1100" },
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SecAnalystRole" },
                 new Dictionary<string, string>(),
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow.AddHours(1),
                 "test"));
 
-        var transformer = new EnterpriseClaimsTransformation(realmRegistry, roleResolver);
-        var validator = CreateValidator(claimsTransformation: transformer);
+        var transformer = TestIdentityPipeline.Create(realmRegistry, roleResolver);
+        var validator = CreateValidator(pipeline: transformer);
 
         // Act
         var (isValid, principal) = await validator.ValidateTokenAsync(token);
@@ -181,7 +172,7 @@ public sealed class WebSocketClaimsTransformationTests
         isValid.ShouldBeTrue();
         principal.ShouldNotBeNull();
         principal.IsInRole("SecAnalystRole").ShouldBeTrue();
-        principal.HasClaim("autheris:group", "SecGroup").ShouldBeTrue();
+        principal.GetGroupSids().ShouldContain(new Sid("S-1-5-21-1-2-3-1100"));
     }
 
     [Fact]
@@ -281,11 +272,11 @@ public sealed class WebSocketClaimsTransformationTests
         // Arrange: Claims transformation throws an exception
         var token = GenerateToken("user-broken");
 
-        var transformer = Substitute.For<IClaimsTransformation>();
-        transformer.TransformAsync(Arg.Any<ClaimsPrincipal>())
-            .Returns<Task<ClaimsPrincipal>>(_ => throw new InvalidOperationException("External identity provider offline"));
+        var transformer = Substitute.For<IIdentityPipeline>();
+        transformer.ProcessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<System.Security.Cryptography.X509Certificates.X509Certificate2?>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<ClaimsPrincipal>>(_ => throw new InvalidOperationException("External identity provider offline"));
 
-        var validator = CreateValidator(claimsTransformation: transformer);
+        var validator = CreateValidator(pipeline: transformer);
 
         // Act
         var (isValid, principal) = await validator.ValidateTokenAsync(token);

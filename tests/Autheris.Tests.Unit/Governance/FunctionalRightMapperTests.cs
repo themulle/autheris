@@ -450,7 +450,7 @@ public sealed class FunctionalRightMapperTests
     }
 
     [Fact]
-    public async Task FunctionalRightMapper_GetRightsForCallerAsync_SupportsAllGroupClaimTypes()
+    public async Task FunctionalRightMapper_GetRightsForCallerAsync_ReadsRolesAndPipelineGroupSidsOnly()
     {
         var tenantId = new TenantId("tenant-claims");
         var realmId = "workforce-entra";
@@ -462,12 +462,13 @@ public sealed class FunctionalRightMapperTests
             new Claim("groups", "grp-2"),
             new Claim("roles", "role-3"),
             new Claim(ClaimTypes.Role, "role-4"),
-            new Claim(ClaimTypes.GroupSid, "grp-5")
+            Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-1105"),
+            new Claim(ClaimTypes.GroupSid, "S-1-5-21-1-2-3-1106")
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
 
         var mapping1 = new FunctionalRightMapping(
-            tenantId.Value, realmId, "grp-1", FunctionalRight.Consumer,
+            tenantId.Value, realmId, "role-4", FunctionalRight.Consumer,
             ApprovedBy: "admin", ApprovedAt: DateTimeOffset.UtcNow,
             RecertClass: RecertClass.Standard.ToString(), CreatedBy: "admin",
             CreatedAt: DateTimeOffset.UtcNow);
@@ -477,11 +478,12 @@ public sealed class FunctionalRightMapperTests
             .Returns(callInfo =>
             {
                 var inputGrps = callInfo.ArgAt<IReadOnlyCollection<string>>(2);
-                inputGrps.ShouldContain("grp-1");
-                inputGrps.ShouldContain("grp-2");
+                inputGrps.ShouldNotContain("grp-1");
+                inputGrps.ShouldNotContain("grp-2");
                 inputGrps.ShouldContain("role-3");
                 inputGrps.ShouldContain("role-4");
-                inputGrps.ShouldContain("grp-5");
+                inputGrps.ShouldContain("S-1-5-21-1-2-3-1105");
+                inputGrps.ShouldNotContain("S-1-5-21-1-2-3-1106");
                 return [mapping1];
             });
 

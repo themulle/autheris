@@ -41,9 +41,10 @@ public sealed class CdcSubscriptionPrincipalTests
 
         p.FindFirst("tenant_id")!.Value.ShouldBe("tenant-a");
         p.Claims.Count(c => c.Type == "tenant_id").ShouldBe(1);
-        // No other claim types than sid, groups, roles, tenant (Casbin copies every claim into attributes).
+        // No other claim types than sid, groups, roles, tenant and the pipeline marker and status (Casbin copies every claim into attributes).
         p.Claims.Select(c => c.Type).Distinct().ShouldBe(
-            [ClaimTypes.PrimarySid, ClaimTypes.GroupSid, ClaimTypes.Role, "tenant_id"], ignoreOrder: true);
+            [ClaimTypes.PrimarySid, ClaimTypes.GroupSid, ClaimTypes.Role, "tenant_id",
+             Autheris.Domain.Identity.GroupResolutionClaims.MarkerClaimType, Autheris.Domain.Identity.GroupResolutionClaims.StatusClaimType, Autheris.Domain.Identity.GroupResolutionClaims.ExpiresAtClaimType], ignoreOrder: true);
     }
 
     [Theory]
@@ -88,7 +89,8 @@ public sealed class CdcSubscriptionPrincipalTests
             new Claim(ClaimTypes.GroupSid, "S-1-5-21-1-2-3-3105"),
             new Claim(ClaimTypes.Role, "Admin"),
             new Claim("tenant_id", "tenant-a"),
-            new Claim("email", "x@y.z")
+            new Claim("email", "x@y.z"),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(), Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
         ], "test"));
 
         var capture = CdcSubscriptionPrincipal.Capture(admin, _options);
@@ -112,12 +114,45 @@ public sealed class CdcSubscriptionPrincipalTests
     {
         var options = new CdcWebhooksOptions { MaxSnapshotGroups = 2 };
         var admin = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-1"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-2"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-3")], "test"));
+            [new Claim(ClaimTypes.PrimarySid, "S"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-1"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-2"), Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-3"), Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(), Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)], "test"));
 
         var capture = CdcSubscriptionPrincipal.Capture(admin, options);
 
         capture.IsSuccess.ShouldBeFalse();
         capture.Error.ShouldBe(CdcSnapshotCaptureError.TooLarge);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Capture_WithUnresolvedGroups_IsRejected(bool markedDegraded)
+    {
+        var claims = new List<Claim> { new(ClaimTypes.PrimarySid, "S-ADMIN"), new(ClaimTypes.Role, "Admin") };
+        if (markedDegraded)
+        {
+            claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker());
+            claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Degraded));
+        }
+
+        var capture = CdcSubscriptionPrincipal.Capture(new ClaimsPrincipal(new ClaimsIdentity(claims, "test")), _options);
+
+        capture.IsSuccess.ShouldBeFalse();
+        capture.Error.ShouldBe(CdcSnapshotCaptureError.GroupsUnresolved);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void TryBuild_WithoutAgeLimit_StillBoundsTheGroupValidity()
+    {
+        var options = new CdcWebhooksOptions { CreatorSnapshotMaxAgeDays = 0 };
+
+        var p = CdcSubscriptionPrincipal.TryBuild(Sub(), _time, options)!;
+
+        var expiry = Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(p);
+        expiry.ShouldNotBeNull();
+        expiry.Value.ShouldBeGreaterThan(Now);
+        expiry.Value.ShouldBeLessThanOrEqualTo(Now.AddHours(1));
     }
 
     [Fact]

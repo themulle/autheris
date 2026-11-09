@@ -348,17 +348,19 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     /// <c>GetGroupSids</c> also read). The session carries the vetted roles and group SIDs separately; letting the raw claims through
     /// as additional claims would re-add groups to an app-only principal (SR-M-08) and untrusted roles.
     /// </summary>
-    private static readonly HashSet<string> RoleAndGroupClaimTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "roles",
-        "role",
-        "groups",
-        "groupsid",
-        "wids",
-        System.Security.Claims.ClaimTypes.Role,
-        System.Security.Claims.ClaimTypes.GroupSid,
-        "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
-    };
+    private static readonly HashSet<string> RoleAndGroupClaimTypes = new(
+        Autheris.Domain.Identity.GroupResolutionClaims.InboundGroupClaimTypes.Concat(
+        [
+            "roles",
+            "role",
+            "wids",
+            System.Security.Claims.ClaimTypes.Role,
+            "autheris:group",
+            Autheris.Domain.Identity.GroupResolutionClaims.MarkerClaimType,
+            Autheris.Domain.Identity.GroupResolutionClaims.StatusClaimType,
+            Autheris.Domain.Identity.GroupResolutionClaims.ExpiresAtClaimType
+        ]),
+        StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Whether a token claim may be carried into the MCP session principal as an additional claim. Role and group claims never are
@@ -375,7 +377,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     /// marker). SR-M-08: the subject is the authenticated user of the session. A session without a user SID (app-only token) keeps the
     /// application identity, is marked with <see cref="IdentityKindClaimType"/> and carries no group SIDs, so no user-level consent applies.
     /// </summary>
-    public static System.Security.Claims.ClaimsPrincipal? BuildPrincipalFromSession(McpSessionContext? session)
+    public static System.Security.Claims.ClaimsPrincipal? BuildPrincipalFromSession(McpSessionContext? session, TimeProvider? timeProvider = null)
     {
         if (session == null) return null;
         var identity = new System.Security.Claims.ClaimsIdentity("MCP");
@@ -401,12 +403,24 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
                 identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, r));
             }
         }
-        if (!isAppOnly && session.GroupSids != null)
+        // The session carries the group snapshot of one pipeline resolution. After its expiry (or when it was degraded) no group claim is
+        // minted from the stored strings; the principal is then marked Degraded and data access is denied until the next request
+        // re-resolves through the pipeline. The sliding session lifetime never extends group validity.
+        var groupsStale = session.GroupsDegraded || (session.GroupsExpireAt is { } groupsExpiry && groupsExpiry <= (timeProvider ?? TimeProvider.System).GetUtcNow());
+        if (!isAppOnly && !groupsStale && session.GroupSids != null)
         {
             foreach (var g in session.GroupSids)
             {
                 identity.AddClaim(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g));
             }
+        }
+
+        identity.AddClaim(Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker());
+        identity.AddClaim(Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(
+            groupsStale ? Autheris.Domain.Identity.GroupResolutionStatus.Degraded : Autheris.Domain.Identity.GroupResolutionStatus.Complete));
+        if (session.GroupsExpireAt is { } expiresAt)
+        {
+            identity.AddClaim(Autheris.Domain.Identity.GroupResolutionClaims.CreateExpiresAt(expiresAt));
         }
         if (session.AdditionalClaims != null)
         {

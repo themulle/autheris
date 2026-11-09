@@ -1,5 +1,6 @@
 namespace Autheris.Application.Governance.Services;
 
+using Autheris.Domain.Identity;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -64,7 +65,11 @@ public sealed class DeclarativeConsentApplyService(
 
         // SR-M-10: the self-grant check compares against every identifier form of the actor and the groups and roles it holds.
         var actorIdentifiers = ActorIdentifiers.Collect(caller, actorSid, callerContext);
-        var hasGroupOverage = HasGroupOverage(caller);
+        // The group set is only as good as its resolution: a Degraded status (set by the identity pipeline, never by a token claim) refuses a
+        // group Allow instead of skipping the self-grant check.
+        var groupsDegraded = callerContext is not null
+            ? callerContext.GroupResolutionStatus == GroupResolutionStatus.Degraded
+            : GroupResolutionClaims.IsMarkedDegraded(caller);
 
         int totalEvaluated = 0;
         int applied = 0;
@@ -158,13 +163,13 @@ public sealed class DeclarativeConsentApplyService(
                     $"Self-grant prohibited: Actor '{actorSid}' cannot grant consent to themselves or to a group or role they belong to via declarative manifest."));
             }
 
-            // With an Entra group overage the token does not list every group of the actor, so a grant to an own group cannot be
-            // ruled out: an Allow towards a group is refused (fail closed) instead of relying on an incomplete group list.
-            if (granteeType == GranteeType.Group && effect == ConsentEffect.Allow && hasGroupOverage)
+            // With unresolved groups (for example an Entra group overage without Graph) the group list of the actor is incomplete, so a grant to
+            // an own group cannot be ruled out: an Allow towards a group is refused (fail closed) instead of relying on an incomplete list.
+            if (granteeType == GranteeType.Group && effect == ConsentEffect.Allow && groupsDegraded)
             {
                 throw new GrantPolicyViolationException(GrantDecision.Deny(
                     GrantErrorCodes.FourEyesRequired,
-                    "Group grant refused: the actor's token carries an Entra group overage marker, so its group memberships are incomplete and a self-grant through a group cannot be ruled out. Use a token with the full group list or the consent request/approval workflow."));
+                    "Group grant refused: the group memberships of the actor could not be resolved completely (group resolution degraded), so a self-grant through a group cannot be ruled out. Use a token with a resolvable group list or the consent request/approval workflow."));
             }
 
             DateTimeOffset validTo;
@@ -441,17 +446,6 @@ public sealed class DeclarativeConsentApplyService(
 
         return new DeclarativeApplyResult(totalEvaluated, applied, unchanged, revoked, dryRun, details, updated);
     }
-
-    /// <summary>
-    /// Entra group overage: with too many groups the token carries "hasgroups" (implicit flow) or a "_claim_names" entry for "groups"
-    /// instead of the group list, so the group claims are incomplete.
-    /// </summary>
-    private static bool HasGroupOverage(ClaimsPrincipal caller) =>
-        caller.HasClaim(c => string.Equals(c.Type, "hasgroups", StringComparison.OrdinalIgnoreCase)
-                             && !string.Equals(c.Value?.Trim(), "false", StringComparison.OrdinalIgnoreCase)) ||
-        caller.HasClaim(c => string.Equals(c.Type, "_claim_names", StringComparison.OrdinalIgnoreCase)
-                             && c.Value != null
-                             && c.Value.Contains("groups", StringComparison.OrdinalIgnoreCase));
 
     // A Clear column rule exposes the column in clear text: the grant is classified like an Unmasked one.
     private static bool HasClearColumnRule(DeclarativeConsentPolicy policy) =>
