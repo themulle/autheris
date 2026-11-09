@@ -1009,7 +1009,7 @@ Autheris bietet eine integrierte, abgesicherte WebSQL-Schnittstelle, die 100% ko
 | `WebSql:DefaultMaxRows` | `long` | `1000` | Zeilen einer Abfrage ohne `LIMIT` (`POST /api/v1/sql`). |
 | `WebSql:MaxAllowedRows` | `long` | `10000` | Obergrenze für ein explizites `LIMIT` (`0` = keine Obergrenze). |
 | `WebSql:ExecutionTimeoutSeconds` | `int` | `30` | Maximaler Timeout für die Abfrageausführung im Backend. |
-| `WebSql:AllowDml` | `bool` | `false` | Erlaubt schreibende Operationen (`INSERT`, `UPDATE`, `DELETE`). Erfordert `Caching:Redis:Enabled = true` (clusterweit durchgesetzter `Idempotency-Key`, Pflicht-Header fuer DML auf `/api/v1/sql`). |
+| `WebSql:AllowDml` | `bool` | `false` | Erlaubt schreibende Operationen (`INSERT`, `UPDATE`, `DELETE`). Erfordert einen clusterweiten Idempotency-Store (`Caching:Redis:Enabled = true`); sonst bricht der Start ab. DML auf `/api/v1/sql` verlangt den Header `Idempotency-Key`. |
 | `WebSql:DmlWriterRoles` | `string[]` | `[]` | Rollen, die DML ausführen dürfen (Pflicht, wenn `AllowDml = true`). |
 | `WebSql:MaxAffectedRows` | `long` | `1000` | Maximal erlaubte Zeilenanzahl bei DML; Überschreitung triggert automatischen Rollback. |
 | `WebSql:RejectUnfilteredDml` | `bool` | `true` | Verhindert ungefilterte `UPDATE`/`DELETE`-Statements (`WHERE 1=1`, `WHERE true`). |

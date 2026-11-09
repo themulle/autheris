@@ -247,7 +247,6 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         var options = new GatewayOptions
         {
             WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] },
-            Caching = new CachingOptions { Redis = new RedisOptions { Enabled = true, Configuration = "redis:6379" } },
             DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
@@ -256,15 +255,6 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         HealthEndpoints.GetSecurityMode(options).ShouldBe("STRICT_ZERO_TRUST");
         Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
-    }
-
-    [Fact]
-    public void SEM_AllowDml_WithoutClusterWideIdempotencyStore_AbortsStartup()
-    {
-        var options = new GatewayOptions { WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] } };
-
-        Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Development), NoEnvironmentVariables));
     }
 
     [Fact]

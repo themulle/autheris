@@ -155,12 +155,6 @@ internal static class GraphQlAndSwitchStartupChecks
                 "(SEC M-20: DML is allowed only for explicitly authorized roles).");
         }
 
-        if (options.WebSql.AllowDml && !options.Caching.Redis.Enabled)
-        {
-            throw new ValidationException(
-                "Configuration error: WebSql.AllowDml=true requires Caching.Redis.Enabled = true so that DML idempotency keys are enforced cluster-wide.");
-        }
-
         if (!context.IsDevelopment && options.IsQuickstartProfile)
         {
             throw new ValidationException("Security violation: The GettingStarted profile 'Quickstart' may be active ONLY in the Development environment.");

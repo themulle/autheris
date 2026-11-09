@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -270,6 +271,7 @@ public static class SimApiHostMain
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dataPath}");
             b.UseSetting("Gateway:WebSql:Enabled", "true");
             b.UseSetting("Gateway:WebSql:AllowDml", options.Profile == SimApiProfile.Write ? "true" : "false");
+            b.ConfigureTestServices(s => s.AddSingleton<Autheris.Application.Common.Interfaces.IIdempotencyStore, ClusterWideTestIdempotencyStore>());
             if (options.Profile == SimApiProfile.Write)
             {
                 // SEC M-20: DML needs explicitly authorized roles; only the throwaway write-phase host allows it.
