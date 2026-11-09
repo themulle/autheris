@@ -20,7 +20,6 @@ using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -38,10 +37,9 @@ public sealed class PdpGroupsUnresolvedTests
 
     private static async Task<(HttpContext Context, bool NextCalled)> RunMiddlewareAsync(GroupResolutionStatus status, bool dataTransport)
     {
-        var monitor = Substitute.For<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>();
-        monitor.CurrentValue.Returns(new GatewayOptions());
+        var monitor = new Autheris.Tests.Unit.Security.FakeOptionsMonitor<GatewayOptions>(new GatewayOptions());
         var services = new ServiceCollection();
-        services.AddSingleton(monitor);
+        services.AddSingleton<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(monitor);
         var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider(), User = Principal(status) };
         context.Response.Body = new MemoryStream();
         var metadata = dataTransport
@@ -70,16 +68,15 @@ public sealed class PdpGroupsUnresolvedTests
         new StreamReader(denied.Response.Body).ReadToEnd().ShouldContain("identity.groups_unresolved");
 
         // The table policy denies on the same status (views are tables).
-        var consents = Substitute.For<IConsentRepository>();
         var policy = new TableAccessPolicy(
-            consents,
-            Substitute.For<IConsentResolutionService>(),
-            Substitute.For<IConsentCacheService>(),
-            Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IRebacEvaluator>(),
+            Autheris.Tests.Unit.Security.NullFake.Create<IConsentRepository>(),
+            Autheris.Tests.Unit.Security.NullFake.Create<IConsentResolutionService>(),
+            Autheris.Tests.Unit.Security.NullFake.Create<IConsentCacheService>(),
+            Autheris.Tests.Unit.Security.NullFake.Create<IPolicyEnforcementService>(),
+            Autheris.Tests.Unit.Security.NullFake.Create<IRebacEvaluator>(),
             null,
             new GatewayOptions(),
-            Substitute.For<Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver>());
+            new Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver());
         var table = new TableIdentifier("d", "main", "orders");
         var meta = new TableMetadata
         {

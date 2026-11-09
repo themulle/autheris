@@ -20,7 +20,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -30,15 +29,12 @@ public sealed class JwtSocketTokenValidatorTests
 
     private static IIdentityRealmRegistry Registry(RealmGroupSource groupSource = RealmGroupSource.None)
     {
-        var registry = Substitute.For<IIdentityRealmRegistry>();
         var realm = new IdentityRealm(
             "test-realm",
             IdentityRealmKind.EntraWorkforce,
             new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-test")),
             groupSource: groupSource);
-        registry.GetDefaultRealm().Returns(realm);
-        registry.GetRealm("test-realm").Returns(realm);
-        return registry;
+        return new Autheris.Tests.Unit.Security.FakeIdentityRealmRegistry(realm);
     }
 
     private (JwtSocketTokenValidator Validator, IHostEnvironment Env) CreateValidator(
@@ -59,8 +55,7 @@ public sealed class JwtSocketTokenValidatorTests
             }
         };
 
-        var jwtOptionsMonitor = Substitute.For<IOptionsMonitor<JwtBearerOptions>>();
-        jwtOptionsMonitor.Get(Arg.Any<string>()).Returns(jwtOptions);
+        var jwtOptionsMonitor = new Autheris.Tests.Unit.Security.FakeOptionsMonitor<JwtBearerOptions>(jwtOptions);
 
         var gatewayOptions = Options.Create(new GatewayOptions
         {
@@ -70,15 +65,14 @@ public sealed class JwtSocketTokenValidatorTests
             }
         });
 
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(isDev ? Environments.Development : Environments.Production);
+        var env = new Autheris.Tests.Unit.Security.FakeHostEnvironment(isDev ? Environments.Development : Environments.Production);
 
         var validator = new JwtSocketTokenValidator(
             jwtOptionsMonitor,
             gatewayOptions,
             env,
             NullLogger<JwtSocketTokenValidator>.Instance,
-            Substitute.For<IIdentitySubjectResolver>(),
+            new Autheris.Tests.Unit.Security.FakeIdentitySubjectResolver(),
             pipeline ?? TestIdentityPipeline.Create(Registry(), options: gatewayOptions.Value));
 
         return (validator, env);
@@ -162,19 +156,17 @@ public sealed class JwtSocketTokenValidatorTests
             TokenValidationParameters = new TokenValidationParameters()
         };
 
-        var jwtOptionsMonitor = Substitute.For<IOptionsMonitor<JwtBearerOptions>>();
-        jwtOptionsMonitor.Get(Arg.Any<string>()).Returns(jwtOptions);
+        var jwtOptionsMonitor = new Autheris.Tests.Unit.Security.FakeOptionsMonitor<JwtBearerOptions>(jwtOptions);
 
         var gatewayOptions = Options.Create(new GatewayOptions());
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        var env = new Autheris.Tests.Unit.Security.FakeHostEnvironment(Environments.Production);
 
         var validator = new JwtSocketTokenValidator(
             jwtOptionsMonitor,
             gatewayOptions,
             env,
             NullLogger<JwtSocketTokenValidator>.Instance,
-            Substitute.For<IIdentitySubjectResolver>(),
+            new Autheris.Tests.Unit.Security.FakeIdentitySubjectResolver(),
             TestIdentityPipeline.Create(Registry()));
 
         var token = GenerateToken("user-bob");
@@ -194,12 +186,12 @@ public sealed class JwtSocketTokenValidatorTests
         ctor.GetParameters().Select(p => p.ParameterType).ShouldContain(typeof(IIdentitySubjectResolver));
         ctor.GetParameters().Select(p => p.ParameterType).ShouldContain(typeof(IIdentityPipeline));
 
-        var monitor = Substitute.For<IOptionsMonitor<JwtBearerOptions>>();
-        var env = Substitute.For<IHostEnvironment>();
+        var monitor = new Autheris.Tests.Unit.Security.FakeOptionsMonitor<JwtBearerOptions>(new JwtBearerOptions());
+        var env = new Autheris.Tests.Unit.Security.FakeHostEnvironment();
         Should.Throw<ArgumentNullException>(() => new JwtSocketTokenValidator(monitor, Options.Create(new GatewayOptions()), env,
-            NullLogger<JwtSocketTokenValidator>.Instance, null!, Substitute.For<IIdentityPipeline>()));
+            NullLogger<JwtSocketTokenValidator>.Instance, null!, new Autheris.Tests.Unit.Security.FakeIdentityPipeline()));
         Should.Throw<ArgumentNullException>(() => new JwtSocketTokenValidator(monitor, Options.Create(new GatewayOptions()), env,
-            NullLogger<JwtSocketTokenValidator>.Instance, Substitute.For<IIdentitySubjectResolver>(), null!));
+            NullLogger<JwtSocketTokenValidator>.Instance, new Autheris.Tests.Unit.Security.FakeIdentitySubjectResolver(), null!));
     }
 
     private static AuthenticationOptions EntraAndAdfs() => new()
@@ -256,9 +248,10 @@ public sealed class JwtSocketTokenValidatorTests
     [Trait("Category", "Security")]
     public async Task Websocket_pipeline_exception_rejects_token()
     {
-        var pipeline = Substitute.For<IIdentityPipeline>();
-        pipeline.ProcessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<System.Security.Cryptography.X509Certificates.X509Certificate2?>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<ClaimsPrincipal>>(_ => throw new InvalidOperationException("provider offline"));
+        var pipeline = new Autheris.Tests.Unit.Security.FakeIdentityPipeline
+        {
+            Handler = (_, _, _, _) => throw new InvalidOperationException("provider offline")
+        };
         var (validator, _) = CreateValidator(pipeline: pipeline);
 
         var (isValid, principal) = await validator.ValidateTokenAsync(GenerateToken("user-1"));

@@ -50,8 +50,7 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
             }
         };
 
-        var jwtOptionsMonitor = Substitute.For<IOptionsMonitor<JwtBearerOptions>>();
-        jwtOptionsMonitor.Get(Arg.Any<string>()).Returns(jwtOptions);
+        var jwtOptionsMonitor = new Autheris.Tests.Unit.Security.FakeOptionsMonitor<JwtBearerOptions>(jwtOptions);
 
         var options = new GatewayOptions
         {
@@ -68,22 +67,17 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
         };
 
         var gatewayOptions = Options.Create(options);
-        var env = Substitute.For<IHostEnvironment>();
-        var subjectResolver = Substitute.For<IIdentitySubjectResolver>();
-
-        // Default: delegated user subject
-        subjectResolver.ResolveSubject(Arg.Any<ClaimsPrincipal>())
-            .Returns(callInfo =>
-            {
-                var principal = callInfo.Arg<ClaimsPrincipal>();
-                var isAppOnly = !principal.HasClaim(c => c.Type == "scp" || c.Type == "http://schemas.microsoft.com/identity/claims/scope");
-                return new SubjectIdentity(
-                    principal.FindFirst("sub")?.Value ?? "user-1",
-                    isAppOnly ? SubjectType.ServicePrincipal : SubjectType.User,
-                    IdentityProviderType.EntraId,
-                    "user@example.com",
-                    Autheris.Tests.Common.TestTenants.Default);
-            });
+        var env = new Autheris.Tests.Unit.Security.FakeHostEnvironment();
+        var subjectResolver = new Autheris.Tests.Unit.Security.FakeIdentitySubjectResolver(principal =>
+        {
+            var isAppOnly = principal?.HasClaim(c => c.Type == "scp" || c.Type == "http://schemas.microsoft.com/identity/claims/scope") != true;
+            return new SubjectIdentity(
+                principal?.FindFirst("sub")?.Value ?? "user-1",
+                isAppOnly ? SubjectType.ServicePrincipal : SubjectType.User,
+                IdentityProviderType.EntraId,
+                "user@example.com",
+                Autheris.Tests.Common.TestTenants.Default);
+        });
 
         var validator = new JwtSocketTokenValidator(
             jwtOptionsMonitor,
@@ -98,15 +92,12 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
 
     private static Autheris.Application.Identity.IIdentityRealmRegistry DefaultRealmRegistry()
     {
-        var registry = Substitute.For<Autheris.Application.Identity.IIdentityRealmRegistry>();
         var realm = new Autheris.Domain.Identity.IdentityRealm(
             "ws-realm",
             Autheris.Domain.Identity.IdentityRealmKind.EntraWorkforce,
             Autheris.Domain.Identity.TenantBindingSpecification.Unbound(),
             Autheris.Domain.Identity.RealmGroupSource.None);
-        registry.GetDefaultRealm().Returns(realm);
-        registry.GetRealm("ws-realm").Returns(realm);
-        return registry;
+        return new Autheris.Tests.Unit.Security.FakeIdentityRealmRegistry(realm);
     }
 
     private string CreateJwt(IEnumerable<Claim> claims)

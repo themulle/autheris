@@ -34,16 +34,12 @@ internal static class TestIdentityPipeline
     /// <summary>A registry whose default realm takes groups from the token and binds the fixed tenant <c>tenant-a</c>.</summary>
     public static IIdentityRealmRegistry TokenRealm(IdentityRealmKind kind = IdentityRealmKind.EntraWorkforce)
     {
-        var registry = Substitute.For<IIdentityRealmRegistry>();
         var realm = new IdentityRealm(
             "token-realm",
             kind,
             new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-a")),
             groupSource: RealmGroupSource.Token);
-        registry.GetDefaultRealm().Returns(realm);
-        registry.GetRealm("token-realm").Returns(realm);
-        registry.ResolveRealmForScheme(Arg.Any<string?>(), Arg.Any<string?>()).Returns(realm);
-        return registry;
+        return new FakeIdentityRealmRegistry(realm);
     }
 
     public static EnterpriseClaimsTransformation Transformation(

@@ -47,20 +47,16 @@ public sealed class WebSocketClaimsTransformationTests
             }
         };
 
-        var jwtOptionsMonitor = Substitute.For<IOptionsMonitor<JwtBearerOptions>>();
-        jwtOptionsMonitor.Get(Arg.Any<string>()).Returns(jwtOptions);
-
+        var jwtOptionsMonitor = new FakeOptionsMonitor<JwtBearerOptions>(jwtOptions);
         var gatewayOptions = Options.Create(new GatewayOptions());
-
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Production);
+        var env = new FakeHostEnvironment(Environments.Production);
 
         return new JwtSocketTokenValidator(
             jwtOptionsMonitor,
             gatewayOptions,
             env,
             NullLogger<JwtSocketTokenValidator>.Instance,
-            subjectResolver ?? Substitute.For<IIdentitySubjectResolver>(),
+            subjectResolver ?? new FakeIdentitySubjectResolver(),
             pipeline ?? TestIdentityPipeline.Create());
     }
 
@@ -112,15 +108,13 @@ public sealed class WebSocketClaimsTransformationTests
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER1")
             });
 
-        var realmRegistry = Substitute.For<IIdentityRealmRegistry>();
         var corpRealm = new IdentityRealm(
             "corp-realm",
             IdentityRealmKind.EntraWorkforce,
             new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-a")),
             groupSource: RealmGroupSource.Token,
             issuers: new[] { issuer });
-
-        realmRegistry.ResolveRealmByIssuer(issuer).Returns(corpRealm);
+        var realmRegistry = new FakeIdentityRealmRegistry(corpRealm);
 
         var transformer = TestIdentityPipeline.Create(realmRegistry);
         var validator = CreateValidator(pipeline: transformer);
@@ -151,16 +145,13 @@ public sealed class WebSocketClaimsTransformationTests
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ANALYST1")
             });
 
-        var realmRegistry = Substitute.For<IIdentityRealmRegistry>();
         var resolverRealm = new IdentityRealm(
             "resolver-realm",
             IdentityRealmKind.EntraWorkforce,
             new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-a")),
             groupSource: RealmGroupSource.Resolver,
             issuers: new[] { issuer });
-
-        realmRegistry.ResolveRealmByIssuer(issuer).Returns(resolverRealm);
-        realmRegistry.GetRealm("resolver-realm").Returns(resolverRealm); // DT-A-3: the tenant resolver looks the stamped realm up by id
+        var realmRegistry = new FakeIdentityRealmRegistry(resolverRealm);
 
         var roleResolver = Substitute.For<IRoleResolver>();
         TestIdentityPipeline.StubResolution(roleResolver, new RoleResolution(
