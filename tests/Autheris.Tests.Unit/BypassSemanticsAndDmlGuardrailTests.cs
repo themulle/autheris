@@ -413,14 +413,21 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         return connection;
     }
 
-    internal static ClaimsPrincipal CreateWriter() =>
-        new(new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-DML-WRITER"),
-                new Claim("tenant_id", Tenant),
-                new Claim(ClaimTypes.Role, WriterRole)
-            ],
-            "Test"));
+    internal static ClaimsPrincipal CreateWriter(bool withWriteScope = true)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.PrimarySid, "S-1-5-21-DML-WRITER"),
+            new("tenant_id", Tenant),
+            new(ClaimTypes.Role, WriterRole)
+        };
+        if (withWriteScope)
+        {
+            claims.Add(new Claim("scp", "Sql.Write"));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+    }
 
     internal static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000, bool permissiveWrite = true, bool withDependency = false, bool columnlessHolder = false, bool plainTable = false, bool requireTenantColumn = false)
     {
@@ -506,7 +513,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 Arg.Any<IReadOnlySet<string>>(),
                 Arg.Any<TableIdentifier>(),
                 Arg.Any<IReadOnlyList<Consent>>(),
-                Arg.Any<DatabaseDialect>())
+                Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci =>
             {
                 var allowed = TableAccessDecision.Allowed(

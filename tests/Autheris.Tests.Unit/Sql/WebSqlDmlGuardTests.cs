@@ -20,7 +20,7 @@ public sealed class WebSqlDmlGuardTests
 {
     private static ClaimsPrincipal Principal(params string[] roles)
     {
-        var claims = new List<Claim> { new(ClaimTypes.PrimarySid, "S-1-5-21-DML-WRITER"), new("tenant_id", BypassSemanticsAndDmlGuardrailTests.Tenant) };
+        var claims = new List<Claim> { new(ClaimTypes.PrimarySid, "S-1-5-21-DML-WRITER"), new("tenant_id", BypassSemanticsAndDmlGuardrailTests.Tenant), new("scp", "Sql.Write") };
         foreach (var role in roles)
         {
             claims.Add(new Claim(ClaimTypes.Role, role));

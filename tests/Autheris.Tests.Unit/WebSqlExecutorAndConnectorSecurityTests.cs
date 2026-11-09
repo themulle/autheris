@@ -61,7 +61,8 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         var claims = new List<Claim>
         {
             new(ClaimTypes.PrimarySid, "S-1-5-21-WEBSQL-USER"),
-            new("tenant_id", Tenant)
+            new("tenant_id", Tenant),
+            new("scp", "Sql.Write")
         };
         foreach (var role in roles)
         {
@@ -154,7 +155,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
                 Arg.Any<IReadOnlySet<string>>(),
                 Arg.Any<TableIdentifier>(),
                 Arg.Any<IReadOnlyList<Consent>>(),
-                Arg.Any<DatabaseDialect>())
+                Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci => decisionFactory(ci.ArgAt<TableIdentifier>(3)));
         return resolution;
     }
