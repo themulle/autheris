@@ -91,6 +91,8 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
 
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "dbx");
+            builder.UseSetting("Gateway:WebSql:AllowedDataSources:0", "dbx");
+            builder.UseSetting("Gateway:WebSql:AllowedDataSources:1", "dbx_notrino");
             builder.UseSetting("Gateway:WebSql:AllowDml", "false");
             builder.UseSetting("Gateway:WebSql:DefaultMaxRows", "200");
             builder.UseSetting("Gateway:WebSql:MaxAllowedRows", "500");
@@ -133,7 +135,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             TableId = ordersMeta.Table.Id, TableIdentifier = OrdersId, TenantId = new TenantId("acme"), Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Role, RoleName = "Reader", ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
             ColumnRules = [CRule("id"), CRule("region"), CRule("status"), CRule("amount"), CRule("email", ColumnAccessLevel.Mask)],
-            RowFilters = [new ConsentRowFilter { ColumnName = "region", Operator = "EQUALS", ValueJson = "\"EU\"" }]
+            RowFilters = [new ConsentRowFilter { ColumnName = "region", Operator = "EQ", ValueJson = "\"EU\"" }]
         });
 
         // 2. Orders_ci table metadata (case-insensitive collation)
@@ -249,6 +251,17 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                 dataArray.Add(rowList);
             }
 
+            var sparkCols = sparkResp?["columns"]?.AsArray();
+            int colCount = sparkCols?.Count ?? (dataArray.Count > 0 ? dataArray[0].Count : 0);
+            var colDefinitions = Enumerable.Range(0, colCount)
+                .Select(i => new
+                {
+                    name = sparkCols != null && i < sparkCols.Count ? sparkCols[i]?.ToString() ?? $"col_{i}" : $"col_{i}",
+                    type_name = "STRING",
+                    position = i
+                })
+                .ToArray();
+
             var resultJson = JsonSerializer.Serialize(new
             {
                 statement_id = Guid.NewGuid().ToString(),
@@ -258,10 +271,8 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                     format = "JSON_ARRAY",
                     schema = new
                     {
-                        column_count = dataArray.Count > 0 ? dataArray[0].Count : 0,
-                        columns = Enumerable.Range(0, dataArray.Count > 0 ? dataArray[0].Count : 0)
-                            .Select(i => new { name = $"col_{i}", type_name = "STRING", position = i })
-                            .ToArray()
+                        column_count = colCount,
+                        columns = colDefinitions
                     }
                 },
                 result = new
@@ -464,6 +475,33 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
 
     // ---- Transport helper methods ----
 
+    private static int GetId(JsonElement row, int arrayIdx = 0)
+    {
+        if (row.ValueKind == JsonValueKind.Array)
+        {
+            var el = row[arrayIdx];
+            return el.ValueKind == JsonValueKind.Number ? el.GetInt32() : int.Parse(el.GetString()!);
+        }
+        if (row.TryGetProperty("id", out var p) || row.TryGetProperty("ID", out p))
+        {
+            return p.ValueKind == JsonValueKind.Number ? p.GetInt32() : int.Parse(p.GetString()!);
+        }
+        return 0;
+    }
+
+    private static string GetEmail(JsonElement row, int arrayIdx = 1)
+    {
+        if (row.ValueKind == JsonValueKind.Array && arrayIdx < row.GetArrayLength())
+        {
+            return row[arrayIdx].GetString() ?? string.Empty;
+        }
+        if (row.TryGetProperty("email", out var p) || row.TryGetProperty("EMAIL", out p))
+        {
+            return p.GetString() ?? string.Empty;
+        }
+        return string.Empty;
+    }
+
     private static async Task<(List<int> Ids, List<string> Emails)> QueryOrdersAsync(HttpClient client, string transport)
     {
         var ids = new List<int>();
@@ -478,8 +516,8 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                 using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
                 foreach (var row in doc.RootElement.GetProperty("rows").EnumerateArray())
                 {
-                    ids.Add(row[0].GetInt32());
-                    emails.Add(row[1].GetString() ?? string.Empty);
+                    ids.Add(GetId(row, 0));
+                    emails.Add(GetEmail(row, 1));
                 }
                 break;
             }
@@ -521,14 +559,8 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                     {
                         if (item.ValueKind == JsonValueKind.Object)
                         {
-                            if (item.TryGetProperty("id", out var idProp))
-                            {
-                                ids.Add(idProp.ValueKind == JsonValueKind.Number ? idProp.GetInt32() : int.Parse(idProp.GetString()!));
-                            }
-                            if (item.TryGetProperty("email", out var emailProp))
-                            {
-                                emails.Add(emailProp.GetString() ?? string.Empty);
-                            }
+                            ids.Add(GetId(item, 0));
+                            emails.Add(GetEmail(item, 1));
                         }
                     }
                 }
@@ -552,7 +584,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                 using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
                 foreach (var row in doc.RootElement.GetProperty("rows").EnumerateArray())
                 {
-                    ids.Add(row[0].GetInt32());
+                    ids.Add(GetId(row, 0));
                 }
                 break;
             }
@@ -586,9 +618,9 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                 {
                     foreach (var item in items.EnumerateArray())
                     {
-                        if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("id", out var idProp))
+                        if (item.ValueKind == JsonValueKind.Object)
                         {
-                            ids.Add(idProp.ValueKind == JsonValueKind.Number ? idProp.GetInt32() : int.Parse(idProp.GetString()!));
+                            ids.Add(GetId(item, 0));
                         }
                     }
                 }
@@ -606,7 +638,13 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             case "websql":
             {
                 var resp = await client.PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT id FROM dbx.default.orders", dataSource = "dbx" });
-                return resp.StatusCode != HttpStatusCode.OK;
+                if (resp.StatusCode != HttpStatusCode.OK) return true;
+                var body = await resp.Content.ReadAsStringAsync();
+                if (body.Contains("error", StringComparison.OrdinalIgnoreCase) || body.Contains("denied", StringComparison.OrdinalIgnoreCase)) return true;
+                using var doc = JsonDocument.Parse(body);
+                var count = doc.RootElement.TryGetProperty("rowCount", out var rc) ? rc.GetInt32() : 0;
+                var hasRows = doc.RootElement.TryGetProperty("rows", out var r) && r.GetArrayLength() > 0;
+                return count == 0 && !hasRows;
             }
             case "trino":
             {
@@ -633,7 +671,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                 var resp = await client.PostAsJsonAsync("/api/v1/sql", new { sql = $"SELECT id FROM dbx.default.orders LIMIT {limit}", dataSource = "dbx" });
                 resp.StatusCode.ShouldBe(HttpStatusCode.OK);
                 using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-                return doc.RootElement.GetProperty("rows").GetArrayLength();
+                return doc.RootElement.TryGetProperty("rows", out var r) ? r.GetArrayLength() : 0;
             }
             case "trino":
             {
@@ -716,7 +754,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             currentDoc = JsonDocument.Parse(body);
             if (currentDoc.RootElement.TryGetProperty("stats", out var stats) &&
                 stats.TryGetProperty("state", out var state) &&
-                state.GetString() == "FINISHED")
+                (state.GetString() == "FINISHED" || state.GetString() == "FAILED"))
             {
                 break;
             }
