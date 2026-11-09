@@ -3,7 +3,6 @@
 # A line is valid only while (1) the property still exists and the heuristic still reports it, and (2) the consuming member is
 # used (member access, construction or static call) in a production file outside the file(s) declaring the options type.
 Autheris.Application.Security.TenantRegistryGateOptions.MaxNewRegistrationsPerIssuerPerWindow|TenantRegistryGate
-Autheris.Domain.Options.AuthenticationOptions.EnableKerberos|IsKerberosConfigured
 Autheris.Domain.Options.DevOptions.DemoData|DevConfiguration
 Autheris.Domain.Options.DevOptions.TestAuthHandler|DevConfiguration
 Autheris.Domain.Options.DevOptions.Tooling|DevConfiguration

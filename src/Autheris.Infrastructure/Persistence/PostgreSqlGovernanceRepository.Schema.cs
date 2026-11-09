@@ -20,7 +20,7 @@ public partial class PostgreSqlGovernanceRepository
         using var trans = conn.BeginTransaction();
         try
         {
-            var ownerSid = "S-1-5-21-DATAOWNER-1";
+            var ownerSid = "S-1-5-21-1000-1000-1000-1001";
             var ownerId = Guid.NewGuid().ToString();
             using (var cmd = conn.CreateCommand())
             {
@@ -68,7 +68,7 @@ public partial class PostgreSqlGovernanceRepository
                 cmd.ExecuteNonQuery();
             }
 
-            var approverASid = "S-1-5-21-APPROVER-A";
+            var approverASid = "S-1-5-21-1000-1000-1000-1002";
             var approverAId = Guid.NewGuid().ToString();
             using (var cmd = conn.CreateCommand())
             {
@@ -84,7 +84,7 @@ public partial class PostgreSqlGovernanceRepository
                 cmd.ExecuteNonQuery();
             }
 
-            var approverBSid = "S-1-5-21-APPROVER-B";
+            var approverBSid = "S-1-5-21-1000-1000-1000-1003";
             var approverBId = Guid.NewGuid().ToString();
             using (var cmd = conn.CreateCommand())
             {

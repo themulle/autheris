@@ -405,9 +405,9 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
             builder.UseSetting("Gateway:Authentication:BasicAuth:Realm", "TestRealm");
             builder.UseSetting("Gateway:Authentication:BasicAuth:Users:0:Username", "testadmin");
             builder.UseSetting("Gateway:Authentication:BasicAuth:Users:0:Password", "Password123!");
-            builder.UseSetting("Gateway:Authentication:BasicAuth:Users:0:Sid", "S-1-5-21-999-ADMIN");
+            builder.UseSetting("Gateway:Authentication:BasicAuth:Users:0:Sid", "S-1-5-21-999-1000-1001");
             builder.UseSetting("Gateway:Authentication:BasicAuth:Users:0:Roles:0", "GovernanceAdmin");
-            builder.UseSetting("Gateway:Authentication:BasicAuth:Users:0:GroupSids:0", "S-1-5-21-999-GROUP");
+            builder.UseSetting("Gateway:Authentication:BasicAuth:Users:0:GroupSids:0", "S-1-5-21-999-1000-1002");
         });
 
         var client = customFactory.CreateClient();
@@ -420,7 +420,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         json.GetProperty("authenticated").GetBoolean().ShouldBeTrue();
         json.GetProperty("user").GetString().ShouldBe("testadmin");
-        json.GetProperty("sid").GetString().ShouldBe("S-1-5-21-999-ADMIN");
+        json.GetProperty("sid").GetString().ShouldBe("S-1-5-21-999-1000-1001");
     }
 
     [Fact]
@@ -447,6 +447,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
     {
         using var customFactory = _factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("Gateway:Authentication:Mode", "Upstream");
             builder.UseSetting("Gateway:Authentication:ForwardAuth:Enabled", "true");
             builder.UseSetting("Gateway:Authentication:ForwardAuth:RequireTrustedProxy", "true");
             builder.UseSetting("Gateway:Authentication:ForwardAuth:TrustedProxies:0", "127.0.0.1");
@@ -469,7 +470,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         json.GetProperty("authenticated").GetBoolean().ShouldBeTrue();
         json.GetProperty("user").GetString().ShouldBe("traefik_k8s_user");
-        json.GetProperty("sid").GetString().ShouldBe("S-1-5-21-FORWARD-USR-TRAEFIK_K8S_USER");
+        json.GetProperty("sid").GetString().ShouldBe("S-1-5-21-FORWARD-USR-traefik_k8s_user");
     }
 }
 
