@@ -77,7 +77,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             builder.UseSetting("Gateway:DataSources:Connections:dbx:Databricks:Catalog", CatalogName);
             builder.UseSetting("Gateway:DataSources:Connections:dbx:Databricks:Schema", SchemaName);
             builder.UseSetting("Gateway:DataSources:Connections:dbx:Databricks:Auth:Mode", "Pat");
-            builder.UseSetting("Gateway:DataSources:Connections:dbx:Databricks:Auth:PatRef", "dbx-pat");
+            builder.UseSetting("Gateway:DataSources:Connections:dbx:Databricks:Auth:PatRef", "kv://dbx-pat");
 
             // Secondary Databricks data source: AllowedTransports restricts to WebSql only (excludes Trino)
             builder.UseSetting("Gateway:DataSources:Connections:dbx_notrino:Provider", "Databricks");
@@ -86,7 +86,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             builder.UseSetting("Gateway:DataSources:Connections:dbx_notrino:Databricks:Catalog", CatalogName);
             builder.UseSetting("Gateway:DataSources:Connections:dbx_notrino:Databricks:Schema", SchemaName);
             builder.UseSetting("Gateway:DataSources:Connections:dbx_notrino:Databricks:Auth:Mode", "Pat");
-            builder.UseSetting("Gateway:DataSources:Connections:dbx_notrino:Databricks:Auth:PatRef", "dbx-pat");
+            builder.UseSetting("Gateway:DataSources:Connections:dbx_notrino:Databricks:Auth:PatRef", "kv://dbx-pat");
             builder.UseSetting("Gateway:DataSources:Configuration:Profiles:dbx_notrino:AllowedTransports", "WebSql");
 
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
@@ -101,7 +101,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             {
                 services.AddSingleton<IKeyVaultSecretProvider>(new FakeSecretProvider(new Dictionary<string, string>
                 {
-                    ["dbx-pat"] = "test-token-parity-123"
+                    ["kv://dbx-pat"] = "test-token-parity-123"
                 }));
 
                 services.AddHttpClient<DatabricksStatementExecutionClient>()
