@@ -169,6 +169,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
         client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_alpha");
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
 
         var payload = new
         {
@@ -196,6 +197,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
         client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_alpha");
+        client.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
 
         var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql });
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);

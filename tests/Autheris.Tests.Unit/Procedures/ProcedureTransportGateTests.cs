@@ -210,7 +210,7 @@ public sealed class ProcedureTransportGateTests
             Substitute.For<Autheris.Application.Mcp.Interfaces.IApiDispatcherService>(),
             Substitute.For<Autheris.Application.Lineage.ILineageGraphStore>(),
             rig.Tables,
-            procedureRegistry: rig.Registry,
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(rig.Registry, svc),
             procedureExecutionService: svc);
         var tool = Autheris.Application.Mcp.Services.McpDatasetTools.Definitions().Single(t => t.Name == Autheris.Application.Mcp.Services.McpDatasetTools.CallProcedure);
         var session = new McpSessionContext("s", "u", Tenant.Value, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
@@ -231,7 +231,7 @@ public sealed class ProcedureTransportGateTests
         var svc = rig.Create(new RecordingGate("src-denied"), "ds-ok", "src-denied");
         var catalog = new Autheris.Application.Mcp.Services.McpDatasetCatalog(
             rig.Tables, rig.Consents, Substitute.For<Autheris.Application.Common.Interfaces.IGatewayExecutionService>(), rig.Audit,
-            procedureRegistry: rig.Registry, procedureExecutionService: svc, transportGate: new RecordingGate("src-denied"));
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(rig.Registry, svc), transportGate: new RecordingGate("src-denied"));
 
         await Should.ThrowAsync<TransportNotAllowedException>(() => catalog.DescribeDatasetAsync(Caller(), "procedure:get_orders", null));
 
@@ -266,6 +266,20 @@ public sealed class ProcedureTransportGateTests
         gate.Calls.ShouldBe(1);
         gate.Sources.ShouldBe(["ds-ok", "src-ok"], ignoreOrder: true);
         await rig.Invoker.ReceivedWithAnyArgs(1).ExecuteReadAsync(default!, default!, default!, default, default);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Executor_VisibilityDecisions_CoverExactlyTheGovernedTables_SEC_PROC_09()
+    {
+        var rig = new Rig();
+        var svc = rig.Create(new RecordingGate(), "ds-ok", "ds-ok");
+        rig.Registry.TryGet("get_orders", out var registered).ShouldBeTrue();
+
+        var visibility = await svc.EvaluateVisibilityAsync(registered!, Caller(), Tenant, null, CancellationToken.None);
+
+        visibility.Visible.ShouldBeTrue();
+        visibility.Decisions.Keys.Order(StringComparer.OrdinalIgnoreCase).ShouldBe(registered!.GovernedTableKeys().Order(StringComparer.OrdinalIgnoreCase));
     }
 }
 

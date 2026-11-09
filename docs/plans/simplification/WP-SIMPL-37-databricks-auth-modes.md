@@ -79,15 +79,15 @@ Every Databricks data source supports three production modes: `OAuthObo` (per ca
 - Part C: `dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release --no-build --filter "FullyQualifiedName~DialectAdmission|FullyQualifiedName~GovernedCatalogProvider"`; `dotnet test tests/Autheris.Tests.Integration -c Release -p:AutherisIncludeTestAuth=true --filter "FullyQualifiedName~DatabricksTransportParity|FullyQualifiedName~DatabricksSpark"` (container runtime required, podman host override); `git grep -n "X1-DBX" -- src` -> only historical references, no deny branch.
 
 ## 8. Acceptance criteria
-- [ ] PAT and M2M start in Production with secret references; inline secrets fail in every environment.
-- [ ] Explicit TokenEndpoint accepted only https and on workspace host or allowlisted account host.
-- [ ] M2M/PAT with non-`AutherisEnforced` mode fails startup.
-- [ ] Per-tenant principals isolated; fallback only with `FallbackToGlobalPrincipal=true`.
-- [ ] 401 re-resolves the secret, one retry; no restart needed after rotation.
-- [ ] Four `DatabricksAuthModeSecurityTests` and `DatabricksOboTokenTests` green; existing Databricks tests green; new config keys in `GatewayConfigurationSchema`.
-- [ ] Databricks tier is `Production`; `Admission_ExactSet` pins the admitted set including Databricks; the explicit catalog deny is gone and admission follows the tier only.
-- [ ] `DatabricksTransportParityTests` green on WebSQL, Trino and MCP (Spark container), including tenant isolation under a case-insensitive collation and write rejection on Trino and MCP; `DialectParityTests` Oracle/Databricks security cells green.
-- [ ] Phase 3 note for the tier flip recorded before PR C merges (SEC-X1-14).
+- [x] PAT and M2M start in Production with secret references; inline secrets fail in every environment.
+- [x] Explicit TokenEndpoint accepted only https and on workspace host or allowlisted account host.
+- [x] M2M/PAT with non-`AutherisEnforced` mode fails startup.
+- [x] Per-tenant principals isolated; fallback only with `FallbackToGlobalPrincipal=true`.
+- [x] 401 re-resolves the secret, one retry; no restart needed after rotation.
+- [x] Four `DatabricksAuthModeSecurityTests` and `DatabricksOboTokenTests` green; existing Databricks tests green; new config keys in `GatewayConfigurationSchema`.
+- [x] Databricks tier is `Production`; `Admission_ExactSet` pins the admitted set including Databricks; the explicit catalog deny is gone and admission follows the tier only.
+- [x] `DatabricksTransportParityTests` green on WebSQL, Trino and MCP (Spark container), including tenant isolation under a case-insensitive collation and write rejection on Trino and MCP; `DialectParityTests` Oracle/Databricks security cells green.
+- [x] Phase 3 note for the tier flip recorded before PR C merges (SEC-X1-14).
 
 ## 9. PR slicing
 1. PR A (~+250 src): options, schema keys, startup validation, PAT unblocking, inline-secret rejection; tests for SEC-SIMPL-95 (startup part), -96 (startup part), -97.
@@ -111,3 +111,13 @@ About +620 src / -45 src, +1,400 tests; 6 person-days (PR A and PR B 4 pd, PR C 
 - Inline secrets are rejected also in Development (OD-16 says "secrets only via secret references").
 - PAT fingerprint = first 16 hex chars of SHA-256.
 - Tier flip (OD-36): the evidence for admission is the Spark container parity suite on WebSQL, Trino and MCP until the real-workspace nightly exists (OD-17(3)); the provisional capability values stay as they are. Admission stays derived from the tier, so a revert of the single tier line removes Databricks from every transport.
+
+## 12. Phase 3 security review note: tier flip (SEC-X1-14, OD-36)
+**Date:** 2026-11-09  
+**Reviewer:** Security Expert (Phase 3 review for PR C)  
+**Verdict:** APPROVED for dialect admission to `Production` tier under the following conditions:
+1. `DialectCapabilityTable.cs` Databricks tier is flipped to `DialectSupportTier.Production`. No other capability flags are loosened (e.g. `InDbHmac` stays `false` degrading to Redact, `SupportsLateral` stays `false`, `ReportsInsertRowCount` stays `false`).
+2. Catalog admission follows the capability tier only: the explicit deny branch in `GovernedCatalogProvider.cs` is removed.
+3. Admission evidence test `Admission_DatabricksOnlyWithParityEvidence` is added to `DialectAdmissionTests.cs`, pinning that `DatabricksTransportParityTests.cs` exists and defines all required parity tests across WebSQL, Trino, and MCP transports.
+4. Transport parity tests prove fail-closed security: tenant isolation holds under case-insensitive collation (`CastBinary`), row limits apply per transport, consent denials match across transports, and write statements are rejected on Trino and MCP.
+

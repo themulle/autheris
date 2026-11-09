@@ -8,7 +8,6 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Plugins;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
-using Autheris.Application.Procedures.Tools;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
@@ -115,7 +114,7 @@ public static class GatewaySqlEngineServiceExtensions
             services.AddSingleton<IProcedureRowScopeResolver, SqlProcedureRowScopeResolver>();
             services.AddSingleton<ProcedureDenialAuditLimiter>();
             services.AddScoped<IProcedureExecutionService, GovernedProcedureExecutionService>();
-            services.AddSingleton<IProcedureYamlGenerator, ProcedureYamlGenerator>();
+            services.AddScoped<IProcedureCatalog, ProcedureCatalog>();
             services.AddHostedService<ProcedureRegistrationService>();
         }
 

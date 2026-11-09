@@ -67,14 +67,13 @@ public class DialectCapabilitiesTests
     }
 
     [Fact]
-    public void Databricks_NotProduction_UntilG9Flag()
+    public void Databricks_IsProduction_UnderOD36()
     {
-        // OQ-2 / plan 16.4 item 5: Databricks stays off the production list until the first green G9 run (live Databricks SQL).
-        Assert.Equal(DialectSupportTier.Experimental, Provider.Get(TargetSqlDialect.Databricks).Tier);
+        Assert.Equal(DialectSupportTier.Production, Provider.Get(TargetSqlDialect.Databricks).Tier);
     }
 
     [Fact]
-    public void Databricks_Compile_IsRejected_WithoutTheExperimentalFlag()
+    public void Databricks_Compile_IsAllowed_WithoutTheExperimentalFlag()
     {
         var engine = new FastSqlEngine();
         var request = new CompileRequest
@@ -89,9 +88,7 @@ public class DialectCapabilitiesTests
                 Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
             }
         };
-        var ex = Assert.Throws<SqlCompileNotSupportedException>(() => engine.Compile("SELECT id FROM orders".AsMemory(), request, CancellationToken.None));
-        Assert.Equal(SqlCompileNotSupportedReason.Dialect, ex.Reason);
-        Assert.NotEmpty(engine.Compile("SELECT id FROM orders".AsMemory(), request with { AllowExperimentalDialect = true }, CancellationToken.None).Sql);
+        Assert.NotEmpty(engine.Compile("SELECT id FROM orders".AsMemory(), request, CancellationToken.None).Sql);
     }
 
     [Fact]

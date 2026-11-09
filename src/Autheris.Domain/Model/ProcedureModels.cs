@@ -135,8 +135,19 @@ public sealed record ProcedureDefinition(
     public TableIdentifier? ResultTableIdentifier =>
         ResultTable == null ? null : (TableIdentifier.TryParse(CatalogDomain + "." + ResultTable, out var id) ? id : (TableIdentifier.TryParse(ResultTable, out var direct) ? direct : null));
 
-    public IReadOnlyList<TableIdentifier> ReferencedTableIdentifiers =>
-        ReferencedTables.Select(t => TableIdentifier.TryParse(CatalogDomain + "." + t, out var id) ? id : (TableIdentifier.TryParse(t, out var direct) ? direct : new TableIdentifier(CatalogDomain, "dbo", t))).ToList();
+    /// <summary>Maps a table key of this declaration to its catalog identifier (catalog domain first, then the key as written).</summary>
+    public bool TryResolveTable(string key, out TableIdentifier tableId)
+    {
+        try
+        {
+            return TableIdentifier.TryParse(CatalogDomain + "." + key, out tableId) || TableIdentifier.TryParse(key, out tableId);
+        }
+        catch (ArgumentException)
+        {
+            tableId = default;
+            return false;
+        }
+    }
 
     /// <summary>
     /// Optional SHA-256 hash of the procedure DDL/header for schema drift prevention.
@@ -198,4 +209,45 @@ public sealed record RegisteredProcedure(
     ProcedureState State,
     ProcedureValidationResult? Validation,
     DateTimeOffset? ValidatedAt,
-    string? DisabledReason);
+    string? DisabledReason)
+{
+    /// <summary>
+    /// The one table set consent is checked on for this procedure: the validated referenced tables of an Active procedure plus
+    /// the result table (case-insensitive distinct). Executor visibility and the AI guardrail both use it.
+    /// </summary>
+    public IReadOnlyList<string> GovernedTableKeys()
+    {
+        var keys = new List<string>();
+        if (State == ProcedureState.Active && Validation != null)
+        {
+            keys.AddRange(Validation.ReferencedTables);
+        }
+
+        if (Definition.ResultTable != null)
+        {
+            keys.Add(Definition.ResultTable);
+        }
+
+        return keys.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary><see cref="GovernedTableKeys"/> as identifiers; null (fail closed) when a key cannot be resolved.</summary>
+    public IReadOnlyList<TableIdentifier>? GovernedTables()
+    {
+        var tables = new List<TableIdentifier>();
+        foreach (var key in GovernedTableKeys())
+        {
+            if (!Definition.TryResolveTable(key, out var id))
+            {
+                return null;
+            }
+
+            if (!tables.Contains(id))
+            {
+                tables.Add(id);
+            }
+        }
+
+        return tables;
+    }
+}

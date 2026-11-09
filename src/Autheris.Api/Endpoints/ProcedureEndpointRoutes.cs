@@ -44,9 +44,9 @@ public static class ProcedureEndpointRoutes
         // OpenSchema (documentation mode) keeps the document reachable anonymously, but it then lists no procedure: visibility
         // depends on the caller's identity and consent.
         var openApi = group.MapGet("/openapi.json",
-                (HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry, IProcedureExecutionService service,
+                (HttpContext http, IProcedureCatalog catalog,
                     Microsoft.Extensions.Options.IOptions<GatewayOptions> options) =>
-                    HandleOpenApi(http, registry, service, options))
+                    HandleOpenApi(http, catalog, options))
             .WithName("GetProcedureEndpointsOpenApiSpec")
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         if (gatewayOptions.IsOpenSchemaAllowed != true)
@@ -65,12 +65,11 @@ public static class ProcedureEndpointRoutes
 
     internal static async Task<IResult> HandleList(
         HttpContext http,
-        Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry,
-        IProcedureExecutionService service)
+        IProcedureCatalog catalog)
     {
-        // Only active procedures the caller may see (identity, role gate and consent on every table: IsVisibleAsync).
+        // Only active procedures the caller may see (identity, role gate and consent on every table).
         var items = new List<object>();
-        foreach (var r in await VisibleAsync(http, registry, service).ConfigureAwait(false))
+        foreach (var r in await catalog.ListVisibleAsync(http.User, EndpointSecurity.GetRequestTenant(http), http.RequestAborted).ConfigureAwait(false))
         {
             items.Add(new
             {
@@ -84,38 +83,9 @@ public static class ProcedureEndpointRoutes
         return Results.Ok(items);
     }
 
-    /// <summary>
-    /// the visible Active procedures. An evaluation failure for one procedure omits only that procedure.
-    /// </summary>
-    private static async Task<List<RegisteredProcedure>> VisibleAsync(
-        HttpContext http,
-        Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry,
-        IProcedureExecutionService service)
-    {
-        var visible = new List<RegisteredProcedure>();
-        var tenant = EndpointSecurity.GetRequestTenant(http);
-        foreach (var reg in registry.GetAll().Where(r => r.State == ProcedureState.Active))
-        {
-            try
-            {
-                if (await service.IsVisibleAsync(reg, http.User, tenant, http.RequestAborted).ConfigureAwait(false))
-                {
-                    visible.Add(reg);
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // omitted: no detail in the response
-            }
-        }
-
-        return visible;
-    }
-
     internal static async Task<IResult> HandleOpenApi(
         HttpContext http,
-        Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry,
-        IProcedureExecutionService service,
+        IProcedureCatalog catalog,
         Microsoft.Extensions.Options.IOptions<GatewayOptions>? options = null)
     {
         int maxRows = options?.Value.SqlEndpoints.Procedures.MaxRows ?? new ProcedureEndpointsOptions().MaxRows;
@@ -123,7 +93,7 @@ public static class ProcedureEndpointRoutes
         // Open-schema documentation mode no longer documents procedures for anonymous callers (OQ-12): visibility needs identity.
         var paths = new Dictionary<string, object>();
         var anonymous = http.User.Identity?.IsAuthenticated != true;
-        var visible = anonymous ? new List<RegisteredProcedure>() : await VisibleAsync(http, registry, service).ConfigureAwait(false);
+        IReadOnlyList<RegisteredProcedure> visible = anonymous ? [] : await catalog.ListVisibleAsync(http.User, EndpointSecurity.GetRequestTenant(http), http.RequestAborted).ConfigureAwait(false);
         foreach (var reg in visible)
         {
             var def = reg.Definition;

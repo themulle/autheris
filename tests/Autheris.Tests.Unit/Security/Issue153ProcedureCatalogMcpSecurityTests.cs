@@ -138,8 +138,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             metaRepo, consentRepo, gatewayExec,
             auditLogRepository: global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             options: Options.Create(new GatewayOptions()),
-            procedureRegistry: procRegistry,
-            procedureExecutionService: procService);
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService));
 
         var executor = new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(),
@@ -199,8 +198,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             auditLogRepository: global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             options: Options.Create(new GatewayOptions()),
             visibilityService: visibility,
-            procedureRegistry: procRegistry,
-            procedureExecutionService: procService);
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService));
 
         var user = CreatePrincipal();
 
@@ -221,8 +219,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance),
             Options.Create(new GatewayOptions()),
             visibilityService: visibility,
-            procedureRegistry: procRegistry,
-            procedureExecutionService: procService);
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService));
 
         var reqContext = Autheris.Domain.Model.RequestContext.FromCaller(new CallerSecurityContext(new Sid("S-1-USER"), [], ["DataAnalyst"], new TenantId(TenantA), false, false));
         reqContext = reqContext with { User = user };
@@ -284,8 +281,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             metaRepo, consentRepo, gatewayExec,
             auditLogRepository: global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             options: Options.Create(new GatewayOptions()),
-            procedureRegistry: procRegistry,
-            procedureExecutionService: procService);
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService));
 
         var user = CreatePrincipal();
         var desc = await catalog.DescribeDatasetAsync(user, "procedure:GetCustomerProfile");
@@ -345,7 +341,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
 
         var handler = new McpToolExecutionHandler(
             sqlExec, dataQuery, catalogDiscovery, apiDispatcher, lineage, metaRepo,
-            procedureRegistry: procRegistry,
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService),
             procedureExecutionService: procService);
 
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.CallProcedure);
@@ -401,7 +397,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
 
         var handler = new McpToolExecutionHandler(
             sqlExec, dataQuery, catalogDiscovery, apiDispatcher, lineage, metaRepo,
-            procedureRegistry: procRegistry,
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService),
             procedureExecutionService: procService);
 
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.CallProcedure);
@@ -442,12 +438,15 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
 
         procService.IsVisibleAsync(procUnconsented, Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(false);
+        // the executor's own visibility stage answers a hidden procedure like an unknown one
+        procService.ExecuteAsync("ProcUnconsented", Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns<GovernedProcedureResult>(_ => throw new KeyNotFoundException("Procedure endpoint not found."));
         procService.ExecuteAsync("ProcNonExistent", Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns<GovernedProcedureResult>(_ => throw new KeyNotFoundException("Procedure endpoint not found."));
 
         var handler = new McpToolExecutionHandler(
             sqlExec, dataQuery, catalogDiscovery, apiDispatcher, lineage, metaRepo,
-            procedureRegistry: procRegistry,
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService),
             procedureExecutionService: procService);
 
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.CallProcedure);
@@ -495,8 +494,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             auditLogRepository: global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             options: Options.Create(new GatewayOptions()),
             visibilityService: visibility,
-            procedureRegistry: procRegistry,
-            procedureExecutionService: procService);
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService));
 
         var user = CreatePrincipal();
 
@@ -523,6 +521,8 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
         var gatewayExec = Substitute.For<IGatewayExecutionService>();
         var procRegistry = Substitute.For<IProcedureRegistry>();
         var procService = Substitute.For<IProcedureExecutionService>();
+        procService.ExecuteAsync("ProcTenantA", Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ClaimsPrincipal>(), Arg.Is<TenantId>(t => t.Value == TenantB), Arg.Any<CancellationToken>())
+            .Returns<GovernedProcedureResult>(_ => throw new KeyNotFoundException("Procedure endpoint not found."));
 
         var procTenantA = CreateProcedure("ProcTenantA");
         procRegistry.GetAll().Returns([procTenantA]);
@@ -543,8 +543,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             auditLogRepository: global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             options: Options.Create(new GatewayOptions()),
             visibilityService: visibility,
-            procedureRegistry: procRegistry,
-            procedureExecutionService: procService);
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService));
 
         var callerTenantB = CreatePrincipal(tenant: TenantB);
 
@@ -565,7 +564,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             Substitute.For<IApiDispatcherService>(),
             Substitute.For<ILineageGraphStore>(),
             metaRepo,
-            procedureRegistry: procRegistry,
+            procedureCatalog: new global::Autheris.Application.Procedures.Services.ProcedureCatalog(procRegistry, procService),
             procedureExecutionService: procService);
 
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.CallProcedure);

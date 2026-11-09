@@ -25,7 +25,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Procedures;
 
 /// <summary>PLAN-PROC-152-INC1: governed procedures INC-1 security slice (SEC-PROC152-01..11).</summary>
-public class ProcedureExecutionSecurityTests
+public partial class ProcedureExecutionSecurityTests
 {
     private const string NotFound = "Procedure endpoint not found.";
     private static readonly TenantId Tenant = new("tenant-a");
@@ -820,16 +820,16 @@ public class ProcedureExecutionSecurityTests
 
         // anonymous in open-schema mode: empty paths, no evaluation at all
         var anonymousHttp = new DefaultHttpContext { User = Anonymous() };
-        var anon = await ProcedureEndpointRoutes.HandleOpenApi(anonymousHttp, registry, service);
+        var anon = await ProcedureEndpointRoutes.HandleOpenApi(anonymousHttp, new ProcedureCatalog(registry, service));
         ((Dictionary<string, object>)anon.ShouldBeOfType<Ok<Dictionary<string, object>>>().Value!["paths"]).ShouldBeEmpty();
 
         // authenticated: only the visible procedure; the failing one is omitted, the response is not failed
         var http = new DefaultHttpContext { User = User() };
-        var open = await ProcedureEndpointRoutes.HandleOpenApi(http, registry, service);
+        var open = await ProcedureEndpointRoutes.HandleOpenApi(http, new ProcedureCatalog(registry, service));
         var paths = (Dictionary<string, object>)open.ShouldBeOfType<Ok<Dictionary<string, object>>>().Value!["paths"];
         paths.Keys.ShouldBe(["/api/v1/procedures/get_orders"]);
 
-        var list = await ProcedureEndpointRoutes.HandleList(http, registry, service);
+        var list = await ProcedureEndpointRoutes.HandleList(http, new ProcedureCatalog(registry, service));
         var items = list.ShouldBeOfType<Ok<List<object>>>().Value!;
         items.Count.ShouldBe(1);
     }
@@ -842,9 +842,9 @@ public class ProcedureExecutionSecurityTests
         service.IsVisibleAsync(default!, default!, default, default).ReturnsForAnyArgs(Task.FromResult(false));
         var http = new DefaultHttpContext { User = User() };
 
-        var open = await ProcedureEndpointRoutes.HandleOpenApi(http, registry, service);
+        var open = await ProcedureEndpointRoutes.HandleOpenApi(http, new ProcedureCatalog(registry, service));
         ((Dictionary<string, object>)open.ShouldBeOfType<Ok<Dictionary<string, object>>>().Value!["paths"]).ShouldBeEmpty();
-        (await ProcedureEndpointRoutes.HandleList(http, registry, service)).ShouldBeOfType<Ok<List<object>>>().Value!.ShouldBeEmpty();
+        (await ProcedureEndpointRoutes.HandleList(http, new ProcedureCatalog(registry, service))).ShouldBeOfType<Ok<List<object>>>().Value!.ShouldBeEmpty();
     }
 
     // ---------- route level ----------

@@ -99,6 +99,7 @@ public static class GatewayStorageServiceExtensions
         services.AddSingleton<IPhysicalKeyCatalog>(sp => sp.GetRequiredService<GovernedCatalogProvider>());
         services.AddSingleton<AuditChainIntegrityMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<AuditChainIntegrityMonitor>());
+        services.AddHostedService<Autheris.Api.Configuration.Validation.DmlIdempotencyStoreStartupCheck>();
         // SEC R3-4: anonymous /health/ready must not drive the DB probe per request -> cached, single-flight decorator.
         services.AddSingleton<GatewayHealthCheckService>();
         services.AddSingleton<IGatewayHealthCheckService>(sp =>

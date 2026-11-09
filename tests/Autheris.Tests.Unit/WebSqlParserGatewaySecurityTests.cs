@@ -248,19 +248,14 @@ public sealed class WebSqlParserGatewaySecurityTests
             RewriteAsync(service, "SELECT e.id, o.id FROM employees e JOIN orders o ON e.id = o.id"));
     }
 
-    [Theory]
-    [InlineData("Databricks")]
-    public async Task P05_UnsupportedTableDialect_IsRejected(string sourceType)
+    [Fact]
+    public async Task P05_DatabricksTable_IsAdmitted()
     {
-        var service = CreateService(CreateOptions(), CreateRepository(CreateTable("orders", sourceType)));
+        var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "Databricks", ConnectionString = "Host=unused" });
+        var service = CreateService(options, CreateRepository(CreateTable("orders", "Databricks")));
 
-        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(service, "SELECT id FROM orders"));
-        ex.Message.ShouldContain("only supports");
-        // X1.3: the message lists the admitted dialects from the capability table.
-        foreach (var admitted in SqlDialectMapper.AdmittedDialects)
-        {
-            ex.Message.ShouldContain(SqlDialectMapper.DisplayName(admitted));
-        }
+        var result = await RewriteAsync(service, "SELECT id FROM orders");
+        result.ShouldNotBeNull();
     }
 
     [Fact]
@@ -275,8 +270,7 @@ public sealed class WebSqlParserGatewaySecurityTests
     [Fact]
     public async Task P05_UnknownConnectionProvider_IsRejected()
     {
-        // Databricks maps and connects, but is Experimental and therefore not admitted to WebSQL (S-4).
-        var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "Databricks", ConnectionString = "Data Source=unused" });
+        var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "UnknownProvider", ConnectionString = "Data Source=unused" });
         var service = CreateService(options, CreateRepository(CreateTable("orders", "PostgreSQL")));
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(service, "SELECT id FROM orders"));
@@ -305,11 +299,10 @@ public sealed class WebSqlParserGatewaySecurityTests
         mssql.ShouldBe(DatabaseDialect.SqlServer);
         GovernedSqlExecutionService.TryMapProviderToDialect("Sqlite", out var sqlite).ShouldBeTrue();
         sqlite.ShouldBe(DatabaseDialect.Sqlite);
-        // X1.3: Oracle is admitted (tier Production, WP-X0z evidence); Databricks is not (Experimental until X1-DBX).
         GovernedSqlExecutionService.TryMapProviderToDialect("Oracle", out var oracle).ShouldBeTrue();
         oracle.ShouldBe(DatabaseDialect.Oracle);
-        GovernedSqlExecutionService.TryMapProviderToDialect("Databricks", out _).ShouldBeFalse();
-
+        GovernedSqlExecutionService.TryMapProviderToDialect("Databricks", out var databricks).ShouldBeTrue();
+        databricks.ShouldBe(DatabaseDialect.Databricks);
     }
 
     [Fact]

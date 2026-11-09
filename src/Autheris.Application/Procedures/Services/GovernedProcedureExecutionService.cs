@@ -323,19 +323,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 return ProcedureVisibility.Hidden("role");
             }
 
-            // Table set: an Active procedure is governed by every table it references plus its result table; otherwise only
-            // the result table can be evaluated. Zero tables is never visible (nothing could be consent-checked).
-            var tableKeys = new List<string>();
-            if (registered.State == ProcedureState.Active && registered.Validation != null)
-            {
-                tableKeys.AddRange(registered.Validation.ReferencedTables);
-            }
-
-            if (definition.ResultTable != null && !tableKeys.Contains(definition.ResultTable, StringComparer.OrdinalIgnoreCase))
-            {
-                tableKeys.Add(definition.ResultTable);
-            }
-
+            // Table set: one definition shared with the AI guardrail. Zero tables is never visible (nothing could be consent-checked).
+            var tableKeys = registered.GovernedTableKeys();
             if (tableKeys.Count == 0)
             {
                 return ProcedureVisibility.Hidden("no-result-table");
