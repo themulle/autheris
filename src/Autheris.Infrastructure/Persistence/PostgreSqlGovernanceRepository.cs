@@ -80,7 +80,6 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
     private readonly ICallerContextProvider? _callerContextProvider;
-    private readonly IEventBus? _eventBus;
 
     private readonly Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? _materializationGuard;
 
@@ -105,7 +104,6 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, ICo
 
         _epochValidationService = epochValidationService;
         _logger = logger;
-        _eventBus = eventBus;
         _options = options.Value;
         _callerContextProvider = callerContextProvider;
 
