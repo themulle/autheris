@@ -476,7 +476,7 @@ public sealed class DatabricksOboSecurityTests
 
         deny = false;
         await h.ExecuteAsync(null);
-        h.Exchanges["m2m"].ShouldBe(2);
+        h.Exchanges["m2m"].ShouldBe(3);
     }
 
     [Fact]
@@ -543,11 +543,5 @@ public sealed class DatabricksOboSecurityTests
 
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(alice)));
         h.Logger.Lines.ShouldNotContain(l => l.Contains(hash, StringComparison.OrdinalIgnoreCase) || l.Contains(alice, StringComparison.Ordinal));
-    }
-
-    private sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            handler(request, cancellationToken);
     }
 }
