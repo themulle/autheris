@@ -297,7 +297,7 @@ public class AuthenticationSecurityTests
                     RequireTrustedProxy = true,
                     TrustedProxies = ["10.0.0.1"],
                     // RR-L2-02: raw upstream SIDs and custom roles require explicit opt-in
-                    TrustUpstreamGroupSids = true,
+                    TrustUpstreamSids = true,
                     AllowedRoles = ["FinanceReader", "Auditor"]
                 }
             }
@@ -315,7 +315,7 @@ public class AuthenticationSecurityTests
         result.Succeeded.ShouldBeTrue();
         result.Principal.ShouldNotBeNull();
         result.Principal.Identity?.Name.ShouldBe("k8s_service_user");
-        result.Principal.GetUserSid()?.Value.ShouldBe("S-1-5-21-FORWARD-USR-K8S_SERVICE_USER");
+        result.Principal.GetUserSid()?.Value.ShouldBe("S-1-5-21-FORWARD-USR-k8s_service_user");
         result.Principal.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-K8S-GRP1");
         result.Principal.GetUserRoles().ShouldContain("FinanceReader");
     }

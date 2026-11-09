@@ -8,14 +8,14 @@ using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// INF-06: Bounded in-memory OAuth token cache keyed by (host, clientId, callerHash).
+/// Bounded in-memory OAuth and PAT token cache keyed by (dataSourceName, tenantId, mode, principalId, callerHash).
 /// Backed by an owned MemoryCache with SizeLimit to prevent unbounded memory growth.
-/// Implements IDisposable and tracks keys per (host, clientId) for targeted eviction.
+/// Implements IDisposable and tracks keys per (dataSource, tenant) for targeted eviction.
 /// </summary>
 public sealed class DatabricksTokenCache : IDisposable
 {
     private readonly MemoryCache _cache;
-    private readonly ConcurrentDictionary<(string Host, string ClientId), ConcurrentDictionary<string, byte>> _keysByHostClient = new();
+    private readonly ConcurrentDictionary<(string DataSource, string TenantId), ConcurrentDictionary<string, byte>> _keysBySourceTenant = new();
     private readonly int _maxEntries;
     private readonly TimeProvider _timeProvider;
     private bool _disposed;
@@ -47,15 +47,12 @@ public sealed class DatabricksTokenCache : IDisposable
         _cache = new MemoryCache(memoryCacheOptions);
     }
 
-    private static string BuildKey(string host, string clientId, string? callerHash) =>
-        $"{host.ToLowerInvariant()}|{clientId}|{callerHash ?? string.Empty}";
+    public static string BuildKey(string dataSourceName, string? tenantId, DatabricksAuthMode mode, string principalId, string? callerHash) =>
+        $"{dataSourceName.ToLowerInvariant()}|{tenantId ?? "-"}|{mode}|{principalId}|{callerHash ?? string.Empty}";
 
-    internal bool TryGet(string host, string clientId, DateTimeOffset now, out string token) =>
-        TryGet(host, clientId, string.Empty, now, out token);
-
-    internal bool TryGet(string host, string clientId, string? callerHash, DateTimeOffset now, out string token)
+    internal bool TryGet(string dataSourceName, string? tenantId, DatabricksAuthMode mode, string principalId, string? callerHash, DateTimeOffset now, out string token)
     {
-        var key = BuildKey(host, clientId, callerHash);
+        var key = BuildKey(dataSourceName, tenantId, mode, principalId, callerHash);
         if (_cache.TryGetValue(key, out string? cached) && !string.IsNullOrEmpty(cached))
         {
             token = cached;
@@ -66,16 +63,13 @@ public sealed class DatabricksTokenCache : IDisposable
         return false;
     }
 
-    internal void Set(string host, string clientId, string token, DateTimeOffset expiresAt) =>
-        Set(host, clientId, string.Empty, token, expiresAt);
-
-    internal void Set(string host, string clientId, string? callerHash, string token, DateTimeOffset expiresAt)
+    internal void Set(string dataSourceName, string? tenantId, DatabricksAuthMode mode, string principalId, string? callerHash, string token, DateTimeOffset expiresAt)
     {
-        var key = BuildKey(host, clientId, callerHash);
-        var hostClient = (host.ToLowerInvariant(), clientId);
+        var key = BuildKey(dataSourceName, tenantId, mode, principalId, callerHash);
+        var group = (dataSourceName.ToLowerInvariant(), tenantId ?? "-");
 
-        var hostKeys = _keysByHostClient.GetOrAdd(hostClient, _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
-        hostKeys.TryAdd(key, 0);
+        var sourceKeys = _keysBySourceTenant.GetOrAdd(group, _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
+        sourceKeys.TryAdd(key, 0);
 
         var entryOptions = new MemoryCacheEntryOptions
         {
@@ -85,50 +79,108 @@ public sealed class DatabricksTokenCache : IDisposable
 
         entryOptions.RegisterPostEvictionCallback((evictedKey, value, reason, state) =>
         {
-            if (state is (string h, string c, string kStr))
+            if (state is (string ds, string tid, string kStr))
             {
-                if (_keysByHostClient.TryGetValue((h, c), out var set))
+                if (_keysBySourceTenant.TryGetValue((ds, tid), out var set))
                 {
                     set.TryRemove(kStr, out _);
                     if (set.IsEmpty)
                     {
-                        _keysByHostClient.TryRemove((h, c), out _);
+                        _keysBySourceTenant.TryRemove((ds, tid), out _);
                     }
                 }
             }
-        }, (hostClient.Item1, hostClient.Item2, key));
+        }, (group.Item1, group.Item2, key));
 
         _cache.Set(key, token, entryOptions);
     }
 
-    public void Evict(string host, string clientId, string? callerHash = null) =>
-        Remove(host, clientId, callerHash);
-
-    internal void Remove(string host, string clientId, string? callerHash = null)
+    public void Evict(string dataSourceName, string? tenantOrPrincipalId = null)
     {
-        var h = host.ToLowerInvariant();
-        if (callerHash is not null)
+        var ds = dataSourceName.ToLowerInvariant();
+        if (tenantOrPrincipalId is null)
         {
-            var key = BuildKey(h, clientId, callerHash);
-            _cache.Remove(key);
-            if (_keysByHostClient.TryGetValue((h, clientId), out var set))
+            foreach (var keyPair in _keysBySourceTenant.Keys)
             {
-                set.TryRemove(key, out _);
-                if (set.IsEmpty)
+                if (string.Equals(keyPair.DataSource, ds, StringComparison.OrdinalIgnoreCase))
                 {
-                    _keysByHostClient.TryRemove((h, clientId), out _);
+                    if (_keysBySourceTenant.TryRemove(keyPair, out var keys))
+                    {
+                        foreach (var key in keys.Keys)
+                        {
+                            _cache.Remove(key);
+                        }
+                    }
                 }
             }
             return;
         }
 
-        if (_keysByHostClient.TryRemove((h, clientId), out var allKeys))
+        var group = (ds, tenantOrPrincipalId);
+        if (_keysBySourceTenant.TryRemove(group, out var tenantKeys))
         {
-            foreach (var key in allKeys.Keys)
+            foreach (var key in tenantKeys.Keys)
             {
                 _cache.Remove(key);
             }
         }
+
+        foreach (var keyPair in _keysBySourceTenant.Keys)
+        {
+            if (string.Equals(keyPair.DataSource, ds, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_keysBySourceTenant.TryGetValue(keyPair, out var set))
+                {
+                    foreach (var key in set.Keys)
+                    {
+                        var parts = key.Split('|');
+                        if (parts.Length >= 4 && string.Equals(parts[3], tenantOrPrincipalId, StringComparison.Ordinal))
+                        {
+                            _cache.Remove(key);
+                            set.TryRemove(key, out _);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    internal void Remove(string dataSourceName, string? tenantId, DatabricksAuthMode mode, string principalId, string? callerHash = null)
+    {
+        var key = BuildKey(dataSourceName, tenantId, mode, principalId, callerHash);
+        _cache.Remove(key);
+        var group = (dataSourceName.ToLowerInvariant(), tenantId ?? "-");
+        if (_keysBySourceTenant.TryGetValue(group, out var set))
+        {
+            set.TryRemove(key, out _);
+            if (set.IsEmpty)
+            {
+                _keysBySourceTenant.TryRemove(group, out _);
+            }
+        }
+    }
+
+    internal bool TryGet(string host, string clientId, DateTimeOffset now, out string token) =>
+        TryGet(host, null, DatabricksAuthMode.OAuthM2M, clientId, string.Empty, now, out token);
+
+    internal bool TryGet(string host, string clientId, string? callerHash, DateTimeOffset now, out string token) =>
+        TryGet(host, null, DatabricksAuthMode.OAuthM2M, clientId, callerHash, now, out token);
+
+    internal void Set(string host, string clientId, string token, DateTimeOffset expiresAt) =>
+        Set(host, null, DatabricksAuthMode.OAuthM2M, clientId, string.Empty, token, expiresAt);
+
+    internal void Set(string host, string clientId, string? callerHash, string token, DateTimeOffset expiresAt) =>
+        Set(host, null, DatabricksAuthMode.OAuthM2M, clientId, callerHash, token, expiresAt);
+
+    public void Evict(string host, string clientId, string? callerHash)
+    {
+        if (callerHash is not null)
+        {
+            Remove(host, null, DatabricksAuthMode.OAuthM2M, clientId, callerHash);
+            return;
+        }
+
+        Evict(host, clientId);
     }
 
     public void Dispose()
@@ -136,7 +188,7 @@ public sealed class DatabricksTokenCache : IDisposable
         if (_disposed) return;
         _disposed = true;
         _cache.Dispose();
-        _keysByHostClient.Clear();
+        _keysBySourceTenant.Clear();
     }
 
     private sealed class TimeProviderClock(TimeProvider time) : ISystemClock

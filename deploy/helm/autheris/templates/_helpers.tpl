@@ -137,6 +137,7 @@ Gateway__Authentication__Adfs__Audience: {{ required "gateway.authentication.adf
 Gateway__Authentication__EnableKerberos: "true"
 {{- end }}
 {{- if $auth.forwardAuth.enabled }}
+Gateway__Authentication__Mode: "Upstream"
 Gateway__Authentication__ForwardAuth__Enabled: "true"
 {{- if not $auth.forwardAuth.trustedProxies }}
 {{- fail "gateway.authentication.forwardAuth.trustedProxies must list the proxy addresses when forwardAuth is enabled" }}
