@@ -269,11 +269,6 @@ public partial class GovernanceRepository : IAuditLogRepository, IAuditChainExpo
     public async Task SavePurgeCheckpointAsync(AuditPurgeCheckpoint checkpoint, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
-        if (!AuditChainEngine.VerifyPurgeCheckpointSignature(_auditHmacKey, checkpoint))
-        {
-            throw new ArgumentException("Purge checkpoint signature is invalid.", nameof(checkpoint));
-        }
-
         await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         _auditAnchorStore?.SavePurgeCheckpoint(checkpoint);
 
