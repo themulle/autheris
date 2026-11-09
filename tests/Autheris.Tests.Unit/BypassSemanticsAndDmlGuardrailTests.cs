@@ -384,6 +384,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             {
                 setup.CommandText =
                     "CREATE TABLE orders (id INTEGER, amount REAL, tenant_id TEXT);" +
+                    "CREATE TABLE plain (id INTEGER);" +
                     "INSERT INTO orders VALUES (1, 10, 'tenant_a'), (2, 20, 'tenant_a'), (3, 30, 'tenant_a'), (4, 40, 'tenant_a'), (5, 50, 'tenant_a');" +
                     "INSERT INTO orders VALUES (6, 60, 'tenant_b'), (7, 70, 'tenant_b');";
                 await setup.ExecuteNonQueryAsync();
@@ -429,7 +430,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
     }
 
-    internal static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000, bool permissiveWrite = true, bool withDependency = false, bool columnlessHolder = false, bool plainTable = false, bool requireTenantColumn = false)
+    internal static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000, bool permissiveWrite = true, bool withDependency = false, bool columnlessHolder = false, bool plainTable = false, bool requireTenantColumn = false, string[]? exemptTables = null)
     {
         if (permissiveWrite)
         {
@@ -451,6 +452,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             DataSources = new SqlDataSourceOptions
             {
                 RequireTenantColumn = requireTenantColumn,
+                TenantColumnExemptTables = (exemptTables ?? []).ToList(),
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["default"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = fixture.ConnectionString }

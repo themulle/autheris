@@ -142,6 +142,7 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<GatewayOptions>, GatewayResilienceOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, CdcStreamOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>, SqlParserCacheOptionsValidator>();
+        services.AddSingleton<IValidateOptions<GatewayOptions>, WebSqlDmlOptionsValidator>();
         services.AddSingleton<IValidateOptions<GatewayOptions>>(sp =>
             new CrossSourceOptionsValidator(
                 configuration,
