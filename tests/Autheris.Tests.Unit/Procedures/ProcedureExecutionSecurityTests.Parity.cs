@@ -2,7 +2,6 @@ using System.Linq;
 using System.Security.Claims;
 using Autheris.Application.Procedures.Services;
 using Autheris.Domain.Model;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -39,12 +38,12 @@ public partial class ProcedureExecutionSecurityTests
         {
             var service = env.Create();
             var handler = new global::Autheris.Application.Mcp.Services.McpToolExecutionHandler(
-                Substitute.For<global::Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>(),
-                Substitute.For<global::Autheris.Application.DataSources.Interfaces.IGovernedDataQueryService>(),
-                Substitute.For<global::Autheris.Application.Catalog.Interfaces.ICatalogDiscoveryService>(),
-                Substitute.For<global::Autheris.Application.Mcp.Interfaces.IApiDispatcherService>(),
-                Substitute.For<global::Autheris.Application.Lineage.ILineageGraphStore>(),
-                Substitute.For<ITableMetadataRepository>(),
+                Dummy<global::Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>(),
+                Dummy<global::Autheris.Application.DataSources.Interfaces.IGovernedDataQueryService>(),
+                Dummy<global::Autheris.Application.Catalog.Interfaces.ICatalogDiscoveryService>(),
+                Dummy<global::Autheris.Application.Mcp.Interfaces.IApiDispatcherService>(),
+                Dummy<global::Autheris.Application.Lineage.ILineageGraphStore>(),
+                Dummy<ITableMetadataRepository>(),
                 procedureCatalog: new ProcedureCatalog(env.Registry, service),
                 procedureExecutionService: service);
             var tool = global::Autheris.Application.Mcp.Services.McpDatasetTools.Definitions()
@@ -59,6 +58,14 @@ public partial class ProcedureExecutionSecurityTests
         hiddenResult.ShouldContain("\"code\":\"NOT_FOUND\"");
         unknownResult.ShouldBe(hiddenResult);
         AssertSameDenialAudit(hidden, unknown);
+    }
+
+    /// <summary>A dependency the call_procedure path never touches; any call fails loudly.</summary>
+    private static T Dummy<T>() where T : class => System.Reflection.DispatchProxy.Create<T, UnusedProxy>();
+
+    public class UnusedProxy : System.Reflection.DispatchProxy
+    {
+        protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args) => throw new NotSupportedException();
     }
 
     private static void AssertSameDenialAudit(Env hidden, Env unknown)

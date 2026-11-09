@@ -12,7 +12,6 @@ using Autheris.Domain.Options.DataSources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -187,10 +186,7 @@ public sealed class ProcedureRescanTests : IDisposable
 
     private ProcedureRegistrationService NewService()
     {
-        var factory = Substitute.For<IServiceScopeFactory>();
-        var scope = Substitute.For<IServiceScope>();
-        scope.ServiceProvider.Returns(Substitute.For<IServiceProvider>());
-        factory.CreateScope().Returns(scope);
+        var factory = new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
         return new ProcedureRegistrationService(_loader, _registry, factory, _options);
     }
 

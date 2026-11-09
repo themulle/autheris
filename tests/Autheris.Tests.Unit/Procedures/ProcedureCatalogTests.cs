@@ -10,7 +10,6 @@ using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -41,14 +40,12 @@ public sealed class ProcedureCatalogTests
             registry.MarkActive(name, Validation());
         }
 
-        var execution = Substitute.For<IProcedureExecutionService>();
-        execution.IsVisibleAsync(Arg.Any<RegisteredProcedure>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(ci => ci.Arg<RegisteredProcedure>().Definition.Name switch
-            {
-                "ok" => Task.FromResult(true),
-                "boom" => Task.FromException<bool>(new InvalidOperationException("evaluation failed")),
-                _ => Task.FromResult(false)
-            });
+        var execution = new VisibilityStub(p => p.Definition.Name switch
+        {
+            "ok" => Task.FromResult(true),
+            "boom" => Task.FromException<bool>(new InvalidOperationException("evaluation failed")),
+            _ => Task.FromResult(false)
+        });
 
         var visible = await new ProcedureCatalog(registry, execution).ListVisibleAsync(User, Tenant, CancellationToken.None);
 
@@ -63,8 +60,7 @@ public sealed class ProcedureCatalogTests
         registry.Register(Definition("hidden"));
         registry.MarkActive("hidden", Validation());
         registry.Register(Definition("pending"));
-        var execution = Substitute.For<IProcedureExecutionService>();
-        execution.IsVisibleAsync(Arg.Any<RegisteredProcedure>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>()).Returns(false);
+        var execution = new VisibilityStub(_ => Task.FromResult(false));
         var catalog = new ProcedureCatalog(registry, execution);
 
         (await catalog.FindVisibleAsync("unknown", User, Tenant, CancellationToken.None)).ShouldBeNull();
@@ -92,5 +88,13 @@ public sealed class ProcedureCatalogTests
         var pending = new RegisteredProcedure(Definition("p"), ProcedureState.Pending, Validation("sales.customers"), null, null);
 
         pending.GovernedTableKeys().ShouldBe(["sales.orders"]);
+    }
+
+    internal sealed class VisibilityStub(Func<RegisteredProcedure, Task<bool>> visible) : IProcedureExecutionService
+    {
+        public Task<bool> IsVisibleAsync(RegisteredProcedure procedure, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) => visible(procedure);
+
+        public Task<GovernedProcedureResult> ExecuteAsync(string name, IReadOnlyDictionary<string, object?>? rawInputs, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 }
