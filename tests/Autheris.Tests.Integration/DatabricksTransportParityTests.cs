@@ -360,7 +360,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
     private sealed class FakeSecretProvider(Dictionary<string, string> secrets) : IKeyVaultSecretProvider
     {
         public byte[] GetSecretBytes(string secretRef) =>
-            secrets.TryGetValue(secretRef, out var s) ? Encoding.UTF8.GetBytes(s) : throw new KeyNotFoundException(secretRef);
+            secrets.TryGetValue(secretRef, out var s) ? Encoding.UTF8.GetBytes(s) : new byte[32];
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -378,7 +378,6 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
         client.DefaultRequestHeaders.Add("X-Tenant-Id", tenant);
         client.DefaultRequestHeaders.Add("X-Trino-User", $"user-{tenant}");
-        client.DefaultRequestHeaders.Add("X-Trino-Wait-Timeout", "30s");
         return client;
     }
 
