@@ -238,7 +238,7 @@ public sealed class McpDatasetToolWiringTests
     public async Task Executor_QueryGraphQl_RejectsAnythingButOneQuery(string args, string expected)
     {
         var provider = Substitute.For<IRequestExecutorProvider>();
-        var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance,
+        var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
             datasetCatalog: Substitute.For<IMcpDatasetCatalog>());
 
         var json = await executor.ExecuteOperationAsync(Tool("query_graphql"), args, Session());
@@ -260,7 +260,7 @@ public sealed class McpDatasetToolWiringTests
         requestExecutor.ExecuteAsync(Arg.Do<IOperationRequest>(r => capturedRequest = r), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IExecutionResult>(OperationResult.FromError(ErrorBuilder.New().SetMessage("success").Build())));
 
-        var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance,
+        var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
             datasetCatalog: Substitute.For<IMcpDatasetCatalog>());
 
         var args = """
@@ -304,7 +304,7 @@ public sealed class McpDatasetToolWiringTests
     private static GatewayMcpQueryExecutor Executor(IMcpDatasetCatalog catalog) => new(
         Substitute.For<IRequestExecutorProvider>(),
         Substitute.For<IGatewayExecutionService>(),
-        NullLogger<GatewayMcpQueryExecutor>.Instance,
+        NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
         datasetCatalog: catalog);
 
     private static McpSessionContext Session() =>
@@ -351,7 +351,7 @@ public sealed class McpDatasetToolWiringTests
             .Returns(new McpDatasetSample("sales.public.orders", 0, [], IsSynthetic: true));
         var gateway = Substitute.For<IGatewayExecutionService>();
         var executor = new GatewayMcpQueryExecutor(
-            Substitute.For<IRequestExecutorProvider>(), gateway, NullLogger<GatewayMcpQueryExecutor>.Instance, datasetCatalog: catalog);
+            Substitute.For<IRequestExecutorProvider>(), gateway, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog);
 
         var json = await executor.ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders","count":3,"synthetic":true}""", Session());
 

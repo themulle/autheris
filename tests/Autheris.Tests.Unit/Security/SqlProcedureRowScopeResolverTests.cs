@@ -16,6 +16,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Unit.Procedures;
 
 namespace Autheris.Tests.Unit.Security;
 
@@ -73,7 +74,7 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     };
 
     private static ProcedureDefinition Definition() =>
-        ProcedureDefinitionParser.Parse("-- @name p\n-- @procedure tem.usp_P\n-- @result-table main.crane\n-- @row-scope-key serial_number", "x", false, 60)
+        TestProcedureYaml.Definition("name: p\nprocedure: tem.usp_P\nresult_table: main.crane\nrow_scope_key: serial_number", "x", false, 60)
         with { DataSource = "erp" };
 
     private static TableAccessDecision Decision(TableMetadata table, string? filter) =>
