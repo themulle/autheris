@@ -87,7 +87,7 @@ public sealed class CdcSubscriptionEndpointTests
             claims.Add(new Claim(ClaimTypes.PrimarySid, sid));
         }
 
-        claims.AddRange((groups ?? ["G-1", "G-2"]).Select(g => new Claim(ClaimTypes.GroupSid, g)));
+        claims.AddRange((groups ?? ["S-1-5-21-1-2-3-3003", "S-1-5-21-1-2-3-3004"]).Select(g => Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(g)));
         context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
         return new Harness(context, store, protector);
     }
@@ -193,10 +193,10 @@ public sealed class CdcSubscriptionEndpointTests
     [Fact]
     public async Task Post_IgnoresClientSuppliedCreatorSnapshot()
     {
-        var h = Create(sid: "S-1-5-21-REAL", groups: ["G-REAL"]);
+        var h = Create(sid: "S-1-5-21-REAL", groups: ["S-1-5-21-1-2-3-3001"]);
         var forged = Body() with
         {
-            CreatedBySid = "S-1-5-21-FORGED", CreatedByGroupSids = ["G-FORGED"], CreatedByRoles = ["PlatformAdmin"],
+            CreatedBySid = "S-1-5-21-FORGED", CreatedByGroupSids = ["S-1-5-21-1-2-3-3002"], CreatedByRoles = ["PlatformAdmin"],
             CreatedAt = DateTimeOffset.UtcNow.AddYears(10), TenantId = "other-tenant", Id = "chosen-id", IsEnabled = true
         };
 
@@ -204,7 +204,7 @@ public sealed class CdcSubscriptionEndpointTests
 
         var stored = await SingleStored(h);
         stored.CreatedBySid.ShouldBe("S-1-5-21-REAL");
-        stored.CreatedByGroupSids.ShouldBe(["G-REAL"]);
+        stored.CreatedByGroupSids.ShouldBe(["S-1-5-21-1-2-3-3001"]);
         stored.CreatedByRoles.ShouldBe(["GovernanceAdmin"]);
         stored.CreatedAt!.Value.ShouldBeLessThan(DateTimeOffset.UtcNow.AddMinutes(1));
         stored.TenantId.ShouldBe("tenant-a");
@@ -215,13 +215,13 @@ public sealed class CdcSubscriptionEndpointTests
     [Fact]
     public async Task Post_CapturesSnapshotFromAuthenticatedAdmin()
     {
-        var h = Create(sid: "S-1-5-21-ADMIN", groups: ["G-1", "G-2"]);
+        var h = Create(sid: "S-1-5-21-ADMIN", groups: ["S-1-5-21-1-2-3-3003", "S-1-5-21-1-2-3-3004"]);
 
         await StreamingCdcEndpoints.CreateSubscriptionAsync(h.Ctx, Body());
 
         var stored = await SingleStored(h);
         stored.CreatedBySid.ShouldBe("S-1-5-21-ADMIN");
-        stored.CreatedByGroupSids.ShouldBe(["G-1", "G-2"], ignoreOrder: true);
+        stored.CreatedByGroupSids.ShouldBe(["S-1-5-21-1-2-3-3003", "S-1-5-21-1-2-3-3004"], ignoreOrder: true);
         stored.CreatedByRoles.ShouldBe(["GovernanceAdmin"]);
         stored.CreatedAt.ShouldNotBeNull();
     }
@@ -240,7 +240,7 @@ public sealed class CdcSubscriptionEndpointTests
     [Fact]
     public async Task Post_TooManyGroups_Returns400_AndStoresNothing()
     {
-        var h = Create(groups: ["1", "2", "3"], options: new CdcWebhooksOptions { Enabled = true, MaxSnapshotGroups = 2 });
+        var h = Create(groups: ["S-1-5-21-1-2-3-1", "S-1-5-21-1-2-3-2", "S-1-5-21-1-2-3-3"], options: new CdcWebhooksOptions { Enabled = true, MaxSnapshotGroups = 2 });
 
         var result = await StreamingCdcEndpoints.CreateSubscriptionAsync(h.Ctx, Body());
 
@@ -322,7 +322,7 @@ public sealed class CdcSubscriptionEndpointTests
         var view = result.ShouldBeOfType<Created<CdcSubscriptionView>>().Value!;
         view.HmacSecret.ShouldBe("[REDACTED]");
         view.CreatedByRoleCount.ShouldBe(1);
-        System.Text.Json.JsonSerializer.Serialize(view).ShouldNotContain("G-1");
+        System.Text.Json.JsonSerializer.Serialize(view).ShouldNotContain("S-1-5-21-1-2-3-3003");
     }
 
     [Fact]
@@ -336,7 +336,7 @@ public sealed class CdcSubscriptionEndpointTests
         var views = result.ShouldBeOfType<Ok<IEnumerable<CdcSubscriptionView>>>().Value!.ToList();
         var json = System.Text.Json.JsonSerializer.Serialize(views);
         views.ShouldHaveSingleItem().HmacSecret.ShouldBe("[REDACTED]");
-        json.ShouldNotContain("G-1");
+        json.ShouldNotContain("S-1-5-21-1-2-3-3003");
         json.ShouldNotContain("enc:v1:");
     }
 

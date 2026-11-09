@@ -203,16 +203,20 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             groupsRaw = customGroupsVal.ToString();
         }
 
-        if (!string.IsNullOrWhiteSpace(groupsRaw))
+        // RR-L2-02: header groups are read only from an explicitly trusted upstream and must be canonical SIDs; one
+        // non-canonical value fails the request (a silently dropped group could drop a group-scoped restriction).
+        if (forwardAuthOptions.IsUpstreamSidTrusted && !string.IsNullOrWhiteSpace(groupsRaw))
         {
             var groups = groupsRaw.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             foreach (var g in groups)
             {
-                // RR-L2-02: never accept raw SIDs from headers unless the upstream IdP is explicitly trusted for that.
-                var groupSid = forwardAuthOptions.IsUpstreamSidTrusted && g.StartsWith("S-1-5-", StringComparison.OrdinalIgnoreCase)
-                    ? g
-                    : $"S-1-5-21-FORWARD-GRP-{g}";
-                claims.Add(new Claim(ClaimTypes.GroupSid, groupSid));
+                if (!SidFormat.IsCanonical(g))
+                {
+                    Logger.LogWarning("ForwardAuth rejected: a group header value is not a canonical SID.");
+                    return Task.FromResult(AuthenticateResult.Fail("Invalid ForwardAuth group SID."));
+                }
+
+                claims.Add(IdentityClaimIssuers.CreateGroupSidClaim(g));
             }
         }
 

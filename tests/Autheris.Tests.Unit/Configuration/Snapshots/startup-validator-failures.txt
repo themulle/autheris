@@ -73,6 +73,7 @@ ProductionAuthentication_WeakPbkdf2 [Production]: ValidationException: Security 
 ProductionAuthentication_TruncatedHash [Production]: ValidationException: Security violation (API-05): Outside Development, BasicAuth hashes must carry a salt of at least 16 bytes and a 32-byte hash (truncated value?).
 ProductionAuthentication_EntraIdIncomplete [Production]: ValidationException: Security violation: Outside Development, EntraId requires Audience or ClientId, plus TenantId (issuer), to be configured.
 ProductionAuthentication_AdfsIncomplete [Production]: ValidationException: Security violation: Outside Development, Adfs.Audience and Authority must be configured.
+ProductionAuthentication_AdfsWithoutAllowedClients [Production]: ValidationException: Security violation: Outside Development, Adfs requires AllowedClientIds to be configured with at least one authorized client ID.
 ProductionAuthentication_WellFormedHashAccepted [Production]: OK
 ProductionStorage_WormWithoutS3Keys [Production]: ValidationException: Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.
 ProductionStorage_FallbackAuditKey [Production]: ValidationException: CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.

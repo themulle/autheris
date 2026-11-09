@@ -45,7 +45,7 @@ public sealed class McpHybridToolsTests
             LastActiveAt: DateTimeOffset.UtcNow,
             UserSid: userSid,
             Roles: ["DataAnalyst"],
-            GroupSids: ["group-sales"],
+            GroupSids: ["S-1-5-21-1-2-3-5001"],
             ClientIp: "10.0.0.1",
             IsReadOnly: false,
             AdditionalClaims: new Dictionary<string, string>());
@@ -110,13 +110,13 @@ public sealed class McpHybridToolsTests
             "s1", "client-app-id", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             UserSid: "S-1-5-21-ALICE",
             Roles: ["DataAnalyst"],
-            GroupSids: ["group-sales"],
+            GroupSids: ["S-1-5-21-1-2-3-5001"],
             AdditionalClaims: new Dictionary<string, string> { ["department"] = "sales" });
 
         var principal = await CaptureQuerySqlPrincipalAsync(session);
 
         principal.GetUserSid()!.Value.Value.ShouldBe("S-1-5-21-ALICE");
-        principal.GetGroupSids().Select(g => g.Value).ShouldContain("group-sales");
+        principal.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-1-2-3-5001");
         principal.IsInRole("DataAnalyst").ShouldBeTrue();
         principal.FindFirst("department")?.Value.ShouldBe("sales");
         principal.HasClaim(McpProtocolHandler.IdentityKindClaimType, McpProtocolHandler.ApplicationIdentityKind).ShouldBeFalse();
@@ -139,7 +139,7 @@ public sealed class McpHybridToolsTests
             "s1", "client-app-id", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             UserSid: null,
             Roles: ["Reader"],
-            GroupSids: ["group-sales"]);
+            GroupSids: ["S-1-5-21-1-2-3-5001"]);
 
         var principal = await CaptureQuerySqlPrincipalAsync(session);
 

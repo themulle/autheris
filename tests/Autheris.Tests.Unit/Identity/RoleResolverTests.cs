@@ -20,7 +20,7 @@ public sealed class RoleResolverTests
     private readonly IRoleProvider _provider = Substitute.For<IRoleProvider>();
 
     [Fact]
-    public async Task RoleResolver_NamespacesExternalGroups_AndStampsRealm()
+    public async Task RoleResolver_ReturnsCanonicalGroupsWithoutPrefix_AndStampsRealm()
     {
         var realmId = "customer-b2b";
         var realm = new IdentityRealm(
@@ -45,22 +45,20 @@ public sealed class RoleResolverTests
         );
 
         _provider.GetRolesAsync(identity, realm, Arg.Any<CancellationToken>())
-            .Returns(new ProviderRoleResult(new HashSet<string> { "billing-admins" }, new HashSet<string> { "Viewer" }, new Dictionary<string, string>()));
+            .Returns(new ProviderRoleResult(new HashSet<string> { "S-1-5-21-1-2-3-4001" }, new HashSet<string> { "Viewer" }, new Dictionary<string, string>()));
 
         var sut = new RoleResolver(_realmRegistry, [_provider], _cache);
 
         var resolution = await sut.ResolveRolesAsync(identity);
 
-        // Group must be namespaced with realm prefix
-        resolution.Groups.ShouldContain("customer-b2b|billing-admins");
-
-        // Customer realm must NOT include the bare un-namespaced group
-        resolution.Groups.ShouldNotContain("billing-admins");
+        // Canonical SIDs are globally unique: no realm prefix. Isolation is the cache key (realm, user) and the realm chain.
+        resolution.Groups.ShouldContain("S-1-5-21-1-2-3-4001");
+        resolution.Groups.ShouldAllBe(g => !g.Contains('|'));
     }
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Workforce_Groups_Are_Always_Realm_Namespaced_DT_SC_14()
+    public async Task Workforce_Groups_Are_Canonical_Sids_Without_Realm_Prefix()
     {
         var realmId = "workforce-entra";
         var realm = new IdentityRealm(
@@ -91,8 +89,7 @@ public sealed class RoleResolverTests
 
         var resolution = await sut.ResolveRolesAsync(identity);
 
-        // DT-SC-14 / DT-A-11: groups are always realm-namespaced; the un-namespaced SID maps to nothing.
-        resolution.Groups.ShouldContain("workforce-entra|S-1-5-21-12345");
-        resolution.Groups.ShouldNotContain("S-1-5-21-12345");
+        resolution.Groups.ShouldContain("S-1-5-21-12345");
+        resolution.Groups.ShouldNotContain("workforce-entra|S-1-5-21-12345");
     }
 }
