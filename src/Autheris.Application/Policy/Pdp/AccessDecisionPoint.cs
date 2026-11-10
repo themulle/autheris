@@ -150,6 +150,10 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
                 _ => RebacEnforcement.QueryPaths
             };
 
+            var principal = subject.Principal ?? (subject.Claims != null
+                ? new ClaimsPrincipal(new ClaimsIdentity(subject.Claims, subject.AuthenticationScheme, ClaimTypes.Name, ClaimTypes.Role))
+                : null);
+
             var query = new TableAccessQuery(
                 subject.UserSid,
                 subject.TenantId,
@@ -162,6 +166,8 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
                 ClientIp: clientIp,
                 ExtraAttributes: isProcedure ? new Dictionary<string, object?> { ["gql.action"] = "read" } : null,
                 ObjectKind: isProcedure ? FilterObjectKinds.ProcedureResult : FilterObjectKinds.Relation,
+                AllUserSids: principal?.GetAllUserSids() ?? [subject.UserSid],
+                Principal: principal,
                 SupplementalConsents: request.SupplementalConsents);
 
             var decision = await _policy.DecideAsync(query, ct).ConfigureAwait(false);
