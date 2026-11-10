@@ -144,6 +144,12 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
             var clientIp = subject.ClientIp ?? _clientIpResolver?.ResolveClientIp() ?? IPAddress.None;
             var isProcedure = request.Transport == AccessTransport.Procedure;
 
+            var rebacEnforcement = request.Transport switch
+            {
+                AccessTransport.Olap or AccessTransport.Analytics or AccessTransport.Mcp => RebacEnforcement.WhenEnabled,
+                _ => RebacEnforcement.QueryPaths
+            };
+
             var query = new TableAccessQuery(
                 subject.UserSid,
                 subject.TenantId,
@@ -152,7 +158,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
                 metadata,
                 Claims: subject.Claims,
                 RequestedColumns: request.Columns,
-                Rebac: RebacEnforcement.WhenEnabled,
+                Rebac: rebacEnforcement,
                 ClientIp: clientIp,
                 ExtraAttributes: isProcedure ? new Dictionary<string, object?> { ["gql.action"] = "read" } : null,
                 ObjectKind: isProcedure ? FilterObjectKinds.ProcedureResult : FilterObjectKinds.Relation,
