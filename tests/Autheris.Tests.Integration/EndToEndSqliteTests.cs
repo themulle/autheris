@@ -275,7 +275,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
     [Fact]
     public async Task OpenApi_IndexJsonAndYaml_AreServedWithValidUrls()
     {
-        var c = Client();
+        var c = Client(roles: "ClusterAdmin");
         var index = await c.GetAsync("/odata/v4/$openapi/index");
         index.StatusCode.ShouldBe(HttpStatusCode.OK);
         var indexBody = await index.Content.ReadAsStringAsync();

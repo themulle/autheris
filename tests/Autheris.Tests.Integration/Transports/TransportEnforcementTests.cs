@@ -777,6 +777,8 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     {
         await EnsureSeededAsync();
         using var client = Client();
+        client.DefaultRequestHeaders.Remove("X-Test-Roles");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,Reader");
 
         SourceSAllows("OData");
         (await BodyAsync(await client.GetAsync("/odata/v4/$openapi"))).ShouldContain("s_items");
