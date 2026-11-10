@@ -23,7 +23,8 @@ public sealed partial class ODataHandler(
     Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
     Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null,
     Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
-    Autheris.Application.DataSources.IIngressTransportContext? ingress = null) : IODataHandler
+    Autheris.Application.DataSources.IIngressTransportContext? ingress = null,
+    IODataQueryPolicyEnforcer? policyEnforcer = null) : IODataHandler
 {
     private const string GenericDenied = "Access denied.";
 
@@ -268,8 +269,9 @@ public sealed partial class ODataHandler(
         {
             try
             {
-                TableAccessDecision? decision = await _executionService
-                    .CheckTableAccessAsync(principal, tableMeta, recordAudit: false, ct).ConfigureAwait(false);
+                TableAccessDecision? decision = policyEnforcer != null
+                    ? await policyEnforcer.EnforceAsync(principal, tableMeta, requestedColumns: null, ct).ConfigureAwait(false)
+                    : await _executionService.CheckTableAccessAsync(principal, tableMeta, recordAudit: false, ct).ConfigureAwait(false);
 
                 // SR-M-16: fail closed. A null decision is treated as deny.
                 if (decision == null)

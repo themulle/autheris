@@ -80,8 +80,10 @@ public sealed class VirtualFilterWiringTests
         await using var scope = provider.CreateAsyncScope();
         var resolver = scope.ServiceProvider.GetRequiredService<ICrossDomainAccessResolver>();
 
-        var policy = resolver.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic).Single(f => f.FieldType == typeof(TableAccessPolicy)).GetValue(resolver)!;
+        var pdpOrPolicy = resolver.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(f => typeof(Autheris.Application.Policy.Pdp.IAccessDecisionPoint).IsAssignableFrom(f.FieldType) || f.FieldType == typeof(TableAccessPolicy))
+            .GetValue(resolver)!;
 
-        ResolverField(policy).ShouldBeOfType<MandatoryRowFilterResolver>();
+        ResolverField(pdpOrPolicy).ShouldBeOfType<MandatoryRowFilterResolver>();
     }
 }

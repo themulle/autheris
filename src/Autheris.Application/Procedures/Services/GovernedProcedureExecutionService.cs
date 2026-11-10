@@ -60,6 +60,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint? _accessDecisionPoint;
 
     public GovernedProcedureExecutionService(
         IProcedureRegistry registry,
@@ -84,8 +85,22 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         ProcedureDenialAuditLimiter? denialAuditLimiter = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
     {
+        _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            options,
+            policyEnforcement,
+            consentResolution,
+            consentRepository,
+            consentCache,
+            rebacEvaluator,
+            clientIpResolver,
+            mandatoryFilters,
+            accessProfileRepository: accessProfileRepository,
+            memoryCache: memoryCache,
+            accessProfileCache: accessProfileCache,
+            typedPolicies: typedPolicies);
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _concurrencyGate = concurrencyGate;
         _denialAuditLimiter = denialAuditLimiter ?? new ProcedureDenialAuditLimiter();
@@ -641,47 +656,16 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return null;
         }
 
-        if (!consentBypassed && (_consentRepository == null || _consentResolution == null))
-        {
-            return null;
-        }
-
         // Architecture 1: the shared access decision (ReBAC on query paths, consents with the decision cache, Casbin as
         // an additional restriction). Row filters (consent or Casbin) cannot be pushed into a procedure: they deny the
         // call unless the result table's filter is enforced by the row scope after the call.
-        var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
-            ? await WithVirtualFiltersAsync(
-                TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
-                user, userSid, tenantId, meta, ct).ConfigureAwait(false)
-            : await new Autheris.Application.Policy.TableAccessPolicy(
-                _consentRepository!,
-                _consentResolution!,
-                _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-                _policyEnforcement ?? throw new InvalidOperationException("IPolicyEnforcementService is not configured; refusing to evaluate table access without policy enforcement (fail-closed)."),
-                _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
-                _clientIpResolver,
-                _options.Value,
-                _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
-                contractManager: null,
-                accessProfileRepository: _accessProfileRepository,
-                memoryCache: _memoryCache,
-                accessProfileCache: _accessProfileCache,
-                rowPolicyFactory: _typedPolicies?.RowPolicies,
-                maskPolicyFactory: _typedPolicies?.MaskPolicies,
-            callerAttributes: _typedPolicies?.CallerAttributes)
-                .DecideAsync(
-                    new Autheris.Application.Policy.TableAccessQuery(
-                        userSid,
-                        tenantId,
-                        user.GetGroupSids(),
-                        user.GetUserRoles(),
-                        meta,
-                        user.Claims,
-                        ClientIp: ResolveClientIp(user),
-                        ExtraAttributes: new Dictionary<string, object?> { ["gql.action"] = "read" },
-                        ObjectKind: FilterObjectKinds.ProcedureResult,
-                        Principal: user),
-                    ct).ConfigureAwait(false);
+        var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: ResolveClientIp(user));
+        var req = new Autheris.Application.Policy.Pdp.AccessRequest(
+            secContext,
+            meta,
+            Autheris.Application.Policy.Pdp.AccessOperation.Execute,
+            Autheris.Application.Policy.Pdp.AccessTransport.Procedure);
+        var decision = await _accessDecisionPoint!.DecideAsync(req, ct).ConfigureAwait(false);
 
         if (!decision.IsAllowed || (!allowRowFilter && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)))
         {

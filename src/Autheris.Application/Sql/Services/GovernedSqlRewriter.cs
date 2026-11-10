@@ -69,6 +69,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly SqlDataSourceResolver _dataSourceResolver;
     private readonly TypedPolicySources? _typedPolicies;
     private readonly Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? _timeZoneState;   // null = conversion unavailable (fail closed)
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _accessDecisionPoint;
     private readonly Autheris.Application.State.Caching.BoundedCache<string, SqlQueryMetadata> _stage1Analyses = new(4_096);
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder =>
@@ -99,8 +100,23 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         IMemoryCache? memoryCache = null,
         SqlDataSourceResolver? dataSourceResolver = null,
         TypedPolicySources? typedPolicies = null,
-        Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
+        Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
     {
+        _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            options,
+            policyEnforcement,
+            consentResolution,
+            consentRepository,
+            consentCache,
+            rebacEvaluator,
+            clientIpResolver,
+            mandatoryFilters,
+            contractManager,
+            accessProfileRepository,
+            memoryCache,
+            accessProfileCache: null,
+            typedPolicies);
         _timeZoneState = timeZoneState;
         _typedPolicies = typedPolicies;
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -114,6 +130,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         _accessProfileRepository = accessProfileRepository; _memoryCache = memoryCache;
         _dataSourceResolver = dataSourceResolver ?? new SqlDataSourceResolver(_options, logger);
     }
+
+    internal Autheris.Application.Policy.Pdp.IAccessDecisionPoint AccessDecisionPoint => _accessDecisionPoint;
 
     /// <summary>
     /// G-6: runs the whole governed pipeline up to and including <see cref="ISqlEngine.Compile"/> and discards the result. The caller
@@ -304,17 +322,17 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             ["action"] = isDml ? "write" : "read"
         };
 
-        async Task<TableAccessDecision> DecideTableAsync(TableMetadata tableMeta, TableIdentifier resolvedId, List<string> colList) =>
-            consentBypassed && (_consentRepository == null || _consentResolution == null)
-                ? WithTypedMasks(
-                    await WithVirtualFiltersAsync(
-                        TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
-                        new MandatoryFilterQuery(userSid, groupSids, roles, tenantId, tableMeta),
-                        ct).ConfigureAwait(false),
-                    tableMeta, tenantId)
-                : await AccessPolicy().DecideAsync(
-                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
-                    ct).ConfigureAwait(false);
+        async Task<TableAccessDecision> DecideTableAsync(TableMetadata tableMeta, TableIdentifier resolvedId, List<string> colList)
+        {
+            var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: clientIp);
+            var req = new Autheris.Application.Policy.Pdp.AccessRequest(
+                secContext,
+                tableMeta,
+                Autheris.Application.Policy.Pdp.AccessOperation.Read,
+                Autheris.Application.Policy.Pdp.AccessTransport.WebSql,
+                Columns: colList);
+            return await _accessDecisionPoint.DecideAsync(req, ct).ConfigureAwait(false);
+        }
 
         DmlDependencyScan? dependencyScan = null;
 
@@ -517,12 +535,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 accessedTables.Add(resolvedId);
             }
 
-            if (!consentBypassed && (_consentRepository == null || _consentResolution == null))
-            {
-                _logger?.LogError("WebSQL cannot evaluate consents (consent services not available); denying access (fail-closed).");
-                throw SqlDataSourceResolver.TableDenied(target);
-            }
-
             var decision = await DecideTableAsync(tableMeta, resolvedId, colList).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
@@ -564,7 +576,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                     throw new WebSqlPolicyException("WebSQL DML on a table that a row policy reads is not permitted.", GovernedSqlErrorCodes.PolicyViolation);
                 }
 
-                if (!await AccessPolicy().CanWriteTableAsync(user, tenantId, tableMeta, ct: ct).ConfigureAwait(false))
+                if (!await CanWriteTableAsync(user, tenantId, tableMeta, clientIp, ct).ConfigureAwait(false))
                 {
                     _logger?.LogWarning("WebSQL DML write access to table {Table} denied.", target.FullName);
                     throw SqlDataSourceResolver.TableDenied(target);
@@ -931,63 +943,20 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         }
     }
 
-    /// <summary>
-    /// SQLA-19: a decision built locally (consent bypass, no consent services) keeps the tenant Virtual Filters of the caller, as the cross-source
-    /// path and the procedure channel do: a deny stays a deny, a predicate narrows the rows. Caller attribute filters are not resolved on this
-    /// path (no attribute store), so a table that needs them is denied (fail closed).
-    /// </summary>
-    private async Task<TableAccessDecision> WithVirtualFiltersAsync(TableAccessDecision decision, MandatoryFilterQuery query, CancellationToken ct)
-    {
-        var mandatory = await (_mandatoryFilters ?? NullMandatoryRowFilterResolver.Instance).ResolveAsync(query, ct).ConfigureAwait(false);
-        if (mandatory.IsDenied)
-        {
-            return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
-        }
-
-        if (mandatory.PredicateSql == null)
-        {
-            return decision;
-        }
-
-        if (_typedPolicies is not null && mandatory.TypedPredicate is not null && mandatory.CallerAttributes.Count == 0)
-        {
-            return decision.WithMandatoryPredicate(
-                _typedPolicies.RowPolicies.FromPredicate(mandatory.TypedPredicate, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings);
-        }
-
-        if (mandatory.CallerAttributesTextConstant || mandatory.CallerAttributes.Count > 0)
-        {
-            return TableAccessDecision.Denied(decision.Table, "Denied by virtual filters.");
-        }
-
-        return decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
-    }
-
-    /// <summary>
-    /// A decision that is built locally (consent bypass, no consent services) still needs the typed masks of its sensitive columns, or
-    /// the typed assembly would deny the table (fail closed). The masks come from the same producer as for every other decision.
-    /// </summary>
-    private TableAccessDecision WithTypedMasks(TableAccessDecision decision, TableMetadata metadata, TenantId tenantId) =>
-        _typedPolicies is null ? decision : decision with { ColumnMasks = _typedPolicies.MaskPolicies.ForDecision(decision, metadata, tenantId) };
-
-    internal TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository!, _consentResolution!,
-            _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            _policyEnforcement ?? throw new InvalidOperationException("IPolicyEnforcementService is not configured; refusing to evaluate table access without policy enforcement (fail-closed)."),
-            _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
-            _clientIpResolver,
-            _options.Value,
-            _mandatoryFilters ?? NullMandatoryRowFilterResolver.Instance,
-            _contractManager,
-            _accessProfileRepository,
-            _memoryCache,
-            rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies,
-            callerAttributes: _typedPolicies?.CallerAttributes,
-            authPluginHost: _typedPolicies?.AuthPlugins);
-
     private System.Net.IPAddress ResolveClientIp()
     {
         return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
+    }
+
+    private async Task<bool> CanWriteTableAsync(ClaimsPrincipal user, TenantId tenantId, TableMetadata tableMeta, System.Net.IPAddress clientIp, CancellationToken ct)
+    {
+        var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: clientIp);
+        var writeRequest = new Autheris.Application.Policy.Pdp.AccessRequest(
+            secContext,
+            tableMeta,
+            Autheris.Application.Policy.Pdp.AccessOperation.Update,
+            Autheris.Application.Policy.Pdp.AccessTransport.WebSql);
+        var writeDecision = await _accessDecisionPoint.DecideAsync(writeRequest, ct).ConfigureAwait(false);
+        return writeDecision.IsAllowed;
     }
 }

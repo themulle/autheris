@@ -28,7 +28,8 @@ public sealed record GovernedSqlRewriteDependencies(
     IAccessProfileRepository? AccessProfileRepository = null,
     IMemoryCache? MemoryCache = null,
     TypedPolicySources? TypedPolicies = null,
-    Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? TimeZoneState = null);
+    Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? TimeZoneState = null,
+    Autheris.Application.Policy.Pdp.IAccessDecisionPoint? AccessDecisionPoint = null);
 
 /// <summary>Optional collaborators of the governed database execution (forwarded to <c>GovernedSqlExecutor</c>).</summary>
 public sealed record GovernedSqlExecutionDependencies(

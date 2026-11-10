@@ -88,6 +88,7 @@ public sealed record SecurityPrincipalContext
     public System.Net.IPAddress? ClientIp { get; init; }
     public CallerContext? Caller { get; init; }
     public IEnumerable<System.Security.Claims.Claim>? Claims { get; init; }
+    public System.Security.Claims.ClaimsPrincipal? Principal { get; init; }
 
     /// <summary>Cluster-level administrator authorized to perform cross-tenant operations.</summary>
     public bool IsClusterAdmin => ClusterRoles.Any(r => !r.Contains(':') && string.Equals(r, "ClusterAdmin", StringComparison.Ordinal));
@@ -237,7 +238,8 @@ public sealed record SecurityPrincipalContext
             IsAuthenticated = principal.Identity?.IsAuthenticated ?? true,
             ClientIp = clientIp,
             Caller = caller,
-            Claims = principal.Claims
+            Claims = principal.Claims,
+            Principal = principal
         };
     }
 }

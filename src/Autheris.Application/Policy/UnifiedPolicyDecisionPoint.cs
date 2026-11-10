@@ -94,39 +94,31 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(securityContext);
 
-        // Architecture 1: the shared access decision. ReBAC applies whenever it is enabled on this path; the caller's
-        // roles are its tenant and cluster roles; there are no token claims, so Casbin sees no purpose or attributes.
-        var roles = new HashSet<string>(securityContext.TenantRoles.Concat(securityContext.ClusterRoles), StringComparer.OrdinalIgnoreCase);
-        var query = new TableAccessQuery(
-            securityContext.UserSid,
-            securityContext.TenantId,
-            securityContext.GroupSids,
-            roles,
-            metadata,
-            Claims: securityContext.Claims,
-            RequestedColumns: requestedColumns,
-            Rebac: RebacEnforcement.WhenEnabled,
-            // RV-01: unknown client IP must never satisfy loopback/internal-network allow rules (fail-closed).
-            ClientIp: securityContext.ClientIp ?? IPAddress.None,
-            SupplementalConsents: supplementalConsents);
-
-        var decision = await new TableAccessPolicy(
-            _consentRepository,
-            _resolutionService,
-            _cacheService,
+        var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            _options,
             _policyEnforcementService,
-            _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+            _resolutionService,
+            _consentRepository,
+            _cacheService,
+            _rebacEvaluator,
             clientIpResolver: null,
-            _options.Value,
             _mandatoryFilters,
             _contractManager,
-            accessProfileRepository: _accessProfileRepository,
-            accessProfileCache: _accessProfileCache,
-            rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies,
-            restrictedScopes: _restrictedScopes,
-            authPluginHost: _typedPolicies?.AuthPlugins)
-            .DecideAsync(query, ct).ConfigureAwait(false);
+            _accessProfileRepository,
+            memoryCache: null,
+            _accessProfileCache,
+            _typedPolicies,
+            _restrictedScopes);
+
+        var request = new Autheris.Application.Policy.Pdp.AccessRequest(
+            securityContext,
+            metadata,
+            Autheris.Application.Policy.Pdp.AccessOperation.Read,
+            Autheris.Application.Policy.Pdp.AccessTransport.Rest,
+            Columns: requestedColumns,
+            SupplementalConsents: supplementalConsents);
+
+        var decision = await pdp.DecideAsync(request, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
         {
             _logger.LogWarning("Access to table {Table} denied for subject {Subject}: {Reasons}", table, securityContext.UserSid.Value, string.Join("; ", decision.DeniedReasons));

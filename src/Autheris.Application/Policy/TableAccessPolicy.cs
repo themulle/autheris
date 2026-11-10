@@ -478,6 +478,16 @@ public sealed partial class TableAccessPolicy
     /// the decision is independent of the principal until a dedicated write decision replaces it.
     /// </summary>
     public Task<bool> CanWriteTableAsync(
+        TenantId tenant,
+        TableMetadata metadata,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        return Task.FromResult(DmlWriteDecisionTestSeam.IsPermissive);
+    }
+
+    public Task<bool> CanWriteTableAsync(
         ClaimsPrincipal user,
         TenantId tenant,
         TableMetadata metadata,
