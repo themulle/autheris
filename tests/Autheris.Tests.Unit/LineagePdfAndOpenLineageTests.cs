@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Audit;
+using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;

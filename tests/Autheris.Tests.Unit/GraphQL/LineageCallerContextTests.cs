@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -157,7 +158,7 @@ public sealed class LineageCallerContextTests
     [Fact]
     public async Task ForwardAuthClusterAdmin_GdprReportForeignSubject_Denied()
     {
-        var lineageService = Substitute.For<ILineageImpactAnalyzerService>();
+        var gdprService = Substitute.For<IGdprDisclosureReportService>();
         var query = new Query();
         var accessor = CreateAccessor("ForwardAuth", "own-tenant", "S-1-5-21-CALLER", "ClusterAdmin");
 
@@ -167,11 +168,11 @@ public sealed class LineageCallerContextTests
             tableName: "orders",
             subjectSid: "S-1-5-21-FOREIGN-SUBJECT",
             timeWindowDays: 30,
-            lineageService: lineageService,
+            gdprService: gdprService,
             httpContextAccessor: accessor));
 
         ex.Errors[0].Code.ShouldBe("FORBIDDEN");
-        await lineageService.DidNotReceiveWithAnyArgs().GetGdprDataDisclosureReportAsync(default, default, default, default, default);
+        await gdprService.DidNotReceiveWithAnyArgs().GetGdprDataDisclosureReportAsync(default, default, default, default, default);
     }
 
     [Fact]

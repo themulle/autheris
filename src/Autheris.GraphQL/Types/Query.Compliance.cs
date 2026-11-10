@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Analytics;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Lineage;
+using Autheris.Application.Compliance;
 using Autheris.Domain.Common;
 using HotChocolate;
 using Microsoft.AspNetCore.Http;
@@ -19,7 +19,7 @@ public sealed partial class Query
         string? tableName = null,
         string? subjectSid = null,
         int timeWindowDays = 365,
-        [Service] ILineageImpactAnalyzerService lineageService = null!,
+        [Service] IGdprDisclosureReportService gdprService = null!,
         [Service] IHttpContextAccessor httpContextAccessor = null!,
         CancellationToken ct = default)
     {
@@ -57,12 +57,12 @@ public sealed partial class Query
 
         try
         {
-            return await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays, callerContext, ct);
+            return await gdprService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays, callerContext, ct);
         }
-        catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException ex)
+        catch (GdprSubjectScopeUnresolvedException ex)
         {
             throw new GraphQLException(ErrorBuilder.New()
-                .SetCode(Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode)
+                .SetCode(GdprSubjectScopeUnresolvedException.ErrorCode)
                 .SetMessage(ex.Message)
                 .Build());
         }
@@ -81,12 +81,12 @@ public sealed partial class Query
         string? tableName = null,
         string? subjectSid = null,
         int timeWindowDays = 365,
-        [Service] ILineageImpactAnalyzerService lineageService = null!,
+        [Service] IGdprDisclosureReportService gdprService = null!,
         [Service] IGdprAuditReportExporter pdfExporter = null!,
         [Service] IHttpContextAccessor httpContextAccessor = null!,
         CancellationToken ct = default)
     {
-        var report = await GetGdprDataDisclosureReportAsync(domain, schema, tableName, subjectSid, timeWindowDays, lineageService, httpContextAccessor, ct);
+        var report = await GetGdprDataDisclosureReportAsync(domain, schema, tableName, subjectSid, timeWindowDays, gdprService, httpContextAccessor, ct);
         var exportResult = pdfExporter.ExportReportToPdf(report);
         return Convert.ToBase64String(exportResult.DocumentBytes);
     }

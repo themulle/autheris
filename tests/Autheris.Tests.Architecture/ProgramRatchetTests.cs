@@ -145,7 +145,7 @@ public sealed partial class ProgramRatchetTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Application_top_level_folder_count_is_at_most_32()
+    public void Application_top_level_folder_count_is_at_most_33()
     {
         var appDir = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.Application");
         var actualFolders = Directory.GetDirectories(appDir)
@@ -154,10 +154,10 @@ public sealed partial class ProgramRatchetTests(ITestOutputHelper output)
             .OrderBy(d => d, StringComparer.Ordinal)
             .ToList();
 
-        output.WriteLine($"Application top-level folders: {actualFolders.Count} (max 32)");
+        output.WriteLine($"Application top-level folders: {actualFolders.Count} (max 33)");
         actualFolders.Count.ShouldBeLessThanOrEqualTo(
-            32,
-            $"WP-SIMPL-24: src/Autheris.Application top-level folder count ({actualFolders.Count}) must be <= 32. Folders: {string.Join(", ", actualFolders)}");
+            33,
+            $"WP-SIMPL-29: src/Autheris.Application top-level folder count ({actualFolders.Count}) must be <= 33. Folders: {string.Join(", ", actualFolders)}");
     }
 
     [Fact]

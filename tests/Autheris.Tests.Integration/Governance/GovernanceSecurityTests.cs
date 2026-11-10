@@ -2,6 +2,7 @@ using Autheris.Tests.Unit;
 using System.Security.Claims;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -809,7 +810,7 @@ public class GovernanceSecurityTests : IDisposable
         var foreignSid = "S-1-5-21-FOREIGN-USER";
         var accessor = CreateAccessor(callerSid); // Standard user, no PrivacyAdmin or GovernanceAdmin
 
-        var lineageService = NSubstitute.Substitute.For<ILineageImpactAnalyzerService>();
+        var gdprService = NSubstitute.Substitute.For<IGdprDisclosureReportService>();
 
         var ex = await Should.ThrowAsync<GraphQLException>(async () =>
         {
@@ -819,7 +820,7 @@ public class GovernanceSecurityTests : IDisposable
                 tableName: "finance_table_1",
                 subjectSid: foreignSid,
                 timeWindowDays: 365,
-                lineageService: lineageService,
+                gdprService: gdprService,
                 httpContextAccessor: accessor);
         });
 
@@ -832,6 +833,7 @@ public class GovernanceSecurityTests : IDisposable
         var query = new Query();
         var unauthenticatedAccessor = new IsolatedHttpContextAccessor(new DefaultHttpContext()); // No User / not authenticated
         var lineageService = NSubstitute.Substitute.For<ILineageImpactAnalyzerService>();
+        var gdprService = NSubstitute.Substitute.For<IGdprDisclosureReportService>();
 
         var ex1 = await Should.ThrowAsync<GraphQLException>(async () =>
         {
@@ -845,10 +847,8 @@ public class GovernanceSecurityTests : IDisposable
         });
         ex2.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
 
-        var ex3 = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await query.GetGdprDataDisclosureReportAsync("finance", "dbo", "invoices", null, 365, lineageService, unauthenticatedAccessor);
-        });
+        var ex3 = await Should.ThrowAsync<GraphQLException>(() =>
+            query.GetGdprDataDisclosureReportAsync("finance", "dbo", "invoices", null, 365, gdprService, unauthenticatedAccessor));
         ex3.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
     }
 
@@ -890,7 +890,7 @@ public class GovernanceSecurityTests : IDisposable
         var callerSid = new Sid("S-1-5-21-STANDARD-CALLER");
         var accessor = CreateAccessor(callerSid);
 
-        var lineageService = NSubstitute.Substitute.For<ILineageImpactAnalyzerService>();
+        var gdprService = NSubstitute.Substitute.For<IGdprDisclosureReportService>();
 
         await query.GetGdprDataDisclosureReportAsync(
             domain: "finance",
@@ -898,10 +898,10 @@ public class GovernanceSecurityTests : IDisposable
             tableName: "finance_table_1",
             subjectSid: null,
             timeWindowDays: 365,
-            lineageService: lineageService,
+            gdprService: gdprService,
             httpContextAccessor: accessor);
 
-        await lineageService.Received(1).GetGdprDataDisclosureReportAsync(
+        await gdprService.Received(1).GetGdprDataDisclosureReportAsync(
             NSubstitute.Arg.Any<TableIdentifier?>(),
             NSubstitute.Arg.Is<Sid?>(s => s.HasValue && s.Value == callerSid),
             NSubstitute.Arg.Any<int>(),

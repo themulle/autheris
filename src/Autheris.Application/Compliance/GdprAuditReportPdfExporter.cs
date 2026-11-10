@@ -1,4 +1,4 @@
-namespace Autheris.Application.Lineage;
+namespace Autheris.Application.Compliance;
 
 using System;
 using System.Collections.Generic;
