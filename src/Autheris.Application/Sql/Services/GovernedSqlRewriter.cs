@@ -791,19 +791,11 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                     string.Equals(m.Identifier.ToString(), name, StringComparison.OrdinalIgnoreCase));
             }
 
-            IReadOnlySet<string>? GetDenied(string name)
-            {
-                var entry = decisions.FirstOrDefault(kv =>
-                    string.Equals(kv.Key.Table, name, StringComparison.OrdinalIgnoreCase));
-                if (entry.Value != null)
-                {
-                    return entry.Value.ColumnAccess
-                        .Where(cl => cl.Value == ColumnAccessLevel.Deny)
-                        .Select(cl => cl.Key)
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                }
-                return null;
-            }
+            IReadOnlySet<string>? GetDenied(string name) =>
+                decisions.FirstOrDefault(kv => string.Equals(kv.Key.Table, name, StringComparison.OrdinalIgnoreCase)).Value?.ColumnAccess
+                    .Where(cl => cl.Value == ColumnAccessLevel.Deny)
+                    .Select(cl => cl.Key)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var (_, hints) = Autheris.Application.Sql.Cost.SqlStatementCostEstimator.EstimateCostWithHints(
                 metadata,

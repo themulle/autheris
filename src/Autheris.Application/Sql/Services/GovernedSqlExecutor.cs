@@ -136,15 +136,11 @@ public sealed partial class GovernedSqlExecutor
 
         GovernedSqlPageOutcome? pageOutcome = null;
         if (request.Page != null || request.NextToken != null)
-        {
             request = request with { OnPageOutcome = outcome => pageOutcome = outcome };
-        }
 
         IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints = null;
         if (request.OnIndexHints == null)
-        {
             request = request with { OnIndexHints = hints => indexHints = hints };
-        }
 
         await ExecuteCoreAsync(
             request,
@@ -184,18 +180,9 @@ public sealed partial class GovernedSqlExecutor
         }
 
         return new GovernedSqlResult(
-            OriginalSql: request.Sql,
-            Columns: columns.AsReadOnly(),
-            Rows: rows.AsReadOnly(),
-            RowCount: rows.Count,
-            ElapsedMilliseconds: sw.ElapsedMilliseconds,
-            Truncated: isTruncated,
-            ColumnDescriptions: columnDescriptions,
-            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled,
-            Page: pageOutcome?.Page,
-            Next: pageOutcome?.NextToken,
-            PagingUnavailable: pageOutcome?.PagingUnavailable,
-            IndexHints: indexHints);
+            request.Sql, columns.AsReadOnly(), rows.AsReadOnly(), rows.Count, sw.ElapsedMilliseconds,
+            isTruncated, columnDescriptions, !_options.Value.IsColumnMaskingDisabled,
+            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints);
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(
