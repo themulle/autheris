@@ -28,6 +28,11 @@ public sealed class SqlCompilerErrorMapperTests
         public int SqliteErrorCode => 1;
     }
 
+    sealed class FakeNumberedDbException(int number, string message = "error") : System.Data.Common.DbException(message)
+    {
+        public int Number { get; } = number;
+    }
+
     private static TableAccessTarget Target(string table) => new("ds", "dbo", table, null, $"ds.dbo.{table}");
 
     public static TheoryData<string, Func<Exception>, int, string, string?> Rows => new()
@@ -71,6 +76,8 @@ public sealed class SqlCompilerErrorMapperTests
         // #312 (SEC-PG-10): the executor's classification of an unknown identifier answers like a denied column; an unrecognised provider error stays 502.
         { "governed-policy-denied", () => new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, TargetSqlDialect.Sqlite), 403, "SQL_POLICY_DENIED", null },
         { "governed-provider-error", () => new GovernedSqlException(GovernedSqlErrorCodes.ProviderError, TargetSqlDialect.Sqlite), 502, "SQL_PROVIDER_ERROR", null },
+        { "governed-statement-rejected", () => new GovernedSqlException(GovernedSqlErrorCodes.StatementRejected, TargetSqlDialect.SqlServer), 400, "SQL_STATEMENT_REJECTED", null },
+        { "governed-source-unavailable", () => new GovernedSqlException(GovernedSqlErrorCodes.SourceUnavailable, TargetSqlDialect.SqlServer), 503, "SQL_SOURCE_UNAVAILABLE", null },
         // #321 (SEC-RG-03): a set operation column-count mismatch (AST check and provider classification) is a 400, never a 502.
         { "set-operation-degree", () => new SetOperationDegreeMismatchException(), 400, "SQL_SYNTAX_ERROR", null },
         { "governed-syntax-error", () => new GovernedSqlException(GovernedSqlErrorCodes.SyntaxError, TargetSqlDialect.Sqlite), 400, "SQL_SYNTAX_ERROR", null },
@@ -296,5 +303,30 @@ public sealed class SqlCompilerErrorMapperTests
         mapping.Title.ShouldNotContain("SECRET_TOKEN");
         mapping.Title.ShouldNotContain("line 3");
         mapping.Title.ShouldNotContain("mismatched");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ProviderStatementRejection_MapsTo400_StatementRejected()
+    {
+        var ex = new FakeNumberedDbException(8116, "Argument data type varchar is invalid for argument 1 of format function. (SecretTable.SecretCol)");
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+        mapping.Status.ShouldBe(400);
+        mapping.Code.ShouldBe(GovernedSqlErrorCodes.StatementRejected);
+        mapping.Title.ShouldBe(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.StatementRejected));
+        mapping.Title.ShouldNotContain("Secret");
+        mapping.Title.ShouldNotContain("format");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ProviderUnavailable_MapsTo503_SourceUnavailable()
+    {
+        var ex = new FakeNumberedDbException(18456, "Login failed for user 'secret_user'");
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+        mapping.Status.ShouldBe(503);
+        mapping.Code.ShouldBe(GovernedSqlErrorCodes.SourceUnavailable);
+        mapping.Title.ShouldBe(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.SourceUnavailable));
+        mapping.Title.ShouldNotContain("secret_user");
     }
 }

@@ -778,9 +778,8 @@ public sealed partial class GovernedSqlExecutor
         compiled.Parameters.Any(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
 
     /// <summary>
-    /// A driver error becomes a typed error with a stable code and a fixed message; the original is logged server-side only. A timeout
-    /// or an unavailable source is classified first and keeps its own status (504, 503). Everything that is not a driver error
-    /// (policy and binder refusals, cancellation, the gateway's own exceptions) passes through unchanged.
+    /// A driver error becomes a typed error with a stable code and fixed message. Timeouts, unavailability and drift
+    /// are classified first (504, 503, 502). Non-driver errors pass through unchanged.
     /// </summary>
     private GovernedSqlException? SanitizeProviderError(Exception error, TargetSqlDialect dialect, string dataSourceName, bool clientListsBound)
     {
@@ -789,18 +788,17 @@ public sealed partial class GovernedSqlExecutor
             return null;
         }
 
-        if (DataAccessErrorClassifier.Classify(error) is DataAccessErrorKind.Timeout or DataAccessErrorKind.Unavailable)
-        {
-            return null;
-        }
+        var classified = DataAccessErrorClassifier.Classify(error);
+        if (classified is DataAccessErrorKind.Timeout or DataAccessErrorKind.Unavailable) return null;
 
         var mapped = DmlErrorSanitizer.Map(dialect, error);
+        if (mapped.Code == GovernedSqlErrorCodes.ProviderError && classified == DataAccessErrorKind.StatementRejected)
+            mapped = new GovernedSqlException(GovernedSqlErrorCodes.StatementRejected, dialect);
 
         // a recursion limit (SQL Server 530, Oracle ORA-32044) is logged by type and number only, never with the driver message.
         if (clientListsBound || mapped.Code == GovernedSqlErrorCodes.LimitExceeded)
         {
-            // 07 / BC-129-16: a driver message can carry a bound list element or caller attribute value ("Conversion failed when converting the nvarchar value '...'"), so
-            // the exception object (message, inner exceptions) is not logged when a client list is bound; its type and number are.
+            // 07 / BC-129-16: driver messages can carry bound values; exception is not logged when client lists are bound.
             var driver = error as DbException;
             _logger?.LogWarning("WebSQL provider error on data source {DataSource} ({Dialect}); the caller receives a sanitized error. ErrorType={ErrorType} ErrorCode={ErrorCode} TraceId={TraceId}",
                 dataSourceName, dialect, error.GetType().Name, driver?.ErrorCode, Activity.Current?.TraceId.ToString());

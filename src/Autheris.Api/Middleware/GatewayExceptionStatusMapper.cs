@@ -54,6 +54,7 @@ internal static class GatewayExceptionStatusMapper
         {
             DataAccessErrorKind.Timeout => StatusCodes.Status504GatewayTimeout,
             DataAccessErrorKind.Unavailable => StatusCodes.Status503ServiceUnavailable,
+            DataAccessErrorKind.StatementRejected => StatusCodes.Status400BadRequest,
             _ => StatusCodes.Status500InternalServerError
         }
     };

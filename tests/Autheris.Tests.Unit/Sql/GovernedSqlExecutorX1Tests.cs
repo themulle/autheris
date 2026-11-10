@@ -392,6 +392,26 @@ public sealed class GovernedSqlExecutorX1Tests
     }
 
     [Fact]
+    public async Task ProviderError_StatementRejected_MapsToStatementRejected()
+    {
+        var compiled = await CompileAsync("SqlServer", "SELECT id FROM orders");
+        var h = CreateHarness("SqlServer", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new FakeNumberedDbException("Argument error in format", 8116) });
+
+        var ex = await Should.ThrowAsync<GovernedSqlException>(() => ExecuteAsync(h, compiled));
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.StatementRejected);
+    }
+
+    [Fact]
+    public async Task ProviderError_Unavailable_PassesThroughForErrorMapper()
+    {
+        var compiled = await CompileAsync("SqlServer", "SELECT id FROM orders");
+        var h = CreateHarness("SqlServer", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new FakeNumberedDbException("Login failed", 18456) });
+
+        var ex = await Should.ThrowAsync<FakeNumberedDbException>(() => ExecuteAsync(h, compiled));
+        ex.Number.ShouldBe(18456);
+    }
+
+    [Fact]
     public async Task ErrorAudit_HasCodeNotMessage()
     {
         var compiled = await CompileAsync("Sqlite", "SELECT id FROM orders");

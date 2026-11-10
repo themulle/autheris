@@ -2367,17 +2367,9 @@
       "Id": "fn-string-044",
       "Group": "fn-string",
       "Sql": "SELECT format('%s-%s', a, b) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT FORMAT(@p0, [a], [b]) AS [r] FROM [t]",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "%s-%s"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "fn-string-045",
