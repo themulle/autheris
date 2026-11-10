@@ -65,6 +65,7 @@ public sealed record SqlQueryMetadata(
     public bool HasRootOrderBy { get; init; }
     public bool HasRootOffset { get; init; }
     public IReadOnlyList<CrossJoinTarget>? CrossJoins { get; init; }
+    public IReadOnlyList<FilterColumnReference>? GroupByColumnReferences { get; init; }
 }
 
 public interface ISqlQueryAnalyzer

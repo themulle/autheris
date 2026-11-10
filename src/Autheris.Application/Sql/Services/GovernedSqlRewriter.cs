@@ -776,7 +776,51 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             LogKeySets(assembly.KeySets);
         }
 
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset);
+        IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints = null;
+        if (metadata.StatementType == SqlStatementType.Select && !isDml)
+        {
+            var costOpts = _options.Value.QueryCost ?? new QueryCostOptions();
+            var analysisOpts = new Autheris.Application.Governance.Analysis.QueryAnalysisOptions();
+            var webSqlCost = _options.Value.WebSql?.Cost ?? new WebSqlCostOptions();
+            var effectiveRowLimit = rowLimit ?? SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions());
+
+            TableMetadata? GetTableMeta(string name)
+            {
+                return decidedTableMetadata.Values.FirstOrDefault(m =>
+                    string.Equals(m.Table.TableName, name, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(m.Identifier.ToString(), name, StringComparison.OrdinalIgnoreCase));
+            }
+
+            IReadOnlySet<string>? GetDenied(string name)
+            {
+                var entry = decisions.FirstOrDefault(kv =>
+                    string.Equals(kv.Key.Table, name, StringComparison.OrdinalIgnoreCase));
+                if (entry.Value != null)
+                {
+                    return entry.Value.ColumnAccess
+                        .Where(cl => cl.Value == ColumnAccessLevel.Deny)
+                        .Select(cl => cl.Key)
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                }
+                return null;
+            }
+
+            var (_, hints) = Autheris.Application.Sql.Cost.SqlStatementCostEstimator.EstimateCostWithHints(
+                metadata,
+                effectiveRowLimit,
+                costOpts,
+                analysisOpts,
+                webSqlCost,
+                getTableMetadata: GetTableMeta,
+                getDeniedColumns: GetDenied);
+
+            if (hints.Count > 0)
+            {
+                indexHints = hints;
+            }
+        }
+
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints);
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();

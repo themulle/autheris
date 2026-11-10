@@ -140,6 +140,12 @@ public sealed partial class GovernedSqlExecutor
             request = request with { OnPageOutcome = outcome => pageOutcome = outcome };
         }
 
+        IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints = null;
+        if (request.OnIndexHints == null)
+        {
+            request = request with { OnIndexHints = hints => indexHints = hints };
+        }
+
         await ExecuteCoreAsync(
             request,
             user,
@@ -188,7 +194,8 @@ public sealed partial class GovernedSqlExecutor
             InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled,
             Page: pageOutcome?.Page,
             Next: pageOutcome?.NextToken,
-            PagingUnavailable: pageOutcome?.PagingUnavailable);
+            PagingUnavailable: pageOutcome?.PagingUnavailable,
+            IndexHints: indexHints);
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(
@@ -439,7 +446,12 @@ public sealed partial class GovernedSqlExecutor
             // Issue #447 C1: the resolved source of the rewrite, before the ALLOW audit record and before any connection exists.
             await _transportGate.EnsureCatalogSourceAsync(dsName, ct).ConfigureAwait(false);
 
-            admission ??= await AdmitCostAsync(request, user, rewrite.Metadata, ct).ConfigureAwait(false);
+            admission ??= await AdmitCostAsync(request, user, rewrite.Metadata, rewrite.IndexHints, ct).ConfigureAwait(false);
+
+            if (rewrite.IndexHints is { Count: > 0 })
+            {
+                request.OnIndexHints?.Invoke(rewrite.IndexHints);
+            }
 
             var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
 

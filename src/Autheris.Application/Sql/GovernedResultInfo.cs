@@ -5,4 +5,5 @@ using System.Collections.Immutable;
 
 public sealed record GovernedResultInfo(
     IReadOnlyList<SqlResultColumn> Columns,
-    ImmutableArray<bool> MaskedColumns);
+    ImmutableArray<bool> MaskedColumns,
+    IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null);

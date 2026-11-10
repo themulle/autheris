@@ -187,7 +187,26 @@ public static partial class WebSqlEndpoints
                     ["description"] = "Objects (column -> value), or arrays with ?format=arrays.",
                     ["items"] = new Dictionary<string, object> { ["type"] = "object", ["additionalProperties"] = true }
                 },
-                ["rowCount"] = new Dictionary<string, object> { ["type"] = "integer" }
+                ["rowCount"] = new Dictionary<string, object> { ["type"] = "integer" },
+                ["indexHints"] = new Dictionary<string, object>
+                {
+                    ["type"] = "array",
+                    ["items"] = new Dictionary<string, object>
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new Dictionary<string, object>
+                        {
+                            ["table"] = new Dictionary<string, object> { ["type"] = "string" },
+                            ["reason"] = new Dictionary<string, object> { ["type"] = "string" },
+                            ["helpfulIndexColumns"] = new Dictionary<string, object>
+                            {
+                                ["type"] = "array",
+                                ["items"] = new Dictionary<string, object> { ["type"] = "string" }
+                            }
+                        },
+                        ["required"] = new[] { "table", "reason", "helpfulIndexColumns" }
+                    }
+                }
             }
         };
 
