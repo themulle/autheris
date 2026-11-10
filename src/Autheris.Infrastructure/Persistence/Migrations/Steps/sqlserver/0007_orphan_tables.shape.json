@@ -1,0 +1,5 @@
+{
+  "ops": [
+    { "op": "dropTable", "table": "ITSM_OUTBOX" }
+  ]
+}
