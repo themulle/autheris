@@ -788,12 +788,12 @@ public sealed partial class GovernedSqlExecutor
             return null;
         }
 
-        if (DataAccessErrorClassifier.Classify(error) is not DataAccessErrorKind.Other)
-        {
-            return null;
-        }
+        var classified = DataAccessErrorClassifier.Classify(error);
+        if (classified is DataAccessErrorKind.Timeout or DataAccessErrorKind.Unavailable) return null;
 
         var mapped = DmlErrorSanitizer.Map(dialect, error);
+        if (mapped.Code == GovernedSqlErrorCodes.ProviderError && classified == DataAccessErrorKind.StatementRejected)
+            mapped = new GovernedSqlException(GovernedSqlErrorCodes.StatementRejected, dialect);
 
         // a recursion limit (SQL Server 530, Oracle ORA-32044) is logged by type and number only, never with the driver message.
         if (clientListsBound || mapped.Code == GovernedSqlErrorCodes.LimitExceeded)

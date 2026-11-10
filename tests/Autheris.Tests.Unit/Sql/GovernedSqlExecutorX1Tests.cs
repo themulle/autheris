@@ -392,13 +392,13 @@ public sealed class GovernedSqlExecutorX1Tests
     }
 
     [Fact]
-    public async Task ProviderError_StatementRejected_PassesThroughForErrorMapper()
+    public async Task ProviderError_StatementRejected_MapsToStatementRejected()
     {
         var compiled = await CompileAsync("SqlServer", "SELECT id FROM orders");
         var h = CreateHarness("SqlServer", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new FakeNumberedDbException("Argument error in format", 8116) });
 
-        var ex = await Should.ThrowAsync<FakeNumberedDbException>(() => ExecuteAsync(h, compiled));
-        ex.Number.ShouldBe(8116);
+        var ex = await Should.ThrowAsync<GovernedSqlException>(() => ExecuteAsync(h, compiled));
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.StatementRejected);
     }
 
     [Fact]
