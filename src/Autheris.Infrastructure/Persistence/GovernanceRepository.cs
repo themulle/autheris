@@ -228,6 +228,17 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         return conn;
     }
 
+    /// <summary>
+    /// Opens an unchecked connection directly from the dialect, used for schema migrations and initialization
+    /// before the store is marked ready.
+    /// </summary>
+    internal DbConnection OpenUncheckedConnection()
+    {
+        var conn = _dialect.CreateConnection();
+        conn.Open();
+        return conn;
+    }
+
     public DbConnection OpenConnection()
     {
         ThrowIfNotReady();
