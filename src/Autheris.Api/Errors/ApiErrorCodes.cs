@@ -44,6 +44,7 @@ public static class ApiErrorCodes
     public const string GatewayTimeout = "GATEWAY_TIMEOUT";
 
     // Domain / feature specific codes
+    public const string InvalidColumns = "INVALID_COLUMNS";
     public const string WebhookPayloadInvalid = "WEBHOOK_PAYLOAD_INVALID";
     public const string WebhookSignatureOrFormatInvalid = "WEBHOOK_SIGNATURE_OR_FORMAT_INVALID";
     public const string CdcFilterInvalid = "CDC_FILTER_INVALID";

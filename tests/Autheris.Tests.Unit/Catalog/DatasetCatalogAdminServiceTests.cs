@@ -67,6 +67,23 @@ public sealed class DatasetCatalogAdminServiceTests
                 _state = before with { Visibility = ci.Arg<DatasetVisibility>() };
                 return new DatasetCatalogChange(Orders, before, _state);
             });
+        _tables.SetDatasetDiscoveryAsync(Orders, Arg.Any<bool?>(), Arg.Any<bool?>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var before = _state;
+                var dh = ci.ArgAt<bool?>(1) ?? before.DiscoveryHidden;
+                var sd = ci.ArgAt<bool?>(2) ?? before.SamplesDisabled;
+                var hc = ci.ArgAt<IReadOnlyList<string>?>(3) ?? before.HiddenColumns;
+                _state = before with { DiscoveryHidden = dh, SamplesDisabled = sd, HiddenColumns = hc };
+                return new DatasetCatalogChange(Orders, before, _state);
+            });
+        _tables.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>())
+            .Returns(new TableMetadata
+            {
+                Identifier = Orders,
+                Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "dbo", TableName = "orders" },
+                Columns = [new TableColumn { ColumnName = "col1" }, new TableColumn { ColumnName = "col2" }]
+            });
     }
 
     private DatasetCatalogAdminService Create(string? mode = null, int maxTags = 32, string[]? shared = null, IDataOwnershipRepository? owners = null)
@@ -482,5 +499,32 @@ public sealed class DatasetCatalogAdminServiceTests
         await _audit.Received(1).RecordBestEffortAsync(Arg.Is<AuditLogEntry>(e =>
             e.Decision == "DENY" && e.DetailsJson.Contains("\"attempts\":3") && e.DetailsJson.Contains("\"source\":\"manifest\"")), Arg.Any<CancellationToken>());
         await _audit.ReceivedWithAnyArgs(1).RecordBestEffortAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Apply_DiscoveryFlags_SetsFlagsAndAuditsVisibilityChanged()
+    {
+        var edit = new DatasetCatalogEdit(null, null, null, null, null, null,
+            DiscoveryHidden: true, HiddenColumns: ["col1"], SamplesDisabled: true);
+
+        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", edit, "admin", default);
+
+        result.Outcome.ShouldBe(DatasetCatalogOutcome.Applied);
+        _state.DiscoveryHidden.ShouldBeTrue();
+        _state.SamplesDisabled.ShouldBeTrue();
+        _state.HiddenColumns.ShouldBe(["col1"]);
+        await _audit.Received(1).RecordRequiredAsync(Arg.Is<AuditLogEntry>(e =>
+            e.EventType == AuditEventTypes.CatalogVisibilityChanged && e.Decision == "ALLOW"), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Apply_UnknownHiddenColumn_ReturnsInvalidColumns()
+    {
+        var edit = new DatasetCatalogEdit(null, null, null, null, null, null,
+            DiscoveryHidden: true, HiddenColumns: ["unknown_col"]);
+
+        var result = await Create().ApplyAsync(Admin(), "sales.dbo.orders", edit, "admin", default);
+
+        result.Outcome.ShouldBe(DatasetCatalogOutcome.InvalidColumns);
     }
 }

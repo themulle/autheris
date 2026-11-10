@@ -1,0 +1,31 @@
+-- WP-SIMPL-41: Authorized data discovery domain model and persistence.
+IF COL_LENGTH(N'dbo.TABLE_CATALOG_SETTINGS', N'discovery_hidden') IS NULL
+ALTER TABLE dbo.TABLE_CATALOG_SETTINGS ADD discovery_hidden BIT NOT NULL CONSTRAINT DF_TABLE_CATALOG_SETTINGS_discovery_hidden DEFAULT 0;
+-- batch
+IF COL_LENGTH(N'dbo.TABLE_CATALOG_SETTINGS', N'samples_disabled') IS NULL
+ALTER TABLE dbo.TABLE_CATALOG_SETTINGS ADD samples_disabled BIT NOT NULL CONSTRAINT DF_TABLE_CATALOG_SETTINGS_samples_disabled DEFAULT 0;
+-- batch
+IF OBJECT_ID(N'dbo.COLUMN_CATALOG_SETTINGS', N'U') IS NULL
+CREATE TABLE dbo.COLUMN_CATALOG_SETTINGS (
+    table_id NVARCHAR(128) NOT NULL,
+    column_name NVARCHAR(256) NOT NULL,
+    discovery_hidden BIT NOT NULL CONSTRAINT DF_COLUMN_CATALOG_SETTINGS_discovery_hidden DEFAULT 0,
+    updated_by NVARCHAR(256) NOT NULL,
+    updated_at NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_COLUMN_CATALOG_SETTINGS PRIMARY KEY (table_id, column_name)
+);
+-- batch
+IF OBJECT_ID(N'dbo.CATALOG_DISCOVERY_ARTIFACTS', N'U') IS NULL
+CREATE TABLE dbo.CATALOG_DISCOVERY_ARTIFACTS (
+    table_id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    tenant_id NVARCHAR(128) NOT NULL,
+    samples_json NVARCHAR(MAX) NULL,
+    statistics_json NVARCHAR(MAX) NULL,
+    content_sha256 CHAR(64) NOT NULL,
+    uploaded_by NVARCHAR(256) NOT NULL,
+    uploaded_at NVARCHAR(64) NOT NULL,
+    schema_version INT NOT NULL
+);
+-- batch
+IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'requested_columns_json') IS NULL
+ALTER TABLE dbo.CONSENT_REQUESTS ADD requested_columns_json NVARCHAR(MAX) NULL;

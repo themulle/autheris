@@ -80,14 +80,14 @@ public sealed class CatalogTagsVisibilityEndpointTests
     }
 
     [Fact]
-    public async Task PutVisibility_PassesTheRawName_NeverParsedInTheHandler()
+    public async Task PutDiscovery_PassesFlagsAndColumnsToService()
     {
         _service.ApplyAsync(default, default!, default!, default!, default).ReturnsForAnyArgs(Ok());
 
-        await Run(await CatalogApiEndpoints.PutDatasetVisibilityHandler("sales.dbo.orders", new SetDatasetVisibilityDto("2"), _service, Context(), default));
+        await Run(await CatalogApiEndpoints.PutDatasetDiscoveryHandler("sales.dbo.orders", new SetDatasetDiscoveryDto(Hidden: true, HiddenColumns: ["colA"], SamplesDisabled: true), _service, Context(), default));
 
         await _service.Received(1).ApplyAsync(Arg.Any<ClaimsPrincipal?>(), "sales.dbo.orders",
-            Arg.Is<DatasetCatalogEdit>(e => e.Visibility == "2"), "admin", Arg.Any<CancellationToken>());
+            Arg.Is<DatasetCatalogEdit>(e => e.DiscoveryHidden == true && e.SamplesDisabled == true && e.HiddenColumns!.Single() == "colA"), "admin", Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -96,13 +96,14 @@ public sealed class CatalogTagsVisibilityEndpointTests
     [InlineData(DatasetCatalogOutcome.InvalidTag, 400, "INVALID_TAG")]
     [InlineData(DatasetCatalogOutcome.TagLimitExceeded, 400, "TAG_LIMIT_EXCEEDED")]
     [InlineData(DatasetCatalogOutcome.InvalidVisibility, 400, "INVALID_VISIBILITY")]
+    [InlineData(DatasetCatalogOutcome.InvalidColumns, 400, "INVALID_COLUMNS")]
     [InlineData(DatasetCatalogOutcome.InvalidRequest, 400, "BAD_REQUEST")]
     [InlineData(DatasetCatalogOutcome.Unavailable, 503, "SERVICE_UNAVAILABLE")]
     public async Task OutcomeMapping_IsStable(DatasetCatalogOutcome outcome, int status, string code)
     {
         _service.ApplyAsync(default, default!, default!, default!, default).ReturnsForAnyArgs(new DatasetCatalogResult(outcome));
 
-        var (actualStatus, body) = await Run(await CatalogApiEndpoints.PutDatasetVisibilityHandler("x", new SetDatasetVisibilityDto("Full"), _service, Context(), default));
+        var (actualStatus, body) = await Run(await CatalogApiEndpoints.PutDatasetDiscoveryHandler("x", new SetDatasetDiscoveryDto(Hidden: true), _service, Context(), default));
 
         // NL-T-20: status and governed code per outcome; no legacy `error` member.
         actualStatus.ShouldBe(status);
@@ -124,7 +125,7 @@ public sealed class CatalogTagsVisibilityEndpointTests
             await Run(await CatalogApiEndpoints.GetDatasetCatalogSettingsHandler("a.b.c", _service, ctx, default)),
             await Run(await CatalogApiEndpoints.PutDatasetTagsHandler("a.b.c", new SetDatasetTagsDto(["x"]), _service, ctx, default)),
             await Run(await CatalogApiEndpoints.PostDatasetTagsHandler("a.b.c", new ChangeDatasetTagsDto(["x"], null), _service, ctx, default)),
-            await Run(await CatalogApiEndpoints.PutDatasetVisibilityHandler("a.b.c", new SetDatasetVisibilityDto("Summary"), _service, ctx, default))
+            await Run(await CatalogApiEndpoints.PutDatasetDiscoveryHandler("a.b.c", new SetDatasetDiscoveryDto(Hidden: true), _service, ctx, default))
         };
 
         results.ShouldAllBe(r => r.Status == 404 && r.Body == results[0].Body && r.Body.Contains("RESOURCE_NOT_FOUND"));
@@ -145,11 +146,11 @@ public sealed class CatalogTagsVisibilityEndpointTests
     [Theory]
     [InlineData("/api/v1/catalog/datasets/{id}/tags", "PUT")]
     [InlineData("/api/v1/catalog/datasets/{id}/tags", "POST")]
-    [InlineData("/api/v1/catalog/datasets/{id}/visibility", "PUT")]
+    [InlineData("/api/v1/catalog/datasets/{id}/discovery", "PUT")]
     [InlineData("/api/v1/catalog/datasets/{id}/catalog-settings", "GET")]
     [InlineData("/api/catalog/datasets/{id}/tags", "PUT")]
     [InlineData("/api/catalog/datasets/{id}/tags", "POST")]
-    [InlineData("/api/catalog/datasets/{id}/visibility", "PUT")]
+    [InlineData("/api/catalog/datasets/{id}/discovery", "PUT")]
     [InlineData("/api/catalog/datasets/{id}/catalog-settings", "GET")]
     public void Route_RequiresAuthentication_ButNotTheGovernanceAdminPolicy_AndIsAuditedFull(string pattern, string method)
     {

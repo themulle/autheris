@@ -1,0 +1,42 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "table_catalog_settings", "column": { "name": "discovery_hidden", "type": "BOOLEAN", "family": "boolean", "nullable": false } },
+    { "op": "addColumn", "table": "table_catalog_settings", "column": { "name": "samples_disabled", "type": "BOOLEAN", "family": "boolean", "nullable": false } },
+    {
+      "op": "addTable",
+      "table": "column_catalog_settings",
+      "newTable": {
+        "name": "column_catalog_settings",
+        "columns": [
+          { "name": "table_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "column_name", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "discovery_hidden", "type": "BOOLEAN", "family": "boolean", "nullable": false },
+          { "name": "updated_by", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "TEXT", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["table_id", "column_name"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "catalog_discovery_artifacts",
+      "newTable": {
+        "name": "catalog_discovery_artifacts",
+        "columns": [
+          { "name": "table_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "samples_json", "type": "TEXT", "family": "string", "nullable": true },
+          { "name": "statistics_json", "type": "TEXT", "family": "string", "nullable": true },
+          { "name": "content_sha256", "type": "CHARACTER(64)", "family": "string", "nullable": false },
+          { "name": "uploaded_by", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "uploaded_at", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "schema_version", "type": "INTEGER", "family": "integer", "nullable": false }
+        ],
+        "primaryKey": ["table_id"],
+        "indexes": []
+      }
+    },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "requested_columns_json", "type": "TEXT", "family": "string", "nullable": true } }
+  ]
+}

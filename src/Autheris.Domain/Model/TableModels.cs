@@ -158,6 +158,9 @@ public sealed record Table
     public string? PluginName { get; init; }
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
     public DatasetVisibility Visibility { get; init; } = DatasetVisibility.Hidden;
+    public bool DiscoveryHidden { get; init; }
+    public bool SamplesDisabled { get; init; }
+    public DiscoveryObjectKind ObjectKind { get; init; } = DiscoveryObjectKind.Table;
     public string? RlsExpression { get; init; }
     public int? MinGroupSize { get; init; }
     public bool NonPersonal { get; init; } = false;
@@ -218,6 +221,7 @@ public sealed class TableColumn
     public string? DisplayName { get; init; }
     public string DataType { get; init; } = "varchar";
     public bool IsSensitive { get; init; }
+    public bool DiscoveryHidden { get; init; }
     public string? Description { get; init; }
     public string? LongDescription { get; init; }
     public LocalizedTexts Texts { get; init; } = LocalizedTexts.Empty;

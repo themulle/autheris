@@ -52,6 +52,23 @@ public interface ITableMetadataRepository
         TableIdentifier table, int? minGroupSize, bool? nonPersonal, Sid actor, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
 
+    /// <summary>Sets discovery visibility flags and hidden columns in one transaction with the before read.</summary>
+    Task<DatasetCatalogChange?> SetDatasetDiscoveryAsync(
+        TableIdentifier table, bool? discoveryHidden, bool? samplesDisabled, IReadOnlyList<string>? hiddenColumns, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement dataset catalog settings.");
+
+    /// <summary>Gets discovery artifacts for a table.</summary>
+    Task<DiscoveryArtifacts?> GetDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
+
+    /// <summary>Upserts discovery artifacts for a table.</summary>
+    Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
+
+    /// <summary>Deletes discovery artifacts for a table.</summary>
+    Task<bool> DeleteDiscoveryArtifactsAsync(Guid tableId, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
+
     /// <summary>
     /// Issue #94 (SD-5): replaces ONLY the declared primary key and indexes of a table. In one transaction the stored columns are read,
     /// the definition is validated against them and replaced, and the epoch is bumped once; masking rules and column metadata other than

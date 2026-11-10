@@ -99,7 +99,10 @@ public sealed class CatalogGovernanceRatchetTests
             NonPersonal = true,
             RequiredFilterColumns = ImmutableArray.Create("a"),
             RequiredFilterColumnGroups = ImmutableArray.Create(ImmutableArray.Create("a", "b")),
-            ExpectedRows = 1_000_000
+            ExpectedRows = 1_000_000,
+            DiscoveryHidden = true,
+            SamplesDisabled = true,
+            ObjectKind = DiscoveryObjectKind.View
         },
         Columns =
         [
@@ -114,7 +117,8 @@ public sealed class CatalogGovernanceRatchetTests
                 LongDescription = "persisted long a",
                 Texts = new LocalizedTexts(new Dictionary<string, LocalizedTextEntry> { ["de"] = new("Spalte A") }),
                 DocumentationSource = "Admin",
-                Meta = new Dictionary<string, string> { ["role"] = "dimension" }
+                Meta = new Dictionary<string, string> { ["role"] = "dimension" },
+                DiscoveryHidden = true
             },
             new TableColumn { Id = Guid.NewGuid(), ColumnName = "b", DisplayName = "Column B", DataType = "varchar" }
         ],

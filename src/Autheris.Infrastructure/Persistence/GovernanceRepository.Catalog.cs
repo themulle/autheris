@@ -573,6 +573,29 @@ public partial class GovernanceRepository
         WriteCatalogSettingsAsync(table, (conn, tx) =>
             DatasetCatalogStore.SetPrivacyAsync(conn, tx, KeyDialect, table, minGroupSize, nonPersonal, actor, ct), ct);
 
+    public Task<DatasetCatalogChange?> SetDatasetDiscoveryAsync(
+        TableIdentifier table, bool? discoveryHidden, bool? samplesDisabled, IReadOnlyList<string>? hiddenColumns, Sid actor, CancellationToken ct = default) =>
+        WriteCatalogSettingsAsync(table, (conn, tx) =>
+            DatasetCatalogStore.SetDiscoveryFlagsAsync(conn, tx, KeyDialect, table, discoveryHidden, samplesDisabled, hiddenColumns, actor, ct), ct);
+
+    public async Task<DiscoveryArtifacts?> GetDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DiscoveryArtifactStore.GetAsync(conn, null, KeyDialect, tableId, ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DiscoveryArtifactStore.UpsertAsync(conn, null, KeyDialect, artifacts, actor, ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> DeleteDiscoveryArtifactsAsync(Guid tableId, Sid actor, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DiscoveryArtifactStore.DeleteAsync(conn, null, KeyDialect, tableId, actor, ct).ConfigureAwait(false);
+    }
+
     /// <summary>Issue #111: one transaction (locked before read, write, after read); no epoch (tags are not policy inputs); the local metadata entry is dropped after the commit.</summary>
     private async Task<DatasetCatalogChange?> WriteCatalogSettingsAsync(
         TableIdentifier table, Func<DbConnection, DbTransaction, Task<DatasetCatalogChange?>> write, CancellationToken ct)

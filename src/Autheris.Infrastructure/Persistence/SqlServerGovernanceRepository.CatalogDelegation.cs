@@ -85,6 +85,24 @@ public partial class SqlServerGovernanceRepository : IPhysicalIndexRepository
         CancellationToken ct = default) =>
         Gov.SetDatasetPrivacyAsync(table, minGroupSize, nonPersonal, actor, ct);
 
+    public Task<DatasetCatalogChange?> SetDatasetDiscoveryAsync(
+        TableIdentifier table,
+        bool? discoveryHidden,
+        bool? samplesDisabled,
+        IReadOnlyList<string>? hiddenColumns,
+        Sid actor,
+        CancellationToken ct = default) =>
+        Gov.SetDatasetDiscoveryAsync(table, discoveryHidden, samplesDisabled, hiddenColumns, actor, ct);
+
+    public Task<DiscoveryArtifacts?> GetDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default) =>
+        Gov.GetDiscoveryArtifactsAsync(tableId, ct);
+
+    public Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default) =>
+        Gov.UpsertDiscoveryArtifactsAsync(artifacts, actor, ct);
+
+    public Task<bool> DeleteDiscoveryArtifactsAsync(Guid tableId, Sid actor, CancellationToken ct = default) =>
+        Gov.DeleteDiscoveryArtifactsAsync(tableId, actor, ct);
+
     public Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table,
         CancellationToken ct = default) =>
         Gov.GetActiveTableIdentifierAsync(table, ct);

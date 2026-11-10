@@ -14,7 +14,10 @@ public sealed record DatasetCatalogEdit(
     IReadOnlyList<string>? RemoveTags,
     string? Visibility,
     string? MinGroupSize = null,
-    bool? NonPersonal = null)
+    bool? NonPersonal = null,
+    bool? DiscoveryHidden = null,
+    IReadOnlyList<string>? HiddenColumns = null,
+    bool? SamplesDisabled = null)
 {
     /// <summary>A request body that could not be bound (missing or wrong shape); answered as <see cref="DatasetCatalogOutcome.InvalidRequest"/> after authorization.</summary>
     public bool Malformed { get; init; }
@@ -33,6 +36,7 @@ public enum DatasetCatalogOutcome
     InvalidTag,
     TagLimitExceeded,
     InvalidVisibility,
+    InvalidColumns,
     InvalidRequest,
     Unavailable
 }

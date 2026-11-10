@@ -23,20 +23,36 @@ internal static class DatasetCatalogStore
     private const string DbtSource = "dbt";
 
     /// <summary>The effective settings of one table after validation; <see cref="Degraded"/> rows carry the secure value.</summary>
-    internal readonly record struct RowOverlay(DatasetVisibility Visibility, IReadOnlyList<DatasetTag> Tags, IReadOnlyList<string> TagNames, bool Degraded, int? MinGroupSize = null, bool? NonPersonal = null)
+    internal readonly record struct RowOverlay(
+        DatasetVisibility Visibility,
+        IReadOnlyList<DatasetTag> Tags,
+        IReadOnlyList<string> TagNames,
+        bool Degraded,
+        int? MinGroupSize = null,
+        bool? NonPersonal = null,
+        bool DiscoveryHidden = false,
+        bool SamplesDisabled = false,
+        IReadOnlySet<string>? HiddenColumns = null)
     {
         private static readonly DatasetTag[] NoTags = [];
         private static readonly string[] NoTagNames = [];
 
-        internal static readonly RowOverlay Secure = new(DatasetVisibility.Hidden, NoTags, NoTagNames, true, null, null);
-        internal static readonly RowOverlay Empty = new(DatasetVisibility.Hidden, NoTags, NoTagNames, false, null, null);
+        internal static readonly RowOverlay Secure = new(DatasetVisibility.Hidden, NoTags, NoTagNames, true, null, null, DiscoveryHidden: true, SamplesDisabled: true);
+        internal static readonly RowOverlay Empty = new(DatasetVisibility.Hidden, NoTags, NoTagNames, false, null, null, DiscoveryHidden: false, SamplesDisabled: false);
 
         /// <summary>A healthy row; tables without tags share one empty array, tagged rows are sorted ordinally once.</summary>
-        internal static RowOverlay Create(DatasetVisibility visibility, List<DatasetTag>? tags, int? minGroupSize = null, bool? nonPersonal = null)
+        internal static RowOverlay Create(
+            DatasetVisibility visibility,
+            List<DatasetTag>? tags,
+            int? minGroupSize = null,
+            bool? nonPersonal = null,
+            bool discoveryHidden = false,
+            bool samplesDisabled = false,
+            HashSet<string>? hiddenColumns = null)
         {
             if (tags is null || tags.Count == 0)
             {
-                return new RowOverlay(visibility, NoTags, NoTagNames, false, minGroupSize, nonPersonal);
+                return new RowOverlay(visibility, NoTags, NoTagNames, false, minGroupSize, nonPersonal, discoveryHidden, samplesDisabled, hiddenColumns);
             }
 
             var sorted = tags.ToArray();
@@ -47,7 +63,7 @@ internal static class DatasetCatalogStore
                 names[i] = sorted[i].Tag;
             }
 
-            return new RowOverlay(visibility, sorted, names, false, minGroupSize, nonPersonal);
+            return new RowOverlay(visibility, sorted, names, false, minGroupSize, nonPersonal, discoveryHidden, samplesDisabled, hiddenColumns);
         }
     }
 
@@ -58,6 +74,9 @@ internal static class DatasetCatalogStore
         private readonly Dictionary<Guid, List<DatasetTag>> _tags = [];
         private readonly Dictionary<Guid, int?> _minGroupSize = [];
         private readonly Dictionary<Guid, bool?> _nonPersonal = [];
+        private readonly Dictionary<Guid, bool> _discoveryHidden = [];
+        private readonly Dictionary<Guid, bool> _samplesDisabled = [];
+        private readonly Dictionary<Guid, HashSet<string>> _hiddenColumns = [];
         private readonly HashSet<Guid> _poisoned = [];
         private readonly Dictionary<Guid, RowOverlay> _built = [];
 
@@ -69,6 +88,22 @@ internal static class DatasetCatalogStore
         {
             _minGroupSize[id] = minGroupSize;
             _nonPersonal[id] = nonPersonal;
+        }
+
+        internal void SetDiscoveryFlags(Guid id, bool discoveryHidden, bool samplesDisabled)
+        {
+            _discoveryHidden[id] = discoveryHidden;
+            _samplesDisabled[id] = samplesDisabled;
+        }
+
+        internal void AddHiddenColumn(Guid id, string column)
+        {
+            if (!_hiddenColumns.TryGetValue(id, out var set))
+            {
+                _hiddenColumns[id] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            set.Add(column);
         }
 
         internal void AddTag(Guid id, DatasetTag tag)
@@ -99,17 +134,58 @@ internal static class DatasetCatalogStore
             _tags.TryGetValue(tableId, out var list);
             _minGroupSize.TryGetValue(tableId, out var minGroupSize);
             _nonPersonal.TryGetValue(tableId, out var nonPersonal);
-            return _built[tableId] = RowOverlay.Create(visibility, list, minGroupSize, nonPersonal);
+            var discoveryHidden = _discoveryHidden.TryGetValue(tableId, out var dh) && dh;
+            var samplesDisabled = _samplesDisabled.TryGetValue(tableId, out var sd) && sd;
+            _hiddenColumns.TryGetValue(tableId, out var hiddenCols);
+            return _built[tableId] = RowOverlay.Create(visibility, list, minGroupSize, nonPersonal, discoveryHidden, samplesDisabled, hiddenCols);
         }
     }
 
     /// <summary>Overlays the fresh tier, tags, and privacy settings onto a structural (possibly cached) record without mutating it.</summary>
-    internal static TableMetadata Apply(TableMetadata structural, RowOverlay row) => structural with
+    internal static TableMetadata Apply(TableMetadata structural, RowOverlay row)
     {
-        Table = structural.Table with { Visibility = row.Visibility },
-        CatalogTags = row.TagNames,
-        MinGroupSize = row.MinGroupSize,
-        NonPersonal = row.NonPersonal
+        var columns = structural.Columns;
+        if (row.HiddenColumns is { Count: > 0 } && !row.Degraded)
+        {
+            var updated = new List<TableColumn>(columns.Count);
+            for (var i = 0; i < columns.Count; i++)
+            {
+                var col = columns[i];
+                var hidden = row.HiddenColumns.Contains(col.ColumnName);
+                updated.Add(hidden != col.DiscoveryHidden ? WithHidden(col, hidden) : col);
+            }
+            columns = updated;
+        }
+
+        return structural with
+        {
+            Table = structural.Table with
+            {
+                Visibility = row.Visibility,
+                DiscoveryHidden = row.Degraded || row.DiscoveryHidden,
+                SamplesDisabled = row.SamplesDisabled
+            },
+            Columns = columns,
+            CatalogTags = row.TagNames,
+            MinGroupSize = row.MinGroupSize,
+            NonPersonal = row.NonPersonal
+        };
+    }
+
+    private static TableColumn WithHidden(TableColumn c, bool hidden) => new()
+    {
+        Id = c.Id,
+        TableId = c.TableId,
+        ColumnName = c.ColumnName,
+        DisplayName = c.DisplayName,
+        DataType = c.DataType,
+        IsSensitive = c.IsSensitive,
+        Description = c.Description,
+        LongDescription = c.LongDescription,
+        Texts = c.Texts,
+        DocumentationSource = c.DocumentationSource,
+        Meta = c.Meta,
+        DiscoveryHidden = hidden
     };
 
     internal static TableMetadata Apply(TableMetadata structural, OverlaySet overlay) => Apply(structural, overlay.Get(structural.Table.Id));
@@ -147,7 +223,14 @@ internal static class DatasetCatalogStore
     {
         var set = await LoadAsync(conn, tx, dialect, tableId, strict: true, logger: null, ct).ConfigureAwait(false);
         var row = set.Get(tableId);
-        return new DatasetCatalogSettings(row.Tags, row.Visibility, row.MinGroupSize, row.NonPersonal);
+        return new DatasetCatalogSettings(
+            row.Tags,
+            row.Visibility,
+            row.MinGroupSize,
+            row.NonPersonal,
+            row.DiscoveryHidden,
+            row.SamplesDisabled,
+            row.HiddenColumns?.OrderBy(c => c, StringComparer.Ordinal).ToArray() ?? []);
     }
 
     /// <summary>
@@ -169,7 +252,14 @@ internal static class DatasetCatalogStore
         }
 
         var row = (await ReadOverlayAsync(conn, tx, dialect, tableId.Value, logger, ct).ConfigureAwait(false)).Get(tableId.Value);
-        return new DatasetCatalogSettings(row.Tags, row.Visibility, row.MinGroupSize, row.NonPersonal);
+        return new DatasetCatalogSettings(
+            row.Tags,
+            row.Visibility,
+            row.MinGroupSize,
+            row.NonPersonal,
+            row.DiscoveryHidden,
+            row.SamplesDisabled,
+            row.HiddenColumns?.OrderBy(c => c, StringComparer.Ordinal).ToArray() ?? []);
     }
 
     /// <summary>Counts per tier: Summary and Full from the settings rows, Hidden as all tables minus those (every other stored value counts as Hidden).</summary>
@@ -225,7 +315,7 @@ internal static class DatasetCatalogStore
         await using (var cmd = conn.CreateCommand())
         {
             Enlist(cmd, tx);
-            cmd.CommandText = $"SELECT table_id, visibility, min_group_size, non_personal FROM {dialect.Prefix}{SettingsTable}{filter}";
+            cmd.CommandText = $"SELECT table_id, visibility, min_group_size, non_personal, discovery_hidden, samples_disabled FROM {dialect.Prefix}{SettingsTable}{filter}";
             if (tableId is { } id)
             {
                 AddParameter(cmd, "@tid", id.ToString());
@@ -257,12 +347,63 @@ internal static class DatasetCatalogStore
                     }
 
                     set.SetPrivacy(rowId, rowMinGroupSize, rowNonPersonal);
+
+                    bool rowDiscoveryHidden = false;
+                    bool rowSamplesDisabled = false;
+                    if (reader.FieldCount > 4 && !reader.IsDBNull(4))
+                    {
+                        var dhVal = reader.GetValue(4);
+                        rowDiscoveryHidden = dhVal is bool b ? b : Convert.ToInt32(dhVal, CultureInfo.InvariantCulture) == 1;
+                    }
+                    if (reader.FieldCount > 5 && !reader.IsDBNull(5))
+                    {
+                        var sdVal = reader.GetValue(5);
+                        rowSamplesDisabled = sdVal is bool b ? b : Convert.ToInt32(sdVal, CultureInfo.InvariantCulture) == 1;
+                    }
+
+                    set.SetDiscoveryFlags(rowId, rowDiscoveryHidden, rowSamplesDisabled);
                 }
                 else
                 {
                     Degrade(strict, logger, rowId.ToString(), SettingsTable);
                     set.Poison(rowId);
                 }
+            }
+        }
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            Enlist(cmd, tx);
+            cmd.CommandText = $"SELECT table_id, column_name, discovery_hidden FROM {dialect.Prefix}COLUMN_CATALOG_SETTINGS{filter}";
+            if (tableId is { } id)
+            {
+                AddParameter(cmd, "@tid", id.ToString());
+            }
+
+            try
+            {
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    if (!TryReadId(reader, out var rowId))
+                    {
+                        continue;
+                    }
+
+                    if (!reader.IsDBNull(1))
+                    {
+                        var colName = reader.GetString(1);
+                        var hiddenVal = reader.IsDBNull(2) ? null : reader.GetValue(2);
+                        var hidden = hiddenVal is bool b ? b : (hiddenVal is not null && Convert.ToInt32(hiddenVal, CultureInfo.InvariantCulture) == 1);
+                        if (hidden)
+                        {
+                            set.AddHiddenColumn(rowId, colName);
+                        }
+                    }
+                }
+            }
+            catch (DbException) when (!strict)
+            {
             }
         }
 
@@ -538,6 +679,67 @@ internal static class DatasetCatalogStore
                 };
                 await ExecAsync(conn, tx,
                     $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, visibility, min_group_size, non_personal, updated_by, updated_at) VALUES (@tid, @vis, @mgs, @np, @by, @now)", ct, insertParams).ConfigureAwait(false);
+            }
+        }, ct);
+    }
+
+    /// <summary>
+    /// Sets the discovery hidden and samples disabled flags, and replaces the hidden columns.
+    /// </summary>
+    internal static Task<DatasetCatalogChange?> SetDiscoveryFlagsAsync(
+        DbConnection conn, DbTransaction tx, KeyDefinitionDialect dialect, TableIdentifier table,
+        bool? discoveryHidden, bool? samplesDisabled, IReadOnlyList<string>? hiddenColumns, Sid actor, CancellationToken ct)
+    {
+        return MutateAsync(conn, tx, dialect, table, actor, async (tableId, before) =>
+        {
+            var newHidden = discoveryHidden ?? before.DiscoveryHidden;
+            var newSamplesDisabled = samplesDisabled ?? before.SamplesDisabled;
+
+            if (newHidden != before.DiscoveryHidden || newSamplesDisabled != before.SamplesDisabled)
+            {
+                var dhValue = (object)(newHidden ? 1 : 0);
+                var sdValue = (object)(newSamplesDisabled ? 1 : 0);
+                var parameters = new (string, object)[]
+                {
+                    ("@tid", tableId.ToString()),
+                    ("@dh", dhValue),
+                    ("@sd", sdValue),
+                    ("@by", actor.Value),
+                    ("@now", Now())
+                };
+
+                var updated = await ExecAsync(conn, tx,
+                    $"UPDATE {dialect.Prefix}{SettingsTable} SET discovery_hidden = @dh, samples_disabled = @sd, updated_by = @by, updated_at = @now WHERE table_id = @tid", ct, parameters).ConfigureAwait(false);
+                if (updated == 0)
+                {
+                    var insertParams = new (string, object)[]
+                    {
+                        ("@tid", tableId.ToString()),
+                        ("@vis", (int)before.Visibility),
+                        ("@mgs", (object?)before.MinGroupSize ?? DBNull.Value),
+                        ("@np", (object?)(before.NonPersonal.HasValue ? (before.NonPersonal.Value ? 1 : 0) : null) ?? DBNull.Value),
+                        ("@dh", dhValue),
+                        ("@sd", sdValue),
+                        ("@by", actor.Value),
+                        ("@now", Now())
+                    };
+                    await ExecAsync(conn, tx,
+                        $"INSERT INTO {dialect.Prefix}{SettingsTable} (table_id, visibility, min_group_size, non_personal, discovery_hidden, samples_disabled, updated_by, updated_at) VALUES (@tid, @vis, @mgs, @np, @dh, @sd, @by, @now)", ct, insertParams).ConfigureAwait(false);
+                }
+            }
+
+            if (hiddenColumns is not null)
+            {
+                await ExecAsync(conn, tx,
+                    $"DELETE FROM {dialect.Prefix}COLUMN_CATALOG_SETTINGS WHERE table_id = @tid", ct, ("@tid", tableId.ToString())).ConfigureAwait(false);
+
+                var distinctCols = hiddenColumns.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.OrdinalIgnoreCase);
+                foreach (var col in distinctCols)
+                {
+                    await ExecAsync(conn, tx,
+                        $"INSERT INTO {dialect.Prefix}COLUMN_CATALOG_SETTINGS (table_id, column_name, discovery_hidden, updated_by, updated_at) VALUES (@tid, @col, 1, @by, @now)",
+                        ct, ("@tid", tableId.ToString()), ("@col", col), ("@by", actor.Value), ("@now", Now())).ConfigureAwait(false);
+                }
             }
         }, ct);
     }

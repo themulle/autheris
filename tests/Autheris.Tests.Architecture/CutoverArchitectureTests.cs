@@ -414,6 +414,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.CatalogKeyDefinitionStore", "governance store: declared key/index tables of the three engines (issue #94), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.RowFilterEvaluationStore", "governance store: row filter evaluation settings (issue #107), fixed statements with bound values over the three engines, no client text"),
         ("Autheris.Infrastructure.Persistence.DatasetCatalogStore", "governance store: dataset catalog tags and visibility tier (issue #111), fixed statements with bound values over the three engines, no client text"),
+        ("Autheris.Infrastructure.Persistence.DiscoveryArtifactStore", "governance store: catalog discovery artifacts (WP-SIMPL-41), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.Migrations.*", "governance schema migrations (WP-ARC-B-12): fixed DDL and version-table statements, no client text"),
         ("Autheris.Infrastructure.Persistence.TenantRegistryStore", "tenant registry table of the governance store"),
         ("Autheris.Infrastructure.Persistence.VirtualFilterStore", "virtual filter table of the governance store"),
