@@ -61,6 +61,7 @@ public static class ApiErrorCodes
     public const string RequiredFilterColumnMissing = "REQUIRED_FILTER_COLUMN_MISSING";
     public const string InvalidSecretRef = "INVALID_SECRET_REF";
     public const string DataContractInvalid = "DATA_CONTRACT_INVALID";
+    public const string CatalogReservedSourceName = "CATALOG_RESERVED_SOURCE_NAME";
     public const string OlapQueryFailed = "OLAP_QUERY_FAILED";
     public const string OlapResultTooLarge = "OLAP_RESULT_TOO_LARGE";
     public const string PrivacyBudgetExhausted = "PRIVACY_BUDGET_EXHAUSTED";

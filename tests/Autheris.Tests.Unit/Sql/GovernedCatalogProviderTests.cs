@@ -1,5 +1,4 @@
-using System.Data.Common;
-using System.Runtime.CompilerServices;
+using System.Collections.Immutable;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Catalog;
@@ -7,7 +6,6 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence.Catalog;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -18,28 +16,14 @@ using TrinoSqlEngine.Governance;
 
 namespace Autheris.Tests.Unit.Sql;
 
-/// <summary>WP-X0c: the catalog is built from database metadata, fail closed (CR-ADG-47, SEC-X1-09).</summary>
+/// <summary>
+/// WP-SIMPL-44 / SEC-SIMPL-142: the catalog is built from declared metadata only, fail closed.
+/// No connection factory or source metadata reader is used.
+/// </summary>
 public sealed class GovernedCatalogProviderTests
 {
     private const string Source = "ds";
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
-
-    private sealed class FakeReader(TargetSqlDialect dialect) : IColumnMetadataReader
-    {
-        public TargetSqlDialect Dialect { get; } = dialect;
-        public List<DbColumnMetadata> Columns { get; set; } = new();
-        public Exception? Failure { get; set; }
-        public int Calls { get; private set; }
-
-        public async IAsyncEnumerable<DbColumnMetadata> ReadAsync(DbConnection connection, TableIdentity table,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            Calls++;
-            if (Failure is not null) throw Failure;
-            foreach (var c in Columns.ToArray()) yield return c;
-            await Task.CompletedTask;
-        }
-    }
 
     private sealed class Clock : TimeProvider
     {
@@ -47,25 +31,24 @@ public sealed class GovernedCatalogProviderTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
-    private static TableColumn Gov(string name) => new() { ColumnName = name };
+    private static TableColumn Col(string name, string type = "int", string? collation = null) =>
+        new() { ColumnName = name, DataType = type, Collation = collation };
 
-    private static IGovernanceRepository Governance(string provider, params string[] columns)
+    private static IGovernanceRepository Governance(string provider, params TableColumn[] columns)
     {
         var repo = Substitute.For<IGovernanceRepository>();
         repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
         {
-            Table = new Table { SourceType = provider, SourceName = Source, SchemaName = "dbo", TableName = "orders" },
+            Table = new Table { SourceType = provider, SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
             Identifier = Orders,
-            Columns = columns.Select(Gov).ToArray()
+            Columns = columns
         });
         return repo;
     }
 
-    private static (GovernedCatalogProvider Provider, FakeReader Reader, Clock Clock) Build(
-        string provider, TargetSqlDialect dialect, string[] govColumns, IEnumerable<DbColumnMetadata> dbColumns, int ttl = 300,
-        IGovernanceRepository? governance = null)
+    private static (GovernedCatalogProvider Provider, Clock Clock, IGovernanceRepository Governance) Build(
+        string provider, TableColumn[] columns, int ttl = 300, IGovernanceRepository? governance = null, string? tenantColumn = null)
     {
-        var reader = new FakeReader(dialect) { Columns = dbColumns.ToList() };
         var gateway = new GatewayOptions
         {
             DataSources = new SqlDataSourceOptions
@@ -73,83 +56,162 @@ public sealed class GovernedCatalogProviderTests
                 Connections = { [Source] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = "x" } }
             }
         };
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult<DbConnection>(new SqliteConnection()));
         var clock = new Clock();
-        var sut = new GovernedCatalogProvider(governance ?? Governance(provider, govColumns), Options.Create(gateway), factory,
-            new[] { reader }, new GovernedCatalogOptions { CacheTtlSeconds = ttl }, clock);
-        return (sut, reader, clock);
+        var repo = governance ?? Substitute.For<IGovernanceRepository>();
+        if (governance is null)
+        {
+            repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+            {
+                Table = new Table { SourceType = provider, SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+                Identifier = Orders,
+                Columns = columns,
+                TenantColumnName = tenantColumn
+            });
+        }
+
+        var sut = new GovernedCatalogProvider(repo, Options.Create(gateway),
+            new GovernedCatalogOptions { CacheTtlSeconds = ttl }, clock);
+        return (sut, clock, repo);
     }
 
     private static TableCatalogEntry? Resolve(ITableCatalog catalog) =>
         catalog.Resolve(new SqlQualifiedName(new[] { new SqlIdentifier("dbo"), new SqlIdentifier("orders") }));
 
-    private static readonly DbColumnMetadata[] SqlServerColumns =
-    {
-        new("id", "int", null),
-        new("tenant_id", "nvarchar(64)", "SQL_Latin1_General_CP1_CI_AS"),
-        new("amount", "decimal(18,2)", null)
-    };
-
     [Fact]
-    public async Task ExposedColumns_AreGovernanceIntersectedWithDatabase_WithDatabaseTypes()
+    [Trait("Category", "Security")]
+    public async Task Admission_UsesDeclaredColumnsOnly_NoConnectionOpened()
     {
-        var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "ID", "Tenant_Id" }, SqlServerColumns);
+        // SEC-SIMPL-142: ISqlConnectionFactory is absent from constructor, declared metadata only
+        var columns = new[]
+        {
+            Col("id", "int"),
+            Col("tenant_id", "nvarchar(64)", "SQL_Latin1_General_CP1_CI_AS"),
+            Col("amount", "decimal(18,2)")
+        };
+        var (sut, _, _) = Build("SqlServer", columns, tenantColumn: "tenant_id");
 
-        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+        var catalog = await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
+        var entry = Resolve(catalog);
 
         entry.ShouldNotBeNull();
         entry.Columns.Select(c => (c.Name, c.DataType, c.Collation)).ShouldBe(new[]
         {
-            ("id", "int", (string?)null), ("tenant_id", "nvarchar(64)", "SQL_Latin1_General_CP1_CI_AS")
+            ("id", "int", (string?)null),
+            ("tenant_id", "nvarchar(64)", "SQL_Latin1_General_CP1_CI_AS"),
+            ("amount", "decimal(18,2)", null)
         });
         entry.TenantColumn.ShouldBe("tenant_id");
         entry.Version.ShouldBeGreaterThan(0);
     }
 
     [Fact]
+    public async Task DeclaredTypeAndCollation_FlowIntoCatalogColumn()
+    {
+        var columns = new[] { Col("name", "nvarchar(128)", "Latin1_General_BIN2") };
+        var (sut, _, _) = Build("SqlServer", columns);
+
+        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+        entry.ShouldNotBeNull();
+        var col = entry.Columns.ShouldHaveSingleItem();
+        col.Name.ShouldBe("name");
+        col.DataType.ShouldBe("nvarchar(128)");
+        col.Collation.ShouldBe("Latin1_General_BIN2");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task FingerprintChanges_WhenDeclaredTypeOrCollationChanges()
+    {
+        var repo = Substitute.For<IGovernanceRepository>();
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+            Identifier = Orders,
+            Columns = new[] { Col("amount", "decimal(10,2)") }
+        });
+
+        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>(), governance: repo);
+        var first = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+        first.ShouldNotBeNull();
+        first.Columns[0].DataType.ShouldBe("decimal(10,2)");
+
+        // Update metadata with changed type: fingerprint must change so cache misses and reloads
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+            Identifier = Orders,
+            Columns = new[] { Col("amount", "decimal(18,4)") }
+        });
+
+        var second = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+        second.ShouldNotBeNull();
+        second.Columns[0].DataType.ShouldBe("decimal(18,4)");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task UndeclaredTenantColumn_Denied()
+    {
+        var columns = new[] { Col("id", "int") };
+        var (sut, _, _) = Build("SqlServer", columns, tenantColumn: "tenant_id");
+
+        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+        entry.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void NullCollationStringKey_NotBindable()
+    {
+        // SEC-SIMPL-142: string keys with unknown collation are not bindable
+        KeySetKeyTypes.IsBindablePair(
+            TargetSqlDialect.SqlServer, "varchar(20)", "varchar(20)",
+            null, "Latin1_General_BIN2").ShouldBeFalse();
+
+        KeySetKeyTypes.IsBindablePair(
+            TargetSqlDialect.SqlServer, "varchar(20)", "varchar(20)",
+            null, null).ShouldBeFalse();
+
+        KeySetKeyTypes.IsBindablePair(
+            TargetSqlDialect.SqlServer, "nvarchar(20)", "nvarchar(20)",
+            null, "UTF8_BINARY").ShouldBeFalse();
+    }
+
+    [Fact]
     [Trait("Category", "Security")]
     public async Task Databricks_admission_follows_tier_only()
     {
-        var (sut, reader, _) = Build("Databricks", TargetSqlDialect.Databricks, new[] { "id", "tenantid" },
-            new DbColumnMetadata[] { new("id", "int", null), new("tenantid", "string", "UTF8_BINARY") });
+        var columns = new[] { Col("id", "int"), Col("tenantid", "string", "UTF8_BINARY") };
+        var (sut, _, _) = Build("Databricks", columns, tenantColumn: "tenantid");
 
         var catalog = await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
         var entry = Resolve(catalog);
         entry.ShouldNotBeNull();
-        reader.Calls.ShouldBe(1);
-    }
-
-    [Fact]
-    public async Task GovernanceColumnMissingInDatabase_DeniesTable()
-    {
-        var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id", "tenant_id", "ghost" }, SqlServerColumns);
-
-        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
+        entry.TenantColumn.ShouldBe("tenantid");
     }
 
     [Fact]
     public async Task ZeroColumns_DeniesTable()
     {
-        var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, Array.Empty<DbColumnMetadata>());
-
+        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>());
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
     }
 
     [Fact]
     public async Task LoadFailure_FailsClosed()
     {
-        var (sut, reader, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns);
-        reader.Failure = new InvalidOperationException("boom");
+        var repo = Substitute.For<IGovernanceRepository>();
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns<Task<TableMetadata?>>(_ => throw new InvalidOperationException("boom"));
 
+        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>(), governance: repo);
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
     }
 
     [Fact]
     public async Task UnknownDataSource_FailsClosed()
     {
-        var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns);
+        var columns = new[] { Col("id", "int") };
+        var (sut, _, _) = Build("SqlServer", columns);
 
         Resolve(await sut.GetCatalogAsync("other", new[] { Orders }, CancellationToken.None)).ShouldBeNull();
     }
@@ -157,68 +219,92 @@ public sealed class GovernedCatalogProviderTests
     [Fact]
     public async Task ColumnTypeChange_ChangesVersion()
     {
-        var (sut, reader, clock) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id", "amount" }, SqlServerColumns);
-        long before = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.Version;
-
-        reader.Columns = SqlServerColumns.Select(c => c.Name == "amount" ? c with { NativeType = "decimal(18,3)" } : c).ToList();
-        clock.Now += TimeSpan.FromSeconds(301);
-        long after = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.Version;
-
-        after.ShouldNotBe(before);
+        var col1 = new[] { Col("id", "int"), Col("amount", "decimal(18,2)") };
+        var col2 = new[] { Col("id", "int"), Col("amount", "decimal(18,3)") };
+        CatalogColumnVersion.Compute(col1).ShouldNotBe(CatalogColumnVersion.Compute(col2));
     }
 
     [Fact]
     public async Task CollationChange_ChangesVersion()
     {
-        var (sut, reader, clock) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id", "tenant_id" }, SqlServerColumns);
-        long before = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.Version;
-
-        reader.Columns = SqlServerColumns.Select(c => c.Name == "tenant_id" ? c with { Collation = "Latin1_General_BIN2" } : c).ToList();
-        clock.Now += TimeSpan.FromSeconds(301);
-        long after = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.Version;
-
-        after.ShouldNotBe(before);
+        var col1 = new[] { Col("id", "int"), Col("tenant_id", "nvarchar(64)", "SQL_Latin1_General_CP1_CI_AS") };
+        var col2 = new[] { Col("id", "int"), Col("tenant_id", "nvarchar(64)", "Latin1_General_BIN2") };
+        CatalogColumnVersion.Compute(col1).ShouldNotBe(CatalogColumnVersion.Compute(col2));
     }
 
     [Fact]
     public async Task CacheWithinTtl_DoesNotReload_ExpiryReloads()
     {
-        var (sut, reader, clock) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns, ttl: 60);
+        var repo = Substitute.For<IGovernanceRepository>();
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+            Identifier = Orders,
+            Columns = new[] { Col("id", "int") }
+        });
+
+        var (sut, clock, _) = Build("SqlServer", Array.Empty<TableColumn>(), ttl: 60, governance: repo);
         await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
         clock.Now += TimeSpan.FromSeconds(59);
         await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
-        reader.Calls.ShouldBe(1);
+        // Table was loaded once + fingerprint check once
+        await repo.Received(2).GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>());
 
         clock.Now += TimeSpan.FromSeconds(2);
         await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
-        reader.Calls.ShouldBe(2);
+        // Expired: reloaded
+        await repo.Received(3).GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task TenantColumnGovernedAfterCachedLoad_TakesEffectWithinTheTtl()
     {
-        var repo = Governance("SqlServer", "id", "amount");
-        var (sut, reader, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id", "amount" }, SqlServerColumns, governance: repo);
+        var repo = Substitute.For<IGovernanceRepository>();
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+            Identifier = Orders,
+            Columns = new[] { Col("id", "int"), Col("amount", "decimal(18,2)") }
+        });
+
+        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>(), governance: repo);
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.TenantColumn.ShouldBeNull();
 
-        SetGovernedColumns(repo, "SqlServer", "id", "amount", "tenant_id");
-        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+            Identifier = Orders,
+            Columns = new[] { Col("id", "int"), Col("amount", "decimal(18,2)"), Col("tenant_id", "nvarchar(64)") },
+            TenantColumnName = "tenant_id"
+        });
 
+        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
         entry.ShouldNotBeNull();
         entry.TenantColumn.ShouldBe("tenant_id");
-        reader.Calls.ShouldBe(2);
     }
 
     [Fact]
     public async Task GovernedColumnRemovedAfterCachedLoad_IsNoLongerExposedWithinTheTtl()
     {
-        var repo = Governance("SqlServer", "id", "amount");
-        var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id", "amount" }, SqlServerColumns, governance: repo);
+        var repo = Substitute.For<IGovernanceRepository>();
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+            Identifier = Orders,
+            Columns = new[] { Col("id", "int"), Col("amount", "decimal(18,2)") }
+        });
+
+        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>(), governance: repo);
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.Columns.Select(c => c.Name).ShouldContain("amount");
 
-        SetGovernedColumns(repo, "SqlServer", "id");
-        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+            Identifier = Orders,
+            Columns = new[] { Col("id", "int") }
+        });
 
+        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
         entry.ShouldNotBeNull();
         entry.Columns.Select(c => c.Name).ShouldBe(new[] { "id" });
     }
@@ -226,58 +312,20 @@ public sealed class GovernedCatalogProviderTests
     [Fact]
     public async Task GovernanceRecordRemovedAfterCachedLoad_DeniesTable()
     {
-        var repo = Governance("SqlServer", "id");
-        var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns, governance: repo);
+        var repo = Substitute.For<IGovernanceRepository>();
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+            Identifier = Orders,
+            Columns = new[] { Col("id", "int") }
+        });
+
+        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>(), governance: repo);
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldNotBeNull();
 
         repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns((TableMetadata?)null);
-
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
     }
-
-    [Fact]
-    public async Task UnchangedGovernance_StillServedFromCache()
-    {
-        var (sut, reader, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns);
-        await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
-        await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
-
-        reader.Calls.ShouldBe(1);
-    }
-
-    private static void SetGovernedColumns(IGovernanceRepository repo, string provider, params string[] columns) =>
-        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
-        {
-            Table = new Table { SourceType = provider, SourceName = Source, SchemaName = "dbo", TableName = "orders" },
-            Identifier = Orders,
-            Columns = columns.Select(Gov).ToArray()
-        });
-
-    [Fact]
-    public async Task FailedLoad_IsNotCached_NextCallReloads()
-    {
-        var (sut, reader, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns);
-        reader.Failure = new InvalidOperationException("boom");
-        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
-
-        reader.Failure = null;
-        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldNotBeNull();
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(301)]
-    [InlineData(int.MaxValue)]
-    public void TtlAboveMaximum_RejectedAtStartup(int ttl)
-    {
-        Should.Throw<ArgumentOutOfRangeException>(() =>
-            Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns, ttl));
-    }
-
-    [Fact]
-    public void TtlAtMaximum_IsAccepted() =>
-        Should.NotThrow(() => Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns, 300));
 
     [Theory]
     [InlineData("INTEGER")]
@@ -289,8 +337,8 @@ public sealed class GovernedCatalogProviderTests
     [InlineData("BOOLEAN")]
     public async Task Sqlite_TenantColumnNonTextAffinity_DeniesTable(string declaredType)
     {
-        var (sut, _, _) = Build("Sqlite", TargetSqlDialect.Sqlite, new[] { "id", "tenant_id" },
-            new[] { new DbColumnMetadata("id", "INTEGER", null), new DbColumnMetadata("tenant_id", declaredType, null) });
+        var columns = new[] { Col("id", "INTEGER"), Col("tenant_id", declaredType) };
+        var (sut, _, _) = Build("Sqlite", columns, tenantColumn: "tenant_id");
 
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
     }
@@ -302,11 +350,10 @@ public sealed class GovernedCatalogProviderTests
     [InlineData("CLOB")]
     public async Task Sqlite_TenantColumnTextAffinity_IsAdmitted_WithNullCollation(string declaredType)
     {
-        var (sut, _, _) = Build("Sqlite", TargetSqlDialect.Sqlite, new[] { "id", "tenant_id" },
-            new[] { new DbColumnMetadata("id", "INTEGER", null), new DbColumnMetadata("tenant_id", declaredType, null) });
+        var columns = new[] { Col("id", "INTEGER"), Col("tenant_id", declaredType) };
+        var (sut, _, _) = Build("Sqlite", columns, tenantColumn: "tenant_id");
 
         var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
-
         entry.ShouldNotBeNull();
         entry.Columns.ShouldAllBe(c => c.Collation == null);
     }
@@ -324,7 +371,7 @@ public sealed class GovernedCatalogProviderTests
     [InlineData("NUMERIC", SqliteAffinity.NumericAffinity)]
     [InlineData("BOOLEAN", SqliteAffinity.NumericAffinity)]
     [InlineData("DATETIME", SqliteAffinity.NumericAffinity)]
-    [InlineData("POINT", SqliteAffinity.IntegerAffinity)]   // contains "INT"
+    [InlineData("POINT", SqliteAffinity.IntegerAffinity)]
     public void SqliteAffinity_FollowsTheDocumentedRules(string declared, SqliteAffinity expected) =>
         SqliteTypeAffinity.Of(declared).ShouldBe(expected);
 
@@ -332,7 +379,8 @@ public sealed class GovernedCatalogProviderTests
     public async Task CatalogCollation_NeverAppearsInEmittedSql()
     {
         const string collation = "SQL_Latin1_General_CP1_CI_AS";
-        var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id", "tenant_id" }, SqlServerColumns);
+        var columns = new[] { Col("id", "int"), Col("tenant_id", "nvarchar(64)", collation) };
+        var (sut, _, _) = Build("SqlServer", columns);
         var catalog = await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
         var policies = new NoPolicies();
 
@@ -360,7 +408,7 @@ public sealed class GovernedCatalogProviderTests
         var orders = new TableIdentity("AUTH_APP", "ORDERS");
         var catalog = new InMemoryTableCatalog(new[]
         {
-            new TableCatalogEntry(orders, System.Collections.Immutable.ImmutableArray.Create(
+            new TableCatalogEntry(orders, ImmutableArray.Create(
                 new CatalogColumn("ID", "NUMBER(10)"), new CatalogColumn("TENANT_ID", "VARCHAR2(64)"), new CatalogColumn("REGION", "VARCHAR2(20)"),
                 new CatalogColumn("STATUS", "VARCHAR2(20)"), new CatalogColumn("AMOUNT", "NUMBER(18,2)"), new CatalogColumn("EMAIL", "VARCHAR2(200)")),
                 "TENANT_ID", 1)

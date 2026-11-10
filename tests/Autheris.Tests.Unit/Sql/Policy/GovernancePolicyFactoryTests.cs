@@ -559,22 +559,6 @@ public sealed class GovernancePolicyFactoryTests
 
     // ---- M-2: a correlated policy table is loaded once, not once per statement --------------------------------------------------
 
-    private sealed class CountingReader : Autheris.Application.Sql.Catalog.IColumnMetadataReader
-    {
-        public TargetSqlDialect Dialect => TargetSqlDialect.Sqlite;
-
-        public int Loads { get; private set; }
-
-        public async IAsyncEnumerable<Autheris.Application.Sql.Catalog.DbColumnMetadata> ReadAsync(
-            System.Data.Common.DbConnection connection, TableIdentity table, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-        {
-            Loads++;
-            yield return new("id", "INTEGER", null);
-            yield return new("tenant_id", "TEXT", null);
-            await Task.CompletedTask;
-        }
-    }
-
     [Theory]
     [InlineData(false)]   // no governance record under the legacy "default" domain
     [InlineData(true)]    // a homonymous record of another data source under the "default" domain
@@ -597,7 +581,6 @@ public sealed class GovernancePolicyFactoryTests
                 Columns = [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "tenant_id" }]
             });
         });
-        var reader = new CountingReader();
         var gateway = new GatewayOptions
         {
             DataSources = new SqlDataSourceOptions
@@ -605,22 +588,18 @@ public sealed class GovernancePolicyFactoryTests
                 Connections = { ["ds"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "x" } }
             }
         };
-        var connections = Substitute.For<ISqlConnectionFactory>();
-        connections.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult<System.Data.Common.DbConnection>(new SqliteConnection()));
         var provider = new Autheris.Infrastructure.Persistence.Catalog.GovernedCatalogProvider(
-            governance, Microsoft.Extensions.Options.Options.Create(gateway), connections, [reader], new Autheris.Application.Sql.Catalog.GovernedCatalogOptions());
+            governance, Microsoft.Extensions.Options.Options.Create(gateway), new Autheris.Application.Sql.Catalog.GovernedCatalogOptions());
         var factory = new GovernancePolicyFactory(provider, governance, Microsoft.Extensions.Options.Options.Create(gateway));
         var decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(new TableIdentifier("ds", "main", "orders"), CorrelatedPolicy()) };
 
         var first = await factory.CreateAsync(Input(decisions), CancellationToken.None);
-        var loadsAfterFirst = reader.Loads;
         var second = await factory.CreateAsync(Input(decisions), CancellationToken.None);
 
         first.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();   // the correlated policy is enforceable
         second.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();
-        loadsAfterFirst.ShouldBe(2);          // orders and the policy table invoices
-        reader.Loads.ShouldBe(2);             // the second compile is served from the cache
+        second.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeSameAs(first.Catalog.Resolve(Orders.ToQualifiedName()));
+        second.Catalog.Resolve(Invoices.ToQualifiedName()).ShouldBeSameAs(first.Catalog.Resolve(Invoices.ToQualifiedName()));
     }
 
     [Fact]

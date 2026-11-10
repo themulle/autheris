@@ -337,6 +337,7 @@ public sealed class CatalogGovernanceRatchetTests
         nameof(TableMetadata.Indexes),
         nameof(TableMetadata.PhysicalIndexes), // issue #404: written only by the catalog sync seam (IPhysicalIndexRepository), never by an upsert
         nameof(TableMetadata.ReplaceKeyDefinition),
+        nameof(TableMetadata.ReplaceColumns),
         nameof(TableMetadata.CatalogTags),
         nameof(TableMetadata.EstimatedRowCount),
         nameof(TableMetadata.ExpectedRows),

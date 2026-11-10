@@ -23,7 +23,7 @@ public sealed class KeySetKeyTypesTests
     [InlineData(TargetSqlDialect.Sqlite, "BIGINT", "INT")]
     [InlineData(TargetSqlDialect.Sqlite, "VARCHAR(20)", "VARCHAR(20)")]
     public void AllowedPairs(TargetSqlDialect dialect, string key, string fk) =>
-        Assert.True(KeySetKeyTypes.IsBindablePair(dialect, key, fk));
+        Assert.True(KeySetKeyTypes.IsBindablePair(dialect, key, fk, "Latin1_General_CI_AS", "Latin1_General_CI_AS"));
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "text", "text")]                    // unbounded
@@ -50,7 +50,7 @@ public sealed class KeySetKeyTypesTests
     [InlineData(TargetSqlDialect.SqlServer, "nvarchar(1,2)", "nvarchar(10)")]
     [InlineData(TargetSqlDialect.SqlServer, "int(4)", "int")]
     public void RejectedPairs(TargetSqlDialect dialect, string key, string fk) =>
-        Assert.False(KeySetKeyTypes.IsBindablePair(dialect, key, fk));
+        Assert.False(KeySetKeyTypes.IsBindablePair(dialect, key, fk, "Latin1_General_CI_AS", "Latin1_General_CI_AS"));
 
     [Theory]
     [InlineData(null, null, true)]
@@ -59,6 +59,15 @@ public sealed class KeySetKeyTypesTests
     [InlineData("a", "b", false)]
     public void Collations(string? key, string? fk, bool expected) =>
         Assert.Equal(expected, KeySetKeyTypes.IsBindablePair(TargetSqlDialect.SqlServer, "int", "int", key, fk));
+
+    [Theory]
+    [InlineData(null, null, false)]
+    [InlineData("a", null, false)]
+    [InlineData(null, "a", false)]
+    [InlineData("a", "A", true)]
+    [InlineData("a", "b", false)]
+    public void StringCollations(string? key, string? fk, bool expected) =>
+        Assert.Equal(expected, KeySetKeyTypes.IsBindablePair(TargetSqlDialect.SqlServer, "varchar(20)", "varchar(20)", key, fk));
 
     [Fact]
     public void Classify_ReportsTheIntegerWidth()

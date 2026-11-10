@@ -434,7 +434,8 @@ public sealed class PolicyKeyQueryCompilerTests
     [InlineData("numeric(9)", "decimal(18,0)")]
     public void KeyTypePair_OnTheAllowlist_IsDerivable(string pk, string fk)
     {
-        var key = Compile(Request(Example1(), catalog: Catalog(pk, fk), target: Air1Entry(fk)));
+        string? collation = pk.Contains("char") ? "Latin1_General_CI_AS" : null;
+        var key = Compile(Request(Example1(), catalog: Catalog(pk, fk, collation, collation), target: Air1Entry(fk, collation)));
 
         Assert.Equal(pk, key.KeyColumnType);
         Assert.Equal(fk, key.ForeignKeyColumnType);

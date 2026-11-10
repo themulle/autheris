@@ -39,6 +39,7 @@ internal static class GatewayExceptionStatusMapper
 
     internal static int MapStatus(Exception exception) => exception switch
     {
+        Autheris.Application.Catalog.Services.CatalogReservedSourceNameException => StatusCodes.Status400BadRequest,
         GatewayInvalidQueryException => StatusCodes.Status400BadRequest,
         GatewayThrottledException => StatusCodes.Status429TooManyRequests,
         Autheris.Application.Audit.AuditUnavailableException => StatusCodes.Status503ServiceUnavailable,

@@ -126,21 +126,13 @@ internal static class ActivationProbes
         {
             var table = new TableIdentifier("sales", "dbo", "orders");
             var governance = Substitute.For<IGovernanceRepository>();
-            governance.GetTableMetadataAsync(table, Arg.Any<CancellationToken>()).Returns(new TableMetadata
-            {
-                Table = new Table { SourceType = "SqlServer", SourceName = "ds", SchemaName = "dbo", TableName = "orders" },
-                Identifier = table,
-                Columns = new[] { new TableColumn { ColumnName = "id" } }
-            });
+            governance.GetTableMetadataAsync(table, Arg.Any<CancellationToken>())
+                .Returns<Task<TableMetadata?>>(_ => throw new InvalidOperationException("metadata store down"));
             var gateway = new GatewayOptions
             {
                 DataSources = new SqlDataSourceOptions { Connections = { ["ds"] = new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "x" } } }
             };
-            var factory = Substitute.For<ISqlConnectionFactory>();
-            factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-                .Returns(_ => Task.FromResult<DbConnection>(new SqliteConnection()));
-            var provider = new GovernedCatalogProvider(governance, Options.Create(gateway), factory,
-                new IColumnMetadataReader[] { new FailingReader() }, new GovernedCatalogOptions { CacheTtlSeconds = 300 });
+            var provider = new GovernedCatalogProvider(governance, Options.Create(gateway), new GovernedCatalogOptions { CacheTtlSeconds = 300 });
 
             var catalog = provider.GetCatalogAsync("ds", new[] { table }, CancellationToken.None).AsTask().GetAwaiter().GetResult();
 
@@ -154,20 +146,6 @@ internal static class ActivationProbes
             throw new InvalidOperationException("registry store down");
 
         public ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct) => ValueTask.CompletedTask;
-    }
-
-    private sealed class FailingReader : IColumnMetadataReader
-    {
-        public TargetSqlDialect Dialect => TargetSqlDialect.SqlServer;
-
-        public async IAsyncEnumerable<DbColumnMetadata> ReadAsync(DbConnection connection, TableIdentity table, [EnumeratorCancellation] CancellationToken ct)
-        {
-            await Task.CompletedTask;
-            throw new InvalidOperationException("metadata store down");
-#pragma warning disable CS0162
-            yield break;
-#pragma warning restore CS0162
-        }
     }
 
     private static CompiledSql Compiled(string sql, int? expected, TargetSqlDialect dialect = TargetSqlDialect.DuckDb) =>

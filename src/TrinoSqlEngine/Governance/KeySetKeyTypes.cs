@@ -75,14 +75,22 @@ public static class KeySetKeyTypes
     /// </summary>
     public static bool IsBindablePair(TargetSqlDialect dialect, string? keyType, string? foreignKeyType, string? keyCollation = null, string? foreignKeyCollation = null)
     {
+        var key = Classify(dialect, keyType);
+        var fk = Classify(dialect, foreignKeyType);
+
+        if ((key.Class is KeyTypeClass.NonUnicodeText or KeyTypeClass.UnicodeText ||
+             fk.Class is KeyTypeClass.NonUnicodeText or KeyTypeClass.UnicodeText) &&
+            (keyCollation is null || foreignKeyCollation is null))
+        {
+            return false;
+        }
+
         if (keyCollation is not null && foreignKeyCollation is not null &&
             !string.Equals(keyCollation, foreignKeyCollation, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
-        var key = Classify(dialect, keyType);
-        var fk = Classify(dialect, foreignKeyType);
         return (key.Class, fk.Class) switch
         {
             (KeyTypeClass.WholeNumber, KeyTypeClass.WholeNumber) => key.Rank <= fk.Rank,

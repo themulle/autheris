@@ -82,9 +82,9 @@ public abstract class GovernanceUpgradeTestsBase
     {
         var sql = AddProbeColumnSql;
         return new MigrationStep(
-            8,
+            9,
             StepName,
-            SqlMigrationStep.ComputeChecksum(Engine, 8, StepName, seed + sql),
+            SqlMigrationStep.ComputeChecksum(Engine, 9, StepName, seed + sql),
             ctx =>
             {
                 onApply?.Invoke();
@@ -181,7 +181,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         await RunAsync(cs, GovernanceMigrationMode.Apply, [step]);
 
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 8 AND name = '" + StepName + "' AND checksum = '" + step.Checksum + "'")).ShouldBe(1);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 9 AND name = '" + StepName + "' AND checksum = '" + step.Checksum + "'")).ShouldBe(1);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(1);
         (await CountAsync(cs, $"SELECT COUNT(*) FROM {ConsentsTable}")).ShouldBe(consents);
         (await CountAsync(cs, "SELECT COUNT(*) FROM audit_log_entries")).ShouldBe(auditCount);
@@ -192,7 +192,7 @@ public abstract class GovernanceUpgradeTestsBase
         // A second run and a Verify run are no-ops on the upgraded database.
         await RunAsync(cs, GovernanceMigrationMode.Apply, [step]);
         await RunAsync(cs, GovernanceMigrationMode.Verify, [step]);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(8);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(9);
     });
 
     private const string SeedV1KeyRowsSql =
@@ -435,7 +435,7 @@ public abstract class GovernanceUpgradeTestsBase
         await Task.WhenAll(runs);
 
         applied.ShouldBe(1);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(8);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(9);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(1);
     });
 
@@ -545,7 +545,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         ex.Code.ShouldBe(GovernanceMigrationCodes.Pending);
         (await QueryAsync(cs, FingerprintSql)).ShouldBe(before);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(7);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(8);
     });
 
     [Fact]
@@ -561,7 +561,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         ex.Code.ShouldBe(GovernanceMigrationCodes.Drift);
         ex.Deviations.ShouldContain(d => d.Kind == SchemaDeviationKind.WrongNullability && d.Name == ProbeColumn);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 8")).ShouldBe(0);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 9")).ShouldBe(0);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(0, "the transactional DDL of the step was rolled back");
         (await QueryAsync(cs, FingerprintSql)).ShouldBe(before);
 

@@ -25,7 +25,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 
-public static class CatalogApiEndpoints
+public static partial class CatalogApiEndpoints
 {
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder app)
     {
@@ -245,6 +245,12 @@ public static class CatalogApiEndpoints
 
         // Issue #94: PUT /api/v1/catalog/datasets/{id}/keys (and /api/catalog/datasets/{id}/keys)
         group.MapPut("/datasets/{id}/keys", SetDatasetKeysHandler)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
+
+        // PUT /api/v1/catalog/datasets/{id}/definition
+        group.MapPut("/datasets/{id}/definition", PutDatasetDefinitionHandler)
+        .WithRequestBodyLimit(1024 * 1024)
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogKeyDefinitionChanged);
 
@@ -943,52 +949,3 @@ public static class CatalogApiEndpoints
         return new RequestContext(tenant, sid, roles, httpContext.TraceIdentifier, httpContext.User, Language: language);
     }
 }
-
-public sealed record AdminSetDatasetStateDto(string State, string? Reason = null);
-
-public sealed record DatasetIndexDto(
-    string Name,
-    System.Collections.Generic.IReadOnlyList<string> Columns,
-    bool? IsUnique = null,
-    bool? Unique = null,
-    System.Collections.Generic.IReadOnlyList<string?>? Directions = null);
-
-public sealed record SetDatasetKeysDto(
-    System.Collections.Generic.IReadOnlyList<string>? PrimaryKey = null,
-    System.Collections.Generic.IReadOnlyList<string>? PrimaryKeyColumns = null,
-    System.Collections.Generic.IReadOnlyList<DatasetIndexDto>? Indexes = null,
-    System.Collections.Generic.IReadOnlyList<string?>? PrimaryKeyDirections = null);
-
-
-/// <summary>Issue #111 (C-4): replace the admin-source tags of a dataset.</summary>
-public sealed record SetDatasetTagsDto(System.Collections.Generic.IReadOnlyList<string>? Tags);
-
-/// <summary>Issue #111 (C-4): add and remove admin-source tags.</summary>
-public sealed record ChangeDatasetTagsDto(System.Collections.Generic.IReadOnlyList<string>? Add, System.Collections.Generic.IReadOnlyList<string>? Remove);
-
-/// <summary>Issue #111 (C-4): the requested tier name; parsed by the service, never bound to an enum.</summary>
-public sealed record SetDatasetVisibilityDto(string? Visibility);
-
-/// <summary>Issue #448: the requested privacy settings (minimum group size and non-personal flag).</summary>
-public sealed record SetDatasetPrivacyDto(string? MinGroupSize = null, bool? NonPersonal = null);
-
-public sealed record DatasetTagDto(string Tag, string Source);
-
-public sealed record DatasetCatalogSettingsDto(
-    string DatasetId,
-    System.Collections.Generic.IReadOnlyList<DatasetTagDto> Tags,
-    string Visibility,
-    bool TierEffective,
-    int? MinGroupSize = null,
-    bool? NonPersonal = null,
-    string? Warning = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    System.Collections.Generic.IReadOnlyList<string>? RequiredFilterColumns = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<string>>? RequiredFilterColumnGroups = null);
-
-public sealed record SetDatasetRequiredFiltersDto(
-    System.Collections.Generic.IReadOnlyList<string>? RequiredFilterColumns = null,
-    System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<string>>? RequiredFilterColumnGroups = null);
-
-public sealed record SetRelationCrossDataSourceDto(bool AllowCrossDataSource);

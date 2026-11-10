@@ -189,6 +189,18 @@ WHERE rm.member_sid = @sid";
         var colTexts = CatalogLocalizationPersistence.ParseLocalizedTexts(colTextsJson, colId, logger);
         var metaDict = ParseColumnMetaJson(metaJson);
 
+        string? collation = null;
+        if (reader.FieldCount > o + 16 && !reader.IsDBNull(o + 16))
+        {
+            collation = reader.GetString(o + 16);
+        }
+
+        string? lengthSemantics = null;
+        if (reader.FieldCount > o + 17 && !reader.IsDBNull(o + 17))
+        {
+            lengthSemantics = reader.GetString(o + 17);
+        }
+
         return new TableColumn
         {
             Id = colId,
@@ -197,6 +209,8 @@ WHERE rm.member_sid = @sid";
             DisplayName = colDisplayName,
             DataType = dataType,
             IsSensitive = isSensitive,
+            Collation = collation,
+            LengthSemantics = lengthSemantics,
             Description = desc,
             LongDescription = longDesc,
             Texts = colTexts,
@@ -669,20 +683,21 @@ WHERE rm.member_sid = @sid";
         return (columnsByTable, maskingRulesByTable, corruptedTableIds);
     }
 
-    internal static async Task<(Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource)> ExistingColsByName, Dictionary<string, MaskingRule> ExistingMaskingRules, Dictionary<string, Guid> ColIdByName)> LoadExistingColumnsAndMaskingRulesAsync(
+    internal static async Task<(Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> ExistingColsByName, Dictionary<string, MaskingRule> ExistingMaskingRules, Dictionary<string, Guid> ColIdByName)> LoadExistingColumnsAndMaskingRulesAsync(
         DbConnection conn,
         DbTransaction tx,
         Guid tableId,
         CancellationToken ct)
     {
-        var existingColsByName = new Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource)>(StringComparer.OrdinalIgnoreCase);
+        var existingColsByName = new Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)>(StringComparer.OrdinalIgnoreCase);
         var existingMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
         var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
-                                   m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id
+                                   m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+                                   c.collation, c.length_semantics
                             FROM TABLE_COLUMNS c
                             LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
                             WHERE c.table_id = @tableId";
@@ -698,7 +713,9 @@ WHERE rm.member_sid = @sid";
                 var colDesc = reader.IsDBNull(4) ? null : reader.GetString(4);
                 var colLongDesc = reader.IsDBNull(5) ? null : reader.GetString(5);
                 var colDocSource = reader.IsDBNull(6) ? null : reader.GetString(6);
-                existingColsByName[colName] = (existingId, colDataType, colSens, colDesc, colLongDesc, colDocSource);
+                var colCollation = reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null;
+                var colLengthSemantics = reader.FieldCount > 13 && !reader.IsDBNull(13) ? reader.GetString(13) : null;
+                existingColsByName[colName] = (existingId, colDataType, colSens, colDesc, colLongDesc, colDocSource, colCollation, colLengthSemantics);
                 colIdByName[colName] = existingId;
 
                 if (!reader.IsDBNull(7) && Guid.TryParse(reader.GetString(7), out var maskId))
@@ -792,12 +809,29 @@ WHERE rm.member_sid = @sid";
         string insertColumnSql,
         Guid tableId,
         TableMetadata metadata,
-        Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource)> existingColsByName,
+        Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> existingColsByName,
         Dictionary<string, Guid> colIdByName,
         CancellationToken ct,
         Func<string?, string?, bool>? shouldOverwriteDoc = null)
     {
         var structuralChange = false;
+        if (metadata.ReplaceColumns)
+        {
+            var incomingNames = new HashSet<string>(metadata.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
+            foreach (var (existingName, existingInfo) in existingColsByName)
+            {
+                if (!incomingNames.Contains(existingName))
+                {
+                    structuralChange = true;
+                    await using var delColCmd = conn.CreateCommand();
+                    delColCmd.Transaction = tx;
+                    delColCmd.CommandText = "DELETE FROM COLUMN_MASKING_RULES WHERE table_column_id = @colId; DELETE FROM TABLE_COLUMNS WHERE id = @colId;";
+                    delColCmd.AddBound("@colId", existingInfo.Id.ToString());
+                    await delColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+            }
+        }
+
         foreach (var col in metadata.Columns)
         {
             var colId = col.Id == Guid.Empty ? Guid.NewGuid() : col.Id;
@@ -812,7 +846,9 @@ WHERE rm.member_sid = @sid";
             {
                 colId = existingCol.Id;
                 if (!string.Equals(existingCol.DataType, col.DataType, StringComparison.OrdinalIgnoreCase) ||
-                    existingCol.IsSensitive != col.IsSensitive)
+                    existingCol.IsSensitive != col.IsSensitive ||
+                    !string.Equals(existingCol.Collation, col.Collation, StringComparison.Ordinal) ||
+                    !string.Equals(existingCol.LengthSemantics, col.LengthSemantics, StringComparison.OrdinalIgnoreCase))
                 {
                     structuralChange = true;
                 }
@@ -860,6 +896,8 @@ WHERE rm.member_sid = @sid";
                 insertColCmd.AddBound("@metaJson", (object?)metaJson ?? DBNull.Value);
                 insertColCmd.AddBound("@displayName", (object?)col.DisplayName ?? DBNull.Value);
                 insertColCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(col.Texts) ?? DBNull.Value);
+                insertColCmd.AddBound("@collation", (object?)col.Collation ?? DBNull.Value);
+                insertColCmd.AddBound("@lengthSemantics", (object?)col.LengthSemantics ?? DBNull.Value);
                 await insertColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
