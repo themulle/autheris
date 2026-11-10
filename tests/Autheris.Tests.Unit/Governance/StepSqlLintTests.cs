@@ -145,7 +145,8 @@ public sealed class StepSqlLintTests
                 (3, "tenant_default_removal_and_request_tenant"),
                 (4, "physical_nonunique_indexes"),
                 (5, "catalog_min_group_size"),
-                (6, "remove_breakglass_assignments")
+                (6, "remove_breakglass_assignments"),
+                (7, "orphan_tables")
             ]);
         }
     }
