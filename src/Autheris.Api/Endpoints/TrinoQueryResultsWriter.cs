@@ -59,10 +59,18 @@ public static class TrinoQueryResultsWriter
         return duration < TimeSpan.Zero ? TimeSpan.Zero : duration > TimeSpan.FromSeconds(300) ? TimeSpan.FromSeconds(300) : duration;
     }
 
+    public static Task WriteAsync(
+        HttpContext httpContext,
+        StatementExecutionStatus status,
+        long token,
+        CancellationToken ct = default) =>
+        WriteAsync(httpContext, status, token, null, ct);
+
     public static async Task WriteAsync(
         HttpContext httpContext,
         StatementExecutionStatus status,
         long token,
+        Exception? exception,
         CancellationToken ct = default)
     {
         string reportedState;
@@ -198,13 +206,23 @@ public static class TrinoQueryResultsWriter
 
             string message = failure?.FixedMessage ?? (kind == SqlFailureKind.Canceled ? SqlFailureClassifier.GenericCanceledMessage : SqlFailureClassifier.GenericServerErrorMessage);
 
-            var trinoError = new
+            var trinoError = new Dictionary<string, object?>
             {
-                message,
-                errorCode,
-                errorName,
-                errorType
+                ["message"] = message,
+                ["errorCode"] = errorCode,
+                ["errorName"] = errorName,
+                ["errorType"] = errorType
             };
+
+            var location = ResolveErrorLocation(status, failure, exception);
+            if (location is not null)
+            {
+                trinoError["errorLocation"] = new
+                {
+                    lineNumber = location.Value.LineNumber,
+                    columnNumber = location.Value.ColumnNumber
+                };
+            }
             responseObj["error"] = trinoError;
         }
 
@@ -225,5 +243,35 @@ public static class TrinoQueryResultsWriter
         }
 
         await httpContext.Response.WriteAsJsonAsync(responseObj, /* Status200OK */ ct);
+    }
+
+    internal static (int LineNumber, int ColumnNumber)? ResolveErrorLocation(
+        StatementExecutionStatus? status,
+        SqlFailure? failure,
+        Exception? exception = null)
+    {
+        if (failure?.Line is not null && failure?.Column is not null && failure.Line.Value > 0 && failure.Column.Value > 0)
+        {
+            return (failure.Line.Value, failure.Column.Value);
+        }
+
+        if (status?.ErrorLine is not null && status?.ErrorColumn is not null && status.ErrorLine.Value > 0 && status.ErrorColumn.Value > 0)
+        {
+            return (status.ErrorLine.Value, status.ErrorColumn.Value);
+        }
+
+        if (exception is not null)
+        {
+            var loc = SqlFailureClassifier.ExtractErrorLocation(exception);
+            if (loc is not null) return loc;
+        }
+
+        if (failure?.Exception is not null)
+        {
+            var loc = SqlFailureClassifier.ExtractErrorLocation(failure.Exception);
+            if (loc is not null) return loc;
+        }
+
+        return null;
     }
 }
