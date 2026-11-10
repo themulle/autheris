@@ -404,16 +404,15 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
 
     // ---------- Zugriffsmodell der Doku ----------
     [Fact]
-    public async Task OpenApi_WithoutOpenSchema_RequiresAuth_WithOpenSchema_IsPublic()
+    public async Task OpenApi_Anonymous_RequiresAuth_Authenticated_IsAccessible()
     {
         var anon = _factory.CreateClient();
         var closed = await anon.GetAsync("/odata/v4/$openapi/index");
         ((int)closed.StatusCode).ShouldBeOneOf(401, 403);
 
-        using var open = _factory.WithWebHostBuilder(b => b.UseSetting("Gateway:OpenSchema", "true"));
-        var publicClient = open.CreateClient();
-        (await publicClient.GetAsync("/odata/v4/$openapi/index")).StatusCode.ShouldBe(HttpStatusCode.OK);
-        (await publicClient.GetAsync("/api/v1/queries/openapi.json")).StatusCode.ShouldBe(HttpStatusCode.OK);
+        var admin = Admin();
+        (await admin.GetAsync("/odata/v4/$openapi/index")).StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await admin.GetAsync("/api/v1/queries/openapi.json")).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     // ---------- GraphQL-Schema ist abrufbar (Introspection) ----------

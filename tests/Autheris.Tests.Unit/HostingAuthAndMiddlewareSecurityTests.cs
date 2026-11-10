@@ -196,44 +196,14 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
     }
 
     // =========================================================================
-    // H-02: OpenSchema is a DANGER bypass and no longer opens GraphQL / introspection
+    // H-02: OpenSchema is removed (OD-19)
     // =========================================================================
 
     [Fact]
-    public void H02_OpenSchema_IsListedAsDangerBypass()
+    public void H02_ActiveBypasses_ContainNoOpenSchemaEntry()
     {
-        var options = new GatewayOptions { OpenSchema = true };
-
-        options.HasAnySecurityBypassActive.ShouldBeTrue();
-        options.GetAllActiveBypasses().ShouldContain(b => b.StartsWith("DANGER:open_schema", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void H02_CatalogOpenSchema_IsListedAsDangerBypass()
-    {
-        var options = new GatewayOptions { Catalog = new DataCatalogOptions { OpenSchema = true } };
-
-        options.GetAllActiveBypasses().ShouldContain(b => b.StartsWith("DANGER:open_schema", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void H02_OpenSchema_InProduction_AbortsStartup()
-    {
-        var options = new GatewayOptions { OpenSchema = true, DataMasking = ProdMasking() };
-
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
-
-        ex.Message.ShouldContain("open_schema");
-    }
-
-    [Fact]
-    public void H02_OpenSchema_InDevelopment_IsAllowed()
-    {
-        var options = new GatewayOptions { OpenSchema = true };
-
-        Should.NotThrow(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Development), NoEnvironmentVariables));
+        var options = new GatewayOptions();
+        options.GetAllActiveBypasses().ShouldNotContain(b => b.Contains("open_schema", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

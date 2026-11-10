@@ -132,7 +132,7 @@ Environment variables work as usual, for example `Gateway__Dev__Preset=Standard`
 | Preset | Meaning |
 |---|---|
 | `Standard` (default) | All convenience on; test auth, introspection, Banana Cake Pop and demo data on; security otherwise strict. |
-| `Quickstart` | `Standard` plus `Insecure.warn_allow_all_cors_origins`, `warn_enable_introspection`, `warn_auto_approve_access_requests` and `OpenSchema`. For a first look without setting up consents. The former `Gateway:Profile` key was removed and fails startup. |
+| `Quickstart` | `Standard` plus `Insecure.warn_allow_all_cors_origins`, `warn_enable_introspection` and `warn_auto_approve_access_requests`. For a first look without setting up consents. The former `Gateway:Profile` key was removed and fails startup. |
 | `Strict` | Like `Standard`, but no test auth and no introspection. Use it to reproduce production-like access. |
 
 A preset is a set of concrete values, not hidden logic. What it applied is visible in `/api/dev/info`, in the banner and in the active bypass list.

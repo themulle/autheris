@@ -138,7 +138,6 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<WebApplicationFactor
             b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(dbPath));
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            b.UseSetting("Gateway:OpenSchema", "true");
             b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:CdcWebhooks:Enabled", "true");
             b.UseSetting("Gateway:CdcWebhooks:SubscriptionCacheSeconds", "1");

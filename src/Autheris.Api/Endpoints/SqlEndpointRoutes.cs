@@ -44,19 +44,10 @@ public static class SqlEndpointRoutes
              .RequireAuthorization()
              .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        var openApiEndpoint = group.MapGet("/openapi.json", HandleOpenApiSpec)
+        group.MapGet("/openapi.json", HandleOpenApiSpec)
              .WithName("GetSqlEndpointsOpenApiSpec")
+             .RequireAuthorization()
              .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-
-        if (gatewayOptions?.IsOpenSchemaAllowed != true)
-        {
-            openApiEndpoint.RequireAuthorization();
-        }
-        else
-        {
-            // SEC M-03: explicit opt-out of the authenticated-user fallback policy (OpenSchema docs only)
-            openApiEndpoint.AllowAnonymous();
-        }
 
         group.MapGet("/{name}", HandleGetEndpoint)
              .WithName("ExecuteSqlEndpointGet")

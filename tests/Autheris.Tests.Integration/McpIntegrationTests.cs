@@ -88,15 +88,14 @@ public class McpIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task H02_McpEndpoints_WhenOpenSchemaEnabled_StillRequireAuthentication()
+    public async Task H02_McpEndpoints_RequireAuthentication()
     {
-        // SEC H-02: OpenSchema only opens documentation/catalog routes. MCP (incl. tools/call) stays behind
-        // authentication unless the production-blocked danger_bypass_mcp_auth switch is set.
+        // SEC H-02: MCP (incl. tools/call) stays behind authentication unless the production-blocked
+        // danger_bypass_mcp_auth switch is set.
         using var openFactory = _factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Insecure:danger_bypass_mcp_auth", "false");
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "false");
-            builder.UseSetting("Gateway:OpenSchema", "true");
         });
 
         var client = openFactory.CreateClient();

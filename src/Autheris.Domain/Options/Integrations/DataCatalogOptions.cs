@@ -16,13 +16,6 @@ public sealed class DataCatalogOptions
     public bool ActivateNewTables { get; init; } = false;
 
     /// <summary>
-    /// Open Schema Mode: When true, all users (even without GovernanceAdmin/CatalogReader roles)
-    /// may view the entire data catalog, OpenAPI specifications, indexes and table schemas.
-    /// Default: false (Disabled - Zero-Trust role enforcement active).
-    /// </summary>
-    public bool OpenSchema { get; init; } = false;
-
-    /// <summary>
     /// When true, all authenticated users can view the complete metadata catalog
     /// (for data discovery and access requests). Data access itself remains strictly protected by consents.
     /// Default: false (Zero-Trust: users only see tables in the catalog for which they hold consents).

@@ -179,7 +179,7 @@ public static class GatewayApplicationBuilderExtensions
             .WithOptions((NitroAppOptions nitro) => nitro.Enable = false)
             .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL) // Issue #447
             .WithAudit(AuditLevel.Delegated, AuditEventTypes.TableQuery);
-        // SEC H-02: OpenSchema no longer opens /graphql; only the Development-only anonymous mode does.
+        // SEC H-02: Only the Development-only anonymous mode allows anonymous /graphql.
         // (SEC M-03: with the authenticated-user FallbackPolicy the anonymous mode must opt out explicitly.)
         if (gatewayOptions.IsAnonymousAccessAllowed)
         {

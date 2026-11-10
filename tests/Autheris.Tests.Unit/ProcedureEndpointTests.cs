@@ -1125,7 +1125,7 @@ public class ProcedureEndpointTests
         Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
     }
 
-    // ---------- OpenAPI documentation (OpenSchema mode) ----------
+    // ---------- OpenAPI documentation ----------
 
     private static IProcedureExecutionService VisibleService()
     {
@@ -1165,7 +1165,7 @@ public class ProcedureEndpointTests
         var result = await ProcedureEndpointRoutes.HandleOpenApi(httpContext, new ProcedureCatalog(registry, VisibleService()));
         var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
-        paths.ShouldBeEmpty(); // OQ-12: open-schema anonymous documentation lists no procedure
+        paths.ShouldBeEmpty();
     }
 
     [Fact]

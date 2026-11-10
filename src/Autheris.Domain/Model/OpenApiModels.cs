@@ -12,7 +12,6 @@ public sealed record OpenApiDocumentOptions
     public string Version { get; init; } = "v1";
     public string Description { get; init; } = "High-performance OData v4 and Zero-Trust data exposure generated dynamically from table metadata and catalog contracts.";
     public string ServerUrl { get; init; } = "/odata/v4";
-    public bool OpenSchema { get; init; } = false;
 
     /// <summary>
     /// Lists the stored procedure spec (/api/v1/procedures/openapi.json) in the index. The route only exists when

@@ -146,15 +146,14 @@ public static class DevConfiguration
     }
 
     /// <summary>
-    /// Insecure/OpenSchema keys (relative to <c>Gateway:</c>) that the Quickstart preset sets when they are not
+    /// Insecure keys (relative to <c>Gateway:</c>) that the Quickstart preset sets when they are not
     /// configured explicitly. They show up under their real names in <c>GetAllActiveBypasses</c>.
     /// </summary>
     public static IReadOnlyList<string> QuickstartExpansion { get; } =
     [
         "Insecure:warn_allow_all_cors_origins",
         "Insecure:warn_enable_introspection",
-        "Insecure:warn_auto_approve_access_requests",
-        "OpenSchema"
+        "Insecure:warn_auto_approve_access_requests"
     ];
 
     private static bool SameBool(string? a, string? b) =>

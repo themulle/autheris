@@ -52,7 +52,6 @@ public sealed class DevSwitchTests
         options.GraphQL.EnableIntrospection.ShouldBeTrue();
         options.GovernanceDb.SeedDemoData.ShouldBe(true);
         options.IsAllCorsAllowed.ShouldBeFalse();
-        options.IsOpenSchemaAllowed.ShouldBeFalse();
     }
 
     [Fact]
@@ -75,7 +74,6 @@ public sealed class DevSwitchTests
         options.Insecure.warn_allow_all_cors_origins.ShouldBeTrue();
         options.Insecure.warn_enable_introspection.ShouldBeTrue();
         options.Insecure.warn_auto_approve_access_requests.ShouldBeTrue();
-        options.OpenSchema.ShouldBeTrue();
         options.GetAllActiveBypasses().ShouldContain("WARN:warn_allow_all_cors_origins");
         options.GetAllActiveBypasses().ShouldContain("DANGER:warn_auto_approve_access_requests");
         report.Applied.Keys.ShouldContain("Gateway:Insecure:warn_allow_all_cors_origins");

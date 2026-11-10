@@ -121,8 +121,6 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     {
         new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true } }
             .GetActiveDangerBypasses().ShouldContain("DANGER:danger_bypass_consent_checks");
-        new GatewayOptions { OpenSchema = true }
-            .GetActiveDangerBypasses().ShouldContain(b => b.StartsWith("DANGER:open_schema", StringComparison.Ordinal));
         new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_websql_governance = true } }
             .GetActiveDangerBypasses().ShouldContain("DANGER:danger_bypass_websql_governance");
     }

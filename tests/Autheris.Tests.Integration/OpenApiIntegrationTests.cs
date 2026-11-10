@@ -232,29 +232,24 @@ public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactor
     }
 
     [Fact]
-    public async Task OpenApiEndpoints_WhenOpenSchemaEnabled_AllowsAnonymousAccess()
+    public async Task OpenApiEndpoints_WhenAnonymous_RequireAuthorization()
     {
-        using var openFactory = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Gateway:OpenSchema", "true");
-        });
-
-        var anonymousClient = openFactory.CreateClient();
+        var anonymousClient = _factory.CreateClient();
 
         // 1. Root OpenAPI
         var openApiResponse = await anonymousClient.GetAsync("/odata/v4/$openapi");
-        openApiResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        openApiResponse.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
 
         // 2. OpenAPI Index
         var indexResponse = await anonymousClient.GetAsync("/odata/v4/$openapi/index");
-        indexResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        indexResponse.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
 
         // 3. Domain OpenAPI
         var domainResponse = await anonymousClient.GetAsync("/odata/v4/finance/openapi.json");
-        domainResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        domainResponse.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
 
         // 4. Standalone Schema
         var schemaResponse = await anonymousClient.GetAsync("/odata/v4/$openapi/schemas/finance/dbo/finance_table_1");
-        schemaResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        schemaResponse.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 }

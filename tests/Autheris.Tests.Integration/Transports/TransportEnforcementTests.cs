@@ -91,7 +91,6 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-                b.UseSetting("Gateway:OpenSchema", "true");
                 b.UseSetting("Gateway:Rebac:Enabled", "false");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":Provider", "Sqlite");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":ConnectionString", $"Data Source={sPath}");
@@ -778,6 +777,8 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     {
         await EnsureSeededAsync();
         using var client = Client();
+        client.DefaultRequestHeaders.Remove("X-Test-Roles");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,Reader");
 
         SourceSAllows("OData");
         (await BodyAsync(await client.GetAsync("/odata/v4/$openapi"))).ShouldContain("s_items");

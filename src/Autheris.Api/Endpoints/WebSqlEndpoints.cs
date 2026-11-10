@@ -35,19 +35,11 @@ public static partial class WebSqlEndpoints
         // Issue #447: the ingress transport comes from endpoint metadata only.
         var webSql = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.WebSql);
 
-        // OpenAPI description of the endpoint (documentation only, no data). Like the other specs it is anonymous only
-        // in OpenSchema mode.
-        var openApi = webSql.MapGet("/api/v1/sql/openapi.json", () => Results.Json(BuildOpenApiSpec(gatewayOptions)))
+        // OpenAPI description of the endpoint (documentation only, no data).
+        webSql.MapGet("/api/v1/sql/openapi.json", () => Results.Json(BuildOpenApiSpec(gatewayOptions)))
             .WithName("GetWebSqlOpenApiSpec")
+            .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        if (gatewayOptions?.IsOpenSchemaAllowed == true)
-        {
-            openApi.AllowAnonymous();
-        }
-        else
-        {
-            openApi.RequireAuthorization();
-        }
 
         webSql.MapPost("/api/v1/sql", HandleWebSqlRequest)
            .WithName("ExecuteGovernedWebSqlV1")

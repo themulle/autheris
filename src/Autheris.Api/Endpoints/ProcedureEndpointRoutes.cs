@@ -41,22 +41,13 @@ public static class ProcedureEndpointRoutes
 
         group.MapGet("/", HandleList).WithName("ListProcedureEndpoints").RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        // OpenSchema (documentation mode) keeps the document reachable anonymously, but it then lists no procedure: visibility
-        // depends on the caller's identity and consent.
-        var openApi = group.MapGet("/openapi.json",
+        group.MapGet("/openapi.json",
                 (HttpContext http, IProcedureCatalog catalog,
                     Microsoft.Extensions.Options.IOptions<GatewayOptions> options) =>
                     HandleOpenApi(http, catalog, options))
             .WithName("GetProcedureEndpointsOpenApiSpec")
+            .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        if (gatewayOptions.IsOpenSchemaAllowed != true)
-        {
-            openApi.RequireAuthorization();
-        }
-        else
-        {
-            openApi.AllowAnonymous();
-        }
 
         group.MapGet("/{name}", HandleGet).WithName("ExecuteProcedureGet").RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
         group.MapPost("/{name}", HandlePost).WithName("ExecuteProcedurePost").RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
