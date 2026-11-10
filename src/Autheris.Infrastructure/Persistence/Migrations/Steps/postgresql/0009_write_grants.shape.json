@@ -1,0 +1,53 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "consent_write_rules",
+      "newTable": {
+        "name": "consent_write_rules",
+        "columns": [
+          { "name": "id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "operation", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "row_scope", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "row_filter_json", "type": "TEXT", "family": "string", "nullable": true },
+          { "name": "max_rows_per_statement", "type": "BIGINT", "family": "integer", "nullable": true },
+          { "name": "columns_json", "type": "TEXT", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "access_profile_write_rules",
+      "newTable": {
+        "name": "access_profile_write_rules",
+        "columns": [
+          { "name": "id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "profile_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "table_identifier", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "operation", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "row_scope", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "row_filter_json", "type": "TEXT", "family": "string", "nullable": true },
+          { "name": "max_rows_per_statement", "type": "BIGINT", "family": "integer", "nullable": true },
+          { "name": "columns_json", "type": "TEXT", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addColumn",
+      "table": "consent_requests",
+      "column": { "name": "requested_write_rules_json", "type": "TEXT", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "table_columns",
+      "column": { "name": "write_protected", "type": "BOOLEAN", "family": "boolean", "nullable": false }
+    }
+  ]
+}

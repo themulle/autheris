@@ -12,6 +12,7 @@ public sealed class AccessProfile
     public MaskingPolicyMode MaskingMode { get; init; } = MaskingPolicyMode.Default;
     public List<string> TargetTables { get; init; } = []; // z. B. ["*.*"] oder ["tem.gps_position", "md.*"]
     public string? RowFilterPredicate { get; set; }      // z. B. "status != 'DELIVERED'"
+    public IReadOnlyList<AccessProfileWriteRule> WriteRules { get; init; } = [];
     /// <summary>the typed assignments (users, groups, roles) with their approvals and expiry. They are the only source of who holds a profile (O-5d: plain subject lists were removed).</summary>
     public List<AccessProfileAssignment> Assignments { get; init; } = [];
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
@@ -109,5 +110,18 @@ public sealed class AccessProfile
             return domainMatch && schemaMatch && tableMatch;
         }
         return false;
+    }
+
+    public void Validate()
+    {
+        if (WriteRules.Count > 0 && HasWildcardPattern)
+        {
+            throw new InvalidOperationException($"Access profile '{ProfileId}' with write rules cannot contain wildcard target tables.");
+        }
+
+        foreach (var rule in WriteRules)
+        {
+            rule.Validate();
+        }
     }
 }

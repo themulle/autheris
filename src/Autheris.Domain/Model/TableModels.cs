@@ -220,6 +220,7 @@ public sealed class TableColumn
     public string? Collation { get; init; }
     public string? LengthSemantics { get; init; }
     public bool IsSensitive { get; init; }
+    public bool WriteProtected { get; init; }
     public string? Description { get; init; }
     public string? LongDescription { get; init; }
     public LocalizedTexts Texts { get; init; } = LocalizedTexts.Empty;
