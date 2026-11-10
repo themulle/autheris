@@ -74,6 +74,11 @@ public static class SqlCompilerErrorMapper
                                 break;
                             }
                         }
+
+                        if (found.Line is null && SqlFailureClassifier.ExtractErrorLocation(exception) is { } extLoc)
+                        {
+                            found = found with { Line = extLoc.LineNumber, Column = extLoc.ColumnNumber };
+                        }
                     }
                     mapping = found;
                     return true;

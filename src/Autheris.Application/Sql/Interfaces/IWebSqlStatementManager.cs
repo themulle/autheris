@@ -24,6 +24,8 @@ public sealed record StatementExecutionStatus(
 {
     public string? ErrorMessage => Failure?.FixedMessage;
     public string? ErrorCode => Failure?.Code;
+    public int? ErrorLine => Failure?.Line;
+    public int? ErrorColumn => Failure?.Column;
 }
 
 /// <summary>

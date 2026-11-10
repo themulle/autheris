@@ -138,7 +138,7 @@ public static partial class TrinoProtocolEndpoints
         catch (Exception ex)
         {
             var failure = SqlFailureClassifier.Classify(ex);
-            await TrinoQueryResultsWriter.WriteAsync(httpContext, new StatementExecutionStatus(GenerateStatementId(), "FAILED", null, null, 0, Failure: failure), 0, ct);
+            await TrinoQueryResultsWriter.WriteAsync(httpContext, new StatementExecutionStatus(GenerateStatementId(), "FAILED", null, null, 0, Failure: failure), 0, ex, ct);
         }
     }
 
@@ -182,7 +182,7 @@ public static partial class TrinoProtocolEndpoints
         catch (Exception ex)
         {
             var failure = SqlFailureClassifier.Classify(ex);
-            await TrinoQueryResultsWriter.WriteAsync(httpContext, new StatementExecutionStatus(statementId, "FAILED", null, null, 0, Failure: failure), token, ct);
+            await TrinoQueryResultsWriter.WriteAsync(httpContext, new StatementExecutionStatus(statementId, "FAILED", null, null, 0, Failure: failure), token, ex, ct);
         }
     }
 
