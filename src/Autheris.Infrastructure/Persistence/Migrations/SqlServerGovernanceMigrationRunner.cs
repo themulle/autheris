@@ -22,7 +22,8 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
             MigrationStep.ComputeChecksum("sqlserver:0001:baseline_governance_schema:v1"),
             ctx =>
             {
-                SqlServerBaselineSchema.Apply((SqlConnection)ctx.Connection);
+                var sqlConn = (SqlConnection)Autheris.Infrastructure.Persistence.Dialects.SqlServerGovernanceDialect.Unwrap(ctx.Connection);
+                SqlServerBaselineSchema.Apply(sqlConn);
                 return Task.CompletedTask;
             }),
         .. SqlMigrationStep.LoadEmbedded("sqlserver").Select(step => step.ToMigrationStep())
