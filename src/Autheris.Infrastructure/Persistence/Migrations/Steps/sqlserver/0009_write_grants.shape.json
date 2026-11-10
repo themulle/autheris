@@ -1,0 +1,53 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "CONSENT_WRITE_RULES",
+      "newTable": {
+        "name": "CONSENT_WRITE_RULES",
+        "columns": [
+          { "name": "id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "operation", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "row_scope", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "row_filter_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "max_rows_per_statement", "type": "BIGINT", "family": "integer", "nullable": true },
+          { "name": "columns_json", "type": "NVARCHAR", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "ACCESS_PROFILE_WRITE_RULES",
+      "newTable": {
+        "name": "ACCESS_PROFILE_WRITE_RULES",
+        "columns": [
+          { "name": "id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "profile_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "table_identifier", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "operation", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "row_scope", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "row_filter_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "max_rows_per_statement", "type": "BIGINT", "family": "integer", "nullable": true },
+          { "name": "columns_json", "type": "NVARCHAR", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addColumn",
+      "table": "CONSENT_REQUESTS",
+      "column": { "name": "requested_write_rules_json", "type": "NVARCHAR", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "TABLE_COLUMNS",
+      "column": { "name": "write_protected", "type": "BIT", "family": "boolean", "nullable": false }
+    }
+  ]
+}

@@ -107,6 +107,7 @@ public sealed class Consent
 
     public IReadOnlyList<ConsentColumnRule> ColumnRules { get; set; } = Array.Empty<ConsentColumnRule>();
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
+    public IReadOnlyList<WriteRule> WriteRules { get; init; } = [];
     public string? RowFilterCondition { get; init; }
 
     /// <summary>expiry after the read-time clamp of legacy individual grants (never later than<see cref="ValidTo"/>).</summary>
@@ -133,6 +134,11 @@ public sealed class Consent
             {
                 throw new InvalidOperationException($"Consent {Id}: RoleId or RoleName must be specified when GranteeType is Role.");
             }
+
+            if (WriteRules.Count > 0)
+            {
+                throw new InvalidOperationException($"Consent {Id}: Role grantees cannot hold write rules.");
+            }
         }
         else
         {
@@ -140,6 +146,16 @@ public sealed class Consent
             {
                 throw new InvalidOperationException($"Consent {Id}: GranteeSid must be specified when GranteeType is User, Group or ServicePrincipal.");
             }
+        }
+
+        if (Effect == ConsentEffect.Deny && WriteRules.Count > 0)
+        {
+            throw new InvalidOperationException($"Consent {Id}: Deny consents cannot hold write rules.");
+        }
+
+        foreach (var rule in WriteRules)
+        {
+            rule.Validate();
         }
 
         ConsentRowFilterShape.Validate(RowFilters);
