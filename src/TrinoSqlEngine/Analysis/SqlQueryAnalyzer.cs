@@ -14,6 +14,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     private readonly List<JoinColumnReference> _joinColumnReferences = new();
     private readonly List<FilterColumnReference> _filterColumnReferences = new();
     private readonly List<FilterColumnReference> _windowColumnReferences = new();
+    private readonly List<FilterColumnReference> _groupByColumnReferences = new();
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
     private readonly List<string> _functionCalls = new();
     private readonly HashSet<string> _seenFunctionCalls = new(StringComparer.Ordinal);
@@ -109,7 +110,8 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             SetOperationCount = _setOperationCount,
             HasRootOrderBy = _hasRootOrderBy,
             HasRootOffset = _hasRootOffset,
-            CrossJoins = _crossJoins.ToArray()
+            CrossJoins = _crossJoins.ToArray(),
+            GroupByColumnReferences = _groupByColumnReferences.Count > 0 ? _groupByColumnReferences.ToArray() : null
         };
     }
 
@@ -376,6 +378,11 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         if (context.having != null)
         {
             ExtractFilterColumnReferences(context.having, _filterColumnReferences);
+        }
+
+        if (context.groupBy() != null)
+        {
+            ExtractFilterColumnReferences(context.groupBy(), _groupByColumnReferences);
         }
 
         if (_isRootQuerySpecification && _currentSubqueryDepth == 0)

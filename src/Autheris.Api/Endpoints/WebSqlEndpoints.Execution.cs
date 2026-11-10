@@ -193,6 +193,7 @@ public static partial class WebSqlEndpoints
             pageWindow = new SqlPageWindow(0, pageReq.Size.Value, 1);
         }
 
+        IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints = null;
         GovernedSqlPageOutcome? pageOutcome = null;
         var governedRequest = new GovernedSqlQueryRequest(
             sql,
@@ -202,7 +203,8 @@ public static partial class WebSqlEndpoints
             RowLimit: rowLimit,
             Page: pageWindow,
             NextToken: nextTok,
-            OnPageOutcome: isPagingRequested ? outcome => pageOutcome = outcome : null);
+            OnPageOutcome: isPagingRequested ? outcome => pageOutcome = outcome : null,
+            OnIndexHints: hints => indexHints = hints);
 
         if (waitTimeout != null)
         {
@@ -374,6 +376,25 @@ public static partial class WebSqlEndpoints
             if (!string.IsNullOrEmpty(pageOutcome?.PagingUnavailable))
             {
                 writer.WriteString("pagingUnavailable", pageOutcome.PagingUnavailable);
+            }
+
+            if (indexHints is { Count: > 0 })
+            {
+                writer.WriteStartArray("indexHints");
+                foreach (var hint in indexHints)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("table", hint.Table);
+                    writer.WriteString("reason", hint.Reason);
+                    writer.WriteStartArray("helpfulIndexColumns");
+                    foreach (var col in hint.HelpfulIndexColumns)
+                    {
+                        writer.WriteStringValue(col);
+                    }
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
             }
 
             writer.WriteEndObject();

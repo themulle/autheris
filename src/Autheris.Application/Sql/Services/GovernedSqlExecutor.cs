@@ -136,9 +136,11 @@ public sealed partial class GovernedSqlExecutor
 
         GovernedSqlPageOutcome? pageOutcome = null;
         if (request.Page != null || request.NextToken != null)
-        {
             request = request with { OnPageOutcome = outcome => pageOutcome = outcome };
-        }
+
+        IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints = null;
+        if (request.OnIndexHints == null)
+            request = request with { OnIndexHints = hints => indexHints = hints };
 
         await ExecuteCoreAsync(
             request,
@@ -178,17 +180,9 @@ public sealed partial class GovernedSqlExecutor
         }
 
         return new GovernedSqlResult(
-            OriginalSql: request.Sql,
-            Columns: columns.AsReadOnly(),
-            Rows: rows.AsReadOnly(),
-            RowCount: rows.Count,
-            ElapsedMilliseconds: sw.ElapsedMilliseconds,
-            Truncated: isTruncated,
-            ColumnDescriptions: columnDescriptions,
-            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled,
-            Page: pageOutcome?.Page,
-            Next: pageOutcome?.NextToken,
-            PagingUnavailable: pageOutcome?.PagingUnavailable);
+            request.Sql, columns.AsReadOnly(), rows.AsReadOnly(), rows.Count, sw.ElapsedMilliseconds,
+            isTruncated, columnDescriptions, !_options.Value.IsColumnMaskingDisabled,
+            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints);
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(
@@ -439,7 +433,12 @@ public sealed partial class GovernedSqlExecutor
             // Issue #447 C1: the resolved source of the rewrite, before the ALLOW audit record and before any connection exists.
             await _transportGate.EnsureCatalogSourceAsync(dsName, ct).ConfigureAwait(false);
 
-            admission ??= await AdmitCostAsync(request, user, rewrite.Metadata, ct).ConfigureAwait(false);
+            admission ??= await AdmitCostAsync(request, user, rewrite.Metadata, rewrite.IndexHints, ct).ConfigureAwait(false);
+
+            if (rewrite.IndexHints is { Count: > 0 })
+            {
+                request.OnIndexHints?.Invoke(rewrite.IndexHints);
+            }
 
             var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
 

@@ -20,7 +20,8 @@ public sealed partial class GovernedSqlExecutor
 
     private int CalculateEstimatedCost(
         GovernedSqlQueryRequest request,
-        SqlQueryMetadata? metadata)
+        SqlQueryMetadata? metadata,
+        IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints = null)
     {
         if (metadata == null) return 1;
 
@@ -29,7 +30,7 @@ public sealed partial class GovernedSqlExecutor
         var analysisOpts = new QueryAnalysisOptions();
         var webSqlCost = _options.Value.WebSql?.Cost ?? new WebSqlCostOptions();
 
-        return SqlStatementCostEstimator.EstimateCost(
+        int cost = SqlStatementCostEstimator.EstimateCost(
             metadata,
             rowLimit,
             costOpts,
@@ -38,12 +39,24 @@ public sealed partial class GovernedSqlExecutor
             pageOffset: request.PageOffset ?? 0,
             isPaged: request.IsPaged,
             maxAffectedRows: _options.Value.WebSql?.MaxAffectedRows ?? 1000);
+
+        if (request.IsPaged && indexHints is { Count: > 0 } && costOpts.UnindexedRootListSurchargeMultiplier > 1.0)
+        {
+            double factor = (costOpts.RowCostFactor <= 0.0) ? 0.01 : costOpts.RowCostFactor;
+            long effectiveRows = rowLimit.DefaultMaxRows;
+            long rTerm = (long)Math.Ceiling(factor * (double)effectiveRows);
+            long surchargedRTerm = (long)Math.Ceiling(rTerm * costOpts.UnindexedRootListSurchargeMultiplier);
+            cost = (int)Math.Clamp((long)cost + (surchargedRTerm - rTerm), 1, int.MaxValue);
+        }
+
+        return cost;
     }
 
     private async Task<QueryCostAdmission?> AdmitCostAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         SqlQueryMetadata? metadata,
+        IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? indexHints,
         CancellationToken ct)
     {
         bool isMeteredTransport = SqlTransports.IsCostMetered(request.Transport);
@@ -63,7 +76,7 @@ public sealed partial class GovernedSqlExecutor
             return null;
         }
 
-        int cEst = CalculateEstimatedCost(request, metadata);
+        int cEst = CalculateEstimatedCost(request, metadata, indexHints);
         int maxCost = _options.Value.WebSql?.Cost?.MaxStatementCost ?? 2000;
 
         QueryCostAdmission admission;

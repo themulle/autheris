@@ -85,7 +85,8 @@ public sealed record GovernedSqlQueryRequest(
     int? TimeoutSeconds = null,
     SqlPageWindow? Page = null,
     string? NextToken = null,
-    Action<GovernedSqlPageOutcome>? OnPageOutcome = null)
+    Action<GovernedSqlPageOutcome>? OnPageOutcome = null,
+    Action<IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>>? OnIndexHints = null)
 {
     /// <summary>
     /// Issue #280: parameters whose names the gateway generated for a planned read (internal; never from client input). The setter is
@@ -114,7 +115,8 @@ public sealed record GovernedSqlResult(
     [property: System.Text.Json.Serialization.JsonIgnore] bool InDbColumnMaskingExecuted = false,
     GovernedSqlPageResponse? Page = null,
     string? Next = null,
-    string? PagingUnavailable = null);
+    string? PagingUnavailable = null,
+    IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null);
 
 public interface IGovernedSqlExecutionService
 {
