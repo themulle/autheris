@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -33,20 +34,16 @@ public sealed class GdprDisclosureReportTests
         TargetColumn = "salary"
     };
 
-    private static (LineageImpactAnalyzerService Sut, IAuditLogRepository Audit) Create(IReadOnlyList<AuditLogEntry> entries, int? cap = null)
+    private static (GdprDisclosureReportService Sut, IAuditLogRepository Audit) Create(IReadOnlyList<AuditLogEntry> entries, int? cap = null)
     {
         var audit = Substitute.For<IAuditLogRepository>();
         audit.QueryAuditLogsAsync(Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(call => Task.FromResult<IReadOnlyList<AuditLogEntry>>(entries.Take(call.ArgAt<int>(3)).ToList()));
-        var sut = new LineageImpactAnalyzerService(
-            Substitute.For<IConsentRepository>(),
+        var sut = new GdprDisclosureReportService(
             Substitute.For<IDataOwnershipRepository>(),
-            Substitute.For<ILineageGraphStore>(),
             audit,
             Substitute.For<ITableMetadataRepository>(),
-            NullLogger<LineageImpactAnalyzerService>.Instance,
-            consumerAggregationRepo: null,
-            gdprReportOptions: cap == null ? null : Options.Create(new GdprReportOptions { MaxAuditEvents = cap.Value }));
+            cap == null ? null : Options.Create(new GdprReportOptions { MaxAuditEvents = cap.Value }));
         return (sut, audit);
     }
 

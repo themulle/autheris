@@ -3,6 +3,7 @@ Analytics
 Audit
 Catalog
 Common
+Compliance
 ConsentRequests
 DataSources
 Docs

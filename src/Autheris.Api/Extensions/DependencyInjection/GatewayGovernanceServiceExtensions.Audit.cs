@@ -11,6 +11,7 @@ using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Api.Security;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.Policy.Services;
@@ -53,6 +54,7 @@ public static partial class GatewayGovernanceServiceExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddScoped<ILineageImpactAnalyzerService, LineageImpactAnalyzerService>();
+        services.AddScoped<IGdprDisclosureReportService, GdprDisclosureReportService>();
         services.AddSingleton<IGdprAuditReportExporter, GdprAuditReportPdfExporter>();
         services.AddSingleton<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>(sp =>
         {

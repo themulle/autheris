@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -198,7 +199,8 @@ public class TableDownstreamConsumersAndGdprTests
             ct: Arg.Any<CancellationToken>())
             .Returns(auditLogs);
 
-        var report = await _sut.GetGdprDataDisclosureReportAsync(table, subjectSid: null, timeWindowDays: 365);
+        var gdprService = new GdprDisclosureReportService(_ownershipRepo, _auditRepo, _tableMetadataRepo);
+        var report = await gdprService.GetGdprDataDisclosureReportAsync(table, subjectSid: null, timeWindowDays: 365);
 
         report.ShouldNotBeNull();
         report.TargetTable.ShouldBe("healthcare.dbo.patient_diagnoses");

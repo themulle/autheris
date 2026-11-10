@@ -15,6 +15,7 @@ using Autheris.Application.Analytics;
 using Autheris.Application.DataSources.Changes;
 using Autheris.Application.DataSources.Services;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Application.Runtime.Jobs.Interfaces;
 using Autheris.Application.Runtime.Jobs.Services;
@@ -316,13 +317,10 @@ public sealed class Batch5SecurityTestsA
         ownershipRepo.IsAuthorizedApproverForTableAsync(table, callerSid, Arg.Any<CancellationToken>())
             .Returns(false);
 
-        var lineageService = new LineageImpactAnalyzerService(
-            Substitute.For<IConsentRepository>(),
+        var gdprService = new GdprDisclosureReportService(
             ownershipRepo,
-            Substitute.For<ILineageGraphStore>(),
             Substitute.For<IAuditLogRepository>(),
-            Substitute.For<ITableMetadataRepository>(),
-            NullLogger<LineageImpactAnalyzerService>.Instance);
+            Substitute.For<ITableMetadataRepository>());
 
         var callerContext = new CallerSecurityContext(
             callerSid,
@@ -334,11 +332,11 @@ public sealed class Batch5SecurityTestsA
 
         // Act & Assert: Denied when attempting to query report for a foreign subject
         await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            lineageService.GetGdprDataDisclosureReportAsync(table, foreignSubjectSid, 365, callerContext, CancellationToken.None));
+            gdprService.GetGdprDataDisclosureReportAsync(table, foreignSubjectSid, 365, callerContext, CancellationToken.None));
 
         // Also denied when requesting an unscoped / all-subjects report without table authorization
         await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            lineageService.GetGdprDataDisclosureReportAsync(table, subjectSid: null, 365, callerContext, CancellationToken.None));
+            gdprService.GetGdprDataDisclosureReportAsync(table, subjectSid: null, 365, callerContext, CancellationToken.None));
     }
 
     private async Task Case_qx32_5cq2_2()
@@ -376,13 +374,10 @@ public sealed class Batch5SecurityTestsA
         ownershipRepo.IsAuthorizedApproverForTableAsync(table, callerSid, Arg.Any<CancellationToken>())
             .Returns(false); // Not owner
 
-        var lineageService = new LineageImpactAnalyzerService(
-            Substitute.For<IConsentRepository>(),
+        var gdprService = new GdprDisclosureReportService(
             ownershipRepo,
-            Substitute.For<ILineageGraphStore>(),
             auditRepo,
-            Substitute.For<ITableMetadataRepository>(),
-            NullLogger<LineageImpactAnalyzerService>.Instance);
+            Substitute.For<ITableMetadataRepository>());
 
         var callerContext = new CallerSecurityContext(
             callerSid,
@@ -393,7 +388,7 @@ public sealed class Batch5SecurityTestsA
             IsClusterAdmin: false);
 
         // Act: Caller requests report for themselves
-        var report = await lineageService.GetGdprDataDisclosureReportAsync(table, callerSid, 365, callerContext, CancellationToken.None);
+        var report = await gdprService.GetGdprDataDisclosureReportAsync(table, callerSid, 365, callerContext, CancellationToken.None);
 
         // Assert: The report disclosed recipients must ONLY contain callerSid, never otherActorSid
         report.DisclosedRecipients.ShouldNotBeEmpty();
@@ -410,7 +405,7 @@ public sealed class Batch5SecurityTestsA
             authScheme: ClusterAdminPolicy.ForwardAuthScheme, // "ForwardAuth"
             roles: ["ClusterAdmin"]);
 
-        var lineageService = Substitute.For<ILineageImpactAnalyzerService>();
+        var gdprService = Substitute.For<IGdprDisclosureReportService>();
         var pdfExporter = Substitute.For<IGdprAuditReportExporter>();
 
         // Act: Invoke GDPR PDF export with a foreign subjectSid
@@ -420,7 +415,7 @@ public sealed class Batch5SecurityTestsA
             table: "salary",
             subjectSid: "S-1-5-21-FOREIGN-USER",
             timeWindowDays: 365,
-            lineageService: lineageService,
+            gdprService: gdprService,
             pdfExporter: pdfExporter,
             context: context,
             ct: CancellationToken.None);

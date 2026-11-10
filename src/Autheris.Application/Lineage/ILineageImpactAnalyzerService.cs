@@ -28,16 +28,5 @@ public interface ILineageImpactAnalyzerService
         int timeWindowDays = 30,
         CallerSecurityContext? callerContext = null,
         CancellationToken ct = default);
-
-    /// <summary>
-    /// Erstellt eine DSGVO-Art.-15-Auskunft (Right of Access) über alle Empfänger und Kategorien von Empfängern,
-    /// die im angegebenen Zeitraum Daten einer Tabelle oder eines Betroffenen über das Gateway abgefragt haben.
-    /// </summary>
-    Task<GdprDisclosureReport> GetGdprDataDisclosureReportAsync(
-        TableIdentifier? table,
-        Sid? subjectSid,
-        int timeWindowDays = 365,
-        CallerSecurityContext? callerContext = null,
-        CancellationToken ct = default);
 }
 

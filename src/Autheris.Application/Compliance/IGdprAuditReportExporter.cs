@@ -1,4 +1,4 @@
-namespace Autheris.Application.Common.Interfaces;
+namespace Autheris.Application.Compliance;
 
 using System;
 using Autheris.Domain.Model;

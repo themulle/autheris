@@ -28,6 +28,8 @@ src/Autheris.Application/Catalog/Search/CatalogVisibilityCache.cs|3
 src/Autheris.Application/Catalog/Services/CatalogDiscoveryService.cs|1
 src/Autheris.Application/Catalog/Services/DatasourceTestingService.cs|1
 src/Autheris.Application/Common/Serialization/ParquetExportService.cs|1
+src/Autheris.Application/Compliance/GdprAuditReportPdfExporter.cs|2
+src/Autheris.Application/Compliance/GdprDisclosureReportService.cs|2
 src/Autheris.Application/ConsentRequests/ConsentRequestService.cs|1
 src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.Cursors.cs|2
 src/Autheris.Application/Docs/Services/MarkdownDocIngestor.cs|1
@@ -53,8 +55,7 @@ src/Autheris.Application/Identity/Providers/GraphRoleProvider.cs|4
 src/Autheris.Application/Identity/RoleResolver.cs|1
 src/Autheris.Application/Identity/Services/IdentityDeprovisioningService.cs|1
 src/Autheris.Application/Identity/Services/ScimService.cs|8
-src/Autheris.Application/Lineage/GdprAuditReportPdfExporter.cs|2
-src/Autheris.Application/Lineage/LineageImpactAnalyzerService.cs|6
+src/Autheris.Application/Lineage/LineageImpactAnalyzerService.cs|4
 src/Autheris.Application/Mcp/Services/AiDataGuardrailService.Helpers.cs|2
 src/Autheris.Application/Mcp/Services/AiDataGuardrailService.cs|3
 src/Autheris.Application/Mcp/Services/GoldenQueryService.cs|3

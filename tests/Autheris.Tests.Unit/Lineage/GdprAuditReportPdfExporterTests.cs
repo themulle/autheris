@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Audit;
+using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Model;
 using Shouldly;

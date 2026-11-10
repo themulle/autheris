@@ -14,6 +14,7 @@ using Autheris.Application.Governance;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Paging;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -296,10 +297,10 @@ public static partial class GovernanceEndpoints
             string? table,
             string? subjectSid,
             int? timeWindowDays,
-            ILineageImpactAnalyzerService lineageService,
+            IGdprDisclosureReportService gdprService,
             IGdprAuditReportExporter pdfExporter,
             HttpContext context,
-            CancellationToken ct) => ExportGdprPdfAsync(domain, schema, table, subjectSid, timeWindowDays, lineageService, pdfExporter, context, ct))
+            CancellationToken ct) => ExportGdprPdfAsync(domain, schema, table, subjectSid, timeWindowDays, gdprService, pdfExporter, context, ct))
           .RequireAuthorization()
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditExport);
 
@@ -318,7 +319,7 @@ public static partial class GovernanceEndpoints
         string? table,
         string? subjectSid,
         int? timeWindowDays,
-        ILineageImpactAnalyzerService lineageService,
+        IGdprDisclosureReportService gdprService,
         IGdprAuditReportExporter pdfExporter,
         HttpContext context,
         CancellationToken ct)
@@ -364,17 +365,17 @@ public static partial class GovernanceEndpoints
         GdprDisclosureReport report;
         try
         {
-            report = await lineageService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays ?? 365, callerContext, ct);
+            report = await gdprService.GetGdprDataDisclosureReportAsync(tableId, effectiveSid, timeWindowDays ?? 365, callerContext, ct);
         }
         catch (UnauthorizedAccessException)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
-        catch (Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException)
+        catch (GdprSubjectScopeUnresolvedException)
         {
             // MISC-11: no table scope means no honest report; never a report that implies completeness.
             return ApiProblems.Unprocessable(
-                Autheris.Application.Lineage.GdprSubjectScopeUnresolvedException.ErrorCode,
+                GdprSubjectScopeUnresolvedException.ErrorCode,
                 "The GDPR report scope cannot be resolved: name the table that holds the data subject's data.",
                 context);
         }
