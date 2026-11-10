@@ -41,6 +41,12 @@ public sealed partial class GovernedCatalogProvider
             return PhysicalKeySnapshot.Unavailable;
         }
 
+        var connectionFactory = _connectionFactory;
+        if (connectionFactory is null)
+        {
+            return PhysicalKeySnapshot.Unavailable;
+        }
+
         if (!_keyReaders.TryGetValue(target, out var reader))
         {
             return PhysicalKeySnapshot.Unsupported;
@@ -50,7 +56,7 @@ public sealed partial class GovernedCatalogProvider
         timeout.CancelAfter(PhysicalKeyReadTimeout);
         try
         {
-            await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connectionOptions, timeout.Token).ConfigureAwait(false);
+            await using var connection = await connectionFactory.CreateOpenConnectionAsync(connectionOptions, timeout.Token).ConfigureAwait(false);
             var identity = new TableIdentity(metadata.Table.SchemaName, metadata.Table.TableName);
             var rows = new List<DbKeyIndexColumn>();
             var nonUniqueNames = new HashSet<string>(StringComparer.Ordinal);

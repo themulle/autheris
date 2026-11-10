@@ -49,7 +49,7 @@ public sealed class KeyDirectionSyncPathContainerTests : IClassFixture<AstCompil
         };
         var provider = new GovernedCatalogProvider(
             Substitute.For<IGovernanceRepository>(), Options.Create(gateway), new SqlConnectionFactory(new DevelopmentEnvironment()),
-            Array.Empty<IColumnMetadataReader>(), new GovernedCatalogOptions { CacheTtlSeconds = 60 }, TimeProvider.System, null,
+            null, new GovernedCatalogOptions { CacheTtlSeconds = 60 }, TimeProvider.System, null,
             new IKeyIndexMetadataReader[] { new SqlServerKeyIndexMetadataReader() });
         var metadata = new TableMetadata
         {

@@ -10,7 +10,7 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class KeySetValueConverterTests
 {
-    private static KeySetValueConverter Create(TargetSqlDialect dialect, string key, string fk, string? keyCollation = null, string? fkCollation = null)
+    private static KeySetValueConverter Create(TargetSqlDialect dialect, string key, string fk, string? keyCollation = "Latin1_General_CI_AS", string? fkCollation = "Latin1_General_CI_AS")
         => KeySetValueConverter.Create(dialect, key, fk, keyCollation, fkCollation).ShouldNotBeNull();
 
     private static bool Convert(KeySetValueConverter c, out object[] keys, params object?[] raw) => c.TryConvertAll(raw, out keys);
@@ -101,9 +101,9 @@ public sealed class KeySetValueConverterTests
     [Fact]
     public void VarcharToNvarchar_IsAllowed_NvarcharToVarcharIsRefused_SEC_RF107_07_a()
     {
-        KeySetValueConverter.Create(TargetSqlDialect.SqlServer, "varchar(10)", "nvarchar(10)").ShouldNotBeNull();
-        KeySetValueConverter.Create(TargetSqlDialect.SqlServer, "nvarchar(10)", "varchar(10)").ShouldBeNull();
-        KeySetValueConverter.Create(TargetSqlDialect.Oracle, "nvarchar2(10)", "varchar2(10)").ShouldBeNull();
+        KeySetValueConverter.Create(TargetSqlDialect.SqlServer, "varchar(10)", "nvarchar(10)", "Latin1_General_CI_AS", "Latin1_General_CI_AS").ShouldNotBeNull();
+        KeySetValueConverter.Create(TargetSqlDialect.SqlServer, "nvarchar(10)", "varchar(10)", "Latin1_General_CI_AS", "Latin1_General_CI_AS").ShouldBeNull();
+        KeySetValueConverter.Create(TargetSqlDialect.Oracle, "nvarchar2(10)", "varchar2(10)", "Latin1_General_CI_AS", "Latin1_General_CI_AS").ShouldBeNull();
     }
 
     [Theory]
@@ -123,7 +123,7 @@ public sealed class KeySetValueConverterTests
     {
         KeySetValueConverter.Create(TargetSqlDialect.SqlServer, "varchar(10)", "varchar(10)", "Latin1_General_CI_AS", "Latin1_General_BIN2").ShouldBeNull();
         KeySetValueConverter.Create(TargetSqlDialect.SqlServer, "varchar(10)", "varchar(10)", "latin1_general_ci_as", "Latin1_General_CI_AS").ShouldNotBeNull();
-        KeySetValueConverter.Create(TargetSqlDialect.SqlServer, "varchar(10)", "varchar(10)", null, "Latin1_General_BIN2").ShouldNotBeNull();   // only a differing pair is refused
+        KeySetValueConverter.Create(TargetSqlDialect.SqlServer, "varchar(10)", "varchar(10)", null, "Latin1_General_BIN2").ShouldBeNull();   // null collation is not bindable (WP-SIMPL-44)
     }
 
     [Fact]

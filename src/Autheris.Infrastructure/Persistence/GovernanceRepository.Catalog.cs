@@ -353,6 +353,7 @@ public partial class GovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
+        Autheris.Application.Catalog.Services.CatalogSourceNameValidator.Validate(metadata);
         metadata.ValidateRequiredFilterColumns();
         Autheris.Application.Catalog.Semantic.SemanticVirtualTables.EnsureNamespaceRespected(metadata);
         // Only a replacing write validates (and later persists) the definition; any other upsert never reads or rewrites it.

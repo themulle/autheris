@@ -98,7 +98,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         if (!_available) return;
 
         await using var repo = NewRepository();
-        var tableId = new TableIdentifier("sales", "crm", "pg_fe_" + Guid.NewGuid().ToString("N")[..8]);
+        var tableId = new TableIdentifier("sales", "crm", "psql_fe_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table
         {
             Id = Guid.NewGuid(),
@@ -162,7 +162,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
 
     private static async Task<(TableIdentifier Table, Guid TableId)> CreateRevokeTableAsync(PostgreSqlGovernanceRepository repo)
     {
-        var tableId = new TableIdentifier("sales", "crm", "pg_rv_" + Guid.NewGuid().ToString("N")[..8]);
+        var tableId = new TableIdentifier("sales", "crm", "psql_rv_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new Table
         {
             Id = Guid.NewGuid(),

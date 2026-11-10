@@ -85,12 +85,6 @@ public static class GatewayStorageServiceExtensions
         var catalogOptions = new GovernedCatalogOptions { CacheTtlSeconds = gatewayOptions.DataSources.CatalogCacheTtlSeconds };
         catalogOptions.Validate();
         services.AddSingleton(catalogOptions);
-        services.AddSingleton<IColumnMetadataReader, PostgreSqlColumnMetadataReader>();
-        services.AddSingleton<IColumnMetadataReader, SqlServerColumnMetadataReader>();
-        services.AddSingleton<IColumnMetadataReader, OracleColumnMetadataReader>();
-        services.AddSingleton<IColumnMetadataReader, SqliteColumnMetadataReader>();
-        services.AddSingleton<IColumnMetadataReader, DuckDbColumnMetadataReader>();
-        services.AddSingleton<IColumnMetadataReader, DatabricksColumnMetadataReader>();
         // I403: key and index column direction. Only SQL Server and PostgreSQL expose a direction; no other dialect has a reader.
         services.AddSingleton<IKeyIndexMetadataReader, PostgreSqlKeyIndexMetadataReader>();
         services.AddSingleton<IKeyIndexMetadataReader, SqlServerKeyIndexMetadataReader>();

@@ -26,38 +26,30 @@ public sealed class GovernedCatalogProviderDiagnosticsTests
     private const string ConnectionString = "Server=10.1.1.1,1433;Database=Secret_DB;Integrated Security=true;";
     private static readonly TableIdentifier Items = new("inventory", "inventory", "ItemInventoryByCompanyHistory");
 
-    private sealed class NoopReader : IColumnMetadataReader
-    {
-        public TargetSqlDialect Dialect => TargetSqlDialect.SqlServer;
-
-        public async IAsyncEnumerable<DbColumnMetadata> ReadAsync(DbConnection connection, TableIdentity table,
-            [EnumeratorCancellation] CancellationToken ct)
-        {
-            await Task.CompletedTask;
-            yield break;
-        }
-    }
-
     private static async Task<CapturingLogger<GovernedCatalogProvider>> RunAsync(Exception failure, bool configured = true, string? mappedSource = null, string provider = "SqlServer")
     {
         var governance = Substitute.For<IGovernanceRepository>();
-        governance.GetTableMetadataAsync(Items, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        if (configured && provider == "SqlServer")
         {
-            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "inventory", TableName = Items.TableName },
-            Identifier = Items,
-            Columns = new[] { new TableColumn { ColumnName = "id" } }
-        });
+            governance.GetTableMetadataAsync(Items, Arg.Any<CancellationToken>()).Returns<Task<TableMetadata?>>(_ => throw failure);
+        }
+        else
+        {
+            governance.GetTableMetadataAsync(Items, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+            {
+                Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "inventory", TableName = Items.TableName },
+                Identifier = Items,
+                Columns = new[] { new TableColumn { ColumnName = "id" } }
+            });
+        }
         var gateway = new GatewayOptions { DataSources = new SqlDataSourceOptions() };
         if (configured)
         {
             gateway.DataSources.Connections[mappedSource ?? Source] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = ConnectionString };
         }
 
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns<Task<DbConnection>>(_ => throw failure);
         var logger = new CapturingLogger<GovernedCatalogProvider>();
-        var sut = new GovernedCatalogProvider(governance, Options.Create(gateway), factory, new[] { new NoopReader() },
+        var sut = new GovernedCatalogProvider(governance, Options.Create(gateway),
             new GovernedCatalogOptions { CacheTtlSeconds = 60 }, null, logger);
 
         var catalog = await sut.GetCatalogAsync(Source, new[] { Items }, CancellationToken.None);

@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "TABLE_COLUMNS", "column": { "name": "collation", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "TABLE_COLUMNS", "column": { "name": "length_semantics", "type": "NVARCHAR", "family": "string", "nullable": true } }
+  ]
+}

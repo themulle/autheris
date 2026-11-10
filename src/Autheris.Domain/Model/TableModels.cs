@@ -217,6 +217,8 @@ public sealed class TableColumn
     public string ColumnName { get; init; } = string.Empty;
     public string? DisplayName { get; init; }
     public string DataType { get; init; } = "varchar";
+    public string? Collation { get; init; }
+    public string? LengthSemantics { get; init; }
     public bool IsSensitive { get; init; }
     public string? Description { get; init; }
     public string? LongDescription { get; init; }
@@ -406,6 +408,9 @@ public sealed record TableMetadata
     /// <summary>Write intent: the upsert replaces the stored key/index definition only when true; otherwise it keeps it.</summary>
     public bool ReplaceKeyDefinition { get; init; }
 
+    /// <summary>Write intent: the upsert replaces stored columns atomically (deleting columns not in Columns) when true.</summary>
+    public bool ReplaceColumns { get; init; }
+
     /// <summary>Issue #80: When true, callers with Full catalog visibility may view coarsened value profiles and request synthetic sample rows without an active table consent.</summary>
     public bool ReleaseProfileToCatalogViewers { get; init; }
 
@@ -520,6 +525,8 @@ public sealed record TableMetadata
     public bool HasColumn(string columnName) =>
         Columns.Any(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
 
+    private readonly string? _tenantColumnName;
+
     /// <summary>
     /// Review E-5: the column that carries the tenant, whatever the source system calls it (<c>tenant_id</c>, <c>TenantId</c>,
     /// <c>tenantId</c>, <c>TENANT-ID</c>). An exact <c>tenant_id</c> wins. Null when the table has no tenant column.
@@ -528,6 +535,11 @@ public sealed record TableMetadata
     {
         get
         {
+            if (!string.IsNullOrWhiteSpace(_tenantColumnName))
+            {
+                return _tenantColumnName;
+            }
+
             var exact = Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "tenant_id", StringComparison.OrdinalIgnoreCase));
             if (exact != null)
             {
@@ -537,6 +549,7 @@ public sealed record TableMetadata
             return Columns.FirstOrDefault(c =>
                 string.Equals(c.ColumnName.Replace("_", string.Empty).Replace("-", string.Empty), "tenantid", StringComparison.OrdinalIgnoreCase))?.ColumnName;
         }
+        init => _tenantColumnName = value;
     }
 
     /// <summary>

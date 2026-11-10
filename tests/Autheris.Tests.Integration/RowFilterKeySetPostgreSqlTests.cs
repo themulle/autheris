@@ -72,7 +72,7 @@ public sealed class RowFilterKeySetPostgreSqlTests : IClassFixture<RowFilterKeyS
     private static RowFilterKeySetLoadRequest Request(string connectionString, CompiledKeyQuery query) => new(
         new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = connectionString, DefaultSchema = "public" },
         TargetSqlDialect.PostgreSql, new TenantId("t1"), "ds", query,
-        KeySetValueConverter.Create(TargetSqlDialect.PostgreSql, query.KeyColumnType, query.ForeignKeyColumnType)!, 100, TimeSpan.FromSeconds(30));
+        KeySetValueConverter.Create(TargetSqlDialect.PostgreSql, query.KeyColumnType, query.ForeignKeyColumnType, "en_US.utf8", "en_US.utf8")!, 100, TimeSpan.FromSeconds(30));
 
     private static async Task<string[]> TextRowsAsync(RowFilterKeySetLoadRequest request) =>
         (await Loader().LoadAsync(request, CancellationToken.None)).Keys.Cast<string>().ToArray();

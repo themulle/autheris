@@ -134,7 +134,8 @@ public sealed class CatalogGovernanceRatchetTests
         MinGroupSize = 7,
         SmallGroupStrategy = SmallGroupStrategy.Suppress,
         NonPersonal = true,
-        DeletedKeyPolicy = DeletedKeyPolicy.AllDeletedKeys
+        DeletedKeyPolicy = DeletedKeyPolicy.AllDeletedKeys,
+        TenantColumnName = "tenant_id"
     };
 
     /// <summary>SEC-RATCHET-01: a catalog snapshot only carries catalog fields; it must not wipe anything else on the next sync.</summary>
@@ -337,6 +338,7 @@ public sealed class CatalogGovernanceRatchetTests
         nameof(TableMetadata.Indexes),
         nameof(TableMetadata.PhysicalIndexes), // issue #404: written only by the catalog sync seam (IPhysicalIndexRepository), never by an upsert
         nameof(TableMetadata.ReplaceKeyDefinition),
+        nameof(TableMetadata.ReplaceColumns),
         nameof(TableMetadata.CatalogTags),
         nameof(TableMetadata.EstimatedRowCount),
         nameof(TableMetadata.ExpectedRows),

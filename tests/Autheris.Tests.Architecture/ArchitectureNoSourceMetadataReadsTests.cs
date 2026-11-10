@@ -53,6 +53,7 @@ public sealed class ArchitectureNoSourceMetadataReadsTests
         ["Autheris.Infrastructure/Persistence/SessionPinning.cs"] = "denylist/emulation literal, never sent to a source: pg_catalog is a search_path entry, not a read",
         ["Autheris.Application/Sql/Services/TrinoMetadataQueryHandler.cs"] = "denylist/emulation literal, never sent to a source: answers from the declared catalog",
         ["Autheris.Application/Governance/CasbinEnforcementService.Columns.cs"] = "denylist/emulation literal, never sent to a source",
+        ["Autheris.Application/Catalog/Services/CatalogSourceNameValidator.cs"] = "denylist literal, never sent to a source: validates against reserved catalog names",
         ["Autheris.Application/VirtualFilters/EffectiveFilterInspector.cs"] = "audit target label literal, never sent to a source"
     };
 
@@ -64,13 +65,7 @@ public sealed class ArchitectureNoSourceMetadataReadsTests
         ["Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs"] = Removed,
         ["Autheris.Application/Procedures/Services/StoredProcedureCatalogValidator.cs"] = Removed,
         ["Autheris.Infrastructure/Persistence/Catalog/PostgreSqlKeyIndexMetadataReader.cs"] = Removed,
-        ["Autheris.Infrastructure/Persistence/Catalog/SqlServerKeyIndexMetadataReader.cs"] = Removed,
-        ["Autheris.Infrastructure/Persistence/Catalog/PostgreSqlColumnMetadataReader.cs"] = Removed,
-        ["Autheris.Infrastructure/Persistence/Catalog/SqlServerColumnMetadataReader.cs"] = Removed,
-        ["Autheris.Infrastructure/Persistence/Catalog/OracleColumnMetadataReader.cs"] = Removed,
-        ["Autheris.Infrastructure/Persistence/Catalog/DatabricksColumnMetadataReader.cs"] = Removed,
-        ["Autheris.Infrastructure/Persistence/Catalog/SqliteColumnMetadataReader.cs"] = Removed,
-        ["Autheris.Infrastructure/Persistence/Catalog/DuckDbColumnMetadataReader.cs"] = Removed
+        ["Autheris.Infrastructure/Persistence/Catalog/SqlServerKeyIndexMetadataReader.cs"] = Removed
     };
 
     private const string MigrationsDirectory = "Autheris.Infrastructure/Persistence/Migrations/";

@@ -74,7 +74,7 @@ public sealed class GovernedCatalogProviderPhysicalKeysTests
             .Returns(_ => Task.FromResult<DbConnection>(new SqliteConnection()));
         var log = new CollectingLogger();
         var sut = new GovernedCatalogProvider(Substitute.For<IGovernanceRepository>(), Options.Create(gateway), factory,
-            Array.Empty<IColumnMetadataReader>(), new GovernedCatalogOptions { CacheTtlSeconds = 60 }, TimeProvider.System, log,
+            null, new GovernedCatalogOptions { CacheTtlSeconds = 60 }, TimeProvider.System, log,
             registerReader ? new IKeyIndexMetadataReader[] { reader } : Array.Empty<IKeyIndexMetadataReader>())
         {
             PhysicalKeyReadTimeout = timeout ?? TimeSpan.FromSeconds(30)

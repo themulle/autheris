@@ -62,6 +62,12 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             code = mapped.Code;
             limit = mapped.Limit;
         }
+        else if (exception is Autheris.Application.Catalog.Services.CatalogReservedSourceNameException)
+        {
+            status = StatusCodes.Status400BadRequest;
+            title = "The dataset references a reserved system or catalog name.";
+            code = ApiErrorCodes.CatalogReservedSourceName;
+        }
         else if (exception is GatewayThrottledException throttled)
         {
             status = StatusCodes.Status429TooManyRequests;
@@ -133,6 +139,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         BadHttpRequestException { StatusCode: StatusCodes.Status414UriTooLong } => (StatusCodes.Status414UriTooLong, "The request URI is too long.", null),
         BadHttpRequestException { StatusCode: StatusCodes.Status431RequestHeaderFieldsTooLarge } => (StatusCodes.Status431RequestHeaderFieldsTooLarge, "The request headers are too large.", null),
         BadHttpRequestException => (StatusCodes.Status400BadRequest, "The request is malformed.", null),
+        Autheris.Application.Catalog.Services.CatalogReservedSourceNameException => (StatusCodes.Status400BadRequest, "The dataset references a reserved system or catalog name.", null),
         GatewayInvalidQueryException => (StatusCodes.Status400BadRequest, "The query is invalid.", null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
         Autheris.Application.Audit.AuditUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The audit store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
