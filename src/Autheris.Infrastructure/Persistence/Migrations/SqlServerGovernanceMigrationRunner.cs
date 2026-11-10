@@ -22,7 +22,8 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
             MigrationStep.ComputeChecksum("sqlserver:0001:baseline_governance_schema:v1"),
             ctx =>
             {
-                SqlServerBaselineSchema.Apply((SqlConnection)ctx.Connection);
+                var sqlConn = (SqlConnection)Autheris.Infrastructure.Persistence.Dialects.SqlServerGovernanceDialect.Unwrap(ctx.Connection);
+                SqlServerBaselineSchema.Apply(sqlConn);
                 return Task.CompletedTask;
             }),
         .. SqlMigrationStep.LoadEmbedded("sqlserver").Select(step => step.ToMigrationStep())
@@ -30,10 +31,10 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
 
     private static readonly GovernanceSchemaShapeVerifier Verifier = new("sqlserver", new SqlServerSchemaCatalogReader());
 
-    private readonly SqlServerGovernanceRepository _repository;
+    private readonly GovernanceRepository _repository;
 
     public SqlServerGovernanceMigrationRunner(
-        SqlServerGovernanceRepository repository,
+        GovernanceRepository repository,
         IOptions<GatewayOptions> options,
         ILogger<SqlServerGovernanceMigrationRunner>? logger = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
@@ -85,10 +86,12 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
     protected override async Task<DbConnection> OpenConnectionAsync(bool verifyOnly, CancellationToken ct)
     {
         // Mode=Verify only reads: it runs with the runtime login, never with the DDL login (least privilege, plan D-12).
-        var connectionString = verifyOnly || string.IsNullOrWhiteSpace(_repository.MigrationConnectionString)
-            ? _repository.ConnectionString
-            : _repository.MigrationConnectionString;
-        var conn = new SqlConnection(connectionString);
+        if (verifyOnly || string.IsNullOrWhiteSpace(_repository.MigrationConnectionString))
+        {
+            return await _repository.OpenUncheckedConnectionAsync(ct).ConfigureAwait(false);
+        }
+
+        var conn = new SqlConnection(_repository.MigrationConnectionString);
         try
         {
             await conn.OpenAsync(ct).ConfigureAwait(false);

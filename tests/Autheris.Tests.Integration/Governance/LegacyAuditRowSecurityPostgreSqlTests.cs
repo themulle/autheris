@@ -23,7 +23,7 @@ public sealed class LegacyAuditRowSecurityPostgreSqlTests
 {
     private const string Genesis = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
 
-    private static (Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository Repo, string ConnectionString) Create(AuditChainViolationPolicy? policy = null)
+    private static (PostgreSqlGovernanceRepository Repo, string ConnectionString) Create(AuditChainViolationPolicy? policy = null)
     {
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Test");

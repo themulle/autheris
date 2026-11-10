@@ -47,7 +47,7 @@ public sealed class PackageBoundaryArchitectureTests
     [Fact]
     public void FileSystemUniversalDocStore_ShouldResideInInfrastructureAssembly()
     {
-        typeof(FileSystemUniversalDocStore).Assembly.ShouldBe(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
+        typeof(FileSystemUniversalDocStore).Assembly.ShouldBe(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly);
     }
 
     [Fact]

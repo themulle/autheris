@@ -14,7 +14,7 @@ public sealed class DeletedFeaturesArchitectureTests
     [
         typeof(Autheris.Domain.Options.GatewayOptions).Assembly,
         typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-        typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
+        typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly,
         typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly,
         typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
         typeof(Program).Assembly

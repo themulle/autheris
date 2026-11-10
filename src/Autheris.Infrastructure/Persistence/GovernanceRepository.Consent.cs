@@ -17,6 +17,9 @@ using Autheris.Infrastructure.Persistence.Dialects;
 
 public partial class GovernanceRepository
 {
+    internal const string SubjectPredicate =
+        " AND (c.grantee_type = 'Role' OR c.grantee_sid_norm IS NULL OR c.grantee_sid_norm = ANY(@subjects))";
+
     private const int ConsentHydrateBatchSize = 500;
 
     internal static class ConsentSql

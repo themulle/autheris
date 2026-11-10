@@ -17,8 +17,7 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
 
     private static readonly string[] RepositoryTypes =
     [
-        "Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository",
-        "Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository"
+        "Autheris.Infrastructure.Persistence.GovernanceRepository"
     ];
 
     /// <summary>Types that still violate the rule. Each entry is removed together with its violation (see the allow-list test).</summary>
@@ -38,7 +37,7 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
     ];
 
     private static ModuleDefinition InfrastructureModule() =>
-        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
+        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly);
 
     private static ModuleDefinition TestModule() => CecilModuleCache.For(typeof(GovernanceRepositoryConstructorArchitectureTests).Assembly);
 
@@ -94,8 +93,7 @@ public sealed class GovernanceRepositoryConstructorArchitectureTests
         method.DeclaringType == repository || method.DeclaringType.DeclaringType == repository;
 
     [Theory]
-    [InlineData("Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository")]
-    [InlineData("Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository")]
+    [InlineData("Autheris.Infrastructure.Persistence.GovernanceRepository")]
     public void GovernanceRepositoryConstructor_PerformsNoIo(string typeName)
     {
         if (ConstructorIoAllowList.Contains(typeName))

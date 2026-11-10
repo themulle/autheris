@@ -622,7 +622,7 @@ public class GovernanceSecurityTests : IDisposable
 
         Should.Throw<InvalidOperationException>(() =>
         {
-            using var repo = new Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository(
+            using var repo = new PostgreSqlGovernanceRepository(
                 epochService, opts, prodEnv, Substitute.For<Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider>(),
                 Substitute.For<Autheris.Application.Audit.IAuditChainAnchorStore>(), Substitute.For<Autheris.Application.Common.Interfaces.ICallerContextProvider>());
         });

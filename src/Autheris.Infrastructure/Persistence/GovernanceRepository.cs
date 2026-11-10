@@ -5,6 +5,7 @@ using System.Data.Common;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -19,7 +20,7 @@ using Microsoft.Extensions.Options;
 /// Persists and queries governance metadata across supported engines using <see cref="IGovernanceSqlDialect"/>.
 /// Enforces tenant scoping, safe parameterization, and confidentiality in logging.
 /// </summary>
-public partial class GovernanceRepository : IConsentRepository, IConsentApprovalRepository, IConsentDescriptionRepository
+public partial class GovernanceRepository : IGovernanceRepository, IConsentDescriptionRepository, Migrations.IGovernanceStoreInitializer, IAuditChainExportSource, IAuditPurgeKeyProvider
 {
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
 
@@ -36,11 +37,75 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
     private readonly Action<string>? _metadataInvalidator;
     private readonly Action<DbTransaction>? _onTransactionCommitted;
     private readonly Action<DbTransaction>? _onTransactionRolledBack;
+    private readonly Microsoft.Extensions.Hosting.IHostEnvironment? _environment;
+    private int _initialized;
+    private volatile bool _ready;
 
     /// <summary>
     /// Test seam: runs inside decision transactions between locked read and guarded state transition.
     /// </summary>
     internal Func<DbConnection, DbTransaction, CancellationToken, Task>? ConsentStatusUpdateSeam { get; set; }
+
+    public GovernanceRepository(
+        IEpochValidationService epochValidationService,
+        IOptions<GatewayOptions> options,
+        Microsoft.Extensions.Hosting.IHostEnvironment environment,
+        IKeyVaultSecretProvider secretProvider,
+        Autheris.Application.Audit.IAuditChainAnchorStore auditAnchorStore,
+        ICallerContextProvider callerContextProvider,
+        ILogger<GovernanceRepository>? logger = null,
+        IEventBus? eventBus = null,
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
+        : this(
+            ResolveDialectForLegacyCtor(options),
+            epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService)),
+            options ?? throw new ArgumentNullException(nameof(options)),
+            environment ?? throw new ArgumentNullException(nameof(environment)),
+            secretProvider ?? throw new ArgumentNullException(nameof(secretProvider)),
+            auditAnchorStore ?? throw new ArgumentNullException(nameof(auditAnchorStore)),
+            callerContextProvider ?? throw new ArgumentNullException(nameof(callerContextProvider)),
+            logger,
+            eventBus,
+            materializationGuard)
+    {
+    }
+
+    private static IGovernanceSqlDialect ResolveDialectForLegacyCtor(IOptions<GatewayOptions>? options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var connStr = options.Value?.GovernanceDb?.ConnectionString ?? string.Empty;
+        return options.Value?.GovernanceDb?.Provider?.Equals("SqlServer", StringComparison.OrdinalIgnoreCase) == true
+            ? new SqlServerGovernanceDialect(connStr)
+            : new PostgreSqlGovernanceDialect(connStr);
+    }
+
+    public GovernanceRepository(
+        IGovernanceSqlDialect dialect,
+        IEpochValidationService epochValidationService,
+        IOptions<GatewayOptions> options,
+        Microsoft.Extensions.Hosting.IHostEnvironment environment,
+        IKeyVaultSecretProvider secretProvider,
+        Autheris.Application.Audit.IAuditChainAnchorStore auditAnchorStore,
+        ICallerContextProvider callerContextProvider,
+        ILogger<GovernanceRepository>? logger = null,
+        IEventBus? eventBus = null,
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
+        : this(dialect,
+               epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService)),
+               options ?? throw new ArgumentNullException(nameof(options)),
+               (ILogger?)logger,
+               materializationGuard,
+               auditRecorder: null,
+               metadataInvalidator: null,
+               onTransactionCommitted: null,
+               onTransactionRolledBack: null,
+               eventBus,
+               auditAnchorStore ?? throw new ArgumentNullException(nameof(auditAnchorStore)),
+               secretProvider ?? throw new ArgumentNullException(nameof(secretProvider)),
+               environment ?? throw new ArgumentNullException(nameof(environment)),
+               callerContextProvider ?? throw new ArgumentNullException(nameof(callerContextProvider)))
+    {
+    }
 
     internal GovernanceRepository(
         IGovernanceSqlDialect dialect,
@@ -58,8 +123,8 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
         ICallerContextProvider? callerContextProvider = null)
     {
-        _eventBus = eventBus;
         _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
+        _eventBus = eventBus;
         _epochValidationService = epochValidationService;
         _options = options?.Value;
         _logger = logger;
@@ -68,6 +133,8 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         _metadataInvalidator = metadataInvalidator;
         _onTransactionCommitted = onTransactionCommitted;
         _onTransactionRolledBack = onTransactionRolledBack;
+        _environment = environment;
+        _ready = environment == null;
         InitializeAuditFields(options, auditAnchorStore, secretProvider, environment, callerContextProvider);
     }
 
@@ -75,21 +142,106 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
 
     internal Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> MetadataCache => _metadataCache;
 
+    internal string? MigrationConnectionString => _options?.GovernanceDb?.MigrationConnectionString;
+
+    internal void InvalidateMetadataCacheForTesting() => _metadataCache.Clear();
+
     /// <summary>Test seam: runs after a metadata read loaded its snapshot and before the result is cached.</summary>
     internal Func<CancellationToken, Task>? AfterMetadataSnapshotForTesting { get; set; }
 
     /// <summary>Test seam: a positive key-table probe is cached per instance; this models a fresh instance.</summary>
     internal void ResetKeyTableProbeForTesting() => _keyTables.Reset();
 
+    private void ThrowIfNotReady()
+    {
+        if (!_ready)
+        {
+            throw new Migrations.GovernanceStoreNotReadyException(nameof(GovernanceRepository));
+        }
+    }
+
+    public Task InitializeAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (Interlocked.Exchange(ref _initialized, 1) == 1)
+        {
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            InitializeAudit();
+            var shouldSeed = _options?.GovernanceDb?.SeedDemoData ?? (_environment != null && (string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) || string.Equals(_environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase)));
+            if (shouldSeed)
+            {
+                SeedInitialCatalog();
+            }
+
+            _ready = true;
+        }
+        catch
+        {
+            Volatile.Write(ref _initialized, 0);
+            throw;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public async Task<bool> PingAsync(CancellationToken ct = default)
+    {
+        if (!_ready)
+        {
+            return false;
+        }
+
+        try
+        {
+            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT 1;";
+            var res = await ExecuteScalarAsync(cmd, "Governance.Ping", ct).ConfigureAwait(false);
+            return res != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public async ValueTask<DbConnection> OpenConnectionAsync(CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        var conn = _dialect.CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        return conn;
+    }
+
+    /// <summary>
+    /// Opens an unchecked connection directly from the dialect, used for schema migrations and initialization
+    /// before the store is marked ready.
+    /// </summary>
+    internal async ValueTask<DbConnection> OpenUncheckedConnectionAsync(CancellationToken ct = default)
     {
         var conn = _dialect.CreateConnection();
         await conn.OpenAsync(ct).ConfigureAwait(false);
         return conn;
     }
 
+    /// <summary>
+    /// Opens an unchecked connection directly from the dialect, used for schema migrations and initialization
+    /// before the store is marked ready.
+    /// </summary>
+    internal DbConnection OpenUncheckedConnection()
+    {
+        var conn = _dialect.CreateConnection();
+        conn.Open();
+        return conn;
+    }
+
     public DbConnection OpenConnection()
     {
+        ThrowIfNotReady();
         var conn = _dialect.CreateConnection();
         conn.Open();
         return conn;
@@ -280,5 +432,39 @@ public partial class GovernanceRepository : IConsentRepository, IConsentApproval
         {
             await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
         }
+    }
+}
+
+/// <summary>
+/// Parameter binding shared by the engine-neutral SQL cores.
+/// Values are always bound parameters; nothing here concatenates caller data into SQL.
+/// </summary>
+internal static class SqlCoreBinding
+{
+    /// <summary>
+    /// DT-SC-04: a tenant parameter never binds NULL, empty or whitespace.
+    /// </summary>
+    internal static void GuardTenantParameter(string name, object? value)
+    {
+        if ((string.Equals(name, "@tenantId", StringComparison.OrdinalIgnoreCase) || string.Equals(name, "@tenant", StringComparison.OrdinalIgnoreCase) || string.Equals(name, "@tenant_id", StringComparison.OrdinalIgnoreCase))
+            && (value is null || value is DBNull || (value is string text && string.IsNullOrWhiteSpace(text))))
+        {
+            throw new ArgumentException("A tenant is required; default(TenantId) is not a tenant.", nameof(value));
+        }
+    }
+
+    public static DbParameter AddBound(this DbCommand cmd, string name, object? value, System.Data.DbType? dbType = null)
+    {
+        GuardTenantParameter(name, value);
+        var parameter = cmd.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value ?? DBNull.Value;
+        if (dbType.HasValue)
+        {
+            parameter.DbType = dbType.Value;
+        }
+
+        cmd.Parameters.Add(parameter);
+        return parameter;
     }
 }

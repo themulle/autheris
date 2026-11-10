@@ -29,7 +29,7 @@ public partial class GovernanceRepository
             "marketing", "logistics", "crm", "procurement", "billing"
         };
 
-        using var conn = OpenConnection();
+        using var conn = OpenUncheckedConnection();
         using var trans = conn.BeginTransaction();
         try
         {
@@ -445,7 +445,7 @@ public partial class GovernanceRepository
             "marketing", "logistics", "crm", "procurement", "billing"
         };
 
-        using var conn = OpenConnection();
+        using var conn = OpenUncheckedConnection();
         using var trans = conn.BeginTransaction();
         try
         {

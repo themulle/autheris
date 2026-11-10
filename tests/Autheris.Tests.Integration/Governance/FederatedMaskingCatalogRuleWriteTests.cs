@@ -46,7 +46,7 @@ public sealed class FederatedMaskingCatalogRuleWriteTests : IDisposable
 
     private sealed class PostgreSqlGovernanceRepositoryHandle
     {
-        public Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository Repository { get; } =
+        public PostgreSqlGovernanceRepository Repository { get; } =
             GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
     }
 }

@@ -37,7 +37,7 @@ public sealed class CutoverArchitectureTests
     [
         typeof(Autheris.Domain.Common.Sid).Assembly,
         typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-        typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
+        typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly,
         typeof(Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor).Assembly,
         typeof(Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator).Assembly,
         typeof(Autheris.Extensions.ExtensionsServiceCollectionExtensions).Assembly,
@@ -408,8 +408,6 @@ public sealed class CutoverArchitectureTests
         // -- persistence of the gateway's own governance store (its schema bootstrap and repositories) --
         ("Autheris.Infrastructure.Persistence.GovernanceRepository", "unified governance store repository (WP-SIMPL-20)"),
         ("Autheris.Infrastructure.Persistence.Dialects.*", "governance SQL dialect implementations (WP-SIMPL-20)"),
-        ("Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository", "governance store repository and schema bootstrap"),
-        ("Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository", "governance store repository and schema bootstrap"),
         ("Autheris.Infrastructure.Persistence.CatalogPhysicalIndexStore", "governance store: physical non-unique index tables (issue #404), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.CatalogKeyDefinitionStore", "governance store: declared key/index tables of the three engines (issue #94), fixed statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.RowFilterEvaluationStore", "governance store: row filter evaluation settings (issue #107), fixed statements with bound values over the three engines, no client text"),
@@ -424,7 +422,6 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.ConsumerAggregationStore", "consumer aggregation store (Issue #114, SEC-AUD114-05): fixed rollup statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.CdcStreamSqlCore", "CDC durable stream store (Issue #99, SEC-CDC-05): fixed event and row-image statements over engine-specific schemas, bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.WebhookOutboxSqlCore", "webhook outbox (ARCH-MNT-22): the dialect repositories hand in fixed statements, the core binds values only; owner scope predicate stays in the SQL, no client text"),
-        ("Autheris.Infrastructure.Persistence.DataOwnerAssignmentSqlCore", "data owner assignment of the dbt governance import (issue #393 part b): the dialect repositories hand in the table lookup, the core owns fixed statements and binds values only; no client text"),
         ("Autheris.Infrastructure.Persistence.ConsentGrantSqlCore", "consent grant statements (ARCH-MNT-22, SC-04): tenant-scoped statements plus the row-locked revoke by id; fixed SQL, bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.AuditSqlCore", "audit statement execution (ARCH-MNT-22 Step 2): the dialect repositories hand in fixed statements, the core binds values and maps rows only; no client text"),
         ("Autheris.Infrastructure.Persistence.ConsentSqlCore", "consent statement execution (ARCH-MNT-22 Step 4): the dialect repositories hand in dialect statements, the core binds values and maps rows only; no client text"),

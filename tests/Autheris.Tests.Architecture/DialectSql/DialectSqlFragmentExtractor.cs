@@ -47,11 +47,10 @@ internal static class DialectSqlFragmentExtractor
 
     public static DialectSqlSnapshot Extract(string dialect, DialectSqlArea area)
     {
-        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
-        var repo = module.GetType($"{InfrastructureNamespace}.{dialect}GovernanceRepository")
-            ?? throw new InvalidOperationException($"{dialect}GovernanceRepository not found");
-
+        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly);
         var unified = UnifiedRepositoryType();
+        var repo = module.GetType($"{InfrastructureNamespace}.{dialect}GovernanceRepository") ?? unified;
+
         var methods = new List<DialectSqlMethod>();
         var set = new HashSet<string>(StringComparer.Ordinal);
         foreach (var root in area.Roots)
@@ -81,7 +80,7 @@ internal static class DialectSqlFragmentExtractor
             set.UnionWith(fragments);
         }
 
-        foreach (var type in AuxiliaryTypes(module, repo, area).Concat(AuxiliaryTypes(module, unified, area)))
+        foreach (var type in AuxiliaryTypes(module, repo, area, dialect).Concat(AuxiliaryTypes(module, unified, area, dialect)).Distinct())
         {
             foreach (var method in AllMethods(type))
             {
@@ -258,9 +257,9 @@ internal static class DialectSqlFragmentExtractor
         return matches[0];
     }
 
-    private static IEnumerable<TypeDefinition> AuxiliaryTypes(ModuleDefinition module, TypeDefinition repo, DialectSqlArea area)
+    private static IEnumerable<TypeDefinition> AuxiliaryTypes(ModuleDefinition module, TypeDefinition repo, DialectSqlArea area, string dialect)
     {
-        var nested = repo.NestedTypes.FirstOrDefault(t => t.Name == $"{area.TypeName}Sql");
+        var nested = repo.NestedTypes.FirstOrDefault(t => t.Name == $"{area.TypeName}Sql" || t.Name == $"{area.TypeName}{dialect}");
         if (nested is not null)
         {
             yield return nested;
@@ -282,7 +281,7 @@ internal static class DialectSqlFragmentExtractor
     private static bool IsCompilerGenerated(TypeReference type) => type.Name.Contains('<', StringComparison.Ordinal);
 
     public static TypeDefinition UnifiedRepositoryType() =>
-        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
+        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly)
             .GetType($"{InfrastructureNamespace}.GovernanceRepository");
 
     /// <summary>The unified repository when it declares <paramref name="method"/> (dialect classes only forward), otherwise the dialect repository.</summary>
@@ -290,8 +289,8 @@ internal static class DialectSqlFragmentExtractor
         UnifiedRepositoryType().Methods.Any(m => m.Name == method) ? UnifiedRepositoryType() : RepositoryType(dialect);
 
     public static TypeDefinition RepositoryType(string dialect) =>
-        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
-            .GetType($"{InfrastructureNamespace}.{dialect}GovernanceRepository");
+        CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly)
+            .GetType($"{InfrastructureNamespace}.{dialect}GovernanceRepository") ?? UnifiedRepositoryType();
 
     /// <summary>The root method plus every compiler-generated state machine / closure method reachable from it (the bodies a reviewer would call "the method").</summary>
     public static IReadOnlyList<MethodDefinition> Bodies(TypeDefinition repo, MethodDefinition root)
@@ -432,7 +431,7 @@ internal static class DialectSqlFragmentExtractor
 
                     var type = definition.DeclaringType;
                     var ownedByDialect = type.DeclaringType is null || type.DeclaringType.Name is "GovernanceRepository" || type.DeclaringType.Name == $"{dialect}GovernanceRepository";
-                    if (ownedByDialect && (type.Name == $"{area.TypeName}Sql" || type.Name == $"{area.TypeName}SqlCore"))
+                    if (ownedByDialect && (type.Name == $"{area.TypeName}Sql" || type.Name == $"{area.TypeName}{dialect}" || type.Name == $"{area.TypeName}SqlCore"))
                     {
                         foreach (var helper in Bodies(type, definition))
                         {

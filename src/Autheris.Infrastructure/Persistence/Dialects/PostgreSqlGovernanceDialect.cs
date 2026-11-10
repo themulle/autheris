@@ -9,7 +9,7 @@ using Npgsql;
 /// <summary>
 /// PostgreSQL implementation of the governance SQL dialect.
 /// </summary>
-internal sealed class PostgreSqlGovernanceDialect : IGovernanceSqlDialect
+public sealed class PostgreSqlGovernanceDialect : IGovernanceSqlDialect
 {
     private readonly Func<DbConnection> _connectionFactory;
 

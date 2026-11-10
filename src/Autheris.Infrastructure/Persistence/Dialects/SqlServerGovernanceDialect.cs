@@ -12,7 +12,7 @@ using Microsoft.Data.SqlClient;
 /// <summary>
 /// SQL Server implementation of the governance SQL dialect.
 /// </summary>
-internal sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
+public sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
 {
     private readonly Func<DbConnection> _connectionFactory;
 
@@ -176,6 +176,9 @@ internal sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
         }
     }
 
+    internal static DbConnection Unwrap(DbConnection conn) =>
+        conn is QuotedIdentifierSqlConnection wrapper ? wrapper.InnerConnection : conn;
+
     private static string Quote(string identifier) => "[" + GovernanceSqlInput.Identifier(identifier, nameof(identifier)) + "]";
 
     private sealed class QuotedIdentifierSqlConnection : DbConnection
@@ -186,6 +189,8 @@ internal sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         }
+
+        internal DbConnection InnerConnection => _inner;
 
         [System.Diagnostics.CodeAnalysis.AllowNull]
         public override string ConnectionString

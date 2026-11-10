@@ -13,7 +13,7 @@ namespace Autheris.Tests.Integration.Governance;
 public sealed class AuditAnchorBeforeAckTests : IDisposable
 {
     private readonly SwitchableAnchorStore _anchors = new();
-    private readonly Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository _repo;
+    private readonly PostgreSqlGovernanceRepository _repo;
 
     public AuditAnchorBeforeAckTests()
     {

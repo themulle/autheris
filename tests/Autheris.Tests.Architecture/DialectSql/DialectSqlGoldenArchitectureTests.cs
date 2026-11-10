@@ -164,7 +164,7 @@ public sealed class DialectSqlGoldenArchitectureTests
     {
         // ARCH-MNT-22-T-07 / SC-05: ConsentQueryTenantArchitectureTests skips every type whose name contains "GovernanceRepository"; the
         // extracted cores and SQL holders must stay visible to it.
-        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
+        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly);
         var candidates = module.GetTypes()
             .Where(t => t.Name.EndsWith("SqlCore", StringComparison.Ordinal) || t.Name.EndsWith("Sql", StringComparison.Ordinal))
             .Where(t => DialectSqlFragmentExtractor.Areas.Any(a => t.Name.StartsWith(a.TypeName, StringComparison.Ordinal)))
@@ -253,7 +253,7 @@ public sealed class DialectSqlGoldenArchitectureTests
     public void IntegrityAuditTenant_Is_Referenced_Only_By_The_Refusal_Audit()
     {
         // DEF-SC-04: one named bucket, used by exactly one method (the single replacement point for the default-tenant lane).
-        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly);
+        var module = CecilModuleCache.For(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly);
         var users = module.GetTypes().SelectMany(t => t.Methods).Where(m => m.HasBody)
             .Where(m => m.Body.Instructions.Any(i => i.Operand is MethodReference { Name: "get_IntegrityAuditTenant" }))
             .Select(m => m.DeclaringType.Name + "." + m.Name).ToList();
@@ -277,7 +277,7 @@ public sealed class DialectSqlGoldenArchitectureTests
     public void SEC_A20_11_ConsentGrantSql_members_and_dialect_revoke_target_form_are_in_the_golden(string dialect)
     {
         // Every string of the dialect's ConsentGrantSql holder is pinned by its golden set, including its own lock-clause form.
-        var holder = DialectSqlFragmentExtractor.RepositoryType(dialect).NestedTypes.Single(t => t.Name == "ConsentGrantSql");
+        var holder = DialectSqlFragmentExtractor.RepositoryType(dialect).NestedTypes.Single(t => t.Name == "ConsentGrantSql" || t.Name == $"ConsentGrant{dialect}");
         var strings = holder.Methods.Where(m => m.HasBody).SelectMany(m => m.Body.Instructions)
             .Where(i => i.OpCode.Code == Code.Ldstr).Select(i => (string)i.Operand)
             .Concat(holder.Fields.Where(f => f.HasConstant && f.Constant is string).Select(f => (string)f.Constant))

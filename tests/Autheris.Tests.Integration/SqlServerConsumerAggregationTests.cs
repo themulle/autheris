@@ -33,7 +33,7 @@ public sealed class SqlServerConsumerAggregationTests : IClassFixture<SqlServerC
 
     public SqlServerConsumerAggregationTests(MigratedDatabase shared) => _shared = shared;
 
-    private async Task<(Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository Repo, TableIdentifier Table)> NewRepositoryAsync()
+    private async Task<(SqlServerGovernanceRepository Repo, TableIdentifier Table)> NewRepositoryAsync()
     {
         var options = GovernanceSchemaTestSupport.SqlServerOptions(_shared.Db.ConnectionString, GovernanceMigrationMode.Verify);
         var repo = GovernanceSchemaTestSupport.UnmigratedSqlServer(options);

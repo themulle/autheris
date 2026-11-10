@@ -8,7 +8,7 @@ public sealed class AuditBatchInsertSqlTests
 {
     private static string Build(int rows, string? table = null)
     {
-        var type = typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly.GetType("Autheris.Infrastructure.Persistence.AuditBatchInsertSql")!;
+        var type = typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly.GetType("Autheris.Infrastructure.Persistence.AuditBatchInsertSql")!;
         var method = type.GetMethod("Build", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
         try
         {

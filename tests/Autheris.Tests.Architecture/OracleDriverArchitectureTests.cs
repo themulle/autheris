@@ -19,7 +19,7 @@ public sealed class OracleDriverArchitectureTests
     [
         typeof(Autheris.Domain.Common.Sid).Assembly,
         typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
-        typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly,
+        typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly,
         typeof(Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor).Assembly,
         typeof(Autheris.Api.Extensions.DependencyInjection.GatewayStartupValidator).Assembly,
         typeof(TrinoSqlEngine.FastSqlEngine).Assembly
@@ -44,7 +44,7 @@ public sealed class OracleDriverArchitectureTests
     [Fact]
     public void RawOracleCommand_IsOnlyUsedByTheBindByNameWrapper()
     {
-        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
+        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly)
             .That().DoNotHaveName("BindByNameOracleCommand")
             .ShouldNot().HaveDependencyOn("Oracle.ManagedDataAccess.Client.OracleCommand")
             .GetResult();
@@ -57,7 +57,7 @@ public sealed class OracleDriverArchitectureTests
     public void RawOracleConnection_IsOnlyUsedByTheFactoryTheWrapperAndTheConnectionPolicy()
     {
         string[] allowed = ["SqlConnectionFactory", "BindByNameOracleConnection", "BindByNameOracleCommand", "OracleConnectionStringPolicy", "OracleSessionInitialization"];
-        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
+        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly)
             .That().DoNotHaveNameStartingWith("SqlConnectionFactory")
             .And().DoNotHaveNameStartingWith("BindByNameOracle")
             .And().DoNotHaveNameStartingWith("OracleConnectionStringPolicy")
@@ -72,7 +72,7 @@ public sealed class OracleDriverArchitectureTests
     [Fact]
     public void RawOracleTransaction_IsOnlyUsedByTheWrapper()
     {
-        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository).Assembly)
+        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly)
             .That().DoNotHaveNameStartingWith("BindByNameOracle")
             .ShouldNot().HaveDependencyOn("Oracle.ManagedDataAccess.Client.OracleTransaction")
             .GetResult();

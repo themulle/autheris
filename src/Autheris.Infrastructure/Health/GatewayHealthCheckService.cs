@@ -2,6 +2,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -47,30 +48,18 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         string? dbDesc = null;
         try
         {
-            if (_governanceRepository is PostgreSqlGovernanceRepository pgRepo)
+            if (_governanceRepository is GovernanceRepository repo)
             {
-                dbHealthy = await pgRepo.PingAsync(ct).ConfigureAwait(false);
-                if (pgRepo.IsAuditPipelineFaulted)
+                var engineName = repo.Dialect is PostgreSqlGovernanceDialect ? "PostgreSQL" : "SQL Server";
+                dbHealthy = await repo.PingAsync(ct).ConfigureAwait(false);
+                if (repo.IsAuditPipelineFaulted)
                 {
                     dbHealthy = false;
-                    dbDesc = "PostgreSQL Governance DB: Audit pipeline is faulted.";
+                    dbDesc = $"{engineName} Governance DB: Audit pipeline is faulted.";
                 }
                 else
                 {
-                    dbDesc = dbHealthy ? "PostgreSQL Governance DB connection active." : "PostgreSQL query returned null.";
-                }
-            }
-            else if (_governanceRepository is SqlServerGovernanceRepository msRepo)
-            {
-                dbHealthy = await msRepo.PingAsync(ct).ConfigureAwait(false);
-                if (msRepo.IsAuditPipelineFaulted)
-                {
-                    dbHealthy = false;
-                    dbDesc = "SQL Server Governance DB: Audit pipeline is faulted.";
-                }
-                else
-                {
-                    dbDesc = dbHealthy ? "SQL Server Governance DB connection active." : "SQL Server query returned null.";
+                    dbDesc = dbHealthy ? $"{engineName} Governance DB connection active." : $"{engineName} query returned null.";
                 }
             }
             else if (_governanceRepository != null)
