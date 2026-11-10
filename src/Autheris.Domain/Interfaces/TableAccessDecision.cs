@@ -1,5 +1,7 @@
 namespace Autheris.Domain.Interfaces;
 
+using System;
+using System.Collections.Generic;
 using Autheris.Domain.Exceptions;
 
 public record TableAccessDecision(
@@ -40,6 +42,15 @@ public record TableAccessDecision(
 
     /// <summary>MISC-06: why a denied decision was denied. <see cref="TableAccessDenialKind.None"/> on an allowed decision.</summary>
     public TableAccessDenialKind DenialKind { get; init; }
+
+    /// <summary>Structured trace of reasons that produced this decision (OD-30).</summary>
+    public IReadOnlyList<DecisionReason> Reasons { get; init; } = [];
+
+    /// <summary>Policy epoch at the time the decision was evaluated.</summary>
+    public long PolicyEpoch { get; init; } = 0;
+
+    /// <summary>Active grant records that contributed to this decision (OD-42).</summary>
+    public IReadOnlyList<DecisionGrantRef> Grants { get; init; } = [];
 
     /// <summary>
     /// MISC-06: set only by the unified policy decision point after the full pipeline ran (ReBAC, contract, Casbin, hooks, virtual filters,
@@ -481,3 +492,36 @@ public record TableAccessDecision(
         IReadOnlyDictionary<string, object?>? rowFilterParameters = null) =>
         new(table, true, columnAccess, rowFilterSql, Array.Empty<string>(), hasUnconstrainedColumnAllow, rowFilterParameters);
 }
+
+public enum DecisionStep
+{
+    Precondition,
+    ExplicitDeny,
+    Grant,
+    Narrowing,
+    DefaultDeny
+}
+
+public enum GrantSourceKind
+{
+    ConsentRequest,
+    AccessProfile,
+    Owner,
+    Bulk,
+    Declarative,
+    AccessPlan
+}
+
+public readonly record struct DecisionReason(
+    DecisionStep Step,
+    string Code,
+    string? SourceKind,
+    string? SourceId,
+    string? Column = null);
+
+public readonly record struct DecisionGrantRef(
+    string GrantId,
+    GrantSourceKind Source,
+    DateTimeOffset ValidFrom,
+    DateTimeOffset? ValidUntil = null);
+
