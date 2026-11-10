@@ -123,6 +123,19 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
             return TableAccessDecision.Denied(table, $"Table '{table.ToQualifiedName()}' is not active.");
         }
 
+        if (request.Operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete)
+        {
+            var canWrite = _policy != null && await _policy.CanWriteTableAsync(
+                subject.TenantId,
+                metadata,
+                ct: ct).ConfigureAwait(false);
+
+            if (!canWrite)
+            {
+                return TableAccessDecision.Denied(table, $"Write access to table '{table.ToQualifiedName()}' is not permitted.");
+            }
+        }
+
         bool consentBypassed = _options.Value.IsConsentBypassed;
         var roles = new HashSet<string>(subject.TenantRoles.Concat(subject.ClusterRoles), StringComparer.OrdinalIgnoreCase);
 

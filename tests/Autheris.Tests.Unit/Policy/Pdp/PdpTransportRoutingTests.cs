@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Policy.Pdp;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,7 +22,6 @@ using Autheris.Domain.Security;
 using Autheris.GraphQL.Interceptors;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -68,20 +68,14 @@ public sealed class PdpTransportRoutingTests
     [Fact]
     public async Task WebSql_RoutesDecisionsThroughPdp_WhenAllowed()
     {
-        var pdp = Substitute.For<IAccessDecisionPoint>();
         var meta = CreateTableMetadata("orders");
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(meta);
-
         var decision = TableAccessDecision.Allowed(
             meta.Identifier,
             new Dictionary<string, ColumnAccessLevel>(),
             hasUnconstrainedColumnAllow: true);
 
-        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(decision));
-
+        var pdp = new FakeAccessDecisionPoint(decision);
+        var tableRepo = new FakeMetadataRepository(meta);
         var options = new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true } };
 
         var rewriter = new GovernedSqlRewriter(
@@ -94,27 +88,19 @@ public sealed class PdpTransportRoutingTests
         var compiled = await rewriter.CompileAsync("SELECT id, secret FROM orders", user, Tenant);
 
         compiled.ShouldNotBeNull();
-        await pdp.Received(1).DecideAsync(
-            Arg.Is<AccessRequest>(r =>
-                r.Transport == AccessTransport.WebSql &&
-                r.Object.Identifier == meta.Identifier),
-            Arg.Any<CancellationToken>());
+        pdp.RecordedRequests.ShouldHaveSingleItem();
+        var req = pdp.RecordedRequests[0];
+        req.Transport.ShouldBe(AccessTransport.WebSql);
+        req.Object.Identifier.ShouldBe(meta.Identifier);
     }
 
     [Fact]
     public async Task WebSql_RoutesDecisionsThroughPdp_WhenDeniedThrowsException()
     {
-        var pdp = Substitute.For<IAccessDecisionPoint>();
         var meta = CreateTableMetadata("orders");
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(meta);
-
         var decision = TableAccessDecision.Denied(meta.Identifier, "Denied by PDP policy test.");
-
-        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(decision));
-
+        var pdp = new FakeAccessDecisionPoint(decision);
+        var tableRepo = new FakeMetadataRepository(meta);
         var options = new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true } };
 
         var rewriter = new GovernedSqlRewriter(
@@ -129,20 +115,16 @@ public sealed class PdpTransportRoutingTests
             await rewriter.CompileAsync("SELECT id, secret FROM orders", user, Tenant);
         });
 
-        await pdp.Received(1).DecideAsync(
-            Arg.Is<AccessRequest>(r => r.Transport == AccessTransport.WebSql),
-            Arg.Any<CancellationToken>());
+        pdp.RecordedRequests.ShouldHaveSingleItem();
+        pdp.RecordedRequests[0].Transport.ShouldBe(AccessTransport.WebSql);
     }
 
     [Fact]
     public async Task ODataQueryPolicyEnforcer_RoutesThroughPdp()
     {
-        var pdp = Substitute.For<IAccessDecisionPoint>();
         var meta = CreateTableMetadata("customers");
         var decision = TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-
-        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(decision));
+        var pdp = new FakeAccessDecisionPoint(decision);
 
         var enforcer = new ODataQueryPolicyEnforcer(pdp);
         var user = CreateUser();
@@ -150,61 +132,50 @@ public sealed class PdpTransportRoutingTests
         var result = await enforcer.EnforceAsync(user, meta, ["id", "name"]);
 
         result.IsAllowed.ShouldBeTrue();
-        await pdp.Received(1).DecideAsync(
-            Arg.Is<AccessRequest>(r =>
-                r.Transport == AccessTransport.OData &&
-                r.Operation == AccessOperation.Read &&
-                r.Object == meta &&
-                r.Columns != null && r.Columns.Count == 2),
-            Arg.Any<CancellationToken>());
+        pdp.RecordedRequests.ShouldHaveSingleItem();
+        var req = pdp.RecordedRequests[0];
+        req.Transport.ShouldBe(AccessTransport.OData);
+        req.Operation.ShouldBe(AccessOperation.Read);
+        req.Object.ShouldBe(meta);
+        req.Columns.ShouldNotBeNull();
+        req.Columns.Count.ShouldBe(2);
     }
 
     [Fact]
     public async Task GraphQlDataSecurityMiddleware_RoutesThroughPdp()
     {
-        var pdp = Substitute.For<IAccessDecisionPoint>();
         var meta = CreateTableMetadata("products");
         var decision = TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-
-        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(decision));
+        var pdp = new FakeAccessDecisionPoint(decision);
 
         var user = CreateUser();
         var result = await GraphQlDataSecurityMiddleware.DecideAccessAsync(pdp, user, meta, ["id", "price"]);
 
         result.IsAllowed.ShouldBeTrue();
-        await pdp.Received(1).DecideAsync(
-            Arg.Is<AccessRequest>(r =>
-                r.Transport == AccessTransport.GraphQl &&
-                r.Operation == AccessOperation.Read &&
-                r.Object == meta &&
-                r.Columns != null && r.Columns.Count == 2),
-            Arg.Any<CancellationToken>());
+        pdp.RecordedRequests.ShouldHaveSingleItem();
+        var req = pdp.RecordedRequests[0];
+        req.Transport.ShouldBe(AccessTransport.GraphQl);
+        req.Operation.ShouldBe(AccessOperation.Read);
+        req.Object.ShouldBe(meta);
+        req.Columns.ShouldNotBeNull();
+        req.Columns.Count.ShouldBe(2);
     }
 
     [Fact]
     public async Task GovernedProcedureExecutionService_RoutesThroughPdp()
     {
-        var pdp = Substitute.For<IAccessDecisionPoint>();
         var meta = CreateTableMetadata("orders");
         var decision = TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-
-        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(decision));
+        var pdp = new FakeAccessDecisionPoint(decision);
 
         var registry = new InMemoryProcedureRegistry();
-        var invoker = Substitute.For<IProcedureInvoker>();
-        var audit = Substitute.For<IAuditLogRepository>();
-        var tableRepo = Substitute.For<ITableMetadataRepository>();
-        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(meta);
+        var invoker = new FakeProcedureInvoker();
+        var audit = new Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository();
+        var tableRepo = new FakeMetadataRepository(meta);
 
         var definition = new ProcedureDefinition("get_orders", "", "dbo.usp_GetOrders", ProcedureMode.Read, null, [], [], ProcedureRlsMode.None, "dbo.orders", [], [], 30);
         registry.Register(definition);
         registry.MarkActive("get_orders", new ProcedureValidationResult(true, [], [], ["dbo.orders"], new Dictionary<string, string>()));
-
-        invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
-            .Returns(new RawProcedureResult(["id", "secret"], [], false));
 
         var service = new GovernedProcedureExecutionService(
             registry,
@@ -219,10 +190,62 @@ public sealed class PdpTransportRoutingTests
         var result = await service.ExecuteAsync("get_orders", null, user, Tenant);
 
         result.ShouldNotBeNull();
-        await pdp.Received(1).DecideAsync(
-            Arg.Is<AccessRequest>(r =>
-                r.Transport == AccessTransport.Procedure &&
-                r.Operation == AccessOperation.Execute),
-            Arg.Any<CancellationToken>());
+        pdp.RecordedRequests.ShouldHaveSingleItem();
+        var req = pdp.RecordedRequests[0];
+        req.Transport.ShouldBe(AccessTransport.Procedure);
+        req.Operation.ShouldBe(AccessOperation.Execute);
+    }
+
+    private sealed class FakeAccessDecisionPoint(TableAccessDecision decision) : IAccessDecisionPoint
+    {
+        public List<AccessRequest> RecordedRequests { get; } = [];
+
+        public ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default)
+        {
+            RecordedRequests.Add(request);
+            return new ValueTask<TableAccessDecision>(decision);
+        }
+
+        public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(
+            SecurityPrincipalContext subject,
+            IReadOnlyList<TableMetadata> objects,
+            AccessOperation operation,
+            AccessTransport transport,
+            CancellationToken ct = default) =>
+            new(objects.Select(_ => decision).ToList());
+
+        public ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default) =>
+            throw new NotImplementedException();
+    }
+
+    private sealed class FakeMetadataRepository(TableMetadata meta) : ITableMetadataRepository
+    {
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<TableMetadata?>(meta);
+
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TableMetadata>>([meta]);
+
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) =>
+            Task.FromResult(metadata);
+
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table,
+            IReadOnlyList<string> primaryKey,
+            IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
+            CancellationToken ct = default) =>
+            Task.FromResult<TableKeyDefinitionChange?>(null);
+    }
+
+    private sealed class FakeProcedureInvoker : IProcedureInvoker
+    {
+        public Task<RawProcedureResult> ExecuteReadAsync(
+            ProcedureDefinition definition,
+            IReadOnlyDictionary<string, object?> parameters,
+            ProcedureSecurityContext security,
+            int timeoutSeconds,
+            CancellationToken ct) =>
+            Task.FromResult(new RawProcedureResult(["id", "secret"], [], false));
     }
 }

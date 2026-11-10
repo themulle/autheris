@@ -576,14 +576,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                     throw new WebSqlPolicyException("WebSQL DML on a table that a row policy reads is not permitted.", GovernedSqlErrorCodes.PolicyViolation);
                 }
 
-                var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: clientIp);
-                var writeRequest = new Autheris.Application.Policy.Pdp.AccessRequest(
-                    secContext,
-                    tableMeta,
-                    Autheris.Application.Policy.Pdp.AccessOperation.Update,
-                    Autheris.Application.Policy.Pdp.AccessTransport.WebSql);
-                var writeDecision = await _accessDecisionPoint.DecideAsync(writeRequest, ct).ConfigureAwait(false);
-                if (!writeDecision.IsAllowed)
+                if (!await CanWriteTableAsync(user, tenantId, tableMeta, clientIp, ct).ConfigureAwait(false))
                 {
                     _logger?.LogWarning("WebSQL DML write access to table {Table} denied.", target.FullName);
                     throw SqlDataSourceResolver.TableDenied(target);
@@ -953,5 +946,17 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private System.Net.IPAddress ResolveClientIp()
     {
         return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
+    }
+
+    private async Task<bool> CanWriteTableAsync(ClaimsPrincipal user, TenantId tenantId, TableMetadata tableMeta, System.Net.IPAddress clientIp, CancellationToken ct)
+    {
+        var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: clientIp);
+        var writeRequest = new Autheris.Application.Policy.Pdp.AccessRequest(
+            secContext,
+            tableMeta,
+            Autheris.Application.Policy.Pdp.AccessOperation.Update,
+            Autheris.Application.Policy.Pdp.AccessTransport.WebSql);
+        var writeDecision = await _accessDecisionPoint.DecideAsync(writeRequest, ct).ConfigureAwait(false);
+        return writeDecision.IsAllowed;
     }
 }
