@@ -83,7 +83,8 @@ public sealed class WebSqlIndexHintTests
             webSqlCost,
             getTableMetadata: name => ordersMeta);
 
-        surchargedCost.Should().Be((int)Math.Ceiling(baseCost * 2.0));
+        int expectedSurcharge = (int)Math.Ceiling((double)rowLimit.DefaultMaxRows * costOptions.RowCostFactor * (costOptions.UnindexedRootListSurchargeMultiplier - 1.0));
+        surchargedCost.Should().Be(baseCost + expectedSurcharge);
         hints.Should().HaveCount(1);
         hints[0].Table.Should().Be("orders");
         hints[0].Reason.Should().Be("NO_USABLE_INDEX");

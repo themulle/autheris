@@ -42,12 +42,11 @@ public sealed partial class GovernedSqlExecutor
 
         if (indexHints is { Count: > 0 } && costOpts.UnindexedRootListSurchargeMultiplier > 1.0)
         {
-            long total = cost;
-            for (int i = 0; i < indexHints.Count; i++)
-            {
-                total = (long)Math.Ceiling(total * costOpts.UnindexedRootListSurchargeMultiplier);
-            }
-            cost = (int)Math.Clamp(total, 1, int.MaxValue);
+            double factor = (costOpts.RowCostFactor <= 0.0) ? 0.01 : costOpts.RowCostFactor;
+            long effectiveRows = request.IsPaged ? rowLimit.DefaultMaxRows : rowLimit.Effective(metadata.ExplicitLimitValue);
+            long rTerm = (long)Math.Ceiling(factor * (double)effectiveRows);
+            long surchargedRTerm = (long)Math.Ceiling(rTerm * costOpts.UnindexedRootListSurchargeMultiplier);
+            cost = (int)Math.Clamp((long)cost + (surchargedRTerm - rTerm), 1, int.MaxValue);
         }
 
         return cost;

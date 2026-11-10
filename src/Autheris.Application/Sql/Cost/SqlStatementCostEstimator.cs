@@ -121,8 +121,6 @@ public static class SqlStatementCostEstimator
             ? (long)Math.Ceiling((double)pageOffset / webSqlCostOptions.OffsetRowsPerCostUnit)
             : 0;
 
-        long total = (long)costOptions.BaseCost + rTerm + joinTerm + crossJoinTerm + subqueryTerm + setOpTerm + unboundedPenalty + recursivePenalty + offsetTerm;
-
         var indexHints = new List<WebSqlIndexHint>();
         int unindexedScans = 0;
 
@@ -210,15 +208,14 @@ public static class SqlStatementCostEstimator
 
         if (unindexedScans > 0 && costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
         {
-            for (int i = 0; i < unindexedScans; i++)
-            {
-                total = (long)Math.Ceiling(total * costOptions.UnindexedRootListSurchargeMultiplier);
-            }
+            rTerm = (long)Math.Ceiling(rTerm * costOptions.UnindexedRootListSurchargeMultiplier);
         }
         else if (costOptions.UnindexedRootListSurchargeMultiplier <= 1.0)
         {
             indexHints.Clear();
         }
+
+        long total = (long)costOptions.BaseCost + rTerm + joinTerm + crossJoinTerm + subqueryTerm + setOpTerm + unboundedPenalty + recursivePenalty + offsetTerm;
 
         if (total >= int.MaxValue) return (int.MaxValue, indexHints);
         if (total < 1) return (1, indexHints);
