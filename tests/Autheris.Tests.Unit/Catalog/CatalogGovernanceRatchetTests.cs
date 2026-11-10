@@ -339,7 +339,9 @@ public sealed class CatalogGovernanceRatchetTests
         nameof(TableMetadata.ReplaceKeyDefinition),
         nameof(TableMetadata.CatalogTags),
         nameof(TableMetadata.EstimatedRowCount),
-        nameof(TableMetadata.ExpectedRows)
+        nameof(TableMetadata.ExpectedRows),
+        nameof(TableMetadata.IngestedAt),
+        nameof(TableMetadata.AsOf)
     };
 
     [Fact]
