@@ -64,4 +64,14 @@ public sealed class DmlWriteDecisionArchitectureTests
 
         users.ShouldBe(["DmlWriteDecisionTestSeam.cs", "TableAccessPolicy.cs"]);
     }
+
+    [Fact]
+    public void Evaluator_DoesNotReferenceCasbin()
+    {
+        var text = Source("src/Autheris.Application/Policy/WriteGrants/WriteGrantEvaluator.cs");
+        foreach (var forbidden in new[] { "Casbin", "IPolicyEnforcementService", "_policyEnforcementService" })
+        {
+            text.ShouldNotContain(forbidden, Case.Insensitive);
+        }
+    }
 }
