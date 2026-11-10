@@ -320,7 +320,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     graphQl?.QueryField,
                     Tags: t.CatalogTags,
                     AccessStatus: status,
-                    Kind: "table"));
+                    Kind: "table",
+                    Size: DatasetSizeClassifier.Resolve(t)));
             }
             else if (c.Proc is { } proc)
             {
@@ -461,7 +462,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 Indexes: null,
                 View: "Brief",
                 Language: negotiatedLanguage,
-                RequestedLanguage: language);
+                RequestedLanguage: language,
+                Size: DatasetSizeClassifier.Resolve(table));
         }
         var columns = table.Columns
             .Select(c =>
@@ -535,7 +537,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             RequiredFilterColumns: table.RequiredFilterColumns.Length > 0 ? table.RequiredFilterColumns : null,
             RequiredFilterColumnGroups: table.RequiredFilterColumnGroups.Length > 0 ? table.RequiredFilterColumnGroups.Select(g => (IReadOnlyList<string>)g).ToList() : null,
             Language: negotiatedLanguage,
-            RequestedLanguage: language, PrimaryKeyOrder: keyView.PrimaryKeyOrder);
+            RequestedLanguage: language,
+            PrimaryKeyOrder: keyView.PrimaryKeyOrder,
+            Size: DatasetSizeClassifier.Resolve(table));
     }
 
     /// <summary>
@@ -613,7 +617,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             Indexes: null,
             View: SummaryView,
             Language: negotiatedLanguage,
-            RequestedLanguage: requestedLanguage);
+            RequestedLanguage: requestedLanguage,
+            Size: DatasetSizeClassifier.Resolve(table));
     }
 
     private async Task<McpDatasetDescription> DescribeProcedureDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct)

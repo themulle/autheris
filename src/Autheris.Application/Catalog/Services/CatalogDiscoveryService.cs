@@ -166,7 +166,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 DisplayName: tableDisplayName,
                 Description: tableDescription,
                 LongDescription: null,
-                Language: lang);
+                Language: lang,
+                Size: DatasetSizeClassifier.Resolve(metadata));
         }
 
         // I404-SC-L1/L2/L4: declared keys and indexes are reported only as a whole and only when every column is Clear for this
@@ -217,7 +218,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             LongDescription: tableLongDescription,
             Language: lang,
             // Issue #390: parallel to PrimaryKeys; null unless a column is descending, and never for a key with a hidden column (Restrict drops it).
-            PrimaryKeyDirections: KeyDirections.AnyDescending(keys.PrimaryKeyDirections) ? KeyDirections.ToWire(keys.PrimaryKeyDirections) : null
+            PrimaryKeyDirections: KeyDirections.AnyDescending(keys.PrimaryKeyDirections) ? KeyDirections.ToWire(keys.PrimaryKeyDirections) : null,
+            Size: DatasetSizeClassifier.Resolve(metadata)
         );
     }
 
