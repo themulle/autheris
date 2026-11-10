@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// SEC-SIMPL-143: Rejects reserved system schemas, system catalogs, and database dictionary views.
+/// Rejects reserved system schemas, system catalogs, and database dictionary views.
 /// No catalog ingestion path can register a system schema, a system catalog or a dictionary view as a governed table.
 /// </summary>
 public static partial class CatalogSourceNameValidator

@@ -89,6 +89,20 @@ LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1";
 
+        public const string SelectExistingColumnsSqlPg = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
+                                   m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+                                   c.""collation"", c.length_semantics
+                            FROM TABLE_COLUMNS c
+                            LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+                            WHERE c.table_id = @tableId";
+
+        public const string SelectExistingColumnsSqlSs = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
+                                   m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+                                   c.[collation], c.length_semantics
+                            FROM TABLE_COLUMNS c
+                            LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+                            WHERE c.table_id = @tableId";
+
         public const string SelectTableForUpdateSqlPg = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
 FOR UPDATE";
