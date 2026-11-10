@@ -296,6 +296,7 @@ public partial class GovernanceRepository : IAuditLogRepository, IAuditChainExpo
 
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
+        ThrowIfNotReady();
         StoredTenant.RequireWritable(entry.TenantId);
 
         if (entry.Caller == null && _callerContextProvider != null)
@@ -352,6 +353,7 @@ public partial class GovernanceRepository : IAuditLogRepository, IAuditChainExpo
 
     public async Task RecordAuditEventsAsync(IReadOnlyList<AuditLogEntry> entries, CancellationToken ct = default)
     {
+        ThrowIfNotReady();
         foreach (var candidate in entries ?? throw new ArgumentNullException(nameof(entries)))
         {
             StoredTenant.RequireWritable(candidate.TenantId);

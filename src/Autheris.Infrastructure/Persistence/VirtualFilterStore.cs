@@ -80,7 +80,8 @@ internal static class VirtualFilterStore
             return;
         }
 
-        var sqlServer = connection is Microsoft.Data.SqlClient.SqlConnection;
+        var sqlServer = connection is Microsoft.Data.SqlClient.SqlConnection
+            || Autheris.Infrastructure.Persistence.Dialects.SqlServerGovernanceDialect.Unwrap(connection) is Microsoft.Data.SqlClient.SqlConnection;
         await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         // PERS-13: compare-and-set of the generation first; it also takes the write lock before any definition is touched.
