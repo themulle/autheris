@@ -1,4 +1,8 @@
+using System;
 using System.Collections.Concurrent;
+using System.Linq;
+using System.Security.Claims;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
@@ -6,6 +10,7 @@ namespace Autheris.Application.Catalog.Search;
 
 /// <summary>
 /// Cache key for visible table sets under multi-epoch governance invalidation.
+/// Includes tenant, groups, roles and scopes to prevent cross-principal cache collisions.
 /// </summary>
 public readonly record struct CatalogVisibilityCacheKey(
     string SubjectSid,
@@ -13,7 +18,40 @@ public readonly record struct CatalogVisibilityCacheKey(
     long StructureVersion,
     long ContentVersion,
     long PolicyEpoch,
-    long RebacGeneration);
+    long RebacGeneration,
+    string? TenantId = null,
+    string? Groups = null,
+    string? Roles = null,
+    string? Scopes = null)
+{
+    public static CatalogVisibilityCacheKey From(
+        ClaimsPrincipal principal,
+        string? domainFilter,
+        long structureVersion,
+        long contentVersion,
+        long policyEpoch,
+        long rebacGeneration)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        var sid = principal.GetUserSid()?.Value ?? principal.Identity?.Name ?? "anonymous";
+        string? tenant = null;
+        try { tenant = principal.GetTenantId().Value; } catch { }
+        var groups = string.Join(',', principal.GetGroupSids().Select(g => g.Value).OrderBy(x => x, StringComparer.Ordinal));
+        var roles = string.Join(',', principal.GetUserRoles().OrderBy(x => x, StringComparer.Ordinal));
+        var scopes = string.Join(',', Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims).OrderBy(x => x, StringComparer.Ordinal));
+        return new CatalogVisibilityCacheKey(
+            sid,
+            domainFilter,
+            structureVersion,
+            contentVersion,
+            policyEpoch,
+            rebacGeneration,
+            tenant,
+            groups,
+            roles,
+            scopes);
+    }
+}
 
 /// <summary>
 /// Cached entry representing a visible bitset evaluated for a specific caller.

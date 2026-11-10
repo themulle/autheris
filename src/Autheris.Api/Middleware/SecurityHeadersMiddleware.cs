@@ -55,6 +55,12 @@ public sealed class SecurityHeadersMiddleware
                          context.Request.Path.StartsWithSegments(_nitroToolPath, StringComparison.OrdinalIgnoreCase);
         context.Response.Headers.Append("Content-Security-Policy", isToolPath ? NitroToolCsp : StrictCsp);
 
+        if (!IsPublicDocumentOrStatic(context))
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Append("Vary", "Authorization, Cookie");
+        }
+
         if (_options.OData.Enabled && context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
         {
             context.Response.Headers["OData-Version"] = "4.0";
@@ -80,4 +86,37 @@ public sealed class SecurityHeadersMiddleware
 
         return _next(context);
     }
+
+    private bool IsPublicDocumentOrStatic(HttpContext context)
+    {
+        if (context.GetEndpoint()?.Metadata.GetMetadata<IPublicDocumentMetadata>() != null)
+        {
+            return true;
+        }
+
+        var path = context.Request.Path;
+        if (_allowNitroToolCsp && path.StartsWithSegments(_nitroToolPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return path.StartsWithSegments("/ui/swagger", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWithSegments("/docs", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase) ||
+               path.Equals("/odata/v4/$swagger", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWithSegments("/.well-known", StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+public interface IPublicDocumentMetadata { }
+
+public sealed class PublicDocumentMetadata : IPublicDocumentMetadata
+{
+    public static readonly PublicDocumentMetadata Instance = new();
+}
+
+public static class PublicDocumentEndpointExtensions
+{
+    public static TBuilder WithPublicDocument<TBuilder>(this TBuilder builder) where TBuilder : Microsoft.AspNetCore.Builder.IEndpointConventionBuilder =>
+        builder.WithMetadata(PublicDocumentMetadata.Instance);
 }

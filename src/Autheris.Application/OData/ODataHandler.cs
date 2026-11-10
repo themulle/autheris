@@ -88,10 +88,10 @@ public sealed partial class ODataHandler(
         {
             var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
             var tenantId = principal.GetTenantId().Value;
-            var structureVersion = _versionProvider != null ? (await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false)).StructureVersion : 1;
+            var version = _versionProvider != null ? await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false) : new Autheris.Application.Catalog.CatalogVersion(1, 0);
             // EXT-01: Key by column visibility and keys shape hash rather than table identifiers alone
             var shapeHash = ComputeShapeHash(tables);
-            var cacheKey = $"odata:csdl:{tenantId}:s{structureVersion}:{shapeHash}";
+            var cacheKey = $"odata:csdl:{tenantId}:s{version.StructureVersion}:c{version.ContentVersion}:{shapeHash}";
 
             if (_memoryCache.TryGetValue(cacheKey, out string? cachedXml) && cachedXml != null)
             {
@@ -118,9 +118,9 @@ public sealed partial class ODataHandler(
         {
             var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
             var tenantId = principal.GetTenantId().Value;
-            var structureVersion = _versionProvider != null ? (await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false)).StructureVersion : 1;
+            var version = _versionProvider != null ? await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false) : new Autheris.Application.Catalog.CatalogVersion(1, 0);
             var visibilityHash = Autheris.Application.Catalog.Search.CatalogVisibleBitSet.ComputeSha256(tables.Select(t => t.Identifier));
-            var cacheKey = $"odata:servicedoc:{tenantId}:s{structureVersion}:{visibilityHash}:{serviceRootUrl}";
+            var cacheKey = $"odata:servicedoc:{tenantId}:s{version.StructureVersion}:c{version.ContentVersion}:{visibilityHash}:{serviceRootUrl}";
 
             if (_memoryCache.TryGetValue(cacheKey, out object? cachedDoc) && cachedDoc != null)
             {
@@ -149,7 +149,7 @@ public sealed partial class ODataHandler(
     private void SetCache(string key, object value, long size) =>
         _memoryCache?.Set(key, value, new MemoryCacheEntryOptions
         {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60),
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(15),
             Size = Math.Max(1, size)
         });
 
@@ -230,8 +230,12 @@ public sealed partial class ODataHandler(
     /// The authorized-tables entry also depends on the transports the sources allow (they hide tables), so the key carries the
     /// generation of the options resolver: a reload that newly denies a source starts a fresh entry (Issue #447).
     /// </summary>
-    private string? AuthorizedTablesCacheKey(ClaimsPrincipal principal) =>
-        BuildAuthorizedTablesCacheKey(principal) is { } key ? $"{key}:g{_transportResolver?.Generation ?? 0}" : null;
+    private string? AuthorizedTablesCacheKey(ClaimsPrincipal principal, Autheris.Application.Catalog.CatalogVersion? version = null) =>
+        BuildAuthorizedTablesCacheKey(principal) is { } key
+            ? (version.HasValue
+                ? $"{key}:g{_transportResolver?.Generation ?? 0}:s{version.Value.StructureVersion}:c{version.Value.ContentVersion}"
+                : $"{key}:g{_transportResolver?.Generation ?? 0}")
+            : null;
 
     private async Task<(IReadOnlyList<Autheris.Domain.Model.TableMetadata> Tables, bool Complete)> GetAuthorizedTablesCoreAsync(ClaimsPrincipal? principal, CancellationToken ct)
     {
@@ -240,9 +244,15 @@ public sealed partial class ODataHandler(
             return (Array.Empty<Autheris.Domain.Model.TableMetadata>(), true);
         }
 
+        Autheris.Application.Catalog.CatalogVersion? version = null;
+        if (_versionProvider != null)
+        {
+            version = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+        }
+
         if (_memoryCache != null)
         {
-            var cacheKey = AuthorizedTablesCacheKey(principal);
+            var cacheKey = AuthorizedTablesCacheKey(principal, version);
             if (cacheKey != null && _memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
             {
                 return (cachedTables, true);
@@ -298,7 +308,7 @@ public sealed partial class ODataHandler(
 
         if (_memoryCache != null && complete)
         {
-            var cacheKey = AuthorizedTablesCacheKey(principal);
+            var cacheKey = AuthorizedTablesCacheKey(principal, version);
             if (cacheKey != null)
             {
                 SetCache(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, EstimateTablesSize(authorizedTables));

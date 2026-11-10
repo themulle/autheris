@@ -16,15 +16,19 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
     private const int MaxCacheEntries = 200;
     private readonly ConcurrentDictionary<string, byte[]> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider;
     private long _seenGeneration;
 
     /// <summary>
     /// <paramref name="transportResolver"/>: the documents list only tables whose source allows OData, so the cache is dropped whenever a
     /// data-source options reload swapped the profiles (Issue #447, 08/10); a newly denied source never stays in a cached document.
     /// </summary>
-    public OpenApiCacheManager(Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
+    public OpenApiCacheManager(
+        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
+        Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null)
     {
         _transportResolver = transportResolver;
+        _versionProvider = versionProvider;
         _seenGeneration = transportResolver?.Generation ?? 0;
     }
 
@@ -54,7 +58,16 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
         CancellationToken ct = default)
     {
         DropWhenTransportsReloaded();
-        var key = BuildKey(domainScope, isYaml, isModular);
+        long structureVersion = 0;
+        long contentVersion = 0;
+        if (_versionProvider != null)
+        {
+            var version = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+            structureVersion = version.StructureVersion;
+            contentVersion = version.ContentVersion;
+        }
+
+        var key = BuildKey(domainScope, isYaml, isModular, structureVersion, contentVersion);
         if (key is null)
         {
             // G3: non-identifier / oversized domain names are never cached (no key collisions, no unbounded keys).
@@ -83,13 +96,14 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
         _cache.Clear();
     }
 
-    internal static string? BuildKey(string? domainScope, bool isYaml, bool isModular)
+    internal static string? BuildKey(string? domainScope, bool isYaml, bool isModular, long structureVersion = 0, long contentVersion = 0)
     {
         var format = isYaml ? "yaml" : "json";
         var mod = isModular ? "_modular" : "";
+        var ver = (structureVersion > 0 || contentVersion > 0) ? $":s{structureVersion}:c{contentVersion}" : "";
         if (string.IsNullOrWhiteSpace(domainScope))
         {
-            return $"global_{format}{mod}";
+            return $"global_{format}{mod}{ver}";
         }
 
         // G3: key on the exact domain. Dropping characters (previous behaviour) mapped e.g. "a.b" and "ab" to one entry.
@@ -98,6 +112,6 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
             return null;
         }
 
-        return $"domain:{domainScope.ToLowerInvariant()}_{format}{mod}";
+        return $"domain:{domainScope.ToLowerInvariant()}_{format}{mod}{ver}";
     }
 }

@@ -148,7 +148,7 @@ public sealed class ParquetGraphQLResponseMiddleware
             context.Request.Headers.Accept = originalAccept;
         }
 
-        context.Response.Headers.Vary = "Accept";
+        context.Response.Headers.Append("Vary", "Accept");
 
         if (capture.IsPassThrough)
         {

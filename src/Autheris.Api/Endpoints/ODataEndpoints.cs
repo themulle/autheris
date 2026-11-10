@@ -12,6 +12,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Autheris.Application.OData;
+using Autheris.Api.Middleware;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -251,7 +252,7 @@ public static partial class ODataEndpoints
                 return Results.NotFound();
             }
             return Results.Stream(stream, contentType, enableRangeProcessing: false);
-        }).AllowAnonymous().WithAuditExemption("Swagger UI static asset");
+        }).AllowAnonymous().WithPublicDocument().WithAuditExemption("Swagger UI static asset");
 
         ingress.MapGet("/odata/{domain}/{schema}/{tableName}", HandleEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())

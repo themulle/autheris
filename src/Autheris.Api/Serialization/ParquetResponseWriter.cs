@@ -119,7 +119,7 @@ public static class ParquetResponseWriter
         {
             response.Headers["X-Autheris-Truncated"] = "true";
         }
-        response.Headers.Vary = "Accept";
+        response.Headers.Append("Vary", "Accept");
         response.Headers.CacheControl = "no-store";
 
         await response.Body.WriteAsync(result.Data, ct).ConfigureAwait(false);
