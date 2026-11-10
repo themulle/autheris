@@ -73,6 +73,12 @@ public static partial class CatalogSourceNameValidator
     public static void Validate(TableMetadata metadata)
     {
         ArgumentNullException.ThrowIfNull(metadata);
+        if (string.Equals(metadata.Identifier.Domain, Autheris.Application.DataSources.VirtualSystemTables.Domain, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(metadata.Identifier.Schema, Autheris.Application.DataSources.VirtualSystemTables.Schema, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         if (IsReserved(metadata.Identifier.Domain, metadata.Identifier.Schema, metadata.Identifier.TableName) ||
             IsReserved(metadata.Table.SourceName, metadata.Table.SchemaName, metadata.Table.TableName))
         {
