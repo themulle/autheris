@@ -150,9 +150,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
                 _ => RebacEnforcement.QueryPaths
             };
 
-            var principal = subject.Principal ?? (subject.Claims != null
-                ? new ClaimsPrincipal(new ClaimsIdentity(subject.Claims, subject.AuthenticationScheme, ClaimTypes.Name, ClaimTypes.Role))
-                : null);
+            var principal = subject.Principal;
 
             var query = new TableAccessQuery(
                 subject.UserSid,
