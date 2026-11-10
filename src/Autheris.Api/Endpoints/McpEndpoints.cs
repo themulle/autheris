@@ -63,66 +63,7 @@ public static class McpEndpoints
         endpoint.Add(builder =>
         {
             var inner = builder.RequestDelegate!;
-            builder.RequestDelegate = async context =>
-            {
-                if (context.Request.ContentLength > MaxMcpMessageBytes)
-                {
-                    await ApiProblems.WriteAsync(context, StatusCodes.Status413PayloadTooLarge, ApiErrorCodes.PayloadTooLarge, "MCP message exceeds maximum allowed size (1 MB).", context.RequestAborted).ConfigureAwait(false);
-                    return;
-                }
-
-                var sizeFeature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
-                if (sizeFeature is { IsReadOnly: false })
-                {
-                    sizeFeature.MaxRequestBodySize = MaxMcpMessageBytes;
-                }
-
-                // Check for JSON-RPC batch arrays (MCP >= 2025-06-18 specification removal of batching)
-                if (HttpMethods.IsPost(context.Request.Method))
-                {
-                    context.Request.EnableBuffering();
-                    byte[] buffer = new byte[512];
-                    int bytesRead = await context.Request.Body.ReadAsync(buffer.AsMemory(0, buffer.Length), context.RequestAborted).ConfigureAwait(false);
-                    context.Request.Body.Position = 0;
-
-                    int startIndex = 0;
-                    if (bytesRead >= 3 && buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF)
-                    {
-                        startIndex = 3;
-                    }
-
-                    int firstChar = -1;
-                    for (int i = startIndex; i < bytesRead; i++)
-                    {
-                        char c = (char)buffer[i];
-                        if (!char.IsWhiteSpace(c))
-                        {
-                            firstChar = c;
-                            break;
-                        }
-                    }
-
-                    if (firstChar == '[')
-                    {
-                        context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                        context.Response.ContentType = "application/json";
-                        var batchError = new
-                        {
-                            jsonrpc = "2.0",
-                            id = (object?)null,
-                            error = new
-                            {
-                                code = -32600,
-                                message = "JSON-RPC batching is not supported (MCP \u2265 2025-06-18)"
-                            }
-                        };
-                        await context.Response.WriteAsJsonAsync(batchError, context.RequestAborted).ConfigureAwait(false);
-                        return;
-                    }
-                }
-
-                await inner(context).ConfigureAwait(false);
-            };
+            builder.RequestDelegate = context => ExecuteBatchGuardAsync(context, inner);
         });
 
         var hostEnv = env ?? app.ServiceProvider?.GetService<IHostEnvironment>();
@@ -260,5 +201,119 @@ public static class McpEndpoints
         var groupsDegraded = isAuthenticated && Autheris.Domain.Identity.GroupResolutionClaims.Read(principal) != Autheris.Domain.Identity.GroupResolutionStatus.Complete;
         return new McpCaller(principalId, userSid, tenantId, roles, groupSids, clientIp, isReadOnly, additionalClaims,
             Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(principal), groupsDegraded);
+    }
+
+    internal static async Task ExecuteBatchGuardAsync(HttpContext context, RequestDelegate next)
+    {
+        if (context.Request.ContentLength > MaxMcpMessageBytes)
+        {
+            await ApiProblems.WriteAsync(context, StatusCodes.Status413PayloadTooLarge, ApiErrorCodes.PayloadTooLarge, "MCP message exceeds maximum allowed size (1 MB).", context.RequestAborted).ConfigureAwait(false);
+            return;
+        }
+
+        var sizeFeature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+        if (sizeFeature is { IsReadOnly: false })
+        {
+            sizeFeature.MaxRequestBodySize = MaxMcpMessageBytes;
+        }
+
+        // Check for JSON-RPC batch arrays (MCP >= 2025-06-18 specification removal of batching)
+        if (HttpMethods.IsPost(context.Request.Method))
+        {
+            context.Request.EnableBuffering();
+            if (await IsBatchPayloadAsync(context.Request.Body, context.RequestAborted).ConfigureAwait(false))
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                context.Response.ContentType = "application/json";
+                var batchError = new
+                {
+                    jsonrpc = "2.0",
+                    id = (object?)null,
+                    error = new
+                    {
+                        code = -32600,
+                        message = "JSON-RPC batching is not supported (MCP \u2265 2025-06-18)"
+                    }
+                };
+                await context.Response.WriteAsJsonAsync(batchError, context.RequestAborted).ConfigureAwait(false);
+                return;
+            }
+        }
+
+        await next(context).ConfigureAwait(false);
+    }
+
+    internal static async Task<bool> IsBatchPayloadAsync(Stream bodyStream, CancellationToken cancellationToken = default)
+    {
+        if (bodyStream == null || !bodyStream.CanRead)
+        {
+            return false;
+        }
+
+        long initialPosition = bodyStream.CanSeek ? bodyStream.Position : 0;
+        try
+        {
+            byte[] buffer = new byte[512];
+            long totalBytesInspected = 0;
+            bool isFirstChunk = true;
+
+            while (totalBytesInspected < MaxMcpMessageBytes)
+            {
+                int toRead = (int)Math.Min(buffer.Length, MaxMcpMessageBytes - totalBytesInspected);
+                int bytesRead = await bodyStream.ReadAsync(buffer.AsMemory(0, toRead), cancellationToken).ConfigureAwait(false);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                int startIndex = 0;
+                if (isFirstChunk)
+                {
+                    isFirstChunk = false;
+                    if (bytesRead >= 3 && buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF)
+                    {
+                        startIndex = 3;
+                    }
+                    else if (bytesRead < 3 && buffer[0] == 0xEF)
+                    {
+                        int bomRead = bytesRead;
+                        while (bomRead < 3)
+                        {
+                            int more = await bodyStream.ReadAsync(buffer.AsMemory(bomRead, 3 - bomRead), cancellationToken).ConfigureAwait(false);
+                            if (more == 0)
+                            {
+                                break;
+                            }
+                            bomRead += more;
+                        }
+                        bytesRead = bomRead;
+                        if (bytesRead >= 3 && buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF)
+                        {
+                            startIndex = 3;
+                        }
+                    }
+                }
+
+                for (int i = startIndex; i < bytesRead; i++)
+                {
+                    char c = (char)buffer[i];
+                    if (!char.IsWhiteSpace(c))
+                    {
+                        return c == '[';
+                    }
+                }
+
+                totalBytesInspected += bytesRead;
+            }
+
+            return false;
+        }
+        finally
+        {
+            if (bodyStream.CanSeek)
+            {
+                bodyStream.Position = initialPosition;
+            }
+        }
     }
 }
