@@ -693,12 +693,12 @@ WHERE rm.member_sid = @sid";
         var existingMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
         var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
 
-        var colCollation = conn.GetType().Name.StartsWith("Npgsql", StringComparison.OrdinalIgnoreCase) ? "c.\"collation\"" : "c.[collation]";
+        var collationSql = conn.GetType().Name.StartsWith("Npgsql", StringComparison.OrdinalIgnoreCase) ? "c.\"collation\"" : "c.[collation]";
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = $@"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
                                    m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
-                                   {colCollation}, c.length_semantics
+                                   {collationSql}, c.length_semantics
                             FROM TABLE_COLUMNS c
                             LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
                             WHERE c.table_id = @tableId";
