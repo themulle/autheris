@@ -12,7 +12,7 @@ namespace Autheris.Tests.Integration.Governance;
 [Trait("Category", "Security")]
 public sealed class AuditCursorQueryTests : IDisposable
 {
-    private readonly Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository _repo =
+    private readonly PostgreSqlGovernanceRepository _repo =
         GovernanceTestDatabase.CreateRepository(Substitute.For<IEpochValidationService>());
 
     public void Dispose() => _repo.Dispose();

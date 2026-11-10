@@ -22,7 +22,7 @@ using Xunit;
 [Collection(GovernancePostgresCollection.Name)]
 public sealed class PostgreSqlDemoSeedParityTests(GovernancePostgresFixture postgres)
 {
-    private static Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository CreateSeeded(string connectionString)
+    private static PostgreSqlGovernanceRepository CreateSeeded(string connectionString)
     {
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Development");

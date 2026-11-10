@@ -14,7 +14,7 @@ internal static class GovernanceTestDatabase
 {
     private static readonly ConcurrentDictionary<string, Lazy<string>> Stable = new(StringComparer.Ordinal);
 
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository, string> Clones = new();
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PostgreSqlGovernanceRepository, string> Clones = new();
 
     private static readonly Lazy<Task<GovernancePostgresFixture>> Shared = new(() => Task.Run(StartAsync));
 
@@ -62,13 +62,13 @@ internal static class GovernanceTestDatabase
     /// <c>GovernanceStoreFactory.CreateSqlite</c> of the former unit tests; <paramref name="connectionString"/> addresses the clone
     /// (for raw SQL assertions).
     /// </summary>
-    internal static Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository CreateRepository(
+    internal static PostgreSqlGovernanceRepository CreateRepository(
         Autheris.Application.Common.Interfaces.IEpochValidationService epochValidationService,
         out string connectionString,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? options = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
         Autheris.Application.Audit.IAuditChainAnchorStore? auditAnchorStore = null,
-        Microsoft.Extensions.Logging.ILogger<Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository>? logger = null,
+        Microsoft.Extensions.Logging.ILogger<PostgreSqlGovernanceRepository>? logger = null,
         Autheris.Application.Common.Interfaces.IEventBus? eventBus = null)
     {
         var gateway = options ?? Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions());
@@ -82,7 +82,7 @@ internal static class GovernanceTestDatabase
     }
 
     /// <summary>Creates a repository on an existing clone (restart scenarios: several repository lifetimes over the same database).</summary>
-    internal static Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository CreateRepositoryOn(
+    internal static PostgreSqlGovernanceRepository CreateRepositoryOn(
         string connectionString,
         Autheris.Application.Common.Interfaces.IEpochValidationService epochValidationService,
         Autheris.Application.Audit.IAuditChainAnchorStore? auditAnchorStore = null,
@@ -97,12 +97,12 @@ internal static class GovernanceTestDatabase
     }
 
     /// <summary>Overload for tests that need no raw SQL access.</summary>
-    internal static Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository CreateRepository(
+    internal static PostgreSqlGovernanceRepository CreateRepository(
         Autheris.Application.Common.Interfaces.IEpochValidationService epochValidationService,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? options = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
         Autheris.Application.Audit.IAuditChainAnchorStore? auditAnchorStore = null,
-        Microsoft.Extensions.Logging.ILogger<Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository>? logger = null,
+        Microsoft.Extensions.Logging.ILogger<PostgreSqlGovernanceRepository>? logger = null,
         Autheris.Application.Common.Interfaces.IEventBus? eventBus = null) =>
         CreateRepository(epochValidationService, out _, options, environment, auditAnchorStore, logger, eventBus);
 
@@ -147,8 +147,8 @@ internal static class GovernanceTestDatabase
         return result is DBNull ? null : result;
     }
 
-    /// <summary>Connection string of the clone a repository created by <see cref="CreateRepository(Autheris.Application.Common.Interfaces.IEpochValidationService, Microsoft.Extensions.Options.IOptions{Autheris.Domain.Options.GatewayOptions}?, Microsoft.Extensions.Hosting.IHostEnvironment?, Autheris.Application.Audit.IAuditChainAnchorStore?, Microsoft.Extensions.Logging.ILogger{Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository}?, Autheris.Application.Common.Interfaces.IEventBus?)"/> is bound to.</summary>
-    internal static string ConnectionStringOf(Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository repository) =>
+    /// <summary>Connection string of the clone a repository created by <see cref="CreateRepository(Autheris.Application.Common.Interfaces.IEpochValidationService, Microsoft.Extensions.Options.IOptions{Autheris.Domain.Options.GatewayOptions}?, Microsoft.Extensions.Hosting.IHostEnvironment?, Autheris.Application.Audit.IAuditChainAnchorStore?, Microsoft.Extensions.Logging.ILogger{PostgreSqlGovernanceRepository}?, Autheris.Application.Common.Interfaces.IEventBus?)"/> is bound to.</summary>
+    internal static string ConnectionStringOf(PostgreSqlGovernanceRepository repository) =>
         Clones.TryGetValue(repository, out var connectionString)
             ? connectionString
             : throw new InvalidOperationException("The repository was not created through GovernanceTestDatabase.");
@@ -164,10 +164,10 @@ internal static class GovernanceTestDatabase
 /// <summary>Raw-SQL access to the cloned PostgreSQL governance database of a test repository (replaces the SQLite <c>RawConnection</c>).</summary>
 internal static class GovernanceRepositoryTestExtensions
 {
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository, Npgsql.NpgsqlConnection> Raw = new();
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PostgreSqlGovernanceRepository, Npgsql.NpgsqlConnection> Raw = new();
 
     /// <summary>Returns one open connection per repository; it lives as long as the test process (clones are throwaway).</summary>
-    public static Npgsql.NpgsqlConnection RawConnection(this Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository repository) =>
+    public static Npgsql.NpgsqlConnection RawConnection(this PostgreSqlGovernanceRepository repository) =>
         Raw.GetValue(repository, static r =>
         {
             var connection = new Npgsql.NpgsqlConnection(GovernanceTestDatabase.ConnectionStringOf(r));
