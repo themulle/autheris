@@ -344,7 +344,7 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogTagsChanged);
 
-        group.MapPut("/datasets/{id}/visibility", PutDatasetVisibilityHandler)
+        group.MapPut("/datasets/{id}/discovery", PutDatasetDiscoveryHandler)
         .RequireAuthorization()
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogVisibilityChanged);
 
@@ -399,16 +399,14 @@ public static partial class CatalogApiEndpoints
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
-    internal static async Task<IResult> PutDatasetVisibilityHandler(
-        string id,
-        SetDatasetVisibilityDto? request,
+    internal static async Task<IResult> PutDatasetDiscoveryHandler(
+        string id, SetDatasetDiscoveryDto? request,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService service,
-        HttpContext httpContext,
-        CancellationToken ct)
+        HttpContext httpContext, CancellationToken ct)
     {
-        var edit = request?.Visibility is null
+        var edit = request is null || (!request.Hidden.HasValue && request.HiddenColumns is null && !request.SamplesDisabled.HasValue)
             ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
-            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, request.Visibility);
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null, null, null, request.Hidden, request.HiddenColumns, request.SamplesDisabled);
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
@@ -436,6 +434,8 @@ public static partial class CatalogApiEndpoints
                 return ApiProblems.BadRequest(ApiErrorCodes.TagLimitExceeded, "The tag limit is exceeded.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidVisibility:
                 return ApiProblems.BadRequest(ApiErrorCodes.InvalidVisibility, "The visibility is invalid.");
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidColumns:
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidColumns, "One or more column names are invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidRequest:
                 return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The request is invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Unavailable:
@@ -949,3 +949,55 @@ public static partial class CatalogApiEndpoints
         return new RequestContext(tenant, sid, roles, httpContext.TraceIdentifier, httpContext.User, Language: language);
     }
 }
+<<<<<<< HEAD
+=======
+
+public sealed record AdminSetDatasetStateDto(string State, string? Reason = null);
+
+public sealed record DatasetIndexDto(
+    string Name,
+    System.Collections.Generic.IReadOnlyList<string> Columns,
+    bool? IsUnique = null,
+    bool? Unique = null,
+    System.Collections.Generic.IReadOnlyList<string?>? Directions = null);
+
+public sealed record SetDatasetKeysDto(
+    System.Collections.Generic.IReadOnlyList<string>? PrimaryKey = null,
+    System.Collections.Generic.IReadOnlyList<string>? PrimaryKeyColumns = null,
+    System.Collections.Generic.IReadOnlyList<DatasetIndexDto>? Indexes = null,
+    System.Collections.Generic.IReadOnlyList<string?>? PrimaryKeyDirections = null);
+
+/// <summary>Issue #111 (C-4): replace the admin-source tags of a dataset.</summary>
+public sealed record SetDatasetTagsDto(System.Collections.Generic.IReadOnlyList<string>? Tags);
+
+/// <summary>Issue #111 (C-4): add and remove admin-source tags.</summary>
+public sealed record ChangeDatasetTagsDto(System.Collections.Generic.IReadOnlyList<string>? Add, System.Collections.Generic.IReadOnlyList<string>? Remove);
+
+/// <summary>Discovery visibility settings of a dataset.</summary>
+public sealed record SetDatasetDiscoveryDto(
+    [property: System.Text.Json.Serialization.JsonPropertyName("hidden")] bool? Hidden = null, [property: System.Text.Json.Serialization.JsonPropertyName("hiddenColumns")] System.Collections.Generic.IReadOnlyList<string>? HiddenColumns = null, [property: System.Text.Json.Serialization.JsonPropertyName("samplesDisabled")] bool? SamplesDisabled = null);
+
+/// <summary>Issue #448: the requested privacy settings (minimum group size and non-personal flag).</summary>
+public sealed record SetDatasetPrivacyDto(string? MinGroupSize = null, bool? NonPersonal = null);
+
+public sealed record DatasetTagDto(string Tag, string Source);
+
+public sealed record DatasetCatalogSettingsDto(
+    string DatasetId,
+    System.Collections.Generic.IReadOnlyList<DatasetTagDto> Tags,
+    string Visibility,
+    bool TierEffective,
+    int? MinGroupSize = null,
+    bool? NonPersonal = null,
+    string? Warning = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    System.Collections.Generic.IReadOnlyList<string>? RequiredFilterColumns = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<string>>? RequiredFilterColumnGroups = null);
+
+public sealed record SetDatasetRequiredFiltersDto(
+    System.Collections.Generic.IReadOnlyList<string>? RequiredFilterColumns = null,
+    System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<string>>? RequiredFilterColumnGroups = null);
+
+public sealed record SetRelationCrossDataSourceDto(bool AllowCrossDataSource);
+>>>>>>> bfc86f73 (feat(catalog): implement authorized data discovery domain model, persistence, and discovery flag API (WP-SIMPL-41 PR 2))

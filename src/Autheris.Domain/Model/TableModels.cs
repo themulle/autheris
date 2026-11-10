@@ -158,6 +158,9 @@ public sealed record Table
     public string? PluginName { get; init; }
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
     public DatasetVisibility Visibility { get; init; } = DatasetVisibility.Hidden;
+    public bool DiscoveryHidden { get; init; }
+    public bool SamplesDisabled { get; init; }
+    public DiscoveryObjectKind ObjectKind { get; init; } = DiscoveryObjectKind.Table;
     public string? RlsExpression { get; init; }
     public int? MinGroupSize { get; init; }
     public bool NonPersonal { get; init; } = false;
@@ -221,7 +224,11 @@ public sealed class TableColumn
     public string? Collation { get; init; }
     public string? LengthSemantics { get; init; }
     public bool IsSensitive { get; init; }
+<<<<<<< HEAD
     public bool WriteProtected { get; init; }
+=======
+    public bool DiscoveryHidden { get; init; }
+>>>>>>> bfc86f73 (feat(catalog): implement authorized data discovery domain model, persistence, and discovery flag API (WP-SIMPL-41 PR 2))
     public string? Description { get; init; }
     public string? LongDescription { get; init; }
     public LocalizedTexts Texts { get; init; } = LocalizedTexts.Empty;

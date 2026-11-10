@@ -22,7 +22,7 @@ public partial class GovernanceRepository
 {
     private bool IsPostgreSql => _dialect is PostgreSqlGovernanceDialect;
 
-    private KeyDefinitionDialect KeyDialect => IsPostgreSql ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
+    internal KeyDefinitionDialect KeyDialect => IsPostgreSql ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
 
     private string SelectTableColumnsSql => IsPostgreSql ? CatalogSql.SelectTableColumnsSqlPg : CatalogSql.SelectTableColumnsSqlSs;
     private string SelectActiveBatchTableColumnsSql => IsPostgreSql ? CatalogSql.SelectActiveBatchTableColumnsSqlPg : CatalogSql.SelectActiveBatchTableColumnsSqlSs;

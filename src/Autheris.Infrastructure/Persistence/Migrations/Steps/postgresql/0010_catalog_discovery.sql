@@ -1,0 +1,25 @@
+-- WP-SIMPL-41: Authorized data discovery domain model and persistence.
+ALTER TABLE TABLE_CATALOG_SETTINGS ADD COLUMN IF NOT EXISTS discovery_hidden BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE TABLE_CATALOG_SETTINGS ADD COLUMN IF NOT EXISTS samples_disabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS COLUMN_CATALOG_SETTINGS (
+    table_id TEXT NOT NULL,
+    column_name CHARACTER VARYING(256) NOT NULL,
+    discovery_hidden BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_by TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (table_id, column_name)
+);
+
+CREATE TABLE IF NOT EXISTS CATALOG_DISCOVERY_ARTIFACTS (
+    table_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    samples_json TEXT NULL,
+    statistics_json TEXT NULL,
+    content_sha256 CHARACTER(64) NOT NULL,
+    uploaded_by TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    schema_version INTEGER NOT NULL
+);
+
+ALTER TABLE CONSENT_REQUESTS ADD COLUMN IF NOT EXISTS requested_columns_json TEXT NULL;

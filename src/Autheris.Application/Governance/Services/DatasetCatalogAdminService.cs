@@ -146,6 +146,25 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
         bool? requestedNonPersonal = edit.NonPersonal;
         bool nonPersonalSpecified = edit.NonPersonal.HasValue;
+        bool? requestedDiscoveryHidden = edit.DiscoveryHidden;
+        bool? requestedSamplesDisabled = edit.SamplesDisabled;
+        IReadOnlyList<string>? requestedHiddenColumns = edit.HiddenColumns;
+        bool discoverySpecified = requestedDiscoveryHidden.HasValue || requestedSamplesDisabled.HasValue || requestedHiddenColumns is not null;
+
+        if (requestedHiddenColumns is not null)
+        {
+            var meta = await _tables.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            if (meta is null)
+            {
+                return new DatasetCatalogResult(DatasetCatalogOutcome.NotFound);
+            }
+
+            var knownColumns = meta.Columns.Select(c => c.ColumnName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (requestedHiddenColumns.Any(col => !knownColumns.Contains(col)))
+            {
+                return new DatasetCatalogResult(DatasetCatalogOutcome.InvalidColumns);
+            }
+        }
 
         var max = _options.CurrentValue.Catalog.MaxTagsPerDataset;
         if (!TryNormalizeList(edit.ReplaceTags, out var replace) || !TryNormalizeList(edit.AddTags, out var add) || !TryNormalizeList(edit.RemoveTags, out var remove))
@@ -190,12 +209,13 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
         if (dryRun)
         {
-            return await SimulateAsync(table, actor.Tenant, before, replace, add, remove, requested, minGroupSizeSpecified, requestedMinGroupSize, nonPersonalSpecified, requestedNonPersonal, ct).ConfigureAwait(false);
+            return await SimulateAsync(table, actor.Tenant, before, replace, add, remove, requested, minGroupSizeSpecified, requestedMinGroupSize, nonPersonalSpecified, requestedNonPersonal, requestedDiscoveryHidden, requestedSamplesDisabled, requestedHiddenColumns, ct).ConfigureAwait(false);
         }
 
         DatasetCatalogChange? tagChange = null;
         DatasetCatalogChange? visibilityChange = null;
         DatasetCatalogChange? privacyChange = null;
+        DatasetCatalogChange? discoveryChange = null;
         var actorSid = actor.Sid;
         try
         {
@@ -244,6 +264,15 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
                     return new DatasetCatalogResult(DatasetCatalogOutcome.NotFound);
                 }
             }
+
+            if (discoverySpecified)
+            {
+                discoveryChange = await _tables.SetDatasetDiscoveryAsync(table, requestedDiscoveryHidden, requestedSamplesDisabled, requestedHiddenColumns, actorSid, ct).ConfigureAwait(false);
+                if (discoveryChange is null)
+                {
+                    return new DatasetCatalogResult(DatasetCatalogOutcome.NotFound);
+                }
+            }
         }
         catch (ArgumentException)
         {
@@ -255,15 +284,25 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             tagChange?.After.Tags ?? before.Tags,
             visibilityChange?.After.Visibility ?? before.Visibility,
             privacyChange?.After.MinGroupSize ?? before.MinGroupSize,
-            privacyChange?.After.NonPersonal ?? before.NonPersonal);
+            privacyChange?.After.NonPersonal ?? before.NonPersonal,
+            discoveryChange?.After.DiscoveryHidden ?? before.DiscoveryHidden,
+            discoveryChange?.After.SamplesDisabled ?? before.SamplesDisabled,
+            discoveryChange?.After.HiddenColumns ?? before.HiddenColumns);
 
         var tagsChanged = tagChange?.Changed == true;
         var visibilityChanged = visibilityChange?.Changed == true;
         var privacyChanged = privacyChange?.Changed == true;
+        var discoveryChanged = discoveryChange?.Changed == true;
 
         if (visibilityChanged)
         {
             await AuditChangeAsync(AuditEventTypes.CatalogVisibilityChanged, actor, table, source, visibilityChange!.Before, visibilityChange.After).ConfigureAwait(false);
+            _metrics?.RequestRefresh();
+        }
+
+        if (discoveryChanged)
+        {
+            await AuditChangeAsync(AuditEventTypes.CatalogVisibilityChanged, actor, table, source, discoveryChange!.Before, discoveryChange.After).ConfigureAwait(false);
             _metrics?.RequestRefresh();
         }
 
@@ -283,14 +322,15 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         }
 
         return new DatasetCatalogResult(
-            tagsChanged || visibilityChanged || privacyChanged ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged,
+            tagsChanged || visibilityChanged || privacyChanged || discoveryChanged ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged,
             table, after, IsTierEffective(table, actor.Tenant), warning);
     }
 
     /// <summary>Dry run: the state the edit would produce, computed from the strict before-state like the repositories do.</summary>
     private async Task<DatasetCatalogResult> SimulateAsync(
         TableIdentifier table, TenantId tenant, DatasetCatalogSettings before, IReadOnlyList<string>? replace, IReadOnlyList<string>? add, IReadOnlyList<string>? remove, DatasetVisibility? requested,
-        bool minGroupSizeSpecified, int? requestedMinGroupSize, bool nonPersonalSpecified, bool? requestedNonPersonal, CancellationToken ct)
+        bool minGroupSizeSpecified, int? requestedMinGroupSize, bool nonPersonalSpecified, bool? requestedNonPersonal,
+        bool? requestedDiscoveryHidden, bool? requestedSamplesDisabled, IReadOnlyList<string>? requestedHiddenColumns, CancellationToken ct)
     {
         var admin = new HashSet<string>(before.Tags.Where(t => t.Source == DatasetTagSource.Admin).Select(t => t.Tag), StringComparer.Ordinal);
         if (replace is not null)
@@ -312,7 +352,12 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
             .Concat(before.Tags.Where(t => t.Source == DatasetTagSource.Dbt && !admin.Contains(t.Tag))).ToList();
         var afterMinGroup = minGroupSizeSpecified ? requestedMinGroupSize : before.MinGroupSize;
         var afterNonPersonal = nonPersonalSpecified ? requestedNonPersonal : before.NonPersonal;
-        var after = new DatasetCatalogSettings(tags, requested ?? before.Visibility, afterMinGroup, afterNonPersonal);
+        var afterDiscoveryHidden = requestedDiscoveryHidden ?? before.DiscoveryHidden;
+        var afterSamplesDisabled = requestedSamplesDisabled ?? before.SamplesDisabled;
+        var afterHiddenColumns = requestedHiddenColumns ?? before.HiddenColumns;
+        var after = new DatasetCatalogSettings(
+            tags, requested ?? before.Visibility, afterMinGroup, afterNonPersonal,
+            afterDiscoveryHidden, afterSamplesDisabled, afterHiddenColumns);
         var changed = new DatasetCatalogChange(table, before, after).Changed;
 
         string? warning = null;
@@ -517,7 +562,10 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         visibility = s.Visibility.ToString(),
         tags = s.Tags.Select(t => t.Tag).OrderBy(t => t, StringComparer.Ordinal).ToArray(),
         minGroupSize = s.MinGroupSize,
-        nonPersonal = s.NonPersonal
+        nonPersonal = s.NonPersonal,
+        discoveryHidden = s.DiscoveryHidden,
+        samplesDisabled = s.SamplesDisabled,
+        hiddenColumns = (s.HiddenColumns ?? []).OrderBy(c => c, StringComparer.Ordinal).ToArray()
     };
 
     private Task AuditChangeAsync(string eventType, Caller actor, TableIdentifier table, string source, DatasetCatalogSettings before, DatasetCatalogSettings after)
