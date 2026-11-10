@@ -166,7 +166,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
                 ClientIp: clientIp,
                 ExtraAttributes: isProcedure ? new Dictionary<string, object?> { ["gql.action"] = "read" } : null,
                 ObjectKind: isProcedure ? FilterObjectKinds.ProcedureResult : FilterObjectKinds.Relation,
-                AllUserSids: principal?.GetAllUserSids() ?? [subject.UserSid],
+                AllUserSids: isProcedure ? null : (principal?.GetAllUserSids() ?? [subject.UserSid]),
                 Principal: principal,
                 SupplementalConsents: request.SupplementalConsents);
 
