@@ -15,6 +15,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -23,7 +24,7 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolver
 {
-    private readonly TableAccessPolicy _policy;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _pdp;
     private readonly GatewayOptions? _options;
     private readonly TypedPolicySources? _typedPolicies;
 
@@ -44,20 +45,18 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         // SR-M-07: access profiles (Strict/Default masking, profile row filters) apply on the OLAP path as on the main data path.
         _typedPolicies = typedPolicies;
         _options = options?.Value ?? new GatewayOptions();
-        _policy = new TableAccessPolicy(
-            consentRepository ?? throw new ArgumentNullException(nameof(consentRepository)),
-            resolutionService ?? throw new ArgumentNullException(nameof(resolutionService)),
-            consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+        _pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            Microsoft.Extensions.Options.Options.Create(_options),
             policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService)),
+            resolutionService ?? throw new ArgumentNullException(nameof(resolutionService)),
+            consentRepository ?? throw new ArgumentNullException(nameof(consentRepository)),
+            consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver,
-            _options,
             mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             accessProfileRepository: accessProfileRepository,
             accessProfileCache: accessProfileCache,
-            rowPolicyFactory: typedPolicies?.RowPolicies,
-            maskPolicyFactory: typedPolicies?.MaskPolicies,
-            callerAttributes: typedPolicies?.CallerAttributes,
+            typedPolicies: typedPolicies,
             restrictedScopes: restrictedScopes);
     }
 
@@ -86,8 +85,12 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         var userSid = principal.GetUserSid() ?? new Sid("anonymous");
         var tenantId = tenant ?? principal.GetTenantId();
 
-        // The caller resolved the catalog entry for this table; the decision is for that entry.
-        var query = TableAccessQuery.ForPrincipal(principal, userSid, tenantId, metadata, rebac: RebacEnforcement.WhenEnabled);
-        return _policy.DecideAsync(query, ct);
+        var secContext = SecurityPrincipalContext.FromPrincipal(principal, tenantId);
+        var request = new Autheris.Application.Policy.Pdp.AccessRequest(
+            secContext,
+            metadata,
+            Autheris.Application.Policy.Pdp.AccessOperation.Read,
+            Autheris.Application.Policy.Pdp.AccessTransport.Olap);
+        return _pdp.DecideAsync(request, ct).AsTask();
     }
 }

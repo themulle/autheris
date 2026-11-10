@@ -135,7 +135,7 @@ public sealed class TypedPolicySourcesWiringTests
         var rewriter = new GovernedSqlRewriter(Options.Create(new GatewayOptions()), consentResolution: new ConsentResolutionService(),
             consentRepository: Consents(), typedPolicies: Sources(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
-        AssertTyped(await Decide(rewriter.AccessPolicy()));
+        AssertTyped(await Decide(rewriter.AccessDecisionPoint));
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public sealed class TypedPolicySourcesWiringTests
             Substitute.For<ICrossSourcePlanner>(), Substitute.For<IFederatedStagingService>(), Substitute.For<IDuckDbOlapEngine>(),
             consentResolution: new ConsentResolutionService(), consentRepository: Consents(), typedPolicies: Sources(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
-        AssertTyped(await Decide(service.AccessPolicy()));
+        AssertTyped(await Decide(service.AccessDecisionPoint));
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public sealed class TypedPolicySourcesWiringTests
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance, Substitute.For<IColumnMaskingProvider>(),
             typedPolicies: Sources(), policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
 
-        AssertTyped(await Decide(service.AccessPolicy()));
+        AssertTyped(await Decide(service.AccessDecisionPoint));
     }
 
     // ---- SR-M-07: access profiles also apply on the unified PDP and the cross-domain (OLAP) path ------------------------
@@ -230,6 +230,14 @@ public sealed class TypedPolicySourcesWiringTests
 
     private static Task<TableAccessDecision> Decide(TableAccessPolicy policy) =>
         policy.DecideAsync(new TableAccessQuery(UserSid, Tenant, new HashSet<Sid>(), new HashSet<string>(), Meta()), CancellationToken.None);
+
+    private static async Task<TableAccessDecision> Decide(Autheris.Application.Policy.Pdp.IAccessDecisionPoint pdp)
+    {
+        var meta = Meta();
+        var secContext = SecurityPrincipalContext.FromPrincipal(User(), Tenant);
+        var req = new Autheris.Application.Policy.Pdp.AccessRequest(secContext, meta, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.WebSql);
+        return await pdp.DecideAsync(req, CancellationToken.None);
+    }
 
     // ---- DI -------------------------------------------------------------------------------------------------------
 
@@ -310,7 +318,9 @@ public sealed class TypedPolicySourcesWiringTests
         await using var scope = provider.CreateAsyncScope();
         var resolver = scope.ServiceProvider.GetRequiredService<ICrossDomainAccessResolver>();
 
-        var policy = FieldsOf(resolver, typeof(TableAccessPolicy)).Single();
+        var pdp = FieldsOf(resolver, typeof(Autheris.Application.Policy.Pdp.IAccessDecisionPoint)).FirstOrDefault()
+            ?? FieldsOf(resolver, typeof(Autheris.Application.Policy.Pdp.AccessDecisionPoint)).Single();
+        var policy = FieldsOf(pdp, typeof(TableAccessPolicy)).Single();
 
         FieldsOf(policy, typeof(RowPolicyFactory)).ShouldHaveSingleItem().ShouldNotBeNull();
         FieldsOf(policy, typeof(ColumnMaskPolicyFactory)).ShouldHaveSingleItem().ShouldNotBeNull();
@@ -334,7 +344,9 @@ public sealed class TypedPolicySourcesWiringTests
         await using var scope = provider.CreateAsyncScope();
         var resolver = scope.ServiceProvider.GetRequiredService<ICrossDomainAccessResolver>();
 
-        var policy = FieldsOf(resolver, typeof(TableAccessPolicy)).Single();
+        var pdp = FieldsOf(resolver, typeof(Autheris.Application.Policy.Pdp.IAccessDecisionPoint)).FirstOrDefault()
+            ?? FieldsOf(resolver, typeof(Autheris.Application.Policy.Pdp.AccessDecisionPoint)).Single();
+        var policy = FieldsOf(pdp, typeof(TableAccessPolicy)).Single();
 
         FieldsOf(policy, typeof(Autheris.Application.Policy.Interfaces.IAccessProfileCache)).ShouldHaveSingleItem()
             .ShouldBeSameAs(provider.GetRequiredService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>());

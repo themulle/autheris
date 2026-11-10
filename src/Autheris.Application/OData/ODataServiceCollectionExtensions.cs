@@ -20,6 +20,7 @@ public static class ODataServiceCollectionExtensions
         }
 
         services.AddSingleton(new ODataIntegrationMarker());
+        services.TryAddScoped<IODataQueryPolicyEnforcer, ODataQueryPolicyEnforcer>();
         services.TryAddScoped<IODataHandler, ODataHandler>();
         return services;
     }

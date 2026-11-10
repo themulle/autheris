@@ -96,6 +96,7 @@ public static class GatewayExecutionServiceExtensions
             sp.GetService<TrinoSqlEngine.ISqlEngine>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<TreeSecuredSourceBuilder>>()));
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
+        services.AddScoped<Autheris.Application.Policy.Pdp.IAccessDecisionPoint, Autheris.Application.Policy.Pdp.AccessDecisionPoint>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
 
         // Hierarchical Parquet Egress (F-DATA-01)

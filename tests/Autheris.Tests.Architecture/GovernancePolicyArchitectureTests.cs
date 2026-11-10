@@ -60,12 +60,7 @@ public sealed class GovernancePolicyArchitectureTests
     {
         var sites = TypesCreating(TableAccessPolicyName).Select(t => t.FullName.Split('/')[0]).Distinct().ToList();
 
-        sites.ShouldContain("Autheris.Application.Policy.UnifiedPolicyDecisionPoint");
-        sites.ShouldContain("Autheris.Application.Services.GatewayExecutionService");
-        sites.ShouldContain("Autheris.Application.Sql.Services.GovernedSqlRewriter");
-        sites.ShouldContain("Autheris.Application.Sql.Services.FederatedDuckDbExecutionService");
-        sites.ShouldContain("Autheris.Application.Procedures.Services.GovernedProcedureExecutionService");
-        sites.ShouldContain("Autheris.Application.DataSources.Connectors.CrossDomain.DefaultCrossDomainAccessResolver");
+        sites.ShouldContain("Autheris.Application.Policy.Pdp.AccessDecisionPoint");
     }
 
     [Fact]

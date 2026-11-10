@@ -58,6 +58,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
     private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _accessDecisionPoint;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly IVirtualFilterFederationPlanner? _vfPlanner;
@@ -90,8 +91,23 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         Autheris.Application.Policy.TypedPolicySources? typedPolicies = null,
         CompiledSqlAuditDigester? auditDigester = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
-        Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null)
+        Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
     {
+        _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            options,
+            policyEnforcement,
+            consentResolution,
+            consentRepository,
+            consentCache,
+            rebacEvaluator,
+            clientIpResolver,
+            mandatoryFilters,
+            contractManager,
+            accessProfileRepository,
+            memoryCache,
+            accessProfileCache: null,
+            typedPolicies);
         _costQuota = costQuota;
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
@@ -118,20 +134,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         _vfPlanner = vfPlanner;
     }
 
-    internal TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository!, _consentResolution!,
-            _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            _policyEnforcement ?? throw new InvalidOperationException("IPolicyEnforcementService is not configured; refusing to evaluate table access without policy enforcement (fail-closed)."),
-            _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
-            _clientIpResolver,
-            _options.Value,
-            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
-            _contractManager,
-            _accessProfileRepository,
-            _memoryCache,
-            rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies,
-            callerAttributes: _typedPolicies?.CallerAttributes);
+    internal Autheris.Application.Policy.Pdp.IAccessDecisionPoint AccessDecisionPoint => _accessDecisionPoint;
 
     private IPAddress? ResolveClientIp(ClaimsPrincipal user)
     {
@@ -609,14 +612,14 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             }
 
             var colList = resolved.Metadata.Columns.Select(c => c.ColumnName).ToList();
-            var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
-                ? await WithVirtualFiltersAsync(
-                    TableAccessDecision.Allowed(resolved.ResolvedIdentifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
-                    new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenantId, resolved.Metadata),
-                    ct).ConfigureAwait(false)
-                : await AccessPolicy().DecideAsync(
-                    new TableAccessQuery(userSid, tenantId, groupSids, roles, resolved.Metadata, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute, Principal: user),
-                    ct).ConfigureAwait(false);
+            var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: clientIp);
+            var req = new Autheris.Application.Policy.Pdp.AccessRequest(
+                secContext,
+                resolved.Metadata,
+                Autheris.Application.Policy.Pdp.AccessOperation.Read,
+                Autheris.Application.Policy.Pdp.AccessTransport.Federation,
+                Columns: colList);
+            var decision = await _accessDecisionPoint!.DecideAsync(req, ct).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
             {

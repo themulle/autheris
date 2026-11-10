@@ -62,7 +62,11 @@ public sealed partial class CallerAttributeArchitectureTests
     public void ST_129_23_EveryTableAccessQueryConstruction_PassesThePrincipal()
     {
         // The unified PDP (MCP RAG) has no ClaimsPrincipal in its SecurityPrincipalContext: an attribute filter there is the fail-closed constant.
-        string[] allowlist = ["src/Autheris.Application/Policy/UnifiedPolicyDecisionPoint.cs"];
+        string[] allowlist =
+        [
+            "src/Autheris.Application/Policy/UnifiedPolicyDecisionPoint.cs",
+            "src/Autheris.Application/Policy/Pdp/AccessDecisionPoint.cs"
+        ];
         var offenders = new List<string>();
         foreach (var (path, text) in Sources("src"))
         {
@@ -151,13 +155,13 @@ public sealed partial class CallerAttributeArchitectureTests
             ["src/Autheris.Application/Services/InMemoryRowFilterEvaluator.cs"] = "in-memory typed first; a Virtual Filter in memory is refused or denies; the text path rejects markers",
             ["src/Autheris.Application/Sql/Policy/GovernancePolicyFactory.cs"] = "typed/text agreement check of the compile path: the typed predicate is authoritative",
             ["src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs"] = "consent bypass without consent services: text only, so a caller attribute filter denies the table (F-4)",
-            ["src/Autheris.Application/Sql/Services/GovernedSqlRewriter.cs"] = "consent bypass without consent services (SQLA-19): a caller attribute filter (resolved or the constant text) denies the table; a typed predicate without attributes is wrapped as a typed policy",
             ["src/Autheris.Application/Sql/SqlSecurityValidator.cs"] = "length limit of the predicate text",
             ["src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs"] = "CDC: an applying Virtual Filter drops the event",
             ["src/Autheris.Application/VirtualFilters/Federation/VirtualFilterFederationPlanner.cs"] = "planner of the gateway-side enforcement: presence check only",
             ["src/Autheris.Application/VirtualFilters/MandatoryRowFilterResolver.cs"] = "producer: marks CallerAttributesTextConstant",
             ["src/Autheris.Domain/Interfaces/TableAccessDecision.cs"] = "the decision itself",
-            ["src/Autheris.Application/Policy/AccessDecisionPoint.cs"] = "mandatory row filter presence check for Iceberg/data source access decisions"
+            ["src/Autheris.Application/Policy/AccessDecisionPoint.cs"] = "mandatory row filter presence check for Iceberg/data source access decisions",
+            ["src/Autheris.Application/Policy/Pdp/AccessDecisionPoint.cs"] = "mandatory row filter presence check for Iceberg/data source access decisions"
         };
 
         var readers = Sources("src")

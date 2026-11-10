@@ -32,6 +32,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly IConsumerUsageRecorder? _usageRecorder;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _accessDecisionPoint;
 
     /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
     private const int ThrottledRetryAfterSeconds = 2;
@@ -62,8 +63,24 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         TypedPolicySources? typedPolicies = null,
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         IConsumerUsageRecorder? usageRecorder = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
     {
+        _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            options ?? Microsoft.Extensions.Options.Options.Create(new GatewayOptions()),
+            policyEnforcementService,
+            resolutionService,
+            consentRepository,
+            cacheService,
+            rebacEvaluator,
+            clientIpResolver,
+            mandatoryFilters,
+            contractManager,
+            accessProfileRepository,
+            memoryCache,
+            accessProfileCache: null,
+            typedPolicies,
+            auditWriter: auditWriter);
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _usageRecorder = usageRecorder;
@@ -88,6 +105,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _concurrencyGate = concurrencyGate;
         _rebacEvaluator = rebacEvaluator;
     }
+
+    internal Autheris.Application.Policy.Pdp.IAccessDecisionPoint AccessDecisionPoint => _accessDecisionPoint;
 
     public GatewayExecutionService(
         IGovernanceRepository repository,
@@ -540,9 +559,15 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             throw new TableNotFoundException(table);
         }
 
-        // Architecture 1: the shared access decision (ReBAC on query paths, consents with the decision cache, Casbin).
-        var decision = await AccessPolicy().DecideAsync(
-            TableAccessQuery.ForPrincipal(principal, userSid, tenantId, metadata, requestedFields), ct).ConfigureAwait(false);
+        var clientIp = _clientIpResolver?.ResolveClientIp();
+        var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(principal, tenantId, clientIp: clientIp);
+        var accessRequest = new Autheris.Application.Policy.Pdp.AccessRequest(
+            secContext,
+            metadata,
+            Autheris.Application.Policy.Pdp.AccessOperation.Read,
+            Autheris.Application.Policy.Pdp.AccessTransport.Rest,
+            Columns: requestedFields);
+        var decision = await _accessDecisionPoint.DecideAsync(accessRequest, ct).ConfigureAwait(false);
 
         return new ResolvedTableAccess(metadata, decision, tenantId, userSid, principal);
     }
@@ -624,22 +649,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly TypedPolicySources? _typedPolicies;
 
-    internal TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository, _resolutionService,
-            _cacheService,
-            _policyEnforcementService ?? throw new InvalidOperationException("IPolicyEnforcementService is not configured; refusing to evaluate table access without policy enforcement (fail-closed)."),
-            _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
-            _clientIpResolver,
-            _options ?? new GatewayOptions(),
-            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
-            _contractManager,
-            _accessProfileRepository,
-            _memoryCache,
-            rowPolicyFactory: _typedPolicies?.RowPolicies,
-            maskPolicyFactory: _typedPolicies?.MaskPolicies,
-            callerAttributes: _typedPolicies?.CallerAttributes,
-            authPluginHost: _typedPolicies?.AuthPlugins);
-
     /// <summary>
     /// Virtual filters: an in-memory row filter cannot evaluate their subqueries (it would return nothing and look like
     /// "no data"). Sources that filter in memory refuse the request instead (403 with reason).
@@ -719,9 +728,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
 
         var tenantId = principal.GetTenantId();
-
-        // Architecture 1: same decision as ResolveTableAccessAsync (OData metadata must not show more than a query returns).
-        var decision = await AccessPolicy().DecideAsync(TableAccessQuery.ForPrincipal(principal, userSid, tenantId, metadata), ct).ConfigureAwait(false);
+        var clientIp = _clientIpResolver?.ResolveClientIp();
+        var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(principal, tenantId, clientIp: clientIp);
+        var accessRequest = new Autheris.Application.Policy.Pdp.AccessRequest(
+            secContext,
+            metadata,
+            Autheris.Application.Policy.Pdp.AccessOperation.Read,
+            Autheris.Application.Policy.Pdp.AccessTransport.Rest);
+        var decision = await _accessDecisionPoint.DecideAsync(accessRequest, ct).ConfigureAwait(false);
 
         if (recordAudit)
         {
