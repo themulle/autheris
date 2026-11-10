@@ -164,7 +164,7 @@ public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplication
     [InlineData("/api/extensions/dbt/sync", 100 * Mb)]
     [InlineData("/api/extensions/dbt/validate-contract", 100 * Mb)]
     [InlineData("/api/extensions/dbt/run-results", 50 * Mb)]
-    [InlineData("/api/extensions/dbt/webhooks/dbt-cloud", 10 * Mb)]
+    [InlineData("/api/extensions/dbt/webhooks/dbt-cloud", 2 * Mb)]
     [InlineData("/api/v1/cdc/events", 10 * Mb)]
     [InlineData("/api/governance/catalog/ingest-openapi", 20 * Mb)]
     public void GAP02_LargeBodyRoutes_DeclareRequestSizeLimitAboveGlobalKestrelLimit(string rawPattern, long expectedBytes)

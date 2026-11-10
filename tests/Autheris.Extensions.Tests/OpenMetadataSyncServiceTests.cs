@@ -400,10 +400,10 @@ public sealed class OpenMetadataSyncServiceTests
         var firstResult = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
         firstResult.ShouldBeTrue();
 
-        // Duplicate delivery with same event ID: idempotent skip without re-invoking repo
+        // Duplicate delivery with same event ID: rejected (replay protection) without re-invoking repo
         _metadataRepo.ClearReceivedCalls();
         var duplicateResult = await syncService.HandleWebhookEventAsync(payload, $"sha256={hash}");
-        duplicateResult.ShouldBeTrue();
+        duplicateResult.ShouldBeFalse();
         await _metadataRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
     }
 

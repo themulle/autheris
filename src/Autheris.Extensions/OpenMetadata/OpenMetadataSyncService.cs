@@ -39,14 +39,13 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
 
     private static readonly SemaphoreSlim SyncLock = new(1, 1);
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, DateTimeOffset> ProcessedWebhookEvents = new();
+    internal static int ProcessedWebhookEventsCount => ProcessedWebhookEvents.Count;
+    internal static void ClearProcessedWebhookEvents() => ProcessedWebhookEvents.Clear();
 
     public OpenMetadataSyncService(
-        IOpenMetadataClient client,
-        ITableMetadataRepository metadataRepo,
-        IConsentRepository consentRepo,
-        IPolicyEpochRepository epochRepo,
-        IOptions<GatewayOptions> options,
-        ILogger<OpenMetadataSyncService> logger,
+        IOpenMetadataClient client, ITableMetadataRepository metadataRepo,
+        IConsentRepository consentRepo, IPolicyEpochRepository epochRepo,
+        IOptions<GatewayOptions> options, ILogger<OpenMetadataSyncService> logger,
         IDistributedClusterStateProvider? clusterState = null)
     {
         _client = client;
@@ -74,8 +73,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
             var warnings = new List<string>();
             var affectedTables = new HashSet<TableIdentifier>();
 
-            int syncedTablesCount = 0;
-            int syncedMaskingRulesCount = 0;
+            int syncedTablesCount = 0, syncedMaskingRulesCount = 0;
 
             _logger.LogInformation("Starting OpenMetadata synchronization. DryRun: {DryRun}", dryRun);
 
@@ -613,6 +611,12 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
 
     public async Task<bool> HandleWebhookEventAsync(string eventPayload, string? signatureHeader = null, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(eventPayload) || eventPayload.Length > 2 * 1024 * 1024 || Encoding.UTF8.GetByteCount(eventPayload) > 2 * 1024 * 1024)
+        {
+            _logger.LogWarning("Rejecting OpenMetadata webhook: empty payload or payload exceeds maximum allowed size (2 MB).");
+            return false;
+        }
+
         var omOptions = _options.Value.OpenMetadata;
 
         bool bypassSignature = _options.Value.IsWebhookSignatureBypassed;
@@ -682,13 +686,13 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
             }
         }
 
-        // Event ID deduplication
+        // Event ID deduplication and replay prevention (similar to dbt replay prevention)
         if (webhookEvent.Id.HasValue)
         {
             if (!ProcessedWebhookEvents.TryAdd(webhookEvent.Id.Value, DateTimeOffset.UtcNow))
             {
-                _logger.LogInformation("OpenMetadata webhook event {EventId} has already been processed. Skipping duplicate.", webhookEvent.Id.Value);
-                return true;
+                _logger.LogWarning("Rejecting OpenMetadata webhook: event {EventId} has already been processed (replay detected).", webhookEvent.Id.Value);
+                return false;
             }
 
             if (_clusterState != null)
@@ -698,8 +702,8 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                     var count = await _clusterState.IncrementAsync($"om:dedup:{webhookEvent.Id.Value}", 1, TimeSpan.FromMinutes(15), ct).ConfigureAwait(false);
                     if (count > 1)
                     {
-                        _logger.LogInformation("Cluster OpenMetadata webhook event {EventId} has already been processed. Skipping duplicate.", webhookEvent.Id.Value);
-                        return true;
+                        _logger.LogWarning("Rejecting cluster OpenMetadata webhook: event {EventId} has already been processed (replay detected).", webhookEvent.Id.Value);
+                        return false;
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -709,18 +713,23 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
             }
         }
 
-            // Bound the size of the deduplication dictionary
+        // Bound the size of the deduplication dictionary
+        if (ProcessedWebhookEvents.Count > 10_000)
+        {
+            var cutoff = DateTimeOffset.UtcNow.AddMinutes(-30);
+            foreach (var (k, v) in ProcessedWebhookEvents)
+            {
+                if (v < cutoff) ProcessedWebhookEvents.TryRemove(k, out _);
+            }
+
             if (ProcessedWebhookEvents.Count > 10_000)
             {
-                var cutoff = DateTimeOffset.UtcNow.AddMinutes(-30);
-                foreach (var (k, v) in ProcessedWebhookEvents)
+                foreach (var (k, _) in ProcessedWebhookEvents.OrderBy(kv => kv.Value).Take(ProcessedWebhookEvents.Count - 10_000))
                 {
-                    if (v < cutoff)
-                    {
-                        ProcessedWebhookEvents.TryRemove(k, out _);
-                    }
+                    ProcessedWebhookEvents.TryRemove(k, out _);
                 }
             }
+        }
 
         // EXT-12: the registration is released when processing fails, so the provider's retry is not dropped as a duplicate.
         try
@@ -862,9 +871,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         {
             var cleanSignature = signatureHeader.Trim();
             if (cleanSignature.StartsWith("sha256=", StringComparison.OrdinalIgnoreCase))
-            {
                 cleanSignature = cleanSignature[7..];
-            }
 
             var expectedBytes = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(payload));
             var expectedHex = Convert.ToHexStringLower(expectedBytes);
@@ -889,13 +896,9 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         foreach (var pRef in policyRefs)
         {
             if (pRef.Id.HasValue && byId.TryGetValue(pRef.Id.Value, out var policyById))
-            {
                 resolved.Add(policyById);
-            }
             else if (!string.IsNullOrEmpty(pRef.Name) && byName.TryGetValue(pRef.Name, out var policyByName))
-            {
                 resolved.Add(policyByName);
-            }
         }
         return resolved;
     }
@@ -905,9 +908,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         // SEC H-19: resource "all" is no longer treated as "every table"; only the explicit entity type "table"
         // or explicitly named tables apply.
         if (rule.Resources.Any(r => string.Equals(r, "table", StringComparison.OrdinalIgnoreCase)))
-        {
             return true;
-        }
 
         return rule.Resources.Any(r =>
             string.Equals(r, table.TableName, StringComparison.OrdinalIgnoreCase) ||

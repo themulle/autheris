@@ -73,6 +73,8 @@ public sealed class DbtWebhookReceiver : IDbtWebhookReceiver
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> ProcessedWebhookEvents = new(StringComparer.Ordinal);
+    internal static int ProcessedWebhookEventsCount => ProcessedWebhookEvents.Count;
+    internal static void ClearProcessedWebhookEvents() => ProcessedWebhookEvents.Clear();
 
     public async Task<DbtWebhookProcessingResult> ProcessWebhookAsync(
         string payload,
@@ -80,6 +82,11 @@ public sealed class DbtWebhookReceiver : IDbtWebhookReceiver
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(payload);
+
+        if (Encoding.UTF8.GetByteCount(payload) > 2 * 1024 * 1024)
+        {
+            return new DbtWebhookProcessingResult(false, "Webhook payload exceeds maximum allowed size (2 MB).");
+        }
 
         var secret = !string.IsNullOrWhiteSpace(_options.Value.Dbt.WebhookSecret)
             ? _options.Value.Dbt.WebhookSecret
@@ -156,6 +163,15 @@ public sealed class DbtWebhookReceiver : IDbtWebhookReceiver
                 foreach (var (k, v) in ProcessedWebhookEvents)
                 {
                     if (v < cutoff)
+                    {
+                        ProcessedWebhookEvents.TryRemove(k, out _);
+                    }
+                }
+
+                if (ProcessedWebhookEvents.Count > 10_000)
+                {
+                    var excess = ProcessedWebhookEvents.Count - 10_000;
+                    foreach (var (k, _) in ProcessedWebhookEvents.OrderBy(kv => kv.Value).Take(excess))
                     {
                         ProcessedWebhookEvents.TryRemove(k, out _);
                     }

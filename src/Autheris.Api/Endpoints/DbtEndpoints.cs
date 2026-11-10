@@ -331,40 +331,9 @@ public static class DbtEndpoints
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // F-DBT-4: dbt Cloud & Orchestrator HMAC Webhook Receiver
-        app.MapPost("/api/extensions/dbt/webhooks/dbt-cloud", async (
-            HttpContext context,
-            IDbtWebhookReceiver webhookReceiver) =>
-        {
-            // SEC M-07: Bounded read instead of a bypassable Content-Length check.
-            var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
-                context.Request,
-                10 * 1024 * 1024,
-                "Webhook payload exceeds maximum allowed size (10 MB).",
-                context.RequestAborted);
-            if (payload == null)
-            {
-                return tooLarge!;
-            }
-
-            string? signatureHeader = null;
-            if (context.Request.Headers.TryGetValue("X-Dbt-Signature", out var dbtSig))
-            {
-                signatureHeader = dbtSig.ToString();
-            }
-            else if (context.Request.Headers.TryGetValue("X-Hub-Signature-256", out var hubSig))
-            {
-                signatureHeader = hubSig.ToString();
-            }
-
-            var result = await webhookReceiver.ProcessWebhookAsync(payload, signatureHeader, context.RequestAborted);
-            if (!result.Success)
-            {
-                return Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
-            }
-
-            return Results.Ok(result);
-        }).AllowAnonymous()
-          .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+        app.MapPost("/api/extensions/dbt/webhooks/dbt-cloud", HandleDbtCloudWebhookAsync)
+          .AllowAnonymous()
+          .WithRequestBodyLimit(2 * 1024 * 1024) // SEC M-01: unauthenticated webhook body capped at 2 MB
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // Wave 4 / Issue #38: dbt Semantic Manifest Ingestion & Metrics Catalog
@@ -545,5 +514,44 @@ public static class DbtEndpoints
                 EndpointSecurity.GetRequestTenant(context),
                 context.RequestAborted);
         return Results.Ok(SemanticMetricCatalogProjection.Project(metrics, context.User));
+    }
+
+    internal static async Task<IResult> HandleDbtCloudWebhookAsync(
+        HttpContext context,
+        IDbtWebhookReceiver webhookReceiver)
+    {
+        string? signatureHeader = null;
+        if (context.Request.Headers.TryGetValue("X-Dbt-Signature", out var dbtSig) && !string.IsNullOrWhiteSpace(dbtSig))
+        {
+            signatureHeader = dbtSig.ToString();
+        }
+        else if (context.Request.Headers.TryGetValue("X-Hub-Signature-256", out var hubSig) && !string.IsNullOrWhiteSpace(hubSig))
+        {
+            signatureHeader = hubSig.ToString();
+        }
+
+        if (string.IsNullOrWhiteSpace(signatureHeader))
+        {
+            return Results.Json(new DbtWebhookProcessingResult(false, "Invalid or missing HMAC signature."), statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        // SEC M-07: Bounded read instead of a bypassable Content-Length check (capped at 2 MB for unauthenticated webhook).
+        var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+            context.Request,
+            2 * 1024 * 1024,
+            "Webhook payload exceeds maximum allowed size (2 MB).",
+            context.RequestAborted);
+        if (payload == null)
+        {
+            return tooLarge!;
+        }
+
+        var result = await webhookReceiver.ProcessWebhookAsync(payload, signatureHeader, context.RequestAborted);
+        if (!result.Success)
+        {
+            return Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        return Results.Ok(result);
     }
 }
