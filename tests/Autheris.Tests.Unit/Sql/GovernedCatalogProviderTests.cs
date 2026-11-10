@@ -122,15 +122,7 @@ public sealed class GovernedCatalogProviderTests
     [Trait("Category", "Security")]
     public async Task FingerprintChanges_WhenDeclaredTypeOrCollationChanges()
     {
-        var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
-        {
-            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
-            Identifier = Orders,
-            Columns = new[] { Col("amount", "decimal(10,2)") }
-        });
-
-        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>(), governance: repo);
+        var (sut, _, repo) = Build("SqlServer", new[] { Col("amount", "decimal(10,2)") });
         var first = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
         first.ShouldNotBeNull();
         first.Columns[0].DataType.ShouldBe("decimal(10,2)");
@@ -235,15 +227,7 @@ public sealed class GovernedCatalogProviderTests
     [Fact]
     public async Task CacheWithinTtl_DoesNotReload_ExpiryReloads()
     {
-        var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
-        {
-            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
-            Identifier = Orders,
-            Columns = new[] { Col("id", "int") }
-        });
-
-        var (sut, clock, _) = Build("SqlServer", Array.Empty<TableColumn>(), ttl: 60, governance: repo);
+        var (sut, clock, repo) = Build("SqlServer", new[] { Col("id", "int") }, ttl: 60);
         await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
         clock.Now += TimeSpan.FromSeconds(59);
         await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
@@ -259,15 +243,7 @@ public sealed class GovernedCatalogProviderTests
     [Fact]
     public async Task TenantColumnGovernedAfterCachedLoad_TakesEffectWithinTheTtl()
     {
-        var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
-        {
-            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
-            Identifier = Orders,
-            Columns = new[] { Col("id", "int"), Col("amount", "decimal(18,2)") }
-        });
-
-        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>(), governance: repo);
+        var (sut, _, repo) = Build("SqlServer", new[] { Col("id", "int"), Col("amount", "decimal(18,2)") });
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.TenantColumn.ShouldBeNull();
 
         repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
@@ -286,15 +262,7 @@ public sealed class GovernedCatalogProviderTests
     [Fact]
     public async Task GovernedColumnRemovedAfterCachedLoad_IsNoLongerExposedWithinTheTtl()
     {
-        var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
-        {
-            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
-            Identifier = Orders,
-            Columns = new[] { Col("id", "int"), Col("amount", "decimal(18,2)") }
-        });
-
-        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>(), governance: repo);
+        var (sut, _, repo) = Build("SqlServer", new[] { Col("id", "int"), Col("amount", "decimal(18,2)") });
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.Columns.Select(c => c.Name).ShouldContain("amount");
 
         repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
@@ -312,15 +280,7 @@ public sealed class GovernedCatalogProviderTests
     [Fact]
     public async Task GovernanceRecordRemovedAfterCachedLoad_DeniesTable()
     {
-        var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
-        {
-            Table = new Table { SourceType = "SqlServer", SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
-            Identifier = Orders,
-            Columns = new[] { Col("id", "int") }
-        });
-
-        var (sut, _, _) = Build("SqlServer", Array.Empty<TableColumn>(), governance: repo);
+        var (sut, _, repo) = Build("SqlServer", new[] { Col("id", "int") });
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldNotBeNull();
 
         repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns((TableMetadata?)null);

@@ -134,7 +134,8 @@ public sealed class CatalogGovernanceRatchetTests
         MinGroupSize = 7,
         SmallGroupStrategy = SmallGroupStrategy.Suppress,
         NonPersonal = true,
-        DeletedKeyPolicy = DeletedKeyPolicy.AllDeletedKeys
+        DeletedKeyPolicy = DeletedKeyPolicy.AllDeletedKeys,
+        TenantColumnName = "tenant_id"
     };
 
     /// <summary>SEC-RATCHET-01: a catalog snapshot only carries catalog fields; it must not wipe anything else on the next sync.</summary>

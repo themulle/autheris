@@ -49,6 +49,40 @@ public sealed class CatalogDatasetDefinitionEndpointTests
         public bool IsKeyedService(Type serviceType, object? serviceKey) => false;
     }
 
+    private sealed class NullAuditWriter : IAuditWriter
+    {
+        public Task RecordRequiredAsync(AuditLogEntry entry, CancellationToken ct = default) => Task.CompletedTask;
+        public Task RecordBestEffortAsync(AuditLogEntry entry, CancellationToken ct = default) => Task.CompletedTask;
+        public Task RecordAsync(AuditLogEntry entry, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class FakeTableMetadataRepository : ITableMetadataRepository
+    {
+        public TableMetadata? Stored { get; set; }
+        public int UpsertCalls { get; private set; }
+
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult(Stored);
+
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<TableMetadata>>(Stored != null ? [Stored] : []);
+
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+        {
+            UpsertCalls++;
+            Stored = metadata;
+            return Task.FromResult(metadata);
+        }
+
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(
+            TableIdentifier table,
+            IReadOnlyList<string> primaryKey,
+            IReadOnlyList<TableIndexDefinition> indexes,
+            IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null,
+            CancellationToken ct = default)
+            => Task.FromResult<TableKeyDefinitionChange?>(null);
+    }
+
     private sealed class TestRouteBuilder(IServiceProvider serviceProvider) : IEndpointRouteBuilder
     {
         public IServiceProvider ServiceProvider { get; } = serviceProvider;
@@ -86,17 +120,8 @@ public sealed class CatalogDatasetDefinitionEndpointTests
     [Fact]
     public async Task Put_CreatesThenReplaces_KeepsMaskingAndConsent()
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
-        var audit = Substitute.For<IAuditWriter>();
-        TableMetadata? stored = null;
-        repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                stored = call.Arg<TableMetadata>();
-                return Task.FromResult(stored);
-            });
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult(stored));
+        var repo = new FakeTableMetadataRepository();
+        var audit = new NullAuditWriter();
 
         var tableId = "sales.public.orders";
         var createRequest = new CatalogDatasetDefinitionRequest(
@@ -116,6 +141,7 @@ public sealed class CatalogDatasetDefinitionEndpointTests
 
         var createStatus = ((IStatusCodeHttpResult)createResult).StatusCode ?? StatusCodes.Status200OK;
         createStatus.ShouldBe(StatusCodes.Status200OK);
+        var stored = repo.Stored;
         stored.ShouldNotBeNull();
         stored.Columns.Count.ShouldBe(3);
         stored.TenantColumnName.ShouldBe("tenant_id");
@@ -124,7 +150,7 @@ public sealed class CatalogDatasetDefinitionEndpointTests
 
         // Add a masking rule to existing stored metadata
         var maskingRule = new MaskingRule { TableColumnId = stored.Columns[0].Id, RuleType = "hash" };
-        stored = stored with { ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["id"] = maskingRule } };
+        repo.Stored = stored with { ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["id"] = maskingRule } };
 
         // Second call: replace columns (remove amount, add status)
         var replaceRequest = new CatalogDatasetDefinitionRequest(
@@ -144,6 +170,7 @@ public sealed class CatalogDatasetDefinitionEndpointTests
 
         var replaceStatus = ((IStatusCodeHttpResult)replaceResult).StatusCode ?? StatusCodes.Status200OK;
         replaceStatus.ShouldBe(StatusCodes.Status200OK);
+        stored = repo.Stored;
         stored.ShouldNotBeNull();
         stored.Columns.Select(c => c.ColumnName).ShouldBe(new[] { "id", "status", "tenant_id" });
         stored.ColumnMaskingRules.ShouldContainKey("id");
@@ -161,8 +188,8 @@ public sealed class CatalogDatasetDefinitionEndpointTests
     [InlineData("sales", "public", "ALL_TABLES")]
     public async Task Reserved_source_names_rejected(string domain, string schema, string table)
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
-        var audit = Substitute.For<IAuditWriter>();
+        var repo = new FakeTableMetadataRepository();
+        var audit = new NullAuditWriter();
         var request = new CatalogDatasetDefinitionRequest(
             SchemaVersion: 1,
             DataSource: domain,
@@ -181,8 +208,8 @@ public sealed class CatalogDatasetDefinitionEndpointTests
     [Trait("Category", "Security")]
     public async Task Put_LimitsEnforced()
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
-        var audit = Substitute.For<IAuditWriter>();
+        var repo = new FakeTableMetadataRepository();
+        var audit = new NullAuditWriter();
 
         // Over 1024 columns rejected
         var tooManyColumns = Enumerable.Range(1, 1025)
@@ -212,8 +239,8 @@ public sealed class CatalogDatasetDefinitionEndpointTests
     [InlineData("bad!type")]
     public async Task Put_InvalidNativeType_Rejected(string invalidType)
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
-        var audit = Substitute.For<IAuditWriter>();
+        var repo = new FakeTableMetadataRepository();
+        var audit = new NullAuditWriter();
         var request = new CatalogDatasetDefinitionRequest(
             1, "sales", "table", [new CatalogDatasetDefinitionColumn("id", invalidType)]);
 
@@ -228,8 +255,8 @@ public sealed class CatalogDatasetDefinitionEndpointTests
     public async Task Put_NeverOpensSourceConnection()
     {
         // SEC-SIMPL-142: Definition endpoint interacts with metadataRepository and audit only, never ISqlConnectionFactory
-        var repo = Substitute.For<ITableMetadataRepository>();
-        var audit = Substitute.For<IAuditWriter>();
+        var repo = new FakeTableMetadataRepository();
+        var audit = new NullAuditWriter();
         var request = new CatalogDatasetDefinitionRequest(
             1, "sales", "table", [new CatalogDatasetDefinitionColumn("id", "int")]);
 
@@ -238,6 +265,6 @@ public sealed class CatalogDatasetDefinitionEndpointTests
 
         var status = ((IStatusCodeHttpResult)result).StatusCode ?? StatusCodes.Status200OK;
         status.ShouldBe(StatusCodes.Status200OK);
-        await repo.Received(1).UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        repo.UpsertCalls.ShouldBe(1);
     }
 }
