@@ -80,6 +80,16 @@ public sealed class DatasourceTestAuditTests
     }
 
     [Fact]
+    public async Task DatasourceTest_AuditUnavailable_RefusesProbe()
+    {
+        _writer.RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new AuditUnavailableException("down")));
+
+        await Should.ThrowAsync<AuditUnavailableException>(() => CreateService().TestDatasourceAsync(Source, new DatasourceTestRequest(), User("t1")));
+
+        await _factory.DidNotReceiveWithAnyArgs().CreateOpenConnectionAsync(default!, default);
+    }
+
+    [Fact]
     public async Task Probe_intent_audit_precedes_outbound_connection()
     {
         await CreateService().TestDatasourceAsync(Source, new DatasourceTestRequest(), User("t1"));

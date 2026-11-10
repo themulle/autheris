@@ -25,4 +25,14 @@ public sealed class EgressUrlPolicyMessageTests
         var ex = await Should.ThrowAsync<SecurityException>(() => EgressUrlPolicy.ValidateResolvedAsync(new Uri("https://192.168.7.9/hook"), isDev: false));
         ex.Message.ShouldNotContain("192.168.7.9");
     }
+
+    [Fact]
+    public async Task ValidateResolvedAsync_DnsOracle_UnresolvableHost_ReturnsGenericMessage()
+    {
+        var ex = await Should.ThrowAsync<SecurityException>(() =>
+            EgressUrlPolicy.ValidateResolvedAsync(new Uri("https://nonexistent-host-dns-oracle.invalid/hook"), isDev: false));
+
+        ex.Message.ShouldBe("Outbound access to target host 'nonexistent-host-dns-oracle.invalid' is restricted or cannot be resolved.");
+        ex.Data["EgressReason"].ShouldBe("unresolved");
+    }
 }

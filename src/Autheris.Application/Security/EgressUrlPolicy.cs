@@ -69,14 +69,14 @@ public static class EgressUrlPolicy
             }
             catch (SocketException)
             {
-                // SEC I-1: fail closed; an unresolvable host must not pass validation.
-                throw WithReason(new SecurityException($"SSRF protection: host '{host}' could not be resolved (fail-closed)."), "unresolved");
+                // SEC I-1 / Issue #507: fail closed; an unresolvable host returns the same generic message to prevent DNS oracle enumeration.
+                throw WithReason(GenericResolutionException(host), "unresolved");
             }
         }
 
         if (addresses.Length == 0)
         {
-            throw WithReason(new SecurityException($"SSRF protection: host '{host}' did not resolve to any address (fail-closed)."), "unresolved");
+            throw WithReason(GenericResolutionException(host), "unresolved");
         }
 
         foreach (var ip in addresses)
@@ -84,10 +84,13 @@ public static class EgressUrlPolicy
             var normIp = EgressAddressRules.Normalize(ip);
             if (EgressAddressRules.IsAlwaysForbidden(normIp) || EgressAddressRules.IsPrivate(normIp))
             {
-                throw WithResolvedIp(new SecurityException($"Outbound access to a private/loopback/restricted address (host '{host}') is strictly forbidden."), ip);
+                throw WithResolvedIp(GenericResolutionException(host), ip);
             }
         }
     }
+
+    private static SecurityException GenericResolutionException(string host) =>
+        new($"Outbound access to target host '{host}' is restricted or cannot be resolved.");
 
     /// <summary>Marks a rejection as transient DNS failure (<c>EgressReason</c>) so delivery can retry instead of dead-lettering.</summary>
     private static SecurityException WithReason(SecurityException ex, string reason)
@@ -100,6 +103,7 @@ public static class EgressUrlPolicy
     private static SecurityException WithResolvedIp(SecurityException ex, IPAddress ip)
     {
         ex.Data["ResolvedIp"] = ip.ToString();
+        ex.Data["EgressReason"] ??= "restricted_address";
         return ex;
     }
 }

@@ -179,13 +179,15 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         var endpoint = table.Table.HttpEndpoint;
         if (endpoint == null || string.IsNullOrWhiteSpace(endpoint.BaseUrl))
         {
+            var msg = "Datasource has no configured HTTP endpoint or BaseUrl.";
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: false, msg, ct).ConfigureAwait(false);
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
                 Type: table.Table.DataSourceType,
                 IsSuccess: false,
                 HttpStatusCode: null,
                 LatencyMs: 0,
-                ErrorMessage: "Datasource has no configured HTTP endpoint or BaseUrl.",
+                ErrorMessage: msg,
                 Diagnostics: new DatasourceDiagnostics(
                     TargetHost: string.Empty,
                     TargetPort: 0,
@@ -199,13 +201,15 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
 
         if (!Uri.TryCreate(endpoint.BaseUrl, UriKind.Absolute, out var baseUri))
         {
+            var msg = $"Datasource BaseUrl '{endpoint.BaseUrl}' is not a valid absolute URI.";
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: false, msg, ct).ConfigureAwait(false);
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
                 Type: table.Table.DataSourceType,
                 IsSuccess: false,
                 HttpStatusCode: null,
                 LatencyMs: 0,
-                ErrorMessage: $"Datasource BaseUrl '{endpoint.BaseUrl}' is not a valid absolute URI.",
+                ErrorMessage: msg,
                 Diagnostics: new DatasourceDiagnostics(
                     TargetHost: string.Empty,
                     TargetPort: 0,
@@ -223,6 +227,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
         if (!OutboundPathPolicy.TryBuild(baseUri, relativePath, preserveBasePath: false, allowDotSegments: false, out var probeUri, out var pathError))
         {
             var ssrfError = "Invalid relative probe path. Absolute URLs, backslashes, network-path references and path traversal sequences are rejected.";
+            await AppendAuditAsync(AuditEventTypes.DatasourceTested, datasourceId, user, isSuccess: false, ssrfError, ct).ConfigureAwait(false);
             return new DatasourceTestResult(
                 DatasourceId: datasourceId,
                 Type: table.Table.DataSourceType,
