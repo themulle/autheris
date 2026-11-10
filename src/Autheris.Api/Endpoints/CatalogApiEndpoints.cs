@@ -36,15 +36,7 @@ public static class CatalogApiEndpoints
             HttpContext httpContext,
             CancellationToken ct) =>
         {
-            var lang = httpContext.Request.Query.TryGetValue("lang", out var langVal) ? langVal.ToString() : null;
-            var acceptLanguage = httpContext.Request.Headers.AcceptLanguage.ToString();
-            var requestedLang = !string.IsNullOrWhiteSpace(lang) ? lang : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
-            var languageNegotiator = httpContext.RequestServices.GetService(typeof(ILanguageNegotiator)) as ILanguageNegotiator ?? new LanguageNegotiator();
-            var localizationOptions = (httpContext.RequestServices.GetService(typeof(IOptions<CatalogLocalizationOptions>)) as IOptions<CatalogLocalizationOptions>)?.Value ?? new CatalogLocalizationOptions();
-            var targetLang = languageNegotiator.NegotiateLanguage(requestedLang, localizationOptions.SupportedLanguages, localizationOptions.DefaultLanguage);
-            httpContext.Response.Headers.Append("Content-Language", targetLang);
-            httpContext.Response.Headers.Append("Vary", "Accept-Language");
-
+            var targetLang = ApplyCatalogLanguageAndVary(httpContext);
             var context = CreateRequestContext(httpContext, targetLang);
             var datasets = await discoveryService.ListDatasetsAsync(context, ct);
             return Results.Ok(datasets);
@@ -63,15 +55,7 @@ public static class CatalogApiEndpoints
                 return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The dataset identifier is invalid.", httpContext);
             }
 
-            var lang = httpContext.Request.Query.TryGetValue("lang", out var langVal) ? langVal.ToString() : null;
-            var acceptLanguage = httpContext.Request.Headers.AcceptLanguage.ToString();
-            var requestedLang = !string.IsNullOrWhiteSpace(lang) ? lang : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
-            var languageNegotiator = httpContext.RequestServices.GetService(typeof(ILanguageNegotiator)) as ILanguageNegotiator ?? new LanguageNegotiator();
-            var localizationOptions = (httpContext.RequestServices.GetService(typeof(IOptions<CatalogLocalizationOptions>)) as IOptions<CatalogLocalizationOptions>)?.Value ?? new CatalogLocalizationOptions();
-            var targetLang = languageNegotiator.NegotiateLanguage(requestedLang, localizationOptions.SupportedLanguages, localizationOptions.DefaultLanguage);
-            httpContext.Response.Headers.Append("Content-Language", targetLang);
-            httpContext.Response.Headers.Append("Vary", "Accept-Language");
-
+            var targetLang = ApplyCatalogLanguageAndVary(httpContext);
             var context = CreateRequestContext(httpContext, targetLang);
             var detail = await discoveryService.GetDatasetDetailAsync(tableId, context, ct);
             if (detail is null)
@@ -173,15 +157,7 @@ public static class CatalogApiEndpoints
             HttpContext httpContext,
             CancellationToken ct) =>
         {
-            var lang = httpContext.Request.Query.TryGetValue("lang", out var langVal) ? langVal.ToString() : null;
-            var acceptLanguage = httpContext.Request.Headers.AcceptLanguage.ToString();
-            var requestedLang = !string.IsNullOrWhiteSpace(lang) ? lang : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
-            var languageNegotiator = httpContext.RequestServices.GetService(typeof(ILanguageNegotiator)) as ILanguageNegotiator ?? new LanguageNegotiator();
-            var localizationOptions = (httpContext.RequestServices.GetService(typeof(IOptions<CatalogLocalizationOptions>)) as IOptions<CatalogLocalizationOptions>)?.Value ?? new CatalogLocalizationOptions();
-            var targetLang = languageNegotiator.NegotiateLanguage(requestedLang, localizationOptions.SupportedLanguages, localizationOptions.DefaultLanguage);
-            httpContext.Response.Headers.Append("Content-Language", targetLang);
-            httpContext.Response.Headers.Append("Vary", "Accept-Language");
-
+            var targetLang = ApplyCatalogLanguageAndVary(httpContext);
             var context = CreateRequestContext(httpContext, targetLang);
             var searchMode = mode?.ToLowerInvariant() switch
             {
@@ -939,6 +915,24 @@ public static class CatalogApiEndpoints
             ApiProblems.LogFailure(httpContext, ex, ApiErrorCodes.InvalidSecretRef);
             return ApiProblems.BadRequest(ApiErrorCodes.InvalidSecretRef, "The secret reference is invalid.", httpContext);
         }
+    }
+
+    internal static string ApplyCatalogLanguageAndVary(HttpContext httpContext)
+    {
+        var lang = httpContext.Request.Query.TryGetValue("lang", out var langVal) ? langVal.ToString() : null;
+        var acceptLanguage = httpContext.Request.Headers.AcceptLanguage.ToString();
+        var requestedLang = !string.IsNullOrWhiteSpace(lang) ? lang : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
+        var languageNegotiator = httpContext.RequestServices?.GetService(typeof(ILanguageNegotiator)) as ILanguageNegotiator ?? new LanguageNegotiator();
+        var localizationOptions = (httpContext.RequestServices?.GetService(typeof(IOptions<CatalogLocalizationOptions>)) as IOptions<CatalogLocalizationOptions>)?.Value ?? new CatalogLocalizationOptions();
+        var targetLang = languageNegotiator.NegotiateLanguage(requestedLang, localizationOptions.SupportedLanguages, localizationOptions.DefaultLanguage);
+        httpContext.Response.Headers.Append("Content-Language", targetLang);
+        httpContext.Response.Headers.Append("Vary", "Accept-Language");
+        if (httpContext.Request.Headers.ContainsKey("X-Gateway-Contract") ||
+            httpContext.Items.ContainsKey(Autheris.Application.Governance.Contracts.SchemaContractConstants.ContractItemKey))
+        {
+            httpContext.Response.Headers.Append("Vary", "X-Gateway-Contract");
+        }
+        return targetLang;
     }
 
     private static RequestContext CreateRequestContext(HttpContext httpContext, string? language = null)

@@ -15,6 +15,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Autheris.Api.Middleware;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Autheris.Api.Mcp;
@@ -104,6 +105,7 @@ public static class McpEndpoints
                 return Results.Redirect(target, permanent: false);
             })
             .AllowAnonymous()
+            .WithPublicDocument()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         }
 

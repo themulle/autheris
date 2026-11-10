@@ -153,6 +153,15 @@ public sealed partial class Query
             contractDef = contractMgr.GetContract(contractName);
         }
 
+        if (httpContext != null)
+        {
+            httpContext.Response.Headers.Append("Vary", "Accept-Language");
+            if (httpContext.Request?.Headers.ContainsKey("X-Gateway-Contract") == true || contractDef != null)
+            {
+                httpContext.Response.Headers.Append("Vary", "X-Gateway-Contract");
+            }
+        }
+
         if (principal?.Identity?.IsAuthenticated != true)
         {
             throw new GraphQLException(ErrorBuilder.New()

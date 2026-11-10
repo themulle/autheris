@@ -202,7 +202,7 @@ public sealed class ClientTierResolver : IClientTierResolver
         }
 
         // 4. Fallback: Pure Anonymous / Free tier with IP
-        var ip = !string.IsNullOrWhiteSpace(clientIp) ? clientIp : "anonymous";
+        var ip = !string.IsNullOrWhiteSpace(clientIp) ? clientIp : $"unassigned_{Guid.NewGuid():N}";
         var freeSubject = $"anon_{ip}";
         return Task.FromResult(new ClientQuotaContext(freeSubject, ClientTier.Free, ClientQuotaPolicy.ForTier(ClientTier.Free, tierOptions)));
     }
@@ -284,14 +284,35 @@ public sealed class ClientTierResolver : IClientTierResolver
             userSid = principal.Identity?.Name;
         }
 
-        if (string.IsNullOrWhiteSpace(userSid))
-        {
-            userSid = "authenticated_user";
-        }
-
         var clientId = principal.FindFirst("client_id")?.Value ??
                        principal.FindFirst("azp")?.Value ??
                        principal.FindFirst("appid")?.Value;
+
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            userSid = principal.FindFirst("email")?.Value ??
+                      principal.FindFirst(ClaimTypes.Email)?.Value ??
+                      principal.FindFirst("preferred_username")?.Value ??
+                      principal.FindFirst("upn")?.Value ??
+                      clientId;
+        }
+
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            var claimsSignature = string.Join(';', principal.Claims
+                .Select(c => $"{c.Type}={c.Value}")
+                .OrderBy(x => x, StringComparer.Ordinal));
+
+            if (!string.IsNullOrWhiteSpace(claimsSignature))
+            {
+                var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(claimsSignature))).ToLowerInvariant();
+                userSid = $"claims_{hash[..16]}";
+            }
+            else
+            {
+                userSid = $"anon_principal_{Guid.NewGuid():N}";
+            }
+        }
 
         var subject = $"user:{tenant}:{userSid}";
         if (!string.IsNullOrWhiteSpace(clientId) && !string.Equals(clientId, userSid, StringComparison.OrdinalIgnoreCase))
