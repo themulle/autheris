@@ -441,6 +441,7 @@ public class CompileApiTests
             [nameof(GovernancePolicy.TablesWithConsentRowFilter)] = policy with { TablesWithConsentRowFilter = new HashSet<string> { "x" } },
             [nameof(GovernancePolicy.TablesWithMaskedColumns)] = policy with { TablesWithMaskedColumns = new HashSet<string> { "x" } },
             [nameof(GovernancePolicy.SubqueryStrategy)] = policy with { SubqueryStrategy = (GovernedSubqueryStrategy)99 },
+            [nameof(GovernancePolicy.Write)] = policy with { Write = new DmlWritePermit(DmlWriteOperation.Insert, new HashSet<string> { "x" }, new HashSet<string>()) },
             [nameof(GovernancePolicy.Tenant)] = policy with { Tenant = new TenantBinding("other_param", "acme", SqlParameterType.String) }
         };
         var validatedPerTable = new HashSet<string> { nameof(GovernancePolicy.RowFilters), nameof(GovernancePolicy.Masks), nameof(GovernancePolicy.Catalog) };

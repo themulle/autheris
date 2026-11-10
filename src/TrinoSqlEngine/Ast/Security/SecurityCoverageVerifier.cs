@@ -7,6 +7,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security;
 using System.Threading;
+using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Nodes;
 
@@ -61,6 +62,7 @@ public sealed partial class SecurityCoverageVerifier
     private readonly DmlGuardOptions _dml;
     private readonly string? _tenantParameterName;
     private readonly DialectCapabilities? _capabilities;
+    private readonly DmlWritePermit? _writePermit;
 
     public SecurityCoverageVerifier(
         Func<SqlQualifiedName, TableCoverageRequirement?> requirementOf,
@@ -69,7 +71,8 @@ public sealed partial class SecurityCoverageVerifier
         int maxAstDepth = 512,
         DmlGuardOptions? dml = null,
         string? tenantParameterName = null,
-        DialectCapabilities? capabilities = null)
+        DialectCapabilities? capabilities = null,
+        DmlWritePermit? writePermit = null)
     {
         _capabilities = capabilities;
         _dml = dml ?? DmlGuardOptions.Strict;
@@ -78,6 +81,7 @@ public sealed partial class SecurityCoverageVerifier
         _dialect = dialect;
         _maxSecuredTableReferences = maxSecuredTableReferences;
         _maxAstDepth = maxAstDepth;
+        _writePermit = writePermit;
     }
 
     /// <summary>Verifies <paramref name="statement"/> and returns the root predicate ids found.</summary>

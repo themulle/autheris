@@ -35,6 +35,7 @@ internal sealed record AstSecurityVisitorOptions
     public long EnforcedMaxRows { get; init; }
 
     public IReadOnlySet<string> TablesWithConsentRowFilter { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    public DmlWritePermit? WritePermit { get; init; }
 
     public bool RejectMaskedColumnsInPredicates { get; init; } = true;
     public bool RejectMaskedColumnsInDml { get; init; } = true;

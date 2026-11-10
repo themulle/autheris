@@ -15,6 +15,13 @@ public enum StatementPermissions { ReadOnly = 0, Insert = 1, Update = 2, Delete 
 
 public enum GovernedSubqueryStrategy { Correlated = 0 }
 
+public enum DmlWriteOperation { Insert = 1, Update = 2, Delete = 3 }
+
+public sealed record DmlWritePermit(
+    DmlWriteOperation Operation,
+    IReadOnlySet<string> WritableColumns,
+    IReadOnlySet<string> WriteProtectedColumns);
+
 /// <summary>
 /// DML guard switches (plan 4.1), enforced by the typed security visitor and proved by the coverage verifier. <see cref="Strict"/> is
 /// the only value the governed compiler accepts (CR-ADG-38): any other combination is rejected with a
@@ -43,6 +50,7 @@ public sealed record GovernancePolicy
     public required ITableCatalog Catalog { get; init; }
     public required TenantBinding Tenant { get; init; }
     public DmlGuardOptions Dml { get; init; } = DmlGuardOptions.Strict;
+    public DmlWritePermit? Write { get; init; }
     public IReadOnlySet<string> TablesWithConsentRowFilter { get; init; } = FrozenSet<string>.Empty;
     public IReadOnlySet<string> TablesWithMaskedColumns { get; init; } = FrozenSet<string>.Empty;
     public GovernedSubqueryStrategy SubqueryStrategy { get; init; }
