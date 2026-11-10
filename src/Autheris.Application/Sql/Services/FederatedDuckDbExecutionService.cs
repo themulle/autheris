@@ -265,6 +265,19 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             throw new WebSqlPolicyException("DML statements across multiple data sources or HTTP APIs are not permitted in WebSQL.");
         }
 
+        // SqlFunctionPolicy check
+        if (metadata.FunctionCalls is { Count: > 0 })
+        {
+            var allowedFunctions = EffectiveDuckDbFunctions();
+            foreach (var functionName in metadata.FunctionCalls)
+            {
+                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions, additionalDeniedFunctions: null))
+                {
+                    throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
+                }
+            }
+        }
+
         var routing = await _router.RouteAsync(metadata, requestedDataSource: null, tenantId, isDml: false, ct).ConfigureAwait(false);
         if (routing.SourceClass == QuerySourceClass.Unsupported)
         {
@@ -367,10 +380,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         // SqlFunctionPolicy check
         if (metadata.FunctionCalls is { Count: > 0 })
         {
+            var allowedFunctions = EffectiveDuckDbFunctions();
             foreach (var functionName in metadata.FunctionCalls)
             {
-                // G-9: the denylist only; no RlsOptions bag.
-                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions: null, additionalDeniedFunctions: null))
+                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions, additionalDeniedFunctions: null))
                 {
                     throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
                 }
@@ -499,7 +512,18 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private SqlStatement ParseStatement(string sql)
     {
         var (tree, _) = _sqlEngine.Parse(sql.AsMemory());
-        return new SqlAstBuilder().BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = EffectiveDuckDbFunctions(),
+            TranslateTrinoDateFunctions = true
+        }).BuildStatement(tree);
+    }
+
+    private IReadOnlySet<string> EffectiveDuckDbFunctions()
+    {
+        var webSqlOptions = _options.Value.WebSql ?? new WebSqlOptions();
+        return SqlFunctionAllowlists.WithDateTranslation(
+            SqlFunctionAllowlists.Build(TargetSqlDialect.DuckDb, webSqlOptions.AdditionalAllowedFunctions));
     }
 
     private async Task<IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>?> PlanVirtualFiltersAsync(

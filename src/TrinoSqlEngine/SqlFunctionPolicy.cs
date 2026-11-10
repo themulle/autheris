@@ -69,6 +69,10 @@ public static class SqlFunctionPolicy
         "current_version", "input_file_name", "input_file_block_start", "input_file_block_length", "assert_true", "raise_error",
         // CR-ADG-02 SQL Server role and principal probing, Oracle URI and XML types (object constructors read remote data)
         "is_rolemember", "database_principal_id", "dburitype", "xmltype", "xdburitype", "sys_dburigen", "sys_xmlgen", "extractvalue",
+        // Issue #481 DuckDB: file access, secrets, settings, environment disclosure
+        "read_parquet", "read_csv", "read_csv_auto", "read_json", "read_json_auto", "read_ndjson",
+        "read_blob", "read_text", "scan_parquet", "scan_csv", "parquet_scan", "sniff_csv",
+        "glob", "getenv", "duckdb_settings", "duckdb_secrets",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -81,7 +85,7 @@ public static class SqlFunctionPolicy
         "pg_advisory_", "pg_try_advisory_", "pg_sleep", "pg_get_", "pg_stat_", "pg_replication_",
         "lo_", "dblink", "xp_", "sp_", "dbms_", "utl_", "fn_dblog", "fn_xe_", "fn_get_audit_", "fn_trace_",
         // SEC P-02: all PostgreSQL system functions (pg_logical_slot_*, pg_*), regclass lookups, inet_*, SQLite internals
-        "pg_", "to_reg", "inet_", "sqlite_", "pragma_", "txid_",
+        "pg_", "to_reg", "inet_", "sqlite_", "pragma_", "txid_", "duckdb_",
     };
 
     /// <summary>
@@ -165,13 +169,17 @@ public static class SqlFunctionPolicy
 
     internal static bool ContainsIgnoreCase(IReadOnlySet<string> set, string value)
     {
-        if (set.Contains(value)) return true;
-        foreach (var entry in set)
+        if (set is FrozenSet<string> frozen && frozen.Comparer == StringComparer.OrdinalIgnoreCase)
         {
-            if (string.Equals(entry, value, StringComparison.OrdinalIgnoreCase))
-                return true;
+            return frozen.Contains(value);
         }
-        return false;
+
+        if (set is HashSet<string> hashSet && hashSet.Comparer == StringComparer.OrdinalIgnoreCase)
+        {
+            return hashSet.Contains(value);
+        }
+
+        return set.Contains(value);
     }
 
     private static string GetSimpleName(string fullName) => SqlIdentifierHelper.GetSimpleName(fullName);
