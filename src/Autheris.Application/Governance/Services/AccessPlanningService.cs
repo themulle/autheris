@@ -39,9 +39,8 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public class AccessPlanningService : IAccessPlanningService
 {
-    private const string SigningKeyInfo = "autheris/access-plan/confirmation-token/v1";
-
-    private readonly byte[] _hmacKey;
+    private readonly AccessPlanTokenSigner _tokenSigner;
+    private readonly bool _isDev;
     private readonly IAccessPlanStore _store;
 
     private readonly ITableMetadataRepository _tableRepo;
@@ -165,9 +164,10 @@ public class AccessPlanningService : IAccessPlanningService
         _time = timeProvider ?? TimeProvider.System;
         _store = accessPlanStore
             ?? new InMemoryAccessPlanStore(_time, TimeSpan.FromSeconds(_planOptions.SweepIntervalSeconds));
-        _hmacKey = ResolveSigningKey(_secretProvider, _planOptions.SigningKeyRef, clusterTopology?.IsClusterWide == true);
+        _tokenSigner = new AccessPlanTokenSigner(_secretProvider, _planOptions.SigningKeyRef, clusterTopology?.IsClusterWide == true);
+        _isDev = hostEnvironment?.IsDevelopment() == true;
         // SR-L-06 Part D: the demo directory is only exposed when the host is explicitly a Development host.
-        _allowDemoDirectory = hostEnvironment?.IsDevelopment() == true;
+        _allowDemoDirectory = _isDev;
     }
 
     public async Task<AdminPlanAccessResult> PlanAccessAsync(
@@ -291,9 +291,9 @@ public class AccessPlanningService : IAccessPlanningService
         }
 
         var tokenExpiresAt = _time.GetUtcNow().AddMinutes(_planOptions.ConfirmationTokenTtlMinutes);
-        var token = GenerateConfirmationToken(planId, adminSid, tokenExpiresAt);
+        var token = _tokenSigner.GenerateConfirmationToken(planId, adminSid, tokenExpiresAt);
 
-        if (!await _store.SetConfirmedTokenAsync(planId, HashToken(token), ct).ConfigureAwait(false))
+        if (!await _store.SetConfirmedTokenAsync(planId, AccessPlanTokenSigner.HashToken(token), ct).ConfigureAwait(false))
         {
             throw new SecurityException($"Plan '{planId}' does not exist or has expired.");
         }
@@ -622,13 +622,13 @@ public class AccessPlanningService : IAccessPlanningService
 
         if (string.IsNullOrWhiteSpace(stored.ConfirmedTokenHash) ||
             !CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(HashToken(request.ConfirmationToken)),
+                Encoding.UTF8.GetBytes(AccessPlanTokenSigner.HashToken(request.ConfirmationToken)),
                 Encoding.UTF8.GetBytes(stored.ConfirmedTokenHash)))
         {
             throw new SecurityException("Confirmation token does not match the confirmed plan token.");
         }
 
-        if (!ValidateConfirmationToken(request.ConfirmationToken, request.PlanId, adminSid, out var tokenExpiry))
+        if (!_tokenSigner.ValidateConfirmationToken(request.ConfirmationToken, request.PlanId, adminSid, out var tokenExpiry))
         {
             throw new SecurityException("Invalid or malformed confirmation token.");
         }
@@ -646,7 +646,7 @@ public class AccessPlanningService : IAccessPlanningService
 
         // Cluster-wide single use: the first caller wins; an unavailable store throws (no apply).
         var consumeTtl = stored.Result.ExpiresAt - _time.GetUtcNow();
-        if (!await _store.TryConsumeTokenAsync(HashToken(request.ConfirmationToken), consumeTtl, ct).ConfigureAwait(false))
+        if (!await _store.TryConsumeTokenAsync(AccessPlanTokenSigner.HashToken(request.ConfirmationToken), consumeTtl, ct).ConfigureAwait(false))
         {
             throw new SecurityException("Confirmation token has already been consumed (replay prevention).");
         }
@@ -751,10 +751,20 @@ public class AccessPlanningService : IAccessPlanningService
         var datasourceId = $"{request.Domain.ToLowerInvariant()}.{request.Name.ToLowerInvariant()}";
         string? secretRef = null;
         IKeyVaultSecretProvider? inlineStore = null;
-        var vaultPrefix = $"vault://datasources/{request.Domain.ToLowerInvariant()}/";
+        var domainPrefix = DatasourceSecretRefPolicy.DomainPrefix(request.Domain.ToLowerInvariant());
 
         // SR-H-03: a client-supplied SecretRef must lie inside this domain's datasource namespace.
-        DatasourceSecretRefPolicy.ValidateClientRef(request.Auth?.SecretRef, vaultPrefix);
+        DatasourceSecretRefPolicy.ValidateClientRef(request.Auth?.SecretRef, domainPrefix);
+
+        if (!string.IsNullOrWhiteSpace(request.BaseUrl))
+        {
+            if (!Uri.TryCreate(request.BaseUrl, UriKind.Absolute, out var baseUri))
+            {
+                throw new ArgumentException($"BaseUrl '{request.BaseUrl}' must be a valid absolute URI.", nameof(request));
+            }
+
+            EgressUrlPolicy.ValidateStatic(baseUri, isDev: _isDev);
+        }
 
         if (!string.IsNullOrWhiteSpace(request.Auth?.Secret))
         {
@@ -773,6 +783,8 @@ public class AccessPlanningService : IAccessPlanningService
             secretRef = request.Auth.SecretRef;
         }
 
+        var auditedBaseUrl = StripUserInfo(request.BaseUrl);
+
         // Write-ahead: the required record exists before the secret is stored.
         await RecordAdminAuditAsync(
             AuditEventTypes.AdminRegisterDatasource, TenantId.TryParse(tenantId, out var auditTenant) ? auditTenant : TenantId.Platform, adminSid, datasourceId,
@@ -784,7 +796,7 @@ public class AccessPlanningService : IAccessPlanningService
                 status = "inactive",
                 isConfigured = true,
                 secretRef,
-                baseUrl = request.BaseUrl,
+                baseUrl = auditedBaseUrl,
                 dryRun = request.DryRun
             }, ct).ConfigureAwait(false);
 
@@ -929,94 +941,19 @@ public class AccessPlanningService : IAccessPlanningService
 
     internal int ConsumedTokenCount => (_store as InMemoryAccessPlanStore)?.ConsumedTokenCount ?? 0;
 
-    private static string HashToken(string token)
-        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
-
-    /// <summary>
-    /// Derives the confirmation-token HMAC key (HKDF-SHA256) from the configured secret. Without a configured secret a
-    /// per-process random key is used, which is only acceptable when the state is not shared across replicas.
-    /// </summary>
-    private static byte[] ResolveSigningKey(IKeyVaultSecretProvider? provider, string? signingKeyRef, bool clusterWide)
+    private static string? StripUserInfo(string? url)
     {
-        if (string.IsNullOrWhiteSpace(signingKeyRef))
+        if (string.IsNullOrWhiteSpace(url))
         {
-            if (clusterWide)
-            {
-                throw new InvalidOperationException(
-                    $"{AccessPlanOptions.SectionName}:SigningKeyRef is required when the cluster state is shared across replicas.");
-            }
-
-            return RandomNumberGenerator.GetBytes(32);
+            return url;
         }
 
-        if (provider == null)
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.UserInfo))
         {
-            throw new InvalidOperationException(
-                $"{AccessPlanOptions.SectionName}:SigningKeyRef is configured but no IKeyVaultSecretProvider is registered.");
+            return uri.GetComponents(UriComponents.AbsoluteUri & ~UriComponents.UserInfo, UriFormat.UriEscaped);
         }
 
-        var ikm = provider.GetSecretBytes(signingKeyRef);
-        if (ikm == null || ikm.Length == 0)
-        {
-            throw new InvalidOperationException($"The secret referenced by {AccessPlanOptions.SectionName}:SigningKeyRef is empty.");
-        }
-
-        return HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, 32, salt: null, info: Encoding.UTF8.GetBytes(SigningKeyInfo));
-    }
-
-    private static string B64(string value) => Base64Url.EncodeToString(Encoding.UTF8.GetBytes(value));
-
-    private string Sign(string signedPart)
-        => Convert.ToHexString(HMACSHA256.HashData(_hmacKey, Encoding.UTF8.GetBytes(signedPart)));
-
-    // Token layout: v1.{b64url(planId)}.{b64url(adminSid)}.{unix}.{hmac-hex}. Base64url never contains '.',
-    // so the encoding is unambiguous even when the SID contains ':' or other separators.
-    private string GenerateConfirmationToken(string planId, string adminSid, DateTimeOffset expiresAt)
-    {
-        var signedPart = $"v1.{B64(planId)}.{B64(adminSid)}.{expiresAt.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)}";
-        return $"{signedPart}.{Sign(signedPart)}";
-    }
-
-    private bool ValidateConfirmationToken(string token, string expectedPlanId, string expectedAdminSid, out DateTimeOffset expiresAt)
-    {
-        expiresAt = DateTimeOffset.MinValue;
-        var parts = token.Split('.');
-        if (parts.Length != 5 || parts[0] != "v1") return false;
-
-        var signedPart = string.Join('.', parts[0], parts[1], parts[2], parts[3]);
-        if (!CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(parts[4]),
-            Encoding.UTF8.GetBytes(Sign(signedPart))))
-        {
-            return false;
-        }
-
-        if (!long.TryParse(parts[3], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var unix)) return false;
-
-        string planId, adminSid;
-        try
-        {
-            planId = Encoding.UTF8.GetString(Base64Url.DecodeFromChars(parts[1]));
-            adminSid = Encoding.UTF8.GetString(Base64Url.DecodeFromChars(parts[2]));
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-
-        if (!string.Equals(planId, expectedPlanId, StringComparison.OrdinalIgnoreCase)) return false;
-        if (!string.Equals(adminSid, expectedAdminSid, StringComparison.OrdinalIgnoreCase)) return false;
-
-        try
-        {
-            expiresAt = DateTimeOffset.FromUnixTimeSeconds(unix);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
-            return false;
-        }
-
-        return true;
+        return url;
     }
 
     private static TableIdentifier ParseTableIdentifier(string datasetId)
@@ -1029,24 +966,5 @@ public class AccessPlanningService : IAccessPlanningService
             1 => new TableIdentifier("default", "public", parts[0]),
             _ => new TableIdentifier("default", "public", "unknown")
         };
-    }
-
-    private sealed class NullTableMetadataRepository : ITableMetadataRepository
-    {
-        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<TableMetadata?>(null);
-        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<TableMetadata>>(Array.Empty<TableMetadata>());
-        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) => Task.FromResult(metadata);
-        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default) =>
-            Task.FromResult<TableKeyDefinitionChange?>(null);
-    }
-
-    private sealed class NullRebacStore : IRebacStore
-    {
-        public ValueTask AddTupleAsync(RebacTuple tuple, CancellationToken ct = default) => ValueTask.CompletedTask;
-        public ValueTask AddTuplesAsync(IEnumerable<RebacTuple> tuples, CancellationToken ct = default) => ValueTask.CompletedTask;
-        public ValueTask<bool> DeleteTupleAsync(RebacTuple tuple, CancellationToken ct = default) => ValueTask.FromResult(true);
-        public ValueTask<IReadOnlyList<RebacTuple>> GetTuplesAsync(string tenantId, string? user = null, string? relation = null, string? obj = null, CancellationToken ct = default) =>
-            ValueTask.FromResult<IReadOnlyList<RebacTuple>>(Array.Empty<RebacTuple>());
-        public ValueTask ClearTenantTuplesAsync(string tenantId, CancellationToken ct = default) => ValueTask.CompletedTask;
     }
 }

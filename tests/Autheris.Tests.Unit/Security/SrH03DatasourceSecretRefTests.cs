@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Governance.Services;
@@ -129,15 +130,73 @@ public sealed class SrH03DatasourceSecretRefTests
     }
 
     [Fact]
+    public async Task RegisterDatasource_ForeignSecretRef_IsRejected()
+    {
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+        var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
+            Auth: new DatasourceAuthDto("apiKey", SecretRef: "datasource:other-domain:crane:auth_secret"));
+
+        await Should.ThrowAsync<ArgumentException>(() => service.RegisterDatasourceAsync(request, "S-1-5-21-1-500", isClusterAdmin: true));
+    }
+
+    [Fact]
     public async Task SR_H_03_AccessPlanning_OwnNamespaceRef_IsAccepted()
     {
         var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
             Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
-            Auth: new DatasourceAuthDto("apiKey", SecretRef: "vault://datasources/telemetry/crane/auth_secret"));
+            Auth: new DatasourceAuthDto("apiKey", SecretRef: "datasource:telemetry:crane:auth_secret"));
 
         var result = await service.RegisterDatasourceAsync(request, "S-1-5-21-1-500", isClusterAdmin: true);
-        result.SecretRef.ShouldBe("vault://datasources/telemetry/crane/auth_secret");
+        result.SecretRef.ShouldBe("datasource:telemetry:crane:auth_secret");
+    }
+
+    [Fact]
+    public async Task RegisterDatasource_InvalidBaseUrl_IsRejected()
+    {
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+        var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
+            BaseUrl: "not-a-valid-uri");
+
+        await Should.ThrowAsync<ArgumentException>(() => service.RegisterDatasourceAsync(request, "S-1-5-21-1-500", isClusterAdmin: true));
+    }
+
+    [Theory]
+    [InlineData("http://api.example.com")]
+    [InlineData("https://localhost:8080")]
+    [InlineData("https://169.254.169.254/latest/meta-data")]
+    public async Task RegisterDatasource_RestrictedBaseUrl_IsRejected(string restrictedUrl)
+    {
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
+            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+        var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
+            BaseUrl: restrictedUrl);
+
+        await Should.ThrowAsync<System.Security.SecurityException>(() => service.RegisterDatasourceAsync(request, "S-1-5-21-1-500", isClusterAdmin: true));
+    }
+
+    [Fact]
+    public async Task RegisterDatasource_UrlWithUserInfo_StripsCredentialsBeforeAudit()
+    {
+        var auditWriter = Substitute.For<IAuditWriter>();
+        AuditLogEntry? capturedAudit = null;
+        auditWriter.RecordRequiredAsync(Arg.Do<AuditLogEntry>(e => capturedAudit = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var service = new AccessPlanningService(auditWriter, Substitute.For<ITableMetadataRepository>(),
+            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+        var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
+            BaseUrl: "https://admin:super-secret-password@api.example.com/v1");
+
+        var result = await service.RegisterDatasourceAsync(request, "S-1-5-21-1-500", isClusterAdmin: true);
+        result.DatasourceId.ShouldBe("telemetry.crane");
+
+        capturedAudit.ShouldNotBeNull();
+        capturedAudit.DetailsJson.ShouldNotContain("admin");
+        capturedAudit.DetailsJson.ShouldNotContain("super-secret-password");
+        capturedAudit.DetailsJson.ShouldContain("https://api.example.com/v1");
     }
 
     [Theory]
