@@ -276,7 +276,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             // G-9: the denylist only (no allowlist yet; the dialect allowlist is applied in stage 4).
             foreach (var functionName in metadata.FunctionCalls)
             {
-                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions: null, additionalDeniedFunctions: null))
+                if (SqlFunctionPolicy.IsDeniedByDefault(functionName))
                 {
                     throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
                 }

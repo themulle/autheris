@@ -216,6 +216,7 @@ public static class SqlFunctionAllowlists
     /// <summary>DuckDB allowlist (ANSI + safe analytical/date/string functions).</summary>
     public static IReadOnlySet<string> DuckDb { get; } = Create(CommonFunctions, PostgreSqlFunctions);
 
+
     /// <summary>Returns the curated default allowlist for <paramref name="dialect"/>.</summary>
     public static IReadOnlySet<string> GetDefault(TargetSqlDialect dialect) => dialect switch
     {
