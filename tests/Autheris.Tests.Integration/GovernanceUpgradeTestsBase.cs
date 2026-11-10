@@ -500,7 +500,7 @@ public abstract class GovernanceUpgradeTestsBase
         renamed.Code.ShouldBe(GovernanceMigrationCodes.HistoryRenamed);
         await ExecAsync(cs, "UPDATE autheris_schema_migrations SET name = 'baseline_governance_schema' WHERE version = 1");
 
-        await ExecAsync(cs, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (9, 'x', 'y', 'z', 'w')");
+        await ExecAsync(cs, "INSERT INTO autheris_schema_migrations (version, name, checksum, applied_at, applied_by) VALUES (10, 'x', 'y', 'z', 'w')");
         var gap = await Should.ThrowAsync<GovernanceSchemaDriftException>(
             () => RunAsync(cs, GovernanceMigrationMode.Apply, [ProbeStep()], allowNewer: true, trace: trace));
         gap.Code.ShouldBe(GovernanceMigrationCodes.HistoryGap);

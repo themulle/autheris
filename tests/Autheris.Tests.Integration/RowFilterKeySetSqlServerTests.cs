@@ -74,7 +74,7 @@ public sealed class RowFilterKeySetSqlServerTests : IClassFixture<RowFilterKeySe
     private static RowFilterKeySetLoadRequest Request(string connectionString, CompiledKeyQuery query, bool readUncommitted = false, string tenant = "t1") => new(
         new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = connectionString, ReadUncommitted = readUncommitted },
         TargetSqlDialect.SqlServer, new TenantId(tenant), "ds", query,
-        KeySetValueConverter.Create(TargetSqlDialect.SqlServer, query.KeyColumnType, query.ForeignKeyColumnType)!, 100, TimeSpan.FromSeconds(30));
+        KeySetValueConverter.Create(TargetSqlDialect.SqlServer, query.KeyColumnType, query.ForeignKeyColumnType, "Latin1_General_CI_AS", "Latin1_General_CI_AS")!, 100, TimeSpan.FromSeconds(30));
 
     private async Task<string[]> TextRowsAsync(RowFilterKeySetLoadRequest request) =>
         (await Loader().LoadAsync(request, CancellationToken.None)).Keys.Cast<string>().ToArray();
