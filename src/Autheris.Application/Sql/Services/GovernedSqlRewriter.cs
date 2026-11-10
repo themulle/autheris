@@ -328,7 +328,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             var req = new Autheris.Application.Policy.Pdp.AccessRequest(
                 secContext,
                 tableMeta,
-                isDml ? Autheris.Application.Policy.Pdp.AccessOperation.Update : Autheris.Application.Policy.Pdp.AccessOperation.Read,
+                Autheris.Application.Policy.Pdp.AccessOperation.Read,
                 Autheris.Application.Policy.Pdp.AccessTransport.WebSql,
                 Columns: colList);
             return await _accessDecisionPoint.DecideAsync(req, ct).ConfigureAwait(false);
