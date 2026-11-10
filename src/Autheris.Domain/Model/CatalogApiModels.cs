@@ -41,7 +41,8 @@ public sealed record CatalogDatasetDetail(
     string? Description = null,
     string? LongDescription = null,
     string? Language = null,
-    IReadOnlyList<string>? PrimaryKeyDirections = null);
+    IReadOnlyList<string>? PrimaryKeyDirections = null,
+    McpDatasetSize? Size = null);
 
 public sealed record CatalogDatasourceSummary(
     string Id,

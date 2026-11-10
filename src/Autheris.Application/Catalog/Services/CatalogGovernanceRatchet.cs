@@ -152,6 +152,7 @@ public static class CatalogGovernanceRatchet
             PredefinedSyntheticSamples = existing.PredefinedSyntheticSamples,
             EstimatedRowCount = incoming.EstimatedRowCount ?? existing.EstimatedRowCount,
             ExpectedRows = incoming.ExpectedRows ?? existing.ExpectedRows,
+            IngestedAt = incoming.IngestedAt ?? existing.IngestedAt,
             MinGroupSize = existing.MinGroupSize,
             NonPersonal = existing.NonPersonal,
             SmallGroupStrategy = existing.SmallGroupStrategy,

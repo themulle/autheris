@@ -1,8 +1,24 @@
 namespace Autheris.Domain.Model;
 
+using System;
 using System.Linq;
 using System.Collections.Generic;
 using Autheris.Domain.Common;
+
+/// <summary>Issue #572: Coarse size class and metadata provenance for MCP and REST catalog discovery.</summary>
+public sealed record McpDatasetSize(string SizeClass, string Source, DateTimeOffset? AsOf = null)
+{
+    public const string Tiny = "tiny";
+    public const string Small = "small";
+    public const string Medium = "medium";
+    public const string Large = "large";
+    public const string Huge = "huge";
+    public const string Unknown = "unknown";
+
+    public const string SourceDbtMeta = "DBT_META";
+    public const string SourceDeclared = "DECLARED";
+    public const string SourceUnknown = "UNKNOWN";
+}
 
 /// <summary>One catalog table as listed by the MCP <c>list_datasets</c> tool.</summary>
 /// <param name="GraphQlField">Root query field of the dataset in the GraphQL API; null when the dataset is not in the GraphQL schema.</param>
@@ -15,7 +31,8 @@ public sealed record McpDatasetSummary(
     string? GraphQlField = null,
     IReadOnlyList<string>? Tags = null,
     string? AccessStatus = null,
-    string Kind = "table");
+    string Kind = "table",
+    McpDatasetSize? Size = null);
 
 /// <summary>Issue #153: Parameter information for a stored procedure exposed via describe_dataset.</summary>
 public sealed record McpProcedureParameterInfo(
@@ -145,7 +162,8 @@ public sealed record McpDatasetDescription(
     IReadOnlyList<IReadOnlyList<string>>? RequiredFilterColumnGroups = null,
     string? Language = null,
     string? RequestedLanguage = null,
-    IReadOnlyList<McpKeyColumn>? PrimaryKeyOrder = null);
+    IReadOnlyList<McpKeyColumn>? PrimaryKeyOrder = null,
+    McpDatasetSize? Size = null);
 
 /// <summary>Issue #390: one primary key column in key order with its declared sort direction (<c>ASC</c> or <c>DESC</c>).</summary>
 public sealed record McpKeyColumn(string Column, string Direction);

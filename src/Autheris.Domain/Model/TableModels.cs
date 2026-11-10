@@ -421,6 +421,12 @@ public sealed record TableMetadata
     /// <summary>Issue #124: Optional cardinality hint (expected row count) used for cross-source join ordering.</summary>
     public long? ExpectedRows { get; init; }
 
+    /// <summary>Issue #572: Last ingestion time of the table metadata or null.</summary>
+    public DateTimeOffset? IngestedAt { get; init; }
+
+    /// <summary>Issue #572: Alias for <see cref="IngestedAt"/>.</summary>
+    public DateTimeOffset? AsOf { get => IngestedAt; init => IngestedAt = value; }
+
     public long? EffectiveExpectedRows => ExpectedRows ?? Table.ExpectedRows ?? EstimatedRowCount;
 
     /// <summary>Per-table minimum group size override for governed aggregations (#37). Falls back to <see cref="Table.MinGroupSize"/>.</summary>

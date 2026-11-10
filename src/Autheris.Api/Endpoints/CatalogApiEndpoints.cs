@@ -92,6 +92,7 @@ public static class CatalogApiEndpoints
                     description = detail.Description,
                     sensitivity = detail.Sensitivity,
                     primaryKeys = detail.PrimaryKeys,
+                    size = detail.Size,
                     columns = detail.Columns.Select(c => new
                     {
                         name = c.Name,
