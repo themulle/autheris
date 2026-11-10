@@ -22,6 +22,7 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
     private readonly IOptionsMonitor<DataSourceConfigurationOptions> _dataSourceOptions;
     private readonly IOptionsMonitor<GatewayOptions>? _gatewayOptions;
     private readonly IOptionsMonitor<TelemetryOptions>? _telemetryOptions;
+    private readonly ILogger<HierarchicalDataSourceOptionsResolver>? _logger;
     private readonly List<IDisposable> _subscriptions = new();
     private readonly object _syncRoot = new();
 
@@ -29,19 +30,28 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
     private sealed record Snapshot(FrozenDictionary<string, EffectiveDataSourceProfile> Profiles, EffectiveDataSourceProfile DefaultProfile);
 
     private volatile Snapshot _snapshot = null!;
+    private volatile Exception? _lastRebuildError;
     private long _generation;
 
     /// <inheritdoc />
     public long Generation => Interlocked.Read(ref _generation);
 
+    /// <inheritdoc />
+    public bool IsConfigurationStale => _lastRebuildError is not null;
+
+    /// <inheritdoc />
+    public Exception? LastRebuildError => _lastRebuildError;
+
     public HierarchicalDataSourceOptionsResolver(
         IOptionsMonitor<DataSourceConfigurationOptions> dataSourceOptions,
         IOptionsMonitor<GatewayOptions>? gatewayOptions = null,
-        IOptionsMonitor<TelemetryOptions>? telemetryOptions = null)
+        IOptionsMonitor<TelemetryOptions>? telemetryOptions = null,
+        ILogger<HierarchicalDataSourceOptionsResolver>? logger = null)
     {
         _dataSourceOptions = dataSourceOptions ?? throw new ArgumentNullException(nameof(dataSourceOptions));
         _gatewayOptions = gatewayOptions;
         _telemetryOptions = telemetryOptions;
+        _logger = logger;
 
         Rebuild();
 
@@ -107,9 +117,10 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
         {
             Rebuild();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // keep the last good snapshot; the options validators report the broken configuration
+            _lastRebuildError = ex;
+            _logger?.LogError(ex, "Failed to rebuild hierarchical data source options. Keeping last known good snapshot.");
         }
     }
 
@@ -192,6 +203,7 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
             }
 
             _snapshot = new Snapshot(dict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase), defaultProfile);
+            _lastRebuildError = null;
 
             // after the swap: a cache that sees the new generation also sees the new snapshot
             Interlocked.Increment(ref _generation);
@@ -268,19 +280,22 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
         int rawComplexity = profileOptions?.MaxAllowedComplexity
             ?? fallbackDefaults.MaxAllowedComplexity
             ?? 1000;
-        int complexity = relaxed ? rawComplexity : Math.Min(rawComplexity, ceilings.MaxAllowedComplexityCeiling);
+        int complexityCeiling = Math.Max(1, ceilings.MaxAllowedComplexityCeiling);
+        int complexity = relaxed ? Math.Max(1, rawComplexity) : Math.Clamp(rawComplexity, 1, complexityCeiling);
 
         long rawBudget = profileOptions?.MaxAggregateRowBudget
             ?? fallbackDefaults.MaxAggregateRowBudget
             ?? 100_000L;
-        long budget = relaxed ? rawBudget : Math.Min(rawBudget, ceilings.MaxAggregateRowBudgetCeiling);
+        long budgetCeiling = Math.Max(1L, ceilings.MaxAggregateRowBudgetCeiling);
+        long budget = relaxed ? Math.Max(1L, rawBudget) : Math.Clamp(rawBudget, 1L, budgetCeiling);
 
         int rawQueryTimeout = profileOptions?.QueryTimeoutSeconds
             ?? fallbackDefaults.QueryTimeoutSeconds
             ?? connectionOptions?.CommandTimeoutSeconds
             ?? 30;
-        int queryTimeoutSec = relaxed ? rawQueryTimeout : Math.Min(rawQueryTimeout, ceilings.QueryTimeoutCeilingSeconds);
-        TimeSpan queryTimeout = TimeSpan.FromSeconds(Math.Max(1, queryTimeoutSec));
+        int queryTimeoutCeiling = Math.Max(1, ceilings.QueryTimeoutCeilingSeconds);
+        int queryTimeoutSec = relaxed ? Math.Max(1, rawQueryTimeout) : Math.Clamp(rawQueryTimeout, 1, queryTimeoutCeiling);
+        TimeSpan queryTimeout = TimeSpan.FromSeconds(queryTimeoutSec);
 
         // 2. Logging & Telemetry
         string rawLogLevel = profileOptions?.MinimumLogLevel
@@ -320,19 +335,22 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
             ?? fallbackDefaults.MaxResponseRows
             ?? gateway?.RowLimits?.Trino?.DefaultMaxRows
             ?? 10_000L;
-        long maxRows = relaxed ? rawMaxRows : Math.Min(rawMaxRows, ceilings.MaxResponseRowsCeiling);
+        long maxRowsCeiling = Math.Max(1L, ceilings.MaxResponseRowsCeiling);
+        long maxRows = relaxed ? Math.Max(1L, rawMaxRows) : Math.Clamp(rawMaxRows, 1L, maxRowsCeiling);
 
         long rawMaxBytes = profileOptions?.MaxResponseBytes
             ?? fallbackDefaults.MaxResponseBytes
             ?? 10_485_760L; // 10 MB default
-        long maxBytes = relaxed ? rawMaxBytes : Math.Min(rawMaxBytes, ceilings.MaxResponseBytesCeiling);
+        long maxBytesCeiling = Math.Max(1L, ceilings.MaxResponseBytesCeiling);
+        long maxBytes = relaxed ? Math.Max(1L, rawMaxBytes) : Math.Clamp(rawMaxBytes, 1L, maxBytesCeiling);
 
         int rawCmdTimeout = profileOptions?.CommandTimeoutSeconds
             ?? fallbackDefaults.CommandTimeoutSeconds
             ?? connectionOptions?.CommandTimeoutSeconds
             ?? 30;
-        int cmdTimeoutSec = relaxed ? rawCmdTimeout : Math.Min(rawCmdTimeout, ceilings.CommandTimeoutCeilingSeconds);
-        TimeSpan commandTimeout = TimeSpan.FromSeconds(Math.Max(1, cmdTimeoutSec));
+        int cmdTimeoutCeiling = Math.Max(1, ceilings.CommandTimeoutCeilingSeconds);
+        int cmdTimeoutSec = relaxed ? Math.Max(1, rawCmdTimeout) : Math.Clamp(rawCmdTimeout, 1, cmdTimeoutCeiling);
+        TimeSpan commandTimeout = TimeSpan.FromSeconds(cmdTimeoutSec);
 
         int? minPool = profileOptions?.MinPoolSize ?? fallbackDefaults.MinPoolSize;
         int? maxPool = profileOptions?.MaxPoolSize ?? fallbackDefaults.MaxPoolSize;
@@ -354,13 +372,15 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
         int rawStagingTtl = profileOptions?.StagingTtlSeconds
             ?? fallbackDefaults.StagingTtlSeconds
             ?? 3600;
-        int stagingTtlSec = relaxed ? rawStagingTtl : Math.Min(rawStagingTtl, ceilings.StagingTtlCeilingSeconds);
-        TimeSpan stagingTtl = TimeSpan.FromSeconds(Math.Max(1, stagingTtlSec));
+        int stagingTtlCeiling = Math.Max(1, ceilings.StagingTtlCeilingSeconds);
+        int stagingTtlSec = relaxed ? Math.Max(1, rawStagingTtl) : Math.Clamp(rawStagingTtl, 1, stagingTtlCeiling);
+        TimeSpan stagingTtl = TimeSpan.FromSeconds(stagingTtlSec);
 
         int rawKeyLimit = profileOptions?.MaxKeySetImportLimit
             ?? fallbackDefaults.MaxKeySetImportLimit
             ?? 1000;
-        int keyLimit = relaxed ? rawKeyLimit : Math.Min(rawKeyLimit, ceilings.MaxKeySetImportLimitCeiling);
+        int keyLimitCeiling = Math.Max(1, ceilings.MaxKeySetImportLimitCeiling);
+        int keyLimit = relaxed ? Math.Max(1, rawKeyLimit) : Math.Clamp(rawKeyLimit, 1, keyLimitCeiling);
 
         return new EffectiveDataSourceProfile(
             DataSourceName: dataSourceName,
@@ -382,7 +402,8 @@ public sealed class HierarchicalDataSourceOptionsResolver : IDataSourceOptionsRe
             CachingEnabled: cachingEnabled,
             StagingTtl: stagingTtl,
             MaxKeySetImportLimit: keyLimit,
-            CeilingRelaxed: relaxed);
+            CeilingRelaxed: relaxed,
+            IsUnresolved: isGlobalDefault);
     }
 
     public void Dispose()

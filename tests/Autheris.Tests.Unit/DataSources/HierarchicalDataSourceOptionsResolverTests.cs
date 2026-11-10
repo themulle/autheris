@@ -7,6 +7,7 @@ using Autheris.Application.DataSources;
 using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Options.Observability;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
@@ -337,6 +338,196 @@ public sealed class HierarchicalDataSourceOptionsResolverTests
 
         resolver.TryResolve("src", out var profile).ShouldBeTrue();
         profile.AllowedTransports.ShouldBe(DataSourceTransportFlags.GraphQL);
+    }
+
+    [Fact]
+    public void Resolve_WhenProfileHasNonPositiveOrNegativeCeilingValues_ClampsToPositiveMinimum()
+    {
+        var configMonitor = new TestMonitor<DataSourceConfigurationOptions>(new DataSourceConfigurationOptions
+        {
+            Ceilings = new DataSourceSafetyCeilingsOptions
+            {
+                MaxAllowedComplexityCeiling = 2000,
+                MaxAggregateRowBudgetCeiling = 50_000,
+                QueryTimeoutCeilingSeconds = 60,
+                MaxResponseRowsCeiling = 10_000,
+                MaxResponseBytesCeiling = 5_000_000,
+                CommandTimeoutCeilingSeconds = 60,
+                StagingTtlCeilingSeconds = 1800,
+                MaxKeySetImportLimitCeiling = 500,
+                AllowGlobalCeilingRelaxation = false
+            },
+            Profiles = new Dictionary<string, DataSourceProfileOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["non_positive_source"] = new DataSourceProfileOptions
+                {
+                    MaxAllowedComplexity = -50,
+                    MaxAggregateRowBudget = 0,
+                    QueryTimeoutSeconds = -10,
+                    MaxResponseRows = -1,
+                    MaxResponseBytes = 0,
+                    CommandTimeoutSeconds = -5,
+                    StagingTtlSeconds = 0,
+                    MaxKeySetImportLimit = -100
+                }
+            }
+        });
+
+        using var resolver = new HierarchicalDataSourceOptionsResolver(configMonitor);
+
+        var profile = resolver.Resolve("non_positive_source");
+
+        profile.MaxAllowedComplexity.ShouldBe(1);
+        profile.MaxAggregateRowBudget.ShouldBe(1L);
+        profile.QueryTimeout.ShouldBe(TimeSpan.FromSeconds(1));
+        profile.MaxResponseRows.ShouldBe(1L);
+        profile.MaxResponseBytes.ShouldBe(1L);
+        profile.CommandTimeout.ShouldBe(TimeSpan.FromSeconds(1));
+        profile.StagingTtl.ShouldBe(TimeSpan.FromSeconds(1));
+        profile.MaxKeySetImportLimit.ShouldBe(1);
+    }
+
+    [Fact]
+    public void Resolve_WhenCeilingRelaxedAndNonPositiveValues_ClampsToPositiveMinimum()
+    {
+        var configMonitor = new TestMonitor<DataSourceConfigurationOptions>(new DataSourceConfigurationOptions
+        {
+            Ceilings = new DataSourceSafetyCeilingsOptions
+            {
+                AllowGlobalCeilingRelaxation = true
+            },
+            Profiles = new Dictionary<string, DataSourceProfileOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["relaxed_negative"] = new DataSourceProfileOptions
+                {
+                    AllowCeilingRelaxation = true,
+                    MaxResponseRows = -1,
+                    MaxAggregateRowBudget = 0,
+                    MaxAllowedComplexity = -999
+                }
+            }
+        });
+
+        using var resolver = new HierarchicalDataSourceOptionsResolver(configMonitor);
+
+        var profile = resolver.Resolve("relaxed_negative");
+        profile.CeilingRelaxed.ShouldBeTrue();
+        profile.MaxResponseRows.ShouldBe(1L);
+        profile.MaxAggregateRowBudget.ShouldBe(1L);
+        profile.MaxAllowedComplexity.ShouldBe(1);
+    }
+
+    [Fact]
+    public void RebuildFailure_LogsErrorAndMarksConfigurationStale()
+    {
+        var monitor = new FlakyMonitor(new DataSourceConfigurationOptions
+        {
+            Profiles = new Dictionary<string, DataSourceProfileOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["src"] = new DataSourceProfileOptions { AllowedTransports = DataSourceTransportFlags.GraphQL }
+            }
+        });
+        var logger = new TestLogger<HierarchicalDataSourceOptionsResolver>();
+        using var resolver = new HierarchicalDataSourceOptionsResolver(monitor, logger: logger);
+
+        resolver.IsConfigurationStale.ShouldBeFalse();
+        resolver.LastRebuildError.ShouldBeNull();
+
+        // Cause rebuild to throw
+        monitor.FailNext = true;
+        monitor.RaiseChange();
+
+        resolver.IsConfigurationStale.ShouldBeTrue();
+        resolver.LastRebuildError.ShouldNotBeNull();
+        resolver.LastRebuildError.ShouldBeOfType<InvalidOperationException>();
+        resolver.LastRebuildError!.Message.ShouldBe("boom");
+
+        logger.Logs.Count.ShouldBeGreaterThan(0);
+        logger.Logs.ShouldContain(l => l.Level == LogLevel.Error && l.Exception == resolver.LastRebuildError);
+
+        // Next successful rebuild recovers state
+        monitor.FailNext = false;
+        monitor.RaiseChange();
+
+        resolver.IsConfigurationStale.ShouldBeFalse();
+        resolver.LastRebuildError.ShouldBeNull();
+    }
+
+    [Fact]
+    public void TryResolve_DistinguishesConfiguredSource_ConfiguredDefault_AndUnknownSource()
+    {
+        var configMonitor = new TestMonitor<DataSourceConfigurationOptions>(new DataSourceConfigurationOptions
+        {
+            Defaults = new DataSourceProfileOptions
+            {
+                QueryCostMultiplier = 1.0,
+                MaxResponseRows = 5000
+            },
+            Profiles = new Dictionary<string, DataSourceProfileOptions>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["known_source"] = new DataSourceProfileOptions { QueryCostMultiplier = 2.0 },
+                ["default"] = new DataSourceProfileOptions { QueryCostMultiplier = 3.0 }
+            }
+        });
+
+        using var resolver = new HierarchicalDataSourceOptionsResolver(configMonitor);
+
+        // Known explicitly configured source
+        resolver.TryResolve("known_source", out var known).ShouldBeTrue();
+        known.DataSourceName.ShouldBe("known_source");
+        known.QueryCostMultiplier.ShouldBe(2.0);
+        known.IsUnresolved.ShouldBeFalse();
+        known.IsResolved.ShouldBeTrue();
+
+        // Known explicitly configured "default" profile
+        resolver.TryResolve("default", out var explicitDefault).ShouldBeTrue();
+        explicitDefault.DataSourceName.ShouldBe("default");
+        explicitDefault.QueryCostMultiplier.ShouldBe(3.0);
+        explicitDefault.IsUnresolved.ShouldBeFalse();
+        explicitDefault.IsResolved.ShouldBeTrue();
+
+        // Unknown source
+        resolver.TryResolve("unknown_source", out var unknown).ShouldBeFalse();
+        unknown.ShouldNotBeNull();
+        unknown.IsUnresolved.ShouldBeTrue();
+        unknown.IsResolved.ShouldBeFalse();
+
+        // Null / whitespace source
+        resolver.TryResolve(null, out var nullProfile).ShouldBeFalse();
+        nullProfile.ShouldNotBeNull();
+        nullProfile.IsUnresolved.ShouldBeTrue();
+
+        resolver.TryResolve("   ", out var blankProfile).ShouldBeFalse();
+        blankProfile.ShouldNotBeNull();
+        blankProfile.IsUnresolved.ShouldBeTrue();
+
+        // Resolve() also marks unresolved for unknown sources
+        var resolvedUnknown = resolver.Resolve("unknown_source");
+        resolvedUnknown.IsUnresolved.ShouldBeTrue();
+        resolvedUnknown.IsResolved.ShouldBeFalse();
+
+        var resolvedKnown = resolver.Resolve("known_source");
+        resolvedKnown.IsUnresolved.ShouldBeFalse();
+        resolvedKnown.IsResolved.ShouldBeTrue();
+    }
+
+    private sealed class TestLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, Exception? Exception, string Message)> Logs { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Logs.Add((logLevel, exception, formatter(state, exception)));
+        }
     }
 
     private sealed class FlakyMonitor(DataSourceConfigurationOptions value) : IOptionsMonitor<DataSourceConfigurationOptions>

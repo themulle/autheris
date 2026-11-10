@@ -33,9 +33,14 @@ public sealed record EffectiveDataSourceProfile(
     TimeSpan StagingTtl,
     int MaxKeySetImportLimit,
     // 5. Anti-Escalation State
-    bool CeilingRelaxed
+    bool CeilingRelaxed,
+    // 6. Resolution State
+    bool IsUnresolved = false
 )
 {
+    /// <summary>Checks whether this profile was explicitly resolved rather than falling back to default.</summary>
+    public bool IsResolved => !IsUnresolved;
+
     /// <summary>Checks whether the specified ingress transport is authorized for this data source.</summary>
     public bool IsTransportAllowed(DataSourceTransportFlags transport) =>
         (AllowedTransports & transport) == transport;
