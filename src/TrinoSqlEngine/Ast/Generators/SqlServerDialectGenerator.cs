@@ -339,8 +339,8 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
                         Arguments = new[] { fn.Arguments[0], fn.Arguments[1], new LiteralExpression(string.Empty, LiteralType.String) }
                     }, ref builder, context);
                     return;
-                case "lpad" or "rpad" or "octet_length":
-                    // No exact T-SQL equivalent: LPAD/RPAD truncate and repeat the pad string, DATALENGTH counts UTF-16 bytes of nvarchar.
+                case "format" or "lpad" or "rpad" or "octet_length":
+                    // No exact T-SQL equivalent: format differs between Trino printf and SQL Server .NET format strings; LPAD/RPAD truncate and repeat.
                     throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, $"{fn.Name.Parts[0].Value.ToLowerInvariant()} on SQL Server");
                 case "strpos" when fn.Arguments.Count == 2:
                     base.GenerateFunctionCall(fn with

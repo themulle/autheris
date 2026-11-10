@@ -150,6 +150,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         {
             DataAccessErrorKind.Timeout => (StatusCodes.Status504GatewayTimeout, "The request exceeded the execution time limit.", null),
             DataAccessErrorKind.Unavailable => (StatusCodes.Status503ServiceUnavailable, "The data source is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
+            DataAccessErrorKind.StatementRejected => (StatusCodes.Status400BadRequest, "The data source rejected the SQL statement.", null),
             _ => (StatusCodes.Status500InternalServerError, "The request could not be processed.", (int?)null)
         }
     };

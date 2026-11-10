@@ -42,6 +42,7 @@ public static class GovernedSqlErrorCodes
     public const string CompilerInvariant = "SQL_COMPILER_INVARIANT";
     public const string Timeout = "SQL_TIMEOUT";
     public const string SourceUnavailable = "SQL_SOURCE_UNAVAILABLE";
+    public const string StatementRejected = "SQL_STATEMENT_REJECTED";
 
     // client list parameters. Fixed messages, never counts, names or values.
     public const string RequiredFilterColumnMissing = "REQUIRED_FILTER_COLUMN_MISSING";
@@ -103,6 +104,7 @@ public static class GovernedSqlErrorCodes
         CompilerInvariant => "The statement could not be processed.",
         Timeout => "The SQL statement exceeded the execution time limit. Narrow the query (filter, fewer columns, LIMIT) or contact support with the trace id.",
         SourceUnavailable => "The data source is temporarily unavailable. Retry later.",
+        StatementRejected => "The data source rejected the SQL statement.",
         ListParamPosition => "A list parameter is only allowed as the single item of an IN or NOT IN list.",
         ListParamType => "A list parameter has an invalid or mixed element type, or a scalar parameter received a list.",
         ListParamNull => "A list parameter contains an element that is not allowed (null, or text the data source cannot store as given).",

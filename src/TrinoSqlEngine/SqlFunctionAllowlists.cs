@@ -59,7 +59,7 @@ public static class SqlFunctionAllowlists
     [
         "getdate", "getutcdate", "sysdatetime", "sysutcdatetime", "sysdatetimeoffset", "dateadd", "datediff",
         "datediff_big", "datepart", "datename", "datefromparts", "datetimefromparts", "eomonth", "year", "month",
-        "day", "isnull", "iif", "choose", "len", "datalength", "charindex", "patindex", "stuff", "format",
+        "day", "isnull", "iif", "choose", "len", "datalength", "charindex", "patindex", "stuff",
         "string_agg", "concat_ws", "replicate", "str", "try_cast", "try_convert", "convert", "isnumeric",
         "square", "pi", "degrees", "radians", "count_big", "stdev", "stdevp", "var", "varp", "translate",
     ];

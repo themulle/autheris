@@ -45,16 +45,38 @@ public sealed class DataAccessErrorClassifierTests
     [InlineData(10929)]
     [InlineData(233)]    // connection broken
     [InlineData(53)]     // network path not found
+    [InlineData(2)]      // server not found / cannot open connection
+    [InlineData(10061)]  // connection refused
+    [InlineData(10051)]  // network unreachable
+    [InlineData(10065)]  // no route to host
+    [InlineData(11001)]  // host not found
+    [InlineData(18456)]  // login failed for user
+    [InlineData(18452)]  // login failed (untrusted domain)
+    [InlineData(18487)]  // password expired
+    [InlineData(18488)]  // password must change
+    [InlineData(40615)]  // client IP not allowed
     [InlineData(-1)]     // connection error
     public void SqlServerTransientErrors_AreUnavailable(int number)
     {
         DataAccessErrorClassifier.Classify(new FakeSqlException(number)).ShouldBe(DataAccessErrorKind.Unavailable);
     }
 
-    [Fact]
-    public void SqlServerSyntaxError_IsOther()
+    [Theory]
+    [InlineData(102)]   // syntax error
+    [InlineData(8116)]  // invalid argument type (e.g. format)
+    [InlineData(195)]   // unrecognized function name
+    [InlineData(245)]   // conversion error
+    public void SqlServerStatementErrors_AreStatementRejected(int number)
     {
-        DataAccessErrorClassifier.Classify(new FakeSqlException(102, "Incorrect syntax near 'Timeout'")).ShouldBe(DataAccessErrorKind.Other);
+        DataAccessErrorClassifier.Classify(new FakeSqlException(number, "Incorrect syntax near 'Timeout'")).ShouldBe(DataAccessErrorKind.StatementRejected);
+    }
+
+    [Theory]
+    [InlineData("42601")] // syntax error
+    [InlineData("22P02")] // invalid text representation
+    public void PostgresStatementErrors_AreStatementRejected(string sqlState)
+    {
+        DataAccessErrorClassifier.Classify(new FakePostgresException(sqlState)).ShouldBe(DataAccessErrorKind.StatementRejected);
     }
 
     [Fact]
@@ -68,6 +90,8 @@ public sealed class DataAccessErrorClassifierTests
     [InlineData("08006")] // connection failure
     [InlineData("53300")] // too many connections
     [InlineData("57P03")] // cannot connect now
+    [InlineData("28000")] // invalid authorization
+    [InlineData("28P01")] // invalid password
     public void PostgresTransientStates_AreUnavailable(string sqlState)
     {
         DataAccessErrorClassifier.Classify(new FakePostgresException(sqlState)).ShouldBe(DataAccessErrorKind.Unavailable);

@@ -96,6 +96,9 @@ public static class SqlCompilerErrorMapper
             case DataAccessErrorKind.SourcePermissionDenied:
                 mapping = new SqlErrorMapping(502, SourceDriftErrors.PermissionDeniedCode, SourceDriftErrors.PermissionDeniedMessage, null);
                 return true;
+            case DataAccessErrorKind.StatementRejected:
+                mapping = Of(400, GovernedSqlErrorCodes.StatementRejected);
+                return true;
             default:
                 mapping = default;
                 return false;
@@ -221,6 +224,8 @@ public static class SqlCompilerErrorMapper
         // compile-time limits (422), with the fixed message and no limit kind.
         GovernedSqlErrorCodes.LimitExceeded => Of(422, code),
         GovernedSqlErrorCodes.ProviderError => Of(502, code),
+        GovernedSqlErrorCodes.SourceUnavailable => Of(503, code),
+        GovernedSqlErrorCodes.StatementRejected => Of(400, code),
         // #312: the executor classified an unknown identifier by provider code; it answers exactly like a denied column.
         GovernedSqlErrorCodes.PolicyDenied => Of(403, code),
         // #321: a provider set-operation column-count error, classified by provider code in the sanitizer.
