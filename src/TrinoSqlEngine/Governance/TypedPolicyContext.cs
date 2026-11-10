@@ -52,6 +52,7 @@ public sealed class TypedPolicyContext
 
     /// <summary>DML guard switches of the request (the verifier proves what they require).</summary>
     public DmlGuardOptions Dml { get; init; } = DmlGuardOptions.Strict;
+    public DmlWritePermit? Write { get; init; }
 
     /// <summary>Values to bind, by parameter name (tenant, policy and mask parameters of every applied table).</summary>
     public IReadOnlyDictionary<string, PolicyValue> PolicyValues => _values;
@@ -187,7 +188,7 @@ public sealed class TypedPolicyContext
         // The verifier keeps its own per-entry cache (never shared with the injector, so it stays an independent check): the requirement of
         // a catalog entry is derived from the providers once per verification instead of once per table reference.
         var requirements = new Dictionary<TableCatalogEntry, TableCoverageRequirement>(ReferenceEqualityComparer.Instance);
-        return new SecurityCoverageVerifier(name => RequirementOf(name, requirements), dialect, maxSecuredTableReferences, dml: Dml, tenantParameterName: Tenant.ParameterName, capabilities: Capabilities);
+        return new SecurityCoverageVerifier(name => RequirementOf(name, requirements), dialect, maxSecuredTableReferences, dml: Dml, tenantParameterName: Tenant.ParameterName, capabilities: Capabilities, writePermit: Write);
     }
 
     /// <summary>Catalog type by canonical column name; an ambiguous (duplicate) name has no type, so a check that needs it fails closed.</summary>

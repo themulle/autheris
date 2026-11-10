@@ -128,7 +128,7 @@ internal sealed class GovernedSqlCompiler
         string keyMaterial = CompileCacheKey.Material(request, rawSql, caps, _engine.MaxQueryLength);
         var policy = request.Policy;
         var guards = EffectiveDmlGuards(policy.Dml);
-        var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards };
+        var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards, Write = policy.Write };
 
         string keyHash = CompiledSqlTemplateCache.HashOf(keyMaterial);
         var template = _cache.Find(keyMaterial, keyHash);
@@ -142,7 +142,7 @@ internal sealed class GovernedSqlCompiler
         if (template is not null)
         {
             // A rehydration attempt may have added values; start clean. A plain miss reuses the context (CR-ADG-12).
-            typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards };
+            typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards, Write = policy.Write };
         }
 
         // 3. token guards + parse
@@ -401,6 +401,7 @@ internal sealed class GovernedSqlCompiler
             AllowRecursiveCte = request.AllowRecursiveCte,
             BindPageOffset = request.BindPageOffset,
             TablesWithConsentRowFilter = CaseInsensitive(request.Policy.TablesWithConsentRowFilter),
+            WritePermit = request.Policy.Write,
             RejectMaskedColumnsInPredicates = true,
             // DML guards of the request (DmlGuardOptions.Strict by default); the coverage verifier proves what they require.
             EnforceWithCheckOption = guards.EnforceWithCheckOption,

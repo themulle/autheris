@@ -25,59 +25,26 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("MERGE is only supported by the governed compiler.");
         }
 
-        _rootLimitHandled = true;
-        var entry = ResolveDmlTarget(node.Target);
-        var alias = node.Target.Alias ?? new SqlIdentifier(node.Target.Name.SimpleName, node.Target.Name.Parts[^1].IsQuoted);
-        var targetNames = new List<string> { alias.Value, entry.Identity.Table, node.Target.Name.SimpleName };
-        var masked = MaskedColumnsOf(entry);
-
-        // CR-ADG-33: isolation must never depend on a backend name-resolution error for a source that reuses the target's name.
-        if (!MergeAliasGuard.IsDisjoint(node.Source, targetNames))
+        if (_options.WritePermit is null)
         {
-            throw new SecurityException("A MERGE source alias must differ from the target alias and the target table name.");
+            throw new SecurityException("A write permit is required for DML operations.");
         }
 
-        // user part checks run on the user tree, before any injected predicate exists
-        RejectMaskedReads(masked, targetNames, node.On);
-        EnsureFilteredDml(node.On, "MERGE");
-
-        var clauses = new List<MergeClause>(node.Clauses.Count);
-        foreach (var clause in node.Clauses)
-        {
-            RejectMaskedReads(masked, targetNames, clause.Condition);
-            var condition = clause.Condition != null ? (Expression)WithScope(SecurityScope.DmlSource, () => Visit(clause.Condition)) : null;
-            switch (clause)
-            {
-                case MergeUpdateClause update:
-                    clauses.Add(new MergeUpdateClause(condition, SecureAssignments(entry, update.Assignments, masked, targetNames)));
-                    break;
-                case MergeDeleteClause:
-                    clauses.Add(new MergeDeleteClause(condition));
-                    break;
-                case MergeInsertClause insert:
-                {
-                    RejectMergeInsertIntoPolicyTable(entry);
-                    var columns = ResolveInsertColumns(entry, insert.Columns, masked, out int tenantIndex);
-                    var values = ForceTenantInRow(entry, columns, insert.Values, tenantIndex);
-                    RejectMaskedReads(masked, targetNames, values);
-                    var visited = values.Select(v => (Expression)WithScope(SecurityScope.DmlSource, () => Visit(v))).ToList();
-                    clauses.Add(new MergeInsertClause(condition, columns.Columns, visited));
-                    break;
-                }
-                default:
-                    // The clause set is closed (08 a).
-                    throw new SecurityException($"MERGE clause '{clause.GetType().Name}' is not supported.");
-            }
-        }
-
-        var source = (TableSource)WithScope(SecurityScope.MergeSource, () => Visit(node.Source));
-        var on = (Expression)WithScope(SecurityScope.DmlSource, () => Visit(node.On));
-        var combinedOn = AndInjected(on, BuildTargetPredicates(entry, SecurityScope.MergeOn, alias));
-        return new MergeStatement(new NamedTableSource(entry.Identity.ToQualifiedName(), alias), source, combinedOn!, clauses);
+        throw new SecurityException("MERGE is not supported for governed writes.");
     }
 
     private SqlNode SecureDeleteTyped(DeleteStatement node)
     {
+        if (_options.WritePermit is null)
+        {
+            throw new SecurityException("A write permit is required for DML operations.");
+        }
+
+        if (_options.WritePermit.Operation != DmlWriteOperation.Delete)
+        {
+            throw new SecurityException("DELETE requires a delete write permit.");
+        }
+
         _rootLimitHandled = true;
         var entry = ResolveDmlTarget(node.TargetTable);
         var masked = MaskedColumnsOf(entry);
@@ -93,6 +60,16 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private SqlNode SecureUpdateTyped(UpdateStatement node)
     {
+        if (_options.WritePermit is null)
+        {
+            throw new SecurityException("A write permit is required for DML operations.");
+        }
+
+        if (_options.WritePermit.Operation != DmlWriteOperation.Update)
+        {
+            throw new SecurityException("UPDATE requires an update write permit.");
+        }
+
         _rootLimitHandled = true;
         var entry = ResolveDmlTarget(node.TargetTable);
         var masked = MaskedColumnsOf(entry);
@@ -112,6 +89,16 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private SqlNode SecureInsertTyped(InsertStatement node)
     {
+        if (_options.WritePermit is null)
+        {
+            throw new SecurityException("A write permit is required for DML operations.");
+        }
+
+        if (_options.WritePermit.Operation != DmlWriteOperation.Insert)
+        {
+            throw new SecurityException("INSERT requires an insert write permit.");
+        }
+
         _rootLimitHandled = true;
         var entry = ResolveDmlTarget(node.TargetTable);
         bool checkOption = RequiresInsertCheckOption(entry, node.Source);
@@ -330,6 +317,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     private sealed record InsertColumns(IReadOnlyList<SqlIdentifier> Columns, int OriginalCount, bool TenantAppended);
 
+    private static bool ContainsColumn(IReadOnlySet<string> set, string column) =>
+        set.Contains(column) || set.Any(c => string.Equals(c, column, StringComparison.OrdinalIgnoreCase));
+
     private InsertColumns ResolveInsertColumns(TableCatalogEntry entry, IReadOnlyList<SqlIdentifier>? written, ISet<string> masked, out int tenantIndex)
     {
         if (written is null || written.Count == 0)
@@ -337,6 +327,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("A governed INSERT must list its target columns.");
         }
 
+        var permit = _options.WritePermit ?? throw new SecurityException("A write permit is required for DML operations.");
         var resolved = new List<SqlIdentifier>(written.Count + 1);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         tenantIndex = -1;
@@ -348,7 +339,17 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 throw new SecurityException("A column is listed more than once.");
             }
 
-            if (_options.RejectMaskedColumnsInDml && masked.Contains(column.Name))
+            if (!ContainsColumn(permit.WritableColumns, column.Name))
+            {
+                throw new SecurityException("A column is not covered by a write grant.");
+            }
+
+            if (ContainsColumn(permit.WriteProtectedColumns, column.Name))
+            {
+                throw new SecurityException("A write-protected column must not be written.");
+            }
+
+            if (_options.RejectMaskedColumnsInDml && masked.Contains(column.Name) && !ContainsColumn(permit.WritableColumns, column.Name))
             {
                 throw new SecurityException("A masked column must not be written.");
             }
@@ -445,6 +446,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         ISet<string> masked,
         ICollection<string> targetNames)
     {
+        var permit = _options.WritePermit ?? throw new SecurityException("A write permit is required for DML operations.");
         var typed = _typed;
         var policyColumns = _options.RejectPolicyColumnAssignment && typed.RowFilters.ShouldApplyPolicy(entry.Identity)
             ? typed.RowFilters.GetPredicate(entry.Identity).ReferencedColumns
@@ -459,7 +461,22 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 throw new SecurityException("A column is assigned more than once.");
             }
 
-            if (_options.RejectMaskedColumnsInDml && masked.Contains(column.Name))
+            if (IsTenantColumn(entry, column) && _options.DisallowTenantColumnModificationInUpdate)
+            {
+                throw new SecurityException("The tenant column must not be modified by an UPDATE statement.");
+            }
+
+            if (!ContainsColumn(permit.WritableColumns, column.Name))
+            {
+                throw new SecurityException("A column is not covered by a write grant.");
+            }
+
+            if (ContainsColumn(permit.WriteProtectedColumns, column.Name))
+            {
+                throw new SecurityException("A write-protected column must not be written.");
+            }
+
+            if (_options.RejectMaskedColumnsInDml && masked.Contains(column.Name) && !ContainsColumn(permit.WritableColumns, column.Name))
             {
                 throw new SecurityException("A masked column must not be written.");
             }
@@ -474,11 +491,6 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             Expression value;
             if (IsTenantColumn(entry, column))
             {
-                if (_options.DisallowTenantColumnModificationInUpdate)
-                {
-                    throw new SecurityException("The tenant column must not be modified by an UPDATE statement.");
-                }
-
                 EnsureCallerTenantLiteral(assignment.Value, "UPDATE");
                 value = TenantValue(entry);
             }

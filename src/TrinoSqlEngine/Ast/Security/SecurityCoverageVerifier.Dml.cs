@@ -107,7 +107,10 @@ public sealed partial class SecurityCoverageVerifier
 
                 if (requirement.MaskedColumns?.Contains(column) == true && Owner._dml.RejectMaskedColumnsInDml)
                 {
-                    throw new SecurityCoverageException("A masked column is written by the statement.");
+                    if (Owner._writePermit is null || !Owner._writePermit.WritableColumns.Any(w => string.Equals(w, column, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        throw new SecurityCoverageException("A masked column is written by the statement.");
+                    }
                 }
 
                 if (requirement.TenantColumn is not null && string.Equals(column, requirement.TenantColumn, StringComparison.Ordinal))
@@ -161,7 +164,10 @@ public sealed partial class SecurityCoverageVerifier
 
                 if (requirement.MaskedColumns?.Contains(name) == true && Owner._dml.RejectMaskedColumnsInDml)
                 {
-                    throw new SecurityCoverageException("A masked column is written by the statement.");
+                    if (Owner._writePermit is null || !Owner._writePermit.WritableColumns.Any(w => string.Equals(w, name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        throw new SecurityCoverageException("A masked column is written by the statement.");
+                    }
                 }
 
                 if (requirement.TenantColumn is not null && string.Equals(name, requirement.TenantColumn, StringComparison.Ordinal))
