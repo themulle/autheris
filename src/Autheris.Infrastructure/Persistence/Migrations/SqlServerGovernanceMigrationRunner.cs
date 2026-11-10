@@ -87,7 +87,7 @@ public sealed class SqlServerGovernanceMigrationRunner : GovernanceMigrationRunn
         // Mode=Verify only reads: it runs with the runtime login, never with the DDL login (least privilege, plan D-12).
         if (verifyOnly || string.IsNullOrWhiteSpace(_repository.MigrationConnectionString))
         {
-            return await _repository.OpenConnectionAsync(ct).ConfigureAwait(false);
+            return await _repository.OpenUncheckedConnectionAsync(ct).ConfigureAwait(false);
         }
 
         var conn = new SqlConnection(_repository.MigrationConnectionString);
