@@ -215,6 +215,7 @@ public sealed class TableColumn
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid TableId { get; init; }
     public string ColumnName { get; init; } = string.Empty;
+    public string Name => ColumnName;
     public string? DisplayName { get; init; }
     public string DataType { get; init; } = "varchar";
     public string? Collation { get; init; }
