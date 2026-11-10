@@ -31,4 +31,14 @@ public interface IDataSourceOptionsResolver
     /// so a reload that newly denies a source never serves a stale entry (Issue #447). Resolvers without reload report 0.
     /// </summary>
     long Generation => 0;
+
+    /// <summary>
+    /// Indicates whether a configuration reload failed, leaving the resolver running on the last good configuration snapshot.
+    /// </summary>
+    bool IsConfigurationStale => false;
+
+    /// <summary>
+    /// The exception caught during the most recent failed configuration rebuild, or null if healthy.
+    /// </summary>
+    Exception? LastRebuildError => null;
 }
