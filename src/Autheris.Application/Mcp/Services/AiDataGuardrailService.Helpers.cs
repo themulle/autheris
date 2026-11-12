@@ -100,13 +100,15 @@ public sealed partial class AiDataGuardrailService
     }
 
     /// <summary>
-    /// Whether <paramref name="table"/> is the fixed pseudo target of a catalog-level tool (no data table, nothing to decide). Keyed on the tool,
+    /// Whether the call is a catalog-level or metadata tool (no data rows, nothing to decide); <paramref name="table"/> is its target. Keyed on the tool,
     /// never on a table name alone: a tool that parses table names from user input always reaches the decision point.
     /// </summary>
     private static bool IsCatalogToolTarget(McpToolDefinition tool, TableIdentifier table) =>
         tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
         tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
-        tool.Name.Equals(McpDatasetTools.ListDatasets, StringComparison.OrdinalIgnoreCase) ||
+        // Metadata tools read no data rows; discovery visibility governs them. get_table_schema stays an access target per table.
+        (McpDatasetTools.IsDatasetTool(tool.Name) && !McpDatasetTools.ReadsRows(tool.Name) &&
+         !tool.Name.Equals(McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase)) ||
         McpSemanticTools.IsSemanticTool(tool.Name) ||
         (tool.Name.Equals("query_graphql", StringComparison.OrdinalIgnoreCase) && table.Equals(McpDatasetTools.CatalogTable)) ||
         (tool.Name.Equals(McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase) && table.Equals(McpDataTargetResolver.ApiNoTable));

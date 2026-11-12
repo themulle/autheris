@@ -440,8 +440,8 @@ public sealed class McpOpenFindingsSecurityTests
         var guardrail = Guardrail(policy, Executor("""{"rows":[]}"""));
         var args = """{"dataset":"sales.public.orders"}""";
 
-        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.DescribeDataset, args), AppOnlySession(["S-1-5-21-1-2-3-4001"]));
-        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.DescribeDataset, args), UserSession(["S-1-5-21-1-2-3-4001"]));
+        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.SampleRows, args), AppOnlySession(["S-1-5-21-1-2-3-4001"]));
+        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.SampleRows, args), UserSession(["S-1-5-21-1-2-3-4001"]));
 
         captured.Count.ShouldBe(2);
         captured[0].Subject.UserSid.Value.ShouldBe("app-client");
