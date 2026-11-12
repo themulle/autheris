@@ -323,7 +323,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
             // The one decision point decides every disclosed table of a data tool (pseudo targets of tools without a data table are not objects;
             // call_procedure and query_metrics are decided on the real tables behind the call below).
-            if (resolvedTables != null && !_options.Value.IsMcpAuthBypassed && !isSchemaTool && !ReadsThroughUnderlyingTables(tool) && !IsCatalogToolTarget(tool, effectiveTable))
+            if (resolvedTables != null && !_options.Value.IsMcpAuthBypassed && !isSchemaTool && !ReadsThroughUnderlyingTables(tool) && !IsCatalogToolTarget(tool, effectiveTable) &&
+                !await IsValueFreeDescribeAsync(tool, request.ArgumentsJson, sessionContext, effectiveTable, cancellationToken).ConfigureAwait(false))
             {
                 var denied = await DenyByDecisionAsync(activity, tool, sessionContext, effectiveTable, cancellationToken).ConfigureAwait(false);
                 if (denied != null)

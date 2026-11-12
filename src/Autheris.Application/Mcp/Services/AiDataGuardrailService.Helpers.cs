@@ -108,10 +108,51 @@ public sealed partial class AiDataGuardrailService
         tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
         // Metadata tools read no data rows; discovery visibility governs them. get_table_schema stays an access target per table.
         (McpDatasetTools.IsDatasetTool(tool.Name) && !McpDatasetTools.ReadsRows(tool.Name) &&
-         !tool.Name.Equals(McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase)) ||
+         !tool.Name.Equals(McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase) &&
+         !tool.Name.Equals(McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase)) ||
         McpSemanticTools.IsSemanticTool(tool.Name) ||
         (tool.Name.Equals("query_graphql", StringComparison.OrdinalIgnoreCase) && table.Equals(McpDatasetTools.CatalogTable)) ||
         (tool.Name.Equals(McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase) && table.Equals(McpDataTargetResolver.ApiNoTable));
+
+    /// <summary>
+    /// describe_dataset returns column value profiles (allowed values, ranges, samples) in its full view. Only the brief shape and the
+    /// allow-listed summary shape and an unreleased tier-Full row carry no values and need no data decision; every other shape, and any failure to tell, is decided.
+    /// </summary>
+    private async ValueTask<bool> IsValueFreeDescribeAsync(
+        McpToolDefinition tool, string? argumentsJson, McpSessionContext sessionContext, TableIdentifier table, CancellationToken ct)
+    {
+        if (!tool.Name.Equals(McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (McpDatasetTools.TryGetBooleanArgument(argumentsJson, "brief", out var brief) && brief)
+        {
+            return true;
+        }
+
+        try
+        {
+            if (_catalogVisibility == null)
+            {
+                return false;
+            }
+
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext)!;
+            var caller = new Autheris.Application.Catalog.Interfaces.CatalogCaller(principal, McpCatalogVisibility.SafeTenantId(principal), Autheris.Application.Catalog.Interfaces.CatalogChannel.Mcp);
+            var row = await _catalogVisibility.FindVisibleAsync(caller, table, ct).ConfigureAwait(false);
+            // Value profiles are served only to a granted caller or for a tier-Full row released to catalog viewers; a summary row and a
+            // tier-Full row without release show names only.
+            return row is { } visible &&
+                   (visible.Shape == Autheris.Application.Services.CatalogOutputShape.Summary ||
+                    (visible.Shape == Autheris.Application.Services.CatalogOutputShape.Full &&
+                     visible.Table.CatalogView == CatalogView.Full && !visible.Table.ReleaseProfileToCatalogViewers));
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Reason codes of a denied decision for the audit trail: codes only, never predicate values or policy text.</summary>
     private static string ReasonCodesOf(TableAccessDecision decision) =>

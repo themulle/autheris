@@ -4,7 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Application.Events;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
@@ -46,7 +48,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         IGatewayEventBus Bus,
         IMcpQueryExecutor Executor);
 
-    private static Harness Create(Func<TableIdentifier, TableAccessDecision> decide, Action<AccessRequest>? capture = null, bool knownTables = true)
+    private static Harness Create(Func<TableIdentifier, TableAccessDecision> decide, Action<AccessRequest>? capture = null, bool knownTables = true, Func<TableIdentifier, TableMetadata>? metadataOf = null, CatalogOutputShape? shape = null, CatalogView view = CatalogView.Granted, bool released = false)
     {
         var pdp = Substitute.For<IAccessDecisionPoint>();
         pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
@@ -57,7 +59,9 @@ public sealed class AiDataGuardrailDecisionPointTests
             });
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(ci => knownTables ? new TableMetadata { Identifier = ci.Arg<TableIdentifier>(), Table = new Table { IsActive = true } } : null);
+            .Returns(ci => knownTables
+                ? (metadataOf?.Invoke(ci.Arg<TableIdentifier>()) ?? new TableMetadata { Identifier = ci.Arg<TableIdentifier>(), Table = new Table { IsActive = true } })
+                : null);
         var map = Substitute.For<IGraphQlCatalogMap>();
         map.ResolveDocumentTablesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableIdentifier>?>([Orders]));
@@ -78,8 +82,19 @@ public sealed class AiDataGuardrailDecisionPointTests
             tableMetadataRepository: tables,
             graphQlCatalogMap: map,
             sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
+            catalogVisibility: Visibility(shape, view, released),
             eventBus: bus);
         return new Harness(guardrail, pdp, audit, bus, executor);
+    }
+
+    private static ICatalogVisibilityService Visibility(CatalogOutputShape? shape, CatalogView view, bool released)
+    {
+        var visibility = Substitute.For<ICatalogVisibilityService>();
+        visibility.FindVisibleAsync(Arg.Any<CatalogCaller>(), Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => shape is { } s
+                ? new CatalogVisibleRow(new TableMetadata { Identifier = ci.Arg<TableIdentifier>(), Table = new Table { IsActive = true }, CatalogView = view, ReleaseProfileToCatalogViewers = released }, s)
+                : (CatalogVisibleRow?)null);
+        return visibility;
     }
 
     private static McpSessionContext Session() =>
@@ -223,6 +238,70 @@ public sealed class AiDataGuardrailDecisionPointTests
 
         result.IsSuccess.ShouldBeFalse();
         await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Describe_dataset_full_view_is_denied_by_the_decision_point_and_returns_nothing()
+    {
+        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Granted);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders"}"""), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ContentJson.ShouldBe("{}");
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+        await h.Pdp.Received(1).DecideAsync(
+            Arg.Is<AccessRequest>(r => r.Object.Identifier == Orders && r.Transport == AccessTransport.Mcp && r.Operation == AccessOperation.Read),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Describe_dataset_summary_view_needs_no_grant()
+    {
+        var h = Create(Denied, shape: CatalogOutputShape.Summary);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders"}"""), Session());
+
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+        await h.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Describe_dataset_brief_needs_no_grant_but_unknown_shape_is_decided()
+    {
+        var brief = Create(Denied, shape: CatalogOutputShape.Full);
+        (await brief.Guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders","brief":true}"""), Session()))
+            .IsSuccess.ShouldBeTrue();
+        await brief.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
+
+        var unknown = Create(Denied, knownTables: false);
+        (await unknown.Guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders"}"""), Session()))
+            .IsSuccess.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task Describe_dataset_tier_full_row_is_decided_only_when_profiles_are_released(bool released, bool expectDecision)
+    {
+        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Full, released: released);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders"}"""), Session());
+
+        result.IsSuccess.ShouldBe(!expectDecision);
+        if (expectDecision)
+        {
+            await h.Pdp.Received(1).DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+        }
+        else
+        {
+            await h.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
+        }
     }
 }
 
