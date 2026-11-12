@@ -288,14 +288,15 @@ public sealed class McpServerTests
         var registry = new McpToolRegistry();
         var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
         var auditRepo = Substitute.For<IAuditLogRepository>();
-        var policyService = new DenyingPolicyService();
+        var policyService = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(r => TableAccessDecision.Denied(r.Object.Identifier, "not authorized"));
 
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
             auditLogRepository: auditRepo,
-            policyEnforcementService: policyService);
+            decisionPoint: policyService,
+            tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-deny-1", "agent-unauthorized", "tenant-test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -496,22 +497,6 @@ public sealed class McpServerTests
         var dispatchedAfterRemove = await store.SendEventAsync(session.SessionId, "notifications/progress", """{"progress":100}""");
         dispatchedAfterRemove.ShouldBeFalse();
     }
-
-    private sealed class DenyingPolicyService : IPolicyEnforcementService
-    {
-        public ValueTask<TableAccessDecision> EvaluatePolicyAsync(SecurityEvaluationContext context, System.Threading.CancellationToken ct = default)
-        {
-            return ValueTask.FromResult(TableAccessDecision.Denied(
-                context.TargetTable,
-                $"Role 'AiAgent' not authorized for table '{context.TargetTable}'."));
-        }
-
-        public bool HasPolicies(TenantId tenant) => true;
-        public Task ReloadPoliciesAsync(TenantId tenant, System.Threading.CancellationToken ct = default) => Task.CompletedTask;
-        public void LoadPolicyFromText(TenantId tenant, string policyText) { }
-        public void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false) { }
-    }
-
 
     [Fact]
     public async Task AiDataGuardrailService_ShouldEmitGenAiOpenTelemetrySpanAndAttributes()

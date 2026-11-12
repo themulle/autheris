@@ -12,7 +12,6 @@ using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.DataSources.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Errors;
@@ -45,7 +44,6 @@ public static class ArrowExportEndpoints
         ingress.MapPost("/api/v1/export/arrow", HandleArrowExportAsync)
             .WithName("ExportTableToArrow")
             .WithSummary("Exports governed tabular rows directly into Apache Arrow IPC streaming format")
-            .RequireRebac("viewer", "table", paramName: "table", source: RebacParameterSource.QueryOrJsonBody)
             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return endpoints;
@@ -135,25 +133,11 @@ public static class ArrowExportEndpoints
             }
         }
 
-        // WebSQL finding 4.3 & SR15-21: Ensure target table matches ReBAC-authorized table if checked by route filter
-        if (httpContext.Items.TryGetValue("RebacValidated:table", out var rebacTableObj) && rebacTableObj is string rebacTable && tableId.HasValue)
+        // The decision point decides a read of the named table and of every table the SQL references
+        // (fail closed when the statement cannot be analyzed or the decision point is unavailable).
+        if (!await IsReadPermittedAsync(httpContext, tableId, sql, ct).ConfigureAwait(false))
         {
-            var expectedObj = Autheris.Application.Policy.RebacTableGate.ObjectId(tableId.Value);
-            var actualObj = rebacTable.StartsWith("table:", StringComparison.OrdinalIgnoreCase)
-                ? rebacTable
-                : Autheris.Application.Policy.RebacTableGate.ObjectId(TableIdentifierNormalizer.Normalize(rebacTable));
-            if (!string.Equals(expectedObj, actualObj, StringComparison.OrdinalIgnoreCase))
-            {
-                return ApiProblems.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by ReBAC policy.", httpContext, "Forbidden");
-            }
-        }
-
-        // WebSQL findings 4.3: the route filter checks the table named in the query or body. SQL from the body may read
-        // other tables, so every table it references needs the same relation (fail-closed when it cannot be analyzed).
-        if (!string.IsNullOrWhiteSpace(sql) &&
-            !await IsSqlPermittedByRebacAsync(httpContext, sql, caller, tenant, ct).ConfigureAwait(false))
-        {
-            return ApiProblems.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by ReBAC policy.", httpContext, "Forbidden");
+            return ApiProblems.Problem(StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "Access denied by access policy.", httpContext, "Forbidden");
         }
 
         var effectiveSql = !string.IsNullOrWhiteSpace(sql)
@@ -236,47 +220,85 @@ public static class ArrowExportEndpoints
     }
 
     /// <summary>
-    /// True when ReBAC is disabled or the caller holds the "viewer" relation on every table <paramref name="sql"/>
-    /// references. A statement that cannot be analyzed, or references no table, is not permitted.
+    /// True when the decision point allows an <see cref="Autheris.Application.Policy.Pdp.AccessTransport.ArrowExport"/> read on the named
+    /// table and on every table <paramref name="sql"/> references. A statement that cannot be analyzed, references no table, names an
+    /// unknown table or meets a failing decision point is not permitted.
     /// </summary>
-    private static async Task<bool> IsSqlPermittedByRebacAsync(HttpContext httpContext, string sql, string caller, TenantId tenant, CancellationToken ct)
+    internal static async Task<bool> IsReadPermittedAsync(HttpContext httpContext, TableIdentifier? tableId, string? sql, CancellationToken ct)
     {
         var services = httpContext.RequestServices;
-        var rebacOptions = services?.GetService<IOptions<GatewayOptions>>()?.Value?.Rebac;
-        if (rebacOptions is not null && !rebacOptions.Enabled)
-        {
-            return true;
-        }
-
-        var engine = services?.GetService<TrinoSqlEngine.ISqlEngine>();
-        var loader = services?.GetService<IRebacBatchDataLoader>();
-        if (engine == null || loader == null)
+        var pdp = services?.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+        var repository = services?.GetService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
+        if (pdp == null || repository == null)
         {
             return false;
         }
 
-        IReadOnlyList<TrinoSqlEngine.Analysis.TableAccessTarget> referencedTables;
+        var targets = new List<TableIdentifier>();
+        if (tableId.HasValue)
+        {
+            targets.Add(tableId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sql))
+        {
+            var engine = services!.GetService<TrinoSqlEngine.ISqlEngine>();
+            if (engine == null)
+            {
+                return false;
+            }
+
+            IReadOnlyList<TrinoSqlEngine.Analysis.TableAccessTarget> referencedTables;
+            try
+            {
+                referencedTables = engine.Analyze(sql.AsMemory()).ReferencedTables;
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                // A syntax error surfaces as a ParseCanceledException (an OperationCanceledException): it denies, it is no cancellation.
+                return false;
+            }
+
+            foreach (var target in referencedTables)
+            {
+                if (!TableIdentifierNormalizer.TryNormalize(target.FullName, out var normalized))
+                {
+                    return false;
+                }
+
+                targets.Add(normalized);
+            }
+        }
+
+        if (targets.Count == 0)
+        {
+            return false;
+        }
+
         try
         {
-            referencedTables = engine.Analyze(sql.AsMemory()).ReferencedTables;
+            var subject = httpContext.GetSecurityContext();
+            foreach (var target in targets)
+            {
+                var metadata = await repository.GetTableMetadataAsync(target, ct).ConfigureAwait(false);
+                if (metadata == null)
+                {
+                    return false;
+                }
+
+                var decision = await pdp.DecideAsync(
+                    new Autheris.Application.Policy.Pdp.AccessRequest(
+                        subject, metadata, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.ArrowExport),
+                    ct).ConfigureAwait(false);
+                if (!decision.IsAllowed)
+                {
+                    return false;
+                }
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return false;
-        }
-
-        if (referencedTables.Count == 0)
-        {
-            return false;
-        }
-
-        foreach (var target in referencedTables)
-        {
-            if (!TableIdentifierNormalizer.TryNormalize(target.FullName, out var normalized) ||
-                !await loader.CheckAsync(tenant.Value, caller, "viewer", Autheris.Application.Policy.RebacTableGate.ObjectId(normalized), ct).ConfigureAwait(false))
-            {
-                return false;
-            }
         }
 
         return true;

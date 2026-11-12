@@ -12,7 +12,6 @@ using Autheris.Application.DataSources;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -25,14 +24,13 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Issue #138 INC-1: the one discovery visibility entry point (always <see cref="CatalogSurface.Discovery"/>). Order of one evaluation:
-/// <see cref="CallerScopeResolver"/> (once) -> <see cref="CatalogVisibility"/> engine -> shape (NotFound rows dropped) -> ReBAC
-/// (<c>can_query</c> through <c>BatchCheckAsync</c>, only ever shrinks) -> memo. Every failure answers empty / null; nothing falls back
+/// <see cref="CallerScopeResolver"/> (once) -> <see cref="CatalogVisibility"/> engine -> shape (NotFound rows dropped) -> transport
+/// filter -> memo (no ReBAC filter; hidden objects stay hidden, a grant is not needed to discover). Every failure answers empty / null; nothing falls back
 /// to an unfiltered list. Scoped: the memo lives and dies with the DI scope.
 /// </summary>
 public sealed class CatalogVisibilityService : ICatalogVisibilityService
 {
     // hard bounds, no per-request override.
-    private const int ChunkSize = 32;
     private const int MaxParallelChunks = 8;
     private const int MaxCandidates = 256;
     private const string AnonymousMcpClientSid = "ANONYMOUS_MCP_CLIENT";
@@ -40,7 +38,6 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     private readonly ITableMetadataRepository? _metadataRepository;
     private readonly IConsentRepository? _consentRepository;
     private readonly GatewayOptions? _options;
-    private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly ILogger<CatalogVisibilityService> _logger;
     private readonly IIngressTransportContext? _ingress;
     private readonly IDataSourceOptionsResolver? _transportResolver;
@@ -52,7 +49,6 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         ITableMetadataRepository? metadataRepository,
         IConsentRepository? consentRepository,
         IOptions<GatewayOptions>? gatewayOptions,
-        IRebacEvaluator? rebacEvaluator = null,
         ILogger<CatalogVisibilityService>? logger = null,
         IIngressTransportContext? ingress = null,
         IDataSourceOptionsResolver? transportResolver = null)
@@ -62,7 +58,6 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
         _options = gatewayOptions?.Value;
-        _rebacEvaluator = rebacEvaluator;
         _logger = logger ?? NullLogger<CatalogVisibilityService>.Instance;
     }
 
@@ -317,89 +312,13 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
                 shaped = [.. TransportDiscoveryFilter.Apply(_transportResolver, transport, shaped)];
             }
 
-            return await ApplyRebacAsync(context, shaped, ct).ConfigureAwait(false);
+            return shaped;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             LogFailure(ex);
             return null;
         }
-    }
-
-    private async Task<IReadOnlyList<TableMetadata>> ApplyRebacAsync(Context context, List<TableMetadata> rows, CancellationToken ct)
-    {
-        var evaluator = _rebacEvaluator;
-        if (evaluator is not { IsEnabled: true })
-        {
-            // Configured but not resolvable: deny instead of treating it as "off".
-            return evaluator == null && _options?.Rebac?.Enabled == true ? [] : rows;
-        }
-
-        if (rows.Count == 0)
-        {
-            return rows;
-        }
-
-        var tenant = context.Tenant.Value;
-        var subject = context.Sid.Value;
-        var chunks = rows.Chunk(ChunkSize).ToArray();
-        var allowed = new bool[chunks.Length][];
-        var failedTables = 0;
-        string? failureType = null;
-
-        await Parallel.ForEachAsync(
-            Enumerable.Range(0, chunks.Length),
-            new ParallelOptions { MaxDegreeOfParallelism = MaxParallelChunks, CancellationToken = ct },
-            async (index, token) =>
-            {
-                var chunk = chunks[index];
-                var checks = chunk
-                    .Select(t => new RebacCheckRequest(tenant, subject, RebacTableGate.Relation, RebacTableGate.ObjectId(t.Identifier)))
-                    .ToList();
-                var flags = new bool[chunk.Length];
-                try
-                {
-                    var result = await evaluator.BatchCheckAsync(new RebacBatchCheckRequest(tenant, checks), token).ConfigureAwait(false);
-                    token.ThrowIfCancellationRequested();
-                    for (var i = 0; i < checks.Count; i++)
-                    {
-                        // A decision absent from the result is a deny.
-                        flags[i] = result?.Decisions != null && result.Decisions.TryGetValue(checks[i], out var ok) && ok;
-                    }
-                }
-                catch (Exception ex) when (!token.IsCancellationRequested)
-                {
-                    // A timeout surfaces as OperationCanceledException with an uncancelled token: a failure, not a cancellation.
-                    Interlocked.Add(ref failedTables, chunk.Length);
-                    Interlocked.CompareExchange(ref failureType, ex.GetType().Name, null);
-                    Array.Clear(flags);
-                }
-
-                allowed[index] = flags;
-            }).ConfigureAwait(false);
-
-        // The real evaluator stops quietly on cancellation: a partial result must never be returned or memoised.
-        ct.ThrowIfCancellationRequested();
-
-        if (failedTables > 0)
-        {
-            _logger.LogWarning(
-                "ReBAC evaluation failed for {HiddenTables} catalog tables ({FailureType}); they are hidden (fail-closed).", failedTables, failureType);
-        }
-
-        var visible = new List<TableMetadata>(rows.Count);
-        for (var c = 0; c < chunks.Length; c++)
-        {
-            for (var i = 0; i < chunks[c].Length; i++)
-            {
-                if (allowed[c][i])
-                {
-                    visible.Add(chunks[c][i]);
-                }
-            }
-        }
-
-        return visible;
     }
 
     private bool TryGetMemo(MemoKey key, out CatalogVisibleSet set)

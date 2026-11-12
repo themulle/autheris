@@ -399,7 +399,7 @@
 0398 Autheris.Application.Audit.IAuthFailureAggregator Singleton key=- type:Autheris.Application.Audit.AuthFailureAggregator
 0399 Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate Singleton key=- type:Autheris.Application.Services.TableReadConcurrencyGate
 0400 Autheris.Application.Common.Interfaces.IDbSessionContextInitializer Singleton key=- type:Autheris.Application.Services.DbSessionContextInitializer
-0401 Autheris.Application.Mesh.Interfaces.IEnvoyExtAuthzService Singleton key=- type:Autheris.Application.Mesh.Services.EnvoyExtAuthzService
+0401 Autheris.Application.Mesh.Interfaces.IEnvoyExtAuthzService Scoped key=- type:Autheris.Application.Mesh.Services.EnvoyExtAuthzService
 0402 Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore Singleton key=- factory:Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore
 0403 Autheris.Application.Security.Totp.Interfaces.ITotpVerificationService Singleton key=- factory:Autheris.Application.Security.Totp.Interfaces.ITotpVerificationService
 0404 Autheris.Application.Security.Totp.Interfaces.ITotpEnrollmentService Singleton key=- factory:Autheris.Application.Security.Totp.Interfaces.ITotpEnrollmentService

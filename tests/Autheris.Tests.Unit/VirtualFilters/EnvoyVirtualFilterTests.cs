@@ -23,11 +23,9 @@ public sealed class EnvoyVirtualFilterTests
 {
     private static EnvoyExtAuthzService Service(params VirtualFilterAccessProfile[] profiles)
     {
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(ci => TableAccessDecision.Allowed(ci.Arg<SecurityEvaluationContext>().TargetTable, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+        var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
         var snapshot = new MandatoryRowFilterResolverTests.FixedSnapshot(new VirtualFilterSnapshot(1, [], profiles));
-        return new EnvoyExtAuthzService(policy, NullLogger<EnvoyExtAuthzService>.Instance, snapshot);
+        return new EnvoyExtAuthzService(policy, Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(), NullLogger<EnvoyExtAuthzService>.Instance, snapshot);
     }
 
     private static ClaimsPrincipal Caller(string sid) => new(new ClaimsIdentity(

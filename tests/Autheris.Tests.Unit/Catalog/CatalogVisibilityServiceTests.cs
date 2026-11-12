@@ -266,98 +266,6 @@ public sealed class CatalogVisibilityServiceTests
     }
 
     [Fact]
-    [Trait("Category", "Security")]
-    public async Task RebacEnabled_IsIntersection_NeverUnion()
-    {
-        var rows = new[] { Row(T1), Row(T2) };
-        var rebac = new FakeRebac();
-        rebac.Allowed.Add(RebacTableGate.ObjectId(T1));
-        rebac.Allowed.Add(RebacTableGate.ObjectId(new TableIdentifier("sales", "dbo", "unconsented")));
-
-        // t1: consent and tuple; t2: consent only; "unconsented": tuple only (not in the candidate catalog of the caller).
-        var all = rows.Append(Row(new TableIdentifier("sales", "dbo", "unconsented"))).ToArray();
-        var set = await Svc(Wp0.Tables(all), ConsentsFor(rows), rebac).GetVisibleAsync(Caller(Subject()));
-
-        set.Tables.Select(t => t.Identifier).ShouldBe([T1]);
-    }
-
-    [Theory]
-    [InlineData("ClusterAdmin")]
-    [InlineData("GovernanceAdmin")]
-    [Trait("Category", "Security")]
-    public async Task RebacAppliesToAdminClasses(string role)
-    {
-        var rows = new[] { Row(T1), Row(T2) };
-        var rebac = new FakeRebac();
-        rebac.Allowed.Add(RebacTableGate.ObjectId(T1));
-        var admin = Wp0.User("S-ADMIN", "tenant-a", [role]);
-        var consents = ConsentsFor(rows, "S-OTHER");
-
-        var set = await Svc(Wp0.Tables(rows), consents, rebac).GetVisibleAsync(Caller(admin));
-
-        set.Tables.Select(t => t.Identifier).ShouldBe([T1]);
-        set.IsAdminView.ShouldBeTrue();
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task RebacEvaluatorNullOrDisabledResultMissingKey_Denies()
-    {
-        var rows = new[] { Row(T1) };
-        var principal = Caller(Subject());
-
-        // enabled by configuration but no evaluator resolved
-        (await Svc(Wp0.Tables(rows), ConsentsFor(rows), null, Opts(rebacEnabled: true)).GetVisibleAsync(principal)).Tables.ShouldBeEmpty();
-        (await Svc(Wp0.Tables(rows), ConsentsFor(rows), null, Opts(rebacEnabled: true)).FindVisibleAsync(principal, T1)).ShouldBeNull();
-
-        // evaluator answers without the requested key
-        var missing = new FakeRebac { Override = _ => new RebacBatchCheckResult(new Dictionary<RebacCheckRequest, bool>()) };
-        (await Svc(Wp0.Tables(rows), ConsentsFor(rows), missing).GetVisibleAsync(principal)).Tables.ShouldBeEmpty();
-        (await Svc(Wp0.Tables(rows), ConsentsFor(rows), missing).FindVisibleAsync(principal, T1)).ShouldBeNull();
-
-        // evaluator disabled and configuration disabled: no ReBAC term
-        var off = new FakeRebac { IsEnabled = false };
-        (await Svc(Wp0.Tables(rows), ConsentsFor(rows), off, Opts(rebacEnabled: false)).GetVisibleAsync(principal)).Tables.Count.ShouldBe(1);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task RebacChunkThrows_OnlyThatChunkHidden_CancellationPropagates_NoPartialMemo()
-    {
-        var rows = Rows(70); // chunks 32 / 32 / 6
-        var first = rows[0];
-        var calls = 0;
-        var rebac = new FakeRebac
-        {
-            AllowAll = true,
-            Override = req =>
-            {
-                if (req.Checks.Any(c => c.Object == RebacTableGate.ObjectId(first.Identifier)))
-                {
-                    Interlocked.Increment(ref calls);
-                    throw new InvalidOperationException("boom S-USER table:sales.dbo.tab0000");
-                }
-
-                return null;
-            }
-        };
-        var service = Svc(Wp0.Tables(rows), ConsentsFor(rows), rebac);
-
-        var set = await service.GetVisibleAsync(Caller(Subject()));
-
-        set.Tables.Count.ShouldBe(70 - 32);
-        set.Contains(first.Identifier).ShouldBeFalse();
-
-        // cancellation is not a deny: it propagates and is never memoised as a (partial) set
-        var cancelling = new FakeRebac { AllowAll = true, Delay = TimeSpan.FromSeconds(5) };
-        var svc2 = Svc(Wp0.Tables(rows), ConsentsFor(rows), cancelling);
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-        await Should.ThrowAsync<OperationCanceledException>(async () => await svc2.GetVisibleAsync(Caller(Subject()), null, cts.Token));
-        cancelling.Delay = TimeSpan.Zero;
-        (await svc2.GetVisibleAsync(Caller(Subject()))).Tables.Count.ShouldBe(70);
-    }
-
-    [Fact]
     public async Task Cancellation_Propagates_BeforeAnyWork()
     {
         var rows = new[] { Row(T1) };
@@ -365,55 +273,6 @@ public sealed class CatalogVisibilityServiceTests
         await cts.CancelAsync();
         await Should.ThrowAsync<OperationCanceledException>(async () =>
             await Svc(Wp0.Tables(rows), ConsentsFor(rows)).GetVisibleAsync(Caller(Subject()), null, cts.Token));
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Batching_Chunk32_Parallel8_Enforced_RelationCandidatesCappedAndDeduped()
-    {
-        var rows = Rows(32 * 12);
-        var rebac = new FakeRebac { AllowAll = true, Delay = TimeSpan.FromMilliseconds(25) };
-        var service = Svc(Wp0.Tables(rows), ConsentsFor(rows), rebac);
-
-        var set = await service.GetVisibleAsync(Caller(Subject()));
-
-        set.Tables.Count.ShouldBe(rows.Length);
-        rebac.Requests.Count.ShouldBe(12);
-        rebac.Requests.Max(r => r.Checks.Count).ShouldBe(32);
-        rebac.MaxInFlight.ShouldBeLessThanOrEqualTo(8);
-        rebac.MaxInFlight.ShouldBeGreaterThan(1);
-        rebac.CheckCalls.ShouldBe(0);
-
-        // FilterVisible: duplicates collapse, anything beyond the cap of 256 is dropped (deny), not evaluated.
-        var many = Rows(300);
-        var rebac2 = new FakeRebac { AllowAll = true };
-        var svc2 = Svc(Wp0.Tables(many), ConsentsFor(many), rebac2);
-        var candidates = many.Select(t => t.Identifier).Concat(many.Take(10).Select(t => t.Identifier)).ToList();
-
-        var visible = await svc2.FilterVisibleAsync(Caller(Subject()), candidates);
-
-        visible.Count.ShouldBe(256);
-        rebac2.Requests.Sum(r => r.Checks.Count).ShouldBe(256);
-        visible.ShouldBe(many.Take(256).Select(t => t.Identifier), ignoreOrder: true);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task UsesBatchCheck_RebacSubjectIsPrincipalSid_TenantIsCallerTenant_NoPerTableCheckAsync()
-    {
-        var rows = new[] { Row(T1) };
-        var rebac = new FakeRebac { AllowAll = true };
-
-        await Svc(Wp0.Tables(rows), ConsentsFor(rows), rebac).GetVisibleAsync(Caller(Subject()));
-
-        var request = rebac.Requests.Single();
-        request.TenantId.ShouldBe("tenant-a");
-        var check = request.Checks.Single();
-        check.User.ShouldBe("S-USER");
-        check.Relation.ShouldBe(RebacTableGate.Relation);
-        check.Object.ShouldBe(RebacTableGate.ObjectId(T1));
-        check.TenantId.ShouldBe("tenant-a");
-        rebac.CheckCalls.ShouldBe(0);
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------
@@ -484,57 +343,6 @@ public sealed class CatalogVisibilityServiceTests
     // Find / Filter
     // ------------------------------------------------------------------------------------------------------------------------------
 
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task FindVisible_UnknownHiddenInactiveRebacDenied_AllNull()
-    {
-        var inactive = Wp0.Table("sales", "inactive", active: false);
-        var hidden = Row(new TableIdentifier("sales", "dbo", "nocons"));
-        var denied = Row(T2);
-        var ok = Row(T1);
-        var rebac = new FakeRebac();
-        rebac.Allowed.Add(RebacTableGate.ObjectId(T1));
-        rebac.Allowed.Add(RebacTableGate.ObjectId(inactive.Identifier));
-        var consents = Wp0.Consents(
-            Wp0.Allow(ok.Identifier, "S-USER", Wp0.TenantA, "id"),
-            Wp0.Allow(denied.Identifier, "S-USER", Wp0.TenantA, "id"),
-            Wp0.Allow(inactive.Identifier, "S-USER", Wp0.TenantA, "id"));
-        var service = Svc(Wp0.Tables(ok, hidden, denied, inactive), consents, rebac);
-        var caller = Caller(Subject());
-
-        (await service.FindVisibleAsync(caller, new TableIdentifier("sales", "dbo", "unknown"))).ShouldBeNull();
-        (await service.FindVisibleAsync(caller, hidden.Identifier)).ShouldBeNull();
-        (await service.FindVisibleAsync(caller, denied.Identifier)).ShouldBeNull();
-        (await service.FindVisibleAsync(caller, inactive.Identifier)).ShouldBeNull();
-        (await service.FindVisibleAsync(caller, ok.Identifier)).ShouldNotBeNull();
-    }
-
-    [Fact]
-    public async Task FindVisible_OneRebacCheck()
-    {
-        var rows = Rows(5);
-        var rebac = new FakeRebac { AllowAll = true };
-        var service = Svc(Wp0.Tables(rows), ConsentsFor(rows), rebac);
-
-        var row = await service.FindVisibleAsync(Caller(Subject()), rows[2].Identifier);
-
-        row.ShouldNotBeNull();
-        rebac.Requests.Single().Checks.Count.ShouldBe(1);
-    }
-
-    [Fact]
-    public async Task FilterVisible_ChecksCandidatesOnly()
-    {
-        var rows = Rows(10);
-        var rebac = new FakeRebac { AllowAll = true };
-        var service = Svc(Wp0.Tables(rows), ConsentsFor(rows), rebac);
-
-        var visible = await service.FilterVisibleAsync(Caller(Subject()), [rows[1].Identifier, rows[3].Identifier, new TableIdentifier("x", "y", "z")]);
-
-        visible.ShouldBe([rows[1].Identifier, rows[3].Identifier], ignoreOrder: true);
-        rebac.Requests.Sum(r => r.Checks.Count).ShouldBe(2);
-    }
-
     // ------------------------------------------------------------------------------------------------------------------------------
     // Shape (SEC-CAT138-13, -15)
     // ------------------------------------------------------------------------------------------------------------------------------
@@ -551,28 +359,6 @@ public sealed class CatalogVisibilityServiceTests
         Should.Throw<ArgumentOutOfRangeException>(() => new CatalogVisibleRow(row, (CatalogOutputShape)42));
         Should.Throw<ArgumentNullException>(() => new CatalogVisibleRow(null!, CatalogOutputShape.Full));
         new CatalogVisibleRow(row, CatalogOutputShape.Summary).Shape.ShouldBe(CatalogOutputShape.Summary);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Pipeline_NonAdminUnmarkedRow_DroppedBeforeRebacAndMemo()
-    {
-        var unmarked = WithView("unmarked_t", CatalogView.Unmarked);
-        var unknown = WithView("unknown_t", (CatalogView)42);
-        var granted = WithView("granted_t", CatalogView.Granted);
-        var rebac = new FakeRebac { AllowAll = true };
-        var service = CatalogVisibilityTestFactory.Create(
-            Wp0.Tables(unmarked, unknown, granted), Wp0.Consents(), Opts(rebacEnabled: true), rebac,
-            engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>([unmarked, unknown, granted]));
-
-        var set = await service.GetVisibleAsync(Caller(Subject()));
-
-        set.Tables.Select(t => t.Identifier.TableName).ShouldBe(["granted_t"]);
-        set.ShapeOf(unmarked.Identifier).ShouldBe(CatalogOutputShape.NotFound);
-        rebac.Requests.SelectMany(r => r.Checks).Select(c => c.Object).ShouldBe([RebacTableGate.ObjectId(granted.Identifier)]);
-        (await service.FindVisibleAsync(Caller(Subject()), unmarked.Identifier)).ShouldBeNull();
-        (await service.FilterVisibleAsync(Caller(Subject()), [unmarked.Identifier, unknown.Identifier])).ShouldBeEmpty();
-        (await service.FindVisibleAsync(Caller(Subject()), granted.Identifier))!.Value.Shape.ShouldBe(CatalogOutputShape.Full);
     }
 
     [Fact]
@@ -647,40 +433,6 @@ public sealed class CatalogVisibilityServiceTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Logs_Metrics_NoSidTenantTableName_OnChunkFailureAndDeny()
-    {
-        var rows = Rows(40);
-        var logger = new CapturingLogger<CatalogVisibilityService>();
-        var rebac = new FakeRebac
-        {
-            Override = req => throw new InvalidOperationException($"fail for S-USER tenant-a {req.Checks[0].Object}")
-        };
-        var service = Svc(Wp0.Tables(rows), ConsentsFor(rows), rebac, logger: logger);
-
-        (await service.GetVisibleAsync(Caller(Subject()))).Tables.ShouldBeEmpty();
-
-        logger.Entries.ShouldNotBeEmpty();
-        foreach (var (_, message, exception) in logger.Entries)
-        {
-            exception.ShouldBeNull();
-            message.ShouldNotContain("S-USER");
-            message.ShouldNotContain("tenant-a");
-            message.ShouldNotContain("tab0");
-            message.ShouldNotContain("sales");
-        }
-
-        // dependency failure of the consent store: same rule
-        var consents = Substitute.For<IConsentRepository>();
-        consents.GetAllActiveConsentsForSubjectsAsync(default!, default, default, default, default)
-            .ReturnsForAnyArgs<Task<IReadOnlyList<Consent>>>(_ => throw new InvalidOperationException("S-USER sales.dbo.tab0000"));
-        var logger2 = new CapturingLogger<CatalogVisibilityService>();
-        (await Svc(Wp0.Tables(rows), consents, logger: logger2).GetVisibleAsync(Caller(Subject()))).Tables.ShouldBeEmpty();
-        logger2.Entries.ShouldNotBeEmpty();
-        logger2.Entries.ShouldAllBe(e => e.Exception == null && !e.Message.Contains("S-USER") && !e.Message.Contains("tab0000"));
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
     public void EngineOutputForTesting_NotAssignedInProduction()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
@@ -710,5 +462,31 @@ public sealed class CatalogVisibilityServiceTests
         property.ShouldNotBeNull();
         property.GetMethod!.IsAssembly.ShouldBeTrue();
         property.SetMethod!.IsAssembly.ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task WPSIMPL46_Discovery_ListsAllNonHiddenObjects_WithoutAnyRebacFilter_HiddenStaysHidden()
+    {
+        // WP-SIMPL-46 step 5: ApplyRebacAsync is deleted; a ReBAC evaluator that would deny everything has no effect, and the service takes no
+        // ReBAC dependency at all. Hidden (unmarked / unknown view) rows stay hidden.
+        typeof(CatalogVisibilityService).GetConstructors()
+            .SelectMany(c => c.GetParameters())
+            .ShouldNotContain(p => p.ParameterType.Name.Contains("Rebac", StringComparison.OrdinalIgnoreCase));
+
+        var unmarked = WithView("unmarked_t", CatalogView.Unmarked);
+        var unknown = WithView("unknown_t", (CatalogView)42);
+        var granted = WithView("granted_t", CatalogView.Granted);
+        var service = CatalogVisibilityTestFactory.Create(
+            Wp0.Tables(unmarked, unknown, granted), Wp0.Consents(), Opts(rebacEnabled: true), new FakeRebac(),
+            engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>([unmarked, unknown, granted]));
+
+        var set = await service.GetVisibleAsync(Caller(Subject()));
+
+        set.Tables.Select(t => t.Identifier.TableName).ShouldBe(["granted_t"]);
+        set.ShapeOf(unmarked.Identifier).ShouldBe(CatalogOutputShape.NotFound);
+        (await service.FindVisibleAsync(Caller(Subject()), unmarked.Identifier)).ShouldBeNull();
+        (await service.FilterVisibleAsync(Caller(Subject()), [unmarked.Identifier, unknown.Identifier])).ShouldBeEmpty();
+        (await service.FindVisibleAsync(Caller(Subject()), granted.Identifier))!.Value.Shape.ShouldBe(CatalogOutputShape.Full);
     }
 }

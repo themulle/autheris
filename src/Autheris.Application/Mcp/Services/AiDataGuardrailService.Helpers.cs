@@ -67,22 +67,46 @@ public sealed partial class AiDataGuardrailService
         !string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId;
 
     /// <summary>
-    /// The Casbin ABAC request of a session for one target table. SR-M-08: an app-only session (no user SID) is evaluated without group
-    /// SIDs, exactly like its principal (<see cref="McpProtocolHandler.BuildPrincipalFromSession"/>).
+    /// The read decision of a session for one target table. The subject is the session principal (an app-only session carries no group
+    /// SIDs and a stale group snapshot is degraded, SR-M-08); roles are never grantees. A table without catalog metadata, or a
+    /// failing decision point, denies (fail closed).
     /// </summary>
-    private static SecurityEvaluationContext BuildSecurityContext(McpSessionContext sessionContext, TableIdentifier targetTable)
+    private async ValueTask<TableAccessDecision> DecideReadAsync(McpSessionContext sessionContext, TableIdentifier table, CancellationToken ct)
     {
-        var groupSids = !string.IsNullOrWhiteSpace(sessionContext.UserSid) && sessionContext.GroupSids is { Count: > 0 }
-            ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray()
-            : [];
-        var clientIp = !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var parsedIp)
-            ? parsedIp : System.Net.IPAddress.None;
+        try
+        {
+            var metadata = _tableMetadataRepository == null
+                ? null
+                : await _tableMetadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            if (metadata == null)
+            {
+                return TableAccessDecision.Denied(table, "Table not found in the catalog.");
+            }
 
-        return new SecurityEvaluationContext(
-            UserSid: new Sid(CallerSidOf(sessionContext)), GroupSids: groupSids, Tenant: new TenantId(sessionContext.TenantId),
-            TargetTable: targetTable, RequestedColumns: [], ClientIp: clientIp,
-            Timestamp: DateTimeOffset.UtcNow, PurposeId: "MCP_AI_AGENT_QUERY");
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext)!;
+            var subject = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(
+                principal, new TenantId(sessionContext.TenantId),
+                clientIp: !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var ip) ? ip : System.Net.IPAddress.None);
+            return await _decisionPoint!.DecideAsync(
+                new Autheris.Application.Policy.Pdp.AccessRequest(
+                    subject, metadata, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Mcp),
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError("MCP guardrail decision failed ({FailureType}); denying (fail-closed).", ex.GetType().Name);
+            return TableAccessDecision.Denied(table, "Decision failed (fail-closed).");
+        }
     }
+
+    /// <summary>The governance catalog and golden-query pseudo targets of the catalog tools: no data table, so no object to decide.</summary>
+    private static bool IsCatalogPseudoTarget(TableIdentifier table) =>
+        string.Equals(table.Domain, "governance", StringComparison.OrdinalIgnoreCase) &&
+        (string.Equals(table.Schema, "catalog", StringComparison.OrdinalIgnoreCase) || string.Equals(table.Schema, "mcp", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Reason codes of a denied decision for the audit trail: codes only, never predicate values or policy text.</summary>
+    private static string ReasonCodesOf(TableAccessDecision decision) =>
+        decision.Reasons.Count == 0 ? "DEFAULT_DENY" : string.Join(';', decision.Reasons.Select(r => r.Code));
 
     /// <summary>
     /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>), a governed

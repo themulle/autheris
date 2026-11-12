@@ -22,7 +22,8 @@ using Autheris.Domain.Model;
 /// </summary>
 public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
 {
-    private readonly IPolicyEnforcementService _policyService;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _decisionPoint;
+    private readonly ITableMetadataRepository _tables;
     private readonly ILogger<EnvoyExtAuthzService> _logger;
 
     private static readonly char[] CrlfChars = new[] { '\r', '\n' };
@@ -30,12 +31,14 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
     private readonly Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? _virtualFilters;
 
     public EnvoyExtAuthzService(
-        IPolicyEnforcementService policyService,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint decisionPoint,
+        ITableMetadataRepository tables,
         ILogger<EnvoyExtAuthzService> logger,
         Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? virtualFilters = null)
     {
         _virtualFilters = virtualFilters;
-        _policyService = policyService ?? throw new ArgumentNullException(nameof(policyService));
+        _decisionPoint = decisionPoint ?? throw new ArgumentNullException(nameof(decisionPoint));
+        _tables = tables ?? throw new ArgumentNullException(nameof(tables));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -125,18 +128,10 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         var tenantStr = tenantId.Value;
         var principal = userSid.Value;
 
-        // 4. Extract Groups / Roles (SEC C-1: Strictly from validated ClaimsPrincipal)
-        var groupList = new List<Sid>();
-        foreach (var claim in caller.FindAll(c => c.Type is System.Security.Claims.ClaimTypes.Role
-                                                         or System.Security.Claims.ClaimTypes.GroupSid
-                                                         or "groups"
-                                                         or "roles"))
-        {
-            if (!string.IsNullOrWhiteSpace(claim.Value))
-            {
-                groupList.Add(new Sid(claim.Value));
-            }
-        }
+        // 4. Subject: the request SecurityPrincipalContext of the validated principal. Roles are never grantees and a
+        // degraded group resolution carries no groups, so the decision point denies group grants.
+        var subject = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(caller, tenantId);
+        var groupList = subject.GroupSids;
 
         // 5. Determine Resource / Table
         string resourceName = "default";
@@ -153,37 +148,21 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             resourceName = ExtractResourceFromPath(normalizedPath);
         }
 
-        // Parse Client IP (SEC H-4: Fail-closed to IPAddress.None instead of Loopback)
-        IPAddress clientIp = IPAddress.None;
-        if (!string.IsNullOrWhiteSpace(clientIpStr) && IPAddress.TryParse(clientIpStr, out var parsedIp))
-        {
-            clientIp = parsedIp;
-        }
-
-        // 6. Security Evaluation Context
+        // 6. Decision point evaluation: the one PDP decides; an unknown table or a failing decision denies (fail closed).
         var targetTable = TableIdentifier.TryParse(resourceName, out var parsedTid)
             ? parsedTid
             : new TableIdentifier("default", "public", resourceName);
         var upperMethod = method?.ToUpperInvariant() ?? "GET";
-        var action = (upperMethod is "GET" or "HEAD" or "OPTIONS") ? "read" : "write";
-        var evalContext = new SecurityEvaluationContext(
-            UserSid: userSid,
-            GroupSids: groupList,
-            Tenant: tenantId,
-            TargetTable: targetTable,
-            RequestedColumns: Array.Empty<string>(),
-            ClientIp: clientIp,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null,
-            Attributes: new Dictionary<string, object?>
-            {
-                ["method"] = upperMethod,
-                ["path"] = normalizedPath,
-                ["action"] = action
-            });
+        var tableMeta = await _tables.GetTableMetadataAsync(targetTable, ct).ConfigureAwait(false);
+        if (tableMeta == null)
+        {
+            _logger.LogWarning("Envoy ext_authz DENIED: Subject '{Principal}', Resource '{Resource}' is not in the catalog.", ForLog(principal), ForLog(resourceName));
+            return EnvoyCheckResponse.Deny(403, DeniedByPolicyMessage);
+        }
 
-        // 7. Policy Evaluation
-        var decision = await _policyService.EvaluatePolicyAsync(evalContext, ct).ConfigureAwait(false);
+        var decision = await _decisionPoint.DecideAsync(
+            new Autheris.Application.Policy.Pdp.AccessRequest(subject, tableMeta, OperationOf(upperMethod), Autheris.Application.Policy.Pdp.AccessTransport.EnvoyExtAuthz),
+            ct).ConfigureAwait(false);
 
         if (!decision.IsAllowed)
         {
@@ -235,6 +214,14 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         // SEC C-1: Do not leak raw CombinedRowFilterSql in header response
         return EnvoyCheckResponse.Allow(principal, tenantStr);
     }
+
+    private static Autheris.Application.Policy.Pdp.AccessOperation OperationOf(string upperMethod) => upperMethod switch
+    {
+        "GET" or "HEAD" or "OPTIONS" => Autheris.Application.Policy.Pdp.AccessOperation.Read,
+        "POST" => Autheris.Application.Policy.Pdp.AccessOperation.Insert,
+        "DELETE" => Autheris.Application.Policy.Pdp.AccessOperation.Delete,
+        _ => Autheris.Application.Policy.Pdp.AccessOperation.Update
+    };
 
     internal const string DeniedByPolicyMessage = "Access denied by policy.";
 

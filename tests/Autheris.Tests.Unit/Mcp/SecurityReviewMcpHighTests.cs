@@ -39,7 +39,7 @@ public sealed class SecurityReviewMcpHighTests
     private static AiDataGuardrailService Guardrail(
         IMcpQueryExecutor executor,
         IAccessPlanningService? planning = null,
-        IPolicyEnforcementService? policy = null,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? policy = null,
         IConsentRepository? consents = null)
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
@@ -62,7 +62,7 @@ public sealed class SecurityReviewMcpHighTests
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
-            policyEnforcementService: policy,
+            decisionPoint: policy,
             tableMetadataRepository: metadataRepo,
             consentRepository: consents,
             accessPlanningService: planning);
@@ -143,15 +143,13 @@ public sealed class SecurityReviewMcpHighTests
     [Fact]
     public async Task SR_H_01_QuerySql_AbacRunsOnEveryTable()
     {
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(ci => ValueTask.FromResult(ci.Arg<SecurityEvaluationContext>().TargetTable.Equals(Secret)
-                ? TableAccessDecision.Denied(Secret, "no policy")
-                : new TableAccessDecision(Pub, true, new Dictionary<string, ColumnAccessLevel>(), null, [])));
-        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
+        var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(r => r.Object.Identifier.Equals(Secret)
+            ? TableAccessDecision.Denied(Secret, "no policy")
+            : new TableAccessDecision(Pub, true, new Dictionary<string, ColumnAccessLevel>(), null, []));
+        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             new McpToolRegistry(Options.Create(new GatewayOptions()), new NoDemo()), options,
-            NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: Executor(), policyEnforcementService: policy);
+            NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: Executor(), decisionPoint: policy, tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(
             new McpToolCallRequest("query_sql", SqlArgs("SELECT * FROM sales.public.pub p JOIN sales.public.secret s ON s.id = p.id")), Session());

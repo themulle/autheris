@@ -84,7 +84,7 @@ public sealed class Issue143ScopeBlindPathTests
         var repo = Substitute.For<IConsentRepository>();
         repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([consent]));
-        var real = new ConsentResolutionService();
+        var real = new ConsentResolutionService(null, RestrictedScopePolicy.Default);
         var recording = Substitute.For<IConsentResolutionService>();
         recording.ResolveAccess(default!, default!, default!, default, default!, default, default, default)
             .ReturnsForAnyArgs(ci =>
@@ -94,12 +94,12 @@ public sealed class Issue143ScopeBlindPathTests
                     ci.ArgAt<IReadOnlyList<Consent>>(4), ci.ArgAt<DatabaseDialect>(5), ci.ArgAt<IReadOnlySet<Sid>?>(6), ci.ArgAt<IReadOnlySet<string>?>(7));
             });
         var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
-        var adp = new AccessDecisionPoint(
+        var adp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
             Substitute.For<IPolicyEnforcementService>(),
-            consentService: recording,
-            consentRepo: repo,
-            metadataRepo: metadataRepo);
+            recording,
+            repo,
+            restrictedScopes: RestrictedScopePolicy.Default);
         return new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(), metadataRepo,
             options,
@@ -182,8 +182,7 @@ public sealed class Issue143ScopeBlindPathTests
                 .Returns(Task.FromResult<IReadOnlyList<Consent>>(consents));
             var masking = Substitute.For<IColumnMaskingProvider>();
             masking.MaskValue(default!, default, default!).ReturnsForAnyArgs("MASKED");
-            var policy = Substitute.For<IPolicyEnforcementService>();
-            policy.HasPolicies(Arg.Any<TenantId>()).Returns(false);
+            var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
 
             // A key/value cache keyed by the context hash, like the real one: a hit of a foreign key would show up as a wrong level.
             var store = new Dictionary<string, TableAccessDecision>();

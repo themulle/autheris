@@ -83,83 +83,13 @@ public sealed class CatalogChannelMigrationTests
     // T-CAT138-06 / SEC-CAT138-09
     // ------------------------------------------------------------------------------------------------------------------------------
 
-    [Fact]
-    public async Task FindVisible_InactiveWrongTenantUnknownRebacDenied_IdenticalErrorAndMessage_T_CAT138_06()
-    {
-        var tables = Wp0.Tables(Ok, Inactive, Foreign, Denied);
-        var consents = Wp0.Consents(
-            Wp0.Allow(Ok.Identifier, "S-USER", Wp0.TenantA, "id"),
-            Wp0.Allow(Inactive.Identifier, "S-USER", Wp0.TenantA, "id"),
-            Wp0.Allow(Denied.Identifier, "S-USER", Wp0.TenantA, "id"),
-            Wp0.Allow(Foreign.Identifier, "S-USER", Wp0.TenantB, "id"));
-        var rebac = new RebacDouble(Denied);
-        var (mcp, rest, _) = Channels(tables, consents, Opts(rebac: true), rebac.Evaluator);
-        var user = Wp0.User("S-USER", "tenant-a");
-        var context = Wp0.Context(user);
-
-        var hidden = new[] { "inactive_t", "foreign_t", "denied_t", "unknown_t" };
-        var describe = new List<string>();
-        var sample = new List<string>();
-        foreach (var name in hidden)
-        {
-            var describeEx = await Should.ThrowAsync<TableNotFoundException>(() => mcp.DescribeDatasetAsync(user, $"sales.dbo.{name}"));
-            var sampleEx = await Should.ThrowAsync<TableNotFoundException>(() => mcp.SampleRowsAsync(user, $"sales.dbo.{name}", 3));
-            describe.Add(Normalise(describeEx.Message, name));
-            sample.Add(Normalise(sampleEx.Message, name));
-            (await rest.GetDatasetDetailAsync(new TableIdentifier("sales", "dbo", name), context)).ShouldBeNull();
-        }
-
-        describe.Distinct().Count().ShouldBe(1);
-        sample.Distinct().Count().ShouldBe(1);
-        describe[0].ShouldBe(sample[0]);
-        describe[0].ShouldNotContain("rebac", Case.Insensitive);
-        (await rest.GetDatasetDetailAsync(Ok.Identifier, context)).ShouldNotBeNull();
-        (await mcp.DescribeDatasetAsync(user, "sales.dbo.ok_t")).Id.ShouldBe("sales.dbo.ok_t");
-    }
-
     // ------------------------------------------------------------------------------------------------------------------------------
     // T-CAT138-07 / SEC-CAT138-08
     // ------------------------------------------------------------------------------------------------------------------------------
 
-    [Fact]
-    public async Task Describe_RelationTargetDenied_NoNameInRelationsAccessPathsLineageOrError_T_CAT138_07()
-    {
-        var tables = Wp0.Tables(Ok, Denied);
-        var consents = ConsentsFor("S-USER", Ok, Denied);
-        var rebac = new RebacDouble(Denied);
-        var graphQl = Substitute.For<IGraphQlCatalogMap>();
-        graphQl.GetTableAsync(Ok.Identifier, Arg.Any<CancellationToken>()).Returns(new GraphQlTableMapping(
-            Ok.Identifier, "salesOk", "OkT", "OkTFilter", "OkTOrder", [new GraphQlColumnMapping("id", "id", "Int")],
-            [new GraphQlRelationMapping("deniedRel", Denied.Identifier, IsList: true), new GraphQlRelationMapping("self", Ok.Identifier, IsList: false)]));
-        var (mcp, _, _) = Channels(tables, consents, Opts(rebac: true), rebac.Evaluator, graphQl);
-
-        var description = await mcp.DescribeDatasetAsync(Wp0.User("S-USER", "tenant-a"), "sales.dbo.ok_t");
-
-        description.GraphQl.ShouldNotBeNull().Relations.Select(r => r.Dataset).ShouldBe(["sales.dbo.ok_t"]);
-        JsonSerializer.Serialize(description).ShouldNotContain("denied_t", Case.Insensitive);
-    }
-
     // ------------------------------------------------------------------------------------------------------------------------------
     // T-CAT138-08 / SEC-CAT138-03
     // ------------------------------------------------------------------------------------------------------------------------------
-
-    [Theory]
-    [InlineData("S-USER", "Bearer")]
-    [InlineData("cert:ABCDEF", "Certificate")]
-    public async Task RestRebacSubject_EqualsDataPathSubject_ForUserAndServiceToken_T_CAT138_08(string sid, string authType)
-    {
-        var tables = Wp0.Tables(Ok);
-        var consents = ConsentsFor(sid, Ok);
-        var rebac = new RebacDouble();
-        var (_, rest, _) = Channels(tables, consents, Opts(rebac: true), rebac.Evaluator);
-        var principal = Wp0.User(sid, "tenant-a", authType: authType);
-
-        (await rest.ListDatasetsAsync(Wp0.Context(principal))).ShouldHaveSingleItem();
-
-        // The data path keys ReBAC on the principal SID (query.UserSid); the catalog must ask for the same subject.
-        rebac.Subjects.ShouldNotBeEmpty();
-        rebac.Subjects.ShouldAllBe(s => s == principal.GetUserSid()!.Value.Value);
-    }
 
     [Fact]
     public async Task RestSubjectDifferentFromPrincipalSid_StricterOfBoth_Empty_T_CAT138_08()
@@ -248,45 +178,9 @@ public sealed class CatalogChannelMigrationTests
     // T-CAT138-11
     // ------------------------------------------------------------------------------------------------------------------------------
 
-    [Fact]
-    public async Task AdminClass_RebacOn_NoTuples_SeesNothing_RestAndMcp_T_CAT138_11()
-    {
-        var tables = Wp0.Tables(Ok, Denied);
-        var rebac = new RebacDouble(Ok, Denied);
-        var (mcp, rest, _) = Channels(tables, Wp0.Consents(), Opts(rebac: true), rebac.Evaluator);
-        var admin = Wp0.User("S-ADMIN", null, ["ClusterAdmin"]);
-
-        (await rest.ListDatasetsAsync(Wp0.Context(admin))).ShouldBeEmpty();
-        (await rest.GetDatasetDetailAsync(Ok.Identifier, Wp0.Context(admin))).ShouldBeNull();
-        (await mcp.ListDatasetsAsync(admin)).Total.ShouldBe(0);
-        await Should.ThrowAsync<TableNotFoundException>(() => mcp.DescribeDatasetAsync(admin, "sales.dbo.ok_t"));
-    }
-
     // ------------------------------------------------------------------------------------------------------------------------------
     // T-CAT138-12
     // ------------------------------------------------------------------------------------------------------------------------------
-
-    [Fact]
-    public async Task Datasources_AdminGateBeforeVisibility_RebacShrinksOnly_T_CAT138_12()
-    {
-        var a = Wp0.Table("alpha", "t1", "A", ["id"], baseUrl: "https://a.internal/api");
-        var b = Wp0.Table("beta", "t2", "B", ["id"], baseUrl: "https://b.internal/api");
-        var tables = Wp0.Tables(a, b);
-        var spy = Substitute.For<ICatalogVisibilityService>();
-        var rebac = new RebacDouble(b);
-        var options = Opts(rebac: true);
-        var (_, restSpied, _) = Channels(tables, Wp0.Consents(), options, serviceOverride: spy);
-        var (_, restReal, _) = Channels(tables, Wp0.Consents(), options, rebac.Evaluator);
-
-        // Gate first: a non-administrator never reaches the visibility service.
-        (await restSpied.ListDatasourcesAsync(Wp0.Context(Wp0.User("S-USER", "tenant-a")))).ShouldBeEmpty();
-        await spy.DidNotReceiveWithAnyArgs().GetVisibleAsync(default!, default, default);
-
-        // ReBAC only shrinks the administrator answer.
-        var sources = await restReal.ListDatasourcesAsync(Wp0.Context(Wp0.User("S-ADMIN", null, ["ClusterAdmin"])));
-        sources.Select(s => s.Domain).ShouldBe(["alpha"]);
-        sources.ShouldNotContain(s => s.BaseUrl == "https://b.internal/api");
-    }
 
     // ------------------------------------------------------------------------------------------------------------------------------
     // SEC-CAT138-14 (REST/MCP part): no SID, nothing visible, nothing read
@@ -355,20 +249,4 @@ public sealed class CatalogChannelMigrationTests
         await spy.DidNotReceiveWithAnyArgs().FindVisibleAsync(default!, default, default);
     }
 
-    [Fact]
-    public async Task List_RebacDeniedTable_AbsentFromPageAndPaging()
-    {
-        var tables = Wp0.Tables(Ok, Denied);
-        var consents = ConsentsFor("S-USER", Ok, Denied);
-        var rebac = new RebacDouble(Denied);
-        var (mcp, rest, _) = Channels(tables, consents, Opts(rebac: true), rebac.Evaluator);
-        var user = Wp0.User("S-USER", "tenant-a");
-
-        var list = await mcp.ListDatasetsAsync(user, limit: 1);
-
-        list.Total.ShouldBe(1);
-        list.Datasets.Select(d => d.Id).ShouldBe(["sales.dbo.ok_t"]);
-        list.Truncated.ShouldBeFalse();
-        (await rest.ListDatasetsAsync(Wp0.Context(user))).Select(d => d.Table).ShouldBe(["ok_t"]);
-    }
 }

@@ -351,15 +351,14 @@ public sealed class SecurityReviewG5Tests : IDisposable
         policy.HasPolicies(Arg.Any<TenantId>()).Returns(true);
         policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<TableAccessDecision>(abacAllowed
-                ? TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>())
+                ? TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
                 : TableAccessDecision.Denied(OrdersId, "abac")));
         var options = Options.Create(new GatewayOptions());
-        var adp = new AccessDecisionPoint(
+        var adp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
             policy,
-            consentService: new Autheris.Application.Services.ConsentResolutionService(),
-            consentRepo: consentRepo,
-            metadataRepo: metaRepo);
+            new Autheris.Application.Services.ConsentResolutionService(),
+            consentRepo);
         var svc = new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(), metaRepo, options,
             NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,

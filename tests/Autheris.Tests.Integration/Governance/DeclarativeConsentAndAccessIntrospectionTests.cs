@@ -252,7 +252,6 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
                 tableRepo,
                 consentRepo,
                 Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = Autheris.Tests.Common.TenancyShapeExtensions.Options(Autheris.Tests.Common.TenancyShape.Multi), Rebac = new Autheris.Domain.Options.RebacOptions { Enabled = false } }),
-                DisabledRebac(),
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Catalog.Services.CatalogVisibilityService>.Instance));
 
         var user = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "test"));

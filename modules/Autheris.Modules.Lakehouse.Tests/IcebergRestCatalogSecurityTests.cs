@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using System.Linq;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.DataSources;
-using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -62,18 +61,14 @@ public sealed class IcebergRestCatalogSecurityTests
         IConsentResolutionService? consentService = null,
         IConsentRepository? consentRepo = null,
         IPolicyEnforcementService? policyEnforcementService = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
-        IAccessDecisionPoint? accessDecisionPoint = null)
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
     {
         var opt = options ?? _options;
-        var adp = accessDecisionPoint ?? new AccessDecisionPoint(
+        var adp = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             opt,
             policyEnforcementService ?? Substitute.For<IPolicyEnforcementService>(),
             consentService,
-            consentRepo,
-            rebacEvaluator: rebacEvaluator,
-            metadataRepo: _metadataRepo,
-            transportGate: _transportGate);
+            consentRepo);
 
         return new IcebergRestCatalogFederationService(
             _metadataReader,
@@ -83,7 +78,7 @@ public sealed class IcebergRestCatalogSecurityTests
             auditRepository ?? global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             adp,
             consentRepo: consentRepo,
-            rebacEvaluator: rebacEvaluator);
+            transportGate: _transportGate);
     }
 
     private IcebergRestCatalogFederationService ServiceWith(TableMetadata meta, params Consent[] consents)
@@ -131,17 +126,17 @@ public sealed class IcebergRestCatalogSecurityTests
         _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(Orders("id")));
 
-        var withRowFilter = Substitute.For<IAccessDecisionPoint>();
-        withRowFilter.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<AccessDecision>(AccessDecision.Allowed(
-                OrdersId, new Dictionary<string, ColumnAccessLevel>(), AccessTransport.Lakehouse, "region = 'EU'")));
+        var withRowFilter = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+        withRowFilter.DecideAsync(Arg.Any<Autheris.Application.Policy.Pdp.AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(
+                OrdersId, new Dictionary<string, ColumnAccessLevel>(), "region = 'EU'", hasUnconstrainedColumnAllow: true)));
         await Should.ThrowAsync<SecurityException>(() =>
             CreateService(auditRepository: audit, accessDecisionPoint: withRowFilter).LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
 
-        var withMask = Substitute.For<IAccessDecisionPoint>();
-        withMask.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<AccessDecision>(AccessDecision.Allowed(
-                OrdersId, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Mask }, AccessTransport.Lakehouse)));
+        var withMask = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+        withMask.DecideAsync(Arg.Any<Autheris.Application.Policy.Pdp.AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(
+                OrdersId, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Mask }, hasUnconstrainedColumnAllow: true)));
         await Should.ThrowAsync<SecurityException>(() =>
             CreateService(auditRepository: audit, accessDecisionPoint: withMask).LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
 
@@ -413,7 +408,7 @@ public sealed class IcebergRestCatalogSecurityTests
             .Returns(call =>
             {
                 captured = call.Arg<SecurityEvaluationContext>();
-                return new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>()));
+                return new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
             });
 
         var service = CreateService(
@@ -464,12 +459,12 @@ public sealed class IcebergRestCatalogSecurityTests
     }
 
     [Fact]
-    public async Task LoadTable_CasbinContext_ActionClaimsAreIgnored_AndGatewayActionWins()
+    public async Task LoadTable_CasbinContext_ActionClaimsAreIgnored()
     {
         var context = await CaptureCasbinContextAsync(new Claim("action", "write"), new Claim("gql.action", "delete"));
 
         context.Attributes.ShouldNotBeNull();
-        context.Attributes["action"].ShouldBe("read");
+        context.Attributes.TryGetValue("action", out var action).ShouldBeFalse(action?.ToString());
         context.Attributes.ContainsKey("gql.action").ShouldBeFalse();
     }
 
@@ -481,128 +476,5 @@ public sealed class IcebergRestCatalogSecurityTests
         (await CaptureCasbinContextAsync(new Claim("purpose", ""), new Claim("purpose_id", "billing"))).PurposeId.ShouldBe("billing");
         (await CaptureCasbinContextAsync(new Claim("purpose", "audit"), new Claim("purpose", "marketing"))).PurposeId.ShouldBeNull();
         (await CaptureCasbinContextAsync(new Claim("purpose", "audit"), new Claim("purpose", "audit"))).PurposeId.ShouldBe("audit");
-    }
-
-    [Fact]
-    public async Task LoadTable_WhenRebacEnforced_AndRebacDenies_ThrowsSecurityExceptionAndAuditsDeny()
-    {
-        var optionsWithRebac = Options.Create(new GatewayOptions
-        {
-            Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = true }
-        });
-
-        var rebac = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>();
-        rebac.IsEnabled.Returns(true);
-        rebac.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<RebacCheckResult>(new RebacCheckResult(false)));
-
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        var meta = Orders("id", "name");
-        _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(meta));
-        var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([AllowFor("analyst@corp.com")]));
-
-        var service = CreateService(
-            options: optionsWithRebac,
-            auditRepository: auditRepo,
-            consentService: new ConsentResolutionService(),
-            consentRepo: consentRepo,
-            rebacEvaluator: rebac);
-
-        await Should.ThrowAsync<SecurityException>(() =>
-            service.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
-
-        await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e =>
-                e.EventType == "Iceberg.LoadTable" &&
-                e.Decision == "DENY" &&
-                e.TargetTable.Contains("orders")),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ListTables_WhenRebacEnforced_FiltersOutDeniedTables_ConsistentlyWithLoadTable()
-    {
-        var optionsWithRebac = Options.Create(new GatewayOptions
-        {
-            Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" },
-            Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = true }
-        });
-
-        var ordersMeta = Orders("id", "name");
-        var customersId = new TableIdentifier("tenant-1", "raw", "customers");
-        var customersMeta = new TableMetadata
-        {
-            Identifier = customersId,
-            Table = new Table { SourceName = "tenant-1", SchemaName = "raw", TableName = "customers", DataSourceType = DataSourceType.LakehouseIceberg },
-            Columns = [new TableColumn { ColumnName = "id" }]
-        };
-
-        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([ordersMeta, customersMeta]));
-        _metadataRepo.GetTableMetadataAsync(OrdersId, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(ordersMeta));
-        _metadataRepo.GetTableMetadataAsync(customersId, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(customersMeta));
-
-        var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([
-                AllowFor("analyst@corp.com", tenant: "tenant-1"),
-                new Consent
-                {
-                    TableIdentifier = customersId,
-                    TenantId = new TenantId("tenant-1"),
-                    GranteeType = GranteeType.User,
-                    GranteeSid = new Sid("analyst@corp.com"),
-                    Effect = ConsentEffect.Allow,
-                    ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-                    ValidTo = DateTimeOffset.UtcNow.AddDays(1)
-                }
-            ]));
-        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Is<TableIdentifier>(t => t == OrdersId), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([AllowFor("analyst@corp.com", tenant: "tenant-1")]));
-        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Is<TableIdentifier>(t => t == customersId), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([
-                new Consent
-                {
-                    TableIdentifier = customersId,
-                    TenantId = new TenantId("tenant-1"),
-                    GranteeType = GranteeType.User,
-                    GranteeSid = new Sid("analyst@corp.com"),
-                    Effect = ConsentEffect.Allow,
-                    ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-                    ValidTo = DateTimeOffset.UtcNow.AddDays(1)
-                }
-            ]));
-
-        // ReBAC: allow orders, deny customers
-        var rebac = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>();
-        rebac.IsEnabled.Returns(true);
-        rebac.CheckAsync(Arg.Is<RebacCheckRequest>(r => r.Object.Contains("orders")), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<RebacCheckResult>(RebacCheckResult.Permitted));
-        rebac.CheckAsync(Arg.Is<RebacCheckRequest>(r => r.Object.Contains("customers")), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<RebacCheckResult>(RebacCheckResult.Denied));
-
-        var service = CreateService(
-            options: optionsWithRebac,
-            consentService: new ConsentResolutionService(),
-            consentRepo: consentRepo,
-            rebacEvaluator: rebac);
-
-        // 1. ListTablesAsync should only list 'orders' because 'customers' is denied by ReBAC
-        var listed = await service.ListTablesAsync("tenant-1", "raw", Analyst());
-        listed.ShouldContain("orders");
-        listed.ShouldNotContain("customers");
-
-        // 2. LoadTableAsync for 'orders' succeeds (consistent with listing)
-        var loaded = await service.LoadTableAsync("tenant-1", "raw", "orders", Analyst());
-        loaded.ShouldNotBeNull();
-
-        // 3. LoadTableAsync for 'customers' fails closed with 403 (consistent with exclusion from listing)
-        await Should.ThrowAsync<SecurityException>(() =>
-            service.LoadTableAsync("tenant-1", "raw", "customers", Analyst()).AsTask());
     }
 }

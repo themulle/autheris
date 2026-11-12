@@ -40,22 +40,6 @@ public sealed class IntegrationGapBTests
 {
     // ---------------------------------------------------------------- helpers
 
-    private sealed class DenyingPolicyService : IPolicyEnforcementService
-    {
-        public int Calls { get; private set; }
-
-        public ValueTask<TableAccessDecision> EvaluatePolicyAsync(SecurityEvaluationContext context, CancellationToken ct = default)
-        {
-            Calls++;
-            return ValueTask.FromResult(TableAccessDecision.Denied(context.TargetTable, "denied by test policy"));
-        }
-
-        public bool HasPolicies(TenantId tenant) => true;
-        public Task ReloadPoliciesAsync(TenantId tenant, CancellationToken ct = default) => Task.CompletedTask;
-        public void LoadPolicyFromText(TenantId tenant, string policyText) { }
-        public void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false) { }
-    }
-
     private sealed class RecordingLifetimeFeature : IHttpRequestLifetimeFeature
     {
         public CancellationToken RequestAborted { get; set; }
@@ -125,51 +109,6 @@ public sealed class IntegrationGapBTests
     }
 
     // ---------------------------------------------------------------- GAP06
-
-    [Fact]
-    public async Task GAP06_Catalog_DoesNotExemptMcpToolsFromAbac()
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            // Casbin is enabled: the guardrail asks it only then.
-            Casbin = new CasbinOptions { Enabled = true }
-        });
-        var policy = new DenyingPolicyService();
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult("""{"assets":[]}"""));
-
-        var guardrail = new AiDataGuardrailService(new McpToolRegistry(), options, NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, policyEnforcementService: policy);
-
-        var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_data_catalog", "{}"), CreateSession());
-
-        result.IsSuccess.ShouldBeFalse();
-        policy.Calls.ShouldBe(1);
-        await executor.DidNotReceive().ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task GAP06_OnlyExplicitMcpAuthBypass_SkipsAbac()
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            Mcp = new McpOptions { Enabled = true },
-            Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true }
-        });
-        var policy = new DenyingPolicyService();
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult("""{"assets":[]}"""));
-
-        var guardrail = new AiDataGuardrailService(new McpToolRegistry(), options, NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, policyEnforcementService: policy);
-
-        var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_data_catalog", "{}"), CreateSession());
-
-        result.IsSuccess.ShouldBeTrue();
-        policy.Calls.ShouldBe(0);
-    }
 
     [Fact]
     public async Task GAP06_McpResources_NotOpenedForAnonymousCallers()
