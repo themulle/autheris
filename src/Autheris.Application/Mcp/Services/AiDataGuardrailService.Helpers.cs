@@ -115,8 +115,9 @@ public sealed partial class AiDataGuardrailService
         (tool.Name.Equals(McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase) && table.Equals(McpDataTargetResolver.ApiNoTable));
 
     /// <summary>
-    /// describe_dataset returns column value profiles (allowed values, ranges, samples) in its full view. Only the brief shape and the
-    /// allow-listed summary shape and an unreleased tier-Full row carry no values and need no data decision; every other shape, and any failure to tell, is decided.
+    /// describe_dataset returns column value profiles (allowed values, ranges, samples) and raw value-bearing column meta whenever the shared
+    /// <see cref="McpDatasetCatalog.EmitsValueProfile"/> predicate holds (same inputs as the handler). Only a call that emits none of them
+    /// skips the decision point; any failure to tell is decided (fail closed).
     /// </summary>
     private async ValueTask<bool> IsValueFreeDescribeAsync(
         McpToolDefinition tool, string? argumentsJson, McpSessionContext sessionContext, TableIdentifier table, CancellationToken ct)
@@ -126,14 +127,14 @@ public sealed partial class AiDataGuardrailService
             return false;
         }
 
-        if (McpDatasetTools.TryGetBooleanArgument(argumentsJson, "brief", out var brief) && brief)
+        if (McpDatasetTools.IsBriefRequested(argumentsJson))
         {
             return true;
         }
 
         try
         {
-            if (_catalogVisibility == null)
+            if (_catalogVisibility == null || _consentRepository == null)
             {
                 return false;
             }
@@ -141,12 +142,14 @@ public sealed partial class AiDataGuardrailService
             var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext)!;
             var caller = new Autheris.Application.Catalog.Interfaces.CatalogCaller(principal, McpCatalogVisibility.SafeTenantId(principal), Autheris.Application.Catalog.Interfaces.CatalogChannel.Mcp);
             var row = await _catalogVisibility.FindVisibleAsync(caller, table, ct).ConfigureAwait(false);
-            // Value profiles are served only to a granted caller or for a tier-Full row released to catalog viewers; a summary row and a
-            // tier-Full row without release show names only.
-            return row is { } visible &&
-                   (visible.Shape == Autheris.Application.Services.CatalogOutputShape.Summary ||
-                    (visible.Shape == Autheris.Application.Services.CatalogOutputShape.Full &&
-                     visible.Table.CatalogView == CatalogView.Full && !visible.Table.ReleaseProfileToCatalogViewers));
+            if (row is not { } visible)
+            {
+                return false;
+            }
+
+            var (consents, pending, isAdmin) = await McpDatasetCatalog.ResolveCallerConsentsAsync(principal, _options.Value, _consentRepository, null, null, ct).ConfigureAwait(false);
+            var status = McpDatasetCatalog.AccessStatusOf(table, consents, pending, isAdmin, _options.Value.IsMcpAuthBypassed);
+            return !McpDatasetCatalog.EmitsValueProfile(visible.Shape, visible.Table, status, brief: false);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {

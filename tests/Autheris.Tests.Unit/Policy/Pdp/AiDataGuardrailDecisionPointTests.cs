@@ -48,7 +48,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         IGatewayEventBus Bus,
         IMcpQueryExecutor Executor);
 
-    private static Harness Create(Func<TableIdentifier, TableAccessDecision> decide, Action<AccessRequest>? capture = null, bool knownTables = true, Func<TableIdentifier, TableMetadata>? metadataOf = null, CatalogOutputShape? shape = null, CatalogView view = CatalogView.Granted, bool released = false)
+    private static Harness Create(Func<TableIdentifier, TableAccessDecision> decide, Action<AccessRequest>? capture = null, bool knownTables = true, Func<TableIdentifier, TableMetadata>? metadataOf = null, CatalogOutputShape? shape = null, CatalogView view = CatalogView.Granted, bool released = false, bool granted = false)
     {
         var pdp = Substitute.For<IAccessDecisionPoint>();
         pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
@@ -83,8 +83,20 @@ public sealed class AiDataGuardrailDecisionPointTests
             graphQlCatalogMap: map,
             sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
             catalogVisibility: Visibility(shape, view, released),
+            consentRepository: ConsentsFor(granted),
             eventBus: bus);
         return new Harness(guardrail, pdp, audit, bus, executor);
+    }
+
+    private static IConsentRepository ConsentsFor(bool granted)
+    {
+        var repo = Substitute.For<IConsentRepository>();
+        IReadOnlyList<Consent> consents = granted
+            ? [new Consent { TableIdentifier = Orders, TenantId = new TenantId("tenant-a"), Effect = ConsentEffect.Allow, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-USER") }]
+            : [];
+        repo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(consents));
+        return repo;
     }
 
     private static ICatalogVisibilityService Visibility(CatalogOutputShape? shape, CatalogView view, bool released)
@@ -240,13 +252,17 @@ public sealed class AiDataGuardrailDecisionPointTests
         await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
-    [Fact]
-    public async Task Describe_dataset_full_view_is_denied_by_the_decision_point_and_returns_nothing()
-    {
-        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Granted);
+    private static ValueTask<McpToolCallResult> Describe(Harness h, string args) =>
+        h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.DescribeDataset, args), Session());
 
-        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
-            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders"}"""), Session());
+    private const string OrdersArgs = """{"dataset":"sales.public.orders"}""";
+
+    [Fact]
+    public async Task Describe_full_view_with_consent_grant_on_an_unreleased_row_is_decided_and_a_deny_blocks_the_profiles()
+    {
+        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Full, released: false, granted: true);
+
+        var result = await Describe(h, OrdersArgs);
 
         result.IsSuccess.ShouldBeFalse();
         result.ContentJson.ShouldBe("{}");
@@ -256,45 +272,24 @@ public sealed class AiDataGuardrailDecisionPointTests
             Arg.Any<CancellationToken>());
     }
 
-    [Fact]
-    public async Task Describe_dataset_summary_view_needs_no_grant()
-    {
-        var h = Create(Denied, shape: CatalogOutputShape.Summary);
-
-        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
-            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders"}"""), Session());
-
-        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
-        await h.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
-    }
-
-    [Fact]
-    public async Task Describe_dataset_brief_needs_no_grant_but_unknown_shape_is_decided()
-    {
-        var brief = Create(Denied, shape: CatalogOutputShape.Full);
-        (await brief.Guardrail.ExecuteToolWithGuardrailAsync(
-            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders","brief":true}"""), Session()))
-            .IsSuccess.ShouldBeTrue();
-        await brief.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
-
-        var unknown = Create(Denied, knownTables: false);
-        (await unknown.Guardrail.ExecuteToolWithGuardrailAsync(
-            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders"}"""), Session()))
-            .IsSuccess.ShouldBeFalse();
-    }
-
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, true)]
-    public async Task Describe_dataset_tier_full_row_is_decided_only_when_profiles_are_released(bool released, bool expectDecision)
+    // (shape, view, released, granted) -> decided?
+    [InlineData(CatalogOutputShape.Summary, CatalogView.Summary, false, false, false)]
+    [InlineData(CatalogOutputShape.Summary, CatalogView.Summary, false, true, false)]
+    [InlineData(CatalogOutputShape.Full, CatalogView.Full, false, false, false)]
+    [InlineData(CatalogOutputShape.Full, CatalogView.Full, false, true, true)]
+    [InlineData(CatalogOutputShape.Full, CatalogView.Full, true, false, true)]
+    [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, false, false)]
+    [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, true, true)]
+    public async Task Describe_is_decided_exactly_when_the_shared_predicate_emits_value_profiles(
+        CatalogOutputShape shape, CatalogView view, bool released, bool granted, bool decided)
     {
-        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Full, released: released);
+        var h = Create(Denied, shape: shape, view: view, released: released, granted: granted);
 
-        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
-            new McpToolCallRequest(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders"}"""), Session());
+        var result = await Describe(h, OrdersArgs);
 
-        result.IsSuccess.ShouldBe(!expectDecision);
-        if (expectDecision)
+        result.IsSuccess.ShouldBe(!decided);
+        if (decided)
         {
             await h.Pdp.Received(1).DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
         }
@@ -302,6 +297,38 @@ public sealed class AiDataGuardrailDecisionPointTests
         {
             await h.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
         }
+    }
+
+    [Theory]
+    [InlineData("""{"dataset":"sales.public.orders","brief":true}""", false)]
+    [InlineData("""{"dataset":"sales.public.orders","brief":"true"}""", false)]
+    [InlineData("""{"dataset":"sales.public.orders","BRIEF":"True"}""", false)]
+    [InlineData("""{"dataset":"sales.public.orders","brief":1}""", true)]
+    [InlineData("""{"dataset":"sales.public.orders","brief":"1"}""", true)]
+    [InlineData("""{"dataset":"sales.public.orders","brief":"yes"}""", true)]
+    [InlineData("""{"dataset":"sales.public.orders","brief":null}""", true)]
+    [InlineData("""{"dataset":"sales.public.orders","brief":false}""", true)]
+    [InlineData("""{"dataset":"sales.public.orders","brief":true,"Brief":false}""", true)]
+    [InlineData("""{"dataset":"sales.public.orders","brief":false,"BRIEF":true}""", true)]
+    public async Task Brief_is_parsed_exactly_as_the_handler_and_never_looser(string args, bool decided)
+    {
+        // A full view that would emit value profiles (granted): only an unambiguous brief request skips the decision.
+        var h = Create(Denied, shape: CatalogOutputShape.Full, view: CatalogView.Full, released: true, granted: true);
+
+        var result = await Describe(h, args);
+
+        result.IsSuccess.ShouldBe(!decided);
+    }
+
+    [Fact]
+    public async Task Describe_without_a_visible_row_is_decided()
+    {
+        // No visible row (unknown, hidden or a failing lookup) is decided, never skipped.
+        var unknown = Create(Denied, knownTables: false, shape: null);
+        (await Describe(unknown, OrdersArgs)).IsSuccess.ShouldBeFalse();
+
+        var noRow = Create(Denied, shape: null);
+        (await Describe(noRow, OrdersArgs)).IsSuccess.ShouldBeFalse();
     }
 }
 
