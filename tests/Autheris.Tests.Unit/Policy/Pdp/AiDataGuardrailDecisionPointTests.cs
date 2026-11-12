@@ -330,5 +330,35 @@ public sealed class AiDataGuardrailDecisionPointTests
         var noRow = Create(Denied, shape: null);
         (await Describe(noRow, OrdersArgs)).IsSuccess.ShouldBeFalse();
     }
+
+    [Theory]
+    [InlineData("autheris://api/docs/endpoints")]
+    [InlineData("autheris://api/docs/mcp-tools")]
+    [InlineData("autheris://api/openapi.json")]
+    [InlineData("autheris://catalog/summary")]
+    [InlineData("autheris://catalog/datasources")]
+    [InlineData("autheris://governance/my-access")]
+    public async Task Catalog_level_resources_need_no_data_grant(string uri)
+    {
+        var h = Create(Denied);
+
+        var result = await h.Guardrail.ReadResourceWithGuardrailAsync(uri, McpResourceProvider.GuardTargets(uri)!, _ => Task.FromResult("{}"), Session());
+
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+        await h.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
+    }
+
+    [Theory]
+    [InlineData("autheris://catalog/datasets/governance.catalog.datasets/schema")]
+    [InlineData("autheris://catalog/datasets/sales.public.orders/schema")]
+    public async Task Schema_resource_naming_a_table_is_decided_even_for_a_pseudo_table_name(string uri)
+    {
+        var h = Create(Denied);
+
+        var result = await h.Guardrail.ReadResourceWithGuardrailAsync(uri, McpResourceProvider.GuardTargets(uri)!, _ => Task.FromResult("{}"), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        await h.Pdp.Received(1).DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+    }
 }
 

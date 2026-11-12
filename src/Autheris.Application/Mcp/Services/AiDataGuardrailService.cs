@@ -603,7 +603,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         {
             foreach (var table in targetTables)
             {
-                if (table.Equals(McpSemanticTools.SemanticCatalogTable))
+                if (McpResourceProvider.IsCatalogLevelResource(resourceUri) ||
+                    (table.Equals(McpSemanticTools.SemanticCatalogTable) && !resourceUri.StartsWith("autheris://catalog/datasets/", StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
                 }
