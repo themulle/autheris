@@ -218,7 +218,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
                     Columns: [.. rawPayload.Keys]),
                 ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "Failed to evaluate the streaming access decision for event '{EventId}' - failing closed", cdcEvent.EventId);
             return StreamSecurityDecision.Denied("Policy evaluation error");

@@ -87,22 +87,29 @@ public sealed partial class AiDataGuardrailService
             var subject = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(
                 principal, new TenantId(sessionContext.TenantId),
                 clientIp: !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var ip) ? ip : System.Net.IPAddress.None);
-            return await _decisionPoint!.DecideAsync(
+            return await _decisionPoint.DecideAsync(
                 new Autheris.Application.Policy.Pdp.AccessRequest(
                     subject, metadata, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Mcp),
                 ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogError("MCP guardrail decision failed ({FailureType}); denying (fail-closed).", ex.GetType().Name);
             return TableAccessDecision.Denied(table, "Decision failed (fail-closed).");
         }
     }
 
-    /// <summary>The governance catalog and golden-query pseudo targets of the catalog tools: no data table, so no object to decide.</summary>
-    private static bool IsCatalogPseudoTarget(TableIdentifier table) =>
-        string.Equals(table.Domain, "governance", StringComparison.OrdinalIgnoreCase) &&
-        (string.Equals(table.Schema, "catalog", StringComparison.OrdinalIgnoreCase) || string.Equals(table.Schema, "mcp", StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// Whether <paramref name="table"/> is the fixed pseudo target of a catalog-level tool (no data table, nothing to decide). Keyed on the tool,
+    /// never on a table name alone: a tool that parses table names from user input always reaches the decision point.
+    /// </summary>
+    private static bool IsCatalogToolTarget(McpToolDefinition tool, TableIdentifier table) =>
+        tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
+        tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
+        tool.Name.Equals(McpDatasetTools.ListDatasets, StringComparison.OrdinalIgnoreCase) ||
+        McpSemanticTools.IsSemanticTool(tool.Name) ||
+        (tool.Name.Equals("query_graphql", StringComparison.OrdinalIgnoreCase) && table.Equals(McpDatasetTools.CatalogTable)) ||
+        (tool.Name.Equals(McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase) && table.Equals(McpDataTargetResolver.ApiNoTable));
 
     /// <summary>Reason codes of a denied decision for the audit trail: codes only, never predicate values or policy text.</summary>
     private static string ReasonCodesOf(TableAccessDecision decision) =>

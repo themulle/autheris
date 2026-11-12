@@ -425,6 +425,20 @@ public sealed class StreamRlsPolicyEnforcerTests
 
     [Trait("Category", "Security")]
     [Fact]
+    public async Task SEC_AZ_10_Stream_denies_when_decision_point_times_out_with_a_live_token()
+    {
+        var (cdcEvent, subscriber) = PdpScenario();
+        _policyEnforcement.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<TableAccessDecision>>(_ => throw new OperationCanceledException("timeout"));
+
+        var result = await _sut.EvaluateAndMaskAsync(cdcEvent, subscriber, CancellationToken.None);
+
+        result.IsAllowed.ShouldBeFalse();
+        result.FilterReason.ShouldBe("Policy evaluation error");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
     public async Task SEC_AZ_10_Stream_drops_event_when_decision_has_mandatory_predicate()
     {
         var (cdcEvent, subscriber) = PdpScenario();

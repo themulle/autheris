@@ -175,6 +175,21 @@ public sealed class ArrowExportDecisionPointTests
     }
 
     [Fact]
+    public async Task Decision_point_timeout_with_a_live_token_denies()
+    {
+        var setup = CreateServices(true, "sales.public.orders");
+        setup.Pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<TableAccessDecision>>(_ => throw new OperationCanceledException("timeout"));
+        var context = CreateContext(setup.Services, "{\"table\":\"sales.public.orders\"}");
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+
+        var result = await RunAsync(context, setup.Services, sql);
+
+        result.ShouldBeOfType<ProblemHttpResult>().StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        await sql.DidNotReceiveWithAnyArgs().ExecuteQueryBufferedAsync(default!, default!, default, default);
+    }
+
+    [Fact]
     public async Task Without_a_decision_point_the_export_is_denied()
     {
         var setup = CreateServices(withPdp: false);

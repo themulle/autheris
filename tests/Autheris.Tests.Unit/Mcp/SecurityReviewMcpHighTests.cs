@@ -62,7 +62,7 @@ public sealed class SecurityReviewMcpHighTests
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
-            decisionPoint: policy,
+            decisionPoint: policy ?? Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(),
             tableMetadataRepository: metadataRepo,
             consentRepository: consents,
             accessPlanningService: planning);

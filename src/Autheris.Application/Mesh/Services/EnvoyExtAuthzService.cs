@@ -153,16 +153,26 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             ? parsedTid
             : new TableIdentifier("default", "public", resourceName);
         var upperMethod = method?.ToUpperInvariant() ?? "GET";
-        var tableMeta = await _tables.GetTableMetadataAsync(targetTable, ct).ConfigureAwait(false);
-        if (tableMeta == null)
+        TableMetadata? tableMeta;
+        Autheris.Domain.Interfaces.TableAccessDecision decision;
+        try
         {
-            _logger.LogWarning("Envoy ext_authz DENIED: Subject '{Principal}', Resource '{Resource}' is not in the catalog.", ForLog(principal), ForLog(resourceName));
+            tableMeta = await _tables.GetTableMetadataAsync(targetTable, ct).ConfigureAwait(false);
+            if (tableMeta == null)
+            {
+                _logger.LogWarning("Envoy ext_authz DENIED: Subject '{Principal}', Resource '{Resource}' is not in the catalog.", ForLog(principal), ForLog(resourceName));
+                return EnvoyCheckResponse.Deny(403, DeniedByPolicyMessage);
+            }
+
+            decision = await _decisionPoint.DecideAsync(
+                new Autheris.Application.Policy.Pdp.AccessRequest(subject, tableMeta, OperationOf(upperMethod), Autheris.Application.Policy.Pdp.AccessTransport.EnvoyExtAuthz),
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError("Envoy ext_authz DENIED: the decision could not be evaluated ({FailureType}); failing closed.", ex.GetType().Name);
             return EnvoyCheckResponse.Deny(403, DeniedByPolicyMessage);
         }
-
-        var decision = await _decisionPoint.DecideAsync(
-            new Autheris.Application.Policy.Pdp.AccessRequest(subject, tableMeta, OperationOf(upperMethod), Autheris.Application.Policy.Pdp.AccessTransport.EnvoyExtAuthz),
-            ct).ConfigureAwait(false);
 
         if (!decision.IsAllowed)
         {

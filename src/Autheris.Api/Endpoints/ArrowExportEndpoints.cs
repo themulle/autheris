@@ -296,7 +296,7 @@ public static class ArrowExportEndpoints
                 }
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception) when (!ct.IsCancellationRequested)
         {
             return false;
         }

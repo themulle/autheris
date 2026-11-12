@@ -144,7 +144,7 @@ public sealed class IntegrationGapBTests
         var audit = Substitute.For<IAuditLogRepository>();
 
         var guardrail = new AiDataGuardrailService(new McpToolRegistry(), Options.Create(new GatewayOptions()),
-            NullLogger<AiDataGuardrailService>.Instance, audit, executor);
+            NullLogger<AiDataGuardrailService>.Instance, audit, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_customers", "{}"), CreateSession());
 
@@ -164,7 +164,7 @@ public sealed class IntegrationGapBTests
             .Returns(Task.FromResult(errorJson));
 
         var registry = new McpToolRegistry();
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor);
+        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
         var session = handler.CreateSession("svc-agent", "tenant-alpha");
 
@@ -187,7 +187,7 @@ public sealed class IntegrationGapBTests
             .Returns(Task.FromResult("""{"items":[{"id":"1"}],"isError":false}"""));
 
         var registry = new McpToolRegistry();
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor);
+        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
         var session = handler.CreateSession("svc-agent", "tenant-alpha");
 

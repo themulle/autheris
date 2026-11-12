@@ -444,6 +444,37 @@ public sealed class EnvoyExtAuthzSecurityTests
         await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
     }
 
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Failing_decision_point_denies_with_403(bool cancellationException)
+    {
+        // A PDP timeout (OperationCanceledException with a live token) is a failure, not a cancellation: deny.
+        _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<TableAccessDecision>>(_ => throw (cancellationException ? new OperationCanceledException("timeout") : new InvalidOperationException("pdp down")));
+
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        Assert.Equal(EnvoyExtAuthzService.DeniedByPolicyMessage, response.HttpResponse.DeniedResponse.Body);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Failing_metadata_repository_denies_with_403_without_decision()
+    {
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableMetadata?>>(_ => throw new InvalidOperationException("db down"));
+        var service = new EnvoyExtAuthzService(_policyService, tables, NullLogger<EnvoyExtAuthzService>.Instance);
+
+        var response = await service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public void GenerateIstioEnvoyFilterYaml_EnforcesFailClosedByDefault()
     {

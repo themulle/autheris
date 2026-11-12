@@ -46,14 +46,18 @@ public sealed class AiDataGuardrailDecisionPointTests
         IGatewayEventBus Bus,
         IMcpQueryExecutor Executor);
 
-    private static Harness Create(Func<TableIdentifier, TableAccessDecision> decide)
+    private static Harness Create(Func<TableIdentifier, TableAccessDecision> decide, Action<AccessRequest>? capture = null, bool knownTables = true)
     {
         var pdp = Substitute.For<IAccessDecisionPoint>();
         pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
-            .Returns(ci => ValueTask.FromResult(decide(ci.Arg<AccessRequest>().Object.Identifier)));
+            .Returns(ci =>
+            {
+                capture?.Invoke(ci.Arg<AccessRequest>());
+                return ValueTask.FromResult(decide(ci.Arg<AccessRequest>().Object.Identifier));
+            });
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(ci => new TableMetadata { Identifier = ci.Arg<TableIdentifier>(), Table = new Table { IsActive = true } });
+            .Returns(ci => knownTables ? new TableMetadata { Identifier = ci.Arg<TableIdentifier>(), Table = new Table { IsActive = true } } : null);
         var map = Substitute.For<IGraphQlCatalogMap>();
         map.ResolveDocumentTablesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableIdentifier>?>([Orders]));
@@ -73,6 +77,7 @@ public sealed class AiDataGuardrailDecisionPointTests
             decisionPoint: pdp,
             tableMetadataRepository: tables,
             graphQlCatalogMap: map,
+            sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
             eventBus: bus);
         return new Harness(guardrail, pdp, audit, bus, executor);
     }
@@ -147,4 +152,77 @@ public sealed class AiDataGuardrailDecisionPointTests
             Arg.Is<AuditLogEntry>(e => e.Decision == "DENY" && e.DetailsJson!.Contains("DEFAULT_DENY") && !e.DetailsJson.Contains("EU-secret")),
             Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public void Constructor_requires_a_decision_point()
+    {
+        var ex = Should.Throw<ArgumentNullException>(() => new AiDataGuardrailService(
+            new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData()),
+            Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
+            NullLogger<AiDataGuardrailService>.Instance,
+            Substitute.For<IAuditLogRepository>(),
+            decisionPoint: null));
+
+        ex.ParamName.ShouldBe("decisionPoint");
+    }
+
+    [Fact]
+    public async Task Sql_tool_naming_a_catalog_pseudo_table_still_reaches_the_decision_point()
+    {
+        // A user-named governance.catalog.t is a data target like any other; only the catalog tools skip the decision.
+        var h = Create(Denied);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest("query_sql", """{"query":"SELECT * FROM governance.catalog.t"}"""), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+        await h.Pdp.Received(1).DecideAsync(
+            Arg.Is<AccessRequest>(r => r.Object.Identifier.TableName == "t" && r.Transport == AccessTransport.Mcp),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Tool_call_denied_when_catalog_has_no_metadata_for_the_table()
+    {
+        var h = Create(t => TableAccessDecision.Allowed(t, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true), knownTables: false);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest("query_graphql", """{"query":"{ sales_public_orders { id } }"}"""), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        await h.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Degraded_group_snapshot_reaches_the_decision_point_as_degraded_without_groups()
+    {
+        AccessRequest? captured = null;
+        var h = Create(t => TableAccessDecision.Denied(t, "degraded"), r => captured = r);
+        var session = new McpSessionContext(
+            "s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            UserSid: "S-1-USER", GroupSids: ["S-1-GROUP"], GroupsDegraded: true);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest("query_graphql", """{"query":"{ sales_public_orders { id } }"}"""), session);
+
+        result.IsSuccess.ShouldBeFalse();
+        captured.ShouldNotBeNull();
+        captured.Subject.GroupResolutionStatus.ShouldBe(Autheris.Domain.Identity.GroupResolutionStatus.Degraded);
+        captured.Subject.GroupSids.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Decision_point_timeout_with_a_live_token_denies()
+    {
+        var h = Create(_ => throw new OperationCanceledException("pdp timeout"));
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest("query_graphql", """{"query":"{ sales_public_orders { id } }"}"""), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
 }
+

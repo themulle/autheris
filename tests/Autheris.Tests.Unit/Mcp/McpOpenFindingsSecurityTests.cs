@@ -89,7 +89,7 @@ public sealed class McpOpenFindingsSecurityTests
             NullLogger<AiDataGuardrailService>.Instance,
             audit ?? global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             queryExecutor: executor ?? Executor(),
-            decisionPoint: policy,
+            decisionPoint: policy ?? Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(),
             tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(),
             accessPlanningService: planning);
 
