@@ -63,7 +63,7 @@ public sealed class DbtSqlEndpointAutoSyncTests : IDisposable
         return JsonSerializer.Serialize(new { metadata = new { dbt_version = "1.8.0" }, nodes, sources = new { } });
     }
 
-    private static (DbtMetadataIngestionService Service, CountingLogger Log) Build(string queriesDir, bool enabled, bool autoSync)
+    private static (DbtMetadataIngestionService Service, CountingLogger Log) Build(string queriesDir, bool enabled, bool autoSync, bool nullSqlEndpoints = false, bool nullOptions = false)
     {
         var sources = new SqlDataSourceOptions();
         sources.Connections["warehouse"] = new DataSourceConnectionOptions { Provider = "PostgreSql" };
@@ -71,7 +71,7 @@ public sealed class DbtSqlEndpointAutoSyncTests : IDisposable
         {
             Dbt = new DbtOptions { CreateMissingTables = true },
             DataSources = sources,
-            SqlEndpoints = new SqlEndpointsOptions { Enabled = enabled, AutoSyncFromDbt = autoSync, Directory = queriesDir }
+            SqlEndpoints = nullSqlEndpoints ? null! : new SqlEndpointsOptions { Enabled = enabled, AutoSyncFromDbt = autoSync, Directory = queriesDir }
         };
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
@@ -82,7 +82,7 @@ public sealed class DbtSqlEndpointAutoSyncTests : IDisposable
             metadataRepository: repo,
             lineageGraphStore: Substitute.For<ILineageGraphStore>(),
             epochRepository: null,
-            gatewayOptions: Microsoft.Extensions.Options.Options.Create(options),
+            gatewayOptions: nullOptions ? null : Microsoft.Extensions.Options.Options.Create(options),
             sqlEndpointLoader: new SqlEndpointLoader(new InMemorySqlEndpointRegistry(), NullLogger<SqlEndpointLoader>.Instance),
             relationRepository: null,
             virtualFilterAdmin: null,
@@ -125,7 +125,7 @@ public sealed class DbtSqlEndpointAutoSyncTests : IDisposable
 
         var warnings = result.Warnings.Where(w => w.Contains(FailedCode, StringComparison.Ordinal)).ToList();
         warnings.Count.ShouldBe(1);
-        warnings[0].ShouldContain("3");
+        warnings[0].ShouldContain("3 dbt model(s)");
     }
 
     [Fact]
@@ -159,6 +159,33 @@ public sealed class DbtSqlEndpointAutoSyncTests : IDisposable
         var (service, _) = Build(dir, enabled: true, autoSync: true);
 
         await Sync(service, true, "orders");
+
+        Directory.Exists(dir).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task AutoSync_InvalidIdentifiers_AggregatesOneRejectionWarning()
+    {
+        var dir = Path.Combine(_root, "queries");
+        var (service, _) = Build(dir, enabled: true, autoSync: true);
+
+        var result = await Sync(service, false, "bad-one", "bad two", "orders");
+
+        result.Warnings.Count(w => w.Contains("rejected for 2 dbt model(s)", StringComparison.Ordinal)).ShouldBe(1);
+        result.Warnings.ShouldNotContain(w => w.Contains(FailedCode, StringComparison.Ordinal));
+        File.Exists(Path.Combine(dir, "orders.sql")).ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, true, false)]
+    [InlineData(true, true, false, true)]
+    public async Task AutoSync_GatingCombinations_WriteNoFile(bool enabled, bool autoSync, bool nullSqlEndpoints, bool nullOptions)
+    {
+        var dir = Path.Combine(_root, "queries");
+        var (service, _) = Build(dir, enabled, autoSync, nullSqlEndpoints, nullOptions);
+
+        await Sync(service, false, "orders");
 
         Directory.Exists(dir).ShouldBeFalse();
     }

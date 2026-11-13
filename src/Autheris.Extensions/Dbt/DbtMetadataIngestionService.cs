@@ -784,9 +784,10 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     autoSyncSkipped++;
                     _logger.LogWarning("SQL_ENDPOINT_AUTOSYNC_FAILED: dbt SQL endpoint auto-sync failed ({Error}); skipping auto-sync for the rest of this run.", ex.GetType().Name);
                 }
-                catch (Exception)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     autoSyncRejected++;
+                    _logger.LogDebug(ex, "dbt model '{ModelName}' rejected by SQL endpoint auto-sync.", model.Name);
                 }
             }
             else if (autoSyncFailed)
