@@ -64,6 +64,7 @@ Recommended order: WP-OI-SRCH-501 -> 627 -> 628a -> 624 -> 625 -> 626 -> (owner 
 - Dependencies: none; gate for #625, #626, #627, #628.
 - Risks: a fixture tuned to the implementation; mitigated by writing cases from the issue observations before #625/#626 code.
 - Size: M (test only), 1 PR.
+- Delivery: UNDER REVIEW, see [`2026-11-14-plan-issue-624-catalog-relevance-set.md`](2026-11-14-plan-issue-624-catalog-relevance-set.md) (deviations: the `full-identifier` cases check the `search_catalog` projection, two cases corrected after the first run).
 
 ## #625 Catalog search: field weights not applied
 
