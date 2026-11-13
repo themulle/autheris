@@ -92,8 +92,8 @@ public sealed class DegradedExplainSubjectResolver : IExplainSubjectResolver
 }
 
 /// <summary>
-/// SEC-AZ-06 / SEC-AZ-19: explain and grants listing. The decision always comes from <see cref="IAccessDecisionPoint"/>
-/// (no second decision logic). Roles only gate this control-plane read, they never grant data access (SEC-AZ-03).
+/// Explain and grants listing. The decision always comes from <see cref="IAccessDecisionPoint"/>
+/// (no second decision logic). Roles only gate this control-plane read, they never grant data access.
 /// </summary>
 public sealed class AccessExplanationService(
     IAccessDecisionPoint decisionPoint,

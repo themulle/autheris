@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -36,7 +37,7 @@ public sealed class ParityPostgresHostFixture : IAsyncLifetime, IParityHost
         _workDir = Path.Combine(Path.GetTempPath(), "autheris-parity-pg-" + Guid.NewGuid().ToString("N"));
         _govConnectionString = await ParityGovernanceDatabase.CreateAsync();
         Directory.CreateDirectory(_workDir);
-        _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
+        _container = new PostgreSqlBuilder(TestImages.PostgreSql).Build();
         await _container.StartAsync();
         await SeedAsync(_container.GetConnectionString());
 

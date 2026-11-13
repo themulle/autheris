@@ -1,3 +1,5 @@
+using Autheris.Tests.Common;
+
 namespace Autheris.Tests.Integration;
 
 using System;
@@ -24,7 +26,7 @@ internal static class SharedDatabaseServers
     private static readonly Lazy<TestTlsMaterial> PostgreSqlTls = new(TestTlsMaterial.Create);
 
     private static readonly Lazy<Task<PostgreSqlContainer>> PostgreSql =
-        new(() => StartAsync(new PostgreSqlBuilder("postgres:16-alpine")
+        new(() => StartAsync(new PostgreSqlBuilder(TestImages.PostgreSql)
             .WithReuse(Reuse)
             .WithLabel("autheris.tests", "shared-postgresql-tls")
             .WithResourceMapping(System.Text.Encoding.ASCII.GetBytes(PostgreSqlTls.Value.ServerCertPem), "/tmp/tls/server.crt")
@@ -44,7 +46,7 @@ internal static class SharedDatabaseServers
         string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AUTHERIS_TEST_POSTGRES")) ? PostgreSqlTls.Value.CaFilePath : null;
 
     private static readonly Lazy<Task<MsSqlContainer>> SqlServer =
-        new(() => StartAsync(new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest")
+        new(() => StartAsync(new MsSqlBuilder(TestImages.SqlServer)
             .WithReuse(Reuse)
             .WithLabel("autheris.tests", "shared-sqlserver")
             .Build()));

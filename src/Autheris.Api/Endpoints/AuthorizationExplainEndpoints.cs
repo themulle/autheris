@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
-/// <summary>WP-SIMPL-46 step 6 (SEC-AZ-06): explain and grants listing; every call is audited by the service, denied ones included.</summary>
+/// <summary>Explain and grants listing; every call is audited by the service, denied ones included.</summary>
 public static class AuthorizationExplainEndpoints
 {
     public static IEndpointRouteBuilder MapAuthorizationExplainEndpoints(this IEndpointRouteBuilder app)

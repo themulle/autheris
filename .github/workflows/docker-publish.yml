@@ -19,6 +19,12 @@ on:
 
 permissions: {}
 
+# Pull request runs cancel superseded runs. Tag, workflow_dispatch and workflow_run runs keep one group per run and are never
+# cancelled; the workflow_run trigger fires per completed main CI run, and coalesced CI (ci.yml) leaves only the newest main commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-and-push:
     name: Build, Scan & Push Container to GHCR

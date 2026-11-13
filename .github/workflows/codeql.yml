@@ -10,14 +10,41 @@ on:
 
 permissions: {}
 
-# A new push to a pull request cancels its superseded run; pushes to main and scheduled runs are never cancelled.
+# A new push to a pull request cancels its superseded run; pushes to main and scheduled runs are never cancelled (one group per ref).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # WP-OI-CI-1: CodeQL is the only job skipped wholesale for doc-only changes (it runs no tests). Fail-closed classifier;
+  # schedule and unknown events always analyze.
+  changes:
+    name: Classify changes (CodeQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      dotnet: ${{ steps.classify.outputs.dotnet }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Classify changed paths (fail-closed)
+        id: classify
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD: ${{ github.sha }}
+        run: python3 .github/scripts/ci-changes.py
+
   analyze:
     name: CodeQL Security Analysis (C#)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.dotnet != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

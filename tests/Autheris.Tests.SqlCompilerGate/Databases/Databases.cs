@@ -1,3 +1,5 @@
+using Autheris.Tests.Common;
+
 namespace Autheris.Tests.SqlCompilerGate.Databases;
 
 using System.Data.Common;
@@ -43,7 +45,7 @@ public sealed class SqliteGateDatabase : GateDatabase
 
 public sealed class PostgreSqlGateDatabase : GateDatabase
 {
-    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder("postgres:16-alpine")
+    private readonly PostgreSqlContainer _container = new PostgreSqlBuilder(TestImages.PostgreSql)
         .WithDatabase("sql_gate")
         .WithUsername("postgres")
         .WithPassword("postgres_password_2026")
@@ -66,7 +68,7 @@ public sealed class PostgreSqlGateDatabase : GateDatabase
 
 public sealed class SqlServerGateDatabase : GateDatabase
 {
-    private readonly MsSqlContainer _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
+    private readonly MsSqlContainer _container = new MsSqlBuilder(TestImages.SqlServer).Build();
 
     public override GateDialect Dialect => GateDialect.SqlServer;
     public override string DefaultSchema => "dbo";
@@ -91,7 +93,7 @@ public sealed class OracleGateDatabase : GateDatabase
     private const string AdminPassword = "Oracle_Password_2026";
 
     // The digest the Oracle execution suites pin (SEC-ADG-24).
-    private const string Image = "gvenzl/oracle-free:23-slim-faststart@sha256:d86d09794ae138a8951e97d7ee010778dcd43088e8d0f83a51002abab8c6d7fd";
+    private const string Image = TestImages.Oracle;
 
     private readonly OracleContainer _container = new OracleBuilder(Image).WithPassword(AdminPassword).Build();
     private string _dataSource = string.Empty;

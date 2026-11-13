@@ -8,14 +8,45 @@ on:
 
 permissions: {}
 
-# A new push to a pull request cancels its superseded run; pushes to main are never cancelled (one group per commit).
+# A new push to a pull request cancels its superseded run. Pushes to main share one group per ref and are never cancelled:
+# a running run finishes and only the newest pending run survives (at most 1 running + 1 pending).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # WP-OI-CI-1: classifies the change set. dotnet=false (doc-only) never skips a Security-trait suite wholesale; it only narrows
+  # the test filters of the jobs below. Dependent jobs use `!cancelled()` so a failed or skipped classifier means the full run.
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      dotnet: ${{ steps.classify.outputs.dotnet }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Classify changed paths (fail-closed)
+        id: classify
+        env:
+          CI_EVENT: ${{ github.event_name }}
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD: ${{ github.sha }}
+        run: python3 .github/scripts/ci-changes.py
+
+      - name: Test the classifier
+        run: python3 -m unittest discover -s .github/scripts -p 'test_ci_changes.py'
+
   build-and-test:
     name: Build & Test All Suites
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -56,7 +87,16 @@ jobs:
       # WP-TS-02: Autheris.Tests.Integration runs in the parallel integration-tests shards below.
       - name: Test Autheris Solution (excluding Spark and integration)
         timeout-minutes: 15
-        run: dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&Category!=Parity&FullyQualifiedName!~Autheris.Tests.Integration." --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
+        env:
+          DOTNET_CHANGED: ${{ needs.changes.outputs.dotnet }}
+        run: |
+          FILTER="Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&Category!=Parity&FullyQualifiedName!~Autheris.Tests.Integration."
+          # Doc-only change (dotnet=false, fail-closed otherwise): architecture tests read docs/, deploy/, benchmarks/ and README.md,
+          # so the whole Architecture project and every Security-trait test still run.
+          if [ "$DOTNET_CHANGED" = "false" ]; then
+            FILTER="(FullyQualifiedName~Autheris.Tests.Architecture.|Category=Security)&$FILTER"
+          fi
+          dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
 
       # WP-ARC-B-12 (D7): the chart must lint and render with and without the optional governance migration job.
       - name: Lint and render Helm chart
@@ -90,10 +130,15 @@ jobs:
   # shard is the exact complement of the others, so every test runs in exactly one shard.
   integration-tests:
     name: Integration Tests (shard ${{ matrix.shard }}/4)
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest # Docker is available for Testcontainers
     timeout-minutes: 90
     permissions:
       contents: read
+    env:
+      # WP-OI-CI-4: use the pre-pulled, digest-pinned Ryuk image (TestImages.Ryuk).
+      TESTCONTAINERS_RYUK_CONTAINER_IMAGE: testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
     strategy:
       fail-fast: false
       matrix:
@@ -112,13 +157,45 @@ jobs:
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
 
+      # WP-OI-CI-4: pull the pinned Testcontainers images in the background while the build runs (list: tests/test-images.txt,
+      # mirrored by TestImages.cs). A failed pull is surfaced by the wait step; tests still pull on demand.
+      - name: Pre-pull Testcontainers images (background)
+        run: |
+          : > "$RUNNER_TEMP/prepull.log"
+          setsid bash -c '
+            while IFS= read -r image; do
+              [ -n "$image" ] || continue
+              ( docker pull --quiet "$image" >> "$RUNNER_TEMP/prepull.log" 2>&1 || echo "PREPULL-FAILED: $image" >> "$RUNNER_TEMP/prepull.log" ) &
+            done < tests/test-images.txt
+            wait
+            echo "PREPULL-DONE" >> "$RUNNER_TEMP/prepull.log"
+          ' > /dev/null 2>&1 &
+
+      - name: Build integration tests
+        run: dotnet build tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true
+
+      - name: Wait for image pre-pull
+        run: |
+          for _ in $(seq 1 120); do
+            grep -q '^PREPULL-DONE$' "$RUNNER_TEMP/prepull.log" && break
+            sleep 5
+          done
+          cat "$RUNNER_TEMP/prepull.log"
+          grep -q '^PREPULL-DONE$' "$RUNNER_TEMP/prepull.log" || echo "::warning::Image pre-pull did not finish; tests pull on demand"
+          if grep -q '^PREPULL-FAILED:' "$RUNNER_TEMP/prepull.log"; then
+            echo "::warning::Some images failed to pre-pull; tests pull on demand and fail on their own if the registry is unavailable"
+          fi
+
       - name: Test integration shard
         timeout-minutes: 85
         env:
           SHARD: ${{ matrix.shard }}
+          DOTNET_CHANGED: ${{ needs.changes.outputs.dotnet }}
         run: |
           FILTER="$(python3 .github/scripts/integration-shard-filter.py "$((SHARD - 1))" 4)"
-          dotnet test tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
+          # Doc-only change: only the Security-trait tests of this shard run (never drop a Security suite).
+          if [ "$DOTNET_CHANGED" = "false" ]; then FILTER="($FILTER)&Category=Security"; fi
+          dotnet test tests/Autheris.Tests.Integration -c Release --no-build -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory ${{ runner.temp }}/test-results --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
 
       - name: Upload integration test results (TRX)
         if: always()
@@ -142,10 +219,15 @@ jobs:
   # WP-TS-03: run Databricks/Spark proxy execution tests in a dedicated parallel job so the main test job does not wait on the Spark container.
   spark-integration-tests:
     name: Spark Integration Tests
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      # WP-OI-CI-4: use the pre-pulled, digest-pinned Ryuk image (TestImages.Ryuk).
+      TESTCONTAINERS_RYUK_CONTAINER_IMAGE: testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -160,13 +242,19 @@ jobs:
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
 
-      # CR-ADG-11: with CI=true the Spark proxy tests fail without the pinned image (AstCompilerDatabricksSparkExecutionTests.Image).
+      # CR-ADG-11: with CI=true the Spark proxy tests fail without the pinned image (TestImages.Spark, listed in tests/test-images.txt).
       - name: Pull pinned Spark proxy image
-        run: docker pull apache/spark:4.0.0-python3@sha256:9e2f63442ba1a672ea70d780d56da28f42ce515d0be18840569a3054cc6d2314
+        run: docker pull "$(grep '^apache/spark:' tests/test-images.txt)"
 
       - name: Test Spark Integration Suite
         timeout-minutes: 12
-        run: dotnet test tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category=Spark" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
+        env:
+          DOTNET_CHANGED: ${{ needs.changes.outputs.dotnet }}
+        run: |
+          FILTER="Category=Spark"
+          # Doc-only change: keep the Spark-hosted Security tests (DatabricksTransportParityTests).
+          if [ "$DOTNET_CHANGED" = "false" ]; then FILTER="Category=Spark&Category=Security"; fi
+          dotnet test tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
 
       - name: Upload Spark test results (TRX)
         if: always()
