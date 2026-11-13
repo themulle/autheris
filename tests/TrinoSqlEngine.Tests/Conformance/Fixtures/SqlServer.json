@@ -6592,268 +6592,89 @@
       "Id": "dml-merge-001",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements] ON ([orders].[id] = [entitlements].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN MATCHED THEN UPDATE SET [Status] = @p1;",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-002",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN DELETE",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements] ON ([orders].[id] = [entitlements].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN MATCHED THEN DELETE;",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-003",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements] ON ([orders].[id] = [entitlements].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN NOT MATCHED THEN INSERT ([Id], [TenantId]) VALUES ([entitlements].[id], @p0);",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-004",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x' WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements] ON ([orders].[id] = [entitlements].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN MATCHED THEN UPDATE SET [Status] = @p1 WHEN NOT MATCHED THEN INSERT ([Id], [TenantId]) VALUES ([entitlements].[id], @p0);",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-005",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED AND entitlements.id > 1 THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements] ON ([orders].[id] = [entitlements].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN MATCHED AND [entitlements].[id] > @p1 THEN UPDATE SET [Status] = @p2;",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        },
-        {
-          "Marker": "@p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-006",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED AND entitlements.id = 1 THEN DELETE WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements] ON ([orders].[id] = [entitlements].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN MATCHED AND [entitlements].[id] = @p1 THEN DELETE WHEN MATCHED THEN UPDATE SET [Status] = @p2;",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        },
-        {
-          "Marker": "@p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-007",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING (SELECT id, orderid FROM entitlements) AS e ON orders.id = e.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [id], [orderid] FROM (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements]) AS [e] ON ([orders].[id] = [e].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN MATCHED THEN UPDATE SET [Status] = @p1;",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-008",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders AS o USING entitlements AS e ON o.id = e.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [o] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [e] ON ([o].[id] = [e].[orderid]) AND ([o].[TenantId] = @p0 AND CAST(CAST([o].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([o].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN MATCHED THEN UPDATE SET [Status] = @p1;",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-009",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN NOT MATCHED AND entitlements.id > 1 THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements] ON ([orders].[id] = [entitlements].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN NOT MATCHED AND [entitlements].[id] > @p1 THEN INSERT ([Id], [TenantId]) VALUES ([entitlements].[id], @p0);",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-010",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x', region = 'EU' WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (entitlements.id, 'acme', 'n')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements] ON ([orders].[id] = [entitlements].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN MATCHED THEN UPDATE SET [Status] = @p1, [Region] = @p2 WHEN NOT MATCHED THEN INSERT ([Id], [TenantId], [Status]) VALUES ([entitlements].[id], @p0, @p3);",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        },
-        {
-          "Marker": "@p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "EU"
-        },
-        {
-          "Marker": "@p3",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "n"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-011",
       "Group": "dml-merge",
       "Sql": "MERGE INTO dbo.orders USING dbo.entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO [dbo].[Orders] AS [orders] USING (SELECT [Id] AS [Id], [TenantId] AS [TenantId], [OrderId] AS [OrderId] FROM [dbo].[Entitlements] WHERE ([TenantId] = @p0 AND CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max))))) AS [entitlements] ON ([orders].[id] = [entitlements].[orderid]) AND ([orders].[TenantId] = @p0 AND CAST(CAST([orders].[TenantId] AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@p0 AS nvarchar(max)) AS varbinary(max)) AND DATALENGTH(CAST([orders].[TenantId] AS nvarchar(max))) = DATALENGTH(CAST(@p0 AS nvarchar(max)))) WHEN MATCHED THEN UPDATE SET [Status] = @p1;",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-012",

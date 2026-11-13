@@ -66,7 +66,7 @@ internal static class TimeZoneTestSupport
 
     public static CompiledSql Compile(TargetSqlDialect dialect, string sql, bool available = true, IColumnMaskProvider? masks = null, ClientListShapes? lists = null,
         StatementPermissions statements = StatementPermissions.ReadOnly, IReadOnlySet<string>? tablesWithMaskedColumns = null) =>
-        Engine.Compile(sql.AsMemory(), Request(dialect, available, masks, lists, statements, tablesWithMaskedColumns), CancellationToken.None);
+        Engine.Compile(sql.AsMemory(), Request(dialect, available, masks, lists, statements, tablesWithMaskedColumns).WithTestWritePermit(sql), CancellationToken.None);
 
     public const StatementPermissions AllDml = StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge;
 

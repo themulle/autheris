@@ -7,6 +7,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
+using Autheris.Tests.Unit.TestDoubles;
 
 /// <summary>
 /// The compile environment of the unit tests after the X1 cutover: one engine, an in-memory catalog and plain typed providers. It
@@ -81,7 +82,7 @@ internal sealed class TestCompileEnv
         string tenant = "t1",
         StatementPermissions statements = StatementPermissions.ReadOnly,
         SqlTokenSecurityOptions? guards = null) =>
-        Engine.Compile(sql.AsMemory(), Request(tenant, statements, guards), CancellationToken.None);
+        Engine.Compile(sql.AsMemory(), Request(tenant, statements, guards).WithTestWritePermit(sql), CancellationToken.None);
 
     private sealed class Policies : IPolicyPredicateProvider, IColumnMaskProvider
     {

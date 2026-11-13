@@ -552,7 +552,8 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             environment: null,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consentRepository,
-            secretProvider: null);
+            secretProvider: null,
+            sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
     }
 
     internal static Task ExecuteAsync(GovernedSqlExecutionService service, string sql) =>

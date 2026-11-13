@@ -143,20 +143,17 @@ public sealed class AstCompilerOracleDmlExecutionTests : AstCompilerDmlContract,
     }
 
     [Fact]
-    public async Task Merge_UpdateWithAClauseCondition_UsesTheOracleWhereForm()
+    public async Task Merge_UpdateWithAClauseCondition_IsRejected_MergeNotSupported()
     {
-        (await ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'one'", "acme")).ShouldBe(1);
-        (await OrdersAsync()).Where(r => r.Status == "one").Select(r => r.Id).ShouldBe(new[] { 1 });
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'one'", "acme");
     }
 
     [Fact]
-    public async Task Merge_DeleteClause_AndRepeatedClauses_AreRejectedFailClosed_NothingChanges()
+    public async Task Merge_DeleteClause_AndRepeatedClauses_AreRejected_MergeNotSupported()
     {
-        var before = await SnapshotAsync();
-        await Should.ThrowAsync<SqlCompileNotSupportedException>(() => ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN DELETE", "acme"));
-        await Should.ThrowAsync<SqlCompileNotSupportedException>(() => ExecAsync(
-            $"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'a' WHEN MATCHED AND s.id = 3 THEN UPDATE SET status = 'b'", "acme"));
-        (await SnapshotAsync()).ShouldBe(before);
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN DELETE", "acme");
+        await MergeRejectedAsync(
+            $"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'a' WHEN MATCHED AND s.id = 3 THEN UPDATE SET status = 'b'", "acme");
     }
 
     [Fact]
