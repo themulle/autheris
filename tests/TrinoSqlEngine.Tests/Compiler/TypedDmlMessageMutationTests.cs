@@ -62,12 +62,12 @@ public class TypedDmlMessageMutationTests
     };
 
     private string Reason<T>(string sql, TargetSqlDialect dialect = TargetSqlDialect.SqlServer) where T : Exception =>
-        Assert.Throws<T>(() => _engine.Compile(sql.AsMemory(), Request(dialect: dialect), CancellationToken.None)).Message;
+        Assert.Throws<T>(() => _engine.Compile(sql.AsMemory(), Request(dialect: dialect).WithTestWritePermit(sql), CancellationToken.None)).Message;
 
     private string Reason(string sql, TargetSqlDialect dialect = TargetSqlDialect.SqlServer) => Reason<SecurityException>(sql, dialect);
 
-    private CompiledSql Compile(string sql, TargetSqlDialect dialect = TargetSqlDialect.SqlServer) =>
-        _engine.Compile(sql.AsMemory(), Request(dialect: dialect), CancellationToken.None);
+    private CompiledSql Compile(string sql, TargetSqlDialect dialect = TargetSqlDialect.SqlServer, IEnumerable<string>? alsoWritable = null) =>
+        _engine.Compile(sql.AsMemory(), Request(dialect: dialect).WithTestWritePermit(sql, alsoWritable), CancellationToken.None);
 
     // ---- targets and columns ----
 
@@ -99,7 +99,10 @@ public class TypedDmlMessageMutationTests
         Assert.Equal("A column is listed more than once.", Reason("INSERT INTO orders (id, tenantid, id) VALUES (1, 'acme', 2)"));
         Assert.Equal("A column is listed more than once.", Reason("INSERT INTO orders (id, tenantid, ID) VALUES (1, 'acme', 2)"));
         MaskEmail();
-        Assert.Equal("A masked column must not be written.", Reason("INSERT INTO orders (id, tenantid, email) VALUES (1, 'acme', 'x')"));
+        // SEC-SIMPL-121 / R-5: a masked column is outside the default writable set, so the INSERT list fails at the grant check; it is
+        // writable only when named explicitly.
+        Assert.Equal(TestWritePermits.NotCoveredMessage, Reason("INSERT INTO orders (id, tenantid, email) VALUES (1, 'acme', 'x')"));
+        Assert.Equal(SqlStatementClass.Insert, Compile("INSERT INTO orders (id, tenantid, email) VALUES (1, 'acme', 'x')", alsoWritable: new[] { "email" }).StatementClass);
         Assert.Equal("The tenant column must be explicitly specified in an INSERT statement.", Reason("INSERT INTO orders (id, status) VALUES (1, 'x')"));
     }
 
@@ -193,7 +196,8 @@ public class TypedDmlMessageMutationTests
         MaskEmail();
         Assert.Equal("A column is assigned more than once.", Reason("UPDATE orders SET status = 'a', status = 'b' WHERE id = 1"));
         Assert.Equal("A column is assigned more than once.", Reason("UPDATE orders SET status = 'a', STATUS = 'b' WHERE id = 1"));
-        Assert.Equal("A masked column must not be written.", Reason("UPDATE orders SET email = 'x' WHERE id = 1"));
+        Assert.Equal(TestWritePermits.NotCoveredMessage, Reason("UPDATE orders SET email = 'x' WHERE id = 1"));
+        Assert.Equal(SqlStatementClass.Update, Compile("UPDATE orders SET email = 'x' WHERE id = 1", alsoWritable: new[] { "email" }).StatementClass);
         Assert.Equal("The tenant column must not be modified by an UPDATE statement.", Reason("UPDATE orders SET tenantid = 'acme' WHERE id = 1"));
         RegionPolicy();
         Assert.Equal("A column referenced by the row policy must not be assigned.", Reason("UPDATE orders SET region = 'EU' WHERE id = 1"));
@@ -212,7 +216,7 @@ public class TypedDmlMessageMutationTests
         Assert.Equal("A masked column of the DML target is read by the statement.", where);
         // a request that relaxes the guard is rejected as a configuration error (CR-ADG-38), so the typed path never reaches the relaxed branch
         var relaxed = DmlGuardOptions.Strict with { RejectMaskedColumnsInDml = false };
-        Assert.Throws<SqlCompileConfigurationException>(() => _engine.Compile("DELETE FROM orders WHERE email = 'x'".AsMemory(), Request(relaxed), CancellationToken.None));
+        Assert.Throws<SqlCompileConfigurationException>(() => _engine.Compile("DELETE FROM orders WHERE email = 'x'".AsMemory(), Request(relaxed).WithTestWritePermit("DELETE FROM orders WHERE email = 'x'"), CancellationToken.None));
     }
 
     // ---- MERGE ----
@@ -220,39 +224,40 @@ public class TypedDmlMessageMutationTests
     private const string MergeHead = "MERGE INTO orders t USING entitlements s ON t.id = s.orderid ";
 
     [Fact]
-    public void Merge_SourceAliasMustDifferFromTheTarget()
+    public void Merge_SourceAliasMustDifferFromTheTarget_IsRejected_MergeNotSupported()
     {
-        const string expected = "A MERGE source alias must differ from the target alias and the target table name.";
+        // D-45-4 / SEC-SIMPL-124: every MERGE variant is rejected with the exact message before any alias check runs.
+        const string expected = TestWritePermits.MergeNotSupportedMessage;
         Assert.Equal(expected, Reason("MERGE INTO orders t USING entitlements t ON t.id = t.orderid WHEN MATCHED THEN DELETE"));
         Assert.Equal(expected, Reason("MERGE INTO orders t USING entitlements orders ON t.id = orders.orderid WHEN MATCHED THEN DELETE"));
         Assert.Equal(expected, Reason("MERGE INTO orders USING entitlements orders ON orders.id = orders.orderid WHEN MATCHED THEN DELETE"));
     }
 
     [Fact]
-    public void Merge_InsertIntoAPolicyOrConsentTable_IsRejected()
+    public void Merge_InsertIntoAPolicyOrConsentTable_IsRejected_MergeNotSupported()
     {
+        // The statement that used to compile without a policy or consent filter is rejected too (no MERGE test asserts success any more).
         const string insert = "WHEN NOT MATCHED THEN INSERT (id, tenantid, region) VALUES (s.id, 'acme', 'EU')";
-        Assert.Contains("INSERT", Compile(MergeHead + insert).Sql, StringComparison.Ordinal);
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason(MergeHead + insert));
         RegionPolicy();
-        Assert.Equal("MERGE INSERT into a table with a row-level policy is not permitted.", Reason(MergeHead + insert));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason(MergeHead + insert));
         _rowFilters.NoPolicy.Add(Orders);
         _consent = new HashSet<string> { "Orders" };
-        Assert.Equal("MERGE INSERT into a table with a row-level policy is not permitted.", Reason(MergeHead + insert));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason(MergeHead + insert));
         _consent = new HashSet<string> { "dbo.Orders" };
-        Assert.Equal("MERGE INSERT into a table with a row-level policy is not permitted.", Reason(MergeHead + insert));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason(MergeHead + insert));
         _consent = new HashSet<string> { "Other" };
-        Assert.Contains("INSERT", Compile(MergeHead + insert).Sql, StringComparison.Ordinal);
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason(MergeHead + insert));
     }
 
     [Fact]
-    public void Merge_MaskedReads_AreRejectedInEveryPartOfTheStatement()
+    public void Merge_MaskedReadsAndWrites_InEveryPartOfTheStatement_AreRejected_MergeNotSupported()
     {
         MaskEmail();
-        Assert.Equal("A masked column of the DML target is read by the statement.", Assert.Throws<SecurityException>(() => Compile("MERGE INTO orders t USING entitlements s ON t.email = s.orderid WHEN MATCHED THEN DELETE")).Message);
-        Assert.Equal("A masked column of the DML target is read by the statement.", Assert.Throws<SecurityException>(() => Compile(MergeHead + "WHEN MATCHED AND t.email = 'x' THEN DELETE")).Message);
-        Assert.Equal("A masked column of the DML target is read by the statement.", Assert.Throws<SecurityException>(() => Compile(MergeHead + "WHEN MATCHED THEN UPDATE SET status = t.email")).Message);
-        Assert.Equal("A masked column of the DML target is read by the statement.", Assert.Throws<SecurityException>(() =>
-            Compile(MergeHead + "WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (s.id, 'acme', t.email)")).Message);
-        Assert.Equal("A masked column must not be written.", Reason(MergeHead + "WHEN NOT MATCHED THEN INSERT (id, tenantid, email) VALUES (s.id, 'acme', 'x')"));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason("MERGE INTO orders t USING entitlements s ON t.email = s.orderid WHEN MATCHED THEN DELETE"));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason(MergeHead + "WHEN MATCHED AND t.email = 'x' THEN DELETE"));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason(MergeHead + "WHEN MATCHED THEN UPDATE SET status = t.email"));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason(MergeHead + "WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (s.id, 'acme', t.email)"));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, Reason(MergeHead + "WHEN NOT MATCHED THEN INSERT (id, tenantid, email) VALUES (s.id, 'acme', 'x')"));
     }
 }

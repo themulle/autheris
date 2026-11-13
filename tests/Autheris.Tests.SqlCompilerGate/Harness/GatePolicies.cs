@@ -59,10 +59,29 @@ public sealed class GatePolicies(GateDialect dialect, string defaultSchema, Poli
             new Dictionary<string, PolicyValue> { ["__mask_const"] = new(GateModel.MaskValue, SqlParameterType.String) }.ToFrozenDictionary());
     }
 
-    public CompileRequest AstRequest(StatementPermissions permissions)
+    /// <summary>
+    /// The AST compile request. For a DML corpus statement (<paramref name="statementClass"/> and <paramref name="sql"/> given) the policy
+    /// carries the test-only default write permit (<see cref="GateWritePermits"/>); without them the permit stays null (SELECT probes).
+    /// </summary>
+    public CompileRequest AstRequest(StatementPermissions permissions, string? statementClass = null, string? sql = null)
     {
         var typed = new TypedPolicies(this);
         var masked = new HashSet<string>(GateModel.Tables.Where(t => t.Columns.Any(c => c.Masked)).Select(t => t.Name), StringComparer.OrdinalIgnoreCase);
+        var catalog = Catalog();
+        var policy = new GovernancePolicy
+        {
+            RowFilters = typed,
+            Masks = typed,
+            Catalog = catalog,
+            Tenant = new TenantBinding("__autheris_tenant", GateModel.TenantA, SqlParameterType.String),
+            TablesWithConsentRowFilter = (Consent ? new HashSet<string>(["orders"], StringComparer.OrdinalIgnoreCase) : new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToFrozenSet(StringComparer.OrdinalIgnoreCase),
+            TablesWithMaskedColumns = (Masks ? masked : new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToFrozenSet(StringComparer.OrdinalIgnoreCase)
+        };
+        if (statementClass is not null && sql is not null)
+        {
+            policy = policy with { Write = GateWritePermits.For(statementClass, sql, policy) };
+        }
+
         return new CompileRequest
         {
             TargetDialect = Target,
@@ -70,15 +89,7 @@ public sealed class GatePolicies(GateDialect dialect, string defaultSchema, Poli
             TokenGuards = SqlTokenSecurityOptions.ForDialect(Target),
             Statements = permissions,
             AllowedFunctions = SqlFunctionAllowlists.Build(Target, null),
-            Policy = new GovernancePolicy
-            {
-                RowFilters = typed,
-                Masks = typed,
-                Catalog = Catalog(),
-                Tenant = new TenantBinding("__autheris_tenant", GateModel.TenantA, SqlParameterType.String),
-                TablesWithConsentRowFilter = (Consent ? new HashSet<string>(["orders"], StringComparer.OrdinalIgnoreCase) : new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToFrozenSet(StringComparer.OrdinalIgnoreCase),
-                TablesWithMaskedColumns = (Masks ? masked : new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToFrozenSet(StringComparer.OrdinalIgnoreCase)
-            }
+            Policy = policy
         };
     }
 

@@ -91,7 +91,8 @@ public abstract class AstCompilerDmlContract
         if (!Available()) return;
         await using var connection = await OpenSessionConnectionAsync();
         if (connection is null) return;
-        var compiled = Engine.Compile($"UPDATE {O} SET status = 'sess' WHERE id > 0".AsMemory(), Request("acme"), default);
+        var sessionSql = $"UPDATE {O} SET status = 'sess' WHERE id > 0";
+        var compiled = Engine.Compile(sessionSql.AsMemory(), Request("acme", sessionSql), default);
         await using (var transaction = await connection.BeginTransactionAsync())   // the session transaction; a second Begin would fail
         {
             int affected = await CompiledSqlBinders.CheckedExecutorFor(Dialect)
@@ -108,7 +109,8 @@ public abstract class AstCompilerDmlContract
         if (!Available()) return;
         await using var connection = await OpenSessionConnectionAsync();
         if (connection is null) return;
-        var compiled = Engine.Compile($"UPDATE {O} SET status = 'sess' WHERE id > 0".AsMemory(), Request("acme"), default);
+        var sessionSql = $"UPDATE {O} SET status = 'sess' WHERE id > 0";
+        var compiled = Engine.Compile(sessionSql.AsMemory(), Request("acme", sessionSql), default);
         await using (var transaction = await connection.BeginTransactionAsync())
         {
             await Should.ThrowAsync<DmlAffectedRowsLimitException>(() => CompiledSqlBinders.CheckedExecutorFor(Dialect)
@@ -199,7 +201,18 @@ public abstract class AstCompilerDmlContract
         new MaskArguments(Constant: new PolicyParameterExpression("__mask_email", SqlParameterType.String, ParameterOrigin.Mask)),
         new Dictionary<string, PolicyValue> { ["__mask_email"] = new("[REDACTED]", SqlParameterType.String) }.ToFrozenDictionary());
 
-    protected CompileRequest Request(string tenant) => new()
+    /// <summary>
+    /// The compile request of <paramref name="sql"/>. The engine denies every DML statement without a write permit, so the policy carries
+    /// the test-only default permit (<see cref="TestWritePermits"/>): every unmasked column of the statement target is writable, no column
+    /// is write-protected. <paramref name="sql"/> is required so that no caller can compile DML without choosing its permit.
+    /// </summary>
+    protected CompileRequest Request(string tenant, string sql, IEnumerable<string>? alsoWritable = null)
+    {
+        var request = BaseRequest(tenant);
+        return request with { Policy = request.Policy with { Write = TestWritePermits.For(sql, request.Policy, alsoWritable) } };
+    }
+
+    private CompileRequest BaseRequest(string tenant) => new()
     {
         TargetDialect = Dialect,
         AllowExperimentalDialect = AllowExperimental,
@@ -217,14 +230,14 @@ public abstract class AstCompilerDmlContract
     /// <summary>Compiles through the governed path and executes; returns the affected row count.</summary>
     protected async Task<int> ExecAsync(string sql, string tenant)
     {
-        var compiled = Engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
+        var compiled = Engine.Compile(sql.AsMemory(), Request(tenant, sql), CancellationToken.None);
         return await ExecuteAsync(compiled);
     }
 
     /// <summary>Compiles through the governed path and executes with the row-count check (CR-ADG-35).</summary>
     protected async Task<int> ExecCheckedAsync(string sql, string tenant)
     {
-        var compiled = Engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
+        var compiled = Engine.Compile(sql.AsMemory(), Request(tenant, sql), CancellationToken.None);
         compiled.RequiresRowCountCheck.ShouldBeTrue();
         return await ExecuteInTransactionAsync(compiled);
     }
@@ -499,7 +512,8 @@ public abstract class AstCompilerDmlContract
         if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         RegionEuPolicy();
         var before = await SnapshotAsync();
-        var compiled = Engine.Compile($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'US', 'new', 1)".AsMemory(), Request("acme"), CancellationToken.None);
+        var checkedInsert = $"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'US', 'new', 1)";
+        var compiled = Engine.Compile(checkedInsert.AsMemory(), Request("acme", checkedInsert), CancellationToken.None);
         compiled.RequiresRowCountCheck.ShouldBeTrue();
         // the plain path (bind + execute) would silently filter the violating row out and report success: it fails closed instead
         var ex = await Should.ThrowAsync<CheckedExecutionRequiredException>(() => ExecuteAsync(compiled));
@@ -669,6 +683,10 @@ public abstract class AstCompilerDmlContract
     }
 
     // ---- MERGE ----
+    // MERGE is rejected for governed writes (WP-SIMPL-45 D-45-4, SEC-SIMPL-124): every former MERGE scenario now proves that the
+    // compiler refuses it with the exact message and that the tables are unchanged.
+
+    protected const string MergeRejectedMessage = "MERGE is not supported for governed writes.";
 
     private async Task<bool> MergeAvailableAsync()
     {
@@ -679,87 +697,73 @@ public abstract class AstCompilerDmlContract
         return false;
     }
 
+    /// <summary>The MERGE is refused with the exact SecurityException message and no row of any table changes.</summary>
+    protected async Task MergeRejectedAsync(string sql, string tenant)
+    {
+        var before = await SnapshotAsync();
+        var ex = await Should.ThrowAsync<SecurityException>(() => ExecAsync(sql, tenant));
+        ex.Message.ShouldBe(MergeRejectedMessage);
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
     [DmlFact]
-    public async Task Merge_OtherTenantRowWithSameKey_IsNeverMatched_AndNeverDeletedOrUpdated()
+    public async Task Merge_OtherTenantRowWithSameKey_IsRejected_MergeNotSupported()
     {
         if (!await MergeAvailableAsync()) return;
         // entitlement 2 belongs to tenant other and points at order 2, which belongs to acme.
-        var before = await SnapshotAsync();
-        if (SupportsMergeDelete)
-        {
-            (await ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN DELETE", "other")).ShouldBe(0);
-        }
-
-        (await ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'merged'", "other")).ShouldBe(0);
-        (await SnapshotAsync()).ShouldBe(before);
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN DELETE", "other");
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'merged'", "other");
     }
 
     [DmlFact]
-    public async Task Merge_UpdateAndDelete_TouchOnlyTheCallersRows_AndSourceIsSecured()
+    public async Task Merge_UpdateAndDelete_IsRejected_MergeNotSupported()
     {
         if (!await MergeAvailableAsync()) return;
-        // as acme: source entitlements are 1 (order 1) and 3 (order 6); entitlement 2 of tenant other is invisible
-        string deleteClause = SupportsMergeDelete ? " WHEN MATCHED AND s.id = 3 THEN DELETE" : string.Empty;
-        int expected = SupportsMergeDelete ? 2 : 1;
-        (await ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'merged'{deleteClause}", "acme")).ShouldBe(expected);
-        var rows = await OrdersAsync();
-        rows.Single(r => r.Id == 1).Status.ShouldBe("merged");
-        if (SupportsMergeDelete) rows.Any(r => r.Id == 6).ShouldBeFalse();
-        rows.Single(r => r.Id == 2).Status.ShouldBe("open");   // matched only through other's entitlement: untouched
-        rows.Single(r => r.Id == 3).Status.ShouldBe("open");   // ACME: untouched
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'merged' WHEN MATCHED AND s.id = 3 THEN DELETE", "acme");
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'merged'", "acme");
     }
 
     [DmlFact]
-    public async Task Merge_SourceAliasEqualToTheTargetAlias_IsRejectedByTheCompiler_BeforeAnyExecution()
+    public async Task Merge_SourceAliasEqualToTheTargetAlias_IsRejected_MergeNotSupported()
     {
-        if (!await MergeAvailableAsync()) return;   // CR-ADG-33
-        var before = await SnapshotAsync();
+        if (!await MergeAvailableAsync()) return;
         foreach (var source in new[] { $"(SELECT * FROM {E}) t", $"(SELECT * FROM {E}) T", $"{E} t" })
         {
-            // a SecurityException comes from the compiler; a provider error would be a DbException, so nothing reached the database
-            await SecurityRejectedAsync(() => ExecAsync($"MERGE INTO {O} t USING {source} ON t.id = 1 WHEN MATCHED THEN UPDATE SET status = 'merged'", "acme"));
+            await MergeRejectedAsync($"MERGE INTO {O} t USING {source} ON t.id = 1 WHEN MATCHED THEN UPDATE SET status = 'merged'", "acme");
         }
-
-        (await SnapshotAsync()).ShouldBe(before);
     }
 
     [DmlFact]
-    public async Task Merge_Insert_WritesTheCallersTenant_NeverTheSourceTenant()
+    public async Task Merge_Insert_IsRejected_MergeNotSupported()
     {
         if (!await MergeAvailableAsync()) return;
-        (await ExecAsync(
+        await MergeRejectedAsync(
             $"MERGE INTO {O} t USING (SELECT id + 500 AS nid FROM {E}) s ON t.id = s.nid " +
-            "WHEN NOT MATCHED THEN INSERT (id, tenantid, region, status, amount) VALUES (s.nid, 'acme', 'EU', 'inserted', 1)", "acme")).ShouldBe(2);   // entitlements 1 and 3 of acme
-        var rows = await OrdersAsync();
-        rows.Where(r => r.Status == "inserted").Select(r => (r.Id, r.Tenant)).ShouldBe(new[] { (501, "acme"), (503, "acme") });
-        await SecurityRejectedAsync(() => ExecAsync(
+            "WHEN NOT MATCHED THEN INSERT (id, tenantid, region, status, amount) VALUES (s.nid, 'acme', 'EU', 'inserted', 1)", "acme");
+        await MergeRejectedAsync(
             $"MERGE INTO {O} t USING {E} s ON t.id = s.orderid " +
-            "WHEN NOT MATCHED THEN INSERT (id, tenantid, region, status, amount) VALUES (s.id + 600, s.tenantid, 'EU', 'x', 1)", "acme"));
+            "WHEN NOT MATCHED THEN INSERT (id, tenantid, region, status, amount) VALUES (s.id + 600, s.tenantid, 'EU', 'x', 1)", "acme");
     }
 
     [DmlFact]
-    public async Task Merge_PolicyColumn_TenantColumn_MaskedColumn_AndTrivialOn_AreRejected_NothingChanges()
+    public async Task Merge_PolicyColumn_TenantColumn_MaskedColumn_AndTrivialOn_AreRejected_MergeNotSupported()
     {
         if (!await MergeAvailableAsync()) return;
         RegionEuPolicy();
         MaskEmail();
-        var before = await SnapshotAsync();
-        await SecurityRejectedAsync(() => ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET region = 'US'", "acme"));
-        await SecurityRejectedAsync(() => ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET tenantid = 'other'", "acme"));
-        await SecurityRejectedAsync(() => ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = t.email", "acme"));
-        await SecurityRejectedAsync(() => ExecAsync($"MERGE INTO {O} t USING {E} s ON t.email = 'x' WHEN MATCHED THEN UPDATE SET status = 'x'", "acme"));
-        await Should.ThrowAsync<UnfilteredDmlException>(() => ExecAsync($"MERGE INTO {O} t USING {E} s ON 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'", "acme"));
-        (await SnapshotAsync()).ShouldBe(before);
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET region = 'US'", "acme");
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET tenantid = 'other'", "acme");
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = t.email", "acme");
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.email = 'x' WHEN MATCHED THEN UPDATE SET status = 'x'", "acme");
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'", "acme");
     }
 
     [DmlFact]
-    public async Task Merge_RowPolicy_IsPartOfTheOnCondition()
+    public async Task Merge_RowPolicy_IsRejected_MergeNotSupported()
     {
         if (!await MergeAvailableAsync()) return;
         RegionEuPolicy();
-        // acme sees orders 1, 2 and 6 through its entitlements 1 and 3: only the EU rows 1 and 6 can match
-        (await ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'eu'", "acme")).ShouldBe(2);
-        (await OrdersAsync()).Where(r => r.Status == "eu").Select(r => r.Id).ShouldBe(new[] { 1, 6 });
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'eu'", "acme");
     }
 
     [DmlFact]
@@ -772,17 +776,14 @@ public abstract class AstCompilerDmlContract
     }
 
     [DmlFact]
-    public async Task Merge_InsertOfAnotherTenantsKey_IsADmlConstraintViolation_AndChangesNothing()
+    public async Task Merge_InsertOfAnotherTenantsKey_IsRejected_MergeNotSupported()
     {
         if (!await MergeAvailableAsync() || !HasUniqueKey) return;
-        // as tenant other: entitlement 2 points at order 2 (tenant acme). The target RLS hides it, so the row is "not matched"
-        // and the INSERT clause collides with the primary key; the existing row is never touched.
-        var before = await SnapshotAsync();
-        var raw = await Should.ThrowAsync<Exception>(() => ExecAsync(
+        // as tenant other: entitlement 2 points at order 2 (tenant acme). The statement used to reach the primary key; it is now
+        // refused by the compiler, so no constraint is hit, no error is mapped and the existing row is never touched.
+        await MergeRejectedAsync(
             $"MERGE INTO {O} t USING {E} s ON t.id = s.orderid " +
-            "WHEN NOT MATCHED THEN INSERT (id, tenantid, region, status, amount) VALUES (s.orderid, 'other', 'EU', 'x', 1)", "other"));
-        DmlErrorSanitizer.TryMap(Dialect, raw)!.Kind.ShouldBe(DmlConstraintKind.Unique);
-        (await SnapshotAsync()).ShouldBe(before);
+            "WHEN NOT MATCHED THEN INSERT (id, tenantid, region, status, amount) VALUES (s.orderid, 'other', 'EU', 'x', 1)", "other");
     }
 
     // ---- shared ----
@@ -820,7 +821,7 @@ public abstract class AstCompilerDmlContract
         (await ExecAsync($"DELETE FROM {O} WHERE id > 0", tenant)).ShouldBe(0);
         if (SupportsMerge)
         {
-            (await ExecAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'", tenant)).ShouldBe(0);
+            await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'", tenant);
         }
 
         (await SnapshotAsync()).ShouldBe(before);
