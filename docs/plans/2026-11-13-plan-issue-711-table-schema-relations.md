@@ -36,4 +36,4 @@
 ## Phase 4 and 5
 
 - TDD: red commit with the tests and a constructor stub (2 of 8 cases failed: no relations listed), then the implementation.
-- Delivery: see the PR linked from the origin plan registry.
+- Delivery: UNDER REVIEW in PR #725.
