@@ -56,6 +56,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly TenantId? _catalogOwner;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
+    private readonly IGraphQlCatalogMap? _graphQlMap;
 
     public McpToolExecutionHandler(
         IGovernedSqlExecutionService sqlExecutionService,
@@ -68,7 +69,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         Autheris.Application.Analytics.ISemanticMetricQueryService? metricQueryService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
         Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null)
+        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
+        IGraphQlCatalogMap? graphQlMap = null)
     {
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
@@ -81,6 +83,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         _metricQueryService = metricQueryService;
         _procedureCatalog = procedureCatalog;
         _procedureExecutionService = procedureExecutionService;
+        _graphQlMap = graphQlMap;
     }
 
     public bool CanHandle(string toolName) =>
@@ -301,10 +304,18 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Missing required argument 'dataset' or 'datasets'.");
             }
 
+            // Default true, as the input schema documents; only a JSON false turns relations off.
+            var includeRelations = !(root.TryGetProperty("include_relations", out var irProp) && irProp.ValueKind == JsonValueKind.False);
+            var visibleDetails = new Dictionary<TableIdentifier, CatalogDatasetDetail?>();
             var briefSchemas = new List<McpTableBriefSchema>();
             foreach (var tableId in requestedTables)
             {
-                var detail = await _catalogDiscoveryService.GetDatasetDetailAsync(tableId, requestContext, ct).ConfigureAwait(false);
+                if (!visibleDetails.TryGetValue(tableId, out var detail))
+                {
+                    detail = await _catalogDiscoveryService.GetDatasetDetailAsync(tableId, requestContext, ct).ConfigureAwait(false);
+                    visibleDetails[tableId] = detail;
+                }
+
                 if (detail == null)
                 {
                     continue;
@@ -318,9 +329,10 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     IsSensitive: !string.IsNullOrEmpty(c.Sensitivity) && !string.Equals(c.Sensitivity, "Public", StringComparison.OrdinalIgnoreCase) && !string.Equals(c.Sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase)
                 )).ToList();
 
-                // MCP-05: no relations are guessed from column names (target existence, visibility and key are unknown);
-                // only declared relations may be emitted, and none are available on this path.
-                IReadOnlyList<McpTableRelation> relations = [];
+                // MCP-05: only declared relations are emitted, never guessed from column names.
+                var relations = includeRelations
+                    ? await DeclaredRelationsAsync(tableId, detail, visibleDetails, requestContext, ct).ConfigureAwait(false)
+                    : [];
 
                 briefSchemas.Add(new McpTableBriefSchema(
                     Dataset: detail.DatasetId,
@@ -614,6 +626,55 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
 
         var detail = await _catalogDiscoveryService.GetDatasetDetailAsync(tableId, requestContext, ct).ConfigureAwait(false);
         return detail != null;
+    }
+
+    /// <summary>
+    /// Issue #711: the declared relations of a table (catalog GraphQL schema) as single column pairs. Like <c>describe_dataset</c>
+    /// (issue #392) a relation is listed only towards a table the caller can see and only when its join columns are listed for the
+    /// caller on both sides. A composite key is not listed: one entry carries one column pair.
+    /// </summary>
+    private async Task<IReadOnlyList<McpTableRelation>> DeclaredRelationsAsync(
+        TableIdentifier table,
+        CatalogDatasetDetail detail,
+        Dictionary<TableIdentifier, CatalogDatasetDetail?> visibleDetails,
+        RequestContext requestContext,
+        CancellationToken ct)
+    {
+        if (_graphQlMap == null || detail.Columns.Count == 0)
+        {
+            return [];
+        }
+
+        var mapping = await _graphQlMap.GetTableAsync(table, ct).ConfigureAwait(false);
+        if (mapping == null)
+        {
+            return [];
+        }
+
+        var relations = new List<McpTableRelation>();
+        foreach (var relation in mapping.Relations)
+        {
+            if (relation.Columns is not [var fromColumn] || relation.TargetColumns is not [var toColumn] || !Lists(detail, fromColumn))
+            {
+                continue;
+            }
+
+            if (!visibleDetails.TryGetValue(relation.Target, out var target))
+            {
+                target = await _catalogDiscoveryService.GetDatasetDetailAsync(relation.Target, requestContext, ct).ConfigureAwait(false);
+                visibleDetails[relation.Target] = target;
+            }
+
+            if (target != null && Lists(target, toColumn))
+            {
+                relations.Add(new McpTableRelation(McpDatasetCatalog.DatasetId(relation.Target), fromColumn, toColumn));
+            }
+        }
+
+        return relations;
+
+        static bool Lists(CatalogDatasetDetail dataset, string column) =>
+            dataset.Columns.Any(c => string.Equals(c.Name, column, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string CreateMcpError(string tenantId, string tool, string code, string message) =>
