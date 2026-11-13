@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
@@ -21,9 +23,9 @@ public sealed record ExplainSubjectRef(string? Sid, string? Upn);
 
 public sealed record ExplainRequest(
     ExplainSubjectRef? Subject,
-    [property: System.Text.Json.Serialization.JsonPropertyName("object")] string? ObjectName,
-    AccessOperation Operation,
-    AccessTransport? Transport = null,
+    [property: JsonPropertyName("object")] string? ObjectName,
+    [property: JsonConverter(typeof(JsonStringEnumConverter<AccessOperation>))] AccessOperation? Operation,
+    [property: JsonConverter(typeof(JsonStringEnumConverter<AccessTransport>))] AccessTransport? Transport = null,
     IReadOnlyList<string>? Columns = null);
 
 public enum ExplainOutcome
@@ -49,7 +51,7 @@ public sealed record GrantRecordView(
     DateTimeOffset ValidTo,
     string? ApprovedBy);
 
-public sealed record GrantsListResult(ExplainOutcome Outcome, IReadOnlyList<GrantRecordView>? Grants = null);
+public sealed record GrantsListResult(ExplainOutcome Outcome, IReadOnlyList<GrantRecordView>? Grants = null, bool Truncated = false);
 
 public interface IAccessExplanationService
 {
@@ -104,6 +106,8 @@ public sealed class AccessExplanationService(
     TimeProvider? timeProvider = null) : IAccessExplanationService
 {
     private const int MaxGrantPages = 10;
+    private const int MaxSubjectLength = 256;
+    private static readonly Regex SubjectIdFormat = new(@"^[A-Za-z0-9._:@\-]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
     public async Task<ExplainResult> ExplainAsync(SecurityPrincipalContext caller, ExplainRequest request, CancellationToken ct = default)
@@ -120,18 +124,21 @@ public sealed class AccessExplanationService(
     {
         ArgumentNullException.ThrowIfNull(caller);
 
-        var (outcome, grants) = await ListGrantsCoreAsync(caller, objectName, ct).ConfigureAwait(false);
+        var (outcome, grants, truncated) = await ListGrantsCoreAsync(caller, objectName, ct).ConfigureAwait(false);
         await AuditAsync(AuditEventTypes.AuthzGrantsList, caller, objectName, null, outcome, null, ct).ConfigureAwait(false);
-        return new GrantsListResult(outcome, outcome == ExplainOutcome.Ok ? grants : null);
+        return new GrantsListResult(outcome, outcome == ExplainOutcome.Ok ? grants : null, truncated);
     }
 
     private async Task<(ExplainOutcome, AccessExplanation?, string?)> ExplainCoreAsync(SecurityPrincipalContext caller, ExplainRequest request, CancellationToken ct)
     {
         var sidText = request.Subject?.Sid?.Trim();
         var upnText = request.Subject?.Upn?.Trim();
-        if (string.IsNullOrEmpty(sidText) && string.IsNullOrEmpty(upnText))
+        if ((string.IsNullOrEmpty(sidText) && string.IsNullOrEmpty(upnText))
+            || request.Operation is not { } operation || !Enum.IsDefined(operation)
+            || (request.Transport is { } transport && !Enum.IsDefined(transport))
+            || !IsValidSubjectId(sidText) || (upnText?.Length > MaxSubjectLength))
         {
-            return (ExplainOutcome.BadRequest, null, null);
+            return (ExplainOutcome.BadRequest, null, string.IsNullOrEmpty(sidText) || sidText.Length > MaxSubjectLength ? null : sidText);
         }
 
         var (lookup, metadata) = await FindObjectAsync(caller, request.ObjectName, ct).ConfigureAwait(false);
@@ -156,9 +163,10 @@ public sealed class AccessExplanationService(
             }
 
             var explanation = await decisionPoint.ExplainAsync(
-                new AccessRequest(subject, metadata!, request.Operation, request.Transport ?? AccessTransport.Rest, request.Columns, Trace: true),
+                new AccessRequest(subject, metadata!, operation, request.Transport ?? AccessTransport.Rest, request.Columns, Trace: true),
                 ct).ConfigureAwait(false);
-            return (ExplainOutcome.Ok, explanation, subject.UserSid.Value);
+            var resolved = isSelf || subject.GroupResolutionStatus == Autheris.Domain.Identity.GroupResolutionStatus.Complete;
+            return (ExplainOutcome.Ok, explanation with { SubjectResolved = resolved }, subject.UserSid.Value);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -167,40 +175,43 @@ public sealed class AccessExplanationService(
         }
     }
 
-    private async Task<(ExplainOutcome, IReadOnlyList<GrantRecordView>?)> ListGrantsCoreAsync(SecurityPrincipalContext caller, string? objectName, CancellationToken ct)
+    private async Task<(ExplainOutcome, IReadOnlyList<GrantRecordView>?, bool)> ListGrantsCoreAsync(SecurityPrincipalContext caller, string? objectName, CancellationToken ct)
     {
         var (lookup, metadata) = await FindObjectAsync(caller, objectName, ct).ConfigureAwait(false);
         if (lookup != ExplainOutcome.Ok)
         {
-            return (lookup, null);
+            return (lookup, null, false);
         }
 
         try
         {
             if (!await IsPrivilegedAsync(caller, metadata!.Identifier, ct).ConfigureAwait(false))
             {
-                return (ExplainOutcome.Forbidden, null);
+                return (ExplainOutcome.Forbidden, null, false);
             }
 
             var views = new List<GrantRecordView>();
+            var now = _time.GetUtcNow();
+            var truncated = false;
             Guid? after = null;
             for (var page = 0; page < MaxGrantPages; page++)
             {
                 var result = await consents.GetConsentPageAsync(new ConsentPageQuery(caller.TenantId, metadata.Identifier, AfterId: after), ct).ConfigureAwait(false);
-                views.AddRange(result.Items.Where(c => c.IsActive(_time.GetUtcNow())).Select(ToView));
+                views.AddRange(result.Items.Where(c => c.IsActive(now)).Select(ToView));
                 if (result.NextAfterId is not { } next)
                 {
                     break;
                 }
 
                 after = next;
+                truncated = page == MaxGrantPages - 1;
             }
 
-            return (ExplainOutcome.Ok, views);
+            return (ExplainOutcome.Ok, views, truncated);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return (ExplainOutcome.NotFound, null);
+            return (ExplainOutcome.NotFound, null, false);
         }
     }
 
@@ -234,6 +245,9 @@ public sealed class AccessExplanationService(
             return (ExplainOutcome.NotFound, null);
         }
     }
+
+    private static bool IsValidSubjectId(string? sid)
+        => string.IsNullOrEmpty(sid) || (sid.Length <= MaxSubjectLength && SubjectIdFormat.IsMatch(sid));
 
     private static bool IsSelf(SecurityPrincipalContext caller, string? sid, string? upn)
     {
@@ -281,7 +295,7 @@ public sealed class AccessExplanationService(
             EventType = eventType,
             ActorSid = caller.UserSid,
             TargetTable = TableIdentifier.TryParse(objectName, out var id) ? id.ToString() : string.Empty,
-            Decision = outcome == ExplainOutcome.Ok ? "ALLOW" : "DENY",
+            Decision = outcome == ExplainOutcome.Ok && allowed != false ? "ALLOW" : "DENY",
             DetailsJson = details
         }, ct);
     }

@@ -34,7 +34,7 @@ public static class AuthorizationExplainEndpoints
     internal static async Task<IResult> ListGrantsAsync(string objectName, HttpContext context, IAccessExplanationService service, CancellationToken ct)
     {
         var result = await service.ListGrantsAsync(context.GetSecurityContext(), objectName, ct).ConfigureAwait(false);
-        return ToResult(result.Outcome, result.Grants, context);
+        return ToResult(result.Outcome, new { grants = result.Grants, truncated = result.Truncated }, context);
     }
 
     // Foreign-tenant, hidden and unknown objects share one body (no existence oracle).
