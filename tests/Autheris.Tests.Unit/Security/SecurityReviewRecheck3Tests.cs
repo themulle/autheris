@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -15,48 +14,9 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
-/// <summary>Security review 2026-10-05 (recheck 3): E-3, E-4, E-8.</summary>
+/// <summary>Security review 2026-10-05 (recheck 3): E-4, E-8.</summary>
 public sealed class SecurityReviewRecheck3Tests
 {
-    // ---------- E-3: ReBAC batch-check must not evaluate foreign tenants ----------
-
-    [Fact]
-    public async Task E3_BatchCheck_ItemOfForeignTenant_IsDenied()
-    {
-        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
-        await store.AddTupleAsync(new RebacTuple("tenant-b", "alice", "viewer", "doc:1"));
-        var evaluator = new ZanzibarRebacEvaluator(
-            store,
-            Options.Create(new GatewayOptions { Rebac = new RebacOptions { Enabled = true, MaxTraversalDepth = 5, CacheTtlSeconds = 10 } }),
-            NullLogger<ZanzibarRebacEvaluator>.Instance);
-
-        var foreign = new RebacCheckRequest("tenant-b", "alice", "viewer", "doc:1");
-        var result = await evaluator.BatchCheckAsync(new RebacBatchCheckRequest("tenant-a", [foreign]));
-
-        result.Decisions[foreign].ShouldBeFalse();
-        (await evaluator.CheckAsync(foreign)).Allowed.ShouldBeTrue(); // the tuple exists, only the batch tenant differs
-    }
-
-    [Fact]
-    public async Task E3_DecisionCache_IsBounded()
-    {
-        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
-        var evaluator = new ZanzibarRebacEvaluator(
-            store,
-            Options.Create(new GatewayOptions { Rebac = new RebacOptions { Enabled = true, MaxTraversalDepth = 2, CacheTtlSeconds = 600 } }),
-            NullLogger<ZanzibarRebacEvaluator>.Instance);
-
-        for (int i = 0; i < ZanzibarRebacEvaluator.MaxCachedDecisionsPerTenant + 50; i++)
-        {
-            await evaluator.CheckAsync(new RebacCheckRequest("tenant-a", $"user:{i}", "viewer", "doc:x"));
-        }
-
-        var cacheField = typeof(ZanzibarRebacEvaluator).GetField("_cache", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        var cache = (System.Collections.IDictionary)cacheField.GetValue(evaluator)!;
-        var tenantCache = (System.Collections.ICollection)cache["tenant-a"]!;
-        tenantCache.Count.ShouldBeLessThanOrEqualTo(ZanzibarRebacEvaluator.MaxCachedDecisionsPerTenant);
-    }
-
     // ---------- E-4: REGEX masking must not return clear text when the pattern does not match ----------
 
     [Theory]

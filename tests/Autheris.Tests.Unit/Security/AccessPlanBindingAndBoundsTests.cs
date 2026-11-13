@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Domain.Model;
@@ -27,7 +26,7 @@ public sealed class AccessPlanBindingAndBoundsTests
     private const string AdminB = "S-1-5-21-1-501";
     private const string DatasetId = "sales.public.orders";
 
-    private readonly IRebacStore _rebac = Substitute.For<IRebacStore>();
+    private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
     private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
     private readonly ITotpSecretStore _secrets = new InMemoryTotpSecretStore();
     private readonly TotpVerificationService _totp = new();
@@ -36,8 +35,8 @@ public sealed class AccessPlanBindingAndBoundsTests
     private AccessPlanningService CreateService(AccessPlanOptions? options = null, IHostEnvironment? env = null)
         => new(
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_audit),
-            Substitute.For<ITableMetadataRepository>(),
-            _rebac,
+            global::Autheris.Tests.Unit.TestDoubles.AccessPlanTestTables.OrdersRepository(),
+            _consentRepo,
             _totp,
             _secrets,
             planOptions: Options.Create(options ?? new AccessPlanOptions()),
@@ -67,7 +66,7 @@ public sealed class AccessPlanBindingAndBoundsTests
         await Should.ThrowAsync<SecurityException>(() =>
             service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminB, "tenant-a"));
 
-        await _rebac.DidNotReceiveWithAnyArgs().AddTuplesAsync(default!);
+        await _consentRepo.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
 
         // The legitimate admin can still apply: the failed attempt did not consume the token.
         var ok = await service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminA, "tenant-a");
@@ -84,7 +83,7 @@ public sealed class AccessPlanBindingAndBoundsTests
         await Should.ThrowAsync<SecurityException>(() =>
             service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminA, "tenant-b"));
 
-        await _rebac.DidNotReceiveWithAnyArgs().AddTuplesAsync(default!);
+        await _consentRepo.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
     }
 
     [Fact]

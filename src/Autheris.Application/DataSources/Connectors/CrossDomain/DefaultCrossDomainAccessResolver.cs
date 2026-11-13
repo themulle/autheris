@@ -9,7 +9,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -20,7 +19,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// DuckDB OLAP access decision. Validates the caller and delegates to <see cref="TableAccessPolicy"/> (Architecture 1):
-/// ReBAC whenever enabled, consents with the decision cache, Casbin.
+/// consents with the decision cache, Casbin.
 /// </summary>
 public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolver
 {
@@ -35,7 +34,6 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         IClientIpResolver? clientIpResolver = null,
         IOptions<GatewayOptions>? options = null,
         IConsentCacheService? consentCache = null,
-        IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         TypedPolicySources? typedPolicies = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
@@ -51,7 +49,6 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
             resolutionService ?? throw new ArgumentNullException(nameof(resolutionService)),
             consentRepository ?? throw new ArgumentNullException(nameof(consentRepository)),
             consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver,
             mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             accessProfileRepository: accessProfileRepository,

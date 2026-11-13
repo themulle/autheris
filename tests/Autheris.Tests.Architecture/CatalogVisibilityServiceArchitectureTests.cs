@@ -30,13 +30,6 @@ public sealed class CatalogVisibilityServiceArchitectureTests
         "Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService"
     ];
 
-    private static readonly string[] DiscoveryRoots =
-    [
-        "Autheris.Application.Catalog.Services.CatalogDiscoveryService",
-        "Autheris.Application.Mcp.Services.McpDatasetCatalog",
-        "Autheris.GraphQL.Types.Query"
-    ];
-
     private static IEnumerable<ModuleDefinition> ProductionModules()
     {
         yield return CecilModuleCache.For(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly);
@@ -115,76 +108,6 @@ public sealed class CatalogVisibilityServiceArchitectureTests
     }
 
     [Fact]
-    public void DiscoveryCode_HasNoRebacEvaluatorOrTableGateReference()
-    {
-        var module = CecilModuleCache.For(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly);
-        var graphQl = CecilModuleCache.For(typeof(Autheris.GraphQL.Types.Mutation).Assembly);
-        var violations = new List<string>();
-        foreach (var type in module.GetTypes().Concat(graphQl.GetTypes()).Where(t => DiscoveryRoots.Contains(Root(t))))
-        {
-            foreach (var reference in References(type))
-            {
-                if (reference.Contains("IRebacEvaluator", StringComparison.Ordinal) || reference.Contains("RebacTableGate", StringComparison.Ordinal))
-                {
-                    violations.Add($"{Root(type)} -> {reference}");
-                }
-            }
-        }
-
-        violations.Distinct().ShouldBeEmpty("Discovery code must not evaluate ReBAC itself: " + string.Join("; ", violations));
-    }
-
-    private static IEnumerable<string> References(TypeDefinition type)
-    {
-        foreach (var field in type.Fields)
-        {
-            yield return field.FieldType.FullName;
-        }
-
-        foreach (var method in type.Methods)
-        {
-            yield return method.ReturnType.FullName;
-            foreach (var p in method.Parameters)
-            {
-                yield return p.ParameterType.FullName;
-            }
-
-            if (!method.HasBody)
-            {
-                continue;
-            }
-
-            foreach (var v in method.Body.Variables)
-            {
-                yield return v.VariableType.FullName;
-            }
-
-            foreach (var instruction in method.Body.Instructions)
-            {
-                switch (instruction.Operand)
-                {
-                    case MethodReference m:
-                        yield return m.DeclaringType.FullName;
-                        yield return m.ReturnType.FullName;
-                        foreach (var p in m.Parameters)
-                        {
-                            yield return p.ParameterType.FullName;
-                        }
-
-                        break;
-                    case FieldReference f:
-                        yield return f.DeclaringType.FullName;
-                        yield return f.FieldType.FullName;
-                        break;
-                    case TypeReference t:
-                        yield return t.FullName;
-                        break;
-                }
-            }
-        }
-    }
-
-    [Fact]
     public void EngineRowReturningMethods_AreTheGuardedSetPlusTheNarrowingOnlyContractFilter()
     {
         // A new public method that returns catalog rows must be added to the guarded set (or consciously allowed here), otherwise a new
@@ -205,9 +128,9 @@ public sealed class CatalogVisibilityServiceArchitectureTests
     }
 
     [Fact]
-    public void RemovedMembersAbsent_ResolvePermittedAsync_IsRebacAllowedAsync()
+    public void RemovedMembersAbsent_ResolvePermittedAsync()
     {
-        var removed = new[] { "ResolvePermittedAsync", "IsRebacAllowedAsync" };
+        var removed = new[] { "ResolvePermittedAsync" };
         var found = new List<string>();
         foreach (var module in ProductionModules())
         {

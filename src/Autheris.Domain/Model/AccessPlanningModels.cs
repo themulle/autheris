@@ -64,12 +64,12 @@ public sealed record AdminApplyAccessRequest(
     string ConfirmationToken);
 
 /// <summary>
-/// Result of applying an access plan to ReBAC and metadata stores.
+/// Result of applying an access plan as grant records.
 /// </summary>
 public sealed record AdminApplyAccessResult(
     bool Success,
     string PlanId,
-    int AppliedTuplesCount,
+    int AppliedGrantCount,
     string? Message = null);
 
 

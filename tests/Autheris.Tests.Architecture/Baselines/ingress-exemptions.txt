@@ -116,9 +116,6 @@ route /api/v1/governance/virtual-filters/sync/webhook | governance, consent, ReB
 route /api/v1/profiles | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/profiles/{id} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/profiles/{id}/assignments/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/rebac/batch-check | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/rebac/check | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/rebac/tuples | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/governance/recert/campaigns | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaignId}/items | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaignId}/items/{itemId}/certify | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point

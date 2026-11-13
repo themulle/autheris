@@ -103,7 +103,6 @@ public sealed class AuthPluginAuthorizationHookTests
             new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             opts,
             NullMandatoryRowFilterResolver.Instance,

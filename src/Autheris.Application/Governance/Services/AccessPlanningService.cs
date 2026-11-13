@@ -20,7 +20,6 @@ using Autheris.Application.Governance.Grants;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
@@ -44,7 +43,7 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly IAccessPlanStore _store;
 
     private readonly ITableMetadataRepository _tableRepo;
-    private readonly IRebacStore _rebacStore;
+    private readonly IConsentRepository? _consentRepository;
     private readonly IAuditWriter _audit;
     private readonly ITotpVerificationService? _totpService;
     private readonly ITotpSecretStore? _totpSecretStore;
@@ -60,7 +59,7 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly IGrantPolicy _grantPolicy;
     private readonly IRowFilterEvaluationAdminService? _rowFilterEvaluationAdmin;
 
-    private void EnsureGrantsAllowed(
+    private IReadOnlyList<DateTimeOffset?> EnsureGrantsAllowed(
         AdminPlanAccessRequest request,
         TableMetadata? meta,
         IReadOnlyList<AccessPlanDiffItem> diffs,
@@ -68,11 +67,12 @@ public class AccessPlanningService : IAccessPlanningService
         HashSet<string> actorIdentifiers,
         bool rejectFourEyes)
     {
+        var maxValidTo = new List<DateTimeOffset?>(request.Grants.Count);
         foreach (var grant in request.Grants)
         {
-            // GOV-04: an administrator never grants access to themselves (any identifier form, group or role they hold).
+            // an administrator never grants access to themselves (any identifier form, group or role they hold).
             if (ActorIdentifiers.IsActorSubject(actorIdentifiers, grant.Principal) ||
-                ActorIdentifiers.IsActorSubject(actorIdentifiers, RebacSubject.Parse(grant.Principal).Canonical))
+                (AccessGrantRecords.TryParseGrantee(grant.Principal, out _, out var granteeId) && ActorIdentifiers.IsActorSubject(actorIdentifiers, granteeId)))
             {
                 throw new SecurityException("Self-grant is not allowed: an administrator cannot grant access to themselves.");
             }
@@ -92,6 +92,7 @@ public class AccessPlanningService : IAccessPlanningService
                 sensitivity,
                 Justification: request.Reason));
             GrantPolicyViolationException.ThrowIfDenied(decision);
+            maxValidTo.Add(decision.MaxValidTo);
 
             // GOV-04: the single-actor path never grants sensitive access; those grants go through the consent workflow
             // (two independent approvers). An unknown table is not classified here (no table to gate yet).
@@ -104,6 +105,8 @@ public class AccessPlanningService : IAccessPlanningService
                     decision.MaxValidTo));
             }
         }
+
+        return maxValidTo;
     }
 
     private static string? NormalizeTenant(string? tenantId)
@@ -129,7 +132,7 @@ public class AccessPlanningService : IAccessPlanningService
     public AccessPlanningService(
         IAuditWriter auditWriter,
         ITableMetadataRepository? tableMetadataRepository = null,
-        IRebacStore? rebacStore = null,
+        IConsentRepository? consentRepository = null,
         ITotpVerificationService? totpVerificationService = null,
         ITotpSecretStore? totpSecretStore = null,
         IKeyVaultSecretProvider? secretProvider = null,
@@ -151,7 +154,7 @@ public class AccessPlanningService : IAccessPlanningService
         _grantPolicy = grantPolicy ?? new GrantPolicy();
         _audit = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
-        _rebacStore = rebacStore ?? new NullRebacStore();
+        _consentRepository = consentRepository;
         _totpService = totpVerificationService;
         _totpSecretStore = totpSecretStore;
         _secretProvider = secretProvider;
@@ -318,36 +321,32 @@ public class AccessPlanningService : IAccessPlanningService
         {
             foreach (var grant in plan.Request.Grants)
             {
-                var parsed = RebacSubject.Parse(grant.Principal);
-                if (!parsed.IsValid)
+                if (!AccessGrantRecords.TryParseGrantee(grant.Principal, out _, out _))
                 {
-                    throw new SecurityException($"Invalid ReBAC principal '{grant.Principal}' in access plan.");
+                    throw new SecurityException($"Invalid principal '{grant.Principal}' in access plan.");
                 }
             }
             return Task.CompletedTask;
         }, ct).ConfigureAwait(false);
 
+        var consentRepository = _consentRepository
+            ?? throw new SecurityException("Access plans are applied as grant records; no grant store is available.");
         var tableId = ParseTableIdentifier(stored.Request.DatasetId);
 
         // re-evaluated at apply time (the plan may have been stored with a validUntil that has meanwhile lapsed).
         var applyMeta = await _tableRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-        EnsureGrantsAllowed(stored.Request, applyMeta, stored.Result.Diffs, _time.GetUtcNow(), ActorIdentifiers.Collect(caller, new Sid(adminSid), null), rejectFourEyes: true);
-
-        // EP-04: the caller's tenant strictly scopes the ReBAC tuples and audit; no Domain or default fallback.
-        var effectiveTenantId = tenantId.Value;
-        var tuples = new List<RebacTuple>();
-
-        foreach (var grant in stored.Request.Grants)
+        var now = _time.GetUtcNow();
+        var maxValidTo = EnsureGrantsAllowed(stored.Request, applyMeta, stored.Result.Diffs, now, ActorIdentifiers.Collect(caller, new Sid(adminSid), null), rejectFourEyes: true);
+        if (applyMeta is null)
         {
-            var parsed = RebacSubject.Parse(grant.Principal);
-            var canonicalPrincipal = parsed.Canonical;
-
-            // GOV-04: exactly the tuple RebacTableGate checks: the raw subject and the normalised table object id.
-            // Column levels have no ReBAC consumer and are reported as not applied.
-            tuples.Add(new RebacTuple(effectiveTenantId, canonicalPrincipal, RebacTableGate.Relation, RebacTableGate.ObjectId(tableId)) { ExpiresAt = grant.ValidUntil });
+            throw new SecurityException($"Table '{stored.Request.DatasetId}' does not exist; a grant record needs a registered table.");
         }
 
-        // Write-ahead: the required record exists before the tuples are written.
+        // the caller's tenant strictly scopes the grant records and audit; no Domain or default fallback.
+        var effectiveTenantId = tenantId.Value;
+        var consents = AccessGrantRecords.Build(stored.Request.Grants, applyMeta, tableId, new TenantId(effectiveTenantId), adminSid, now, maxValidTo);
+
+        // Write-ahead: the required record exists before the grant records are written.
         await RecordAdminAuditAsync(
             AuditEventTypes.AdminApplyAccess, new TenantId(effectiveTenantId), adminSid, stored.Request.DatasetId,
             new
@@ -356,11 +355,14 @@ public class AccessPlanningService : IAccessPlanningService
                 planId = request.PlanId,
                 diffs = stored.Result.Diffs,
                 reason = stored.Request.Reason,
-                appliedTuplesCount = tuples.Count,
+                appliedGrantCount = consents.Count,
                 wormSignature = Guid.NewGuid().ToString("N")
             }, ct).ConfigureAwait(false);
 
-        await _rebacStore.AddTuplesAsync(tuples, ct).ConfigureAwait(false);
+        foreach (var consent in consents)
+        {
+            await consentRepository.CreateConsentAsync(consent, ct).ConfigureAwait(false);
+        }
 
         if (_policyEpochRepo != null)
         {
@@ -379,19 +381,12 @@ public class AccessPlanningService : IAccessPlanningService
                 PlanId: request.PlanId,
                 DatasetId: stored.Request.DatasetId,
                 ApproverSid: adminSid,
-                AppliedGrantCount: tuples.Count,
+                AppliedGrantCount: consents.Count,
                 Timestamp: DateTimeOffset.UtcNow,
                 TenantId: NormalizeTenant(tenantId) ?? stored.TenantId), ct).ConfigureAwait(false);
         }
 
-        var columnsNotApplied = stored.Request.Grants.Any(g => g.Columns.Count > 0);
-        return new AdminApplyAccessResult(
-            true,
-            request.PlanId,
-            tuples.Count,
-            columnsNotApplied
-                ? "Table access applied successfully. Column-level access levels are not applied (no ReBAC consumer)."
-                : "Access applied successfully.");
+        return new AdminApplyAccessResult(true, request.PlanId, consents.Count, "Access applied successfully as grant records.");
     }
 
     // ---- Issue #107: row filter evaluation plans ----

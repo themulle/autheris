@@ -50,7 +50,6 @@ Plugins
 Policy
 Procedures
 RateLimiting
-Rebac
 Security
 Serialization
 Services

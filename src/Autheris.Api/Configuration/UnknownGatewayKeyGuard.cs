@@ -21,6 +21,14 @@ public static class UnknownGatewayKeyGuard
 
     private const string RemovedProcedureHotReloadKey = GatewayConfigurationSchema.Root + ":SqlEndpoints:Procedures:EnableHotReload";
 
+    private const string RemovedAuthzReplacement = "removed by ADR-020; data access is granted by grant records";
+
+    private static readonly string[] RemovedAuthzPrefixes =
+    [
+        GatewayConfigurationSchema.Root + ":Rebac",
+        GatewayConfigurationSchema.Root + ":Insecure:danger_bypass_rebac"
+    ];
+
     private static readonly string[] RemovedSimpl12Prefixes =
     [
         GatewayConfigurationSchema.Root + ":Itsm",
@@ -167,6 +175,18 @@ public static class UnknownGatewayKeyGuard
             unknown.Add("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); definitions are re-scanned each interval)");
         }
 
+        foreach (var removedPrefix in RemovedAuthzPrefixes)
+        {
+            if (configuration.GetSection(removedPrefix).Exists() ||
+                configuration.AsEnumerable().Any(kv =>
+                    !string.IsNullOrEmpty(kv.Key) &&
+                    (kv.Key.Equals(removedPrefix, StringComparison.OrdinalIgnoreCase) ||
+                     kv.Key.StartsWith(removedPrefix + ":", StringComparison.OrdinalIgnoreCase))))
+            {
+                unknown.Add($"{removedPrefix} ({RemovedAuthzReplacement})");
+            }
+        }
+
         // Removed sections and keys fail startup with any value (including false or empty).
         foreach (var removedPrefix in RemovedSimpl12Prefixes)
         {
@@ -194,6 +214,11 @@ public static class UnknownGatewayKeyGuard
             }
 
             if (claimedModuleSections is not null && IsClaimedByLoadedModule(fullKey, claimedModuleSections))
+            {
+                continue;
+            }
+
+            if (IsClaimedByLoadedModule(fullKey, RemovedAuthzPrefixes))
             {
                 continue;
             }

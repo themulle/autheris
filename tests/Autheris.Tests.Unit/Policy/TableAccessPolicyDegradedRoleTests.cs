@@ -6,7 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
@@ -39,7 +38,6 @@ public sealed class TableAccessPolicyDegradedRoleTests
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
             Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IRebacEvaluator>(),
             null,
             new GatewayOptions(),
             Substitute.For<Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver>());

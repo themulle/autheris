@@ -3,7 +3,6 @@ using System.Text;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Application.State;
@@ -45,7 +44,7 @@ public sealed class AccessPlanningRowFilterPlanTests
         _admin.ValidateObjectAsync(Orders, Arg.Any<RowFilterEvaluationSettings?>(), Arg.Any<CancellationToken>())
             .Returns(new RowFilterEvaluationPreview(Orders, Stored));
         _service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tables, Substitute.For<IRebacStore>(), _totp, _secrets,
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tables, Substitute.For<IConsentRepository>(), _totp, _secrets,
             secretProvider: keyVault,
             planOptions: Options.Create(new AccessPlanOptions { SigningKeyRef = "accessplan-signing" }),
             accessPlanStore: _store,

@@ -14,7 +14,6 @@ using Autheris.Application.Plugins.Auth;
 using Autheris.Application.Policy;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.Security;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
@@ -34,7 +33,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
     private readonly IConsentResolutionService? _resolutionService;
     private readonly IConsentCacheService? _cacheService;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
-    private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly ISchemaContractManager? _contractManager;
@@ -54,7 +52,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         IConsentResolutionService? resolutionService = null,
         IConsentRepository? consentRepository = null,
         IConsentCacheService? cacheService = null,
-        IRebacEvaluator? rebacEvaluator = null,
         IClientIpResolver? clientIpResolver = null,
         IMandatoryRowFilterResolver? mandatoryFilters = null,
         ISchemaContractManager? contractManager = null,
@@ -72,7 +69,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         _resolutionService = resolutionService;
         _consentRepository = consentRepository;
         _cacheService = cacheService ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance;
-        _rebacEvaluator = rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance;
         _clientIpResolver = clientIpResolver;
         _mandatoryFilters = mandatoryFilters ?? NullMandatoryRowFilterResolver.Instance;
         _contractManager = contractManager;
@@ -92,7 +88,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
                 _resolutionService,
                 _cacheService,
                 _policyEnforcementService,
-                _rebacEvaluator,
                 _clientIpResolver,
                 _options.Value,
                 _mandatoryFilters,
@@ -144,12 +139,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
             var clientIp = subject.ClientIp ?? _clientIpResolver?.ResolveClientIp() ?? IPAddress.None;
             var isProcedure = request.Transport == AccessTransport.Procedure;
 
-            var rebacEnforcement = request.Transport switch
-            {
-                AccessTransport.Olap or AccessTransport.Analytics or AccessTransport.Mcp => RebacEnforcement.WhenEnabled,
-                _ => RebacEnforcement.QueryPaths
-            };
-
             var principal = subject.Principal;
 
             var query = new TableAccessQuery(
@@ -160,7 +149,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
                 metadata,
                 Claims: subject.Claims,
                 RequestedColumns: request.Columns,
-                Rebac: rebacEnforcement,
                 ClientIp: clientIp,
                 ExtraAttributes: isProcedure ? new Dictionary<string, object?> { ["gql.action"] = "read" } : null,
                 ObjectKind: isProcedure ? FilterObjectKinds.ProcedureResult : FilterObjectKinds.Relation,

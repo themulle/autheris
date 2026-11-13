@@ -23,8 +23,6 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Policy;
 using Autheris.Application.Policy.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Application.Common.Serialization;

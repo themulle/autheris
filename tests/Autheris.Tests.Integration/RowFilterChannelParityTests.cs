@@ -30,7 +30,6 @@ using Autheris.Tests.Integration.Governance;
 /// Virtual filters, phase 0 (docs/plans/2026-10-08-umsetzungsplan-virtuelle-filter.md): the same correlated consent row
 /// filter (the "David case": only rows of clients whose crane is not delivered yet) must yield the same rows in every
 /// transport. Real consents (no consent bypass), real SQLite data. The expected set is computed directly in SQLite.
-/// ReBAC is disabled: it is an independent gate and not what this test compares.
 /// Run: dotnet test tests/Autheris.Tests.Integration --filter "FullyQualifiedName~RowFilterChannelParityTests"
 /// </summary>
 public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannelParityTests.Fixture>
@@ -335,7 +334,6 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("run"));
-                b.UseSetting("Gateway:Rebac:Enabled", "false");
 
                 b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
                 b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");

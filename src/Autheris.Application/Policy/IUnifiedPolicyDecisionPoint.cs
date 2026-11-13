@@ -9,7 +9,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
 /// <summary>
-/// Architecture Phase 2 (WP 2.2): Unified Policy Decision Point orchestrating ReBAC, Casbin ABAC,
+/// Architecture Phase 2 (WP 2.2): Unified Policy Decision Point orchestrating Casbin ABAC,
 /// and Consent Engine evaluation into a single authoritative TableAccessDecision.
 /// </summary>
 public interface IUnifiedPolicyDecisionPoint

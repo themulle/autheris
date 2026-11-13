@@ -11,7 +11,6 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.OData.Services;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -54,7 +53,7 @@ public sealed class CatalogKeyDefinitionReportTests
             repo,
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             Microsoft.Extensions.Options.Options.Create(options),
-            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(repo, consents, options, Substitute.For<IRebacEvaluator>()),
+            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(repo, consents, options),
             Substitute.For<IKeyVaultSecretProvider>(),
             Substitute.For<IOpenApiIngestionService>(),
             Substitute.For<ICatalogSearchEngine>(),

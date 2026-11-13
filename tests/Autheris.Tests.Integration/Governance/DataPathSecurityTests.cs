@@ -62,7 +62,7 @@ public class DataPathSecurityTests : IDisposable
         _query = new Query();
         _visibility = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(
             _repository, _repository,
-            new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" }, Rebac = new Autheris.Domain.Options.RebacOptions { Enabled = false } });
+            new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } });
     }
 
     public void Dispose()

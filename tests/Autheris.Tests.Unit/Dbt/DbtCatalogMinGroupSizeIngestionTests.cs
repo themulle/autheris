@@ -138,7 +138,6 @@ public sealed class DbtCatalogMinGroupSizeIngestionTests
             null,
             null,
             null,
-            null,
             auditWriter,
             logger);
 

@@ -12,44 +12,6 @@ public sealed class CasbinOptions
     public bool WatchPolicyFile { get; init; } = true;
 }
 
-/// <summary>
-/// F-Relationship-Based Access Control (ReBAC) Options.
-/// Configures Zanzibar/OpenFGA graph traversal depth, caching, and batch DataLoader settings.
-/// </summary>
-public sealed class RebacOptions
-{
-    public bool Enabled { get; init; } = true;
-    public int MaxTraversalDepth { get; init; } = 10;
-    public int CacheTtlSeconds { get; init; } = 60;
-    [Range(0, 5000)] public int GenerationCacheMilliseconds { get; init; } = 1000;
-
-    /// <summary>
-    /// INF-15: Maximum number of entries in the per-check memo during graph traversal recursion.
-    /// </summary>
-    [Range(1, 10_000)]
-    public int PerCheckMemoMaxEntries { get; init; } = 256;
-
-    /// <summary>
-    /// POL-6: also require the ReBAC relation <c>can_query</c> on OData, GraphQL, WebSQL and stored procedures.
-    /// Off by default: the evaluator denies every table without tuples, so enable it only once tuples are maintained.
-    /// The unified PDP (MCP-RAG, DuckDB OLAP) checks ReBAC whenever <see cref="Enabled"/> is true.
-    /// </summary>
-    public bool EnforceOnQueryPaths { get; init; } = false;
-
-    /// <summary>
-    /// SR15-23: When true, users with the <c>viewer</c> relation automatically inherit <c>can_query</c>.
-    /// Defaults to true for backwards compatibility with POL-6 / OLAP / Arrow egress, but can be set to false
-    /// to require explicit <c>can_query</c>, <c>editor</c>, or <c>owner</c> relations, preventing existing <c>viewer</c>
-    /// tuples from automatically granting full analytical and raw egress capabilities.
-    /// </summary>
-    public bool InheritCanQueryFromViewer { get; init; } = true;
-
-    /// <summary>
-    /// Initial relationship tuples seeded into the ReBAC store on startup (for Development, PoC, or testing).
-    /// </summary>
-    public List<RebacTuple> SeedTuples { get; init; } = [];
-}
-
 /// <summary>Virtual filters (docs/plans/2026-10-08-virtuelle-filter.md).</summary>
 public sealed class VirtualFilterOptions
 {

@@ -12,7 +12,6 @@ public sealed class Inf02InvalidationChannelDispatchTests
 {
     [Theory]
     [InlineData("consent:invalidations")]
-    [InlineData("rebac:invalidate")]
     [InlineData("epoch:bump")]
     public async Task INF_02_InvalidationChannels_AreDispatchedSynchronously(string channel)
     {

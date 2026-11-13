@@ -11,8 +11,6 @@ using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Domain.Common;
@@ -25,24 +23,26 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>GOV-04: access-plan apply writes the tuples the ReBAC table gate reads, refuses self-grants and four-eyes grants.</summary>
+/// <summary>GOV-04: access-plan apply writes grant records, refuses self-grants and four-eyes grants.</summary>
 [Trait("Category", "Security")]
-public sealed class AccessPlanApplyTupleTests
+public sealed class AccessPlanApplyGrantTests
 {
     private const string AdminSid = "S-1-5-21-ADMIN-500";
     private const string Grantee = "S-1-5-21-ALICE-1001";
     private const string Tenant = "tenant-a";
 
     private readonly ITableMetadataRepository _tableRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly InMemoryRebacStore _store = new(NullLogger<InMemoryRebacStore>.Instance);
+    private readonly IConsentRepository _consents = Substitute.For<IConsentRepository>();
+    private readonly List<Consent> _created = [];
     private readonly ITotpSecretStore _secrets = new InMemoryTotpSecretStore();
     private readonly ITotpVerificationService _totp = new TotpVerificationService();
     private readonly AccessPlanningService _service;
 
-    public AccessPlanApplyTupleTests()
+    public AccessPlanApplyGrantTests()
     {
         _service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tableRepo, _store, _totp, _secrets);
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tableRepo, _consents, _totp, _secrets);
+        _consents.CreateConsentAsync(Arg.Do<Consent>(c => _created.Add(c)), Arg.Any<CancellationToken>()).Returns(ci => Task.FromResult(ci.Arg<Consent>()));
         UseTable(sensitive: false);
     }
 
@@ -77,52 +77,39 @@ public sealed class AccessPlanApplyTupleTests
         return new AdminApplyAccessRequest(plan.PlanId, confirm.ConfirmationToken);
     }
 
-    private static ZanzibarRebacEvaluator Evaluator(IRebacStore store) => new(
-        store,
-        Options.Create(new GatewayOptions { Rebac = new RebacOptions { Enabled = true, MaxTraversalDepth = 10, CacheTtlSeconds = 10 } }),
-        NullLogger<ZanzibarRebacEvaluator>.Instance);
-
     [Fact]
-    public async Task Apply_WritesTupleMatchedByRebacTableGate()
+    public async Task Apply_CreatesAllowGrantRecord_ForTheNormalisedTable()
     {
         var apply = await PlanAndConfirmAsync(Request("sales.public.orders"));
 
         await _service.ApplyAccessAsync(apply, AdminSid, new TenantId(Tenant));
 
-        (await RebacTableGate.IsAllowedAsync(
-            Evaluator(_store), new TenantId(Tenant), new Sid(Grantee), new TableIdentifier("sales", "public", "orders"), CancellationToken.None))
-            .ShouldBeTrue();
+        var consent = _created.ShouldHaveSingleItem();
+        consent.Effect.ShouldBe(ConsentEffect.Allow);
+        consent.GranteeSid!.Value.Value.ShouldBe(Grantee);
+        consent.TenantId.Value.ShouldBe(Tenant);
+        consent.TableIdentifier.ShouldBe(new TableIdentifier("sales", "public", "orders"));
+        consent.ColumnRules.ShouldHaveSingleItem().ColumnName.ShouldBe("id");
+        consent.ColumnRules[0].AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
     }
 
     [Fact]
-    public async Task Apply_TwoPartDatasetId_UsesNormalisedObjectId()
+    public async Task Apply_TwoPartDatasetId_UsesTheNormalisedTable()
     {
         var apply = await PlanAndConfirmAsync(Request("sales.orders"));
 
         await _service.ApplyAccessAsync(apply, AdminSid, new TenantId(Tenant));
 
-        (await RebacTableGate.IsAllowedAsync(
-            Evaluator(_store), new TenantId(Tenant), new Sid(Grantee), new TableIdentifier("sales", "public", "orders"), CancellationToken.None))
-            .ShouldBeTrue();
+        _created.ShouldHaveSingleItem().TableIdentifier.ShouldBe(new TableIdentifier("sales", "public", "orders"));
     }
 
     [Fact]
-    public async Task Apply_WritesNoColumnTuples()
+    public async Task Apply_RolePrincipal_IsRejected()
     {
-        var rebac = Substitute.For<IRebacStore>();
-        IEnumerable<RebacTuple>? written = null;
-        await rebac.AddTuplesAsync(Arg.Do<IEnumerable<RebacTuple>>(t => written = t.ToList()), Arg.Any<CancellationToken>());
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tableRepo, rebac, _totp, _secrets);
-        var plan = await service.PlanAccessAsync(Request("sales.public.orders"), AdminSid, Tenant);
-        var enrollment = _totp.GenerateEnrollment(AdminSid, "admin@autheris.local");
-        await _secrets.SetSecretAsync(AdminSid, enrollment.SecretBase32);
-        var confirm = await service.ConfirmPlanAsync(plan.PlanId, _totp.GenerateTotpCode(enrollment.SecretBase32), AdminSid);
+        var apply = await PlanAndConfirmAsync(Request("sales.public.orders", "role:analysts"));
 
-        await service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, confirm.ConfirmationToken), AdminSid, new TenantId(Tenant));
-
-        written.ShouldNotBeNull();
-        written!.ShouldAllBe(t => !t.Object.StartsWith("column:", StringComparison.Ordinal));
-        written!.ShouldAllBe(t => t.Object == "table:sales.public.orders" && t.User == Grantee && t.TenantId == Tenant);
+        await Should.ThrowAsync<SecurityException>(() => _service.ApplyAccessAsync(apply, AdminSid, new TenantId(Tenant)));
+        _created.ShouldBeEmpty();
     }
 
     [Fact]

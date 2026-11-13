@@ -134,7 +134,6 @@ public sealed class DbtPhysicalKeyIngestionTests
             null,
             null,
             null,
-            null,
             _physicalKeys,
             _auditWriter,
             NullLogger<DbtMetadataIngestionService>.Instance);
@@ -187,7 +186,6 @@ public sealed class DbtPhysicalKeyIngestionTests
             null,
             null,
             null,
-            null,
             _physicalKeys,
             _auditWriter,
             NullLogger<DbtMetadataIngestionService>.Instance);
@@ -228,7 +226,6 @@ public sealed class DbtPhysicalKeyIngestionTests
             _lineageStore,
             null,
             _gatewayOptions,
-            null,
             null,
             null,
             null,
@@ -277,7 +274,6 @@ public sealed class DbtPhysicalKeyIngestionTests
             null,
             null,
             null,
-            null,
             _physicalKeys,
             _auditWriter,
             NullLogger<DbtMetadataIngestionService>.Instance);
@@ -318,7 +314,6 @@ public sealed class DbtPhysicalKeyIngestionTests
             _lineageStore,
             null,
             _gatewayOptions,
-            null,
             null,
             null,
             null,

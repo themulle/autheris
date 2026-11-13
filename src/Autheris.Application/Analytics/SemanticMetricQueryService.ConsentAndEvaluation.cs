@@ -73,7 +73,7 @@ public sealed partial class SemanticMetricQueryService
             return (tableDecision, false);
         }
 
-        // MISC-06: a metric consent can only cure a missing table consent. Any other denial (DENY consent, ReBAC, Casbin, contract,
+        // MISC-06: a metric consent can only cure a missing table consent. Any other denial (DENY consent, Casbin, contract,
         // virtual filter, plugin, profile source) is final; the kind is typed, never matched on reason text. Without a PDP there is no
         // authoritative pipeline to re-evaluate through, so the denial stands.
         if (_pdp == null || tableDecision is not { DenialKind: TableAccessDenialKind.ConsentMissing })
@@ -154,7 +154,7 @@ public sealed partial class SemanticMetricQueryService
                     })
                     .ToList();
 
-                // MISC-06: the projected metric consents join the repository consents inside the full PDP pipeline (ReBAC, contract,
+                // MISC-06: the projected metric consents join the repository consents inside the full PDP pipeline (contract,
                 // Casbin incl. Restrict, hooks, virtual filters, profiles), so virtual-filter predicates and row filters still apply.
                 var secCtx = SecurityPrincipalContext.FromPrincipal(principal, tenantId);
                 var metricDecision = await _pdp.EvaluateAccessAsync(table, tableMetadata, secCtx, requestedColumns: null, projectedConsents, ct).ConfigureAwait(false);

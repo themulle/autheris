@@ -21,7 +21,6 @@ public static class GatewaySections
     public const string HitLStepUp = "Gateway:HitLStepUp";
     public const string Casbin = "Gateway:Casbin";
     public const string CasbinDecisionCache = "Gateway:Casbin:DecisionCache";
-    public const string Rebac = "Gateway:Rebac";
     public const string RowFilters = "Gateway:RowFilters";
     public const string CallerAttributes = "Gateway:CallerAttributes";
     public const string VirtualFilters = "Gateway:VirtualFilters";

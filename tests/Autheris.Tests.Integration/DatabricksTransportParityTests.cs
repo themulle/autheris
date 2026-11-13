@@ -98,7 +98,6 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             builder.UseSetting("Gateway:WebSql:MaxAllowedRows", "500");
 
             builder.UseSetting("Gateway:Mcp:Enabled", "true");
-            builder.UseSetting("Gateway:Rebac:Enabled", "false");
 
             builder.ConfigureTestServices(services =>
             {

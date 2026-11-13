@@ -67,8 +67,7 @@ public sealed class DefaultTenantCatalogScopeTests
     private static GatewayOptions OptionsWithDefault(string? defaultTenant, params string[] shared) => new()
     {
         Tenancy = new TenancyOptions { DefaultTenantId = defaultTenant },
-        Catalog = new Autheris.Domain.Options.DataCatalogOptions { SharedTables = shared },
-        Rebac = new RebacOptions { Enabled = false }
+        Catalog = new Autheris.Domain.Options.DataCatalogOptions { SharedTables = shared }
     };
 
     private static async Task<string[]> StaticVisibleAsync(

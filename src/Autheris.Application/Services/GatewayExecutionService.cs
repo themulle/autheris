@@ -26,7 +26,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly ITrafficDrainController? _drainController;
     private readonly IEnumerable<IDataSourceExecutor>? _dataSourceExecutors;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
-    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly Autheris.Application.DataSources.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
@@ -55,7 +54,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IClientIpResolver? clientIpResolver = null,
         Autheris.Application.DataSources.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
@@ -72,7 +70,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             resolutionService,
             consentRepository,
             cacheService,
-            rebacEvaluator,
             clientIpResolver,
             mandatoryFilters,
             contractManager,
@@ -103,7 +100,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
         _concurrencyGate = concurrencyGate;
-        _rebacEvaluator = rebacEvaluator;
     }
 
     internal Autheris.Application.Policy.Pdp.IAccessDecisionPoint AccessDecisionPoint => _accessDecisionPoint;

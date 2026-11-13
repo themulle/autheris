@@ -75,7 +75,7 @@ public sealed class CatalogVisibilityCompositionTests
     public async Task GraphQl_CatalogField_ReceivesTheDiResolvedService_NotSilentlyEmpty()
     {
         var table = Wp0.Table("sales", "orders", "Orders", ["id"]) with { CatalogView = CatalogView.Granted };
-        var options = new GatewayOptions { Rebac = new RebacOptions { Enabled = false } };
+        var options = new GatewayOptions();
         var user = Wp0.User("S-USER", "tenant-a");
         var accessor = Substitute.For<IHttpContextAccessor>();
         accessor.HttpContext.Returns(new DefaultHttpContext { User = user });

@@ -46,7 +46,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IOptions<GatewayOptions> _options; private readonly ITableMetadataRepository? _tableRepository;
     private readonly IConsentRepository? _consentRepository; private readonly IConsentResolutionService? _consentResolution;
     private readonly IColumnMaskingProvider? _masking; private readonly IPolicyEnforcementService? _policyEnforcement;
-    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly IAuditLogRepository _audit; private readonly Autheris.Application.Audit.IAuditWriter _auditWriter;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IProcedureRowScopeResolver? _rowScope;
@@ -75,7 +74,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IClientIpResolver? clientIpResolver = null,
         ILogger<GovernedProcedureExecutionService>? logger = null,
         IProcedureRowScopeResolver? rowScope = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         IAccessProfileRepository? accessProfileRepository = null,
@@ -94,7 +92,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             consentResolution,
             consentRepository,
             consentCache,
-            rebacEvaluator,
             clientIpResolver,
             mandatoryFilters,
             accessProfileRepository: accessProfileRepository,
@@ -115,7 +112,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _consentResolution = consentResolution; _masking = masking;
         _policyEnforcement = policyEnforcement; _clientIpResolver = clientIpResolver;
         _logger = logger; _rowScope = rowScope;
-        _rebacEvaluator = rebacEvaluator; _consentCache = consentCache;
+        _consentCache = consentCache;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache; _accessProfileCache = accessProfileCache;
     }
@@ -656,7 +653,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return null;
         }
 
-        // Architecture 1: the shared access decision (ReBAC on query paths, consents with the decision cache, Casbin as
+        // Architecture 1: the shared access decision (consents with the decision cache, Casbin as
         // an additional restriction). Row filters (consent or Casbin) cannot be pushed into a procedure: they deny the
         // call unless the result table's filter is enforced by the row scope after the call.
         var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: ResolveClientIp(user));

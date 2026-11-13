@@ -53,7 +53,6 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(_dbFile));
-            b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:SystemMetrics:Enabled", systemMetricsEnabled ? "true" : "false");
         });
 

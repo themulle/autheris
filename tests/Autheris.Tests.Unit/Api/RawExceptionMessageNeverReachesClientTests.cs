@@ -301,23 +301,6 @@ public sealed class RawExceptionMessageNeverReachesClientTests
     }
 
     [Fact]
-    public async Task AuditDetails_ContainTypeNotMessage_Rebac()
-    {
-        var writer = Substitute.For<IAuditWriter>();
-        AuditLogEntry? captured = null;
-        writer.RecordAsync(Arg.Do<AuditLogEntry>(e => captured = e), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        var ctx = Ctx(["GovernanceAdmin"]);
-
-        await RebacEndpoints.AuditInvalidationFailureAsync(writer, ctx, "tenant-1", new InvalidOperationException(Sentinel));
-
-        captured.ShouldNotBeNull();
-        captured!.DetailsJson.ShouldNotContain(Sentinel);
-        using var doc = JsonDocument.Parse(captured.DetailsJson);
-        doc.RootElement.GetProperty("reasonType").GetString().ShouldBe(nameof(InvalidOperationException));
-        doc.RootElement.GetProperty("tenant").GetString().ShouldBe("tenant-1");
-    }
-
-    [Fact]
     public async Task RawExceptionMessage_NeverReachesTheClient_Plan_Confirm_SecurityException_Is403()
     {
         var svc = Substitute.For<IAccessPlanningService>();

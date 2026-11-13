@@ -25,7 +25,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Issue #138 INC-1: the one discovery visibility entry point (always <see cref="CatalogSurface.Discovery"/>). Order of one evaluation:
 /// <see cref="CallerScopeResolver"/> (once) -> <see cref="CatalogVisibility"/> engine -> shape (NotFound rows dropped) -> transport
-/// filter -> memo (no ReBAC filter; hidden objects stay hidden, a grant is not needed to discover). Every failure answers empty / null; nothing falls back
+/// filter -> memo (no further filter; hidden objects stay hidden, a grant is not needed to discover). Every failure answers empty / null; nothing falls back
 /// to an unfiltered list. Scoped: the memo lives and dies with the DI scope.
 /// </summary>
 public sealed class CatalogVisibilityService : ICatalogVisibilityService
@@ -235,7 +235,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         return result;
     }
 
-    /// <summary>One resolution of the caller class; null means "empty answer" (no repository, ReBAC or memo is touched).</summary>
+    /// <summary>One resolution of the caller class; null means "empty answer" (no repository or memo is touched).</summary>
     private Context? Prepare(CatalogCaller? caller)
     {
         if (caller?.Principal is not { } principal || _metadataRepository == null || _consentRepository == null || _options == null)
@@ -280,7 +280,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         return new Context(principal, sid.Value, scope, caller.Tenant, catalogOwner, _options.Catalog.SharedTables ?? [], baseKey);
     }
 
-    /// <summary>Engine -> shape -> ReBAC. Null = a dependency failed (already logged); cancellation propagates.</summary>
+    /// <summary>Engine -> shape. Null = a dependency failed (already logged); cancellation propagates.</summary>
     private async Task<IReadOnlyList<TableMetadata>?> EvaluateAsync(
         Context context, IReadOnlyList<TableMetadata> rows, SchemaContractDefinition? contract, CancellationToken ct)
     {

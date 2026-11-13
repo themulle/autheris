@@ -72,14 +72,6 @@ internal static class ProductionStartupChecks
             throw new ValidationException("Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.");
         }
 
-        if (options.Rebac.SeedTuples.Count > 0)
-        {
-            if (options.Rebac.SeedTuples.Any(t => t.User.Contains("david", StringComparison.OrdinalIgnoreCase) || t.Object.Contains("prod", StringComparison.OrdinalIgnoreCase)))
-            {
-                throw new ValidationException("Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.");
-            }
-        }
-
         // Only DANGER entries are blocked outside Development; WARN entries are permitted (reported above).
         if (dangerBypasses.Count > 0)
         {
@@ -171,11 +163,6 @@ internal static class ProductionStartupChecks
         if (options.GraphQL.TrustedOrigins.Any(o => o != "*" && (!Uri.TryCreate(o, UriKind.Absolute, out var u) || !string.Equals(u.Scheme, "https", StringComparison.OrdinalIgnoreCase))))
         {
             throw new ValidationException("Security violation: Outside Development, TrustedOrigins must contain only HTTPS URLs.");
-        }
-
-        if (options.HighAvailability.MultiNodeClusterMode && options.Rebac.Enabled && !options.Caching.Redis.Enabled)
-        {
-            throw new ValidationException("Security violation: ReBAC in MultiNodeClusterMode requires Caching.Redis.Enabled = true for cluster-wide invalidation (RR-L4-04).");
         }
 
         if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) && !options.Caching.Redis.Enabled)

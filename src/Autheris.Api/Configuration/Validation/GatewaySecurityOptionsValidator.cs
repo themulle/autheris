@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// Validates security, authentication, audit retention, CORS, masking secret, and ReBAC seed options.
+/// Validates security, authentication, audit retention, CORS, masking secret, and masking options.
 /// </summary>
 public sealed class GatewaySecurityOptionsValidator : IValidateOptions<GatewayOptions>
 {
@@ -103,15 +103,6 @@ public sealed class GatewaySecurityOptionsValidator : IValidateOptions<GatewayOp
             !opts.IsColumnMaskingDisabled)
         {
             failures.Add("NF-SEC-03 violation: Outside Development, HmacSecretKeyVaultRef must be a valid Key Vault secret reference.");
-        }
-
-        if (!isDev &&
-            opts.Rebac.SeedTuples.Count > 0 &&
-            opts.Rebac.SeedTuples.Any(t =>
-                t.User.Contains("david", StringComparison.OrdinalIgnoreCase) ||
-                t.Object.Contains("prod", StringComparison.OrdinalIgnoreCase)))
-        {
-            failures.Add("Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.");
         }
 
         return failures.Count > 0

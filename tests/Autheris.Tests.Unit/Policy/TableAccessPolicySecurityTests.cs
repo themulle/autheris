@@ -10,7 +10,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Policy.Services;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Options;
@@ -30,7 +29,6 @@ public sealed class TableAccessPolicySecurityTests
         var repo = new FakeConsentRepository();
         var resolution = new ConsentResolutionService();
         var cache = NullConsentCacheService.Instance;
-        var rebac = NullRebacEvaluator.Instance;
         var options = new GatewayOptions();
         var filters = NullMandatoryRowFilterResolver.Instance;
 
@@ -40,7 +38,6 @@ public sealed class TableAccessPolicySecurityTests
                 resolution,
                 cache,
                 policyEnforcementService: null!,
-                rebac,
                 clientIpResolver: null,
                 options,
                 filters));
@@ -64,8 +61,7 @@ public sealed class TableAccessPolicySecurityTests
             Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = consentBypass }
         };
         var policy = new TableAccessPolicy(
-            new FakeConsentRepository(), new ConsentResolutionService(), NullConsentCacheService.Instance, enforcement,
-            NullRebacEvaluator.Instance, clientIpResolver: null, options, NullMandatoryRowFilterResolver.Instance);
+            new FakeConsentRepository(), new ConsentResolutionService(), NullConsentCacheService.Instance, enforcement, clientIpResolver: null, options, NullMandatoryRowFilterResolver.Instance);
         var roles = new List<Claim> { new(ClaimTypes.NameIdentifier, "u1"), new(ClaimTypes.Role, "Writer") };
         if (clusterAdmin)
         {

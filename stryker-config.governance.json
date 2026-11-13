@@ -2,14 +2,13 @@
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-net/master/src/Stryker.Core/Stryker.Core/stryker-config.schema.json",
   "stryker-config": {
     "configuration": "Release",
-    "test-case-filter": "FullyQualifiedName~FunctionalRightMapper|FullyQualifiedName~ScopedAccessPolicy|FullyQualifiedName~IdentityDeprovisioningService|FullyQualifiedName~IdentityRealmRegistry|FullyQualifiedName~RebacTableGate",
+    "test-case-filter": "FullyQualifiedName~FunctionalRightMapper|FullyQualifiedName~ScopedAccessPolicy|FullyQualifiedName~IdentityDeprovisioningService|FullyQualifiedName~IdentityRealmRegistry",
     "mutate": [
       "**/Governance/Rights/FunctionalRightMapper.cs",
       "**/Governance/Rights/Validators/FunctionalRightMappingValidator.cs",
       "**/Governance/Policies/ScopedAccessPolicyEngine.cs",
       "**/Identity/IdentityRealmRegistry.cs",
-      "**/Identity/Services/IdentityDeprovisioningService.cs",
-      "**/Policy/RebacTableGate.cs"
+      "**/Identity/Services/IdentityDeprovisioningService.cs"
     ],
     "thresholds": {
       "high": 85,

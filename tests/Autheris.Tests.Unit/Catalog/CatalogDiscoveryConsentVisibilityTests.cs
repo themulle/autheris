@@ -7,7 +7,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -28,16 +27,16 @@ public sealed class CatalogDiscoveryConsentVisibilityTests
     private static readonly TableMetadata Countries = Wp0.Table("ref", "countries", "Shared reference data", ["code"]);
 
     private static (CatalogDiscoveryServiceTestHandle Svc, IConsentRepository Consents) Create(
-        GatewayOptions? options = null, IRebacEvaluator? rebac = null, ILogger<Autheris.Application.Catalog.Services.CatalogDiscoveryService>? logger = null, Consent[]? consents = null)
+        GatewayOptions? options = null, ILogger<Autheris.Application.Catalog.Services.CatalogDiscoveryService>? logger = null, Consent[]? consents = null)
     {
         var repo = Wp0.Consents(consents ?? []);
-        return (new CatalogDiscoveryServiceTestHandle(Wp0.Service(Wp0.Tables(OrdersA, InvoicesB, Countries), repo, options, rebac: rebac, logger: logger)), repo);
+        return (new CatalogDiscoveryServiceTestHandle(Wp0.Service(Wp0.Tables(OrdersA, InvoicesB, Countries), repo, options, logger: logger)), repo);
     }
 
     private static string[] Names(IEnumerable<CatalogDatasetSummary> list) => list.Select(d => d.Table).OrderBy(n => n).ToArray();
 
     [Fact]
-    public async Task List_CallerWithoutConsent_ReBacOff_SeesNothing()
+    public async Task List_CallerWithoutConsent_SeesNothing()
     {
         var (svc, _) = Create();
         var user = Wp0.User("S-B-USER", "tenant-b");

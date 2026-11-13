@@ -68,7 +68,7 @@ internal static class McpCatalogVisibility
 
     /// <summary>
     /// Consent, tier and column visibility (<see cref="VisibleTablesAsync(IReadOnlyList{TableMetadata}, ClaimsPrincipal?, IConsentRepository?, GatewayOptions?, CancellationToken)"/>)
-    /// intersected with the catalog visibility service, which adds the ReBAC step (MCP-14). A table must pass both; without a
+    /// intersected with the catalog visibility service, which adds the visibility step (MCP-14). A table must pass both; without a
     /// service the first rule alone applies (the service is always registered in a running gateway). The intersection keeps the
     /// column filtering of the first rule and can only remove tables.
     /// </summary>

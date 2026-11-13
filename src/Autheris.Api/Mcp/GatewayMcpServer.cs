@@ -372,7 +372,7 @@ public static class GatewayMcpServer
                         Content = new TextContentBlock
                         {
                             Text = $"Perform an access and compliance audit on dataset '{ds}' for principal '{principal}':\n" +
-                                   $"1. Check effective ReBAC authorization and row-level security constraints.\n" +
+                                   $"1. Check effective authorization and row-level security constraints.\n" +
                                    $"2. List all columns with their sensitivity classifications and masking states (clear, mask, deny).\n" +
                                    $"3. Inspect data lineage via get_data_lineage to identify downstream consumers and potential compliance risks."
                         }

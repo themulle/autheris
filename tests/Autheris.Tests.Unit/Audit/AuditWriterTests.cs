@@ -1,7 +1,6 @@
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -110,29 +109,5 @@ public sealed class AuditWriterTests
 
         await Should.ThrowAsync<AuditUnavailableException>(() => writer.RecordAsync(Entry(AuditEventTypes.AuditConfigChanged)));
         await Should.NotThrowAsync(() => writer.RecordAsync(Entry(AuditEventTypes.CatalogRead)));
-    }
-
-    [Fact]
-    public async Task RebacGate_OnCancellation_Rethrows()
-    {
-        var evaluator = Substitute.For<IRebacEvaluator>();
-        evaluator.IsEnabled.Returns(true);
-        evaluator.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<RebacCheckResult>>(_ => throw new OperationCanceledException());
-
-        await Should.ThrowAsync<OperationCanceledException>(async () =>
-            await RebacTableGate.IsAllowedAsync(evaluator, Autheris.Tests.Common.TestTenants.Default, new Sid("S-1"), new TableIdentifier("d", "s", "t"), CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task RebacGate_OnDependencyFailure_StillDenies()
-    {
-        var evaluator = Substitute.For<IRebacEvaluator>();
-        evaluator.IsEnabled.Returns(true);
-        evaluator.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<RebacCheckResult>>(_ => throw new InvalidOperationException("boom"));
-
-        (await RebacTableGate.IsAllowedAsync(evaluator, Autheris.Tests.Common.TestTenants.Default, new Sid("S-1"), new TableIdentifier("d", "s", "t"), CancellationToken.None))
-            .ShouldBeFalse();
     }
 }

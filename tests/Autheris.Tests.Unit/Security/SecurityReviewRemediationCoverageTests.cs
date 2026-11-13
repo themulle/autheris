@@ -11,8 +11,6 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.FinOps.Interfaces;
 using Autheris.Application.Governance;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -155,56 +153,6 @@ public sealed class SecurityReviewRemediationCoverageTests
         // Reject cross-tenant correlation attempt
         Should.Throw<InvalidOperationException>(() =>
             MaskingRule.CreateTenantScopedHmacRule(tenantARule, "tenant-beta"));
-    }
-
-    // =========================================================================
-    // POL-7 (Medium): ReBAC rejection of empty/whitespace tuple fields
-    // =========================================================================
-
-    [Theory]
-    [InlineData("", "viewer", "doc:10", "tenant-1")]
-    [InlineData("alice", "   ", "doc:10", "tenant-1")]
-    [InlineData("alice", "viewer", "", "tenant-1")]
-    [InlineData("alice", "viewer", "doc:10", "")]
-    [InlineData("alice", "viewer", ":doc-without-namespace", "tenant-1")]
-    public async Task POL_7_InMemoryRebacStore_RejectsEmptyOrWhitespaceFields(string user, string rel, string obj, string tenant)
-    {
-        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
-        var tuple = new RebacTuple(tenant, user, rel, obj);
-
-        await Should.ThrowAsync<ArgumentException>(() => store.AddTupleAsync(tuple).AsTask());
-    }
-
-    [Fact]
-    public async Task POL_7_ZanzibarRebacEvaluator_DeniesCheck_OnEmptyParameters()
-    {
-        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
-        var options = Options.Create(new GatewayOptions { Rebac = new RebacOptions { Enabled = true } });
-        var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance);
-
-        var result = await evaluator.CheckAsync(new RebacCheckRequest("tenant-1", "", "viewer", "doc:10"));
-        result.Allowed.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task POL_7_Userset_GroupMember_Syntax_FunctionsCorrectly()
-    {
-        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
-        var options = Options.Create(new GatewayOptions { Rebac = new RebacOptions { Enabled = true } });
-        var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance);
-
-        // Tuple 1: group:engineering#member has 'viewer' on doc:specs
-        await store.AddTupleAsync(new RebacTuple("tenant-alpha", "group:engineering#member", "viewer", "doc:specs"));
-        // Tuple 2: alice is member of group:engineering
-        await store.AddTupleAsync(new RebacTuple("tenant-alpha", "alice", "member", "group:engineering"));
-
-        // Alice should be permitted via userset expansion
-        var aliceResult = await evaluator.CheckAsync(new RebacCheckRequest("tenant-alpha", "alice", "viewer", "doc:specs"));
-        aliceResult.Allowed.ShouldBeTrue();
-
-        // Bob is not a member of group:engineering and should be denied
-        var bobResult = await evaluator.CheckAsync(new RebacCheckRequest("tenant-alpha", "bob", "viewer", "doc:specs"));
-        bobResult.Allowed.ShouldBeFalse();
     }
 
     // =========================================================================

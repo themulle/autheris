@@ -7,7 +7,6 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -23,11 +22,10 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class CatalogVisibilityServiceHardeningTests
 {
-    private static GatewayOptions Opts(bool rebac = false) => new()
+    private static GatewayOptions Opts() => new()
     {
         Tenancy = TenancyShape.Multi.Options(),
-        Catalog = new DataCatalogOptions { SharedTables = [] },
-        Rebac = new RebacOptions { Enabled = rebac }
+        Catalog = new DataCatalogOptions { SharedTables = [] }
     };
 
     private static TableMetadata[] Rows(int count) =>

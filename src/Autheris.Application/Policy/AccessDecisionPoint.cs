@@ -9,7 +9,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Services;
 using Autheris.Application.VirtualFilters;
@@ -25,14 +24,12 @@ using Microsoft.Extensions.Options;
 
 public sealed class AccessDecisionPoint : IAccessDecisionPoint
 {
-    private readonly IOptions<GatewayOptions> _options;
     private readonly ITableMetadataRepository? _metadataRepo;
     private readonly IConsentResolutionService? _consentService;
     private readonly IConsentRepository? _consentRepo;
     private readonly IPolicyEnforcementService _policyEnforcementService;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IMandatoryRowFilterResolver _mandatoryFilters;
-    private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _logger;
@@ -44,7 +41,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         IConsentRepository? consentRepo = null,
         IClientIpResolver? clientIpResolver = null,
         IMandatoryRowFilterResolver? mandatoryFilters = null,
-        IRebacEvaluator? rebacEvaluator = null,
         ITableMetadataRepository? metadataRepo = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         TimeProvider? timeProvider = null,
@@ -52,13 +48,11 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(policyEnforcementService);
-        _options = options;
         _policyEnforcementService = policyEnforcementService;
         _consentService = consentService;
         _consentRepo = consentRepo;
         _clientIpResolver = clientIpResolver;
         _mandatoryFilters = mandatoryFilters ?? NullMandatoryRowFilterResolver.Instance;
-        _rebacEvaluator = rebacEvaluator;
         _metadataRepo = metadataRepo;
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -166,19 +160,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
                 tableId,
                 [$"Direct Iceberg catalog access not permitted: Table '{@namespace}.{table}' is restricted by virtual filters."],
                 request.Transport);
-        }
-
-        if (RebacTableGate.IsEnforcedOnQueryPaths(_options.Value))
-        {
-            var rebacAllowed = await RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenant, userSid, tableId, cancellationToken).ConfigureAwait(false);
-            if (!rebacAllowed)
-            {
-                _logger.LogWarning(
-                    "ReBAC denied user {User} access to Iceberg table {TableId}",
-                    LogSanitizer.Sanitize(userSid.Value),
-                    LogSanitizer.Sanitize(tableId.ToString()));
-                return AccessDecision.Denied(tableId, [$"Access to table '{@namespace}.{table}' denied by ReBAC policy."], request.Transport);
-            }
         }
 
         string? abacRowFilter = null;

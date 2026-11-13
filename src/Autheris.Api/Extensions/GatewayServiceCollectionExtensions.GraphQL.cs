@@ -208,7 +208,6 @@ public static partial class GatewayServiceCollectionExtensions
             .AddMutationType<Mutation>()
             .AddGatewaySubscriptions(gatewayOptions.GraphQL)
             .AddDirectiveType<Autheris.GraphQL.Directives.McpToolDirectiveType>()
-            .AddDirectiveType<Autheris.GraphQL.Directives.RebacDirectiveType>()
             .AddMaxExecutionDepthRule(maxDepth)
             .AddValidationRule<Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule>((sp, _) =>
                 CreateQueryCostRule(

@@ -251,7 +251,7 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
             visibilityService: new Autheris.Application.Catalog.Services.CatalogVisibilityService(
                 tableRepo,
                 consentRepo,
-                Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = Autheris.Tests.Common.TenancyShapeExtensions.Options(Autheris.Tests.Common.TenancyShape.Multi), Rebac = new Autheris.Domain.Options.RebacOptions { Enabled = false } }),
+                Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = Autheris.Tests.Common.TenancyShapeExtensions.Options(Autheris.Tests.Common.TenancyShape.Multi) }),
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Catalog.Services.CatalogVisibilityService>.Instance));
 
         var user = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1")], "test"));
@@ -384,12 +384,5 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
         // Assert
         options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("Agent.Read");
         options.Authentication.EntraId.GetEffectiveReadOnlyScopes().ShouldContain("App.Read");
-    }
-
-    private static Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator DisabledRebac()
-    {
-        var evaluator = NSubstitute.Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>();
-        evaluator.IsEnabled.Returns(false);
-        return evaluator;
     }
 }

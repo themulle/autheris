@@ -326,7 +326,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             scoreMap[hit.TableId] = (cur.Score + rrf, cur.Bm25, cur.Vec, cur.Terms);
         }
 
-        // 4. Governance ReBAC-Filterung (bereits vorab angewendet) & Join-Graph-Expansion
+        // 4. Governance-Filterung (bereits vorab angewendet) & Join-Graph-Expansion
         var finalHits = scoreMap
             .OrderByDescending(kvp => kvp.Value.Score)
             .Take(query.Limit)

@@ -195,7 +195,7 @@ public sealed partial class Query
                 .Build());
         }
 
-        // #138 INC-1: the one visibility service decides the row set (caller scope, consent, tier, shape, ReBAC); a missing service is empty.
+        // #138 INC-1: the one visibility service decides the row set (caller scope, consent, tier, shape); a missing service is empty.
         // Scope, admin view and shape come from the returned set; this channel never recomputes them.
         if (visibilityService == null)
         {

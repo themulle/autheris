@@ -228,7 +228,6 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
             b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(dbFile));
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", bypassConsent ? "true" : "false");
-            b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dataFile}");
             b.ConfigureLogging(l => l.AddProvider(logs));

@@ -18,7 +18,6 @@ public readonly record struct CatalogVisibilityCacheKey(
     long StructureVersion,
     long ContentVersion,
     long PolicyEpoch,
-    long RebacGeneration,
     string? TenantId = null,
     string? Groups = null,
     string? Roles = null,
@@ -29,8 +28,7 @@ public readonly record struct CatalogVisibilityCacheKey(
         string? domainFilter,
         long structureVersion,
         long contentVersion,
-        long policyEpoch,
-        long rebacGeneration)
+        long policyEpoch)
     {
         ArgumentNullException.ThrowIfNull(principal);
         var sid = principal.GetUserSid()?.Value ?? principal.Identity?.Name ?? "anonymous";
@@ -45,7 +43,6 @@ public readonly record struct CatalogVisibilityCacheKey(
             structureVersion,
             contentVersion,
             policyEpoch,
-            rebacGeneration,
             tenant,
             groups,
             roles,

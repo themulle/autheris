@@ -127,7 +127,6 @@ public sealed class DbtSyncTableCreationTests
             sqlEndpointLoader: null,
             relationRepository: null,
             virtualFilterAdmin: null,
-            rebacStore: null,
             tagImport: tags,
             syntheticRowGenerator: null,
             logger: NullLogger<DbtMetadataIngestionService>.Instance);

@@ -44,7 +44,7 @@ public interface ICatalogSearchEngine
     /// <summary>Erzeugt atomar einen neuen unveränderlichen Such-Snapshot im Speicher.</summary>
     Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default);
 
-    /// <summary>Führt eine hochoptimierte, sperrenfreie Suche unter Berücksichtigung von ReBAC aus.</summary>
+    /// <summary>Führt eine hochoptimierte, sperrenfreie Suche unter Berücksichtigung der Governance aus.</summary>
     IReadOnlyList<CatalogSearchHit> Search(
         CatalogSearchQuery query, 
         Func<TableIdentifier, bool> isVisiblePredicate);

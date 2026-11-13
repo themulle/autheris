@@ -138,7 +138,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("ProductionGovernance_TestAuthHandler", ("Authentication:EnableTestAuthHandler", "true")),
             Prod("ProductionGovernance_EntraIdHttpsMetadata", ("Authentication:EntraId:RequireHttpsMetadata", "false")),
             Prod("ProductionGovernance_AnonymousAccess", ("Insecure:danger_allow_anonymous_access", "true")),
-            Prod("ProductionGovernance_DemoRebacSeed", ("Rebac:SeedTuples:0:TenantId", "t"), ("Rebac:SeedTuples:0:User", "user:david"), ("Rebac:SeedTuples:0:Relation", "viewer"), ("Rebac:SeedTuples:0:Object", "table:orders")),
             Prod("ProductionGovernance_DangerBypass", ("Insecure:danger_disable_column_masking", "true")),
             Dev("ProductionGovernance_DangerBypassAllowedInDevelopment", ("Insecure:danger_disable_column_masking", "true")),
 
@@ -151,7 +150,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("ProductionTransport_DataSourceWithoutTls", ("DataSources:Connections:pg:Provider", "PostgreSql"), ("DataSources:Connections:pg:ConnectionString", "Host=h;Database=d;Username=u"), ("DataSources:Connections:pg:PasswordKeyVaultRef", "kv://secret"), ("DataSources:Connections:pg:DefaultSchema", "public")),
             Prod("ProductionTransport_WildcardOrigin", ("GraphQL:TrustedOrigins:0", "*")),
             Prod("ProductionTransport_PlainHttpOrigin", ("GraphQL:TrustedOrigins:0", "http://app.example.org")),
-            Prod("ProductionTransport_RebacClusterWithoutRedis", ("HighAvailability:MultiNodeClusterMode", "true"), ("Rebac:Enabled", "true")),
             Prod("ProductionTransport_ReplicasWithoutRedis", ("HighAvailability:Replicas", "2")),
             Prod("ProductionTransport_PluginsWithoutManifest", ("Plugins:Directory", "{tmp}"), ("Plugins:RequireIntegrityManifest", "false")),
 
