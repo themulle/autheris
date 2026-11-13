@@ -361,7 +361,8 @@ public sealed partial class SimulationIsolationArchitectureTests
     internal static IReadOnlyList<string> DockerRunViolations(IEnumerable<string> texts)
     {
         var bad = new List<string>();
-        var runLines = JoinedNonCommentLines(texts).Where(l => Regex.IsMatch(l, @"\bdocker\s+run\b")).ToList();
+        // The governance PostgreSQL container (WP-OI-CI-8) is a different image and is judged by PostgresRunViolations instead.
+        var runLines = JoinedNonCommentLines(texts).Where(l => Regex.IsMatch(l, @"\bdocker\s+run\b") && !l.Contains("$SIM_POSTGRES_IMAGE", StringComparison.Ordinal)).ToList();
         if (runLines.Count == 0)
         {
             // Vacuity check: scripts/sim/run-api-fuzz.sh must contain the Schemathesis docker run this guard is about.
