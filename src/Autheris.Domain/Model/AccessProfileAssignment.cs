@@ -64,6 +64,7 @@ public static class AccessProfileAssignmentRules
     public const string SameApprover = "APPROVER_MUST_DIFFER";
     public const string SelfRenewal = "RENEWAL_BY_GRANTEE_FORBIDDEN";
     public const string KindConflict = "ASSIGNMENT_KIND_CONFLICT";
+    public const string RoleSubjectUnsupported = "ROLE_ASSIGNEE_UNSUPPORTED";
 
     private static bool Same(string? a, string? b) => a != null && b != null && string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
 
@@ -125,6 +126,11 @@ public static class AccessProfileAssignmentRules
         if (!Enum.IsDefined(a.Kind))
         {
             throw new AccessProfileAssignmentRejectedException(KindConflict, "The assignment kind is not supported.");
+        }
+
+        if (a.SubjectType == AccessProfileSubjectType.Role)
+        {
+            throw new AccessProfileAssignmentRejectedException(RoleSubjectUnsupported, "Role assignees are not supported; assign the profile to a group or a user.");
         }
 
         var individual = a.SubjectType == AccessProfileSubjectType.User;

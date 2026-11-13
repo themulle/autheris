@@ -515,6 +515,9 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         IReadOnlySet<Sid> subjectGroupSids,
         IReadOnlySet<string> userRoles,
         IReadOnlySet<Sid>? allUserSids = null) =>
-        Autheris.Application.Policy.GranteeMatcher.Matches(
-            consent.GranteeType, consent.GranteeSid, consent.RoleName, consent.RoleId, userSid, subjectGroupSids, userRoles, allUserSids);
+        // A role-bound Deny still restricts (fail closed); a role never matches a grant.
+        consent.Effect == ConsentEffect.Deny
+            ? Autheris.Application.Policy.GranteeMatcher.MatchesRestriction(
+                consent.GranteeType, consent.GranteeSid, consent.RoleName, consent.RoleId, userSid, subjectGroupSids, userRoles, allUserSids)
+            : Autheris.Application.Policy.GranteeMatcher.MatchesGrant(consent.GranteeType, consent.GranteeSid, userSid, subjectGroupSids, allUserSids);
 }

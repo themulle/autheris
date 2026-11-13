@@ -4,12 +4,25 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// Whether a grant (consent or access profile) addresses the caller: users and service principals by SID, groups by
-/// group SID, roles by name (or role id). One rule for consents and virtual filter profiles.
+/// Whether a grantee addresses the caller. Grants (consents, write grants) match users, service principals and groups by SID and
+/// never match a role. Restrictions (virtual filter profiles) also match roles by name or id, so a role-bound restriction keeps applying.
 /// </summary>
 public static class GranteeMatcher
 {
-    public static bool Matches(
+    /// <summary>Whether a consent or write-grant grantee addresses the caller; a role grantee never matches.</summary>
+    public static bool MatchesGrant(
+        GranteeType granteeType,
+        Sid? granteeSid,
+        Sid userSid,
+        IReadOnlySet<Sid> groupSids,
+        IReadOnlySet<Sid>? allUserSids = null) =>
+        granteeType != GranteeType.Role &&
+        MatchesRestriction(granteeType, granteeSid, null, null, userSid, groupSids, EmptyRoles, allUserSids);
+
+    private static readonly IReadOnlySet<string> EmptyRoles = new HashSet<string>(0);
+
+    /// <summary>Whether a restriction grantee addresses the caller; roles match by name or id.</summary>
+    public static bool MatchesRestriction(
         GranteeType granteeType,
         Sid? granteeSid,
         string? roleName,

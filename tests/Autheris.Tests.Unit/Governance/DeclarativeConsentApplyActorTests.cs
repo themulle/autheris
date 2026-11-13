@@ -27,7 +27,7 @@ public sealed class DeclarativeConsentApplyActorTests
     }
 
     private static DeclarativeConsentManifest Manifest() =>
-        new("1", [new DeclarativeConsentPolicy("default", "sales", "orders", "Role", "DataScientist", "Allow")]);
+        new("1", [new DeclarativeConsentPolicy("default", "sales", "orders", "Group", "S-1-5-21-GROUP-DS", "Allow")]);
 
     [Fact]
     public async Task Declarative_Apply_Without_Caller_Sid_Is_Rejected()

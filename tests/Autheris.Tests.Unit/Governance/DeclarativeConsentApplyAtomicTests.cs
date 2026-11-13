@@ -31,8 +31,8 @@ public sealed class DeclarativeConsentApplyAtomicTests
         return repo;
     }
 
-    private static DeclarativeConsentPolicy RolePolicy(string table = "orders", string role = "DataScientist") =>
-        new("default", "sales", table, "Role", role, "Allow");
+    private static DeclarativeConsentPolicy RolePolicy(string table = "orders", string role = "S-1-5-21-GROUP-DS") =>
+        new("default", "sales", table, "Group", role, "Allow");
 
     [Fact]
     public async Task SEC_SC_03_RoleManifest_AppliedTwice_SecondApplyIsUnchanged()

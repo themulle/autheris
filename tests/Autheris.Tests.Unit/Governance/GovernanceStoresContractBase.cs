@@ -224,12 +224,12 @@ public abstract class GovernanceStoresContractBase : IAsyncLifetime
     {
         if (!Available) return;
         var group = Id("grp");
-        await Rights.CreateMappingAsync(Mapping(group, FunctionalRight.DataUnmaskSensitive, "Same-Person", "same-person"));
+        await Rights.CreateMappingAsync(Mapping(group, FunctionalRight.SecurityAdmin, "Same-Person", "same-person"));
         await Rights.CreateMappingAsync(Mapping(group, FunctionalRight.DataExport, "same-person", "same-person"));
 
         var approved = await Rights.GetApprovedMappingsForGroupsAndRolesAsync(Tenant, Realm, [group]);
 
-        approved.ShouldNotContain(m => m.FunctionalRight == FunctionalRight.DataUnmaskSensitive);
+        approved.ShouldNotContain(m => m.FunctionalRight == FunctionalRight.SecurityAdmin);
         approved.ShouldContain(m => m.FunctionalRight == FunctionalRight.DataExport);
     }
 
@@ -238,11 +238,11 @@ public abstract class GovernanceStoresContractBase : IAsyncLifetime
     {
         if (!Available) return;
         var group = Id("grp");
-        await Rights.CreateMappingAsync(Mapping(group, FunctionalRight.DataUnmaskSensitive, "approver", "creator"));
+        await Rights.CreateMappingAsync(Mapping(group, FunctionalRight.SecurityAdmin, "approver", "creator"));
 
         var approved = await Rights.GetApprovedMappingsForGroupsAndRolesAsync(Tenant, Realm, [group]);
 
-        approved.ShouldContain(m => m.FunctionalRight == FunctionalRight.DataUnmaskSensitive);
+        approved.ShouldContain(m => m.FunctionalRight == FunctionalRight.SecurityAdmin);
     }
 
     [Fact]

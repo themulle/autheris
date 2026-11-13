@@ -149,7 +149,8 @@ public sealed class StepSqlLintTests
                 (7, "orphan_tables"),
                 (8, "column_collation"),
                 (9, "write_grants"),
-                (10, "table_column_ordinal")
+                (10, "table_column_ordinal"),
+                (11, "role_grantee_and_profile_assignment_retirement")
             ]);
         }
     }

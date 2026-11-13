@@ -130,22 +130,12 @@ public sealed class Consent
 
         if (GranteeType == GranteeType.Role)
         {
-            if (RoleId == null && string.IsNullOrEmpty(RoleName))
-            {
-                throw new InvalidOperationException($"Consent {Id}: RoleId or RoleName must be specified when GranteeType is Role.");
-            }
-
-            if (WriteRules.Count > 0)
-            {
-                throw new InvalidOperationException($"Consent {Id}: Role grantees cannot hold write rules.");
-            }
+            throw new InvalidOperationException($"Consent {Id}: Role grantees are not supported; grant to a group or a user instead.");
         }
-        else
+
+        if (GranteeSid == null || string.IsNullOrWhiteSpace(GranteeSid.Value.Value))
         {
-            if (GranteeSid == null || string.IsNullOrWhiteSpace(GranteeSid.Value.Value))
-            {
-                throw new InvalidOperationException($"Consent {Id}: GranteeSid must be specified when GranteeType is User, Group or ServicePrincipal.");
-            }
+            throw new InvalidOperationException($"Consent {Id}: GranteeSid must be specified when GranteeType is User, Group or ServicePrincipal.");
         }
 
         if (Effect == ConsentEffect.Deny && WriteRules.Count > 0)
