@@ -187,6 +187,7 @@ public sealed class AuthModeEndToEndTests : IClassFixture<AuthModeEndToEndTests.
             {
                 app.Use(async (context, nextMiddleware) =>
                 {
+                    context.Connection.RemoteIpAddress ??= IPAddress.Loopback;
                     if (context.Request.Headers.TryGetValue(PeerHeader, out var value) && IPAddress.TryParse(value.ToString(), out var peer))
                     {
                         context.Connection.RemoteIpAddress = peer;
@@ -327,6 +328,11 @@ public sealed class AuthModeEndToEndTests : IClassFixture<AuthModeEndToEndTests.
         var response = await _fixture.Factory.CreateClient().SendAsync(request);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        // Discriminating: the same token is denied on a table without a grant for its group.
+        using var other = new HttpRequestMessage(HttpMethod.Get, "/api/v1/envoy/check/api/v1/" + NoGrant.TableName);
+        Authenticate(other, Mode.Jwt);
+        (await _fixture.Factory.CreateClient().SendAsync(other)).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
     [Fact]

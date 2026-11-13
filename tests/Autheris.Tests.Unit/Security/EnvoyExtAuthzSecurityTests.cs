@@ -19,11 +19,12 @@ public sealed class EnvoyExtAuthzSecurityTests
 {
     private readonly IAccessDecisionPoint _policyService;
     private readonly EnvoyExtAuthzService _service;
+    private readonly ITableMetadataRepository _tableRepository;
 
     public EnvoyExtAuthzSecurityTests()
     {
         _policyService = Substitute.For<IAccessDecisionPoint>();
-        var tables = Substitute.For<ITableMetadataRepository>();
+        var tables = _tableRepository = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(ci => MetadataOf(ci.Arg<TableIdentifier>()));
         _service = new EnvoyExtAuthzService(
             _policyService,
@@ -574,6 +575,8 @@ public sealed class EnvoyExtAuthzSecurityTests
         var response = await CheckAsync(_service, CompleteSubject() with { GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Degraded });
 
         Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        Assert.Contains("identity.groups_unresolved", response.HttpResponse.DeniedResponse.Body);
+        await _tableRepository.DidNotReceive().GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>());
         await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
     }
 
