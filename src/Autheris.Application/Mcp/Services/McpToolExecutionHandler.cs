@@ -68,7 +68,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         Autheris.Application.Analytics.ISemanticMetricQueryService? metricQueryService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
         Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
-        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null)
+        Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
+        IGraphQlCatalogMap? graphQlMap = null)
     {
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
