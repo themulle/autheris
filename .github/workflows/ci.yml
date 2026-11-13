@@ -99,6 +99,14 @@ jobs:
           # The Parity exclusion stays literal on the dotnet test line (ParityIsolationArchitectureTests scans it; Parity runs only in the nightly parity workflow).
           dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER&Category!=Parity" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
 
+      # The parity project is outside Autheris.sln and runs only in parity-nightly.yml; this step only compiles it so a broken
+      # project fails the PR. ParityIsolationArchitectureTests allows exactly these two lines outside the nightly.
+      - name: Compile-only guard for the parity test project (never run here)
+        timeout-minutes: 10
+        run: |
+          dotnet restore tests/Autheris.Tests.Parity/Autheris.Tests.Parity.csproj --locked-mode
+          dotnet build tests/Autheris.Tests.Parity/Autheris.Tests.Parity.csproj -c Release --no-restore -p:AutherisIncludeTestAuth=true -warnaserror
+
       # WP-ARC-B-12 (D7): the chart must lint and render with and without the optional governance migration job.
       - name: Lint and render Helm chart
         run: |

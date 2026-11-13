@@ -92,6 +92,7 @@ Plan files of these items were deleted because their work is merged and nothing 
 
 | Id | Title | Issue / PR |
 |---|---|:---:|
+| `CI-GUARD-2026-11-13` | CI guards (no plan file): `build-and-test` compiles `Autheris.Tests.Parity` without running it; scheduled workflows (codeql, trivy, parity, simulation, sql-compiler-gate nightlies) open or comment on one issue per workflow (label `ci-nightly-failure`) on a failed scheduled run. Follow-up: a scheduled wrapper for `footprint-budget.yml` (reusable workflow of `release.yml`, not alerted yet); the G9 Databricks job is not alerted (approval-gated). | branch `ci/parity-build-guard` |
 | `REQ-REV-15` / `PLAN-REV-15` | Critical and High security review remediation and CodeQL alerts | **#464** |
 | `REQ-DBT-463` / `PLAN-DBT-463` | Accept `unique_combination` as alias of `unique_combination_of_columns` | #463 / **#465** |
 | `REQ-MGS-448` / `PLAN-MGS-448` | Catalog-governed lowering of minimum group size for non-personal tables | #448 / **#462** |
