@@ -461,59 +461,6 @@ public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
     }
 
     // =====================================================================================
-    // H-05: Policy simulation tenant scope
-    // =====================================================================================
-
-    [Fact]
-    public async Task H05_PolicySimulation_NullRequestTenant_QueriesOnlyEffectiveTenant()
-    {
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        auditRepo.QueryAuditLogsAsync(Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<AuditLogEntry>>(Array.Empty<AuditLogEntry>()));
-
-        var service = new PolicySimulationService(auditRepo);
-        var request = new PolicySimulationRequest(DraftPolicyCsv: "p, *, *, *, *, true, deny", Tenant: null, Limit: 10000);
-
-        await service.SimulateAsync(request, TenantA);
-
-        await auditRepo.Received(1).QueryAuditLogsAsync(
-            Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(),
-            Arg.Is<TenantId?>(t => t.HasValue && t.Value == TenantA),
-            Arg.Any<CancellationToken>());
-        await auditRepo.DidNotReceive().QueryAuditLogsAsync(
-            Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(),
-            Arg.Is<TenantId?>(t => !t.HasValue),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task H05_PolicySimulation_ForeignRequestTenant_IsIgnoredInFavourOfEffectiveTenant()
-    {
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        auditRepo.QueryAuditLogsAsync(Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<AuditLogEntry>>(Array.Empty<AuditLogEntry>()));
-
-        var service = new PolicySimulationService(auditRepo);
-        var request = new PolicySimulationRequest(DraftPolicyCsv: "p, *, *, *, *, true, deny", Tenant: new TenantId("tenant-victim"));
-
-        await service.SimulateAsync(request, TenantA);
-
-        await auditRepo.DidNotReceive().QueryAuditLogsAsync(
-            Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(),
-            Arg.Is<TenantId?>(t => t.HasValue && t.Value.Value == "tenant-victim"),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task H05_PolicySimulation_DefaultTenant_IsRejected()
-    {
-        var service = new PolicySimulationService(Substitute.For<IAuditLogRepository>());
-        var request = new PolicySimulationRequest(DraftPolicyCsv: "p, *, *, *, *, true, deny");
-
-        await Should.ThrowAsync<ArgumentException>(() => service.SimulateAsync(request, default));
-    }
-
-    // =====================================================================================
     // Low: consent cache TTL bounded by ValidTo
     // =====================================================================================
 

@@ -84,8 +84,9 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddAutherisCatalog();
 
         // Strategic Enterprise Moats (P10, P11, P12)
-        services.AddSingleton<IPolicySimulationService, PolicySimulationService>();
         services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
+        services.AddSingleton<Autheris.Application.Policy.Pdp.IExplainSubjectResolver, Autheris.Application.Policy.Pdp.DegradedExplainSubjectResolver>();
+        services.AddScoped<Autheris.Application.Policy.Pdp.IAccessExplanationService, Autheris.Application.Policy.Pdp.AccessExplanationService>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
         services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // 16

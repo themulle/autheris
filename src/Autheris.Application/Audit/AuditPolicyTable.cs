@@ -16,6 +16,8 @@ public static class AuditPolicyTable
         [AuditEventTypes.AuthSucceeded] = AuditFailurePolicy.BestEffort,
         [AuditEventTypes.AuthBruteForceDetected] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.AuthzEndpointDenied] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.AuthzExplain] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.AuthzGrantsList] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.RateLimitExceeded] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.TokenRevoked] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.TokenRevokedHit] = AuditFailurePolicy.FailClosed,

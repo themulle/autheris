@@ -49,7 +49,7 @@ public class SecurityReviewG3EndpointAuthzTests
     }
 
     [Fact]
-    public async Task A2_PolicySimulation_AuthorizationMatrix()
+    public async Task A2_OwnerOrAuditRoleAuthorizationMatrix_ForAuditRoutes()
     {
         foreach (var role in new[] { "GovernanceAdmin", "ClusterAdmin", "PrivacyAdmin", "Auditor" })
         {

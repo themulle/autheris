@@ -74,4 +74,5 @@ public sealed record AccessExplanation(
     IReadOnlyList<ColumnStateExplanation> Columns,
     EffectiveGroupsExplanation Groups,
     IReadOnlyList<DecisionGrantRef> Grants,
-    long PolicyEpoch);
+    long PolicyEpoch,
+    bool SubjectResolved = true);
