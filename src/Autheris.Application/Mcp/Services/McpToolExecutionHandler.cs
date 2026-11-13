@@ -5,7 +5,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,11 +28,8 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
 {
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
+    // Issue #702: no null members and no empty objects in tool results.
+    private static readonly JsonSerializerOptions JsonOpts = McpResultJson.Options;
 
     // Structured tool errors (isError:true) use the stable codes of the MCP query executor; the messages are fixed texts.
     private const string InvalidParamsCode = "INVALID_PARAMS";
