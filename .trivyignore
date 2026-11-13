@@ -16,3 +16,6 @@ CVE-2026-89161 # Exp: 2026-12-31, Justification: Base image libpcre2-8-0 patch 1
 CVE-2026-109518 # Exp: 2026-12-31, Justification: Base image libapt-pkg6.0t64 patch 2.8.4ubuntu0.1 in Ubuntu noble
 
 
+
+# Base image perl-base (Ubuntu 24.04 Noble) - CVE-2026-82560
+CVE-2026-82560 # Exp: 2026-12-31, Justification: Base image perl-base fix 5.38.2-3.2ubuntu0.7 pending in the dotnet/aspnet 10.0.15 image (installed 5.38.2-3.2ubuntu0.6); bump the base image digest once published
