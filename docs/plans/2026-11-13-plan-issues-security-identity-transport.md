@@ -107,6 +107,21 @@ Recommended order: WP-OI-SEC-ID-2 (governance TLS is enforced nowhere today) -> 
 - WP-OI-SEC-ID-3 (SHA-256 pins, image policy) - light review with Q-SECID-3/4.
 - #469, #482, #484: no review; the owner can close them with the evidence above.
 
+## Phase 3 result (2026-11-13, group 1)
+
+Review: [`2026-11-13-sec-issues-group-1.md`](2026-11-13-sec-issues-group-1.md). Binding conditions `SEC-OI-<issue>-<n>` apply to Phase 4.
+
+| Work package | Verdict | Developer-ready |
+|---|---|---|
+| WP-OI-SEC-ID-2 (#483 TLS policy) | APPROVED WITH CONDITIONS (SEC-OI-483-1..4) | yes |
+| WP-OI-SEC-ID-3 (#483 pins, image policy) | APPROVED WITH CONDITIONS (SEC-OI-483-5) | yes |
+| WP-OI-SEC-ID-4 (#487) | APPROVED WITH CONDITIONS (SEC-OI-487-1..4) | yes |
+| WP-OI-SEC-ID-5 (#489, WP-43 PR 4a; split D-1 confirmed) | APPROVED WITH CONDITIONS (SEC-OI-489-1..4) | yes |
+| WP-OI-SEC-ID-1 (#472) | APPROVED WITH CONDITIONS (SEC-OI-472-1..3) | yes |
+
+#469, #482, #484 need no review. #482 and #484 remain closable with evidence.
+
 ## Owner decisions (2026-11-13)
+
 
 The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.
