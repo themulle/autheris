@@ -284,11 +284,11 @@ public sealed class McpHybridToolsTests
         var args = JsonSerializer.Serialize(new { query = "orders", domain = "sales", limit = 5, mode = "hybrid" });
         var resultJson = await handler.ExecuteToolAsync(tool, args, session);
 
-        resultJson.ShouldContain("sales.orders");
+        resultJson.ShouldContain("\"table\":\"sales.public.orders\"");
         resultJson.ShouldContain("relevance_score");
         resultJson.ShouldContain("0.95");
         resultJson.ShouldContain("join_relations");
-        resultJson.ShouldContain("sales.customers");
+        resultJson.ShouldContain("\"target_table\":\"sales.public.customers\"");
         resultJson.ShouldContain("orders.customer_id = customers.id");
 
         await _catalogDiscoveryService.Received(1).SearchCatalogDetailedAsync(

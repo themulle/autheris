@@ -250,9 +250,9 @@ public sealed class McpTokenEfficientRetrievalTests
         result.ShouldNotBeNull();
         result.UseCase.ShouldBe("Customer margin and revenue report");
         result.TotalCandidates.ShouldBe(1);
-        result.Candidates[0].Dataset.ShouldBe("sales.orders");
+        result.Candidates[0].Dataset.ShouldBe("sales.public.orders");
         result.Candidates[0].MatchedColumns.ShouldBe(["amount"]);
-        result.Candidates[0].Relations.ShouldHaveSingleItem().TargetTable.ShouldBe("sales.customers");
+        result.Candidates[0].Relations.ShouldHaveSingleItem().TargetTable.ShouldBe("sales.public.customers");
         result.Candidates[0].Relations[0].FromColumn.ShouldBe("customer_id");
         result.Candidates[0].Relations[0].ToColumn.ShouldBe("id");
         result.RecommendedNextStep.ShouldNotBeNull();

@@ -41,6 +41,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly long _maxSpecDownloadBytes;
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
+    private readonly Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? _graphQlMap;
 
     /// <summary>
     /// The gateway options are required: the caller class and the visible set depend on them, so a
@@ -61,7 +62,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IConsentResolutionService? consentResolution = null,
         IConsentRepository? consentRepository = null,
         TimeProvider? timeProvider = null,
-        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
+        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
+        Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? graphQlMap = null)
     {
         _transportResolver = transportResolver;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -79,6 +81,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<CatalogDiscoveryService>.Instance;
         _httpClientFactory = httpClientFactory;
         _procedureCatalog = procedureCatalog;
+        _graphQlMap = graphQlMap;
     }
 
     private TenantId? CatalogOwner => TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
@@ -404,12 +407,12 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier))
                 .Where(h => h != null)
                 .Select(h => h!)
-                .ToList();
+                .Take(query.Limit);
 
-            return tableHits.Concat(procHits).Take(query.Limit).ToList();
+            return (await WithGraphQlFieldsAsync(tableHits, permittedById, ct).ConfigureAwait(false)).Concat(procHits).Take(query.Limit).ToList();
         }
 
-        return permitted
+        var fallbackHits = permitted
             .Where(d => string.IsNullOrWhiteSpace(query.DomainFilter) || string.Equals(d.Identifier.Domain, query.DomainFilter, StringComparison.OrdinalIgnoreCase))
             .Where(d => string.IsNullOrWhiteSpace(q) ||
                         d.Identifier.TableName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
@@ -427,11 +430,34 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 MatchedTerms: string.IsNullOrWhiteSpace(q) ? [] : [q],
                 RelevantColumns: [],
                 RelatedJoinPaths: [],
-                SuggestedGraphQlField: d.CatalogView == CatalogView.Summary ? null : $"{d.Identifier.Domain}_{d.Identifier.TableName}"
-            ))
-            .Concat(procHits)
-            .Take(query.Limit)
-            .ToList();
+                SuggestedGraphQlField: null))
+            .Take(query.Limit);
+
+        return (await WithGraphQlFieldsAsync(fallbackHits, permittedById, ct).ConfigureAwait(false)).Concat(procHits).Take(query.Limit).ToList();
+    }
+
+    /// <summary>
+    /// Issue #682 A: the suggested GraphQL field of a table hit is its root field in the catalog GraphQL schema, never derived
+    /// from the id (the root field includes the schema and is sanitized). Null for a table without a root field, for a Summary
+    /// row and when no GraphQL map is registered.
+    /// </summary>
+    private async Task<List<CatalogSearchHit>> WithGraphQlFieldsAsync(
+        IEnumerable<CatalogSearchHit> hits,
+        IReadOnlyDictionary<TableIdentifier, TableMetadata> permitted,
+        CancellationToken ct)
+    {
+        var result = new List<CatalogSearchHit>();
+        foreach (var hit in hits)
+        {
+            var field = _graphQlMap != null &&
+                        permitted.TryGetValue(hit.TableIdentifier, out var row) &&
+                        row.CatalogView != CatalogView.Summary
+                ? await _graphQlMap.GetRootFieldAsync(hit.TableIdentifier, ct).ConfigureAwait(false)
+                : null;
+            result.Add(hit with { SuggestedGraphQlField = field });
+        }
+
+        return result;
     }
 
     public async Task<IReadOnlyList<CatalogDatasourceSummary>> ListDatasourcesAsync(RequestContext context, CancellationToken ct = default)

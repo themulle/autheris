@@ -1156,6 +1156,15 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     /// <summary>Dataset ids use the same <c>domain.schema.table</c> form as catalog objects.</summary>
     public static string DatasetId(TableIdentifier id) => $"{id.Domain}.{id.Schema}.{id.TableName}".ToLowerInvariant();
 
+    /// <summary>
+    /// The <c>list_datasets</c> id of a search hit (#627): the procedure id for a procedure, otherwise the table's dataset id,
+    /// so a hit can be passed to <c>describe_dataset</c> unchanged.
+    /// </summary>
+    public static string DatasetIdOf(CatalogSearchHit hit) =>
+        string.Equals(hit.Kind, CatalogEntryKey.KindProcedure, StringComparison.Ordinal) && hit.DatasetId is { } procedureId
+            ? procedureId
+            : DatasetId(hit.TableIdentifier);
+
     /// <summary>Parses a <c>domain.schema.table</c> dataset id.</summary>
     public static bool TryParseDatasetId(string? dataset, out TableIdentifier id)
     {

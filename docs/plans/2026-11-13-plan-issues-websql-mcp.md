@@ -106,6 +106,7 @@ Suggested order: #669 test PR and #668 now (bug fixes, independent); #682 A now;
 - Dependencies: A none; B with WP-SIMPL-41 PR 3 (same tool handlers). Related: catalog-search cluster #627 (search hits name the table without schema) touches `CatalogSearchEngine.cs`; A merges first or rebases.
 - Risks: the 30 s model lifetime can describe a table removed seconds ago; `FindVisibleAsync` re-reads the catalog row, so a stale map entry only yields not-found.
 - Size: S, ~180 src / ~300 test, 2 PRs, 2 person-days.
+- Delivery: WP-OI-WEB-682-A UNDER REVIEW in PR #722 (together with WP-OI-SRCH-627). `CatalogDiscoveryService` sets `SuggestedGraphQlField` from the map on the index and fallback paths; `CatalogSearchEngine` emits null. WP-OI-WEB-682-B open (with WP-SIMPL-41 PR 3, Q-WEB-4).
 
 ## Open owner questions
 
