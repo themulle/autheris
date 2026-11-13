@@ -576,10 +576,11 @@ public class DmlCompileTests
                                 string.Join(", ", Enumerable.Range(1, rows).Select(i => $"({i}, 'acme', 's{i}')"));
         var request = Request(dialect) with { CompileTimeout = CompileLimits.MaxCompileTimeout };
 
-        var ok = compiler.Compile(Sql(5).AsMemory(), request, CancellationToken.None);
+        var ok = compiler.Compile(Sql(5).AsMemory(), request.WithTestWritePermit(Sql(5)), CancellationToken.None);
         Assert.True(ok.Parameters.Length <= limit);
 
-        var ex = Assert.Throws<SqlLimitExceededException>(() => compiler.Compile(Sql(limit).AsMemory(), request, CancellationToken.None));
+        var overLimitSql = Sql(limit);
+        var ex = Assert.Throws<SqlLimitExceededException>(() => compiler.Compile(overLimitSql.AsMemory(), request.WithTestWritePermit(overLimitSql), CancellationToken.None));
         Assert.Equal(SqlLimitKind.BindParameters, ex.Kind);
         Assert.Equal(limit, ex.Maximum);
     }
