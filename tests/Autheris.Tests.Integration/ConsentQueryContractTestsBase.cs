@@ -284,7 +284,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         third.Revoked.ShouldBe(1);
         epochAfterFirst.ShouldBe(epochBefore + 1);
         (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(epochAfterFirst + 1);
-        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-MANIFEST-GROUP")], seed.Table, DateTimeOffset.UtcNow, TenantA)).Count.ShouldBe(1);
+        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-MANIFEST-GROUP")], seed.Table, DateTimeOffset.UtcNow, TenantA)).Count(c => c.GranteeType == GranteeType.Group).ShouldBe(1);
     }
 
     [Fact]

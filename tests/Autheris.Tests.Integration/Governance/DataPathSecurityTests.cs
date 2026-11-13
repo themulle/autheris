@@ -128,7 +128,7 @@ public class DataPathSecurityTests : IDisposable
     [Fact]
     public async Task Catalog_GroupConsents_AreFilteredByCallerGroups()
     {
-        // Table finance_table_2 has a Group consent for group 'S-1-5-21-FINANCE-GROUP'; roles never grant access
+        // Table finance_table_2 has a Group consent for group 'S-1-5-21-7002-1001'; roles never grant access
         var table = new TableIdentifier("finance", "dbo", "finance_table_2");
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
@@ -140,7 +140,7 @@ public class DataPathSecurityTests : IDisposable
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
             GranteeType = GranteeType.Group,
-            GranteeSid = new Sid("S-1-5-21-FINANCE-GROUP"),
+            GranteeSid = new Sid("S-1-5-21-7002-1001"),
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30)
         });
@@ -154,7 +154,7 @@ public class DataPathSecurityTests : IDisposable
 
         // User WITH the group
         var userWithRole = new Sid("S-1-5-21-USER-HAS-ROLE");
-        var accessorWithRole = CreateAccessor(userWithRole, groupSids: new[] { new Sid("S-1-5-21-FINANCE-GROUP") });
+        var accessorWithRole = CreateAccessor(userWithRole, groupSids: new[] { new Sid("S-1-5-21-7002-1001") });
 
         var catalogWithRole = await _query.GetCatalogAsync(_repository, accessorWithRole, null, _visibility);
         catalogWithRole.ShouldContain(t => t.TableName == "finance_table_2");

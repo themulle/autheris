@@ -290,7 +290,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         public string CallerSid { get; set; } = DavidSid;
 
         /// <summary>Group every caller of <see cref="Client"/> belongs to; roles never grant access, so consents that apply to all callers address this group.</summary>
-        public const string ReadersGroupSid = "S-1-5-21-PARITY-READERS";
+        public const string ReadersGroupSid = "S-1-5-21-7001-1001";
 
         /// <summary>More test headers for <see cref="Client"/> (for example an application-only caller).</summary>
         public Dictionary<string, string> ExtraHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
