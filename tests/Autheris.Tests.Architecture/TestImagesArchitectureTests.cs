@@ -16,6 +16,9 @@ public sealed partial class TestImagesArchitectureTests
     [GeneratedRegex(@"(?<!String)Builder\(\s*\$?@?""|\bWithImage\(\s*\$?@?""")]
     private static partial Regex ImageLiteralRegex();
 
+    [GeneratedRegex(@"\bconst string \w*Image\w*\s*=\s*\$?@?""|\bnew DockerImage\(\s*\$?@?""")]
+    private static partial Regex ImageConstantRegex();
+
     [GeneratedRegex("""public const string (\w+) = "([^"]+)";""")]
     private static partial Regex ConstantRegex();
 
@@ -27,7 +30,8 @@ public sealed partial class TestImagesArchitectureTests
     {
         var offenders = RepositoryScan.EnumerateFiles("tests", "*.cs")
             .Where(p => !p.EndsWith("/TestImages.cs", StringComparison.Ordinal) && !p.EndsWith("/TestImagesArchitectureTests.cs", StringComparison.Ordinal))
-            .Where(p => RepositoryScan.CodeLines(RepositoryScan.ReadText(p)).Any(l => ImageLiteralRegex().IsMatch(l)))
+            .Where(p => RepositoryScan.CodeLines(RepositoryScan.ReadText(p)).Any(l =>
+                ImageLiteralRegex().IsMatch(l) || (ImageConstantRegex().IsMatch(l) && !l.Contains("DerivedImage", StringComparison.Ordinal))))
             .ToList();
 
         offenders.ShouldBeEmpty("Use TestImages constants instead of image string literals: " + string.Join(", ", offenders));
@@ -55,6 +59,12 @@ public sealed partial class TestImagesArchitectureTests
         var expected = Constants().Select(c => c.Value).Order(StringComparer.Ordinal).ToList();
 
         listed.ShouldBe(expected);
-        RepositoryScan.ReadText(".github/workflows/ci.yml").ShouldContain(ImageListPath);
+        var workflow = RepositoryScan.ReadText(".github/workflows/ci.yml");
+        workflow.ShouldContain(ImageListPath);
+
+        var ryuk = Constants().Single(c => c.Name == "Ryuk").Value;
+        var envLines = workflow.Split('\n').Where(l => l.TrimStart().StartsWith("TESTCONTAINERS_RYUK_CONTAINER_IMAGE:", StringComparison.Ordinal)).ToList();
+        envLines.Count.ShouldBeGreaterThanOrEqualTo(2);
+        envLines.ShouldAllBe(l => l.Substring(l.IndexOf(':') + 1).Trim() == ryuk);
     }
 }

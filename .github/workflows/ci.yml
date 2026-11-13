@@ -94,6 +94,9 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+    env:
+      # WP-OI-CI-4: use the pre-pulled, digest-pinned Ryuk image (TestImages.Ryuk).
+      TESTCONTAINERS_RYUK_CONTAINER_IMAGE: testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
     strategy:
       fail-fast: false
       matrix:
@@ -175,6 +178,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      # WP-OI-CI-4: use the pre-pulled, digest-pinned Ryuk image (TestImages.Ryuk).
+      TESTCONTAINERS_RYUK_CONTAINER_IMAGE: testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
