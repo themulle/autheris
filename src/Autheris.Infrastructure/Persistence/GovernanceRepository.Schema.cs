@@ -232,8 +232,8 @@ public partial class GovernanceRepository
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = trans;
-                            cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive)
-                                                VALUES (@id, @tid, @name, @type, @sens)
+                            cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, ordinal)
+                                                VALUES (@id, @tid, @name, @type, @sens, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tid))
                                                 ON CONFLICT DO NOTHING;";
                             cmd.AddBound("@id", colId);
                             cmd.AddBound("@tid", tableId);
@@ -320,8 +320,8 @@ public partial class GovernanceRepository
                 using (var cmd = conn.CreateCommand())
                 {
                     cmd.Transaction = trans;
-                    cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive)
-                                        VALUES (@id, @tid, @name, @type, @sens)
+                    cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, ordinal)
+                                        VALUES (@id, @tid, @name, @type, @sens, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tid))
                                         ON CONFLICT DO NOTHING;";
                     cmd.AddBound("@id", colId);
                     cmd.AddBound("@tid", childTableId);
@@ -555,8 +555,8 @@ public partial class GovernanceRepository
                         using (var cmd = conn.CreateCommand())
                         {
                             cmd.Transaction = trans;
-                            cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive)
-                                                SELECT @id, @tid, @name, @type, @sens
+                            cmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, ordinal)
+                                                SELECT @id, @tid, @name, @type, @sens, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tid)
                                                 WHERE NOT EXISTS (SELECT 1 FROM TABLE_COLUMNS WHERE table_id = @tid AND column_name = @name);";
                             cmd.AddBound("@id", Guid.NewGuid().ToString());
                             cmd.AddBound("@tid", tableId);

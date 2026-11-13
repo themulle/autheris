@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <Compile Include="..\Autheris.Tests.Common\TestTenants.cs" Link="TestSupport\TestTenants.cs" />
+    <Compile Include="..\Autheris.Tests.Common\TestImages.cs" Link="TestSupport\TestImages.cs" />
     <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
     <!-- WP-X0y (G10): the section 7.3 consumers and the legacy and typed policy producers live in the application layer. -->
     <ProjectReference Include="..\..\src\Autheris.Application\Autheris.Application.csproj" />

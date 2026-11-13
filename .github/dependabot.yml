@@ -24,17 +24,17 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
 
+  # WP-OI-CI-1 (Q-CI-2): one weekly group per ecosystem for deploy and benchmarks.
   - package-ecosystem: "docker"
-    directory: "/deploy/containers/gqlgateway-api"
+    directories:
+      - "/deploy/containers/gqlgateway-api"
+      - "/benchmarks/load/docker"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
-
-  - package-ecosystem: "docker"
-    directory: "/benchmarks/load/docker"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+    groups:
+      docker-deploy-benchmarks:
+        patterns: ["*"]
 
   - package-ecosystem: "docker-compose"
     directory: "/"
@@ -42,29 +42,29 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
 
+  # WP-OI-CI-1 (Q-CI-2): one weekly group per ecosystem for deploy and benchmarks.
   - package-ecosystem: "docker-compose"
-    directory: "/deploy"
+    directories:
+      - "/deploy"
+      - "/benchmarks/load/docker"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    groups:
+      compose-deploy-benchmarks:
+        patterns: ["*"]
 
-  - package-ecosystem: "docker-compose"
-    directory: "/benchmarks/load/docker"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
-
+  # WP-OI-CI-1 (Q-CI-2): one weekly group per ecosystem for deploy and benchmarks.
   - package-ecosystem: "npm"
-    directory: "/benchmarks/load/configs/apollo-server"
+    directories:
+      - "/benchmarks/load/configs/apollo-server"
+      - "/benchmarks/load/configs/postgraphile"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
-
-  - package-ecosystem: "npm"
-    directory: "/benchmarks/load/configs/postgraphile"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 10
+    groups:
+      npm-benchmarks:
+        patterns: ["*"]
 
   - package-ecosystem: "npm"
     directory: "/src/Autheris.Api/Assets/swagger-ui"

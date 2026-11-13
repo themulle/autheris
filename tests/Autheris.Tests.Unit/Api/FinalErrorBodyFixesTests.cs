@@ -99,9 +99,9 @@ public sealed class FinalErrorBodyFixesTests
     public async Task NL_T_38_Envoy_Deny_Body_Is_Sanitized_And_Never_Carries_Decision_Reason()
     {
         // NL-SC-38: the denied reasons (policy internals) stay in the log; the body is the fixed message.
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        var service = new EnvoyExtAuthzService(policy, NullLogger<EnvoyExtAuthzService>.Instance);
-        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+        var policy = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+        var service = new EnvoyExtAuthzService(policy, Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(), NullLogger<EnvoyExtAuthzService>.Instance);
+        policy.DecideAsync(Arg.Any<Autheris.Application.Policy.Pdp.AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(new TableAccessDecision(
                 Table: new TableIdentifier("default", "public", "customers"),
                 IsAllowed: false,

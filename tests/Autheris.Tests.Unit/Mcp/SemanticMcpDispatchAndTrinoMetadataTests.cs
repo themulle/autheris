@@ -121,7 +121,7 @@ public sealed class SemanticMcpDispatchAndTrinoMetadataTests
             options,
             NullLogger<AiDataGuardrailService>.Instance,
             Substitute.For<IAuditLogRepository>(),
-            queryExecutor: queryExecutor);
+            queryExecutor: queryExecutor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(), semanticCatalog: catalog);
 
         var session = new McpSessionContext(
             "sess-1",

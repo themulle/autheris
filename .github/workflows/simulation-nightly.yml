@@ -119,6 +119,8 @@ jobs:
       SIM_SEED_INPUT: ${{ inputs.seed }}
       SIM_SAMPLE_INPUT: ${{ inputs.sample }}
       SCHEMATHESIS_IMAGE: 'schemathesis/schemathesis:4.32.4@sha256:b501f25d00fa6e2b393ddd1b525a11bb560d593fd06268491595c2e439090bf0'
+      # Governance database image (multi-arch index digest). Must match TestImages.PostgreSql once that constant lands (WP-OI-CI-4).
+      SIM_POSTGRES_IMAGE: 'postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663'
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -158,6 +160,57 @@ jobs:
       - name: Pull pinned Schemathesis image
         run: docker pull "$SCHEMATHESIS_IMAGE"
 
+      # WP-OI-CI-8 (Q-CI-6): empty per-run TLS PostgreSQL governance DB. The host keeps its Production TLS policy (SSL Mode=VerifyFull against a
+      # job-generated CA); ConnectionTlsPolicy is never relaxed and the host never runs as Development. Nothing here is a repository secret.
+      - name: Start TLS PostgreSQL governance database
+        run: |
+          set -euo pipefail
+          umask 077
+          tls="$(mktemp -d "$RUNNER_TEMP/sim-pg-tls.XXXXXX")"
+          cd "$tls"
+          # SEC-CI-8-1/3: throwaway CA and server certificate (RSA 2048, valid one day); the CA key is deleted right after signing and never mounted.
+          openssl genrsa -out ca.key 2048
+          openssl req -x509 -new -key ca.key -sha256 -days 1 -subj "/CN=autheris-sim-ca" -out ca.crt
+          openssl genrsa -out server.key 2048
+          openssl req -new -key server.key -subj "/CN=localhost" -out server.csr
+          printf 'subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' >server.ext
+          openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -sha256 -days 1 -extfile server.ext -out server.crt
+          rm -f ca.key ca.srl server.csr server.ext
+          chmod 0644 ca.crt server.crt
+          # SEC-CI-8-2: PostgreSQL (alpine uid 70) refuses a key that is group/world readable or owned by another user.
+          chmod 0600 server.key
+          sudo chown 70:70 server.key
+          # SEC-CI-8-4: the password is masked before any other use; the container reads it from a 0600 env file, never from process arguments.
+          pw="$(openssl rand -hex 24)"
+          echo "::add-mask::$pw"
+          printf 'POSTGRES_USER=sim\nPOSTGRES_DB=postgres\nPOSTGRES_PASSWORD=%s\n' "$pw" >pg.env
+          port="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+          conn="Host=127.0.0.1;Port=$port;Database=sim_gov;Username=sim;Password=$pw;SSL Mode=VerifyFull;Root Certificate=$tls/ca.crt"
+          echo "::add-mask::$conn"
+          # SEC-CI-8-5/8: loopback bind only, no volume, removed on exit (--rm), no restart policy.
+          docker run -d --rm --name sim-gov-pg --env-file "$tls/pg.env" -p "127.0.0.1:$port:5432" -v "$tls/server.crt:/tls/server.crt:ro" -v "$tls/server.key:/tls/server.key:ro" "$SIM_POSTGRES_IMAGE" -c ssl=on -c ssl_cert_file=/tls/server.crt -c ssl_key_file=/tls/server.key >/dev/null
+          rm -f pg.env
+          # SEC-CI-8-8: fail closed on timeout.
+          ready=0
+          for _ in $(seq 1 60); do
+            if docker exec sim-gov-pg pg_isready -h 127.0.0.1 -U sim -q; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::governance database did not become ready within 60 seconds"
+            exit 1
+          fi
+          # TLS check: chain and SAN are verified against the job CA before the host is started.
+          if ! echo Q | timeout 20 openssl s_client -starttls postgres -connect "127.0.0.1:$port" -CAfile "$tls/ca.crt" -verify_ip 127.0.0.1 -verify_return_error >/dev/null 2>&1; then
+            echo "::error::governance database TLS verification failed"
+            exit 1
+          fi
+          {
+            echo "AUTHERIS_SIM_GOVERNANCE_DB=$conn"
+            echo "SIM_GOV_PASSWORD=$pw"
+            echo "SIM_GOV_PG_CONTAINER=sim-gov-pg"
+          } >>"$GITHUB_ENV"
+
       # run-api-fuzz.sh runs the read phase and the write phase (fresh data dir) against 127.0.0.1 only and writes
       # raw HAR/JUnit to $RUNNER_TEMP/st/out and the merged canary list to $RUNNER_TEMP/sim-canaries.txt (never uploaded).
       - name: API fuzz (read phase, then write phase)
@@ -181,6 +234,13 @@ jobs:
           path: ${{ github.workspace }}/sim-report-api
           retention-days: 7
           if-no-files-found: ignore
+
+      # SEC-CI-8-5: the container (and with it the database) is removed even when earlier steps fail; its logs are never uploaded.
+      - name: Remove governance database
+        if: always()
+        run: |
+          docker rm -f sim-gov-pg >/dev/null 2>&1 || true
+          sudo rm -rf "$RUNNER_TEMP"/sim-pg-tls.*
 
   sim-parser-fuzz:
     name: Simulation parser fuzz (SharpFuzz and AFL++)

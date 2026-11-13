@@ -65,7 +65,7 @@ public sealed class McpToolSwitchTests
         var executor = Substitute.For<IMcpQueryExecutor>();
         var options = Options.Create(o);
         var guardrail = new AiDataGuardrailService(
-            registry, options, NullLogger<AiDataGuardrailService>.Instance, audit, queryExecutor: executor, switches: switches);
+            registry, options, NullLogger<AiDataGuardrailService>.Instance, audit, queryExecutor: executor, switches: switches, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
         return new Rig(registry, switches, guardrail, audit, executor, handler);
     }
@@ -93,7 +93,7 @@ public sealed class McpToolSwitchTests
     public async Task Default_tools_list_over_JSON_RPC_is_identical_with_and_without_switches()
     {
         var plainRegistry = new McpToolRegistry(Options.Create(Opts()));
-        var plainGuardrail = new AiDataGuardrailService(plainRegistry, Options.Create(Opts()), NullLogger<AiDataGuardrailService>.Instance, Substitute.For<IAuditLogRepository>());
+        var plainGuardrail = new AiDataGuardrailService(plainRegistry, Options.Create(Opts()), NullLogger<AiDataGuardrailService>.Instance, Substitute.For<IAuditLogRepository>(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var plain = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), plainRegistry, plainGuardrail, NullLogger<McpProtocolHandler>.Instance);
         var rig = Rigged(Opts());
 
@@ -455,7 +455,7 @@ public sealed class McpToolSwitchTests
     {
         var o = Opts(Off(McpToolGroup.Query));
         var (registry, switches) = Build(o);
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(o), NullLogger<AiDataGuardrailService>.Instance, Substitute.For<IAuditLogRepository>(), switches: switches);
+        var guardrail = new AiDataGuardrailService(registry, Options.Create(o), NullLogger<AiDataGuardrailService>.Instance, Substitute.For<IAuditLogRepository>(), switches: switches, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var pruner = Substitute.For<Autheris.Application.Mcp.Pruning.ISemanticToolPruner>();
         IReadOnlyList<McpToolDefinition>? seen = null;
         pruner.PruneToolsAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<McpToolDefinition>>(), Arg.Any<Autheris.Application.Mcp.Pruning.ToolPruningOptions?>(), Arg.Any<CancellationToken>())

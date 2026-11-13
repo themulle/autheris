@@ -107,7 +107,7 @@ public sealed class McpDatasetToolWiringTests
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
-            tableMetadataRepository: metadataRepo);
+            tableMetadataRepository: metadataRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
 
         var session = new McpSessionContext("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER");
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(name, """{"dataset":"sales.public.orders"}"""), session);
@@ -119,41 +119,12 @@ public sealed class McpDatasetToolWiringTests
         }
     }
 
-    [Theory]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    public async Task Guardrail_AsksCasbin_OnlyWhenCasbinIsEnabled(bool casbinEnabled, bool expectedSuccess)
-    {
-        // With Casbin disabled (the default) the engine has no policies and would deny every tool call.
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(ValueTask.FromResult(TableAccessDecision.Denied(McpDatasetTools.CatalogTable, "no policy")));
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult("""{"datasets":[]}"""));
-
-        var guardrail = new AiDataGuardrailService(
-            new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false)),
-            Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = casbinEnabled }, Mcp = new McpOptions { Enabled = true } }),
-            NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
-            policyEnforcementService: policy);
-
-        var session = new McpSessionContext("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER");
-        var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("list_datasets", "{}"), session);
-
-        result.IsSuccess.ShouldBe(expectedSuccess);
-        await policy.Received(casbinEnabled ? 1 : 0).EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
-    }
-
-    private static (AiDataGuardrailService Guardrail, IPolicyEnforcementService Policy, IMcpQueryExecutor Executor) GraphQlGuardrail(
+    private static (AiDataGuardrailService Guardrail, Autheris.Application.Policy.Pdp.IAccessDecisionPoint Policy, IMcpQueryExecutor Executor) GraphQlGuardrail(
         IReadOnlyList<TableIdentifier>? documentTables, bool fourEyes = false)
     {
         var map = Substitute.For<IGraphQlCatalogMap>();
         map.ResolveDocumentTablesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(documentTables));
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(c => ValueTask.FromResult(TableAccessDecision.Allowed(c.Arg<SecurityEvaluationContext>().TargetTable, new Dictionary<string, ColumnAccessLevel>())));
+        var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(r => TableAccessDecision.Allowed(r.Object.Identifier, new Dictionary<string, ColumnAccessLevel>()));
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(c => new TableMetadata { Identifier = c.Arg<TableIdentifier>(), Table = new Table { RequiresFourEyes = fourEyes } });
@@ -163,10 +134,10 @@ public sealed class McpDatasetToolWiringTests
 
         var guardrail = new AiDataGuardrailService(
             new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false)),
-            Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } }),
+            Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
-            policyEnforcementService: policy,
+            decisionPoint: policy,
             tableMetadataRepository: metadataRepo,
             graphQlCatalogMap: map);
         return (guardrail, policy, executor);
@@ -186,8 +157,8 @@ public sealed class McpDatasetToolWiringTests
         var result = await CallGraphQl(guardrail, """{"query":"{ sales_public_orders { id } }"}""");
 
         result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
-        await policy.Received(1).EvaluatePolicyAsync(Arg.Is<SecurityEvaluationContext>(c => c.TargetTable == Orders), Arg.Any<CancellationToken>());
-        await policy.Received(1).EvaluatePolicyAsync(Arg.Is<SecurityEvaluationContext>(c => c.TargetTable == customers), Arg.Any<CancellationToken>());
+        await policy.Received(1).DecideAsync(Arg.Is<Autheris.Application.Policy.Pdp.AccessRequest>(c => c.Object.Identifier == Orders), Arg.Any<CancellationToken>());
+        await policy.Received(1).DecideAsync(Arg.Is<Autheris.Application.Policy.Pdp.AccessRequest>(c => c.Object.Identifier == customers), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -218,14 +189,15 @@ public sealed class McpDatasetToolWiringTests
     }
 
     [Fact]
-    public async Task QueryGraphQl_IntrospectionOnly_IsCheckedAsACatalogCall()
+    public async Task QueryGraphQl_IntrospectionOnly_IsACatalogCall_WithoutADataDecision()
     {
         var (guardrail, policy, _) = GraphQlGuardrail([]);
 
         var result = await CallGraphQl(guardrail, """{"query":"{ __schema { types { name } } }"}""");
 
         result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
-        await policy.Received(1).EvaluatePolicyAsync(Arg.Is<SecurityEvaluationContext>(c => c.TargetTable == McpDatasetTools.CatalogTable), Arg.Any<CancellationToken>());
+        // The catalog pseudo target is not a data table: no decision point request (the catalog is filtered by discovery visibility).
+        await policy.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
     }
 
     [Theory]
@@ -287,7 +259,7 @@ public sealed class McpDatasetToolWiringTests
     public async Task Initialize_TellsAgentsToQueryDataWithGraphQl()
     {
         var registry = new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false));
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
         var session = handler.CreateSession("agent", "tenant-a");
 

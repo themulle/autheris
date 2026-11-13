@@ -51,7 +51,7 @@ internal sealed class ClientListHarness
     };
 
     public CompiledSql Compile(TargetSqlDialect dialect, string sql, ClientListShapes? shapes = null, StatementPermissions statements = StatementPermissions.ReadOnly) =>
-        Engine.Compile(sql.AsMemory(), Request(dialect, shapes, statements), CancellationToken.None);
+        Engine.Compile(sql.AsMemory(), Request(dialect, shapes, statements).WithTestWritePermit(sql), CancellationToken.None);
 
     public static List<BoundParameter> ListSlots(CompiledSql compiled, string name) =>
         compiled.Parameters.Where(p => p.Origin == ParameterOrigin.ClientNamed && p.ListIndex is not null

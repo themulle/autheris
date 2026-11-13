@@ -38,7 +38,11 @@ public class BindLimitProductionProbeTests
                 Masks = new DictMaskProvider(),
                 Catalog = DmlCompileTests.CatalogFor(dialect),
                 Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String),
-                Dml = DmlGuardOptions.Strict
+                Dml = DmlGuardOptions.Strict,
+                // explicit permit (no second parse of the huge statement): the three written columns of the INSERT below
+                Write = new DmlWritePermit(DmlWriteOperation.Insert,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id", "tenantid", "status" },
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase))
             }
         };
         int max = DialectCapabilityTable.Default.Get(dialect).MaxBindParameters;
