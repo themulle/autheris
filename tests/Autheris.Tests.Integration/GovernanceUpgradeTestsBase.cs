@@ -78,13 +78,16 @@ public abstract class GovernanceUpgradeTestsBase
     /// <summary>A login that can read the schema; with <paramref name="writeOnHistory"/> it can also write the history table (excess privilege).</summary>
     protected abstract Task<(string ConnectionString, Func<Task> Cleanup)> CreateReadOnlyLoginAsync(TestDb db, bool writeOnHistory);
 
+    /// <summary>Version of the synthetic probe step: one past the newest embedded step, so the catalogue stays gap-free as steps are added.</summary>
+    private int ProbeVersion => SqlMigrationStep.LoadEmbedded(Engine).Max(s => s.Version) + 1;
+
     protected MigrationStep ProbeStep(string seed = "v1", Action? onApply = null, bool wrongNullability = false)
     {
         var sql = AddProbeColumnSql;
         return new MigrationStep(
-            11,
+            ProbeVersion,
             StepName,
-            SqlMigrationStep.ComputeChecksum(Engine, 11, StepName, seed + sql),
+            SqlMigrationStep.ComputeChecksum(Engine, ProbeVersion, StepName, seed + sql),
             ctx =>
             {
                 onApply?.Invoke();
@@ -122,8 +125,8 @@ public abstract class GovernanceUpgradeTestsBase
             TableIdentifier = identifier,
             TenantId = "tenant-388",
             Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role,
-            RoleName = "Reader",
+            GranteeType = GranteeType.Group,
+            GranteeSid = new Sid("S-1-388-READERS"),
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1),
             ColumnRules = [new ConsentColumnRule { ColumnName = "client_id", AccessLevel = ColumnAccessLevel.Clear }]
@@ -181,7 +184,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         await RunAsync(cs, GovernanceMigrationMode.Apply, [step]);
 
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 11 AND name = '" + StepName + "' AND checksum = '" + step.Checksum + "'")).ShouldBe(1);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = " + ProbeVersion + " AND name = '" + StepName + "' AND checksum = '" + step.Checksum + "'")).ShouldBe(1);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(1);
         (await CountAsync(cs, $"SELECT COUNT(*) FROM {ConsentsTable}")).ShouldBe(consents);
         (await CountAsync(cs, "SELECT COUNT(*) FROM audit_log_entries")).ShouldBe(auditCount);
@@ -192,7 +195,7 @@ public abstract class GovernanceUpgradeTestsBase
         // A second run and a Verify run are no-ops on the upgraded database.
         await RunAsync(cs, GovernanceMigrationMode.Apply, [step]);
         await RunAsync(cs, GovernanceMigrationMode.Verify, [step]);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(11);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(ProbeVersion);
     });
 
     private const string SeedV1KeyRowsSql =
@@ -435,7 +438,7 @@ public abstract class GovernanceUpgradeTestsBase
         await Task.WhenAll(runs);
 
         applied.ShouldBe(1);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(11);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(ProbeVersion);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(1);
     });
 
@@ -545,7 +548,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         ex.Code.ShouldBe(GovernanceMigrationCodes.Pending);
         (await QueryAsync(cs, FingerprintSql)).ShouldBe(before);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(10);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(ProbeVersion - 1);
     });
 
     [Fact]
@@ -561,7 +564,7 @@ public abstract class GovernanceUpgradeTestsBase
 
         ex.Code.ShouldBe(GovernanceMigrationCodes.Drift);
         ex.Deviations.ShouldContain(d => d.Kind == SchemaDeviationKind.WrongNullability && d.Name == ProbeColumn);
-        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 11")).ShouldBe(0);
+        (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = " + ProbeVersion)).ShouldBe(0);
         (await CountAsync(cs, ProbeColumnCountSql)).ShouldBe(0, "the transactional DDL of the step was rolled back");
         (await QueryAsync(cs, FingerprintSql)).ShouldBe(before);
 

@@ -50,8 +50,8 @@ INSERT INTO masked_t VALUES (1,'EU',10),(2,'EU',20),(3,'EU',30),(4,'EU',40),(5,'
                 TableIdentifier = MaskedId,
                 TenantId = new TenantId(Tenant),
                 Effect = ConsentEffect.Allow,
-                GranteeType = GranteeType.Role,
-                RoleName = "Reader",
+                GranteeType = GranteeType.Group,
+                GranteeSid = new Sid(ReadersGroupSid),
                 ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
                 ValidTo = DateTimeOffset.UtcNow.AddDays(1),
                 ColumnRules = masked.Columns.Select(c => new ConsentColumnRule

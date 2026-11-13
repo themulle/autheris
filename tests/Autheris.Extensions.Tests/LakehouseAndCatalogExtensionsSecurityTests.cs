@@ -469,7 +469,10 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
                 new OpenMetadataRole { Name = "HrSpecialist", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "HrPolicy" }] }
             ]));
-        client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
+        client.GetTeamsAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([
+                new OpenMetadataTeam { Id = Guid.NewGuid(), Name = "HrTeam", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "HrPolicy" }] }
+            ]));
         client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
 
         metadataRepo.UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>())
@@ -500,7 +503,8 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
                 Enabled = true,
                 AutoCreateConsents = autoCreateConsents,
                 ActivateNewTables = true,
-                RoleToGatewayRoleMap = new Dictionary<string, string> { ["HrSpecialist"] = "HrSpecialist" }
+                RoleToGatewayRoleMap = new Dictionary<string, string> { ["HrSpecialist"] = "HrSpecialist" },
+                TeamToGroupSidMap = new Dictionary<string, string> { ["name:HrTeam"] = "S-1-5-21-HR-TEAM" }
             }
         });
 
@@ -549,8 +553,8 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         await service.SyncPermissionsAsync();
 
         created.Count.ShouldBe(1);
-        created[0].GranteeType.ShouldBe(GranteeType.Role);
-        created[0].RoleName.ShouldBe("HrSpecialist");
+        created[0].GranteeType.ShouldBe(GranteeType.Group);   // roles never grant data access: the allow rule of the role creates nothing
+        created[0].GranteeSid!.Value.Value.ShouldBe("S-1-5-21-HR-TEAM");
         created[0].Effect.ShouldBe(ConsentEffect.Allow);
         created[0].ConsentRequestId.ShouldBe(OpenMetadataSyncService.OpenMetadataSyncConsentMarker);
     }

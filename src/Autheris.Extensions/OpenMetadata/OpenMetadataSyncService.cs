@@ -280,7 +280,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         var validTo = DateTimeOffset.UtcNow.Add(SyncConsentValidity(omOptions));
         var denyValidTo = DateTimeOffset.UtcNow.Add(DenyConsentValidity);
 
-        void AddForPolicies(IEnumerable<OpenMetadataPolicy> sourcePolicies, Func<TableMetadata, TenantId, ConsentEffect, Consent> factory)
+        void AddForPolicies(IEnumerable<OpenMetadataPolicy> sourcePolicies, Func<TableMetadata, TenantId, ConsentEffect, Consent?> factory)
         {
             foreach (var policy in sourcePolicies.Where(p => p.Enabled).DistinctBy(p => p.Id))
             {
@@ -301,7 +301,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                             }
 
                             var consent = factory(tableMeta, tenantId, effect);
-                            desired.TryAdd(SyncConsentKey.From(consent), consent);
+                            if (consent is not null) desired.TryAdd(SyncConsentKey.From(consent), consent);
                         }
                     }
                 }
@@ -318,9 +318,18 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                 continue;
             }
 
+            // Roles never grant data access: only a role Deny (a restriction) is mapped; the reconcile revokes role Allow consents of earlier syncs.
             string mappedRoleName = gatewayRole;
-            AddForPolicies(ResolvePolicies(role.Policies, policyById, policyByName),
-                (meta, tenantId, effect) => CreateConsentForRole(mappedRoleName, meta, tenantId, effect, validFrom, effect == ConsentEffect.Deny ? denyValidTo : validTo));
+            var allowSkipped = false;
+            AddForPolicies(ResolvePolicies(role.Policies, policyById, policyByName), (meta, tenantId, effect) =>
+            {
+                allowSkipped |= effect != ConsentEffect.Deny;
+                return effect == ConsentEffect.Deny ? CreateConsentForRole(mappedRoleName, meta, tenantId, effect, validFrom, denyValidTo) : null;
+            });
+            if (allowSkipped)
+            {
+                _logger.LogWarning("OpenMetadata role '{Role}' has allow rules: roles do not grant data access, so no consent is created. Grant access through a team or a user.", role.Name);
+            }
         }
 
         // 2b. Team policies (SEC E-07: grantee taken directly from the resolved explicit mapping)
@@ -955,23 +964,6 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                 : (consent.GranteeSid?.Value ?? string.Empty).ToUpperInvariant();
             return new SyncConsentKey(consent.TenantId, consent.TableIdentifier, consent.GranteeType, grantee, consent.Effect);
         }
-    }
-
-    private static Consent CreateConsentForRole(string roleName, TableMetadata table, TenantId tenantId, ConsentEffect effect, DateTimeOffset validFrom, DateTimeOffset validTo)
-    {
-        return new Consent
-        {
-            Id = Guid.NewGuid(),
-            ConsentRequestId = OpenMetadataSyncConsentMarker,
-            TableId = table.Table.Id,
-            TableIdentifier = table.Identifier,
-            TenantId = tenantId,
-            GranteeType = GranteeType.Role,
-            RoleName = roleName,
-            Effect = effect,
-            ValidFrom = validFrom,
-            ValidTo = validTo
-        };
     }
 
     private static Consent CreateConsentForSid(GranteeType granteeType, Sid sid, TableMetadata table, TenantId tenantId, ConsentEffect effect, DateTimeOffset validFrom, DateTimeOffset validTo)

@@ -371,4 +371,21 @@ public sealed partial class OpenMetadataSyncService
         rest = string.Empty;
         return false;
     }
+
+    private static Consent CreateConsentForRole(string roleName, TableMetadata table, TenantId tenantId, ConsentEffect effect, DateTimeOffset validFrom, DateTimeOffset validTo)
+    {
+        return new Consent
+        {
+            Id = Guid.NewGuid(),
+            ConsentRequestId = OpenMetadataSyncConsentMarker,
+            TableId = table.Table.Id,
+            TableIdentifier = table.Identifier,
+            TenantId = tenantId,
+            GranteeType = GranteeType.Role,
+            RoleName = roleName,
+            Effect = effect,
+            ValidFrom = validFrom,
+            ValidTo = validTo
+        };
+    }
 }

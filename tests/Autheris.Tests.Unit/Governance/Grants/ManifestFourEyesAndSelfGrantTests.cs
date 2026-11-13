@@ -239,12 +239,12 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     }
 
     [Fact]
-    public async Task SR_M_10_GroupDenyAndRoleGrant_WithDegradedGroupStatus_StayAllowed()
+    public async Task SR_M_10_GroupDeny_WithDegradedGroupStatus_StaysAllowed_AndRoleGrantIsRefused()
     {
         var caller = Caller(GroupResolutionClaims.CreateStatus(GroupResolutionStatus.Degraded));
 
         (await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2002", effect: "Deny"), caller)).Applied.ShouldBe(1);
-        (await ApplyAsync(new FakeConsentRepository(), Policy("Role", "DataScientist"), caller)).Applied.ShouldBe(1);
+        await Should.ThrowAsync<ArgumentException>(() => ApplyAsync(new FakeConsentRepository(), Policy("Role", "DataScientist"), caller));
     }
 
     [Fact]
@@ -261,10 +261,10 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     [Fact]
     public async Task SR_M_10_GrantToARoleTheActorHolds_IsRefused()
     {
-        var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+        var ex = await Should.ThrowAsync<ArgumentException>(() =>
             ApplyAsync(new FakeConsentRepository(), Policy("Role", "governance_admin")));
 
-        ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
+        ex.Message.ShouldContain("Role grantees are not supported");
     }
 
     [Fact]
@@ -282,7 +282,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
 
         await Should.ThrowAsync<GrantPolicyViolationException>(() =>
             ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2003"), callerContext: context));
-        await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+        await Should.ThrowAsync<ArgumentException>(() =>
             ApplyAsync(new FakeConsentRepository(), Policy("Role", "EnrichedRole"), callerContext: context));
     }
 
@@ -298,11 +298,11 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     }
 
     [Fact]
-    public async Task SR_M_10_GrantToAGroupOrRoleTheActorDoesNotHold_IsApplied()
+    public async Task SR_M_10_GrantToAGroupTheActorDoesNotHold_IsApplied_AndARoleGrantIsRefused()
     {
         var caller = Caller(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim("S-1-5-21-1-2-3-2001"));
 
         (await ApplyAsync(new FakeConsentRepository(), Policy("Group", "S-1-5-21-1-2-3-2002"), caller)).Applied.ShouldBe(1);
-        (await ApplyAsync(new FakeConsentRepository(), Policy("Role", "DataScientist"), caller)).Applied.ShouldBe(1);
+        await Should.ThrowAsync<ArgumentException>(() => ApplyAsync(new FakeConsentRepository(), Policy("Role", "DataScientist"), caller));
     }
 }

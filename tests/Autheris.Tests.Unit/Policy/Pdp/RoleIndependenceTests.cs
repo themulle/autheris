@@ -37,18 +37,36 @@ public sealed class RoleIndependenceTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void RoleGranteeConsent_FailsValidation()
+    public void RoleGranteeAllowConsent_FailsValidation()
     {
         var consent = new Consent
         {
             Id = Guid.NewGuid(),
             GranteeType = GranteeType.Role,
             RoleName = "analysts",
+            Effect = ConsentEffect.Allow,
             ValidFrom = DateTimeOffset.UtcNow,
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
 
         Should.Throw<InvalidOperationException>(consent.Validate).Message.ShouldContain("Role grantees are not supported");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void RoleGranteeDenyConsent_StaysValid()
+    {
+        var consent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            GranteeType = GranteeType.Role,
+            RoleName = "analysts",
+            Effect = ConsentEffect.Deny,
+            ValidFrom = DateTimeOffset.UtcNow,
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        };
+
+        Should.NotThrow(consent.Validate);
     }
 
     [Fact]

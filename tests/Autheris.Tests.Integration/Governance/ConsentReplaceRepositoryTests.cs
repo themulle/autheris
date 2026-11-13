@@ -50,7 +50,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
 
     private Consent RoleConsent(string role, TenantId tenant, int fromDays = -1, int toDays = 30) => new()
     {
-        TableId = _tableId, TableIdentifier = _table, TenantId = tenant, GranteeType = GranteeType.Role, RoleName = role,
+        TableId = _tableId, TableIdentifier = _table, TenantId = tenant, GranteeType = GranteeType.Role, RoleName = role, Effect = ConsentEffect.Deny,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(fromDays), ValidTo = DateTimeOffset.UtcNow.AddDays(toDays), CreatedBySid = Admin
     };
 
@@ -115,7 +115,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
         var svc = new Autheris.Application.Governance.Services.DeclarativeConsentApplyService(_repo, _repo, _repo);
         var caller = ManifestAdmin(Admin.Value, TenantA.Value);
-        var policy = new DeclarativeConsentPolicy(_table.Domain, _table.Schema, _table.TableName, "Role", "Analyst", "Allow");
+        var policy = new DeclarativeConsentPolicy(_table.Domain, _table.Schema, _table.TableName, "Group", "S-1-5-21-MANIFEST-GROUP", "Allow");
         var epochBefore = await _repo.GetTableEpochAsync(_table);
 
         var first = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
@@ -131,7 +131,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         third.Revoked.ShouldBe(1);
         epochAfterFirst.ShouldBe(epochBefore + 1);
         (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochAfterFirst + 1);
-        (await _repo.GetActiveRoleConsentsAsync(_table, "Analyst", TenantA, DateTimeOffset.UtcNow)).Count.ShouldBe(1);
+        (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-MANIFEST-GROUP")], _table, DateTimeOffset.UtcNow, TenantA)).Count.ShouldBe(1);
     }
 
     private static System.Security.Claims.ClaimsPrincipal ManifestAdmin(string sid, string tenant) => new(new System.Security.Claims.ClaimsIdentity(
