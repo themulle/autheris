@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Security;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
@@ -47,7 +48,7 @@ public class DmlCoverageTests
             Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String),
             Dml = dml ?? DmlGuardOptions.Strict
         }
-    }, CancellationToken.None);
+    }.WithTestWritePermit(sql), CancellationToken.None);
 
     private static ColumnReference Col(string name) => new(new SqlQualifiedName(new[] { new SqlIdentifier(name, true) }));
 
@@ -262,29 +263,17 @@ public class DmlCoverageTests
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void Merge_WithoutTheOnPredicate_WithTheInsertTenantReplaced_OrWithAnUnknownClause_IsRejectedByTheVerifier(TargetSqlDialect dialect)
+    public void Merge_WithoutTheOnPredicate_WithTheInsertTenantReplaced_OrWithAnUnknownClause_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
+        // WP-SIMPL-45 D-45-4 / SEC-SIMPL-124: MERGE is rejected before the injector and the verifier run, so no faulty injector can
+        // reach a MERGE any more. The same statement stays rejected with the exact message, with a faulty injector installed.
         const string sql = "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
                            "WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (s.id, 'acme')";
-        Mutant(dialect, sql, s => ((MergeStatement)s) with { On = new BinaryExpression(Col("id"), BinaryOperator.Equal, Col("id")) });
-        Mutant(dialect, sql, s =>
-        {
-            var m = (MergeStatement)s;
-            var insert = (MergeInsertClause)m.Clauses[0];
-            return m with { Clauses = new MergeClause[] { insert with { Values = new Expression[] { insert.Values[0], new LiteralExpression("other", LiteralType.String) } } } };
-        });
-        Mutant(dialect, sql, s => ((MergeStatement)s) with { Clauses = ((MergeStatement)s).Clauses.Append(new NotMatchedBySourceDelete()).ToList() });
-        Mutant(dialect, sql, s => ((MergeStatement)s) with { Target = ((MergeStatement)s).Target with { Alias = null } });
-        // CR-ADG-33: a source that reuses the target alias is rejected by the verifier, independently of the injector
-        Mutant(dialect, sql, s =>
-        {
-            var m = (MergeStatement)s;
-            var source = Assert.IsType<SubqueryTableSource>(m.Source);
-            return m with { Source = source with { Alias = new SqlIdentifier(m.Target.Alias!.Value.ToUpperInvariant()) } };
-        });
+        using var _ = CompilerHooks.Use(new MutantHooks { FaultyInjector = s => s });
+        var ex = Assert.Throws<SecurityException>(() => Compile(dialect, sql));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, ex.Message);
+        Assert.Equal(0, _engine.CompileCache.Stats.Entries);   // never cached
     }
-
-    private sealed record NotMatchedBySourceDelete() : MergeClause((Expression?)null);
 
     [Theory]
     [MemberData(nameof(Dialects))]
@@ -294,21 +283,26 @@ public class DmlCoverageTests
                  {
                      "DELETE FROM orders WHERE id = 1",
                      "UPDATE orders SET status = 'x' WHERE id = 1",
-                     "INSERT INTO orders (id, tenantid) VALUES (1, 'acme')",
-                     "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'"
+                     "INSERT INTO orders (id, tenantid) VALUES (1, 'acme')"
                  })
         {
             using var _ = CompilerHooks.Use(new MutantHooks { FaultyEmitter = text => text + ";" + (text.EndsWith(';') ? "" : " SELECT 1") });
             Assert.Throws<EmittedSqlInvariantViolationException>(() => Compile(dialect, sql));
         }
+
+        // MERGE (formerly in the list above) never reaches the emitter any more (D-45-4)
+        using var merge = CompilerHooks.Use(new MutantHooks { FaultyEmitter = text => text + ";" + (text.EndsWith(';') ? "" : " SELECT 1") });
+        var ex = Assert.Throws<SecurityException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'"));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, ex.Message);
     }
 
     [Fact]
-    public void FaultyEmitter_InsertingASemicolonBeforeTheMergeTerminator_IsRejected()
+    public void FaultyEmitter_InsertingASemicolonBeforeTheMergeTerminator_IsRejected_MergeNotSupported()
     {
         using var _ = CompilerHooks.Use(new MutantHooks { FaultyEmitter = text => text.Replace(" WHEN ", "; DROP TABLE x; MERGE WHEN ", StringComparison.Ordinal) });
-        Assert.Throws<EmittedSqlInvariantViolationException>(() =>
+        var ex = Assert.Throws<SecurityException>(() =>
             Compile(TargetSqlDialect.SqlServer, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN DELETE"));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, ex.Message);
     }
 
     // ---- the emitted-text checker and the MERGE terminator (SEC-ADG-08 c) ----

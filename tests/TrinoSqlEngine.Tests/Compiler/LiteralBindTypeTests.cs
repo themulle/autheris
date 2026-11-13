@@ -41,7 +41,7 @@ public class LiteralBindTypeTests
                 Catalog = catalog,
                 Tenant = new TenantBinding("__autheris_tenant", tenant, SqlParameterType.String)
             }
-        }, CancellationToken.None);
+        }.WithTestWritePermit(sql), CancellationToken.None);
 
     private static IEnumerable<BoundParameter> Literals(CompiledSql compiled) => compiled.Parameters.Where(p => p.Origin == ParameterOrigin.QueryLiteral);
 

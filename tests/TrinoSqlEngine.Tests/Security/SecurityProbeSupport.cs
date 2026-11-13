@@ -152,7 +152,7 @@ internal sealed class ProbeEnv
     };
 
     public CompiledSql Compile(string sql, string tenant = "acme") =>
-        Engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
+        Engine.Compile(sql.AsMemory(), Request(tenant).WithTestWritePermit(sql), CancellationToken.None);
 
     /// <summary>The row policy "Region = EU" on orders (a consent-style filter inside one tenant).</summary>
     public void RegionPolicy(string value = "EU")

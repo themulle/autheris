@@ -47,7 +47,7 @@ public class TypedGuardMutationTests
             Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String),
             TablesWithMaskedColumns = _maskedTables
         }
-    }, CancellationToken.None);
+    }.WithTestWritePermit(sql), CancellationToken.None);
 
     private string Rejected<T>(string sql) where T : Exception => Assert.Throws<T>(() => Compile(sql)).Message;
 

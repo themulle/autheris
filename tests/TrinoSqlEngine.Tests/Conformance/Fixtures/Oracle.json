@@ -6598,24 +6598,9 @@
       "Id": "dml-merge-001",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" \"ORDERS\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"ENTITLEMENTS\" ON ((\"ORDERS\".\"ID\" = \"ENTITLEMENTS\".\"ORDERID\") AND (\"ORDERS\".\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"ORDERS\".\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) WHEN MATCHED THEN UPDATE SET \"Status\" = :p2",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": ":p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-002",
@@ -6623,76 +6608,31 @@
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN DELETE",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-003",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" \"ORDERS\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"ENTITLEMENTS\" ON ((\"ORDERS\".\"ID\" = \"ENTITLEMENTS\".\"ORDERID\") AND (\"ORDERS\".\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"ORDERS\".\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) WHEN NOT MATCHED THEN INSERT (\"Id\", \"TenantId\") VALUES (\"ENTITLEMENTS\".\"ID\", :p1)",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-004",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x' WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" \"ORDERS\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"ENTITLEMENTS\" ON ((\"ORDERS\".\"ID\" = \"ENTITLEMENTS\".\"ORDERID\") AND (\"ORDERS\".\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"ORDERS\".\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) WHEN MATCHED THEN UPDATE SET \"Status\" = :p2 WHEN NOT MATCHED THEN INSERT (\"Id\", \"TenantId\") VALUES (\"ENTITLEMENTS\".\"ID\", :p1)",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": ":p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-005",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED AND entitlements.id > 1 THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" \"ORDERS\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"ENTITLEMENTS\" ON ((\"ORDERS\".\"ID\" = \"ENTITLEMENTS\".\"ORDERID\") AND (\"ORDERS\".\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"ORDERS\".\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) WHEN MATCHED THEN UPDATE SET \"Status\" = :p2 WHERE \"ENTITLEMENTS\".\"ID\" > :p3",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": ":p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        },
-        {
-          "Marker": ":p3",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-006",
@@ -6700,136 +6640,47 @@
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED AND entitlements.id = 1 THEN DELETE WHEN MATCHED THEN UPDATE SET status = 'x'",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SqlCompileNotSupportedException"
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-007",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING (SELECT id, orderid FROM entitlements) AS e ON orders.id = e.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" \"ORDERS\" USING (SELECT \"ID\", \"ORDERID\" FROM (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"ENTITLEMENTS\") \"E\" ON ((\"ORDERS\".\"ID\" = \"E\".\"ORDERID\") AND (\"ORDERS\".\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"ORDERS\".\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) WHEN MATCHED THEN UPDATE SET \"Status\" = :p2",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": ":p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-008",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders AS o USING entitlements AS e ON o.id = e.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" \"O\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"E\" ON ((\"O\".\"ID\" = \"E\".\"ORDERID\") AND (\"O\".\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"O\".\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) WHEN MATCHED THEN UPDATE SET \"Status\" = :p2",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": ":p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-009",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN NOT MATCHED AND entitlements.id > 1 THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" \"ORDERS\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"ENTITLEMENTS\" ON ((\"ORDERS\".\"ID\" = \"ENTITLEMENTS\".\"ORDERID\") AND (\"ORDERS\".\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"ORDERS\".\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) WHEN NOT MATCHED THEN INSERT (\"Id\", \"TenantId\") VALUES (\"ENTITLEMENTS\".\"ID\", :p1) WHERE \"ENTITLEMENTS\".\"ID\" > :p2",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": ":p2",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-010",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x', region = 'EU' WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (entitlements.id, 'acme', 'n')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" \"ORDERS\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"ENTITLEMENTS\" ON ((\"ORDERS\".\"ID\" = \"ENTITLEMENTS\".\"ORDERID\") AND (\"ORDERS\".\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"ORDERS\".\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) WHEN MATCHED THEN UPDATE SET \"Status\" = :p2, \"Region\" = :p3 WHEN NOT MATCHED THEN INSERT (\"Id\", \"TenantId\", \"Status\") VALUES (\"ENTITLEMENTS\".\"ID\", :p1, :p4)",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": ":p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        },
-        {
-          "Marker": ":p3",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "EU"
-        },
-        {
-          "Marker": ":p4",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "n"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-011",
       "Group": "dml-merge",
       "Sql": "MERGE INTO dbo.orders USING dbo.entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" \"ORDERS\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) \"ENTITLEMENTS\" ON ((\"ORDERS\".\"ID\" = \"ENTITLEMENTS\".\"ORDERID\") AND (\"ORDERS\".\"TenantId\" = :p1 AND \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"ORDERS\".\"TenantId\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000))))) WHEN MATCHED THEN UPDATE SET \"Status\" = :p2",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": ":p2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-012",

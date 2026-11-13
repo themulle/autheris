@@ -445,7 +445,7 @@ public class SecurityRemediationTests
     private static string CompileWithMaxRows(string sql, TargetSqlDialect dialect = TargetSqlDialect.PostgreSql)
     {
         var env = Env(dialect);
-        return env.Engine.Compile(sql.AsMemory(), env.Request(enforcedMaxRows: 100), CancellationToken.None).Sql.Trim();
+        return env.Engine.Compile(sql.AsMemory(), env.Request(enforcedMaxRows: 100).WithTestWritePermit(sql), CancellationToken.None).Sql.Trim();
     }
 
     [Theory]
