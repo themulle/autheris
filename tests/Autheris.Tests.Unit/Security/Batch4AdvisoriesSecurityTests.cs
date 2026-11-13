@@ -187,11 +187,7 @@ public sealed class Batch4AdvisoriesSecurityTests
             .Returns(meta);
 
         var options = Options.Create(new GatewayOptions());
-        var adp = new AccessDecisionPoint(
-            options,
-            Substitute.For<IPolicyEnforcementService>(),
-            transportGate: gate,
-            metadataRepo: metaRepo);
+        var adp = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
 
         var service = new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(),
@@ -199,7 +195,8 @@ public sealed class Batch4AdvisoriesSecurityTests
             options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
             Substitute.For<IAuditLogRepository>(),
-            adp);
+            adp,
+            transportGate: gate);
 
         var user = Wp0.User("user-1", Tenant.Value);
         await Should.ThrowAsync<TransportNotAllowedException>(() =>
@@ -246,7 +243,7 @@ public sealed class Batch4AdvisoriesSecurityTests
             .Returns(meta);
 
         var enforcer = new StreamRlsPolicyEnforcer(
-            Substitute.For<IPolicyEnforcementService>(),
+            Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(),
             metaRepo,
             Substitute.For<IColumnMaskingProvider>(),
             Substitute.For<IEpochValidationService>(),

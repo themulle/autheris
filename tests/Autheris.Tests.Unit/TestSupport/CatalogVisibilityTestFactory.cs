@@ -38,7 +38,6 @@ internal static class CatalogVisibilityTestFactory
             tables,
             consents,
             Options.Create(options ?? new GatewayOptions { Tenancy = TenancyShape.Multi.Options(), Rebac = new RebacOptions { Enabled = false } }),
-            rebac ?? (omitEvaluator ? null : DisabledRebac()),
             logger ?? NullLogger<CatalogVisibilityService>.Instance)
         {
             EngineOutputForTesting = engineOutput

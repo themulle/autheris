@@ -19,7 +19,7 @@ using Xunit;
 
 public sealed class StreamRlsTenantBindingTests : IDisposable
 {
-    private readonly IPolicyEnforcementService _policyEnforcement = Substitute.For<IPolicyEnforcementService>();
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _policyEnforcement = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
     private readonly IColumnMaskingProvider _maskingProvider = Substitute.For<IColumnMaskingProvider>();
     private readonly IEpochValidationService _epochService = Substitute.For<IEpochValidationService>();

@@ -67,22 +67,99 @@ public sealed partial class AiDataGuardrailService
         !string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId;
 
     /// <summary>
-    /// The Casbin ABAC request of a session for one target table. SR-M-08: an app-only session (no user SID) is evaluated without group
-    /// SIDs, exactly like its principal (<see cref="McpProtocolHandler.BuildPrincipalFromSession"/>).
+    /// The read decision of a session for one target table. The subject is the session principal (an app-only session carries no group
+    /// SIDs and a stale group snapshot is degraded, SR-M-08); roles are never grantees. A table without catalog metadata, or a
+    /// failing decision point, denies (fail closed).
     /// </summary>
-    private static SecurityEvaluationContext BuildSecurityContext(McpSessionContext sessionContext, TableIdentifier targetTable)
+    private async ValueTask<TableAccessDecision> DecideReadAsync(McpSessionContext sessionContext, TableIdentifier table, CancellationToken ct)
     {
-        var groupSids = !string.IsNullOrWhiteSpace(sessionContext.UserSid) && sessionContext.GroupSids is { Count: > 0 }
-            ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray()
-            : [];
-        var clientIp = !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var parsedIp)
-            ? parsedIp : System.Net.IPAddress.None;
+        try
+        {
+            var metadata = _tableMetadataRepository == null
+                ? null
+                : await _tableMetadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            if (metadata == null)
+            {
+                return TableAccessDecision.Denied(table, "Table not found in the catalog.");
+            }
 
-        return new SecurityEvaluationContext(
-            UserSid: new Sid(CallerSidOf(sessionContext)), GroupSids: groupSids, Tenant: new TenantId(sessionContext.TenantId),
-            TargetTable: targetTable, RequestedColumns: [], ClientIp: clientIp,
-            Timestamp: DateTimeOffset.UtcNow, PurposeId: "MCP_AI_AGENT_QUERY");
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext)!;
+            var subject = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(
+                principal, new TenantId(sessionContext.TenantId),
+                clientIp: !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var ip) ? ip : System.Net.IPAddress.None);
+            return await _decisionPoint.DecideAsync(
+                new Autheris.Application.Policy.Pdp.AccessRequest(
+                    subject, metadata, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Mcp),
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError("MCP guardrail decision failed ({FailureType}); denying (fail-closed).", ex.GetType().Name);
+            return TableAccessDecision.Denied(table, "Decision failed (fail-closed).");
+        }
     }
+
+    /// <summary>
+    /// Whether the call is a catalog-level or metadata tool (no data rows, nothing to decide); <paramref name="table"/> is its target. Keyed on the tool,
+    /// never on a table name alone: a tool that parses table names from user input always reaches the decision point.
+    /// </summary>
+    private static bool IsCatalogToolTarget(McpToolDefinition tool, TableIdentifier table) =>
+        tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
+        tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
+        // Metadata tools read no data rows; discovery visibility governs them. get_table_schema stays an access target per table.
+        (McpDatasetTools.IsDatasetTool(tool.Name) && !McpDatasetTools.ReadsRows(tool.Name) &&
+         !tool.Name.Equals(McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase) &&
+         !tool.Name.Equals(McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase)) ||
+        McpSemanticTools.IsSemanticTool(tool.Name) ||
+        (tool.Name.Equals("query_graphql", StringComparison.OrdinalIgnoreCase) && table.Equals(McpDatasetTools.CatalogTable)) ||
+        (tool.Name.Equals(McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase) && table.Equals(McpDataTargetResolver.ApiNoTable));
+
+    /// <summary>
+    /// describe_dataset returns column value profiles (allowed values, ranges, samples) and raw value-bearing column meta whenever the shared
+    /// <see cref="McpDatasetCatalog.EmitsValueProfile"/> predicate holds (same inputs as the handler). Only a call that emits none of them
+    /// skips the decision point; any failure to tell is decided (fail closed).
+    /// </summary>
+    private async ValueTask<bool> IsValueFreeDescribeAsync(
+        McpToolDefinition tool, string? argumentsJson, McpSessionContext sessionContext, TableIdentifier table, CancellationToken ct)
+    {
+        if (!tool.Name.Equals(McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (McpDatasetTools.IsBriefRequested(argumentsJson))
+        {
+            return true;
+        }
+
+        try
+        {
+            if (_catalogVisibility == null || _consentRepository == null)
+            {
+                return false;
+            }
+
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext)!;
+            var caller = new Autheris.Application.Catalog.Interfaces.CatalogCaller(principal, McpCatalogVisibility.SafeTenantId(principal), Autheris.Application.Catalog.Interfaces.CatalogChannel.Mcp);
+            var row = await _catalogVisibility.FindVisibleAsync(caller, table, ct).ConfigureAwait(false);
+            if (row is not { } visible)
+            {
+                return false;
+            }
+
+            var (consents, pending, isAdmin) = await McpDatasetCatalog.ResolveCallerConsentsAsync(principal, _options.Value, _consentRepository, null, null, ct).ConfigureAwait(false);
+            var status = McpDatasetCatalog.AccessStatusOf(table, consents, pending, isAdmin, _options.Value.IsMcpAuthBypassed);
+            return !McpDatasetCatalog.EmitsValueProfile(visible.Shape, visible.Table, status, brief: false);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Reason codes of a denied decision for the audit trail: codes only, never predicate values or policy text.</summary>
+    private static string ReasonCodesOf(TableAccessDecision decision) =>
+        decision.Reasons.Count == 0 ? "DEFAULT_DENY" : string.Join(';', decision.Reasons.Select(r => r.Code));
 
     /// <summary>
     /// Whether a tool result is a structured error: the executor shape (<c>"isError": true</c>, optional <c>error.code</c>), a governed

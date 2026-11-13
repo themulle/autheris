@@ -685,8 +685,8 @@ public sealed class CdcWebhookDeliveryServiceTests
         consentRepo.GetActiveConsentsForSubjectsAsync(
                 Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(consents));
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.HasPolicies(Arg.Any<TenantId>()).Returns(false);
+        var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
+
         var epoch = new Autheris.Infrastructure.Cache.EpochValidationService();
         var cache = new Autheris.Infrastructure.Cache.ConsentCacheService(
             new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),

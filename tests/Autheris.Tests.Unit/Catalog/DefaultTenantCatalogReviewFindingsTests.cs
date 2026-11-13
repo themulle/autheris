@@ -103,7 +103,7 @@ public sealed class DefaultTenantCatalogReviewFindingsTests
         var guardrail = new AiDataGuardrailService(
             registry, Options.Create(options), NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
-            tableMetadataRepository: metadata, goldenQueryService: golden, consentRepository: Wp0.Consents());
+            tableMetadataRepository: metadata, goldenQueryService: golden, consentRepository: Wp0.Consents(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
         var session = new McpSessionContext("s", "sp", D.Value, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "S-D-GA", ["GovernanceAdmin"], []);
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("get_golden_queries", "{}", "s"), session);

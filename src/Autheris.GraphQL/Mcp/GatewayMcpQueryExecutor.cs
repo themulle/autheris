@@ -313,12 +313,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             double d => (int)d,
             _ => null
         } : null;
-        bool? Bool(string name) => variables.TryGetValue(name, out var v) ? v switch
-        {
-            bool b => b,
-            string s => bool.TryParse(s, out var b) ? b : null,
-            _ => null
-        } : null;
+        bool? Bool(string name) => variables.TryGetValue(name, out var v) ? McpDatasetTools.ToBooleanArgument(v) : null;
 
         // MCP-06: `synthetic` must be a real boolean; anything else is rejected instead of silently reading real rows.
         if (variables.TryGetValue("synthetic", out var syntheticValue) && syntheticValue is not (null or bool))

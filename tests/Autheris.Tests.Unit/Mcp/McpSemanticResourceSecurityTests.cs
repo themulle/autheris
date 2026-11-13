@@ -103,7 +103,7 @@ public sealed class McpSemanticResourceSecurityTests
             tableMetadataRepository: repo,
             goldenQueryService: golden,
             consentRepository: AllowAll([Orders]),
-            catalogVisibility: Rebac());
+            catalogVisibility: Rebac(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
         var session = new McpSessionContext("s1", "sp", Tenant, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-5-21-MCP-USER", Roles: ["AiAgent"], GroupSids: []);
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("get_golden_queries", "{}", session.SessionId), session);

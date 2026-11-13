@@ -121,7 +121,7 @@ public sealed class TransportDiscoveryTests
             Wp0.Allow(new TableIdentifier("corp", "sales", "b"), "S-USER", Wp0.TenantA, "id"));
         var options = new GatewayOptions { Tenancy = TenancyShape.Multi.Options(), Rebac = new RebacOptions { Enabled = false } };
         return new CatalogVisibilityService(
-            tables, consents, Options.Create(options), CatalogVisibilityTestFactory.DisabledRebac(), NullLogger<CatalogVisibilityService>.Instance,
+            tables, consents, Options.Create(options), NullLogger<CatalogVisibilityService>.Instance,
             ingress, resolver);
     }
 

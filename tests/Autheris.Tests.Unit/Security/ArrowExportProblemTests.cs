@@ -28,7 +28,7 @@ public sealed class ArrowExportProblemTests
 
     private static DefaultHttpContext Ctx(string query, bool authenticated = true)
     {
-        var ctx = new DefaultHttpContext();
+        var ctx = new DefaultHttpContext { RequestServices = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAllRequestServices() };
         if (authenticated)
         {
             ctx.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "user:alice"), new Claim("tenant_id", "t1")], "T"));

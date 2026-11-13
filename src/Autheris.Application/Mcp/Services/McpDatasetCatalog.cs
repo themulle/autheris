@@ -397,9 +397,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var id = table.Identifier;
 
         var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
-        var accessStatus = options?.Value.IsMcpAuthBypassed == true
-            ? "GRANTED"
-            : CatalogVisibility.ComputeAccessStatus(id, activeConsents, pendingRequests, isAdmin);
+        var accessStatus = AccessStatusOf(id, activeConsents, pendingRequests, isAdmin, options?.Value.IsMcpAuthBypassed == true);
 
         var negotiatedLanguage = _languageNegotiator?.NegotiateLanguage(language, _localizationOptions?.Value.SupportedLanguages, _localizationOptions?.Value.DefaultLanguage);
 
@@ -409,8 +407,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         }
 
         // Positive check (fail closed): the catalog-viewer release applies to a tier-Full row only, never to an unmarked or consent row.
-        bool canViewProfile = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase) ||
-                              (table.CatalogView == CatalogView.Full && table.ReleaseProfileToCatalogViewers);
+        bool canViewProfile = CanViewProfile(table, accessStatus);
 
         var columnAccessLevels = ResolveColumnLevels(principal, table, activeConsents, isAdmin, isGranted: options?.Value.IsMcpAuthBypassed != true && string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase),
             bypass: options?.Value.IsMcpAuthBypassed == true);
@@ -887,11 +884,16 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         return CatalogCallerColumnLevels.Resolve(consentResolution, principal, table, activeConsents, isAdmin, isGranted, bypass, logger);
     }
 
-    private async Task<(IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)> GetCallerConsentsAndRequestsAsync(ClaimsPrincipal principal, CancellationToken ct)
+    private Task<(IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)> GetCallerConsentsAndRequestsAsync(ClaimsPrincipal principal, CancellationToken ct) =>
+        ResolveCallerConsentsAsync(principal, options?.Value, _consentRepository, approvalRepository, logger, ct);
+
+    /// <summary>The caller's consents, pending requests and admin view; shared by the describe handler and the MCP guardrail.</summary>
+    internal static async Task<(IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)> ResolveCallerConsentsAsync(
+        ClaimsPrincipal principal, GatewayOptions? gatewayOptions, IConsentRepository consentRepository, IConsentApprovalRepository? approvalRepository, ILogger? logger, CancellationToken ct)
     {
         var roles = principal.GetUserRoles();
         // The caller class comes from the canonical resolver; a GovernanceAdmin without a resolvable tenant is no administrator.
-        var scope = CallerScopeResolver.Resolve(principal, TenantResolver.EffectiveDefaultOf(options?.Value.Tenancy));
+        var scope = CallerScopeResolver.Resolve(principal, TenantResolver.EffectiveDefaultOf(gatewayOptions?.Tenancy));
         if (logger != null)
         {
             CallerScopeDiagnostics.ReportIfClaimlessAdmin(logger, principal, scope);
@@ -911,7 +913,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         var tenantId = principal.GetTenantId();
         var subjects = principal.GetGroupSids().Append(userSid.Value).ToList();
-        var activeConsents = await _consentRepository.GetAllActiveConsentsForSubjectsAsync(
+        var activeConsents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(
             subjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
 
         IReadOnlyList<ConsentRequest> pendingRequests = Array.Empty<ConsentRequest>();
@@ -929,6 +931,23 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         return (activeConsents, pendingRequests, false);
     }
+
+    /// <summary>The access status of a caller on a table, computed identically by the describe handler and the MCP guardrail.</summary>
+    internal static string AccessStatusOf(
+        TableIdentifier table, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin, bool authBypassed) =>
+        authBypassed ? "GRANTED" : CatalogVisibility.ComputeAccessStatus(table, activeConsents, pendingRequests, isAdmin);
+
+    /// <summary>Positive check (fail closed): the catalog-viewer release applies to a tier-Full row only, never to an unmarked or consent row.</summary>
+    internal static bool CanViewProfile(TableMetadata table, string accessStatus) =>
+        string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase) ||
+        (table.CatalogView == CatalogView.Full && table.ReleaseProfileToCatalogViewers);
+
+    /// <summary>
+    /// Whether describe_dataset emits column value profiles (allowed values, ranges, samples) or the raw value-bearing column meta:
+    /// never for the brief or the summary shape, otherwise exactly when <see cref="CanViewProfile"/> holds.
+    /// </summary>
+    internal static bool EmitsValueProfile(CatalogOutputShape shape, TableMetadata table, string accessStatus, bool brief) =>
+        !brief && shape != CatalogOutputShape.Summary && CanViewProfile(table, accessStatus);
 
     public async Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
     {

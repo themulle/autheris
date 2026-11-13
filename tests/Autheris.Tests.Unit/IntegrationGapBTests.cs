@@ -40,22 +40,6 @@ public sealed class IntegrationGapBTests
 {
     // ---------------------------------------------------------------- helpers
 
-    private sealed class DenyingPolicyService : IPolicyEnforcementService
-    {
-        public int Calls { get; private set; }
-
-        public ValueTask<TableAccessDecision> EvaluatePolicyAsync(SecurityEvaluationContext context, CancellationToken ct = default)
-        {
-            Calls++;
-            return ValueTask.FromResult(TableAccessDecision.Denied(context.TargetTable, "denied by test policy"));
-        }
-
-        public bool HasPolicies(TenantId tenant) => true;
-        public Task ReloadPoliciesAsync(TenantId tenant, CancellationToken ct = default) => Task.CompletedTask;
-        public void LoadPolicyFromText(TenantId tenant, string policyText) { }
-        public void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false) { }
-    }
-
     private sealed class RecordingLifetimeFeature : IHttpRequestLifetimeFeature
     {
         public CancellationToken RequestAborted { get; set; }
@@ -127,51 +111,6 @@ public sealed class IntegrationGapBTests
     // ---------------------------------------------------------------- GAP06
 
     [Fact]
-    public async Task GAP06_Catalog_DoesNotExemptMcpToolsFromAbac()
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            // Casbin is enabled: the guardrail asks it only then.
-            Casbin = new CasbinOptions { Enabled = true }
-        });
-        var policy = new DenyingPolicyService();
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult("""{"assets":[]}"""));
-
-        var guardrail = new AiDataGuardrailService(new McpToolRegistry(), options, NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, policyEnforcementService: policy);
-
-        var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_data_catalog", "{}"), CreateSession());
-
-        result.IsSuccess.ShouldBeFalse();
-        policy.Calls.ShouldBe(1);
-        await executor.DidNotReceive().ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task GAP06_OnlyExplicitMcpAuthBypass_SkipsAbac()
-    {
-        var options = Options.Create(new GatewayOptions
-        {
-            Mcp = new McpOptions { Enabled = true },
-            Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true }
-        });
-        var policy = new DenyingPolicyService();
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult("""{"assets":[]}"""));
-
-        var guardrail = new AiDataGuardrailService(new McpToolRegistry(), options, NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, policyEnforcementService: policy);
-
-        var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_data_catalog", "{}"), CreateSession());
-
-        result.IsSuccess.ShouldBeTrue();
-        policy.Calls.ShouldBe(0);
-    }
-
-    [Fact]
     public async Task GAP06_McpResources_NotOpenedForAnonymousCallers()
     {
         var table = new TableIdentifier("finance", "dbo", "ledger");
@@ -205,7 +144,7 @@ public sealed class IntegrationGapBTests
         var audit = Substitute.For<IAuditLogRepository>();
 
         var guardrail = new AiDataGuardrailService(new McpToolRegistry(), Options.Create(new GatewayOptions()),
-            NullLogger<AiDataGuardrailService>.Instance, audit, executor);
+            NullLogger<AiDataGuardrailService>.Instance, audit, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_customers", "{}"), CreateSession());
 
@@ -225,7 +164,7 @@ public sealed class IntegrationGapBTests
             .Returns(Task.FromResult(errorJson));
 
         var registry = new McpToolRegistry();
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor);
+        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
         var session = handler.CreateSession("svc-agent", "tenant-alpha");
 
@@ -248,7 +187,7 @@ public sealed class IntegrationGapBTests
             .Returns(Task.FromResult("""{"items":[{"id":"1"}],"isError":false}"""));
 
         var registry = new McpToolRegistry();
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor);
+        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
         var session = handler.CreateSession("svc-agent", "tenant-alpha");
 

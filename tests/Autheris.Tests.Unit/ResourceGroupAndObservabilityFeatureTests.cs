@@ -339,7 +339,7 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
             toolRegistry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, goldenQueryService: goldenService);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, goldenQueryService: goldenService, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var sessionContext = new McpSessionContext("sess-1", "agent-1", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest(
