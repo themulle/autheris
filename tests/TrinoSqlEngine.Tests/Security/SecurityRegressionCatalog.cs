@@ -225,7 +225,7 @@ internal static class SecurityRegressionCatalog
         new("SEC-ADG-07", "gateway and database resolve names alike", new[] { "WP-A4", "WP-A7", "WP-F2" },
             new[] { "Autheris.Tests.Integration/AstCompilerPostgreSqlExecutionTests.cs::SEC-ADG-07", "TrinoSqlEngine.Tests/Compiler/CteShadowingTests.cs::QuotedCteVsUnquotedPhysical_CaseVariants_AlwaysSecured" }),
         new("SEC-ADG-08", "MERGE: closed clause set, unique-key side channel", new[] { "WP-A7", "WP-A2" },
-            new[] { "TrinoSqlEngine.Tests/Compiler/DmlCoverageTests.cs::SEC-ADG-08", "TrinoSqlEngine.Tests/Security/SecurityProbes.cs::Verifier_RejectsAnUnknownMergeClause" }),
+            new[] { "TrinoSqlEngine.Tests/Compiler/DmlCoverageTests.cs::SEC-ADG-08", "TrinoSqlEngine.Tests/Security/SecurityProbes.cs::Merge_UnknownClause_IsRejected_BeforeSecuring" }),
         new("SEC-ADG-09", "Databricks REST client SSRF controls", new[] { "WP-C3", "WP-C5" }, new[] { "Autheris.Tests.Unit/Databricks/DatabricksStartupValidationTests.cs::SEC-ADG-09", "Autheris.Tests.SqlCompilerGate/WorkflowPolicyTests.cs::SEC-ADG-09" }),
         new("SEC-ADG-10", "${...} variable substitution", new[] { "WP-C1", "WP-C4" },
             new[] { "TrinoSqlEngine.Tests/Compiler/DatabricksGeneratorTests.cs::Databricks_IdentifierWithDollarOrBrace_Rejected", "TrinoSqlEngine.Tests/Compiler/CompileLimitsTests.cs::Databricks_VariableSubstitutionGuard_IsForcedEvenWhenTheCallerPassesNone" }),
