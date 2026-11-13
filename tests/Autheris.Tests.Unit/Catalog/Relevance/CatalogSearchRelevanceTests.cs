@@ -44,7 +44,7 @@ public sealed class CatalogSearchRelevanceTests(ITestOutputHelper output)
     [RelevanceCases(RelevanceNeed.PartialWords, Skip = "Needs partial-word matching (#626).")]
     [RelevanceCases(RelevanceNeed.WordForms, Skip = "Needs word forms (stemming); not planned, owner decision Q-SRCH-6 (#624).")]
     [RelevanceCases(RelevanceNeed.Embeddings, Skip = "Needs a multilingual embedding model (#628).")]
-    [RelevanceCases(RelevanceNeed.FullIdentifier, Skip = "Needs the full dataset id in search_catalog hits (#627).")]
+    [RelevanceCases(RelevanceNeed.FullIdentifier)]
     public async Task Case_ExpectedTablesWithinMaxRank(string caseId, string mode)
     {
         var c = RelevanceFixture.Case(caseId);

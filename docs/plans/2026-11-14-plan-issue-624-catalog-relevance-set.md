@@ -1,6 +1,6 @@
 # PLAN-OI-624: catalog search relevance set
 
-- Date: 2026-11-14 · Base: `origin/main` @ `0cb36516` · Issue: [#624](https://github.com/themulle/autheris/issues/624)
+- Date: 2026-11-14 · Base: `origin/main` @ `7a4df959` (written on `0cb36516`) · Issue: [#624](https://github.com/themulle/autheris/issues/624)
 - Phase 1 and 2: [`2026-11-13-plan-issues-catalog-search.md`](2026-11-13-plan-issues-catalog-search.md), section WP-OI-SRCH-624. This file records the delivery and where it deviates from that plan.
 - Origin plan: [`00-master-plan-overview.md`](00-master-plan-overview.md) (plan registry).
 - Freeze (PRD 5.1): tests only, 0 lines in `src/`. No Phase 3 review (cluster plan, "Phase 3 review scope").
@@ -21,12 +21,12 @@ xUnit 2 cannot skip a single row of a theory at run time. The cases of one featu
 
 ## Deviations from the cluster plan
 
-- **Full identifier (#627):** the engine and `CatalogDiscoveryService` already return the full `TableIdentifier`; the defect of #627 is in the `search_catalog` projection (`table = domain.table`). The `full-identifier` cases therefore also run `search_catalog` over the same hits and require distinct `table` values that equal the expected dataset ids. Unskipped on this base, both cases fail with `search_catalog tables: sales.orders, sales.orders`; the engine ranks are met. PR #722 (WP-OI-SRCH-627) switches them on, or they are switched on here if #722 merges first.
+- **Full identifier (#627):** the engine and `CatalogDiscoveryService` already return the full `TableIdentifier`; the defect of #627 is in the `search_catalog` projection (`table = domain.table`). The `full-identifier` cases therefore also run `search_catalog` over the same hits and require distinct `table` values that equal the expected dataset ids. On `0cb36516` (before #627) both cases failed with `search_catalog tables: sales.orders, sales.orders` while the engine ranks were met. #627 merged in #729 before this PR, so the cases are switched on here and pass.
 - **Hybrid mode:** runs with the deterministic test generator and a provider other than `None` (with the default `None` the engine silently runs keyword search). It checks the rank fusion of the cases that are switched on; it is not evidence for #628.
 - **Word forms:** no stemming issue exists (owner decision Q-SRCH-6); these cases link #624.
 - **Case corrections after the first run:** two cases did not test their feature because the query matched a whole word of a column name: "Lieferant" (column `lieferant_nr`) is now a baseline case, and "maintenance plan" (column `plan_id`) is now "maintenance". No fixture data was changed.
 
-## Ranks on the base (keyword mode)
+## Ranks on the base (keyword mode, before #625 and #626)
 
 | Need | Case | Rank on base |
 |---|---|---|
@@ -36,7 +36,7 @@ xUnit 2 cannot skip a single row of a theory at run time. The cases of one featu
 | partial-words | "Betriebsstunden", "Fahrzeug" (compounds only), "Verbrauch" | not found |
 | word-forms | "Aufträge", "Rechnungen", "Fahrten" | not found |
 | embeddings | "invoice", "maintenance", "supplier", "Standort", "Personal" | not found |
-| full-identifier | "Bestellungen", "orders" | engine ranks met; `search_catalog` names both `sales.orders` |
+| full-identifier | "Bestellungen", "orders" | met (on `0cb36516`: engine ranks met, `search_catalog` named both `sales.orders`) |
 
 ## Phase 4 and 5
 
