@@ -474,7 +474,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     : Autheris.Domain.Interfaces.ColumnAccessLevel.Deny;
                 if (canViewProfile)
                 {
-                    valueProfile = effectiveProfileService.GetColumnProfile(table, c, effectiveLevel, hasActiveRowFilters);
+                    valueProfile = KnownProfileOrNull(
+                        effectiveProfileService.GetColumnProfile(table, c, effectiveLevel, hasActiveRowFilters),
+                        emptyShareKnown: effectiveProfileService.GetStoredSnapshot(id, c.ColumnName) != null || c.Meta?.ContainsKey("empty_share") == true);
                 }
 
                 var colResolved = negotiatedLanguage != null ? c.Texts.Resolve(negotiatedLanguage) : null;
@@ -936,6 +938,19 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     internal static string AccessStatusOf(
         TableIdentifier table, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin, bool authBypassed) =>
         authBypassed ? "GRANTED" : CatalogVisibility.ComputeAccessStatus(table, activeConsents, pendingRequests, isAdmin);
+
+    /// <summary>
+    /// Issue #702: a profile that carries nothing (no stored snapshot, no declared empty share, no other member set) is not
+    /// emitted; its empty share of 0 would read as "no empty values" although nothing is known.
+    /// </summary>
+    internal static ColumnValueProfile? KnownProfileOrNull(ColumnValueProfile? profile, bool emptyShareKnown) =>
+        emptyShareKnown || profile is not
+        {
+            FormatPattern: null, MinValue: null, MaxValue: null, TypicalLength: null, ApproximateDistinctCount: null,
+            AllowedValues: null, DistinctCountBucket: null, SampleValues: null
+        }
+            ? profile
+            : null;
 
     /// <summary>Positive check (fail closed): the catalog-viewer release applies to a tier-Full row only, never to an unmarked or consent row.</summary>
     internal static bool CanViewProfile(TableMetadata table, string accessStatus) =>
