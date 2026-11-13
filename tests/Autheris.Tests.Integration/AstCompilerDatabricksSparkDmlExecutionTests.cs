@@ -193,19 +193,12 @@ public sealed class AstCompilerDatabricksSparkDmlExecutionTests : AstCompilerDml
     }
 
     [Fact]
-    public async Task Merge_WithTwoSourceRowsForOneTargetRow_FailsWithTheTypedMergeError()
+    public async Task Merge_WithTwoSourceRowsForOneTargetRow_IsRejected_MergeNotSupported()
     {
         if (!Available()) return;
-        // two acme entitlements point at order 1: Delta refuses the ambiguous MERGE
+        // two acme entitlements point at order 1: Delta used to refuse the ambiguous MERGE at run time; the compiler now refuses it first
         await DdlAsync($"INSERT INTO {_schema}.entitlements VALUES (9, 'acme', 1)");
-        var before = await SnapshotAsync();
-        var raw = await Should.ThrowAsync<InvalidOperationException>(() => ExecAsync(
-            $"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'dup'", "acme"));
-        var mapped = DmlErrorSanitizer.TryMap(TargetSqlDialect.Databricks, raw);
-        mapped.ShouldNotBeNull();
-        mapped.Kind.ShouldBe(DmlConstraintKind.MergeMultipleMatches);
-        mapped.Message.ShouldBe("The statement violated a data constraint.");
-        (await SnapshotAsync()).ShouldBe(before);
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'dup'", "acme");
     }
 
     [Fact]
@@ -221,8 +214,11 @@ public sealed class AstCompilerDatabricksSparkDmlExecutionTests : AstCompilerDml
             new TableCatalogEntry(new TableIdentity(_schema, "plain", CatalogName),
                 ImmutableArray.Create(new CatalogColumn("id", "INT"), new CatalogColumn("tenantid", "STRING", "UTF8_BINARY"), new CatalogColumn("status", "STRING")), "tenantid", 1)
         }, _schema);
-        var request = Request("acme") with { Policy = Request("acme").Policy with { Catalog = catalog } };
-        var compiled = Engine.Compile($"UPDATE {_schema}.plain SET status = 'x' WHERE id > 0".AsMemory(), request, CancellationToken.None);
+        var plainSql = $"UPDATE {_schema}.plain SET status = 'x' WHERE id > 0";
+        // the permit is derived from the catalog that holds the target, so it is built after the catalog is replaced
+        var plainPolicy = Request("acme", plainSql).Policy with { Catalog = catalog };
+        var request = Request("acme", plainSql) with { Policy = plainPolicy with { Write = TestWritePermits.For(plainSql, plainPolicy) } };
+        var compiled = Engine.Compile(plainSql.AsMemory(), request, CancellationToken.None);
         await Should.ThrowAsync<InvalidOperationException>(() => ExecuteAsync(compiled));
         var rows = await QueryAsync($"SELECT status FROM {_schema}.plain");
         rows.Single()[0].ShouldBe("o");

@@ -103,7 +103,7 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
         CompiledSql compiled;
         try
         {
-            compiled = _engine.Compile(statement.Sql.AsMemory(), _policies.AstRequest(GatePolicies.PermissionsOf(statement.Class)), CancellationToken.None);
+            compiled = _engine.Compile(statement.Sql.AsMemory(), _policies.AstRequest(GatePolicies.PermissionsOf(statement.Class), statement.Class, statement.Sql), CancellationToken.None);
         }
         catch (Exception ex)
         {
