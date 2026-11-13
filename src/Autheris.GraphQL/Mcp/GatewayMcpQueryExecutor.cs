@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security;
 using System.Security.Claims;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,11 +28,8 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 {
-    private static readonly JsonSerializerOptions CamelCaseJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
+    // Issue #702: no null members and no empty objects in tool results.
+    private static readonly JsonSerializerOptions CamelCaseJsonOptions = McpResultJson.Options;
 
     private readonly IRequestExecutorProvider _executorProvider;
     private readonly IGatewayExecutionService _gatewayExecutionService;

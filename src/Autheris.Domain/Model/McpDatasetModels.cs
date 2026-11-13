@@ -3,6 +3,7 @@ namespace Autheris.Domain.Model;
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 using Autheris.Domain.Common;
 
 /// <summary>Issue #572: Coarse size class and metadata provenance for MCP and REST catalog discovery.</summary>
@@ -54,6 +55,7 @@ public sealed record McpAccessPath(
 public sealed record McpDomainCount(string Domain, int TableCount);
 
 /// <summary>Result of the MCP <c>list_datasets</c> tool.</summary>
+/// <param name="Domains">Always written in MCP results (also when null), because clients index it without a presence check.</param>
 /// <param name="Guidance">How to query data: GraphQL first.</param>
 /// <param name="Endpoints">All enabled protocols of the gateway, GraphQL first.</param>
 public sealed record McpDatasetList(
@@ -67,7 +69,7 @@ public sealed record McpDatasetList(
     int? NextOffset = null,
     string? Language = null,
     string? RequestedLanguage = null,
-    IReadOnlyList<McpDomainCount>? Domains = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] IReadOnlyList<McpDomainCount>? Domains = null);
 
 /// <summary>Issue #79: Field sunsetting and deprecation metadata exposed in <c>describe_dataset</c> and query analysis.</summary>
 public sealed record FieldDeprecationInfo(
@@ -95,7 +97,7 @@ public sealed record ColumnValueProfile(
 /// <summary>A column the caller may see, as described by the MCP <c>describe_dataset</c> tool.</summary>
 /// <param name="Type">Data type in the source database.</param>
 /// <param name="GraphQlField">Field name in the GraphQL API (may differ from the column name).</param>
-/// <param name="GraphQlType">GraphQL scalar of the field (String, Int, Long, Float, Decimal, Boolean).</param>
+/// <param name="GraphQlType">GraphQL scalar of the field (String, Int, Long, Float, Decimal, Boolean); always written in MCP results, also when null.</param>
 public sealed record McpDatasetColumn(
     string Name,
     string Type,
@@ -103,7 +105,7 @@ public sealed record McpDatasetColumn(
     bool Sensitive,
     bool PrimaryKey,
     string? GraphQlField = null,
-    string? GraphQlType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? GraphQlType = null,
     ColumnSemantics? Semantics = null,
     FieldDeprecationInfo? Deprecation = null,
     ColumnValueProfile? ValueProfile = null,

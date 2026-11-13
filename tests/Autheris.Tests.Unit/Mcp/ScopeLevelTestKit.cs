@@ -33,7 +33,11 @@ internal static class ScopeLevelTestKit
     public static readonly TableIdentifier Orders = new("sales", "public", "orders");
     public static readonly string[] SentinelValues = [SentinelOne, SentinelTwo];
 
-    /// <summary>The column under test (<c>grade</c>) carries sentinel allowed values; <c>id</c> is the plain column.</summary>
+    /// <summary>
+    /// The column under test (<c>grade</c>) carries sentinel allowed values; <c>id</c> is the plain column. Both declare an
+    /// empty share, so a column the caller may see always has a value profile (issue #702: a profile without any known value
+    /// is not emitted, and the profile channel would no longer tell Mask from Deny).
+    /// </summary>
     public static TableMetadata CreateTable(
         DatasetVisibility visibility = DatasetVisibility.Hidden,
         bool releaseProfileToCatalogViewers = false,
@@ -52,13 +56,13 @@ internal static class ScopeLevelTestKit
         },
         Columns =
         [
-            new TableColumn { ColumnName = "id", DataType = "int" },
+            new TableColumn { ColumnName = "id", DataType = "int", Meta = new Dictionary<string, string> { ["empty_share"] = "0" } },
             new TableColumn
             {
                 ColumnName = "grade",
                 DataType = "varchar",
                 IsSensitive = gradeSensitive,
-                Meta = new Dictionary<string, string> { ["accepted_values"] = JsonSerializer.Serialize(SentinelValues) }
+                Meta = new Dictionary<string, string> { ["accepted_values"] = JsonSerializer.Serialize(SentinelValues), ["empty_share"] = "0" }
             }
         ],
         ColumnMaskingRules = maskingRules ?? new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase),
