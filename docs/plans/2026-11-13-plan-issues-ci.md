@@ -160,3 +160,7 @@ Measured state (gh, 2026-11-13): of the last 30 `ci.yml` runs 8 succeeded, 17 fa
 - WP-OI-CI-7 (#609): secret handling (environment gate, no PR trigger, masked logs, least-privilege service principal), the ephemeral-schema clean-up and the security cells of the live suite.
 - WP-OI-CI-8 (#611): the TLS setup of the sim governance database (no policy relaxation, no fixed credentials).
 - WP-OI-CI-1 (#518): only a light check that the doc-only glob list cannot skip `src/`, `tests/`, `.github/` or `deploy/helm/`. Phase 3 can confirm this with the `[Security]` architecture tests; no full review is needed.
+
+## Owner decisions (2026-11-13)
+
+The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.

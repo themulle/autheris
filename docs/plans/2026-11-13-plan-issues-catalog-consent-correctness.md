@@ -140,3 +140,7 @@ Recommended order: WP-OI-CAT-2 -> WP-OI-CAT-3 (same caller path, same tests) -> 
 - WP-OI-CAT-1 (short): untrusted `identifier`/`alias` into catalog identity and generated SQL; collision handling.
 - WP-OI-CAT-7 (short): condition C-6 of the sp1b review.
 - Not needed: WP-OI-CAT-5, WP-OI-CAT-6.
+
+## Owner decisions (2026-11-13)
+
+The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.

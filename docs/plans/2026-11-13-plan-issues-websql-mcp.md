@@ -122,3 +122,7 @@ Suggested order: #669 test PR and #668 now (bug fixes, independent); #682 A now;
 - WP-OI-WEB-681 and the WP-SIMPL-41 PR 3 amendment: cursor design (position only, filter binding, no hidden-object leak), cross-request candidate cache key and epoch invalidation, fail-closed on decision errors.
 - WP-OI-WEB-682 B: not-found equivalence for unknown, hidden and other-tenant root fields (no enumeration oracle), relation target field exposure.
 - Not needed: #527 (closed, reviewed under WP-SIMPL-51 SEC-51-07..12), #669 (test-only).
+
+## Owner decisions (2026-11-13)
+
+The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.

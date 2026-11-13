@@ -158,3 +158,7 @@ All eight issues report the same measurement (v1.7.1, PostgreSQL governance DB, 
 ## Phase 3 review scope
 
 csharp-security-expert review required for SCALE-1 (INV-1/INV-2 epoch and flush semantics), SCALE-2 (transaction and rollback per chunk, new SQL statements, parameter binding, allowlist), SCALE-3 (false "unchanged" risk, projection coverage), SCALE-4 (delta completeness, removal of hidden/inactive tables, migration step), SCALE-5 (tombstones, no leak of hidden tables or old masked column text), SCALE-6 (tenant scoping and visibility parity of paged reads), SCALE-7 (cache eviction never serves a stale epoch; Q-SCALE-3). SCALE-8 only for PR 3 or if Q-SCALE-4 changes the schema exposure. SCALE-0 needs no review.
+
+## Owner decisions (2026-11-13)
+
+The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.

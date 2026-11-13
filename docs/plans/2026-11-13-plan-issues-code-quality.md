@@ -47,3 +47,7 @@
 
 - `WP-OI-CQ-1`: confirm the regression-test list and the ratchet rule (no security test may be lost or untagged).
 - `WP-OI-CQ-2a`: review every site where the comparison semantics change (role, SID, tenant, header, SQL keyword checks) and the `tr-TR` test set.
+
+## Owner decisions (2026-11-13)
+
+The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.

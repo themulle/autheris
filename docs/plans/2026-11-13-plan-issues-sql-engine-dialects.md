@@ -108,3 +108,7 @@ Recommended order: #486 (security guard, S) -> #478 A/B (parallel; different pro
 - WP-OI-SQL-479-C: user LIKE pattern rewriting and constant-fragment registration (SQLE-09 invariants, no literal text in emitted SQL).
 - WP-OI-SQL-492 (when unfrozen): `targetScope` must never change access decisions or buckets.
 - WP-OI-SQL-479-A/B/D: no Phase 3 needed (semantic correctness only; parity tests are the gate).
+
+## Owner decisions (2026-11-13)
+
+The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.

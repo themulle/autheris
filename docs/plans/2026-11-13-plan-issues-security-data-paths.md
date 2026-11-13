@@ -152,3 +152,7 @@
 - Required (csharp-security-expert): WP-OI-SEC-DP-1 and -2 (audit integrity, redaction allow-list), -4 (poller guards per engine), -5 (transport gate roots), -8 and -9 (deletions keep every security test accounted for, SEC-SIMPL-03; visibility helper), -10 (plugin loading), -11 (egress policy), -12 (OLAP auth default), -13 (WebSocket session termination), -14 (read-only reads).
 - Delta check only: #475 (WP-SIMPL-36 PR 5c, add the null-key and invalidation conditions above) and #508 (WP-SIMPL-36 PR 4c, re-verify line numbers after WP-SIMPL-46 PR 3).
 - Not needed: WP-OI-SEC-DP-6 and -7 (robustness and test-only), unless the reviewer wants the dbt message change in scope.
+
+## Owner decisions (2026-11-13)
+
+The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.

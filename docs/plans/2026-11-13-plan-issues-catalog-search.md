@@ -135,3 +135,7 @@ Recommended order: WP-OI-SRCH-501 -> 627 -> 628a -> 624 -> 625 -> 626 -> (owner 
 - WP-OI-SRCH-628a..d: fail-loud provider selection, model file integrity and supply chain, vector-based leakage of hidden or HIDDEN-text columns (Q-SRCH-5).
 - #571 and #580 are reviewed with their specs (WP-SIMPL-52, WP-SIMPL-54); the cross-check tests listed under #571 are binding for whichever PR merges later.
 - WP-OI-SRCH-624 and 627: no Phase 3 review needed (tests; identifier format of already visible datasets).
+
+## Owner decisions (2026-11-13)
+
+The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.

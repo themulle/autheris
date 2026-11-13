@@ -106,3 +106,7 @@ Recommended order: WP-OI-SEC-ID-2 (governance TLS is enforced nowhere today) -> 
 - WP-OI-SEC-ID-1 (readiness single-flight) - light review (DoS bound, no cached auth data).
 - WP-OI-SEC-ID-3 (SHA-256 pins, image policy) - light review with Q-SECID-3/4.
 - #469, #482, #484: no review; the owner can close them with the evidence above.
+
+## Owner decisions (2026-11-13)
+
+The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.
