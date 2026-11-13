@@ -72,6 +72,8 @@ public sealed class AccessExplanationServiceTests
 
     private static ExplainRequest Req(string sid) => new(new ExplainSubjectRef(sid, null), "default.dbo.orders", AccessOperation.Read);
 
+    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
+
     [Fact]
     public async Task Foreign_object_returns_uniform_404_and_no_predicate_values()
     {
@@ -198,5 +200,120 @@ public sealed class AccessExplanationServiceTests
         ok.Grants!.Single().RowFilterIds.ShouldBe([consent.RowFilters[0].Id]);
         JsonSerializer.Serialize(ok.Grants).ShouldNotContain("SECRET-EU");
         _audit.ReceivedCalls().Select(c => ((AuditLogEntry)c.GetArguments()[0]!).EventType).ShouldAllBe(t => t == AuditEventTypes.AuthzGrantsList);
+    }
+
+    [Fact]
+    public void Request_binds_string_enums_and_missing_operation_is_null()
+    {
+        var ok = JsonSerializer.Deserialize<ExplainRequest>("{\"subject\":{\"sid\":\"S-1-A\"},\"object\":\"default.dbo.orders\",\"operation\":\"Update\",\"transport\":\"Mcp\"}", Web)!;
+        ok.Operation.ShouldBe(AccessOperation.Update);
+        ok.Transport.ShouldBe(AccessTransport.Mcp);
+        ok.ObjectName.ShouldBe("default.dbo.orders");
+
+        JsonSerializer.Deserialize<ExplainRequest>("{\"subject\":{\"sid\":\"S-1-A\"},\"object\":\"a.b.c\"}", Web)!.Operation.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(99, null)]
+    [InlineData(0, 99)]
+    public async Task Missing_or_undefined_enum_values_are_BadRequest_and_audited(int? operation, int? transport)
+    {
+        var service = Create(Meta());
+        var request = new ExplainRequest(new ExplainSubjectRef("S-1-USER", null), "default.dbo.orders", (AccessOperation?)operation, (AccessTransport?)transport);
+
+        var result = await service.ExplainAsync(Ctx("S-1-USER"), request);
+
+        result.Outcome.ShouldBe(ExplainOutcome.BadRequest);
+        _audit.ReceivedCalls().Count().ShouldBe(1);
+        await _pdp.DidNotReceiveWithAnyArgs().ExplainAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Foreign_subject_with_default_resolver_reports_SubjectResolved_false_and_Degraded()
+    {
+        var service = Create(Meta());
+        _pdp.ExplainAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>()).Returns(ci =>
+        {
+            var subject = ci.Arg<AccessRequest>().Subject;
+            return new ValueTask<AccessExplanation>(new AccessExplanation(false, [], [],
+                new EffectiveGroupsExplanation([], "Token", subject.GroupResolutionStatus.ToString()), [], 1));
+        });
+        var resolver = new DegradedExplainSubjectResolver();
+        service = new AccessExplanationService(_pdp, _tables, _visibility, _owners, _consents, resolver, _audit);
+
+        var foreign = await service.ExplainAsync(Ctx("S-1-ADMIN", clusterRoles: "GovernanceAdmin"), Req("S-1-OTHER"));
+        var self = await service.ExplainAsync(Ctx("S-1-USER"), Req("S-1-USER"));
+
+        foreign.Explanation!.Groups.Status.ShouldBe("Degraded");
+        foreign.Explanation.SubjectResolved.ShouldBeFalse();
+        self.Explanation!.SubjectResolved.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("S-1-A B")]
+    [InlineData("S-1-<script>")]
+    public async Task Malformed_subject_sid_is_BadRequest_before_object_lookup(string sid)
+    {
+        var service = Create(Meta());
+
+        (await service.ExplainAsync(Ctx("S-1-USER"), Req(sid))).Outcome.ShouldBe(ExplainOutcome.BadRequest);
+        (await service.ExplainAsync(Ctx("S-1-USER"), Req(new string('S', 257)))).Outcome.ShouldBe(ExplainOutcome.BadRequest);
+        (await service.ExplainAsync(Ctx("S-1-USER"), new ExplainRequest(new ExplainSubjectRef(null, new string('u', 257)), "default.dbo.orders", AccessOperation.Read)))
+            .Outcome.ShouldBe(ExplainOutcome.BadRequest);
+        await _tables.DidNotReceiveWithAnyArgs().GetTableMetadataAsync(default, default);
+    }
+
+    [Fact]
+    public async Task Audit_Decision_reflects_explanation_Allowed()
+    {
+        var service = Create(Meta());
+        _pdp.ExplainAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>()).Returns(
+            new ValueTask<AccessExplanation>(new AccessExplanation(false, [], [], new EffectiveGroupsExplanation([], "Token", "Complete"), [], 1)));
+
+        await service.ExplainAsync(Ctx("S-1-USER"), Req("S-1-USER"));
+
+        ((AuditLogEntry)_audit.ReceivedCalls().Single().GetArguments()[0]!).Decision.ShouldBe("DENY");
+    }
+
+    [Fact]
+    public async Task Grants_list_flags_truncation_when_page_cap_is_hit()
+    {
+        _consents.GetConsentPageAsync(Arg.Any<ConsentPageQuery>(), Arg.Any<CancellationToken>()).Returns(new ConsentPage([], Guid.NewGuid()));
+        var service = Create(Meta());
+
+        var result = await service.ListGrantsAsync(Ctx("S-1-ADMIN", clusterRoles: "GovernanceAdmin"), "default.dbo.orders");
+
+        result.Outcome.ShouldBe(ExplainOutcome.Ok);
+        result.Truncated.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task NotFound_results_are_identical_for_foreign_hidden_unknown_and_failing_lookup()
+    {
+        var caller = Ctx("S-1-ADMIN", clusterRoles: "ClusterAdmin");
+        Func<AccessExplanationService> failing = () =>
+        {
+            var created = Create(Meta());
+            _tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns<TableMetadata?>(_ => throw new InvalidOperationException("db down"));
+            return created;
+        };
+        var services = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(Microsoft.Extensions.DependencyInjection.OptionsServiceCollectionExtensions.AddOptions(Microsoft.Extensions.DependencyInjection.LoggingServiceCollectionExtensions.AddLogging(new Microsoft.Extensions.DependencyInjection.ServiceCollection())));
+
+        var bodies = new List<(int, string)>();
+        foreach (var factory in new Func<AccessExplanationService>[] { () => Create(Meta("tenant-b")), () => Create(Meta(), visible: false), () => Create(null), failing })
+        {
+            var service = factory();
+            var outcome = (await service.ExplainAsync(caller, Req("S-1-ADMIN"))).Outcome;
+            var context = new Microsoft.AspNetCore.Http.DefaultHttpContext { RequestServices = services, TraceIdentifier = "trace-fixed" };
+            context.Response.Body = new System.IO.MemoryStream();
+            await Autheris.Api.Endpoints.AuthorizationExplainEndpoints.ToResult(outcome, null, context).ExecuteAsync(context);
+            context.Response.Body.Position = 0;
+            bodies.Add((context.Response.StatusCode, await new System.IO.StreamReader(context.Response.Body).ReadToEndAsync()));
+        }
+
+        bodies.Select(b => b.Item1).Distinct().ShouldBe([404]);
+        bodies.Select(b => b.Item2).Distinct().Count().ShouldBe(1);
     }
 }
