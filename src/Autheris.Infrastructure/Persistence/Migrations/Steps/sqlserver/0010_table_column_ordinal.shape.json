@@ -1,0 +1,9 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "TABLE_COLUMNS",
+      "column": { "name": "ordinal", "type": "INT", "family": "integer", "nullable": false }
+    }
+  ]
+}

@@ -60,7 +60,7 @@ WHERE is_active = 1";
 FROM TABLE_COLUMNS c
 LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 WHERE c.table_id = @tableId
-ORDER BY c.ctid"; // TABLE_COLUMNS has no ordinal/serial/timestamp (id is a GUID): heap order is the only registration order until an ordinal column is added by a new migration step (follow-up); the natural-key unique index would otherwise return the columns by name
+ORDER BY c.ordinal, c.column_name";
 
         public const string SelectTableColumnsSqlSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
        m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
@@ -68,7 +68,8 @@ ORDER BY c.ctid"; // TABLE_COLUMNS has no ordinal/serial/timestamp (id is a GUID
        c.display_name, c.texts_json, c.[collation], c.length_semantics
 FROM TABLE_COLUMNS c
 LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-WHERE c.table_id = @tableId";
+WHERE c.table_id = @tableId
+ORDER BY c.ordinal, c.column_name";
 
         public const string SelectActiveBatchTableColumnsSqlPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
        m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
@@ -78,7 +79,7 @@ FROM TABLE_COLUMNS c
 LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1
-ORDER BY c.ctid"; // registration (heap) order, see SelectTableColumnsSql
+ORDER BY c.table_id, c.ordinal, c.column_name";
 
         public const string SelectActiveBatchTableColumnsSqlSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
        m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
@@ -87,7 +88,8 @@ ORDER BY c.ctid"; // registration (heap) order, see SelectTableColumnsSql
 FROM TABLE_COLUMNS c
 LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 INNER JOIN TABLES t ON c.table_id = t.id
-WHERE t.is_active = 1";
+WHERE t.is_active = 1
+ORDER BY c.table_id, c.ordinal, c.column_name";
 
         public const string SelectExistingColumnsSqlPg = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
                                    m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
@@ -157,8 +159,9 @@ WHEN MATCHED THEN UPDATE SET
 WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal)
     VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal);";
 
-        public const string InsertColumnSqlPg = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json, ""collation"", length_semantics)
-VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics)
+        public const string InsertColumnSqlPg = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json, ""collation"", length_semantics, ordinal)
+VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics,
+    (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM TABLE_COLUMNS WHERE table_id = @tableId))
 ON CONFLICT (id) DO UPDATE SET
     data_type = EXCLUDED.data_type,
     is_sensitive = EXCLUDED.is_sensitive,
@@ -172,7 +175,7 @@ ON CONFLICT (id) DO UPDATE SET
     length_semantics = EXCLUDED.length_semantics";
 
         public const string InsertColumnSqlSs = @"MERGE dbo.TABLE_COLUMNS WITH (HOLDLOCK) AS t
-USING (SELECT @id AS id) AS s
+USING (SELECT @id AS id, (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM dbo.TABLE_COLUMNS WHERE table_id = @tableId) AS ordinal) AS s
 ON t.id = s.id
 WHEN MATCHED THEN UPDATE SET
     data_type = @dataType,
@@ -185,8 +188,8 @@ WHEN MATCHED THEN UPDATE SET
     texts_json = @textsJson,
     [collation] = @collation,
     length_semantics = @lengthSemantics
-WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json, [collation], length_semantics)
-    VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics);";
+WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json, [collation], length_semantics, ordinal)
+    VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics, s.ordinal);";
 
         public const string ActiveTableIdentifierSql = "SELECT source_name, schema_name, table_name FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) AND is_active = 1";
 
