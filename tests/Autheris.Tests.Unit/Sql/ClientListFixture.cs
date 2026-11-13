@@ -162,7 +162,8 @@ internal sealed class ClientListFixture : IAsyncDisposable
             consentRepository: consentRepository,
             secretProvider: null,
             federatedExecutionService: federated,
-            timeZoneState: timeZoneState);
+            timeZoneState: timeZoneState,
+            sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
         return new ClientListFixture(keepAlive, connectionString, service, fixtureEntries);
     }
 

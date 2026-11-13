@@ -142,6 +142,25 @@ public sealed class GovernancePolicyFactoryTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task Create_NeverSetsAWritePermit_UntilWriteGrantsAreWired()
+    {
+        // SEC-SIMPL-120: nothing derives a write permit from roles or decisions. The policy carries no permit, so every DML
+        // statement is denied by the engine until WP-SIMPL-45 PR 4 and WP-SIMPL-46 wire the decision-point write decision.
+        var factory = Factory(Catalog(Entry(Orders)), out _);
+        var decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, RegionPolicy()) };
+
+        var policy = await factory.CreateAsync(Input(decisions), CancellationToken.None);
+
+        policy.Write.ShouldBeNull();
+        var request = Request(policy, dml: true);
+        request.Policy.Write.ShouldBeNull();
+        var ex = Should.Throw<SecurityException>(() =>
+            _engine.Compile("DELETE FROM orders WHERE id = 1".AsMemory(), request, CancellationToken.None));
+        ex.Message.ShouldBe("A write permit is required for DML operations.");
+    }
+
+    [Fact]
     public async Task MissingDecision_DeniesTable()
     {
         var request = await AssembleAsync(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, RegionPolicy()) });
