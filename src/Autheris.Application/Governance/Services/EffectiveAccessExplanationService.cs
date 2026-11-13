@@ -161,8 +161,11 @@ public sealed class EffectiveAccessExplanationService(
         }
         else if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
-            // The SQL (literal values, internal rules) is shown only to owners, delegates and governance admins.
-            var canSeeDefinition = isAdmin || await IsOwnerOrDelegateAsync(userSid.Value, table, ct).ConfigureAwait(false);
+            // The SQL (literal values, internal rules) is shown only to owners, delegates and governance admins, and never
+            // to a read-only or restricted-scope token, whoever the user is (#708): an agent forwards results to a model provider.
+            var canSeeDefinition = !principal.IsReadOnly()
+                && !restrictedScope
+                && (isAdmin || await IsOwnerOrDelegateAsync(userSid.Value, table, ct).ConfigureAwait(false));
             activeRowFilters.Add(canSeeDefinition ? decision.CombinedRowFilterSql : RowFilterDescription);
         }
 
