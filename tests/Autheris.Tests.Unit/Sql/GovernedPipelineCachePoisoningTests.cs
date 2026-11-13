@@ -62,7 +62,7 @@ public sealed class GovernedPipelineCachePoisoningTests
     };
 
     private GovernedSqlExecutionService CreateService(
-        Func<TableMetadata> table, Func<IReadOnlyList<Consent>>? consents = null, bool allowDml = false, ISqlEngine? engine = null)
+        Func<TableMetadata> table, Func<IReadOnlyList<Consent>>? consents = null, bool allowDml = false, FastSqlEngine? engine = null, bool grantWritePermit = true)
     {
         // Test-only seam: the production write decision denies every DML target.
         Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
@@ -92,7 +92,7 @@ public sealed class GovernedPipelineCachePoisoningTests
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, AllowDml = allowDml, DmlWriterRoles = ["Writer"], DefaultMaxRows = 100, MaxAllowedRows = 500 } }), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
-            sqlEngine: engine ?? _engine,
+            sqlEngine: grantWritePermit ? new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(engine ?? _engine) : engine ?? _engine,
             logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consentRepository, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
     }
 
@@ -203,6 +203,27 @@ public sealed class GovernedPipelineCachePoisoningTests
         var ex = Should.Throw<SqlCompileNotSupportedException>(() => _engine.Compile(Sql.AsMemory(), readOnly, CancellationToken.None));
         ex.Reason.ShouldBe(SqlCompileNotSupportedReason.StatementClass);
         _engine.CompileCache.Stats.Hits.ShouldBe(hits);   // not served from the writer's template
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CachePoisoning_PermittedWriterThenUnpermittedWriter_IsDenied()
+    {
+        // WP-SIMPL-45 PR 3 CI repair, SEC-CIFIX-3: the write permit is part of the cache key, so a DELETE compiled under a permit is
+        // never served to a compile of the same text and statements that carries none.
+        var table = Orders("id", "tenant_id");
+        var permitted = CreateService(() => table, allowDml: true);
+        var unpermitted = CreateService(() => table, allowDml: true, grantWritePermit: false);
+        const string Sql = "DELETE FROM orders WHERE id = 1";
+
+        var first = await permitted.CompileAsync(Sql, User("S-W"), new TenantId(Tenant));
+        first.StatementClass.ShouldBe(SqlStatementClass.Delete);
+        long hits = _engine.CompileCache.Stats.Hits;
+
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() => unpermitted.CompileAsync(Sql, User("S-W"), new TenantId(Tenant)));
+
+        ex.Message.ShouldContain("A write permit is required for DML operations.");
+        _engine.CompileCache.Stats.Hits.ShouldBe(hits);   // not served from the permitted writer's template
     }
 
     private sealed class StubCatalogProvider(TableMetadata table) : IGovernedCatalogProvider

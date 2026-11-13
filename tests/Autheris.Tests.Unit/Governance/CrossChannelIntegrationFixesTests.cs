@@ -283,7 +283,7 @@ public sealed class CrossChannelIntegrationFixesTests
         var logger = NullLogger<AiDataGuardrailService>.Instance;
         var auditLog = global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance;
 
-        var guardrail = new AiDataGuardrailService(registry, options, logger, auditLog);
+        var guardrail = new AiDataGuardrailService(registry, options, logger, auditLog, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-1", "user-principal", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest(McpDatasetTools.QuerySql, """{"query":"SELECT FROM WHERE"}""");
@@ -332,7 +332,7 @@ public sealed class CrossChannelIntegrationFixesTests
         queryExecutor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult("{}"));
 
-        var guardrail = new AiDataGuardrailService(registry, options, logger, auditLog, queryExecutor: queryExecutor);
+        var guardrail = new AiDataGuardrailService(registry, options, logger, auditLog, queryExecutor: queryExecutor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-1", "user-principal", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest(McpDatasetTools.DescribeMyAccess, "{}");

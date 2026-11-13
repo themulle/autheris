@@ -37,7 +37,7 @@ public sealed class GovernanceSqlServerCollection : ICollectionFixture<Governanc
 /// </summary>
 public sealed class GovernanceSqlServerFixture : IAsyncLifetime, IGovernanceSqlServerFixture
 {
-    public const string PinnedSqlServerImage = "mcr.microsoft.com/mssql/server:2022-CU14-ubuntu-22.04";
+    public const string PinnedSqlServerImage = TestImages.SqlServer;
 
     private MsSqlContainer? _container;
     private string? _adminConnectionString;

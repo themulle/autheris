@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -39,7 +40,7 @@ public sealed class ParitySqlServerHostFixture : IAsyncLifetime, IParityHost
         _workDir = Path.Combine(Path.GetTempPath(), "autheris-parity-mssql-" + Guid.NewGuid().ToString("N"));
         _govConnectionString = await ParityGovernanceDatabase.CreateAsync();
         Directory.CreateDirectory(_workDir);
-        _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").WithPassword(NewPassword()).Build();
+        _container = new MsSqlBuilder(TestImages.SqlServer).WithPassword(NewPassword()).Build();
         try
         {
             await _container.StartAsync();

@@ -125,7 +125,8 @@ public sealed class AstCompilerSqliteDmlExecutionTests : AstCompilerDmlContract,
     {
         // An interrupted statement of the session must not poison the session transaction, and the checked executor (X0k) runs
         // the compiled DML inside it under the guard and commits it.
-        var compiled = Engine.Compile($"UPDATE {O} SET status = 'late' WHERE id > 0".AsMemory(), Request("acme"), default);
+        var lateSql = $"UPDATE {O} SET status = 'late' WHERE id > 0";
+        var compiled = Engine.Compile(lateSql.AsMemory(), Request("acme", lateSql), default);
         await using var connection = (SqliteConnection)(await OpenSessionConnectionAsync())!;
         await using (var transaction = await connection.BeginTransactionAsync())
         {

@@ -151,25 +151,6 @@ public sealed class CatalogDiscoveryConsentVisibilityTests
     }
 
     // T-W0-7
-    [Theory]
-    [InlineData(true, false, false)]
-    [InlineData(false, true, false)]
-    [InlineData(true, true, true)]
-    [InlineData(false, false, false)]
-    public async Task ReBacOn_IsAnAdditionalFilter_NeverAUnion(bool rebacAllows, bool hasConsent, bool expectedVisible)
-    {
-        var rebac = Substitute.For<IRebacEvaluator>();
-        rebac.IsEnabled.Returns(true);
-        rebac.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns(rebacAllows ? RebacCheckResult.Permitted : RebacCheckResult.Denied);
-        var consents = hasConsent ? new[] { Wp0.Allow(OrdersA.Identifier, "S-A-USER", Wp0.TenantA) } : Array.Empty<Consent>();
-        var (svc, _) = Create(rebac: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.WithBatchFromCheck(rebac), consents: consents);
-        var user = Wp0.Context(Wp0.User("S-A-USER", "tenant-a"));
-
-        (await svc.Inner.ListDatasetsAsync(user)).Any(d => d.Table == "orders_a").ShouldBe(expectedVisible);
-        (await svc.Inner.GetDatasetDetailAsync(OrdersA.Identifier, user) != null).ShouldBe(expectedVisible);
-    }
-
     [Fact]
     public async Task ThrowingConsentRepository_YieldsEmptyAndNull_NeverTheUnfilteredCatalog()
     {

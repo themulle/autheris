@@ -1,3 +1,4 @@
+using Autheris.Tests.Common;
 using Npgsql;
 using Testcontainers.PostgreSql;
 
@@ -38,7 +39,7 @@ public static class ParityGovernanceDatabase
         }
 
         var reuse = !string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
-        var container = new PostgreSqlBuilder("postgres:16-alpine")
+        var container = new PostgreSqlBuilder(TestImages.PostgreSql)
             .WithReuse(reuse)
             .WithLabel("autheris.tests", "parity-governance-postgresql")
             .Build();

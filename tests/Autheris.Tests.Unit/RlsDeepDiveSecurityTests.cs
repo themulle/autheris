@@ -187,12 +187,12 @@ public sealed class RlsDeepDiveSecurityTests
     {
         // RLS-3 / K1 Verification:
         // CDC event streaming with StreamRlsPolicyEnforcer must reject events failing CombinedRowFilterSql
-        var policyEnforcement = Substitute.For<IPolicyEnforcementService>();
+        var policyEnforcement = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var maskingProvider = Substitute.For<IColumnMaskingProvider>();
         var epochService = Substitute.For<IEpochValidationService>();
 
-        policyEnforcement.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+        policyEnforcement.DecideAsync(Arg.Any<Autheris.Application.Policy.Pdp.AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(
                 _testTable,
                 new Dictionary<string, ColumnAccessLevel>
@@ -216,7 +216,6 @@ public sealed class RlsDeepDiveSecurityTests
             }));
 
         // SEC H-09: Consent is the primary decision; Casbin (with RLS filter) acts as additional gate when policies exist.
-        policyEnforcement.HasPolicies(Arg.Any<TenantId>()).Returns(true);
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetActiveConsentsForSubjectsAsync(
                 Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())

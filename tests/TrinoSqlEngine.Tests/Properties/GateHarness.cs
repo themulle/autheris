@@ -72,11 +72,11 @@ internal static class ProductionCompiler
     private static readonly FastSqlEngine SharedEngine = new();
 
     public static CompiledSql Compile(string sql, CaseCtx ctx, StatementPermissions statements) =>
-        SharedEngine.Compile(sql.AsMemory(), ctx.Request(statements), CancellationToken.None);
+        SharedEngine.Compile(sql.AsMemory(), ctx.Request(statements).WithTestWritePermit(sql), CancellationToken.None);
 
     /// <summary>A fresh engine: no plan-cache entry can hide a nondeterministic pipeline.</summary>
     public static CompiledSql CompileCold(string sql, CaseCtx ctx, StatementPermissions statements) =>
-        new FastSqlEngine().Compile(sql.AsMemory(), ctx.Request(statements), CancellationToken.None);
+        new FastSqlEngine().Compile(sql.AsMemory(), ctx.Request(statements).WithTestWritePermit(sql), CancellationToken.None);
 }
 
 internal sealed record Violation(string Oracle, string Message);

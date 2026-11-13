@@ -179,7 +179,7 @@ public class SqlParserLexerAndRewriterDifferentialTests
         };
 
         var ex = Assert.ThrowsAny<SecurityException>(() =>
-            env.Engine.Compile("INSERT INTO orders (id, tenantid) VALUES (1, 'acme')".AsMemory(), request, CancellationToken.None));
+            env.Engine.Compile("INSERT INTO orders (id, tenantid) VALUES (1, 'acme')".AsMemory(), request.WithTestWritePermit("INSERT INTO orders (id, tenantid) VALUES (1, 'acme')"), CancellationToken.None));
         Assert.Contains("consent", ex.Message, StringComparison.OrdinalIgnoreCase);
 
         // a table without a consent filter inserts normally

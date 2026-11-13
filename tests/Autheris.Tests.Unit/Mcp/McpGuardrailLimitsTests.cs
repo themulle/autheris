@@ -77,7 +77,7 @@ public sealed class McpGuardrailLimitsTests
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true, MaxTokensPerCall = 1000 } }),
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
-            docSearchService: search);
+            docSearchService: search, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDocTools.SearchDocs, """{"query":"x"}"""), Session());
 

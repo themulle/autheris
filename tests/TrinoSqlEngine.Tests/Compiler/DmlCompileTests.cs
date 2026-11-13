@@ -5,6 +5,7 @@ using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
+using TrinoSqlEngine.Tests.Conformance;
 using Xunit;
 using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
@@ -102,13 +103,20 @@ public class DmlCompileTests
     };
 
     private CompiledSql Compile(TargetSqlDialect dialect, string sql, string tenant = "acme", DmlGuardOptions? dml = null) =>
-        _engine.Compile(sql.AsMemory(), Request(dialect, tenant, dml: dml), CancellationToken.None);
+        _engine.Compile(sql.AsMemory(), Request(dialect, tenant, dml: dml).WithTestWritePermit(sql), CancellationToken.None);
 
     private void Rejected(TargetSqlDialect dialect, string sql, DmlGuardOptions? dml = null) =>
         Assert.ThrowsAny<Exception>(() => Compile(dialect, sql, dml: dml));
 
     private void RejectedSecurity(TargetSqlDialect dialect, string sql, DmlGuardOptions? dml = null) =>
         Assert.ThrowsAny<SecurityException>(() => Compile(dialect, sql, dml: dml));
+
+    /// <summary>D-45-4 / SEC-SIMPL-124: MERGE is rejected for governed writes with this exact message, whatever else is wrong with the statement.</summary>
+    private void MergeRejected(TargetSqlDialect dialect, string sql)
+    {
+        var ex = Assert.Throws<SecurityException>(() => Compile(dialect, sql));
+        Assert.Equal(TestWritePermits.MergeNotSupportedMessage, ex.Message);
+    }
 
     private static int Tenants(CompiledSql c) => c.Parameters.Count(p => p.Origin == ParameterOrigin.Tenant);
 
@@ -133,7 +141,7 @@ public class DmlCompileTests
             _engine.Compile("UPDATE orders SET status = 'x' WHERE id = 1".AsMemory(), onlyDelete, CancellationToken.None));
         Assert.Throws<SqlCompileNotSupportedException>(() =>
             _engine.Compile("INSERT INTO orders (id, tenantid) VALUES (1, 'acme')".AsMemory(), onlyDelete, CancellationToken.None));
-        var c = _engine.Compile("DELETE FROM orders WHERE id = 1".AsMemory(), onlyDelete, CancellationToken.None);
+        var c = _engine.Compile("DELETE FROM orders WHERE id = 1".AsMemory(), onlyDelete.WithTestWritePermit("DELETE FROM orders WHERE id = 1"), CancellationToken.None);
         Assert.Equal(SqlStatementClass.Delete, c.StatementClass);
     }
 
@@ -412,7 +420,8 @@ public class DmlCompileTests
         var request = Request(dialect);
         try
         {
-            var c = _engine.Compile($"INSERT INTO orders (id, tenantid, region) VALUES {values}".AsMemory(), request, CancellationToken.None);
+            string sql = $"INSERT INTO orders (id, tenantid, region) VALUES {values}";
+            var c = _engine.Compile(sql.AsMemory(), request.WithTestWritePermit(sql), CancellationToken.None);
             Assert.Equal(1000, c.ExpectedAffectedRows);
             Assert.Equal(999, CountOf(c.Sql, "UNION ALL"));
         }
@@ -459,7 +468,7 @@ public class DmlCompileTests
         // a consent-based policy
         var consent = Request(dialect);
         consent = consent with { Policy = consent.Policy with { TablesWithConsentRowFilter = new HashSet<string> { "Orders" } } };
-        Assert.ThrowsAny<SecurityException>(() => _engine.Compile("INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')".AsMemory(), consent, CancellationToken.None));
+        Assert.ThrowsAny<SecurityException>(() => _engine.Compile("INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')".AsMemory(), consent.WithTestWritePermit("INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')"), CancellationToken.None));
         // a correlated policy
         _rowFilters.Predicates[Orders] = PolicyPredicate.Create(
             new BinaryExpression(
@@ -467,9 +476,9 @@ public class DmlCompileTests
                 BinaryOperator.Equal, new PolicyParameterExpression("__pol_id", SqlParameterType.Int64)),
             new Dictionary<string, PolicyValue> { ["__pol_id"] = new(1L, SqlParameterType.Int64) });
         RejectedSecurity(dialect, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')");
-        // MERGE INSERT into a policy table stays rejected
+        // MERGE INSERT into a policy table stays rejected (now by the MERGE rejection, D-45-4)
         RegionPolicy();
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN NOT MATCHED THEN INSERT (id, tenantid, region) VALUES (s.id, 'acme', 'EU')");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN NOT MATCHED THEN INSERT (id, tenantid, region) VALUES (s.id, 'acme', 'EU')");
     }
 
     [Fact]
@@ -567,10 +576,11 @@ public class DmlCompileTests
                                 string.Join(", ", Enumerable.Range(1, rows).Select(i => $"({i}, 'acme', 's{i}')"));
         var request = Request(dialect) with { CompileTimeout = CompileLimits.MaxCompileTimeout };
 
-        var ok = compiler.Compile(Sql(5).AsMemory(), request, CancellationToken.None);
+        var ok = compiler.Compile(Sql(5).AsMemory(), request.WithTestWritePermit(Sql(5)), CancellationToken.None);
         Assert.True(ok.Parameters.Length <= limit);
 
-        var ex = Assert.Throws<SqlLimitExceededException>(() => compiler.Compile(Sql(limit).AsMemory(), request, CancellationToken.None));
+        var overLimitSql = Sql(limit);
+        var ex = Assert.Throws<SqlLimitExceededException>(() => compiler.Compile(overLimitSql.AsMemory(), request.WithTestWritePermit(overLimitSql), CancellationToken.None));
         Assert.Equal(SqlLimitKind.BindParameters, ex.Kind);
         Assert.Equal(limit, ex.Maximum);
     }
@@ -862,7 +872,25 @@ public class DmlCompileTests
         RejectedSecurity(dialect, "UPDATE orders SET status = (SELECT max(o2.status) FROM orders o2 WHERE o2.id = 1) WHERE email = 'x'");
     }
 
-    // ---- MERGE ----
+    // ---- MERGE (rejected for governed writes: WP-SIMPL-45 D-45-4, SEC-SIMPL-124) ----
+
+    /// <summary>The corpus statements of every MERGE variant that reaches the compiler (dml-merge-012 is a parse rejection).</summary>
+    public static IEnumerable<object[]> MergeCorpusData() =>
+        ConformanceStore.LoadCorpus(ConformanceStore.OutputDirectory)
+            .Where(i => i.Group == "dml-merge" && i.Id != "dml-merge-012")
+            .SelectMany(i => Dialects.Select(d => new object[] { d, i.Sql }));
+
+    [Theory]
+    [MemberData(nameof(MergeCorpusData))]
+    public void Merge_IsRejected_ForGovernedWrites_InEveryMergeCapableDialect(TargetSqlDialect dialect, string sql)
+    {
+        // with the default test permit: the exact MERGE rejection
+        MergeRejected(dialect, sql);
+        // with a null permit: the permit is required first, so a MERGE never compiles without a grant either
+        var noPermit = Request(dialect);
+        var ex = Assert.Throws<SecurityException>(() => _engine.Compile(sql.AsMemory(), noPermit, CancellationToken.None));
+        Assert.Equal(TestWritePermits.PermitRequiredMessage, ex.Message);
+    }
 
     /// <summary>Oracle has neither a stand-alone MERGE DELETE nor repeated clause kinds (see <see cref="MergeClauseShape"/>).</summary>
     private static string MergeUpdateDelete(TargetSqlDialect dialect) =>
@@ -876,148 +904,124 @@ public class DmlCompileTests
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Merge_TargetPredicatesGoIntoOn_AndTheSourceIsSecured(TargetSqlDialect dialect)
+    public void Merge_TargetPredicatesGoIntoOn_AndTheSourceIsSecured_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
         RegionPolicy();
-        var c = Compile(dialect, MergeUpdateDelete(dialect));
-        Assert.Equal(SqlStatementClass.Merge, c.StatementClass);
-        Assert.Equal(1, Tenants(c));
-        Assert.Contains(new SecurityPredicateId("dbo.Orders", 0), c.AppliedPredicates);
-        Assert.Contains(new SecurityPredicateId("dbo.Orders", 1), c.AppliedPredicates);
-        Assert.Contains(new SecurityPredicateId("dbo.Entitlements", 0), c.AppliedPredicates);
-        Assert.DoesNotContain("acme", c.Sql);
-        Assert.DoesNotContain("BY SOURCE", c.Sql, StringComparison.OrdinalIgnoreCase);
-        int on = c.Sql.IndexOf(" ON ", StringComparison.Ordinal);
-        int when = c.Sql.IndexOf(" WHEN ", StringComparison.Ordinal);
-        Assert.True(on > 0 && when > on);
-        Assert.Contains("TenantId", c.Sql[on..when]);   // the target's tenant predicate is part of the ON condition
+        MergeRejected(dialect, MergeUpdateDelete(dialect));
     }
 
     [Fact]
-    public void OracleMerge_DeleteClause_AndRepeatedClauseKinds_AreRejectedFailClosed_WithATypedError()
+    public void OracleMerge_DeleteClause_AndRepeatedClauseKinds_AreRejected_MergeNotSupported()
     {
-        var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(TargetSqlDialect.Oracle,
-            "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN DELETE"));
-        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
-        ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(TargetSqlDialect.Oracle,
+        // the generator-level Oracle MERGE errors can no longer be reached: the MERGE rejection fires first
+        MergeRejected(TargetSqlDialect.Oracle,
+            "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN DELETE");
+        MergeRejected(TargetSqlDialect.Oracle,
             "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
-            "WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'a' WHEN MATCHED AND s.id = 2 THEN UPDATE SET status = 'b'"));
-        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
-        ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(TargetSqlDialect.Oracle,
+            "WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'a' WHEN MATCHED AND s.id = 2 THEN UPDATE SET status = 'b'");
+        MergeRejected(TargetSqlDialect.Oracle,
             "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
-            "WHEN NOT MATCHED AND s.id = 1 THEN INSERT (id, tenantid) VALUES (s.id, 'acme') WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (s.id, 'acme')"));
-        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+            "WHEN NOT MATCHED AND s.id = 1 THEN INSERT (id, tenantid) VALUES (s.id, 'acme') WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (s.id, 'acme')");
     }
 
     [Fact]
-    public void OracleMerge_ClauseConditionsAreWhere_TheOnIsParenthesized_AndAliasesHaveNoAs()
+    public void OracleMerge_ClauseConditionsAreWhere_TheOnIsParenthesized_AndAliasesHaveNoAs_IsRejected_MergeNotSupported()
     {
-        var c = Compile(TargetSqlDialect.Oracle,
+        MergeRejected(TargetSqlDialect.Oracle,
             "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
             "WHEN MATCHED AND s.id > 1 THEN UPDATE SET status = 'm' WHEN NOT MATCHED AND s.id > 2 THEN INSERT (id, tenantid) VALUES (s.id, 'acme')");
-        Assert.Matches(@"^MERGE INTO ""dbo""\.""Orders"" \S+ USING \(", c.Sql);
-        Assert.DoesNotContain(" AS \"t\"", c.Sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(" ON (", c.Sql);
-        Assert.DoesNotContain("WHEN MATCHED AND", c.Sql);
-        Assert.DoesNotContain("WHEN NOT MATCHED AND", c.Sql);
-        Assert.Matches(@"THEN UPDATE SET .* WHERE ", c.Sql);
-        Assert.Matches(@"THEN INSERT .* VALUES .* WHERE ", c.Sql);
-        Assert.DoesNotContain(";", c.Sql);
     }
 
     [Fact]
-    public void Merge_SqlServer_EndsWithExactlyOneSemicolon_AtTheFinalPosition()
+    public void Merge_SqlServer_EndsWithExactlyOneSemicolon_AtTheFinalPosition_IsRejected_MergeNotSupported()
     {
-        var c = Compile(TargetSqlDialect.SqlServer, MergeUpdateDelete(TargetSqlDialect.SqlServer));
-        Assert.EndsWith(";", c.Sql);
-        Assert.Equal(1, c.Sql.Count(ch => ch == ';'));
+        MergeRejected(TargetSqlDialect.SqlServer, MergeUpdateDelete(TargetSqlDialect.SqlServer));
     }
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Merge_Insert_ForcesTheBoundTenant(TargetSqlDialect dialect)
+    public void Merge_Insert_ForcesTheBoundTenant_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
-        var c = Compile(dialect,
+        MergeRejected(dialect,
             "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
             "WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (s.id, 'acme', 'new')");
-        Assert.Equal(1, Tenants(c));
-        Assert.DoesNotContain("acme", c.Sql);
-        RejectedSecurity(dialect,
+        MergeRejected(dialect,
             "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
             "WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (s.id, 'other', 'new')");
-        RejectedSecurity(dialect,
+        MergeRejected(dialect,
             "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
             "WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (s.id, s.tenantid, 'new')");
-        RejectedSecurity(dialect,
+        MergeRejected(dialect,
             "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
             "WHEN NOT MATCHED THEN INSERT (id, status) VALUES (s.id, 'new')");
-        RejectedSecurity(dialect,
+        MergeRejected(dialect,
             "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
             "WHEN NOT MATCHED THEN INSERT VALUES (s.id, 'acme', 'new')");
     }
 
-    // CR-ADG-33: the source qualifier must differ from the target qualifier and the target table name, case-insensitively.
+    // CR-ADG-33 (alias guard) is gone with the MERGE securing code: every alias variant is rejected by the MERGE rejection itself.
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Merge_SourceAliasEqualToTheTargetAlias_IsRejected_InAnyCase(TargetSqlDialect dialect)
+    public void Merge_SourceAliasEqualToTheTargetAlias_IsRejected_InAnyCase_MergeNotSupported(TargetSqlDialect dialect)
     {
         const string tail = " ON t.id = 1 WHEN MATCHED THEN UPDATE SET status = 'x'";
-        RejectedSecurity(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) t" + tail);
-        RejectedSecurity(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) T" + tail);
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements t" + tail);
-        RejectedSecurity(dialect, "MERGE INTO orders USING (SELECT id FROM entitlements) orders ON orders.id = 1 WHEN MATCHED THEN UPDATE SET status = 'x'");
-        RejectedSecurity(dialect, "MERGE INTO orders USING (SELECT id FROM entitlements) ORDERS ON orders.id = 1 WHEN MATCHED THEN UPDATE SET status = 'x'");
-        RejectedSecurity(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) orders" + tail);
-        // a distinct alias still compiles
-        Assert.Equal(SqlStatementClass.Merge, Compile(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) s ON t.id = s.id WHEN MATCHED THEN UPDATE SET status = 'x'").StatementClass);
+        MergeRejected(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) t" + tail);
+        MergeRejected(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) T" + tail);
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements t" + tail);
+        MergeRejected(dialect, "MERGE INTO orders USING (SELECT id FROM entitlements) orders ON orders.id = 1 WHEN MATCHED THEN UPDATE SET status = 'x'");
+        MergeRejected(dialect, "MERGE INTO orders USING (SELECT id FROM entitlements) ORDERS ON orders.id = 1 WHEN MATCHED THEN UPDATE SET status = 'x'");
+        MergeRejected(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) orders" + tail);
+        // a distinct alias is rejected too
+        MergeRejected(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) s ON t.id = s.id WHEN MATCHED THEN UPDATE SET status = 'x'");
     }
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void MergeInsert_OnATableWithARowPolicy_IsRejected(TargetSqlDialect dialect)
+    public void MergeInsert_OnATableWithARowPolicy_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
         RegionPolicy();
-        RejectedSecurity(dialect,
+        MergeRejected(dialect,
             "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
             "WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (s.id, 'acme')");
     }
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void MergeUpdate_TenantMaskedOrPolicyColumn_IsRejected(TargetSqlDialect dialect)
+    public void MergeUpdate_TenantMaskedOrPolicyColumn_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
         RegionPolicy();
         MaskEmail();
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET tenantid = 'other'");
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET region = 'US'");
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET email = 'x'");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET tenantid = 'other'");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET region = 'US'");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET email = 'x'");
     }
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Merge_MaskedColumnInOnWhenOrAssignment_IsRejected(TargetSqlDialect dialect)
+    public void Merge_MaskedColumnInOnWhenOrAssignment_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
         MaskEmail();
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.email = 'x' WHEN MATCHED THEN UPDATE SET status = 'x'");
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED AND t.email = 'x' THEN UPDATE SET status = 'x'");
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = t.email");
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = email");
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN NOT MATCHED AND t.email IS NULL THEN INSERT (id, tenantid) VALUES (s.id, 'acme')");
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (s.id, 'acme', t.email)");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.email = 'x' WHEN MATCHED THEN UPDATE SET status = 'x'");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED AND t.email = 'x' THEN UPDATE SET status = 'x'");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = t.email");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = email");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN NOT MATCHED AND t.email IS NULL THEN INSERT (id, tenantid) VALUES (s.id, 'acme')");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (s.id, 'acme', t.email)");
     }
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Merge_TriviallyTrueOrColumnFreeOn_IsRejected_AsUnfilteredDml(TargetSqlDialect dialect)
+    public void Merge_TriviallyTrueOrColumnFreeOn_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
-        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'"));
-        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON true WHEN MATCHED THEN UPDATE SET status = 'x'"));
-        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid OR 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'"));
+        // formerly UnfilteredDmlException: the MERGE rejection fires before the unfiltered-scope check
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON true WHEN MATCHED THEN UPDATE SET status = 'x'");
+        MergeRejected(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid OR 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'");
     }
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Merge_CorrelatedTargetRowPolicy_IsRejected(TargetSqlDialect dialect)
+    public void Merge_CorrelatedTargetRowPolicy_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
         var correlated = new ExistsExpression(new SelectStatement(null,
             new QuerySpecification(false,
@@ -1030,7 +1034,7 @@ public class DmlCompileTests
                 null, null), null, null));
         _rowFilters.NoPolicy.Remove(Orders);
         _rowFilters.Predicates[Orders] = PolicyPredicate.Create(correlated, new Dictionary<string, PolicyValue>());
-        RejectedSecurity(dialect, MergeUpdateDelete(dialect));
+        MergeRejected(dialect, MergeUpdateDelete(dialect));
     }
 
     [Theory]
@@ -1044,30 +1048,26 @@ public class DmlCompileTests
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Merge_SourceIsSecured_OtherTenantRowsAreNeverReadFromTheSource(TargetSqlDialect dialect)
+    public void Merge_SourceIsSecured_OtherTenantRowsAreNeverReadFromTheSource_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
-        var c = Compile(dialect,
+        MergeRejected(dialect,
             "MERGE INTO orders t USING (SELECT orderid, id FROM entitlements WHERE id > 0) s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
-        Assert.Contains(new SecurityPredicateId("dbo.Entitlements", 0), c.AppliedPredicates);
-        var joined = Compile(dialect,
+        MergeRejected(dialect,
             "MERGE INTO orders t USING orders s ON t.id = s.id WHEN MATCHED AND s.status = 'a' THEN UPDATE SET status = 'b'");
-        Assert.True(CountOf(joined.Sql, "[Orders]", "\"Orders\"", "`Orders`") >= 2);   // target and source are both the physical table
     }
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Merge_TargetWithoutAlias_UsesTheTableNameAsTheQualifier(TargetSqlDialect dialect)
+    public void Merge_TargetWithoutAlias_UsesTheTableNameAsTheQualifier_IsRejected_MergeNotSupported(TargetSqlDialect dialect)
     {
-        var c = Compile(dialect, "MERGE INTO orders USING entitlements s ON orders.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
-        Assert.Equal(SqlStatementClass.Merge, c.StatementClass);
-        Assert.Equal(1, Tenants(c));
+        MergeRejected(dialect, "MERGE INTO orders USING entitlements s ON orders.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
     }
 
     [Theory]
     [MemberData(nameof(DialectData))]
     public void Merge_UnknownTarget_AndTableBranch_AreRejected(TargetSqlDialect dialect)
     {
-        RejectedSecurity(dialect, "MERGE INTO mystery t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
+        MergeRejected(dialect, "MERGE INTO mystery t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
         Rejected(dialect, "MERGE INTO orders@main t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
     }
 
@@ -1111,7 +1111,7 @@ public class DmlCompileTests
                      dialect == TargetSqlDialect.Databricks ? "DELETE FROM orders WHERE id = 1" : "DELETE FROM orders WHERE id IN (SELECT orderid FROM entitlements)"
                  })
         {
-            var c = _engine.Compile(sql.AsMemory(), request, CancellationToken.None);
+            var c = _engine.Compile(sql.AsMemory(), request.WithTestWritePermit(sql), CancellationToken.None);
             Assert.DoesNotContain("FETCH", c.Sql);
             Assert.DoesNotContain("LIMIT", c.Sql);
             Assert.DoesNotContain("ROWNUM", c.Sql);

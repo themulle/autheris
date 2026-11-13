@@ -137,7 +137,7 @@ public sealed class PackageBoundaryArchitectureTests
                         {
                             tableAccessPolicyRefs.Add($"{type.FullName}.{method.Name} -> {memberRef.FullName}");
                         }
-                        else if (declaringFullName == "Autheris.Application.Policy.IAccessDecisionPoint")
+                        else if (declaringFullName == "Autheris.Application.Policy.Pdp.IAccessDecisionPoint")
                         {
                             accessDecisionPointCallers.Add($"{type.FullName}.{method.Name} -> {memberRef.Name}");
                         }

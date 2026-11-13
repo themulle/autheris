@@ -1,12 +1,15 @@
 {
   "*": {
-    "NamedBindMarkerExpression": "A text-consumer node: only the inline text rendering (IPolicyPredicateRenderer) emits it; the bound compile path rejects it in every dialect (NotSupportedException)."
+    "NamedBindMarkerExpression": "A text-consumer node: only the inline text rendering (IPolicyPredicateRenderer) emits it; the bound compile path rejects it in every dialect (NotSupportedException).",
+    "MergeStatement": "MERGE is rejected for governed writes (WP-SIMPL-45 D-45-4).",
+    "MergeUpdateClause": "MERGE is rejected for governed writes (WP-SIMPL-45 D-45-4).",
+    "MergeDeleteClause": "MERGE is rejected for governed writes (WP-SIMPL-45 D-45-4).",
+    "MergeInsertClause": "MERGE is rejected for governed writes (WP-SIMPL-45 D-45-4)."
   },
   "Oracle": {
     "ArrayConstructorExpression": "Oracle has no array type; the generator rejects the construct (SqlCompileNotSupportedException).",
     "SubscriptExpression": "Oracle has no array subscripts; the generator rejects the construct (SqlCompileNotSupportedException).",
-    "IntervalLiteralExpression": "An interval value has no bound form on Oracle (NUMTODSINTERVAL has no MONTH or YEAR field); the generator rejects the construct (SqlCompileNotSupportedException).",
-    "MergeDeleteClause": "The compile pipeline rejects the MERGE ... THEN DELETE fixtures for Oracle (SqlCompileNotSupportedException)."
+    "IntervalLiteralExpression": "An interval value has no bound form on Oracle (NUMTODSINTERVAL has no MONTH or YEAR field); the generator rejects the construct (SqlCompileNotSupportedException)."
   },
   "SqlServer": {
     "ArrayConstructorExpression": "T-SQL has no array type; the generator rejects the construct (SqlCompileNotSupportedException).",
@@ -20,10 +23,6 @@
   },
   "Sqlite": {
     "GroupingOperationExpression": "GROUPING() is not supported for SQLite (no grouping sets); the builder rejects the construct.",
-    "IntervalLiteralExpression": "SQLite has no interval type; the builder rejects the construct.",
-    "MergeStatement": "MERGE is not supported on SQLite (statement class); the compile pipeline rejects it.",
-    "MergeUpdateClause": "MERGE is not supported on SQLite (statement class); the compile pipeline rejects it.",
-    "MergeDeleteClause": "MERGE is not supported on SQLite (statement class); the compile pipeline rejects it.",
-    "MergeInsertClause": "MERGE is not supported on SQLite (statement class); the compile pipeline rejects it."
+    "IntervalLiteralExpression": "SQLite has no interval type; the builder rejects the construct."
   }
 }

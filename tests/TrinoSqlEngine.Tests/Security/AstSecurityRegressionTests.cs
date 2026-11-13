@@ -178,10 +178,10 @@ public class AstSecurityRegressionTests
         var request = env.Request();
         request = request with { Policy = request.Policy with { TablesWithConsentRowFilter = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dbo.orders", "orders" } } };
         Assert.ThrowsAny<SecurityException>(() =>
-            env.Engine.Compile("INSERT INTO orders (id, tenantid) VALUES (1, 'acme')".AsMemory(), request, CancellationToken.None));
+            env.Engine.Compile("INSERT INTO orders (id, tenantid) VALUES (1, 'acme')".AsMemory(), request.WithTestWritePermit("INSERT INTO orders (id, tenantid) VALUES (1, 'acme')"), CancellationToken.None));
 
         // a table without a consent filter takes the insert
-        var ok = env.Engine.Compile("INSERT INTO entitlements (id, tenantid) VALUES (1, 'acme')".AsMemory(), request, CancellationToken.None);
+        var ok = env.Engine.Compile("INSERT INTO entitlements (id, tenantid) VALUES (1, 'acme')".AsMemory(), request.WithTestWritePermit("INSERT INTO entitlements (id, tenantid) VALUES (1, 'acme')"), CancellationToken.None);
         Assert.Equal(SqlStatementClass.Insert, ok.StatementClass);
     }
 
@@ -324,11 +324,11 @@ public class AstSecurityRegressionTests
         {
             // stricter than legacy: Delta has no subquery in a DML condition, so the statement is not compiled at all
             Assert.Throws<SqlCompileNotSupportedException>(() =>
-                env.Engine.Compile(delete.AsMemory(), env.Request(enforcedMaxRows: 100), CancellationToken.None));
+                env.Engine.Compile(delete.AsMemory(), env.Request(enforcedMaxRows: 100).WithTestWritePermit(delete), CancellationToken.None));
         }
         else
         {
-            var dml = env.Engine.Compile(delete.AsMemory(), env.Request(enforcedMaxRows: 100), CancellationToken.None);
+            var dml = env.Engine.Compile(delete.AsMemory(), env.Request(enforcedMaxRows: 100).WithTestWritePermit(delete), CancellationToken.None);
             Assert.DoesNotContain("LIMIT", dml.Sql, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("FETCH", dml.Sql, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("ROWNUM", dml.Sql, StringComparison.OrdinalIgnoreCase);

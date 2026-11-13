@@ -270,7 +270,7 @@ public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
 
     private sealed class StreamFixture
     {
-        public IPolicyEnforcementService Policy { get; } = Substitute.For<IPolicyEnforcementService>();
+        public Autheris.Application.Policy.Pdp.IAccessDecisionPoint Policy { get; } = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
         public ITableMetadataRepository Metadata { get; } = Substitute.For<ITableMetadataRepository>();
         public IColumnMaskingProvider Masking { get; } = Substitute.For<IColumnMaskingProvider>();
         public IConsentRepository Consents { get; } = Substitute.For<IConsentRepository>();
@@ -396,60 +396,16 @@ public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
     }
 
     [Fact]
-    public async Task H09_Stream_WithoutConsent_IsDeniedEvenIfCasbinWouldAllow()
+    public async Task H09_Stream_WithoutConsent_IsDeniedEvenIfDecisionPointWouldAllow()
     {
         var fixture = new StreamFixture(Array.Empty<Consent>());
-        fixture.Policy.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        fixture.Policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+        fixture.Policy.DecideAsync(Arg.Any<Autheris.Application.Policy.Pdp.AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(HrTable, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
 
         var result = await fixture.Create().EvaluateAndMaskAsync(HrEvent(), Subscriber());
 
         result.IsAllowed.ShouldBeFalse();
         result.MaskedPayload.ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task H09_Stream_PassesClaimAttributesAndNoLoopbackIpToCasbin()
-    {
-        var fixture = new StreamFixture([TenantConsent(ConsentEffect.Allow)]);
-        SecurityEvaluationContext? captured = null;
-        fixture.Policy.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        fixture.Policy.EvaluatePolicyAsync(Arg.Do<SecurityEvaluationContext>(c => captured = c), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(HrTable, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
-
-        var result = await fixture.Create().EvaluateAndMaskAsync(HrEvent(), Subscriber(new Claim("department", "Contractor"), new Claim("purpose", "PAYROLL")));
-
-        result.IsAllowed.ShouldBeTrue();
-        captured.ShouldNotBeNull();
-        captured.Department.ShouldBe("Contractor");
-        captured.PurposeId.ShouldBe("PAYROLL");
-        IPAddress.IsLoopback(captured.ClientIp).ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task H09_Stream_AttributeBasedCasbinDenyRule_IsEnforced()
-    {
-        var fixture = new StreamFixture([TenantConsent(ConsentEffect.Allow)]);
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, UserSid.Value, HrTable.ToString(), "read", "true", "allow");
-        casbin.AddPolicy(TenantA, UserSid.Value, HrTable.ToString(), "read", "r.ctx.Department == 'Contractor'", "deny");
-
-        var enforcer = new StreamRlsPolicyEnforcer(
-            casbin,
-            fixture.Metadata,
-            fixture.Masking,
-            Substitute.For<IEpochValidationService>(),
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
-            fixture.Consents,
-            new ConsentResolutionService(),
-            fixture.Cache);
-
-        var contractor = await enforcer.EvaluateAndMaskAsync(HrEvent(), Subscriber(new Claim("department", "Contractor")));
-        contractor.IsAllowed.ShouldBeFalse();
-
-        var employee = await enforcer.EvaluateAndMaskAsync(HrEvent(), Subscriber(new Claim("department", "HR")));
-        employee.IsAllowed.ShouldBeTrue();
     }
 
     // =====================================================================================

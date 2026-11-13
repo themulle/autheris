@@ -236,7 +236,8 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
             environment: CreateDevEnvironment(),
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: withConsentServices ? (consentRepository ?? CreateConsentRepository()) : null,
-            secretProvider: secretProvider);
+            secretProvider: secretProvider,
+            sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
     }
 
     // =========================================================================

@@ -10,22 +10,33 @@ using NSubstitute;
 using Xunit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mesh.Services;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
 public sealed class EnvoyExtAuthzSecurityTests
 {
-    private readonly IPolicyEnforcementService _policyService;
+    private readonly IAccessDecisionPoint _policyService;
     private readonly EnvoyExtAuthzService _service;
 
     public EnvoyExtAuthzSecurityTests()
     {
-        _policyService = Substitute.For<IPolicyEnforcementService>();
+        _policyService = Substitute.For<IAccessDecisionPoint>();
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(ci => MetadataOf(ci.Arg<TableIdentifier>()));
         _service = new EnvoyExtAuthzService(
             _policyService,
+            tables,
             NullLogger<EnvoyExtAuthzService>.Instance);
     }
+
+    private static TableMetadata MetadataOf(TableIdentifier id) => new()
+    {
+        Identifier = id,
+        Table = new Table { SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, IsActive = true },
+        Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+    };
 
     [Fact]
     public async Task CheckHttpAsync_AuthorizedSubject_ReturnsOkWithSecurityHeaders()
@@ -41,7 +52,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             HasUnconstrainedColumnAllow: true);
 
         _policyService
-            .EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(allowedDecision);
 
         const string method = "GET";
@@ -84,7 +95,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             DeniedReasons: new[] { "Casbin ABAC: insufficient clearance level" });
 
         _policyService
-            .EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(deniedDecision);
 
         const string method = "GET";
@@ -148,7 +159,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             DeniedReasons: new[] { "internal: rule p42 matched" },
             HasUnconstrainedColumnAllow: unconstrained);
         _policyService
-            .EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(decision);
 
         var response = await _service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), MeshCaller("alice"));
@@ -172,7 +183,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             DeniedReasons: Array.Empty<string>(),
             HasUnconstrainedColumnAllow: true);
         _policyService
-            .EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(decision);
 
         var response = await _service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), MeshCaller("alice"));
@@ -189,17 +200,17 @@ public sealed class EnvoyExtAuthzSecurityTests
     [InlineData("/api/v1x/7", "v1x")]
     public async Task CheckHttpAsync_ResourceFromPath_SkipsOnlyRealVersionSegments(string path, string expectedTable)
     {
-        SecurityEvaluationContext? capturedContext = null;
+        AccessRequest? capturedContext = null;
         _policyService
-            .EvaluatePolicyAsync(
-                Arg.Do<SecurityEvaluationContext>(ctx => capturedContext = ctx),
+            .DecideAsync(
+                Arg.Do<AccessRequest>(ctx => capturedContext = ctx),
                 Arg.Any<CancellationToken>())
-            .Returns(ci => TableAccessDecision.Allowed(ci.Arg<SecurityEvaluationContext>().TargetTable, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+            .Returns(ci => TableAccessDecision.Allowed(ci.Arg<AccessRequest>().Object.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
         await _service.CheckHttpAsync("GET", path, new Dictionary<string, string>(), MeshCaller("alice"));
 
         Assert.NotNull(capturedContext);
-        Assert.Equal(expectedTable, capturedContext.TargetTable.TableName);
+        Assert.Equal(expectedTable, capturedContext.Object.Identifier.TableName);
     }
 
     [Fact]
@@ -233,10 +244,10 @@ public sealed class EnvoyExtAuthzSecurityTests
             DeniedReasons: Array.Empty<string>(),
             HasUnconstrainedColumnAllow: true);
 
-        SecurityEvaluationContext? capturedContext = null;
+        AccessRequest? capturedContext = null;
         _policyService
-            .EvaluatePolicyAsync(
-                Arg.Do<SecurityEvaluationContext>(ctx => capturedContext = ctx),
+            .DecideAsync(
+                Arg.Do<AccessRequest>(ctx => capturedContext = ctx),
                 Arg.Any<CancellationToken>())
             .Returns(allowedDecision);
 
@@ -259,8 +270,8 @@ public sealed class EnvoyExtAuthzSecurityTests
         Assert.Equal(0, response.Status.Code);
         Assert.NotNull(capturedContext);
         // Normalized path should resolve out the traversal
-        Assert.Equal("/api/admin/orders", capturedContext.Attributes?["path"]);
-        Assert.Equal("admin", capturedContext.TargetTable.TableName);
+        Assert.Equal("admin", capturedContext.Object.Identifier.TableName);
+        Assert.Equal("admin", capturedContext.Object.Identifier.TableName);
     }
 
     private static string RepoRoot()
@@ -301,7 +312,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             Assert.DoesNotContain("spoofed-admin", response.HttpResponse.DeniedResponse.Body);
         }
 
-        await _policyService.DidNotReceive().EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
+        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
     }
 
     [Trait("Category", "Security")]
@@ -317,7 +328,7 @@ public sealed class EnvoyExtAuthzSecurityTests
         Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
         Assert.DoesNotContain("corp", response.HttpResponse.DeniedResponse.Body);
         Assert.DoesNotContain("ANONYMOUS", response.HttpResponse.DeniedResponse.Body, StringComparison.OrdinalIgnoreCase);
-        await _policyService.DidNotReceive().EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
+        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
     }
 
     [Trait("Category", "Security")]
@@ -335,6 +346,133 @@ public sealed class EnvoyExtAuthzSecurityTests
         Assert.DoesNotContain("new TenantId(\"default\")", source, StringComparison.Ordinal);
         Assert.DoesNotContain("new Sid(\"anonymous\")", source, StringComparison.Ordinal);
         Assert.DoesNotContain("\"ANONYMOUS\"", source, StringComparison.Ordinal);
+    }
+
+    private static TableAccessDecision Allowed(string? rowFilter = null, bool unconstrained = true) =>
+        new(
+            Table: new TableIdentifier("default", "public", "orders"),
+            IsAllowed: true,
+            ColumnAccess: new Dictionary<string, ColumnAccessLevel>(),
+            CombinedRowFilterSql: rowFilter,
+            DeniedReasons: Array.Empty<string>(),
+            HasUnconstrainedColumnAllow: unconstrained);
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task NoGrant_Denied()
+    {
+        // SEC-AZ-10: the decision point denies (default deny, no grant); the caller learns nothing about the policy.
+        _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Denied(new TableIdentifier("default", "public", "orders"), "no grant"));
+
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        Assert.Equal(EnvoyExtAuthzService.DeniedByPolicyMessage, response.HttpResponse.DeniedResponse.Body);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task GrantWithRowFilter_DeniedAsRestricted()
+    {
+        _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>()).Returns(Allowed(rowFilter: "region = 'EU'"));
+
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        Assert.Equal(EnvoyExtAuthzService.RestrictedMessage, response.HttpResponse.DeniedResponse.Body);
+        Assert.DoesNotContain("EU", response.HttpResponse.DeniedResponse.Body);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task GrantUnrestricted_Allowed()
+    {
+        _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>()).Returns(Allowed());
+
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.Equal(0, response.Status.Code);
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("GET", AccessOperation.Read)]
+    [InlineData("HEAD", AccessOperation.Read)]
+    [InlineData("POST", AccessOperation.Insert)]
+    [InlineData("PUT", AccessOperation.Update)]
+    [InlineData("PATCH", AccessOperation.Update)]
+    [InlineData("DELETE", AccessOperation.Delete)]
+    public async Task Decides_via_decision_point_and_denies_restricted(string method, AccessOperation expected)
+    {
+        // SEC-AZ-01/03/10: one PDP request per check, transport EnvoyExtAuthz, the operation follows the method, and the subject carries no
+        // role as a grantee (the role claims are not in GroupSids).
+        AccessRequest? captured = null;
+        _policyService.DecideAsync(Arg.Do<AccessRequest>(r => captured = r), Arg.Any<CancellationToken>()).Returns(Allowed(unconstrained: false));
+        var caller = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            new[]
+            {
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "alice"),
+                new System.Security.Claims.Claim("tenant_id", "corp"),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "ClusterAdmin"),
+                new System.Security.Claims.Claim("roles", "GovernanceAdmin")
+            },
+            "MeshTls"));
+
+        var response = await _service.CheckHttpAsync(method, "/api/v1/orders", new Dictionary<string, string>(), caller);
+
+        Assert.NotNull(captured);
+        Assert.Equal(AccessTransport.EnvoyExtAuthz, captured.Transport);
+        Assert.Equal(expected, captured.Operation);
+        Assert.Equal("alice", captured.Subject.UserSid.Value);
+        Assert.DoesNotContain(captured.Subject.GroupSids, g => g.Value is "ClusterAdmin" or "GovernanceAdmin");
+        // The decision restricts columns (no unconstrained allow): ext_authz cannot enforce that, so it denies.
+        Assert.Equal(EnvoyExtAuthzService.RestrictedMessage, response.HttpResponse.DeniedResponse!.Body);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task UnknownTable_Denied_WithoutDecision()
+    {
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns((TableMetadata?)null);
+        var service = new EnvoyExtAuthzService(_policyService, tables, NullLogger<EnvoyExtAuthzService>.Instance);
+
+        var response = await service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Failing_decision_point_denies_with_403(bool cancellationException)
+    {
+        // A PDP timeout (OperationCanceledException with a live token) is a failure, not a cancellation: deny.
+        _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns<ValueTask<TableAccessDecision>>(_ => throw (cancellationException ? new OperationCanceledException("timeout") : new InvalidOperationException("pdp down")));
+
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        Assert.Equal(EnvoyExtAuthzService.DeniedByPolicyMessage, response.HttpResponse.DeniedResponse.Body);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Failing_metadata_repository_denies_with_403_without_decision()
+    {
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableMetadata?>>(_ => throw new InvalidOperationException("db down"));
+        var service = new EnvoyExtAuthzService(_policyService, tables, NullLogger<EnvoyExtAuthzService>.Instance);
+
+        var response = await service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

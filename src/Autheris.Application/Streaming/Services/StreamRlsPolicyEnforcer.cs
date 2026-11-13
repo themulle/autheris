@@ -21,14 +21,14 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Enforces the gateway access model on CDC streaming events.
 /// SEC H-09: Uses the same decision chain as <see cref="GatewayExecutionService"/>:
-/// consent (via <see cref="IConsentResolutionService"/> and the consent cache) -> Casbin ABAC as additional gate and row filter
+/// consent (via <see cref="IConsentResolutionService"/> and the consent cache) -> the access decision point as additional gate
 /// -> catalog masking (sensitive columns / ColumnMaskingRules are masked unless explicitly released as Clear).
 /// </summary>
 public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
 {
     private static readonly MaskingRule DefaultRedactRule = new() { RuleType = "REDACT", Replacement = "[REDACTED]" };
 
-    private readonly IPolicyEnforcementService _policyEnforcementService;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _decisionPoint;
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IColumnMaskingProvider _maskingProvider;
     private readonly IEpochValidationService _epochValidationService;
@@ -38,7 +38,6 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
     private readonly IConsentCacheService _cacheService;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly GatewayOptions? _options;
-    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
@@ -46,7 +45,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
     private readonly TimeProvider _time;
 
     public StreamRlsPolicyEnforcer(
-        IPolicyEnforcementService policyEnforcementService,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint decisionPoint,
         ITableMetadataRepository metadataRepository,
         IColumnMaskingProvider maskingProvider,
         IEpochValidationService epochValidationService,
@@ -56,7 +55,6 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         IConsentCacheService cacheService,
         IClientIpResolver? clientIpResolver = null,
         IOptions<GatewayOptions>? options = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null,
         TimeProvider? time = null,
@@ -66,7 +64,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         _callerAttributes = callerAttributes;
         _time = time ?? TimeProvider.System;
         _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
-        _policyEnforcementService = policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService));
+        _decisionPoint = decisionPoint ?? throw new ArgumentNullException(nameof(decisionPoint));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
         _epochValidationService = epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService));
@@ -76,7 +74,6 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
         _clientIpResolver = clientIpResolver;
         _options = options?.Value;
-        _rebacEvaluator = rebacEvaluator;
     }
 
     public async ValueTask<StreamSecurityDecision> EvaluateAndMaskAsync(
@@ -208,73 +205,43 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             return StreamSecurityDecision.Denied("Virtual filters cannot be enforced on change events");
         }
 
-        // 6. Casbin ABAC Policy Enforcement as additional gate + row filter (with full ABAC context)
-        if (_policyEnforcementService.HasPolicies(tenantId) && _options?.IsConsentBypassed != true)
+        // 6. The decision point: one Streaming read decision per event table as an additional gate. Its consent
+        // cache is keyed by tenant, subject context and policy epoch and never outlives a grant. A deny, a failure or a mandatory predicate
+        // (an event cannot evaluate a subquery) drops the event (fail closed).
+        TableAccessDecision pdpDecision;
+        try
         {
-            // Same attribute map as the query path (TableAccessPolicy): action claims are ignored, empty values are missing, and a claim
-            // type with several distinct values is ambiguous (fail closed) instead of keeping the last value; the gateway action wins.
-            var (attributes, purpose) = Autheris.Application.Policy.TableAccessPolicy.BuildClaimAttributes(
-                subscriber.Claims,
-                new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["action"] = "read" });
-
-            var evalContext = new SecurityEvaluationContext(
-                UserSid: userSid,
-                GroupSids: groupSids,
-                Tenant: tenantId,
-                TargetTable: cdcEvent.Table,
-                RequestedColumns: rawPayload.Keys.ToList(),
-                ClientIp: ResolveClientIp(subscriber),
-                Timestamp: DateTimeOffset.UtcNow,
-                PurposeId: purpose,
-                Attributes: attributes
-            );
-
-            TableAccessDecision casbinDecision;
-            try
-            {
-                casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(evalContext, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to evaluate streaming ABAC policy for event '{EventId}' - failing closed", cdcEvent.EventId);
-                return StreamSecurityDecision.Denied("Policy evaluation error");
-            }
-
-            if (!casbinDecision.IsAllowed)
-            {
-                _logger.LogDebug(
-                    "Streaming event '{EventId}' on table '{Table}' denied for subscriber '{UserSid}' by ABAC policy",
-                    cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
-                return StreamSecurityDecision.Denied("Access denied by ABAC policy");
-            }
-
-            if (!string.IsNullOrWhiteSpace(casbinDecision.CombinedRowFilterSql))
-            {
-                decision = decision.WithAdditionalRowFilter(casbinDecision.CombinedRowFilterSql);
-            }
+            var subject = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(subscriber, tenantId, clientIp: ResolveClientIp(subscriber));
+            pdpDecision = await _decisionPoint.DecideAsync(
+                new Autheris.Application.Policy.Pdp.AccessRequest(
+                    subject, metadata, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Streaming,
+                    Columns: [.. rawPayload.Keys]),
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "Failed to evaluate the streaming access decision for event '{EventId}' - failing closed", cdcEvent.EventId);
+            return StreamSecurityDecision.Denied("Policy evaluation error");
         }
 
-        // 6b. ReBAC Policy Enforcement (Google Zanzibar) on Streaming Events
-        if (_rebacEvaluator != null && _rebacEvaluator.IsEnabled && _options?.Rebac?.EnforceOnStreaming == true)
+        if (!pdpDecision.IsAllowed)
         {
-            var targetTable = Autheris.Application.Policy.RebacTableGate.ObjectId(cdcEvent.Table);
-            var rebacReq = new Autheris.Domain.Model.RebacCheckRequest(tenantId.Value, userSid.Value, "subscriber", targetTable);
-            try
-            {
-                var rebacDecision = await _rebacEvaluator.CheckAsync(rebacReq, ct).ConfigureAwait(false);
-                if (!rebacDecision.Allowed)
-                {
-                    _logger.LogDebug(
-                        "Streaming event '{EventId}' on table '{Table}' denied for subscriber '{UserSid}' by ReBAC policy",
-                        cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
-                    return StreamSecurityDecision.Denied("Access denied by ReBAC policy");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to evaluate streaming ReBAC policy for event '{EventId}' - failing closed", cdcEvent.EventId);
-                return StreamSecurityDecision.Denied("Policy evaluation error");
-            }
+            _logger.LogDebug(
+                "Streaming event '{EventId}' on table '{Table}' denied for subscriber '{UserSid}' by the decision point",
+                cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
+            return StreamSecurityDecision.Denied("Access denied by access policy");
+        }
+
+        if (!string.IsNullOrWhiteSpace(pdpDecision.MandatoryRowPredicateSql))
+        {
+            return StreamSecurityDecision.Denied("Virtual filters cannot be enforced on change events");
+        }
+
+        // A row filter the consent chain did not already produce narrows further (never widens).
+        if (!string.IsNullOrWhiteSpace(pdpDecision.CombinedRowFilterSql) &&
+            !string.Equals(pdpDecision.CombinedRowFilterSql, decision.CombinedRowFilterSql, StringComparison.Ordinal))
+        {
+            decision = decision.WithAdditionalRowFilter(pdpDecision.CombinedRowFilterSql);
         }
 
         // 7. In-Stream Row-Level Security Filtering (Fail-Closed, SQL three-valued logic)

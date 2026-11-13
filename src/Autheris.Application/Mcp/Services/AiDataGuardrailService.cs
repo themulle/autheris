@@ -37,7 +37,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IMcpQueryExecutor? _queryExecutor;
     private readonly IConsentRepository? _consentRepository;
     private readonly IAuditLogRepository _auditLogRepository;
-    private readonly IPolicyEnforcementService? _policyEnforcementService;
+    private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _decisionPoint;
     private readonly ITableMetadataRepository? _tableMetadataRepository;
     private readonly IMcpSessionStore? _sessionStore;
     private readonly ISemanticPromptGuardrail _promptGuardrail;
@@ -67,7 +67,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         ILogger<AiDataGuardrailService> logger,
         IAuditLogRepository auditLogRepository,
         IMcpQueryExecutor? queryExecutor = null,
-        IPolicyEnforcementService? policyEnforcementService = null,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? decisionPoint = null,
         ITableMetadataRepository? tableMetadataRepository = null,
         IMcpSessionStore? sessionStore = null,
         ISemanticPromptGuardrail? promptGuardrail = null,
@@ -91,7 +91,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _queryExecutor = queryExecutor;
-        _policyEnforcementService = policyEnforcementService;
+        _decisionPoint = decisionPoint ?? throw new ArgumentNullException(nameof(decisionPoint));
         _tableMetadataRepository = tableMetadataRepository;
         _sessionStore = sessionStore;
         _promptGuardrail = promptGuardrail ?? new SemanticPromptGuardrail();
@@ -321,28 +321,15 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                  string.Equals(effectiveTable.Domain, "governance", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(effectiveTable.Domain, "catalog", StringComparison.OrdinalIgnoreCase));
 
-            if (_policyEnforcementService != null && _options.Value.Casbin.Enabled && !_options.Value.IsMcpAuthBypassed && !isSchemaTool)
+            // The one decision point decides every disclosed table of a data tool (pseudo targets of tools without a data table are not objects;
+            // call_procedure and query_metrics are decided on the real tables behind the call below).
+            if (resolvedTables != null && !_options.Value.IsMcpAuthBypassed && !isSchemaTool && !ReadsThroughUnderlyingTables(tool) && !IsCatalogToolTarget(tool, effectiveTable) &&
+                !await IsValueFreeDescribeAsync(tool, request.ArgumentsJson, sessionContext, effectiveTable, cancellationToken).ConfigureAwait(false))
             {
-                var userSidStr = CallerSidOf(sessionContext);
-                var policyDecision = await _policyEnforcementService.EvaluatePolicyAsync(BuildSecurityContext(sessionContext, effectiveTable), cancellationToken).ConfigureAwait(false);
-                if (!policyDecision.IsAllowed)
+                var denied = await DenyByDecisionAsync(activity, tool, sessionContext, effectiveTable, cancellationToken).ConfigureAwait(false);
+                if (denied != null)
                 {
-                    activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
-                    McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
-                    _logger.LogWarning("Casbin ABAC policy denied AI Agent '{Principal}' tool call '{ToolName}' (target: '{TargetTable}') in tenant '{TenantId}'. Reasons: {Reasons}",
-                        sessionContext.ServicePrincipalId, tool.Name, effectiveTable, sessionContext.TenantId, string.Join("; ", policyDecision.DeniedReasons));
-                    await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Access denied by Casbin ABAC policy: {string.Join("; ", policyDecision.DeniedReasons)}", false, false, 0, cancellationToken).ConfigureAwait(false);
-
-                    if (_eventBus != null)
-                    {
-                        await _eventBus.PublishAsync(new PolicyDeniedEvent(
-                            EventId: Guid.NewGuid().ToString("N"), SubjectSid: userSidStr, Action: tool.Name,
-                            Resource: effectiveTable.ToString(), Reason: PolicyDeniedEvent.DefaultReasonCode,
-                            Timestamp: DateTimeOffset.UtcNow, TenantId: sessionContext.TenantId,
-                            ReasonCode: PolicyDeniedEvent.DefaultReasonCode), cancellationToken).ConfigureAwait(false);
-                    }
-
-                    return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}' by ABAC security policy.");
+                    return denied;
                 }
             }
         }
@@ -352,7 +339,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         // call_procedure and query_metrics: the ABAC object above is a pseudo table (procedure.dbo.<name>, the semantic catalog) that
         // never carries the four-eyes flag. The gate below runs on the real tables behind the call instead; unresolvable is fail-closed.
         IReadOnlyList<TableIdentifier>? fourEyesTables = resolvedTables;
-        var gatesUnderlyingTables = needsFourEyesCheck && _tableMetadataRepository != null && ReadsThroughUnderlyingTables(tool);
+        var gatesUnderlyingTables = needsFourEyesCheck && ReadsThroughUnderlyingTables(tool);
         if (gatesUnderlyingTables)
         {
             fourEyesTables = await ResolveUnderlyingTablesAsync(tool, request.ArgumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
@@ -363,6 +350,19 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 _logger.LogWarning("Zero-Trust Fail-Closed: Could not resolve the tables behind MCP tool '{ToolName}'. Denying execution.", tool.Name);
                 await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", "Tool execution denied: the tables behind the call could not be resolved (fail-closed).", false, false, 0, cancellationToken).ConfigureAwait(false);
                 return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible.");
+            }
+
+            // The decision point decides the real tables behind the call, before any approval is requested for them.
+            if (!_options.Value.IsMcpAuthBypassed)
+            {
+                foreach (var underlying in fourEyesTables)
+                {
+                    var denied = await DenyByDecisionAsync(activity, tool, sessionContext, underlying, cancellationToken).ConfigureAwait(false);
+                    if (denied != null)
+                    {
+                        return denied;
+                    }
+                }
             }
         }
 
@@ -539,6 +539,35 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     /// <summary>Audit and metric label of a resource read (the audit row names the URI where a tool call names the tool).</summary>
     internal static string ResourceAuditName(string resourceUri) => "resources/read " + resourceUri;
 
+    /// <summary>The decision point check of one table: null when allowed, otherwise the audited deny result.</summary>
+    private async ValueTask<McpToolCallResult?> DenyByDecisionAsync(
+        Activity? activity, McpToolDefinition tool, McpSessionContext sessionContext, TableIdentifier table, CancellationToken cancellationToken)
+    {
+        var policyDecision = await DecideReadAsync(sessionContext, table, cancellationToken).ConfigureAwait(false);
+        if (policyDecision.IsAllowed)
+        {
+            return null;
+        }
+
+        activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+        McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+        var reasonCodes = ReasonCodesOf(policyDecision);
+        _logger.LogWarning("Decision point denied AI Agent '{Principal}' tool call '{ToolName}' (target: '{TargetTable}') in tenant '{TenantId}'. Reasons: {Reasons}",
+            sessionContext.ServicePrincipalId, tool.Name, table, sessionContext.TenantId, reasonCodes);
+        await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Access denied by access policy: {reasonCodes}", false, false, 0, cancellationToken).ConfigureAwait(false);
+
+        if (_eventBus != null)
+        {
+            await _eventBus.PublishAsync(new PolicyDeniedEvent(
+                EventId: Guid.NewGuid().ToString("N"), SubjectSid: CallerSidOf(sessionContext), Action: tool.Name,
+                Resource: table.ToString(), Reason: PolicyDeniedEvent.DefaultReasonCode,
+                Timestamp: DateTimeOffset.UtcNow, TenantId: sessionContext.TenantId,
+                ReasonCode: PolicyDeniedEvent.DefaultReasonCode), cancellationToken).ConfigureAwait(false);
+        }
+
+        return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}' by ABAC security policy.");
+    }
+
     public async ValueTask<McpToolCallResult> ReadResourceWithGuardrailAsync(
         string resourceUri,
         IReadOnlyList<TableIdentifier> targetTables,
@@ -569,18 +598,24 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             return notFound;
         }
 
-        // Same Casbin ABAC request as the equivalent tool call, on every table the resource discloses.
-        if (_policyEnforcementService != null && _options.Value.Casbin.Enabled && !_options.Value.IsMcpAuthBypassed)
+        // Same decision as the equivalent tool call, on every table the resource discloses.
+        if (!_options.Value.IsMcpAuthBypassed)
         {
             foreach (var table in targetTables)
             {
-                var decision = await _policyEnforcementService.EvaluatePolicyAsync(BuildSecurityContext(sessionContext, table), cancellationToken).ConfigureAwait(false);
+                if (McpResourceProvider.IsCatalogLevelResource(resourceUri) ||
+                    (table.Equals(McpSemanticTools.SemanticCatalogTable) && !resourceUri.StartsWith("autheris://catalog/datasets/", StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                var decision = await DecideReadAsync(sessionContext, table, cancellationToken).ConfigureAwait(false);
                 if (!decision.IsAllowed)
                 {
                     activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
-                    _logger.LogWarning("Casbin ABAC policy denied AI Agent '{Principal}' resource read '{Uri}' (target: '{TargetTable}') in tenant '{TenantId}'.",
+                    _logger.LogWarning("Decision point denied AI Agent '{Principal}' resource read '{Uri}' (target: '{TargetTable}') in tenant '{TenantId}'.",
                         sessionContext.ServicePrincipalId, resourceUri, table, sessionContext.TenantId);
-                    await RecordAuditEventAsync(name, sessionContext, "DENY", $"Access denied by Casbin ABAC policy: {string.Join("; ", decision.DeniedReasons)}", false, false, 0, cancellationToken).ConfigureAwait(false);
+                    await RecordAuditEventAsync(name, sessionContext, "DENY", $"Access denied by access policy: {ReasonCodesOf(decision)}", false, false, 0, cancellationToken).ConfigureAwait(false);
 
                     if (_eventBus != null)
                     {

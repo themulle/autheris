@@ -8,14 +8,14 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -30,9 +30,9 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<IcebergRestCatalogFederationService> _logger;
     private readonly IConsentRepository? _consentRepo;
-    private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly IAuditLogRepository _auditRepository;
     private readonly IAccessDecisionPoint _accessDecisionPoint;
+    private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     public IcebergRestCatalogFederationService(
         IIcebergMetadataReader metadataReader,
@@ -42,8 +42,9 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         IAuditLogRepository auditRepository,
         IAccessDecisionPoint accessDecisionPoint,
         IConsentRepository? consentRepo = null,
-        IRebacEvaluator? rebacEvaluator = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
     {
+        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -52,7 +53,6 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         ArgumentNullException.ThrowIfNull(accessDecisionPoint);
         _accessDecisionPoint = accessDecisionPoint;
         _consentRepo = consentRepo;
-        _rebacEvaluator = rebacEvaluator;
     }
 
     public async ValueTask<IReadOnlyList<string>> ListNamespacesAsync(string tenantId, ClaimsPrincipal principal, CancellationToken ct = default)
@@ -115,19 +115,6 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             _options.Value.Catalog.SharedTables,
             ct).ConfigureAwait(false);
 
-        if (RebacTableGate.IsEnforcedOnQueryPaths(_options.Value))
-        {
-            var filtered = new List<TableMetadata>(visible.Count);
-            foreach (var table in visible)
-            {
-                if (await RebacTableGate.IsAllowedAsync(_rebacEvaluator, new TenantId(tenantId), userSid, table.Identifier, ct).ConfigureAwait(false))
-                {
-                    filtered.Add(table);
-                }
-            }
-            return filtered;
-        }
-
         return visible;
     }
 
@@ -181,7 +168,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         TableMetadata tableMeta;
         try
         {
-            tableMeta = await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, AccessOperation.SchemaRead, ct).ConfigureAwait(false);
+            tableMeta = await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, ct).ConfigureAwait(false);
         }
         catch (SecurityException ex)
         {
@@ -243,7 +230,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
 
         try
         {
-            await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, AccessOperation.VendCredentials, ct).ConfigureAwait(false);
+            await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, ct).ConfigureAwait(false);
         }
         catch (SecurityException ex)
         {
@@ -261,20 +248,25 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         string @namespace,
         string table,
         ClaimsPrincipal principal,
-        AccessOperation operation,
         CancellationToken ct)
     {
         var tableId = new TableIdentifier(tenantId, @namespace, table);
         var tableMeta = await _metadataRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+        if (tableMeta == null || !tableMeta.Table.IsActive)
+        {
+            throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
+        }
+
+        // The source must allow the lakehouse (REST) transport before any decision (same order as the other transports).
+        await _transportGate.EnsureCatalogSourceAsync(
+            Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(tableMeta),
+            ct).ConfigureAwait(false);
 
         var request = new AccessRequest(
-            Principal: principal,
-            Tenant: new TenantId(tenantId),
-            Table: tableId,
-            Operation: operation,
-            Columns: tableMeta?.Columns.Select(c => c.ColumnName).ToList() ?? [],
-            Transport: AccessTransport.Lakehouse,
-            TableMetadata: tableMeta);
+            SecurityPrincipalContext.FromPrincipal(principal, new TenantId(tenantId)),
+            tableMeta,
+            AccessOperation.Read,
+            AccessTransport.Lakehouse);
 
         var decision = await _accessDecisionPoint.DecideAsync(request, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
@@ -284,13 +276,13 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         }
 
         // The catalog path cannot enforce row filters or column restrictions; deny rather than ignore them.
-        if (!string.IsNullOrWhiteSpace(decision.RowFilterSql)
-            || decision.ColumnAccess.Values.Any(level => level != ColumnAccessLevel.Clear))
-        {
-            throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
-        }
-
-        if (tableMeta == null || !tableMeta.Table.IsActive)
+        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)
+            || !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql)
+            || decision.RowPolicy != null
+            || decision.ColumnAccess.Values.Any(level => level != ColumnAccessLevel.Clear)
+            || !decision.HasUnconstrainedColumnAllow
+            || tableMeta.Columns.Any(column => decision.GetEffectiveColumnAccess(column.ColumnName, tableMeta) != ColumnAccessLevel.Clear)
+            || tableMeta.ColumnMaskingRules.Keys.Any(column => decision.GetEffectiveColumnAccess(column, tableMeta) != ColumnAccessLevel.Clear))
         {
             throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
         }
