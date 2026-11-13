@@ -56,7 +56,6 @@ internal static class SecurityMutants
         m.AddRange(ScopeDrop("drop-subquery-rls", "drop the RLS of IN and EXISTS subqueries", "M-3 (extension)", SecurityScope.Subquery, SecurityScope.InSubquery, SecurityScope.ExistsSubquery));
         m.AddRange(ScopeDrop("drop-policysubquery-tenant-predicate", "drop the PolicySubquery tenant predicate", "M-3, SEC-ADG-11", SecurityScope.PolicySubquery));
         m.AddRange(ScopeDrop("drop-dml-target-predicate", "drop the tenant predicate of an UPDATE or DELETE target", "M-3 (extension)", SecurityScope.DmlTarget));
-        m.AddRange(ScopeDrop("drop-merge-predicates", "drop the MERGE target (ON) and source tenant predicates", "M-3 (extension)", SecurityScope.MergeOn, SecurityScope.MergeTarget, SecurityScope.MergeSource));
         m.Add(new SecurityMutant("unmask-wildcard-expansion", "the wildcard expansion no longer masks", "S14/6, M-3", Operator(new UnmaskRewriter())));
         m.Add(new SecurityMutant("unmask-wildcard-expansion+no-verifier", "the wildcard expansion no longer masks (verifier off as well)", "S14/6, M-3",
             Operator(new UnmaskRewriter(), SecurityControl.CoverageVerifier)));
@@ -81,7 +80,6 @@ internal static class SecurityMutants
         m.Add(new SecurityMutant("drop-binary-tenant-template", "drop the SQL Server binary tenant template (DATALENGTH conjunct)", "M-3, SEC-ADG-04", Off(SecurityControl.TenantBinaryLengthConjunct)));
         m.Add(new SecurityMutant("plain-tenant-equality", "compare the tenant with a plain equality (no byte-exact comparison)", "brief, SEC-ADG-04", Off(SecurityControl.TenantByteExactCompare)));
         m.Add(new SecurityMutant("allow-policy-column-assignment-in-update", "allow a policy-column assignment in UPDATE", "M-3, SEC-ADG-06", Relax(d => d with { RejectPolicyColumnAssignment = false })));
-        m.Add(new SecurityMutant("accept-when-not-matched-by-source", "accept an unknown MERGE clause such as WHEN NOT MATCHED BY SOURCE", "M-3, SEC-ADG-08", Off(SecurityControl.MergeClauseClosedSet)));
         m.Add(new SecurityMutant("omit-policy-values-from-cache-rebind", "omit the tenant and policy values from the cache rebind", "M-3, M-8", Off(SecurityControl.CacheRebindPolicyValues)));
         m.Add(new SecurityMutant("cache-rebind-raw-like-pattern", "bind the raw value of an escaped LIKE pattern slot on a cache hit", "SQLE-10", Off(SecurityControl.CacheRebindLikeEscape)));
         m.Add(new SecurityMutant("cte-case-insensitive-scope", "resolve a CTE case-insensitively against a quoted physical name", "M-3, INV-11", Off(SecurityControl.CteCaseInsensitiveScope)));
@@ -114,5 +112,14 @@ internal static class SecurityMutants
     /// Mutants of controls that live on other X0 branches (not on the base of this package). Each has an automatic activation
     /// check: once the control is on this branch, the check fails until the mutant is implemented and moved to <see cref="Active"/>.
     /// </summary>
-    public static IReadOnlyList<PendingMutant> Pending { get; } = Array.Empty<PendingMutant>();
+    public static IReadOnlyList<PendingMutant> Pending { get; } =
+    [
+        // WP-SIMPL-45 D-45-4: MERGE is rejected before the securing code runs, so these controls are unreachable. The mutants are retired here,
+        // not deleted (SEC-CIFIX-9); the activation check fails (inverted: the rejection is gone) until they are moved back to Active.
+        // The probes Merge_*_IsRejected_BeforeSecuring replace their kill coverage.
+        new PendingMutant("drop-merge-predicates", "drop the MERGE target (ON) and source tenant predicates", "M-3 (extension)", "WP-SIMPL-45 D-45-4",
+            "src/TrinoSqlEngine/Ast/Visitors/AstSecurityVisitor.TypedDml.cs", "MERGE is not supported for governed writes", ActivatesWhenAbsent: true),
+        new PendingMutant("accept-when-not-matched-by-source", "accept an unknown MERGE clause such as WHEN NOT MATCHED BY SOURCE", "M-3, SEC-ADG-08", "WP-SIMPL-45 D-45-4",
+            "src/TrinoSqlEngine/Ast/Visitors/AstSecurityVisitor.TypedDml.cs", "MERGE is not supported for governed writes", ActivatesWhenAbsent: true)
+    ];
 }

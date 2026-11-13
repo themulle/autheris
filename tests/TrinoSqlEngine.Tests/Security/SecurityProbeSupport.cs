@@ -206,6 +206,14 @@ internal sealed class ProbeEnv
 
 internal static class ProbeAsserts
 {
+    /// <summary>WP-SIMPL-45 D-45-4, SEC-CIFIX-7: a governed MERGE is rejected with this exact message before any securing step runs, and nothing is cached.</summary>
+    public static void AssertMergeRejected(ProbeEnv env, string sql)
+    {
+        var ex = Xunit.Assert.Throws<System.Security.SecurityException>(() => env.Compile(sql));
+        Xunit.Assert.Equal("MERGE is not supported for governed writes.", ex.Message);
+        Xunit.Assert.Equal(0, env.Engine.CompileCache.Stats.Entries);
+    }
+
     /// <summary>How many tenant predicates a dialect's template puts around one bound tenant marker (see TenantPredicateFactory).</summary>
     public static int MentionsPerTenantPredicate(TargetSqlDialect dialect) => dialect switch
     {
