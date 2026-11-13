@@ -231,12 +231,6 @@ public static partial class GovernanceEndpoints
         app.MapGet("/api/v1/governance/grants", ListGrantsPageAsync)
             .RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
 
-        // P10: Multi-Tenant Policy Simulation Sandbox ("What-If" Replay via Audit Logs)
-        app.MapPost("/api/governance/policy-simulation/replay", (
-            PolicySimulationRequest? request,
-            IPolicySimulationService simulationService,
-            HttpContext context) => ReplayPolicySimulationAsync(request, simulationService, context)).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditRead);
-
         // P11: Automated Schema Deprecation & Client-Impact Sunsetting (Smart Sunsetting Engine)
         app.MapGet("/api/governance/sunsetting/rules", async (
             ISchemaSunsettingService sunsettingService,

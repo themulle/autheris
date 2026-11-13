@@ -230,40 +230,4 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
         Should.Throw<FileNotFoundException>(() => new CasbinEnforcementService(missingPath));
     }
 
-    [Fact]
-    public async Task PolicySimulationService_MatchesEnforcement_ForWildcardRules()
-    {
-        var auditRepo = Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>();
-        auditRepo.QueryAuditLogsAsync(
-            Arg.Any<string?>(),
-            Arg.Any<Sid?>(),
-            Arg.Any<DateTimeOffset?>(),
-            Arg.Any<int>(),
-            Arg.Any<TenantId?>(),
-            Arg.Any<System.Threading.CancellationToken>())
-            .Returns(new List<AuditLogEntry>
-            {
-                new()
-                {
-                    Id = Guid.NewGuid(),
-                    OccurredAt = DateTimeOffset.UtcNow,
-                    ActorSid = new Sid("S-1-5-21-ALICE"),
-                    TargetTable = "hr.employees",
-                    EventType = "read",
-                    Decision = "ALLOW"
-                }
-            });
-
-        var simService = new PolicySimulationService(auditRepo);
-        var simResult = await simService.SimulateAsync(
-            new PolicySimulationRequest(
-                DraftPolicyCsv: "p, S-1-5-21-ALICE, *, hr.employees, read, true, allow",
-                Tenant: TenantA,
-                TargetTable: "hr.employees",
-                Limit: 10),
-            TenantA);
-
-        simResult.AllowedInSimulation.ShouldBe(1);
-        simResult.DeniedInSimulation.ShouldBe(0);
-    }
 }

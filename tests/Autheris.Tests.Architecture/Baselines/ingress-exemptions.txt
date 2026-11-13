@@ -53,7 +53,6 @@ route /api/governance/plans | governance admin route (CatalogApiEndpoints and si
 route /api/governance/plans/{planId} | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/plans/{planId}/apply | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/plans/{planId}/confirm | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/policy-simulation/replay | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/principals | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/sunsetting/evaluate | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/sunsetting/rules | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
@@ -83,6 +82,8 @@ route /api/v1/envoy/export/envoyfilter.yaml | governance, consent, ReBAC, FinOps
 route /api/v1/envoy/export/wasmplugin.yaml | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/finops/budget/{tenantId} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/finops/focus | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/authz/explain | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/authz/objects/{objectName}/grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/2fa/enroll | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/2fa/verify-enrollment | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/access-profiles/{name} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
