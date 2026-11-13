@@ -627,6 +627,59 @@ public static class McpDatasetTools
         return false;
     }
 
+    /// <summary>The one boolean conversion of MCP tool arguments: a JSON boolean or the string "true"/"false" (anything else is null).</summary>
+    public static bool? ToBooleanArgument(object? value) => value switch
+    {
+        bool b => b,
+        string s => bool.TryParse(s, out var parsed) ? parsed : null,
+        _ => null
+    };
+
+    /// <summary>
+    /// Whether the call requests the brief shape, parsed exactly as the executor reads <c>brief</c> (keys case-insensitive, a JSON boolean or
+    /// a "true"/"false" string). A key that occurs more than once is not brief (the executor keeps the last value, so only a single
+    /// occurrence is unambiguous).
+    /// </summary>
+    public static bool IsBriefRequested(string? argumentsJson)
+    {
+        if (string.IsNullOrWhiteSpace(argumentsJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(argumentsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            object? found = null;
+            var count = 0;
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, "brief", StringComparison.OrdinalIgnoreCase))
+                {
+                    count++;
+                    found = prop.Value.ValueKind switch
+                    {
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        JsonValueKind.String => prop.Value.GetString(),
+                        _ => null
+                    };
+                }
+            }
+
+            return count == 1 && ToBooleanArgument(found) == true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// A boolean argument that occurs at most once (case-insensitive).
     /// </summary>

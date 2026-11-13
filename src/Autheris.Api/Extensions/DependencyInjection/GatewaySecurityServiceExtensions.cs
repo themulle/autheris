@@ -115,7 +115,7 @@ public static class GatewaySecurityServiceExtensions
         services.AddSingleton<IDbSessionContextInitializer, DbSessionContextInitializer>();
 
         // F-ARCH-11: Envoy External Authorization & Istio Service Mesh Adapter
-        services.AddSingleton<IEnvoyExtAuthzService, EnvoyExtAuthzService>();
+        services.AddScoped<IEnvoyExtAuthzService, EnvoyExtAuthzService>();
 
         // RFC 6238 TOTP 2FA Engine (ADR-05)
         services.AddAutheris2Fa();

@@ -63,9 +63,7 @@ public sealed class CatalogTierPersistenceEndToEndTests : IDisposable
 
     private Autheris.Application.Catalog.Services.CatalogVisibilityService Visibility(IConsentRepository consents)
     {
-        var rebac = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>();
-        rebac.IsEnabled.Returns(false);
-        return new(_repo, consents, Shared, rebac, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Catalog.Services.CatalogVisibilityService>.Instance);
+        return new(_repo, consents, Shared, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Catalog.Services.CatalogVisibilityService>.Instance);
     }
 
     [Fact]

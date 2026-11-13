@@ -47,6 +47,10 @@ public sealed class AuthorizationArchitectureTests
     [InlineData(typeof(FederatedDuckDbExecutionService))]
     [InlineData(typeof(DefaultCrossDomainAccessResolver))]
     [InlineData(typeof(ODataQueryPolicyEnforcer))]
+    [InlineData(typeof(Autheris.Application.Streaming.Services.StreamRlsPolicyEnforcer))]
+    [InlineData(typeof(Autheris.Application.Mesh.Services.EnvoyExtAuthzService))]
+    [InlineData(typeof(Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService))]
+    [InlineData(typeof(Autheris.Application.Mcp.Services.AiDataGuardrailService))]
     public void Every_Transport_Entry_Depends_On_IAccessDecisionPoint(Type transportType)
     {
         var pdpType = typeof(IAccessDecisionPoint);

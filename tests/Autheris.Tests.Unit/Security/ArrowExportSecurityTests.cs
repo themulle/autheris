@@ -277,7 +277,7 @@ public sealed class ArrowExportSecurityTests
 
     private static DefaultHttpContext CreateAuthenticatedArrowContext(string table)
     {
-        var httpContext = new DefaultHttpContext();
+        var httpContext = new DefaultHttpContext { RequestServices = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAllRequestServices() };
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, "user:alice"),

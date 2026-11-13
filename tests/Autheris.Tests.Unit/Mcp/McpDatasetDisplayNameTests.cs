@@ -150,27 +150,6 @@ public sealed class McpDatasetDisplayNameTests
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task RebacDeniedTable_DisplayNameAbsentFromListAndDescribe()
-    {
-        var denied = Row(Distinct, name: "denied_t");
-        var allowed = Row("Allowed", name: "allowed_t");
-        var objectId = RebacTableGate.ObjectId(denied.Identifier);
-        var evaluator = Substitute.For<IRebacEvaluator>();
-        evaluator.IsEnabled.Returns(true);
-        evaluator.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns(ci => ci.Arg<RebacCheckRequest>().Object == objectId ? RebacCheckResult.Denied : RebacCheckResult.Permitted);
-        var catalog = Catalog([denied, allowed], evaluator.WithBatchFromCheck());
-
-        var list = await catalog.ListDatasetsAsync(Subject());
-
-        list.Datasets.Select(d => d.DisplayName).ShouldBe(["Allowed"]);
-        Json(list).ShouldNotContain(Distinct);
-        var ex = await Should.ThrowAsync<TableNotFoundException>(() => catalog.DescribeDatasetAsync(Subject(), "sales.dbo.denied_t"));
-        ex.ToString().ShouldNotContain(Distinct);
-    }
-
-    [Trait("Category", "Security")]
-    [Fact]
     public async Task Paging_TotalUnaffectedByDisplayName()
     {
         var rows = new[] { Row("", name: "a_t"), Row(Distinct, name: "b_t"), Row("\u200B\u200B", name: "c_t") };

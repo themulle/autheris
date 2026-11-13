@@ -214,14 +214,14 @@ public sealed class LakehouseGovernanceTests
         };
 
         var adp = new RecordingAccessDecisionPoint(req =>
-            AccessDecision.Allowed(
-                req.Table,
+            TableAccessDecision.Allowed(
+                req.Object.Identifier,
                 new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["id"] = ColumnAccessLevel.Clear,
                     ["name"] = ColumnAccessLevel.Clear
                 },
-                req.Transport));
+                hasUnconstrainedColumnAllow: true));
 
         var service = new IcebergRestCatalogFederationService(
             new IcebergMetadataReader(new StubLakehouseStorageProvider(metadataJson), NullLogger<IcebergMetadataReader>.Instance),
@@ -229,7 +229,8 @@ public sealed class LakehouseGovernanceTests
             Options.Create(new GatewayOptions { Lakehouse = new LakehouseOptions { Enabled = true } }),
             NullLogger<IcebergRestCatalogFederationService>.Instance,
             new RecordingAuditLogRepository(),
-            accessDecisionPoint: adp);
+            accessDecisionPoint: adp,
+            transportGate: NSubstitute.Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>());
 
         var response = await service.LoadTableAsync("tenant-1", "raw", "orders", CreatePrincipal());
 
@@ -280,11 +281,11 @@ public sealed class LakehouseGovernanceTests
         bool allowAccess = true;
         var adp = new RecordingAccessDecisionPoint(req =>
             allowAccess
-                ? AccessDecision.Allowed(
-                    req.Table,
+                ? TableAccessDecision.Allowed(
+                    req.Object.Identifier,
                     new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear },
-                    req.Transport)
-                : AccessDecision.Denied(req.Table, ["No active grant for table."], req.Transport));
+                    hasUnconstrainedColumnAllow: true)
+                : TableAccessDecision.Denied(req.Object.Identifier, "No active grant for table."));
 
         var auditRepo = new RecordingAuditLogRepository();
         var service = new IcebergRestCatalogFederationService(
@@ -293,20 +294,21 @@ public sealed class LakehouseGovernanceTests
             Options.Create(new GatewayOptions { Lakehouse = new LakehouseOptions { Enabled = true } }),
             NullLogger<IcebergRestCatalogFederationService>.Instance,
             auditRepo,
-            accessDecisionPoint: adp);
+            accessDecisionPoint: adp,
+            transportGate: NSubstitute.Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>());
 
         var principal = CreatePrincipal();
 
-        // 1. Allowed path records AccessTransport.Lakehouse for both SchemaRead and VendCredentials
+        // 1. Allowed path records AccessTransport.Lakehouse read decisions for both LoadTable and VendCredential
         await service.LoadTableAsync("tenant-1", "raw", "orders", principal);
         await Should.ThrowAsync<NotSupportedException>(() =>
             service.VendCredentialAsync("tenant-1", "raw", "orders", principal).AsTask());
 
         adp.Requests.Count.ShouldBe(2);
-        adp.Requests[0].Transport.ShouldBe(AccessTransport.Lakehouse);
-        adp.Requests[0].Operation.ShouldBe(AccessOperation.SchemaRead);
-        adp.Requests[1].Transport.ShouldBe(AccessTransport.Lakehouse);
-        adp.Requests[1].Operation.ShouldBe(AccessOperation.VendCredentials);
+        adp.Requests[0].Transport.ShouldBe(Autheris.Application.Policy.Pdp.AccessTransport.Lakehouse);
+        adp.Requests[0].Operation.ShouldBe(Autheris.Application.Policy.Pdp.AccessOperation.Read);
+        adp.Requests[1].Transport.ShouldBe(Autheris.Application.Policy.Pdp.AccessTransport.Lakehouse);
+        adp.Requests[1].Operation.ShouldBe(Autheris.Application.Policy.Pdp.AccessOperation.Read);
 
         // 2. Denied path throws SecurityException (403) and issues no credentials
         allowAccess = false;
@@ -706,15 +708,22 @@ private sealed class StubDeltaMetadataReader(DeltaSnapshot snapshot) : IDeltaMet
             => ValueTask.FromResult(true);
     }
 
-    private sealed class RecordingAccessDecisionPoint(Func<AccessRequest, AccessDecision> handler) : IAccessDecisionPoint
+    private sealed class RecordingAccessDecisionPoint(Func<Autheris.Application.Policy.Pdp.AccessRequest, TableAccessDecision> handler) : Autheris.Application.Policy.Pdp.IAccessDecisionPoint
     {
-        public List<AccessRequest> Requests { get; } = [];
+        public List<Autheris.Application.Policy.Pdp.AccessRequest> Requests { get; } = [];
 
-        public ValueTask<AccessDecision> DecideAsync(AccessRequest request, CancellationToken cancellationToken = default)
+        public ValueTask<TableAccessDecision> DecideAsync(Autheris.Application.Policy.Pdp.AccessRequest request, CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
             return ValueTask.FromResult(handler(request));
         }
+
+        public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(
+            Autheris.Domain.Security.SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, Autheris.Application.Policy.Pdp.AccessOperation operation, Autheris.Application.Policy.Pdp.AccessTransport transport, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public ValueTask<Autheris.Application.Policy.Pdp.AccessExplanation> ExplainAsync(Autheris.Application.Policy.Pdp.AccessRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 
     private static GatewayExecutionService BuildGatewayExecutionService(

@@ -226,7 +226,7 @@ public sealed class McpResourceSwitchTests
 
         // JSON-RPC handler: list is empty and read equals the answer for an unknown uri.
         var registry = new McpToolRegistry();
-        var guardrail = new AiDataGuardrailService(registry, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, Substitute.For<IAuditLogRepository>());
+        var guardrail = new AiDataGuardrailService(registry, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, Substitute.For<IAuditLogRepository>(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance, closed);
         var sid = handler.CreateSession("agent", "t").SessionId;
 

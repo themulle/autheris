@@ -112,21 +112,6 @@ public sealed class CatalogVisibilityServiceHardeningTests
     // ------------------------------------------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task EvaluatorTimeout_TaskCanceled_TokenNotCancelled_ChunkHidden_NoThrow()
-    {
-        var rows = Rows(3);
-        var rebac = Substitute.For<IRebacEvaluator>();
-        rebac.IsEnabled.Returns(true);
-        rebac.BatchCheckAsync(Arg.Any<RebacBatchCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<RebacBatchCheckResult>>(_ => throw new TaskCanceledException("evaluator timeout"));
-        var service = CatalogVisibilityTestFactory.Create(Wp0.Tables(rows), ConsentsFor(rows), Opts(rebac: true), rebac);
-        var caller = Caller(Wp0.User("S-USER", "tenant-a"));
-
-        (await service.GetVisibleAsync(caller)).Tables.ShouldBeEmpty();
-        (await service.FindVisibleAsync(caller, rows[0].Identifier)).ShouldBeNull();
-    }
-
-    [Fact]
     public async Task ConsentRepositoryTimeout_TaskCanceled_TokenNotCancelled_Empty_NoThrow()
     {
         var rows = Rows(2);
@@ -137,25 +122,6 @@ public sealed class CatalogVisibilityServiceHardeningTests
         var service = CatalogVisibilityTestFactory.Create(Wp0.Tables(rows), consents, Opts());
 
         (await service.GetVisibleAsync(Caller(Wp0.User("S-USER", "tenant-a")))).Tables.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task RealCancellation_StillPropagates()
-    {
-        var rows = Rows(2);
-        var rebac = Substitute.For<IRebacEvaluator>();
-        rebac.IsEnabled.Returns(true);
-        using var cts = new CancellationTokenSource();
-        rebac.BatchCheckAsync(Arg.Any<RebacBatchCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<RebacBatchCheckResult>>(_ =>
-            {
-                cts.Cancel();
-                throw new OperationCanceledException(cts.Token);
-            });
-        var service = CatalogVisibilityTestFactory.Create(Wp0.Tables(rows), ConsentsFor(rows), Opts(rebac: true), rebac);
-
-        await Should.ThrowAsync<OperationCanceledException>(async () =>
-            await service.GetVisibleAsync(Caller(Wp0.User("S-USER", "tenant-a")), contract: null, cts.Token));
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------
@@ -177,23 +143,6 @@ public sealed class CatalogVisibilityServiceHardeningTests
                 Messages.Add(formatter(state, exception) + (exception == null ? string.Empty : "|EXCEPTION"));
             }
         }
-    }
-
-    [Fact]
-    public async Task ChunkFailure_Log_NamesTheFailureType_NoMessageNoException()
-    {
-        var rows = Rows(2);
-        var rebac = Substitute.For<IRebacEvaluator>();
-        rebac.IsEnabled.Returns(true);
-        rebac.BatchCheckAsync(Arg.Any<RebacBatchCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns<ValueTask<RebacBatchCheckResult>>(_ => throw new InvalidOperationException("S-USER sales.dbo.tab00000"));
-        var log = new Capture();
-        var service = CatalogVisibilityTestFactory.Create(Wp0.Tables(rows), ConsentsFor(rows), Opts(rebac: true), rebac, log);
-
-        (await service.GetVisibleAsync(Caller(Wp0.User("S-USER", "tenant-a")))).Tables.ShouldBeEmpty();
-
-        log.Messages.ShouldContain(m => m.Contains("InvalidOperationException", StringComparison.Ordinal));
-        log.Messages.ShouldAllBe(m => !m.Contains("S-USER") && !m.Contains("tab0000") && !m.Contains("|EXCEPTION"));
     }
 
     // ------------------------------------------------------------------------------------------------------------------------------

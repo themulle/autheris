@@ -85,8 +85,25 @@ PY
 }
 
 # Log tails go to the job log: canaries are replaced and stack-trace frames dropped (the checker treats them as leaks).
+# SEC-CI-8-7: the governance DB password and connection string (when set) are redacted as literals; they never enter a command line (awk reads ENVIRON).
 safe_tail() {
-  tail -n "$2" "$1" | grep -v -E '^[[:space:]]+at ' | sed -E 's/SIMCANARY-[A-Za-z0-9-]+/<canary>/g' >&2 || true
+  tail -n "$2" "$1" | grep -v -E '^[[:space:]]+at ' | sed -E 's/SIMCANARY-[A-Za-z0-9-]+/<canary>/g' | awk '
+    function redact(line, secret,   out, i) {
+      if (secret == "") return line
+      out = ""
+      while ((i = index(line, secret)) > 0) { out = out substr(line, 1, i - 1) "<canary>"; line = substr(line, i + length(secret)) }
+      return out line
+    }
+    { print redact(redact($0, ENVIRON["AUTHERIS_SIM_GOVERNANCE_DB"]), ENVIRON["SIM_GOV_PASSWORD"]) }' >&2 || true
+}
+
+# SEC-CI-8-8: every host start gets an empty governance database (the container is per run, without a volume). Only runs when the workflow
+# provides SIM_GOV_PG_CONTAINER; the local socket inside the container needs no password.
+reset_governance_db() {
+  [ -n "${SIM_GOV_PG_CONTAINER:-}" ] || return 0
+  docker exec "$SIM_GOV_PG_CONTAINER" psql -U sim -d postgres -v ON_ERROR_STOP=1 -q \
+    -c 'DROP DATABASE IF EXISTS sim_gov WITH (FORCE)' -c 'CREATE DATABASE sim_gov' >/dev/null \
+    || die "could not reset the governance database"
 }
 
 wait_for_file() {
@@ -153,6 +170,7 @@ start_host() {
   DATA_DIR="$RUNNER_TEMP/sim-data-$profile"
   READY_FILE="$RUNNER_TEMP/sim-ready-$profile"
   rm -rf "$DATA_DIR" "$READY_FILE"
+  reset_governance_db
   dotnet "$HOST_DLL" --port "$PORT" --data-dir "$DATA_DIR" --ready-file "$READY_FILE" --profile "$profile" >"$RUNNER_TEMP/sim-host-$profile.log" 2>&1 &
   HOST_PID=$!
   HOST_LOG="$RUNNER_TEMP/sim-host-$profile.log"
@@ -311,6 +329,10 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$RUNNER_TEMP/st/out"
 : >"$RUNNER_TEMP/sim-canaries.txt"
+# SEC-CI-8-7: the checker also treats the governance DB password and connection string as canaries (never uploaded, never printed).
+for secret in "${SIM_GOV_PASSWORD:-}" "${AUTHERIS_SIM_GOVERNANCE_DB:-}"; do
+  [ -z "$secret" ] || printf '%s\n' "$secret" >>"$RUNNER_TEMP/sim-canaries.txt"
+done
 
 phase_read
 phase_write
