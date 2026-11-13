@@ -10,6 +10,7 @@ using Autheris.Application.Mesh.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -45,7 +46,8 @@ public static class EnvoyExtAuthzEndpoints
                 }
             }
 
-            var decision = await authzService.CheckHttpAsync(method, path, headerMap, context.User, context.RequestAborted);
+            var subject = ResolveSubject(context);
+            var decision = await authzService.CheckHttpAsync(method, path, headerMap, subject, context.RequestAborted);
 
             if (decision.Status.Code == 0)
             {
@@ -127,6 +129,15 @@ public static class EnvoyExtAuthzEndpoints
 
         return app;
     }
+
+    /// <summary>
+    /// The decision subject is the request security context with the validated principal attached (the claim markers stay a second
+    /// deny layer in the decision point). Without a resolved context there is no subject (401), never a default context.
+    /// </summary>
+    internal static SecurityPrincipalContext? ResolveSubject(HttpContext context) =>
+        context.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var item) && item is SecurityPrincipalContext resolved
+            ? resolved with { Principal = context.User }
+            : null;
 
     /// <summary>
     /// Security review: <c>X-Original-Method</c> / <c>X-Original-URI</c> describe the request being authorised and are

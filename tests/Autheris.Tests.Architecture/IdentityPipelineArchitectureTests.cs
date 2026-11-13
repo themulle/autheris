@@ -87,9 +87,7 @@ public sealed class IdentityPipelineArchitectureTests
         "Autheris.Api.Endpoints.VirtualFilterEndpoints",
         "Autheris.GraphQL.Catalog.AggregateGraphQlTypes",
         "Autheris.GraphQL.Catalog.MetricGraphQlTypes",
-        "Autheris.Extensions.Dbt.DbtOwnerSpecValidator",
-        // Envoy ext_authz still extracts the claim itself; it moves to the security context in the Envoy alignment step (PR 4).
-        "Autheris.Application.Mesh.Services.EnvoyExtAuthzService"
+        "Autheris.Extensions.Dbt.DbtOwnerSpecValidator"
     ];
 
     [Fact]

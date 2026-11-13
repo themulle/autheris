@@ -68,7 +68,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             "MeshTls"));
 
         // Act
-        var response = await _service.CheckHttpAsync(method, path, headers, caller);
+        var response = await _service.CheckHttpAsync(method, path, headers, Subject(caller));
 
         // Assert
         Assert.Equal(0, response.Status.Code);
@@ -111,7 +111,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             "MeshTls"));
 
         // Act
-        var response = await _service.CheckHttpAsync(method, path, headers, caller);
+        var response = await _service.CheckHttpAsync(method, path, headers, Subject(caller));
 
         // Assert
         Assert.Equal(7, response.Status.Code); // PERMISSION_DENIED
@@ -121,6 +121,9 @@ public sealed class EnvoyExtAuthzSecurityTests
         Assert.DoesNotContain("insufficient clearance level", response.HttpResponse.DeniedResponse.Body);
         Assert.Equal(EnvoyExtAuthzService.DeniedByPolicyMessage, response.HttpResponse.DeniedResponse.Body);
     }
+
+    private static Autheris.Domain.Security.SecurityPrincipalContext? Subject(System.Security.Claims.ClaimsPrincipal? caller) =>
+        Autheris.Tests.Unit.TestSupport.EnvoySubjects.From(caller);
 
     private static System.Security.Claims.ClaimsPrincipal MeshCaller(string sid) =>
         new(new System.Security.Claims.ClaimsIdentity(
@@ -162,7 +165,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             .DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(decision);
 
-        var response = await _service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), MeshCaller("alice"));
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), Subject(MeshCaller("alice")));
 
         Assert.True(response.Status.Code != 0, restriction);
         Assert.NotNull(response.HttpResponse.DeniedResponse);
@@ -186,7 +189,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             .DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(decision);
 
-        var response = await _service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), MeshCaller("alice"));
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), Subject(MeshCaller("alice")));
 
         Assert.Equal(0, response.Status.Code);
     }
@@ -207,7 +210,7 @@ public sealed class EnvoyExtAuthzSecurityTests
                 Arg.Any<CancellationToken>())
             .Returns(ci => TableAccessDecision.Allowed(ci.Arg<AccessRequest>().Object.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
-        await _service.CheckHttpAsync("GET", path, new Dictionary<string, string>(), MeshCaller("alice"));
+        await _service.CheckHttpAsync("GET", path, new Dictionary<string, string>(), Subject(MeshCaller("alice")));
 
         Assert.NotNull(capturedContext);
         Assert.Equal(expectedTable, capturedContext.Object.Identifier.TableName);
@@ -264,7 +267,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             "MeshTls"));
 
         // Act
-        var response = await _service.CheckHttpAsync(method, path, headers, caller);
+        var response = await _service.CheckHttpAsync(method, path, headers, Subject(caller));
 
         // Assert
         Assert.Equal(0, response.Status.Code);
@@ -306,7 +309,7 @@ public sealed class EnvoyExtAuthzSecurityTests
         var unauthenticated = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity());
         foreach (var caller in new System.Security.Claims.ClaimsPrincipal?[] { null, unauthenticated })
         {
-            var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", headers, caller);
+            var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", headers, Subject(caller));
 
             Assert.Equal(401, response.HttpResponse.DeniedResponse!.Status.Code);
             Assert.DoesNotContain("spoofed-admin", response.HttpResponse.DeniedResponse.Body);
@@ -317,18 +320,13 @@ public sealed class EnvoyExtAuthzSecurityTests
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task ExtAuthz_Authenticated_Without_Sid_Is_Denied_Instead_Of_Anonymous()
+    public void ExtAuthz_Authenticated_Without_Sid_Is_Denied_Instead_Of_Anonymous()
     {
-        // DEF-SC-10: an authenticated principal without a SID claim must not become "ANONYMOUS".
+        // DEF-SC-10: an authenticated principal without a SID claim is rejected by the request pipeline and never becomes "ANONYMOUS".
         var caller = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
             new[] { new System.Security.Claims.Claim("tenant_id", "corp") }, "MeshTls"));
 
-        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), caller);
-
-        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
-        Assert.DoesNotContain("corp", response.HttpResponse.DeniedResponse.Body);
-        Assert.DoesNotContain("ANONYMOUS", response.HttpResponse.DeniedResponse.Body, StringComparison.OrdinalIgnoreCase);
-        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+        Assert.Throws<UnauthorizedAccessException>(() => Subject(caller));
     }
 
     [Trait("Category", "Security")]
@@ -365,7 +363,7 @@ public sealed class EnvoyExtAuthzSecurityTests
         _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(TableAccessDecision.Denied(new TableIdentifier("default", "public", "orders"), "no grant"));
 
-        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), Subject(MeshCaller("alice")));
 
         Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
         Assert.Equal(EnvoyExtAuthzService.DeniedByPolicyMessage, response.HttpResponse.DeniedResponse.Body);
@@ -377,7 +375,7 @@ public sealed class EnvoyExtAuthzSecurityTests
     {
         _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>()).Returns(Allowed(rowFilter: "region = 'EU'"));
 
-        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), Subject(MeshCaller("alice")));
 
         Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
         Assert.Equal(EnvoyExtAuthzService.RestrictedMessage, response.HttpResponse.DeniedResponse.Body);
@@ -390,7 +388,7 @@ public sealed class EnvoyExtAuthzSecurityTests
     {
         _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>()).Returns(Allowed());
 
-        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), Subject(MeshCaller("alice")));
 
         Assert.Equal(0, response.Status.Code);
     }
@@ -419,7 +417,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             },
             "MeshTls"));
 
-        var response = await _service.CheckHttpAsync(method, "/api/v1/orders", new Dictionary<string, string>(), caller);
+        var response = await _service.CheckHttpAsync(method, "/api/v1/orders", new Dictionary<string, string>(), Subject(caller));
 
         Assert.NotNull(captured);
         Assert.Equal(AccessTransport.EnvoyExtAuthz, captured.Transport);
@@ -438,7 +436,7 @@ public sealed class EnvoyExtAuthzSecurityTests
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns((TableMetadata?)null);
         var service = new EnvoyExtAuthzService(_policyService, tables, NullLogger<EnvoyExtAuthzService>.Instance);
 
-        var response = await service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+        var response = await service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), Subject(MeshCaller("alice")));
 
         Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
         await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
@@ -454,7 +452,7 @@ public sealed class EnvoyExtAuthzSecurityTests
         _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns<ValueTask<TableAccessDecision>>(_ => throw (cancellationException ? new OperationCanceledException("timeout") : new InvalidOperationException("pdp down")));
 
-        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+        var response = await _service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), Subject(MeshCaller("alice")));
 
         Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
         Assert.Equal(EnvoyExtAuthzService.DeniedByPolicyMessage, response.HttpResponse.DeniedResponse.Body);
@@ -469,7 +467,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             .Returns<Task<TableMetadata?>>(_ => throw new InvalidOperationException("db down"));
         var service = new EnvoyExtAuthzService(_policyService, tables, NullLogger<EnvoyExtAuthzService>.Instance);
 
-        var response = await service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), MeshCaller("alice"));
+        var response = await service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), Subject(MeshCaller("alice")));
 
         Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
         await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
@@ -523,5 +521,145 @@ public sealed class EnvoyExtAuthzSecurityTests
 
         var badOpts = new EnvoyFilterExportOptions { WasmPluginTag = "latest" };
         Assert.Throws<ArgumentException>(() => _service.GenerateIstioWasmPluginYaml(badOpts));
+    }
+
+    private static readonly Sid GroupG = new("S-1-5-21-G");
+    private static readonly Sid GroupH = new("S-1-5-21-H");
+
+    private static Autheris.Domain.Security.SecurityPrincipalContext CompleteSubject() => Subject(MeshCaller("alice"))!;
+
+    private static Task<EnvoyCheckResponse> CheckAsync(EnvoyExtAuthzService service, Autheris.Domain.Security.SecurityPrincipalContext? subject) =>
+        service.CheckHttpAsync("GET", "/api/v1/orders", new Dictionary<string, string>(), subject).AsTask();
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Uses_security_context_groups_not_role_claims()
+    {
+        AccessRequest? captured = null;
+        _policyService.DecideAsync(Arg.Do<AccessRequest>(r => captured = r), Arg.Any<CancellationToken>()).Returns(Allowed());
+        var principal = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "alice"),
+                new System.Security.Claims.Claim("tenant_id", "corp"),
+                new System.Security.Claims.Claim("groups", GroupG.Value),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, GroupG.Value)
+            ], "MeshTls"));
+        var subject = Subject(principal)! with { GroupSids = new HashSet<Sid> { GroupH } };
+
+        await CheckAsync(_service, subject);
+
+        Assert.NotNull(captured);
+        Assert.Contains(GroupH, captured.Subject.GroupSids);
+        Assert.DoesNotContain(GroupG, captured.Subject.GroupSids);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Role_never_passed_as_grantee()
+    {
+        AccessRequest? captured = null;
+        _policyService.DecideAsync(Arg.Do<AccessRequest>(r => captured = r), Arg.Any<CancellationToken>()).Returns(Allowed());
+        var subject = CompleteSubject() with { TenantRoles = new HashSet<string> { "Analyst" }, ClusterRoles = new HashSet<string> { "ClusterAdmin" } };
+
+        await CheckAsync(_service, subject);
+
+        Assert.NotNull(captured);
+        Assert.Empty(captured.Subject.GroupSids);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Degraded_groups_deny()
+    {
+        var response = await CheckAsync(_service, CompleteSubject() with { GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Degraded });
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Header_selected_tenant_is_denied()
+    {
+        var response = await CheckAsync(_service, CompleteSubject() with { TenantSelectedByHeader = true });
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Unresolved_tenant_is_denied(bool claimInvalid)
+    {
+        var response = await CheckAsync(_service, CompleteSubject() with { ResolvedTenant = null, TenantClaimInvalid = claimInvalid });
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Null_subject_is_401()
+    {
+        var response = await CheckAsync(_service, null);
+
+        Assert.Equal(401, response.HttpResponse.DeniedResponse!.Status.Code);
+        await _policyService.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Request_without_security_context_returns_401()
+    {
+        // The endpoint resolves no subject without the request security context and never builds a default one.
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.User = MeshCaller("alice");
+
+        var subject = Autheris.Api.Endpoints.EnvoyExtAuthzEndpoints.ResolveSubject(context);
+        var response = await CheckAsync(_service, subject);
+
+        Assert.Null(subject);
+        Assert.Equal(401, response.HttpResponse.DeniedResponse!.Status.Code);
+
+        var withContext = new Microsoft.AspNetCore.Http.DefaultHttpContext { User = MeshCaller("alice") };
+        withContext.Items[Autheris.Domain.Security.SecurityPrincipalContext.ItemKey] = CompleteSubject();
+        Assert.Same(withContext.User, Autheris.Api.Endpoints.EnvoyExtAuthzEndpoints.ResolveSubject(withContext)!.Principal);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Decision_point_exception_denies()
+    {
+        _policyService.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns<TableAccessDecision>(_ => throw new InvalidOperationException("boom"));
+
+        var response = await CheckAsync(_service, CompleteSubject());
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
+        Assert.Equal(EnvoyExtAuthzService.DeniedByPolicyMessage, response.HttpResponse.DeniedResponse.Body);
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public async Task Role_scoped_virtual_filter_profile_denies()
+    {
+        var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
+        var profile = Autheris.Tests.Unit.VirtualFilters.MandatoryRowFilterResolverTests.Profile(Autheris.Domain.Model.UncoveredPolicy.Skip) with
+        {
+            GranteeType = GranteeType.Role,
+            GranteeSid = null,
+            RoleName = "Analyst",
+            Scope = "default.*.*",
+            TenantId = new TenantId("corp")
+        };
+        var snapshot = new Autheris.Tests.Unit.VirtualFilters.MandatoryRowFilterResolverTests.FixedSnapshot(
+            new Autheris.Application.VirtualFilters.VirtualFilterSnapshot(1, [], [profile]));
+        var service = new EnvoyExtAuthzService(policy, Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(), NullLogger<EnvoyExtAuthzService>.Instance, snapshot);
+
+        var response = await CheckAsync(service, CompleteSubject() with { TenantRoles = new HashSet<string> { "Analyst" } });
+
+        Assert.Equal(403, response.HttpResponse.DeniedResponse!.Status.Code);
     }
 }
