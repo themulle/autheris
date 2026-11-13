@@ -1,3 +1,5 @@
+using Autheris.Tests.Common;
+
 namespace Autheris.Tests.Integration;
 
 using System;
@@ -28,7 +30,7 @@ using Xunit;
 public class SparkProxyFixture : IAsyncLifetime, IDisposable
 {
     // Pinned by digest (SEC-ADG-24). Update together with the digest recorded in docs/plans (implementation log).
-    public const string Image = "apache/spark:4.0.0-python3@sha256:9e2f63442ba1a672ea70d780d56da28f42ce515d0be18840569a3054cc6d2314";
+    public const string Image = TestImages.Spark;
 
     private Process? _process;
     private readonly SemaphoreSlim _gate = new(1, 1);
