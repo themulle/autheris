@@ -289,6 +289,9 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         /// <summary>The caller of <see cref="Client"/> (default: David). Variants that compare callers set it before a channel call; the tests of one class run one after the other.</summary>
         public string CallerSid { get; set; } = DavidSid;
 
+        /// <summary>Group every caller of <see cref="Client"/> belongs to; roles never grant access, so consents that apply to all callers address this group.</summary>
+        public const string ReadersGroupSid = "S-1-5-21-PARITY-READERS";
+
         /// <summary>More test headers for <see cref="Client"/> (for example an application-only caller).</summary>
         public Dictionary<string, string> ExtraHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -375,6 +378,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             var client = _factory!.CreateClient();
             client.DefaultRequestHeaders.Add("X-Test-User-Sid", CallerSid);
             client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
+            client.DefaultRequestHeaders.Add("X-Test-Group-Sids", ReadersGroupSid);
             client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
             foreach (var (name, value) in ExtraHeaders)
             {

@@ -91,7 +91,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
         {
           "version": "v1",
           "policies": [
-            { "domain": "warehouse", "schema": "public", "tableName": "orders", "granteeType": "Role", "granteeRef": "Analyst", "effect": "ALLOW",
+            { "domain": "warehouse", "schema": "public", "tableName": "orders", "granteeType": "Group", "granteeRef": "S-1-5-21-1-2-3-2002", "effect": "ALLOW",
               "columnRules": [ { "columnName": "id", "accessLevel": "CLEAR" }, { "columnName": "email", "accessLevel": "MASKED" } ] }
           ]
         }

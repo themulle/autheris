@@ -128,12 +128,17 @@ public sealed class Consent
             throw new InvalidOperationException($"Consent {Id}: ValidTo ({ValidTo}) must be greater than ValidFrom ({ValidFrom}).");
         }
 
-        if (GranteeType == GranteeType.Role)
+        if (GranteeType == GranteeType.Role && Effect != ConsentEffect.Deny)
         {
             throw new InvalidOperationException($"Consent {Id}: Role grantees are not supported; grant to a group or a user instead.");
         }
 
-        if (GranteeSid == null || string.IsNullOrWhiteSpace(GranteeSid.Value.Value))
+        if (GranteeType == GranteeType.Role && RoleId == null && string.IsNullOrEmpty(RoleName))
+        {
+            throw new InvalidOperationException($"Consent {Id}: RoleId or RoleName must be specified when GranteeType is Role.");
+        }
+
+        if (GranteeType != GranteeType.Role && (GranteeSid == null || string.IsNullOrWhiteSpace(GranteeSid.Value.Value)))
         {
             throw new InvalidOperationException($"Consent {Id}: GranteeSid must be specified when GranteeType is User, Group or ServicePrincipal.");
         }

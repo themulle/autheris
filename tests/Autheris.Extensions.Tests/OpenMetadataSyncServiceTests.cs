@@ -211,7 +211,7 @@ public sealed class OpenMetadataSyncServiceTests
         result.Success.ShouldBeTrue();
         result.SyncedTables.ShouldBe(1);
         result.SyncedMaskingRules.ShouldBe(3);
-        result.SyncedConsents.ShouldBeGreaterThanOrEqualTo(3);
+        result.SyncedConsents.ShouldBe(2);   // team and user; the role allow rule creates no consent (roles never grant data access)
 
         // Check table metadata
         capturedMetadata.ShouldNotBeNull();

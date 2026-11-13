@@ -126,9 +126,9 @@ public class DataPathSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task Catalog_RoleConsents_AreFilteredByCallerRoles()
+    public async Task Catalog_GroupConsents_AreFilteredByCallerGroups()
     {
-        // Table finance_table_2 has a Role consent for role 'FinanceManager'
+        // Table finance_table_2 has a Group consent for group 'S-1-5-21-FINANCE-GROUP'; roles never grant access
         var table = new TableIdentifier("finance", "dbo", "finance_table_2");
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
@@ -139,22 +139,22 @@ public class DataPathSecurityTests : IDisposable
             TableId = meta.Table.Id,
             TableIdentifier = table,
             Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role,
-            RoleName = "FinanceManager",
+            GranteeType = GranteeType.Group,
+            GranteeSid = new Sid("S-1-5-21-FINANCE-GROUP"),
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30)
         });
 
-        // User WITHOUT role 'FinanceManager'
+        // User WITHOUT the group (a role named like the old grantee changes nothing)
         var userWithoutRole = new Sid("S-1-5-21-USER-NO-ROLE");
-        var accessorWithoutRole = CreateAccessor(userWithoutRole, roles: new[] { "Auditor" });
+        var accessorWithoutRole = CreateAccessor(userWithoutRole, roles: new[] { "FinanceManager" });
 
         var catalogWithoutRole = await _query.GetCatalogAsync(_repository, accessorWithoutRole, null, _visibility);
         catalogWithoutRole.ShouldNotContain(t => t.TableName == "finance_table_2");
 
-        // User WITH role 'FinanceManager'
+        // User WITH the group
         var userWithRole = new Sid("S-1-5-21-USER-HAS-ROLE");
-        var accessorWithRole = CreateAccessor(userWithRole, roles: new[] { "FinanceManager" });
+        var accessorWithRole = CreateAccessor(userWithRole, groupSids: new[] { new Sid("S-1-5-21-FINANCE-GROUP") });
 
         var catalogWithRole = await _query.GetCatalogAsync(_repository, accessorWithRole, null, _visibility);
         catalogWithRole.ShouldContain(t => t.TableName == "finance_table_2");

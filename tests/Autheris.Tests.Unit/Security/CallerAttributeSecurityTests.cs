@@ -36,6 +36,7 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class CallerAttributeSecurityTests : IDisposable
 {
+    private static readonly Sid AnalystGroup = new("S-analyst-group");
     private static readonly TenantId Tenant = new("acme");
     private static readonly TableIdentifier Orders = new("d", "main", "orders");
     private const string Oid = "11111111-1111-1111-1111-111111111111";
@@ -73,7 +74,7 @@ public sealed class CallerAttributeSecurityTests : IDisposable
 
         var consent = new Consent
         {
-            TableIdentifier = Orders, TenantId = Tenant, GranteeType = GranteeType.Role, RoleName = "analyst", Effect = ConsentEffect.Allow,
+            TableIdentifier = Orders, TenantId = Tenant, GranteeType = GranteeType.Group, GranteeSid = AnalystGroup, Effect = ConsentEffect.Allow,
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
             RowFilters = [new ConsentRowFilter { ColumnName = "cost_center", Operator = "IN", ValueJson = "[]", ValueSource = "USER_ATTRIBUTE", UserAttribute = "cost_center" }]
         };
@@ -85,7 +86,7 @@ public sealed class CallerAttributeSecurityTests : IDisposable
             clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: new RowPolicyFactory(new PolicyPredicateRenderer()), callerAttributes: resolver);
         var principal = withPrincipal ? CallerAttributeTestSupport.Principal(CallerAttributeTestSupport.Bearer, [("oid", Oid)]) : null;
-        return await policy.DecideAsync(new TableAccessQuery(new Sid(Oid), Tenant, new HashSet<Sid>(), new HashSet<string> { "analyst" }, Meta(), Principal: principal), CancellationToken.None);
+        return await policy.DecideAsync(new TableAccessQuery(new Sid(Oid), Tenant, new HashSet<Sid> { AnalystGroup }, new HashSet<string>(), Meta(), Principal: principal), CancellationToken.None);
     }
 
     // ---- ST-129-10 -----------------------------------------------------------------------------------------------------------------

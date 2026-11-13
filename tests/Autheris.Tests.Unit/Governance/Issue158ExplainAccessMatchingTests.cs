@@ -102,8 +102,8 @@ public sealed class Issue158ExplainAccessMatchingTests
     {
         var dto = await Explain(RegressionFixture(), Caller(roles: [RoleA]));
 
-        dto.Decision.ShouldBe("ALLOWED");
-        dto.ConsentDescription.ShouldBeNull();
+        dto.Decision.ShouldBe("DENIED");   // a role grant never grants access
+        (dto.ConsentDescription ?? "").ShouldNotContain(RoleB);
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class Issue158ExplainAccessMatchingTests
         var consents = RegressionFixture();
         var dto = await Explain(consents, Caller(roles: [RoleA]));
 
-        ShouldBeSameWithin(dto.ValidTo, consents[1].EffectiveValidTo);
+        dto.ValidTo.ShouldBeNull();   // role grants never match, so no expiry is reported
     }
 
     [Fact]
@@ -198,7 +198,8 @@ public sealed class Issue158ExplainAccessMatchingTests
         var byId = Grant(GranteeType.Role, 30, roleName: "stored-label", roleId: id);
         var dto = await Explain([byId], Caller(roles: [id.ToString()]));
 
-        dto.ConsentDescription.ShouldBeNull();
+        dto.Decision.ShouldBe("DENIED");   // a role grant never grants access, whether matched by name or id
+        (dto.ConsentDescription ?? "").ShouldNotContain("stored-label");
     }
 
     [Fact]
@@ -276,7 +277,7 @@ public sealed class Issue158ExplainAccessMatchingTests
         var a = RoleGrant(RoleA, 30);
         var dto = await Explain([RoleGrant(RoleB, 0.5), a], Caller(roles: [RoleA]));
 
-        ShouldBeSameWithin(dto.ValidTo, a.EffectiveValidTo);
+        dto.ValidTo.ShouldBeNull();   // role grants never match, so no expiry is reported
     }
 
     [Fact]
@@ -401,8 +402,9 @@ public sealed class Issue158ExplainAccessMatchingTests
             [Grant(GranteeType.Role, 1, roleName: "label-of-other-id", roleId: other), Grant(GranteeType.Role, 30, roleName: "label-of-held-id", roleId: held)],
             Caller(roles: [held.ToString()]));
 
-        dto.ConsentDescription.ShouldBeNull(); // INC-1: role names are no longer shown as an interim description
+        dto.Decision.ShouldBe("DENIED");
         JsonSerializer.Serialize(dto).ShouldNotContain("label-of-other-id");
+        JsonSerializer.Serialize(dto).ShouldNotContain("label-of-held-id");
     }
 
     [Fact]
@@ -432,7 +434,7 @@ public sealed class Issue158ExplainAccessMatchingTests
 
         Json(viaMcp).ShouldNotContain(RoleB);
         Json(viaGraphQl).ShouldNotContain(RoleB);
-        viaGraphQl.ConsentDescription.ShouldBeNull();
+        viaGraphQl.Decision.ShouldBe("DENIED");
         Json(viaGraphQl).ShouldBe(Json(viaMcp));
     }
 }

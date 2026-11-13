@@ -29,7 +29,7 @@ public sealed class ConsentRowFilterAttributeValidatorGovernanceTests
 
     private static Consent ConsentOf(params ConsentRowFilter[] filters) => new()
     {
-        TableIdentifier = Orders, TenantId = Tenant, GranteeType = GranteeType.Role, RoleName = "analyst", Effect = ConsentEffect.Allow,
+        TableIdentifier = Orders, TenantId = Tenant, GranteeType = GranteeType.Group, GranteeSid = new Sid("S-1-5-21-ANALYSTS"), Effect = ConsentEffect.Allow,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1), RowFilters = filters
     };
 

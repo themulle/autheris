@@ -74,7 +74,7 @@ INSERT INTO air_broken SELECT * FROM air1;";
             Consent ReaderConsent(TableMetadata meta, TableIdentifier id, params ConsentRowFilter[] filters) => new()
             {
                 TableId = meta.Table.Id, TableIdentifier = id, TenantId = TenantValue, Effect = ConsentEffect.Allow,
-                GranteeType = GranteeType.Role, RoleName = "Reader",
+                GranteeType = GranteeType.Group, GranteeSid = new Sid(RowFilterChannelParityTests.Fixture.ReadersGroupSid),
                 ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
                 ColumnRules = meta.Columns.Select(c => new ConsentColumnRule { ColumnName = c.ColumnName, AccessLevel = ColumnAccessLevel.Clear }).ToList(),
                 RowFilters = filters

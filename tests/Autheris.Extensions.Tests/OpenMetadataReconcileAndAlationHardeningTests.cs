@@ -65,6 +65,11 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     private static OpenMetadataRule ViewAllTables() =>
         new() { Name = "ReadTables", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"] };
 
+    private const string OrderTeamSid = "S-1-5-21-ORDER-TEAM";
+
+    /// <summary>The team that carries the allow policy: roles never grant data access, so allow consents are generated for teams and users only.</summary>
+    private static OpenMetadataTeam OrderTeam() => new() { Id = Guid.NewGuid(), Name = "OrderTeam", Policies = [PolicyRef()] };
+
     private static OpenMetadataEntityReference PolicyRef() => new() { Id = PolicyId, Name = "R4Policy" };
 
     private static Consent SyncConsent(TableIdentifier table, GranteeType type, string grantee, ConsentEffect effect = ConsentEffect.Allow, DateTimeOffset? validTo = null) => new()
@@ -188,7 +193,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         SyncIntervalMinutes = 30,
         WebhookSecret = webhookSecret,
         RoleToGatewayRoleMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["OrderReader"] = "OrderReaderRole" },
-        TeamToGroupSidMap = teamMap ?? new Dictionary<string, string>(),
+        TeamToGroupSidMap = teamMap ?? new Dictionary<string, string> { ["name:OrderTeam"] = OrderTeamSid },
         UserToUserSidMap = userMap ?? new Dictionary<string, string>(),
         ServiceDatabaseToDomainMap = serviceDatabaseMap ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
         ActivateNewTables = activateNewTables
@@ -201,14 +206,15 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     {
         var rawOmRole = SyncConsent(OrdersId, GranteeType.Role, "RawOmRoleName");               // legacy consent on a raw OM role name
         var deletedUser = SyncConsent(new TableIdentifier("sales_svc", "dbo", "dropped_table"), GranteeType.User, "S-1-5-21-DELETED");
-        var stillGranted = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(10));
+        var legacyRoleAllow = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole");           // a role Allow from an earlier sync is no longer desired
+        var stillGranted = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, validTo: DateTimeOffset.UtcNow.AddMinutes(10));
 
-        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [rawOmRole, deletedUser, stillGranted]);
+        var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [rawOmRole, deletedUser, legacyRoleAllow, stillGranted]);
 
         var result = await f.Service.SyncPermissionsAsync();
 
         result.Success.ShouldBeTrue();
-        f.Revoked.ShouldBe(new[] { rawOmRole.Id, deletedUser.Id }, ignoreOrder: true);
+        f.Revoked.ShouldBe(new[] { rawOmRole.Id, deletedUser.Id, legacyRoleAllow.Id }, ignoreOrder: true);
         f.Created.ShouldBeEmpty(); // the still granted consent is refreshed, not duplicated
         await f.ConsentRepo.Received(1).GetActiveConsentsByConsentRequestIdAsync(
             OpenMetadataSyncService.OpenMetadataSyncConsentMarker, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
@@ -281,9 +287,21 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task RoleAllowPolicy_NeverCreatesAConsent_RolesDoNotGrantDataAccess()
+    {
+        var f = CreateOm(Om(), [Orders()]);   // the default OpenMetadata role carries an allow rule
+
+        var result = await f.Service.SyncPermissionsAsync();
+
+        result.Success.ShouldBeTrue();
+        f.Created.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task EX02_NewSyncConsent_IsValidForTwoSyncIntervalsOnly()
     {
-        var f = CreateOm(Om(), [Orders()]);
+        var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()]);
         var before = DateTimeOffset.UtcNow;
 
         await f.Service.SyncPermissionsAsync();
@@ -297,8 +315,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Fact]
     public async Task EX02_ExistingLongLivedSyncConsent_IsShortenedToRefreshWindow()
     {
-        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole");
-        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid);
+        var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
 
         await f.Service.SyncPermissionsAsync();
 
@@ -307,7 +325,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         f.Revoked.ShouldHaveSingleItem().ShouldBe(existing.Id);
         var created = f.Created.ShouldHaveSingleItem();
         created.ConsentRequestId.ShouldBe(OpenMetadataSyncService.OpenMetadataSyncConsentMarker);
-        created.RoleName.ShouldBe("OrderReaderRole");
+        created.GranteeSid!.Value.Value.ShouldBe(OrderTeamSid);
         created.ValidTo.ShouldBeLessThanOrEqualTo(DateTimeOffset.UtcNow.AddMinutes(61));
     }
 
@@ -316,7 +334,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     public async Task PERS_04_Sync_ExpiredSyncConsent_IsRecreated_NeverExtended()
     {
         // Expired consents are never returned by GetActiveConsentsByConsentRequestIdAsync, so they fall to the create loop.
-        var f = CreateOm(Om(), [Orders()], existingSyncConsents: []);
+        var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: []);
 
         await f.Service.SyncPermissionsAsync();
 
@@ -328,8 +346,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Trait("Category", "Security")]
     public async Task PERS_04_Sync_ExtendRejectedByRace_CreatesOnce()
     {
-        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(5));
-        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, validTo: DateTimeOffset.UtcNow.AddMinutes(5));
+        var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
         f.ConsentRepo.ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns<Task>(_ => throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(existing.Id));
 
@@ -337,7 +355,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
 
         result.Success.ShouldBeTrue();
         await f.ConsentRepo.Received(1).ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
-        f.Created.ShouldHaveSingleItem().RoleName.ShouldBe("OrderReaderRole");
+        f.Created.ShouldHaveSingleItem().GranteeSid!.Value.Value.ShouldBe(OrderTeamSid);
         f.Revoked.ShouldBeEmpty();
     }
 
@@ -345,8 +363,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Trait("Category", "Security")]
     public async Task PERS_04_Sync_ConcurrentlyRevokedConsent_IsNotRecreated()
     {
-        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(5));
-        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, validTo: DateTimeOffset.UtcNow.AddMinutes(5));
+        var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
         f.ConsentRepo.ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns<Task>(_ => throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(existing.Id));
         f.ConsentRepo.GetConsentByIdAsync(existing.Id, Arg.Any<CancellationToken>())
@@ -356,7 +374,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
                 Id = existing.Id,
                 TableIdentifier = existing.TableIdentifier,
                 GranteeType = existing.GranteeType,
-                RoleName = existing.RoleName,
+                GranteeSid = existing.GranteeSid,
                 ConsentRequestId = existing.ConsentRequestId,
                 ValidFrom = existing.ValidFrom,
                 ValidTo = existing.ValidTo,
@@ -372,8 +390,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Trait("Category", "Security")]
     public async Task PERS_04_Sync_RevokeReturnedFalse_DoesNotCreate()
     {
-        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole");
-        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid);
+        var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
         f.ConsentRepo.RevokeSystemConsentAsync(existing.Id, Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(false));
 
@@ -386,8 +404,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Trait("Category", "Security")]
     public async Task PERS_04_Sync_ActiveSyncConsent_IsStillExtended()
     {
-        var existing = SyncConsent(OrdersId, GranteeType.Role, "OrderReaderRole", validTo: DateTimeOffset.UtcNow.AddMinutes(5));
-        var f = CreateOm(Om(), [Orders()], existingSyncConsents: [existing]);
+        var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, validTo: DateTimeOffset.UtcNow.AddMinutes(5));
+        var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
 
         await f.Service.SyncPermissionsAsync();
 
@@ -581,7 +599,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         var result = await f.Service.SyncPermissionsAsync();
 
         result.Success.ShouldBeTrue();
-        f.Created.ShouldContain(c => c.GranteeType == GranteeType.Role && c.RoleName == "OrderReaderRole");
+        f.Created.ShouldNotContain(c => c.GranteeType == GranteeType.Role);   // roles never grant data access
         f.Created.ShouldContain(c => c.GranteeType == GranteeType.Group && c.GranteeSid!.Value.Value == "S-1-5-21-FINANCE");
         f.Created.ShouldContain(c => c.GranteeType == GranteeType.User && c.GranteeSid!.Value.Value == "S-1-5-21-BOB");
     }

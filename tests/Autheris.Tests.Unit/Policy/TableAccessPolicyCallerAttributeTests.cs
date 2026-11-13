@@ -30,6 +30,7 @@ public sealed class TableAccessPolicyCallerAttributeTests : IDisposable
 {
     private static readonly TenantId Tenant = new("acme");
     private static readonly TableIdentifier Orders = new("d", "main", "orders");
+    private static readonly Sid AnalystGroup = new("S-analyst-group");
     private const string OidA = "11111111-1111-1111-1111-111111111111";
     private const string OidB = "22222222-2222-2222-2222-222222222222";
     private const string OidC = "33333333-3333-3333-3333-333333333333";
@@ -63,7 +64,7 @@ public sealed class TableAccessPolicyCallerAttributeTests : IDisposable
 
     private static Consent Consent(ConsentEffect effect, params ConsentRowFilter[] filters) => new()
     {
-        TableIdentifier = Orders, TenantId = Tenant, GranteeType = GranteeType.Role, RoleName = "analyst", Effect = effect,
+        TableIdentifier = Orders, TenantId = Tenant, GranteeType = GranteeType.Group, GranteeSid = AnalystGroup, Effect = effect,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1), RowFilters = filters
     };
 
@@ -97,7 +98,7 @@ public sealed class TableAccessPolicyCallerAttributeTests : IDisposable
     private static ClaimsPrincipal Person(string oid) => CallerAttributeTestSupport.Principal(CallerAttributeTestSupport.Bearer, [("oid", oid)]);
 
     private static Task<TableAccessDecision> Decide(TableAccessPolicy policy, ClaimsPrincipal? principal, string userKey = OidA) =>
-        policy.DecideAsync(new TableAccessQuery(new Sid(userKey), Tenant, new HashSet<Sid>(), new HashSet<string> { "analyst" }, Meta(), Principal: principal), CancellationToken.None);
+        policy.DecideAsync(new TableAccessQuery(new Sid(userKey), Tenant, new HashSet<Sid> { AnalystGroup }, new HashSet<string>(), Meta(), Principal: principal), CancellationToken.None);
 
     private static MapProvider Map() => new(new Dictionary<string, string[]> { [OidA] = ["CC100"], [OidB] = ["CC200"] });
 
