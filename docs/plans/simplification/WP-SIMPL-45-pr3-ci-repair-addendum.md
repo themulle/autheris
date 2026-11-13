@@ -159,3 +159,8 @@ Mandatory tests (all `[Trait("Category","Security")]`, all runnable in `Autheris
 7. `GovernedSqlExecutorX1Tests.WebSqlDml_MaskedColumnWrite_WithoutExplicitGrant_IsRejected` (new, SEC-CIFIX-5 and -6: through the decorator, a masked column write is rejected with the not-covered message).
 
 CI-only (no local run required): TrinoSqlEngine.Tests, Integration, Spark and SqlCompilerGate follow SEC-CIFIX-4, -5, -7 and -8 by review.
+
+## Status and resume note (2026-11-13)
+- Branch `fix/main-ci-write-permit`: Phase 2/3/4/5 done (review APPROVED, test-only, no `src` change). Release build `-warnaserror` clean; Unit filter (the 8 failing classes, GovernancePolicyFactoryTests, ArchitectureAndCleanCodeTests, CompileCacheKeyTests, ClientListHardeningTests, ConvertTimeZoneWebSqlTests, BulkKeysetPlannedReadTenantSecurityTests) 317/317 passed.
+- Not verified locally (owner rule; `ci.yml` runs only on push to main and on pull requests): TrinoSqlEngine.Tests, Integration shards, Spark, SqlCompilerGate. Verify on the PR run.
+- Open Low follow-ups: Unit `TestWritePermits` builder options and missing try/catch (mirror the Trino helper); lexical `TargetPattern` matches `DO UPDATE SET`/`THEN UPDATE SET` (anchor or comment); unconditional permit assignment in `AstCompilerDmlContract`/`GatePolicies` (add a non-null `Write` guard); nightly `SecurityProbes`/`SecurityMutants` MERGE probes (Mutant/NightlyGate) still expect MERGE to compile; dead MERGE and masked-target branches in `src`; loose `Merge_NotMatchedBySource` assertion.
