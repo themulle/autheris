@@ -23,6 +23,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -71,7 +72,9 @@ public sealed class AuthModeEndToEndTests : IClassFixture<AuthModeEndToEndTests.
                 builder.UseEnvironment("Development");
                 builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create(nameof(AuthModeEndToEndTests)));
-                builder.UseSetting("Gateway:Tenancy:DefaultTenantId", RequestTenant);
+                // appsettings.Development.json sets the default tenant and wins over UseSetting; a later configuration source overrides it.
+                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+                    new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = RequestTenant }));
                 builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
 
                 builder.UseSetting("Gateway:Authentication:Mode", "Both");
@@ -166,12 +169,15 @@ public sealed class AuthModeEndToEndTests : IClassFixture<AuthModeEndToEndTests.
                 GranteeSid = new Sid(GroupSid),
                 ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
                 ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-                ColumnRules =
-                [
-                    new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
-                    new ConsentColumnRule { ColumnName = "region", AccessLevel = ColumnAccessLevel.Clear },
-                    new ConsentColumnRule { ColumnName = "email", AccessLevel = withRowFilter ? ColumnAccessLevel.Mask : ColumnAccessLevel.Clear }
-                ],
+                // A consent without column rules releases every column in clear (an unconstrained allow, which the Envoy check needs).
+                ColumnRules = withRowFilter
+                    ?
+                    [
+                        new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                        new ConsentColumnRule { ColumnName = "region", AccessLevel = ColumnAccessLevel.Clear },
+                        new ConsentColumnRule { ColumnName = "email", AccessLevel = ColumnAccessLevel.Mask }
+                    ]
+                    : [],
                 RowFilters = withRowFilter
                     ? [new ConsentRowFilter { ColumnName = "region", Operator = "EQ", ValueJson = "\"EU\"" }]
                     : []
