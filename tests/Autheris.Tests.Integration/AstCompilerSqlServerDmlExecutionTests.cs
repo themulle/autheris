@@ -127,13 +127,10 @@ public sealed class AstCompilerSqlServerDmlExecutionTests : AstCompilerDmlContra
     // ---- SQL Server specifics ----
 
     [Fact]
-    public async Task Merge_IsEmittedWithExactlyOneTrailingSemicolon_AndExecutes()
+    public async Task Merge_IsRejected_MergeNotSupported()
     {
         if (!Available()) return;
-        var compiled = Engine.Compile($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'm'".AsMemory(), Request("acme"), default);
-        compiled.Sql.ShouldEndWith(";");
-        compiled.Sql.Count(c => c == ';').ShouldBe(1);
-        (await ExecuteAsync(compiled)).ShouldBe(2);
+        await MergeRejectedAsync($"MERGE INTO {O} t USING {E} s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'm'", "acme");
     }
 
     [Fact]
