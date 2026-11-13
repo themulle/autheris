@@ -111,8 +111,9 @@ public sealed class GatewayCorsCsrfMiddleware
                 bool isOriginTrusted = _gatewayOptions.IsAllCorsAllowed;
                 if (!isOriginTrusted && Uri.TryCreate(originHeader, UriKind.Absolute, out var originUri))
                 {
-                    // SR-L-02: the Origin must be on the host allow-list; Origin == Host alone is not proof of same-origin.
-                    if (_hostAllowList.IsAllowed(originUri.Authority))
+                    // The Origin must be on the host allow-list and use the scheme of the request (after trusted forwarded-headers processing).
+                    if (_hostAllowList.IsAllowed(originUri.Authority) &&
+                        string.Equals(originUri.Scheme, context.Request.Scheme, StringComparison.OrdinalIgnoreCase))
                     {
                         isOriginTrusted = true;
                     }
