@@ -233,7 +233,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 query,
                 datasets = results.Select(h => new
                 {
-                    table = $"{h.TableIdentifier.Domain}.{h.TableIdentifier.TableName}",
+                    table = McpDatasetCatalog.DatasetIdOf(h),
                     domain = h.Domain,
                     display_name = h.DisplayName,
                     description = h.Description,
@@ -243,7 +243,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     matched_columns = h.RelevantColumns,
                     join_relations = h.RelatedJoinPaths.Select(r => new
                     {
-                        target_table = $"{r.ToTable.Domain}.{r.ToTable.TableName}",
+                        target_table = McpDatasetCatalog.DatasetId(r.ToTable),
                         join_condition = $"{h.TableIdentifier.TableName}.{r.FromColumn} = {r.ToTable.TableName}.{r.ToColumn}"
                     })
                 })
@@ -271,13 +271,13 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             }
 
             var candidates = results.Select(h => new McpUseCaseCandidate(
-                Dataset: h.DatasetId ?? $"{h.TableIdentifier.Domain}.{h.TableIdentifier.TableName}",
+                Dataset: McpDatasetCatalog.DatasetIdOf(h),
                 Domain: h.Domain ?? h.TableIdentifier.Domain ?? "",
                 Description: h.Description,
                 RelevanceScore: Math.Round(h.CombinedScore, 4),
                 MatchedColumns: h.RelevantColumns,
                 Relations: h.RelatedJoinPaths.Select(r => new McpTableRelation(
-                    TargetTable: $"{r.ToTable.Domain}.{r.ToTable.TableName}",
+                    TargetTable: McpDatasetCatalog.DatasetId(r.ToTable),
                     FromColumn: r.FromColumn,
                     ToColumn: r.ToColumn)).ToList()
             )).ToList();

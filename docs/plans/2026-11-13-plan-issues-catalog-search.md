@@ -52,6 +52,7 @@ Recommended order: WP-OI-SRCH-501 -> 627 -> 628a -> 624 -> 625 -> 626 -> (owner 
 - Dependencies: none. #624 case "same name in two schemas" switches on with this PR.
 - Risks: clients parsing `domain.table`; acceptable before production.
 - Size: S, 1 PR.
+- Delivery: UNDER REVIEW in PR #722 (together with WP-OI-WEB-682-A). Implementation note: the helper is `McpDatasetCatalog.DatasetIdOf(hit)` = the procedure id for a procedure, otherwise `McpDatasetCatalog.DatasetId(TableIdentifier)` (lower case), because the done criterion is equality with the `list_datasets` id; `TableIdentifier.ToString()` keeps the original case. The #624 case "same name in two schemas" switches on when the #624 relevance set exists.
 
 ## #624 Catalog search: a relevance test set with expected top hits
 

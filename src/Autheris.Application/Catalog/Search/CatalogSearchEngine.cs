@@ -385,7 +385,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
                     MatchedTerms: kvp.Value.Terms,
                     RelevantColumns: matchedCols,
                     RelatedJoinPaths: relations,
-                    SuggestedGraphQlField: $"{kvp.Key.Domain}_{kvp.Key.TableName}",
+                    // The root field is known only to the GraphQL catalog schema; CatalogDiscoveryService sets it (#682).
+                    SuggestedGraphQlField: null,
                     EffectiveMode: effectiveMode,
                     Language: query.Language
                 );

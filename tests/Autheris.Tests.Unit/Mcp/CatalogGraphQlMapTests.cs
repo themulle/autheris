@@ -122,6 +122,30 @@ public sealed class CatalogGraphQlMapTests
     }
 
     [Fact]
+    public async Task RootField_ResolvesBothWays_ForSanitizedNameWithUnderscores()
+    {
+        // Issue #682 A: the root field is a lossy, sanitized derivation of the id; only the model knows the mapping.
+        var gps = new TableIdentifier("fleet-ops", "raw_v2", "gps_position");
+        var metadata = Substitute.For<ITableMetadataRepository>();
+        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(
+            [Table(gps, [new TableColumn { ColumnName = "id", DataType = "int" }])]));
+        var map = new CatalogGraphQlMap(metadata, Substitute.For<ITableRelationRepository>());
+
+        (await map.GetRootFieldAsync(gps)).ShouldBe("fleet_ops_raw_v2_gps_position");
+        (await map.GetRootFieldAsync(new TableIdentifier("FLEET-OPS", "RAW_V2", "GPS_POSITION"))).ShouldBe("fleet_ops_raw_v2_gps_position");
+        (await map.ResolveRootFieldAsync("fleet_ops_raw_v2_gps_position")).ShouldBe(gps);
+    }
+
+    [Fact]
+    public async Task RootField_UnknownCaseMismatchedOrOutsideTheSchema_IsNull()
+    {
+        (await _map.GetRootFieldAsync(Files)).ShouldBeNull();
+        (await _map.ResolveRootFieldAsync("crm_dbo_unknown")).ShouldBeNull();
+        (await _map.ResolveRootFieldAsync("CRM_DBO_ORDERS")).ShouldBeNull();
+        (await _map.ResolveRootFieldAsync("crm_dbo_orders")).ShouldBe(Orders);
+    }
+
+    [Fact]
     public async Task ResolveDocument_CollectsRootTablesAndNestedRelations_ThroughFragments()
     {
         var customers = (await _map.GetTableAsync(Customers))!;

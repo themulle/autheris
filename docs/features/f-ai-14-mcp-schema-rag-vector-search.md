@@ -81,28 +81,29 @@ AI agents connected via the official Model Context Protocol server can invoke `s
 **MCP Response Payload:**
 ```json
 {
-  "totalMatches": 2,
-  "tables": [
+  "total_hits": 1,
+  "query": "customer sales invoices and billing items",
+  "datasets": [
     {
+      "table": "sales.public.invoices",
       "domain": "sales",
-      "tableName": "invoices",
-      "relevanceScore": 0.0328,
-      "matchedTerms": ["invoices", "sales"],
-      "matchedColumns": ["invoice_id", "customer_id", "total_amount", "created_at"],
-      "joinRelations": [
+      "display_name": "Invoices",
+      "description": "Customer invoices",
+      "relevance_score": 0.0328,
+      "matched_terms": ["invoices", "sales"],
+      "matched_columns": ["invoice_id", "customer_id"],
+      "join_relations": [
         {
-          "targetTable": "sales.customers",
-          "foreignKey": "customer_id"
-        },
-        {
-          "targetTable": "sales.invoice_items",
-          "foreignKey": "invoice_id"
+          "target_table": "sales.public.customers",
+          "join_condition": "invoices.customer_id = customers.id"
         }
       ]
     }
   ]
 }
 ```
+
+`table` and `target_table` are the `domain.schema.table` dataset ids of `list_datasets`; they can be passed to `describe_dataset` unchanged. `find_relevant_tables` uses the same ids (`candidates[].dataset`, `candidates[].relations[].targetTable`).
 
 ---
 
