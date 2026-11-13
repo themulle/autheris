@@ -90,13 +90,14 @@ jobs:
         env:
           DOTNET_CHANGED: ${{ needs.changes.outputs.dotnet }}
         run: |
-          FILTER="Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&Category!=Parity&FullyQualifiedName!~Autheris.Tests.Integration."
+          FILTER="Category!=Spark&Category!=NightlyGate&Category!=Metamorphic&Category!=Fuzz&Category!=Mutant&FullyQualifiedName!~Autheris.Tests.Integration."
           # Doc-only change (dotnet=false, fail-closed otherwise): architecture tests read docs/, deploy/, benchmarks/ and README.md,
           # so the whole Architecture project and every Security-trait test still run.
           if [ "$DOTNET_CHANGED" = "false" ]; then
             FILTER="(FullyQualifiedName~Autheris.Tests.Architecture.|Category=Security)&$FILTER"
           fi
-          dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
+          # The Parity exclusion stays literal on the dotnet test line (ParityIsolationArchitectureTests scans it; Parity runs only in the nightly parity workflow).
+          dotnet test Autheris.sln -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "$FILTER&Category!=Parity" --logger "trx" --results-directory ${{ runner.temp }}/test-results --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
 
       # WP-ARC-B-12 (D7): the chart must lint and render with and without the optional governance migration job.
       - name: Lint and render Helm chart
