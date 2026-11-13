@@ -9,6 +9,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -167,6 +168,65 @@ public sealed class Issue117AccessExplanationDisclosureTests
         var f = Create(AllowedWithFilter());
 
         var result = await f.Service.ExplainMyAccessAsync(User(new Claim(ClaimTypes.Role, "GovernanceAdmin")), Denied);
+
+        result.ActiveRowFilters.ShouldBe([FilterSql]);
+    }
+
+    private static ClaimsPrincipal ReadOnlyUser(params Claim[] extra)
+    {
+        var identity = new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER"), .. extra], "test");
+        TokenAccessScope.MarkReadOnly(identity);
+        return new ClaimsPrincipal(identity);
+    }
+
+    private static TableAccessDecision AllowedWithFilterForRestrictedScope() => AllowedWithFilter() with
+    {
+        ScopeClearance = new RestrictedScopeClearance(
+            new HashSet<string>(["Agent.Read"], StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+    };
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Issue708_OwnerWithReadOnlyToken_GetsNoSql()
+    {
+        var f = Create(AllowedWithFilter(), owner: true);
+
+        var result = await f.Service.ExplainMyAccessAsync(ReadOnlyUser(), Denied);
+
+        result.ActiveRowFilters.ShouldBe([EffectiveAccessExplanationService.RowFilterDescription]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Issue708_GovernanceAdminWithReadOnlyToken_GetsNoSql()
+    {
+        var f = Create(AllowedWithFilter());
+
+        var result = await f.Service.ExplainMyAccessAsync(ReadOnlyUser(new Claim(ClaimTypes.Role, "GovernanceAdmin")), Denied);
+
+        result.ActiveRowFilters.ShouldBe([EffectiveAccessExplanationService.RowFilterDescription]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Issue708_OwnerWithRestrictedScope_GetsNoSql()
+    {
+        var f = Create(AllowedWithFilterForRestrictedScope(), owner: true);
+
+        var result = await f.Service.ExplainMyAccessAsync(User(), Denied);
+
+        result.ActiveRowFilters.ShouldBe([EffectiveAccessExplanationService.RowFilterDescription]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Issue708_ForgedReadOnlyClaim_DoesNotChangeOwnerView()
+    {
+        // The marker counts only with the gateway issuer; a token-supplied look-alike is ignored (owner keeps the definition).
+        var f = Create(AllowedWithFilter(), owner: true);
+
+        var result = await f.Service.ExplainMyAccessAsync(User(new Claim(TokenAccessScope.ClaimType, TokenAccessScope.ReadOnlyValue)), Denied);
 
         result.ActiveRowFilters.ShouldBe([FilterSql]);
     }
