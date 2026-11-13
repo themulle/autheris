@@ -9,7 +9,6 @@ using Autheris.Api.Extensions;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
@@ -66,8 +65,6 @@ public sealed class CompositionRootModularizationTests
         // Validate key registrations from different modules
         sp.GetService<TrinoSqlEngine.ISqlEngine>().ShouldNotBeNull();
         sp.GetService<IGovernanceRepository>().ShouldNotBeNull();
-        sp.GetService<IRebacStore>().ShouldNotBeNull();
-        sp.GetService<IRebacEvaluator>().ShouldNotBeNull();
         sp.GetService<IMcpToolRegistry>().ShouldNotBeNull();
     }
 
@@ -104,35 +101,4 @@ public sealed class CompositionRootModularizationTests
         scope.ServiceProvider.GetRequiredService<Lazy<IFederatedQueryExecutionService>>().Value.ShouldNotBeNull();
     }
 
-    [Fact]
-    public async Task RebacSeedHostedService_SeedsTuplesAndRecordsAudit()
-    {
-        var store = Substitute.For<IRebacStore>();
-        var audit = Substitute.For<IAuditLogRepository>();
-        var options = new GatewayOptions();
-        options.Rebac.SeedTuples.Add(new RebacTuple("tenant-1", "user:alice", "reader", "table:lakehouse.dbo.sales"));
-
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns(Environments.Development);
-
-        var hostedService = new RebacSeedHostedService(
-            store,
-            Options.Create(options),
-            NullLogger<RebacSeedHostedService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(audit),
-            env);
-
-        await hostedService.StartAsync(CancellationToken.None);
-
-        await store.Received(1).AddTuplesAsync(
-            Arg.Is<IReadOnlyList<RebacTuple>>(list => Enumerable.Any(list, t => t.User == "user:alice")),
-            Arg.Any<CancellationToken>());
-
-        await audit.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(entry =>
-                entry.EventType == "REBAC_TUPLE_SEED" &&
-                entry.ActorSid.Value == "System:HostedService:RebacSeedHostedService" &&
-                entry.Decision == "ALLOW"),
-            Arg.Any<CancellationToken>());
-    }
 }

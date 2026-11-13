@@ -14,7 +14,6 @@ using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Tenancy;
 using Autheris.Application.VirtualFilters;
@@ -35,7 +34,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? _sqlEndpointLoader;
     private readonly ITableRelationRepository? _relationRepository;
     private readonly VirtualFilterAdministrationService? _virtualFilterAdmin;
-    private readonly IRebacStore? _rebacStore;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
     private readonly Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? _syntheticRowGenerator;
     private readonly IDbtTestTargetMap? _testTargetMap;
@@ -53,7 +51,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         ILogger<DbtMetadataIngestionService> logger,
         IDbtTestTargetMap? testTargetMap = null)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, null, testTargetMap, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, testTargetMap, logger)
     {
     }
 
@@ -63,7 +61,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IAuditWriter? auditWriter,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, null, null, null, auditWriter, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, null, null, auditWriter, logger)
     {
     }
 
@@ -73,7 +71,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, null, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, null, null, logger)
     {
     }
 
@@ -83,7 +81,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         ITableRelationRepository? relationRepository,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, relationRepository, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, relationRepository, null, logger)
     {
     }
 
@@ -94,7 +92,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         IPolicyEpochRepository? epochRepository,
         ITableRelationRepository? relationRepository,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, relationRepository, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, relationRepository, null, logger)
     {
     }
 
@@ -106,7 +104,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
         Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, null, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, null, null, logger)
     {
     }
 
@@ -119,7 +117,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, null, logger)
     {
     }
 
@@ -146,25 +144,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
-        IRebacStore? rebacStore,
-        ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, rebacStore, null, logger)
-    {
-    }
-
-    public DbtMetadataIngestionService(
-        IDbtProposalRepository proposalRepository,
-        ITableMetadataRepository metadataRepository,
-        ILineageGraphStore lineageGraphStore,
-        IPolicyEpochRepository? epochRepository,
-        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
-        Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
-        ITableRelationRepository? relationRepository,
-        VirtualFilterAdministrationService? virtualFilterAdmin,
-        IRebacStore? rebacStore,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, rebacStore, tagImport, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, null, logger)
     {
     }
 
@@ -177,11 +159,10 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
-        IRebacStore? rebacStore,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, syntheticRowGenerator, null, logger)
     {
     }
 
@@ -194,12 +175,11 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
-        IRebacStore? rebacStore,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
         IDbtTestTargetMap? testTargetMap,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, testTargetMap, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, null, null, logger)
     {
     }
 
@@ -755,7 +735,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         }
 
                         await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
-                        await SeedRebacStructureTuplesAsync(updatedMetadata.Identifier, ct).ConfigureAwait(false);
                         await ImportModelTagsAsync(updatedMetadata.Identifier, model.Tags, warnings, ct).ConfigureAwait(false);
                     }
                 }
@@ -870,7 +849,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
     /// <summary>
     /// Issue #282: registers a manifest model or source that has no catalog entry. Returns the new entry (live) so that the update step
-    /// applies descriptions, keys, tags and the ReBAC seed in the same run; null when nothing was created (skip, dry run, failure).
+    /// applies descriptions, keys and tags in the same run; null when nothing was created (skip, dry run, failure).
     /// An entry that appears between the read and the write is returned as is and never overwritten.
     /// </summary>
     private async Task<TableMetadata?> TryRegisterMissingTableAsync(
@@ -1670,7 +1649,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             foreach (var updatedMetadata in pendingUpserts)
             {
                 await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
-                await SeedRebacStructureTuplesAsync(updatedMetadata.Identifier, ct).ConfigureAwait(false);
             }
         }
 
@@ -1864,22 +1842,5 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     public Task<IReadOnlyList<DbtMetadataProposal>> GetPendingProposalsAsync(TableIdentifier? table = null, CancellationToken ct = default)
     {
         return _proposalRepository.GetPendingProposalsAsync(table, ct);
-    }
-
-    private async Task SeedRebacStructureTuplesAsync(TableIdentifier tableId, CancellationToken ct)
-    {
-        if (_rebacStore == null)
-        {
-            return;
-        }
-
-        var domainObj = RebacTableGate.DomainObjectId(tableId.Domain);
-        var schemaObj = RebacTableGate.SchemaObjectId(tableId.Domain, tableId.Schema);
-        var tableObj = RebacTableGate.ObjectId(tableId);
-
-        await _rebacStore.AddTuplesAsync([
-            new RebacTuple(tableId.Domain, schemaObj, "parent", tableObj),
-            new RebacTuple(tableId.Domain, domainObj, "parent", schemaObj)
-        ], ct).ConfigureAwait(false);
     }
 }

@@ -17,7 +17,7 @@ using Xunit;
 /// <item><term>EffectiveAccessExplanationService</term><description>consent-only by design (S12, DataAccess surface through the engine; call-site guards).</description></item>
 /// <item><term>AccessPlanningService</term><description>out of scope: governance mutation by id, identical generic not-found text.</description></item>
 /// <item><term>OpenAPI gate gap</term><description>follow-up F-138-FU2: <c>IsOpenApiAdmin</c> admits a tenant-scoped GovernanceAdmin, who then receives the all-tenant spec; the catalog rule treats that class as tenant-scoped.</description></item>
-/// <item><term>QueryAnalysisService, BundledConsentRequestService</term><description>follow-up (no enumeration; they resolve names the caller typed, but still tell "exists" from "unknown" for an Unmarked or ReBAC-denied table): tracked in the plan changelog.</description></item>
+/// <item><term>QueryAnalysisService, BundledConsentRequestService</term><description>follow-up (no enumeration; they resolve names the caller typed, but still tell "exists" from "unknown" for an Unmarked or denied table): tracked in the plan changelog.</description></item>
 /// </list>
 /// </summary>
 [Trait("Category", "Security")]

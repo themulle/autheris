@@ -440,7 +440,6 @@ public sealed class Batch5SecurityTestsB : IDisposable
             null,
             null,
             null,
-            null,
             NullLogger<DbtMetadataIngestionService>.Instance,
             auditLog: Substitute.For<IAuditLogRepository>(),
             ownerAssignments: null,

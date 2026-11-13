@@ -99,7 +99,7 @@ internal sealed class AccessProfileStore(
                 first = false;
             }
 
-            sql.Append(')');
+            sql.Append(") AND a.deactivated_reason IS NULL");
             cmd.CommandText = sql.ToString();
 
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -173,7 +173,7 @@ internal sealed class AccessProfileStore(
 
         await using var assignCmd = conn.CreateCommand();
         assignCmd.Transaction = tx;
-        assignCmd.CommandText = $"SELECT profile_id, {AssignmentColumns.Replace("a.", "")} FROM ACCESS_PROFILE_ASSIGNMENTS WHERE tenant_id = @tenantId" +
+        assignCmd.CommandText = $"SELECT profile_id, {AssignmentColumns.Replace("a.", "")} FROM ACCESS_PROFILE_ASSIGNMENTS WHERE tenant_id = @tenantId AND deactivated_reason IS NULL" +
                                 (profileId != null ? " AND profile_id = @profileId" : "");
         AddParam(assignCmd, "@tenantId", tenantId.Value);
         if (profileId != null)
@@ -382,14 +382,14 @@ internal sealed class AccessProfileStore(
             USING (SELECT @tenantId AS tenant_id, @profileId AS profile_id, @subjectType AS subject_type, @subjectNorm AS subject_norm) AS s
               ON t.tenant_id = s.tenant_id AND t.profile_id = s.profile_id AND t.subject_type = s.subject_type AND t.subject_norm = s.subject_norm
             WHEN MATCHED THEN UPDATE SET assigned_at = @assignedAt, expires_at = @expiresAt, created_by = @createdBy,
-                approved_by = @approvedBy, approved_at = @approvedAt, justification = @justification, kind = @kind, renewal_count = @renewalCount
+                approved_by = @approvedBy, approved_at = @approvedAt, justification = @justification, kind = @kind, renewal_count = @renewalCount, deactivated_reason = NULL
             WHEN NOT MATCHED THEN INSERT (profile_id, tenant_id, subject, subject_type, subject_norm, assigned_at, expires_at, created_by, approved_by, approved_at, justification, kind, renewal_count)
                 VALUES (@profileId, @tenantId, @subject, @subjectType, @subjectNorm, @assignedAt, @expiresAt, @createdBy, @approvedBy, @approvedAt, @justification, @kind, @renewalCount);"
         : @"INSERT INTO ACCESS_PROFILE_ASSIGNMENTS (profile_id, tenant_id, subject, subject_type, subject_norm, assigned_at, expires_at, created_by, approved_by, approved_at, justification, kind, renewal_count)
             VALUES (@profileId, @tenantId, @subject, @subjectType, @subjectNorm, @assignedAt, @expiresAt, @createdBy, @approvedBy, @approvedAt, @justification, @kind, @renewalCount)
             ON CONFLICT (tenant_id, profile_id, subject_type, subject_norm) DO UPDATE SET assigned_at = excluded.assigned_at,
                 expires_at = excluded.expires_at, created_by = excluded.created_by, approved_by = excluded.approved_by, approved_at = excluded.approved_at,
-                justification = excluded.justification, kind = excluded.kind, renewal_count = excluded.renewal_count";
+                justification = excluded.justification, kind = excluded.kind, renewal_count = excluded.renewal_count, deactivated_reason = NULL";
 
     /// <summary>The database value of a timestamp: ISO-8601 text on SQLite, a UTC <see cref="DateTimeOffset"/> elsewhere.</summary>
     private object Ts(DateTimeOffset? value) => value is not { } v

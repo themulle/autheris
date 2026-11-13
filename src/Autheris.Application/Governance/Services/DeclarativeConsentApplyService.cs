@@ -133,23 +133,18 @@ public sealed class DeclarativeConsentApplyService(
                 granteeType = GranteeType.User;
             }
 
+            if (granteeType == GranteeType.Role)
+            {
+                throw new ArgumentException($"Role grantees are not supported (table '{tableId}'); grant to a group or a user instead.", nameof(manifest));
+            }
+
             if (!Enum.TryParse<ConsentEffect>(policy.Effect, ignoreCase: true, out var effect))
             {
                 throw new ArgumentException($"Invalid consent effect '{policy.Effect}' for table '{tableId}'. Effect must be explicitly specified (e.g. 'Allow' or 'Deny').", nameof(manifest));
             }
 
             Sid? granteeSid = null;
-            string? roleName = null;
-            Guid? roleId = null;
-
-            if (granteeType == GranteeType.Role)
-            {
-                roleName = policy.GranteeRef;
-            }
-            else
-            {
-                granteeSid = new Sid(policy.GranteeRef);
-            }
+            granteeSid = new Sid(policy.GranteeRef);
 
             // individual grants need an absolute, class-bounded validUntil (also in dry-run). Group/role grants are standing.
             var individual = granteeType is GranteeType.User or GranteeType.ServicePrincipal;
@@ -213,13 +208,10 @@ public sealed class DeclarativeConsentApplyService(
                 validTo = now.AddDays(days);
             }
 
-            // role consents have no subject SID, so they are looked up by role name (the subject lookup never returns them).
-            IReadOnlyList<Consent> existingConsents = granteeType == GranteeType.Role
-                ? await consentRepository.GetActiveRoleConsentsAsync(tableId, roleName!, tenantId, now, ct).ConfigureAwait(false)
-                : await consentRepository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid!.Value }, tableId, now, tenantId, ct).ConfigureAwait(false);
+            var existingConsents = await consentRepository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid!.Value }, tableId, now, tenantId, ct).ConfigureAwait(false);
 
             var activeExisting = existingConsents
-                .Where(c => c.IsActive(now) && c.TenantId == tenantId && MatchesGrantee(c, granteeType, granteeSid, roleName))
+                .Where(c => c.IsActive(now) && c.TenantId == tenantId && MatchesGrantee(c, granteeType, granteeSid))
                 .ToList();
 
             // Issue #116: scope-only column rules never grant access (fail closed); surface that as a non-blocking warning.
@@ -289,8 +281,6 @@ public sealed class DeclarativeConsentApplyService(
                     Effect = effect,
                     GranteeType = granteeType,
                     GranteeSid = granteeSid,
-                    RoleName = roleName,
-                    RoleId = roleId,
                     Description = description,
                     ValidFrom = now,
                     ValidTo = validTo,
@@ -451,13 +441,9 @@ public sealed class DeclarativeConsentApplyService(
     private static bool HasClearColumnRule(DeclarativeConsentPolicy policy) =>
         policy.ColumnRules?.Any(r => Enum.TryParse<ColumnAccessLevel>(r.AccessLevel, ignoreCase: true, out var level) && level == ColumnAccessLevel.Clear) == true;
 
-    private static bool MatchesGrantee(Consent consent, GranteeType type, Sid? sid, string? roleName)
+    private static bool MatchesGrantee(Consent consent, GranteeType type, Sid? sid)
     {
         if (consent.GranteeType != type) return false;
-        if (type == GranteeType.Role)
-        {
-            return string.Equals(consent.RoleName, roleName, StringComparison.OrdinalIgnoreCase);
-        }
         return consent.GranteeSid == sid;
     }
 

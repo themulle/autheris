@@ -20,7 +20,6 @@ using Autheris.Application.DataSources.Connectors;
 using Autheris.Application.DataSources.Connectors.CrossDomain;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Services;
@@ -166,7 +165,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
     }
 
     // =========================================================================
-    // Layer 3: Protocol & Schema Gateway (DuckDB OLAP, Arrow, ReBAC, Options)
+    // Layer 3: Protocol & Schema Gateway (DuckDB OLAP, Arrow, Options)
     // =========================================================================
 
     [Theory]
@@ -194,67 +193,6 @@ public sealed class DynamicMaskingAndConnectorGuardTests
         var req = new OlapQueryRequest("SELECT * FROM range(1000000000)", Array.Empty<OlapTableSource>());
         var ex = await Should.ThrowAsync<SecurityException>(() => engine.ExecuteOlapQueryAsync(req));
         ex.Message.ShouldContain("range", Case.Insensitive);
-    }
-
-    [Fact]
-    public async Task RR_L3_02_DuckDbOlap_RebacCheck_UsesCanonicalQualifiedName()
-    {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        var table = new TableIdentifier("analytics", "finance", "reports");
-        var metadata = new TableMetadata
-        {
-            Identifier = table,
-            Table = new Table { TableName = "reports", SchemaName = "finance" },
-            Columns = new[] { new TableColumn { ColumnName = "id", DataType = "int" } }
-        };
-        metadataRepo.GetTableMetadataAsync(table, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(metadata));
-
-        var rebac = Substitute.For<IRebacEvaluator>();
-        rebac.IsEnabled.Returns(true);
-        RebacCheckRequest? capturedRebac = null;
-        rebac.CheckAsync(Arg.Do<RebacCheckRequest>(r => capturedRebac = r), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<RebacCheckResult>(new RebacCheckResult(false)));
-
-        var context = new DefaultHttpContext();
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
-        var serviceProvider = Substitute.For<IServiceProvider>();
-        serviceProvider.GetService(typeof(IHostEnvironment)).Returns(env);
-        serviceProvider.GetService(typeof(IAuditWriter)).Returns(AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()));
-        context.RequestServices = serviceProvider;
-
-        var secContext = new SecurityPrincipalContext
-        {
-            UserSid = new Sid("S-1-U1"),
-            TenantId = new TenantId("tenant-t1"),
-            GroupSids = new HashSet<Sid>(),
-            TenantRoles = new HashSet<string>(),
-            ClusterRoles = new HashSet<string>(),
-            AuthenticationScheme = "Bearer"
-        };
-        context.Items["SecurityPrincipalContext"] = secContext;
-        context.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.PrimarySid, "S-1-U1"), new Claim("tenant_id", "tenant-t1") }, "Bearer"));
-
-        var body = Encoding.UTF8.GetBytes("{\"sql\":\"SELECT 1\",\"tableNames\":[\"analytics.finance.reports\"]}");
-        context.Request.Body = new MemoryStream(body);
-
-        var engine = Substitute.For<IDuckDbOlapEngine>();
-        var connectorRegistry = Substitute.For<IAutherisConnectorRegistry>();
-        var masking = Substitute.For<IColumnMaskingProvider>();
-        var options = Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true } });
-
-        // Architecture 1: the endpoint's single access decision (the real resolver) applies ReBAC on the fully qualified
-        // object id (POL-11); the endpoint has no check of its own.
-        var accessResolver = new DefaultCrossDomainAccessResolver(
-            Substitute.For<IConsentRepository>(), Substitute.For<IConsentResolutionService>(), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, options: options, rebacEvaluator: rebac);
-
-        await Autheris.Tests.Unit.TestDoubles.OlapEndpointTestHost.HandleAsync(
-            context, engine, metadataRepo, connectorRegistry, accessResolver, masking, options, NullLoggerFactory.Instance);
-
-        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
-        capturedRebac.ShouldNotBeNull();
-        capturedRebac.Object.ShouldBe("table:analytics.finance.reports");
     }
 
     [Fact]
@@ -342,7 +280,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
     }
 
     [Fact]
-    public void RR_L3_06_TableIdentifierNormalizer_CanonicalizesArrowAndRebacObjects()
+    public void RR_L3_06_TableIdentifierNormalizer_CanonicalizesArrowObjects()
     {
         // 1-part table
         var tid1 = TableIdentifierNormalizer.Normalize("orders");

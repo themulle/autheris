@@ -12,7 +12,6 @@ using System.Text;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.State;
 using Autheris.Application.VirtualFilters;
@@ -82,7 +81,6 @@ public sealed class AccessProfileRuntimeResolutionTests
                 ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         var cacheService = Substitute.For<IConsentCacheService>();
         var policyEnforcementService = Substitute.For<IPolicyEnforcementService>();
-        var rebacEvaluator = Substitute.For<IRebacEvaluator>();
         var clientIpResolver = Substitute.For<IClientIpResolver>();
         var mandatoryFilters = NullMandatoryRowFilterResolver.Instance;
 
@@ -93,7 +91,6 @@ public sealed class AccessProfileRuntimeResolutionTests
             resolutionService,
             cacheService,
             policyEnforcementService,
-            rebacEvaluator,
             clientIpResolver,
             options,
             mandatoryFilters,

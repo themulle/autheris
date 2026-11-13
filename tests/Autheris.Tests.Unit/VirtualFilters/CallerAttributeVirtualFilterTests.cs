@@ -117,7 +117,6 @@ public sealed class CallerAttributeVirtualFilterTests : IDisposable
     private static TableAccessPolicy Policy(MandatoryRowFilterResolver resolver, ICallerAttributeResolver? callerResolver) =>
         new(Consents(), new ConsentResolutionService(), Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null, new GatewayOptions(), resolver,
             rowPolicyFactory: new RowPolicyFactory(new PolicyPredicateRenderer()),
             callerAttributes: callerResolver);
@@ -228,7 +227,7 @@ public sealed class CallerAttributeVirtualFilterTests : IDisposable
     public async Task ST_129_06_WithoutARowPolicyFactory_ACallerFilterDeniesTheTable()
     {
         var policy = new TableAccessPolicy(Consents(), new ConsentResolutionService(), Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             clientIpResolver: null, new GatewayOptions(), Resolver(Snapshot(ByDept)), rowPolicyFactory: null, callerAttributes: CallerResolver());
 
         (await Decide(policy, Person(OidA))).IsAllowed.ShouldBeFalse();

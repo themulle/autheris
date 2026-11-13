@@ -61,7 +61,6 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
             b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GovernedEntryPointsEndToEndTests"));
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
             b.UseSetting("Gateway:WebSql:Enabled", "true");

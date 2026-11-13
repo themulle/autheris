@@ -12,7 +12,6 @@ using Autheris.Application.Catalog.Models;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -30,7 +29,6 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
     private readonly IOptions<GatewayOptions> _options;
     private readonly IPhysicalKeyCatalog _physicalKeys;
     private readonly IAuditWriter _auditWriter;
-    private readonly IRebacStore? _rebacStore;
     private readonly ILogger<DataCatalogSyncService> _logger;
     private readonly PhysicalIndexSync _physicalIndexSync;
 
@@ -42,7 +40,6 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         IPhysicalKeyCatalog physicalKeys,
         IAuditWriter auditWriter,
         ILogger<DataCatalogSyncService> logger,
-        IRebacStore? rebacStore = null,
         IPhysicalIndexRepository? physicalIndexes = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
@@ -51,7 +48,6 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _physicalKeys = physicalKeys ?? throw new ArgumentNullException(nameof(physicalKeys));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
-        _rebacStore = rebacStore;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _physicalIndexSync = new PhysicalIndexSync(physicalIndexes, _auditWriter, () => Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(_options.Value.Tenancy), _logger);
     }
@@ -281,19 +277,6 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                     // an already written table (e.g. with tightened masking) behind cached decisions of the old metadata.
                     // CancellationToken.None: a cancelled run still invalidates the table it may already have written.
                     await _epochService.InvalidateEpochAsync(tableAsset.Identifier, CancellationToken.None).ConfigureAwait(false);
-                }
-
-                if (_rebacStore != null)
-                {
-                    var tableId = tableAsset.Identifier;
-                    var domainObj = RebacTableGate.DomainObjectId(tableId.Domain);
-                    var schemaObj = RebacTableGate.SchemaObjectId(tableId.Domain, tableId.Schema);
-                    var tableObj = RebacTableGate.ObjectId(tableId);
-
-                    await _rebacStore.AddTuplesAsync([
-                        new RebacTuple(tableId.Domain, schemaObj, "parent", tableObj),
-                        new RebacTuple(tableId.Domain, domainObj, "parent", schemaObj)
-                    ], ct).ConfigureAwait(false);
                 }
             }
         }

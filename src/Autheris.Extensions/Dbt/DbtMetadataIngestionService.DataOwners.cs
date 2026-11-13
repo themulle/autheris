@@ -12,7 +12,6 @@ using Autheris.Application.Governance;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
@@ -41,7 +40,6 @@ public sealed partial class DbtMetadataIngestionService
         Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
-        IRebacStore? rebacStore,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
         IDbtTestTargetMap? testTargetMap,
@@ -53,7 +51,7 @@ public sealed partial class DbtMetadataIngestionService
         IAuditWriter? auditWriter = null,
         IDataOwnershipRepository? ownershipRepo = null)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
-            virtualFilterAdmin, rebacStore, tagImport, syntheticRowGenerator, testTargetMap, physicalKeys, auditWriter, logger)
+            virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, physicalKeys, auditWriter, logger)
     {
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
         _ownerAssignments = ownerAssignments;

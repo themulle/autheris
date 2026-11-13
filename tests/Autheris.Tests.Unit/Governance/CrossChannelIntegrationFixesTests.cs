@@ -14,8 +14,6 @@ using Autheris.Application.Lineage;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
@@ -31,69 +29,6 @@ using Xunit;
 
 public sealed class CrossChannelIntegrationFixesTests
 {
-    // =========================================================================
-    // WP-243-1: ReBAC Cycle Detection in Diamond DAG Hierarchies & MCP Error
-    // =========================================================================
-
-    [Fact]
-    public async Task Rebac_DiamondInheritance_CanQueryAllowed_WithoutCyclicWarning()
-    {
-        // Arrange
-        var options = Options.Create(new GatewayOptions
-        {
-            Rebac = new RebacOptions
-            {
-                Enabled = true,
-                MaxTraversalDepth = 10,
-                CacheTtlSeconds = 10
-            }
-        });
-
-        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
-        var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance);
-
-        // Standard hierarchy:
-        // "can_query" is inherited by "viewer", "editor", "owner"
-        // "viewer" is inherited by "editor" and "owner"
-        // "editor" is inherited by "owner"
-        // Direct tuple: alice is "owner" of "table:sales.analytics.orders"
-        await store.AddTupleAsync(new RebacTuple("tenant-1", "alice", "owner", "table:sales.analytics.orders"));
-
-        // Act
-        var result = await evaluator.CheckAsync(new RebacCheckRequest("tenant-1", "alice", "can_query", "table:sales.analytics.orders"));
-
-        // Assert
-        result.Allowed.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task Rebac_TrueCycle_DetectedAndDenied_FailsClosed()
-    {
-        // Arrange
-        var options = Options.Create(new GatewayOptions
-        {
-            Rebac = new RebacOptions
-            {
-                Enabled = true,
-                MaxTraversalDepth = 10,
-                CacheTtlSeconds = 10
-            }
-        });
-
-        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
-        var evaluator = new ZanzibarRebacEvaluator(store, options, NullLogger<ZanzibarRebacEvaluator>.Instance);
-
-        // Define a mutually recursive cycle: roleA inherits roleB, and roleB inherits roleA
-        evaluator.RegisterInheritance("roleA", "roleB");
-        evaluator.RegisterInheritance("roleB", "roleA");
-
-        // Act: bob has neither roleA nor roleB tuple; evaluation should traverse and detect cycle without infinite recursion
-        var result = await evaluator.CheckAsync(new RebacCheckRequest("tenant-1", "user:bob", "roleA", "table:sales.analytics.orders"));
-
-        // Assert
-        result.Allowed.ShouldBeFalse();
-    }
-
     [Fact]
     public async Task McpToolExecutionHandler_QueryDataset_UnauthorizedAccessException_ReturnsCleanErrorPayload()
     {

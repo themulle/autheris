@@ -60,7 +60,6 @@ public sealed class TypedConsentRowPolicyTests
         new(repo, new ConsentResolutionService(),
             cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: factory);
 
@@ -182,7 +181,6 @@ public sealed class TypedConsentRowPolicyTests
         var policy = new TableAccessPolicy(Repo(Consent(ConsentEffect.Allow, Region("EU"))), new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             null, new GatewayOptions(), vf, rowPolicyFactory: Factory());
 
         var decision = await Decide(policy);

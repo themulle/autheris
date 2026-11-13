@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Application.State;
@@ -27,7 +26,7 @@ public sealed class AccessPlanStoreTests
     private const string Admin = "S-1-5-21-1-500";
     private const string DatasetId = "sales.public.orders";
 
-    private readonly IRebacStore _rebac = Substitute.For<IRebacStore>();
+    private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
     private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
     private readonly ITotpSecretStore _secrets = new InMemoryTotpSecretStore();
     private readonly TotpVerificationService _totp = new();
@@ -47,8 +46,8 @@ public sealed class AccessPlanStoreTests
     private AccessPlanningService Node(IAccessPlanStore store, IKeyVaultSecretProvider? provider = null, AccessPlanOptions? options = null)
         => new(
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_audit),
-            Substitute.For<ITableMetadataRepository>(),
-            _rebac,
+            global::Autheris.Tests.Unit.TestDoubles.AccessPlanTestTables.OrdersRepository(),
+            _consentRepo,
             _totp,
             _secrets,
             secretProvider: provider ?? SigningProvider(),
@@ -179,7 +178,7 @@ public sealed class AccessPlanStoreTests
 
         await Should.ThrowAsync<ClusterStateUnavailableException>(() =>
             node.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, "token"), Admin, "tenant-a"));
-        await _rebac.DidNotReceiveWithAnyArgs().AddTuplesAsync(default!);
+        await _consentRepo.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
     }
 
     [Fact]

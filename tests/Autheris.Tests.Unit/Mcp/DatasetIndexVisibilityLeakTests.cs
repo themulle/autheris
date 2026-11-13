@@ -14,7 +14,6 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.OData.Services;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -103,7 +102,7 @@ public sealed class DatasetIndexVisibilityLeakTests
             repo,
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             Options.Create(options),
-            CatalogVisibilityTestFactory.Create(repo, consents, options, Substitute.For<IRebacEvaluator>()),
+            CatalogVisibilityTestFactory.Create(repo, consents, options),
             Substitute.For<IKeyVaultSecretProvider>(),
             Substitute.For<IOpenApiIngestionService>(),
             Substitute.For<ICatalogSearchEngine>(),
@@ -253,7 +252,7 @@ public sealed class DatasetIndexVisibilityLeakTests
             tables,
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             Options.Create(options),
-            CatalogVisibilityTestFactory.Create(tables, consents, options, Substitute.For<IRebacEvaluator>()),
+            CatalogVisibilityTestFactory.Create(tables, consents, options),
             Substitute.For<IKeyVaultSecretProvider>(),
             Substitute.For<IOpenApiIngestionService>(),
             Substitute.For<ICatalogSearchEngine>(),

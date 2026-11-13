@@ -55,7 +55,7 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
     {
         var gateway = Options.Create(new GatewayOptions { Dbt = new DbtOptions { ImportDataOwners = flag } });
         return new DbtMetadataIngestionService(
-            Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null, null,
+            Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null,
             NullLogger<DbtMetadataIngestionService>.Instance,
             audit ?? _repo, writer ?? (ownerRepo ? _repo : null), verifier);
     }
@@ -120,10 +120,10 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
         var gateway = Options.Create(new GatewayOptions { Dbt = new DbtOptions { ImportDataOwners = true } });
         var service = withAudit
             ? new DbtMetadataIngestionService(
-                Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null, null,
+                Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null,
                 NullLogger<DbtMetadataIngestionService>.Instance, _repo, withWriter ? _repo : null, null)
             : new DbtMetadataIngestionService(
-                Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null, null,
+                Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(), null, gateway, null, null, null, null, null, null,
                 NullLogger<DbtMetadataIngestionService>.Instance);
 
         var result = await Import(service, Payload(_table, OwnerObj("S-1-5-21-5002"), ",\"description\":\"changed\""));

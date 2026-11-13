@@ -32,8 +32,7 @@ public sealed class CatalogGraphQlVisibilityServiceTests
 
     private static GatewayOptions Opts(TenancyShape mode) => new()
     {
-        Tenancy = mode.Options(),
-        Rebac = new RebacOptions { Enabled = false }
+        Tenancy = mode.Options()
     };
 
     private static Task<IReadOnlyList<TableMetadataDto>> Catalog(

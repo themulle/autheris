@@ -4,7 +4,6 @@ using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Services;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Domain.Audit;
@@ -25,7 +24,7 @@ public sealed class AccessPlanningAuditTests
 
     private readonly IAuditWriter _writer = Substitute.For<IAuditWriter>();
     private readonly ITableMetadataRepository _tableRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly IRebacStore _rebac = Substitute.For<IRebacStore>();
+    private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
     private readonly IKeyVaultSecretProvider _secrets = Substitute.For<IKeyVaultSecretProvider>();
     private readonly ITotpSecretStore _totpSecrets = new InMemoryTotpSecretStore();
     private readonly ITotpVerificationService _totp = new TotpVerificationService();
@@ -33,7 +32,7 @@ public sealed class AccessPlanningAuditTests
 
     public AccessPlanningAuditTests()
     {
-        _service = new AccessPlanningService(_writer, _tableRepo, _rebac, _totp, _totpSecrets, _secrets);
+        _service = new AccessPlanningService(_writer, _tableRepo, _consentRepo, _totp, _totpSecrets, _secrets);
         var id = Guid.NewGuid();
         _tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new TableMetadata
         {
@@ -85,7 +84,7 @@ public sealed class AccessPlanningAuditTests
         await Should.ThrowAsync<AuditUnavailableException>(() =>
             _service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, confirm.ConfirmationToken), AdminSid, new TenantId(Tenant)));
 
-        await _rebac.DidNotReceiveWithAnyArgs().AddTuplesAsync(default!, default);
+        await _consentRepo.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
     }
 
     [Fact]

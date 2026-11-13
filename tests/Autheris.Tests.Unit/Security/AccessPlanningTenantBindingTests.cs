@@ -14,8 +14,6 @@ using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Policies;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Domain.Audit;
@@ -36,9 +34,11 @@ public sealed class AccessPlanningTenantBindingTests
     private const string DatasetId = "sales.public.orders";
     private const string AdminSid = "S-1-5-21-ADMIN";
 
-    private static (AccessPlanningService service, InMemoryRebacStore store) CreateService()
+    private static (AccessPlanningService service, List<Consent> created) CreateService()
     {
-        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
+        var created = new List<Consent>();
+        var consents = Substitute.For<IConsentRepository>();
+        consents.CreateConsentAsync(Arg.Do<Consent>(c => created.Add(c)), Arg.Any<CancellationToken>()).Returns(ci => Task.FromResult(ci.Arg<Consent>()));
 
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         var tableMeta = new TableMetadata
@@ -65,19 +65,19 @@ public sealed class AccessPlanningTenantBindingTests
         var service = new AccessPlanningService(
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             tableMetadataRepository: tableRepo,
-            rebacStore: store,
+            consentRepository: consents,
             totpVerificationService: totpService,
             totpSecretStore: secretStore,
             secretProvider: secretProvider,
             planOptions: Options.Create(new AccessPlanOptions { SigningKeyRef = "key" }));
 
-        return (service, store);
+        return (service, created);
     }
 
     [Fact]
     public async Task RestApply_WritesTuplesUnderRequestTenant_NotDatasetDomain()
     {
-        var (service, store) = CreateService();
+        var (service, created) = CreateService();
 
         var planReq = new AdminPlanAccessRequest(
             DatasetId: DatasetId,
@@ -94,12 +94,9 @@ public sealed class AccessPlanningTenantBindingTests
 
         applyResult.Success.ShouldBeTrue();
 
-        var tuplesUnderRequestTenant = await store.GetTuplesAsync(RequestTenant);
-        tuplesUnderRequestTenant.ShouldNotBeEmpty();
-        tuplesUnderRequestTenant.All(t => t.TenantId == RequestTenant).ShouldBeTrue();
-
-        var tuplesUnderDomain = await store.GetTuplesAsync(DatasetDomain);
-        tuplesUnderDomain.ShouldBeEmpty();
+        created.ShouldNotBeEmpty();
+        created.All(c => c.TenantId.Value == RequestTenant).ShouldBeTrue();
+        created.Any(c => c.TenantId.Value == DatasetDomain).ShouldBeFalse();
     }
 
     [Fact]
@@ -149,7 +146,6 @@ public sealed class AccessPlanningTenantBindingTests
     [Fact]
     public async Task ApplyRowFilterEvaluation_CallerTenantDiffers_Throws()
     {
-        var store = Substitute.For<IRebacStore>();
         var totpService = Substitute.For<ITotpVerificationService>();
         totpService.VerifyAndConsumeTotpAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(true);
@@ -176,7 +172,6 @@ public sealed class AccessPlanningTenantBindingTests
         var service = new AccessPlanningService(
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             tableMetadataRepository: tableRepo,
-            rebacStore: store,
             totpVerificationService: totpService,
             totpSecretStore: secretStore,
             secretProvider: secretProvider,

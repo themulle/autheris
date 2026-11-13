@@ -6,7 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
@@ -34,7 +33,6 @@ public sealed class TableAccessPolicyDenialKindTests
             new ConsentResolutionService(),
             Substitute.For<IConsentCacheService>(),
             abac ?? Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IRebacEvaluator>(),
             Substitute.For<IClientIpResolver>(),
             new GatewayOptions(),
             NullMandatoryRowFilterResolver.Instance,

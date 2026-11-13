@@ -144,7 +144,7 @@ public sealed class GovernedDataQueryServiceTests
         _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>())
             .Returns(metadata);
 
-        var deniedDecision = TableAccessDecision.Denied(_customerTable, "ReBAC Access Denied: Caller does not have can_query on sales.dbo.customers");
+        var deniedDecision = TableAccessDecision.Denied(_customerTable, "Access Denied: Caller holds no grant on sales.dbo.customers");
 
         _pdp.EvaluateAccessAsync(
             _customerTable,

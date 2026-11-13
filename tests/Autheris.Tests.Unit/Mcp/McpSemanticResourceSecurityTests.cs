@@ -20,7 +20,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// MCP-13 / MCP-14: semantic resources honour ReBAC through the catalog visibility service, are listed as paged descriptors and are
+/// MCP-13 / MCP-14: semantic resources honour visibility through the catalog visibility service, are listed as paged descriptors and are
 /// rendered per read; table cells of native resources cannot break out of the cell.
 /// </summary>
 [Trait("Category", "Security")]
@@ -49,7 +49,7 @@ public sealed class McpSemanticResourceSecurityTests
         return repo;
     }
 
-    private static ICatalogVisibilityService Rebac(params TableIdentifier[] visible)
+    private static ICatalogVisibilityService VisibleOnly(params TableIdentifier[] visible)
     {
         var service = Substitute.For<ICatalogVisibilityService>();
         service.FilterVisibleAsync(Arg.Any<CatalogCaller>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
@@ -71,10 +71,10 @@ public sealed class McpSemanticResourceSecurityTests
     }
 
     [Fact]
-    public async Task SemanticResources_RebacDeniedTable_NotListedNotReadable()
+    public async Task SemanticResources_VisibilityDeniedTable_NotListedNotReadable()
     {
-        // MCP-14: consent allows both tables, ReBAC allows only orders.
-        var compiler = Compiler([Table(Orders), Table(Payroll)], Rebac(Orders));
+        // MCP-14: consent allows both tables, visibility allows only orders.
+        var compiler = Compiler([Table(Orders), Table(Payroll)], VisibleOnly(Orders));
 
         var page = await compiler.ListSemanticResourceUrisAsync(User());
         page.Items.ShouldContain(r => r.Uri == "glossary://sales/orders");
@@ -86,9 +86,9 @@ public sealed class McpSemanticResourceSecurityTests
     }
 
     [Fact]
-    public async Task GetGoldenQueries_RebacDenied_Empty()
+    public async Task GetGoldenQueries_VisibilityDenied_Empty()
     {
-        // MCP-14: the golden-query tool uses the same visibility (consent AND ReBAC).
+        // MCP-14: the golden-query tool uses the same visibility (consent AND visibility).
         var registry = Substitute.For<IMcpToolRegistry>();
         registry.FindTool("get_golden_queries").Returns(new McpToolDefinition("get_golden_queries", "Golden", "{}", string.Empty, null));
         var repo = Substitute.For<ITableMetadataRepository>();
@@ -103,7 +103,7 @@ public sealed class McpSemanticResourceSecurityTests
             tableMetadataRepository: repo,
             goldenQueryService: golden,
             consentRepository: AllowAll([Orders]),
-            catalogVisibility: Rebac(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
+            catalogVisibility: VisibleOnly(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
         var session = new McpSessionContext("s1", "sp", Tenant, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-5-21-MCP-USER", Roles: ["AiAgent"], GroupSids: []);
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("get_golden_queries", "{}", session.SessionId), session);
@@ -113,13 +113,13 @@ public sealed class McpSemanticResourceSecurityTests
     }
 
     [Fact]
-    public async Task FourEyesPreCheck_UsesRebacVisibility()
+    public async Task FourEyesPreCheck_UsesVisibility()
     {
-        // MCP-14: the visibility overload used by the four-eyes pre-check removes a ReBAC-denied table.
+        // MCP-14: the visibility overload used by the four-eyes pre-check removes a visibility-denied table.
         var tables = new List<TableMetadata> { Table(Orders) };
 
-        var denied = await McpCatalogVisibility.VisibleTablesAsync(tables, User(), AllowAll([Orders]), null, Rebac(), CancellationToken.None);
-        var allowed = await McpCatalogVisibility.VisibleTablesAsync(tables, User(), AllowAll([Orders]), null, Rebac(Orders), CancellationToken.None);
+        var denied = await McpCatalogVisibility.VisibleTablesAsync(tables, User(), AllowAll([Orders]), null, VisibleOnly(), CancellationToken.None);
+        var allowed = await McpCatalogVisibility.VisibleTablesAsync(tables, User(), AllowAll([Orders]), null, VisibleOnly(Orders), CancellationToken.None);
 
         denied.ShouldBeEmpty();
         allowed.ShouldHaveSingleItem();
@@ -130,7 +130,7 @@ public sealed class McpSemanticResourceSecurityTests
     {
         // 60 tables with one documented column each: 120 descriptors (glossary + column docs).
         var tables = Enumerable.Range(0, 60).Select(i => Table(new TableIdentifier("d", "s", $"t{i:D3}"))).ToList();
-        var compiler = Compiler(tables, Rebac(tables.Select(t => t.Identifier).ToArray()));
+        var compiler = Compiler(tables, VisibleOnly(tables.Select(t => t.Identifier).ToArray()));
 
         var first = await compiler.ListSemanticResourceUrisAsync(User());
         first.Items.Count.ShouldBe(100);
@@ -150,7 +150,7 @@ public sealed class McpSemanticResourceSecurityTests
         var golden = Substitute.For<IGoldenQueryService>();
         golden.GetGoldenQueriesAsync(Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([new GoldenQuery("g1", "sales", "orders", "Orders", "d", "query { x }")]));
-        var compiler = Compiler([Table(Orders), Table(Payroll)], Rebac(Orders, Payroll), golden);
+        var compiler = Compiler([Table(Orders), Table(Payroll)], VisibleOnly(Orders, Payroll), golden);
 
         var item = await compiler.ReadSemanticResourceAsync(User(), "examples://sales/orders");
 

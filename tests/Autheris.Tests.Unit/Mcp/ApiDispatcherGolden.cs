@@ -18,7 +18,7 @@ internal static class ApiDispatcherGolden
           - Returns: `DatasetQueryEnvelope` with metadata and rows.
 
         ## 2. Catalog & Discovery API
-        - **GET /api/v1/catalog/datasets**: Lists all datasets visible to the caller (ReBAC filtered).
+        - **GET /api/v1/catalog/datasets**: Lists all datasets visible to the caller (grant filtered).
         - **GET /api/v1/catalog/datasets/{datasetId}**: Returns detailed column schema and masking states.
         - **GET /api/v1/catalog/datasources**: Lists registered datasources without leaking secrets.
         - **GET /api/v1/catalog/search?q={query}&domain={domain}**: Fulltext search over datasets and columns.

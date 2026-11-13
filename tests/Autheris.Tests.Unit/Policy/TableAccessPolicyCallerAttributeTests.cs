@@ -90,7 +90,6 @@ public sealed class TableAccessPolicyCallerAttributeTests : IDisposable
         new(repo, new ConsentResolutionService(),
             cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: typed ? new RowPolicyFactory(new PolicyPredicateRenderer()) : null,
             callerAttributes: resolver);

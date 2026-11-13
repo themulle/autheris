@@ -10,7 +10,6 @@ using System.Threading.Tasks;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -30,47 +29,16 @@ internal static class CatalogVisibilityTestFactory
         ITableMetadataRepository? tables,
         IConsentRepository? consents,
         GatewayOptions? options = null,
-        IRebacEvaluator? rebac = null,
         ILogger<CatalogVisibilityService>? logger = null,
-        bool omitEvaluator = false,
         Func<IReadOnlyList<TableMetadata>, CallerScope, CancellationToken, Task<IReadOnlyList<TableMetadata>>>? engineOutput = null)
         => new(
             tables,
             consents,
-            Options.Create(options ?? new GatewayOptions { Tenancy = TenancyShape.Multi.Options(), Rebac = new RebacOptions { Enabled = false } }),
+            Options.Create(options ?? new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
             logger ?? NullLogger<CatalogVisibilityService>.Instance)
         {
             EngineOutputForTesting = engineOutput
         };
-
-    /// <summary>The service denies when ReBAC is configured on (the default) but no evaluator resolves; tests of unrelated behaviour use a disabled evaluator.</summary>
-    public static IRebacEvaluator DisabledRebac()
-    {
-        var evaluator = NSubstitute.Substitute.For<IRebacEvaluator>();
-        evaluator.IsEnabled.Returns(false);
-        return evaluator;
-    }
-
-    /// <summary>
-    /// Makes a substitute evaluator answer <c>BatchCheckAsync</c> from its configured <c>CheckAsync</c> answers (the service only uses the batch call).
-    /// </summary>
-    public static IRebacEvaluator WithBatchFromCheck(this IRebacEvaluator evaluator)
-    {
-        evaluator.BatchCheckAsync(Arg.Any<RebacBatchCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns(ci => new ValueTask<RebacBatchCheckResult>(BatchAsync(evaluator, ci.Arg<RebacBatchCheckRequest>(), ci.Arg<CancellationToken>())));
-        return evaluator;
-    }
-
-    private static async Task<RebacBatchCheckResult> BatchAsync(IRebacEvaluator evaluator, RebacBatchCheckRequest request, CancellationToken ct)
-    {
-        var decisions = new Dictionary<RebacCheckRequest, bool>();
-        foreach (var check in request.Checks)
-        {
-            decisions[check] = (await evaluator.CheckAsync(check, ct)).Allowed;
-        }
-
-        return new RebacBatchCheckResult(decisions);
-    }
 
     /// <summary>
     /// Single-row reads (<c>GetTableMetadataAsync</c>, used by <c>FindVisibleAsync</c>) answer from the catalog a test configured for

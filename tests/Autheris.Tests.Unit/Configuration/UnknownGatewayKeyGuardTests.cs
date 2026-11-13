@@ -215,7 +215,6 @@ public sealed class UnknownGatewayKeyGuardTests
     [InlineData("Mcp:RequirePiiMasking")]
     [InlineData("Mcp:AllowAnonymousDiscovery")]
     [InlineData("Casbin:EnforceInQueryPipeline")]
-    [InlineData("Rebac:MaxCachedDecisions")]
     [InlineData("Audit:StoreStatementText")]
     [InlineData("Classification:MaskingRules")]
     [InlineData("Classification:StepUpAuthThresholdRank")]
@@ -243,8 +242,6 @@ public sealed class UnknownGatewayKeyGuardTests
     [InlineData("Gateway:QueryCost:BaseQueryCost")]
     [InlineData("Gateway:QueryCost:CostPerRowReturned")]
     [InlineData("Gateway:QueryCost:NestedDepthFactor")]
-    [InlineData("Gateway:Rebac:OpenFgaApiUrl")]
-    [InlineData("Gateway:Rebac:OpenFgaStoreId")]
     [InlineData("Gateway:DataSources:Connections:testSource:Databricks:Auth:Obo:AllowLongRunning")]
     [InlineData("Gateway:CatalogSearch:FieldWeights")]
     [InlineData("Gateway:DataMasking:MaskingCacheTtlHours")]
@@ -315,7 +312,7 @@ public sealed class UnknownGatewayKeyGuardTests
         var securityRoots = new[]
         {
             "Gateway:Insecure", "Gateway:Authentication", "Gateway:Casbin", "Gateway:Mcp", "Gateway:Audit", "Gateway:Consent",
-            "Gateway:Tls", "Gateway:Rebac", "Gateway:Rls", "Gateway:RowFilters", "Gateway:DataMasking", "Gateway:Jwt"
+            "Gateway:Tls", "Gateway:Rls", "Gateway:RowFilters", "Gateway:DataMasking", "Gateway:Jwt"
         };
 
         var freeForm = GatewayConfigurationSchema.FreeFormSubtrees();

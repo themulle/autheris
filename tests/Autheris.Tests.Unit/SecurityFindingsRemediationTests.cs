@@ -1092,62 +1092,6 @@ public class SecurityFindingsRemediationTests
         }
     }
 
-    [Fact]
-    public void SEC_12H_02_ValidateGatewayOptions_Rebac_DemoTuplesInProduction_ThrowsValidationException()
-    {
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns(Environments.Production);
-
-        var options = new GatewayOptions
-        {
-            Rebac = new RebacOptions
-            {
-                SeedTuples = [new("default", "user:david", "viewer", "table:lakehouse.dbo.orders")]
-            }
-        };
-
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));
-        ex.Message.ShouldContain("Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.");
-    }
-
-    [Fact]
-    public void SEC_12H_02_ValidateGatewayOptions_Rebac_ProductionTargetedTuplesInProduction_ThrowsValidationException()
-    {
-        var prodEnv = Substitute.For<IHostEnvironment>();
-        prodEnv.EnvironmentName.Returns(Environments.Production);
-
-        var options = new GatewayOptions
-        {
-            Rebac = new RebacOptions
-            {
-                SeedTuples = [new("tenant_lwe", "user:alice", "viewer", "table:lwetem_prod.conf.client")]
-            }
-        };
-
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));
-        ex.Message.ShouldContain("Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.");
-    }
-
-    [Fact]
-    public void SEC_12H_02_ValidateGatewayOptions_Rebac_PermittedInDevelopment()
-    {
-        var devEnv = Substitute.For<IHostEnvironment>();
-        devEnv.EnvironmentName.Returns(Environments.Development);
-
-        var options = new GatewayOptions
-        {
-            Rebac = new RebacOptions
-            {
-                SeedTuples = [new("default", "user:david", "viewer", "table:lakehouse.dbo.orders")]
-            }
-        };
-
-        Should.NotThrow(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
-    }
-
     // =========================================================================
     // Finding SEC-12H-05: Atomic Redis Lockout Counter via Lua Script
     // =========================================================================

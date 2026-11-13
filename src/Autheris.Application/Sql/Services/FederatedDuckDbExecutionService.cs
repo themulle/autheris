@@ -55,7 +55,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly IConsentRepository? _consentRepository;
     private readonly IConsentCacheService? _consentCache;
     private readonly IClientIpResolver? _clientIpResolver;
-    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
     private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
     private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _accessDecisionPoint;
@@ -81,7 +80,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         IConsentRepository? consentRepository = null,
         IConsentCacheService? consentCache = null,
         IClientIpResolver? clientIpResolver = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
@@ -100,7 +98,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             consentResolution,
             consentRepository,
             consentCache,
-            rebacEvaluator,
             clientIpResolver,
             mandatoryFilters,
             contractManager,
@@ -125,7 +122,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         _consentRepository = consentRepository;
         _consentCache = consentCache;
         _clientIpResolver = clientIpResolver;
-        _rebacEvaluator = rebacEvaluator;
         _mandatoryFilters = mandatoryFilters;
         _contractManager = contractManager;
         _accessProfileRepository = accessProfileRepository;

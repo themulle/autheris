@@ -13,7 +13,6 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -39,23 +38,22 @@ public sealed class McpDatasetDisplayNameTests
         return t with { Table = t.Table with { DisplayName = displayName, Visibility = visibility, Sensitivity = "INTERNAL" } };
     }
 
-    private static GatewayOptions Opts(bool rebac, params TableMetadata[] rows) => new()
+    private static GatewayOptions Opts(params TableMetadata[] rows) => new()
     {
         Tenancy = TenancyShape.Multi.Options(),
-        Catalog = new DataCatalogOptions { SharedTables = rows.Select(r => r.Identifier.ToString()).ToArray() },
-        Rebac = new RebacOptions { Enabled = rebac }
+        Catalog = new DataCatalogOptions { SharedTables = rows.Select(r => r.Identifier.ToString()).ToArray() }
     };
 
     private static McpDatasetCatalog Catalog(
-        TableMetadata[] rows, IRebacEvaluator? rebac = null, ILogger<McpDatasetCatalog>? logger = null, ILogger<CatalogVisibilityService>? visLogger = null)
+        TableMetadata[] rows, ILogger<McpDatasetCatalog>? logger = null, ILogger<CatalogVisibilityService>? visLogger = null)
     {
-        var options = Opts(rebac is not null, rows);
+        var options = Opts(rows);
         var tables = Wp0.Tables(rows);
         var consents = Wp0.Consents();
         return new McpDatasetCatalog(
             tables, consents, Substitute.For<IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
             options: Options.Create(options), logger: logger,
-            visibilityService: CatalogVisibilityTestFactory.Create(tables, consents, options, rebac, visLogger));
+            visibilityService: CatalogVisibilityTestFactory.Create(tables, consents, options, visLogger));
     }
 
     private static ClaimsPrincipal Subject() => Wp0.User("S-USER", "tenant-a");

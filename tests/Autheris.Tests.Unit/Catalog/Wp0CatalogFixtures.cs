@@ -10,7 +10,6 @@ using System.Threading.Tasks;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -120,13 +119,12 @@ internal static class Wp0
         IConsentRepository consents,
         GatewayOptions? options = null,
         ICatalogSearchEngine? searchEngine = null,
-        IRebacEvaluator? rebac = null,
         ILogger<CatalogDiscoveryService>? logger = null)
         => new(
             tables,
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()),
             Microsoft.Extensions.Options.Options.Create(options ?? Options(TenancyShape.Multi)),
-            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options ?? Options(TenancyShape.Multi), rebac),
+            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consents, options ?? Options(TenancyShape.Multi)),
             Substitute.For<IKeyVaultSecretProvider>(),
             Substitute.For<IOpenApiIngestionService>(),
             searchEngine,

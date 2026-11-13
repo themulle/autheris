@@ -60,11 +60,6 @@ public sealed class InsecureGettingStartedOptions
     /// </summary>
     public bool danger_bypass_lakehouse_auth { get; init; } = false;
 
-    /// <summary>
-    /// [DANGER] Bypasses ReBAC (Relationship-Based Access Control) authorization checks for quickstart / PoC.
-    /// </summary>
-    public bool danger_bypass_rebac { get; init; } = false;
-
     // --- WARN: Medium / operational security impact (relaxes limits and shields) ---
 
     /// <summary>

@@ -7,7 +7,7 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Service managing two-phase access planning, TOTP 2FA confirmation,
-/// ReBAC mutations, and administrative control plane operations.
+/// grant mutations, and administrative control plane operations.
 /// </summary>
 public interface IAccessPlanningService
 {
@@ -31,7 +31,7 @@ public interface IAccessPlanningService
         CancellationToken ct = default);
 
     /// <summary>
-    /// Applies an approved access plan using a valid confirmation token, updating ReBAC and recording WORM audit.
+    /// Applies an approved access plan using a valid confirmation token, creating grant records and recording WORM audit.
     /// </summary>
     Task<AdminApplyAccessResult> ApplyAccessAsync(
         AdminApplyAccessRequest request,

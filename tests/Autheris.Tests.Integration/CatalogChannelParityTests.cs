@@ -44,7 +44,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         public HostFixture()
         {
             MultiFactory = Configure(Root, "Multi");
-            TierFactory = Configure(Root, "Multi", rebac: false, SummaryT.ToString().ToLowerInvariant(), FullT.ToString().ToLowerInvariant(), HiddenT.ToString().ToLowerInvariant());
+            TierFactory = Configure(Root, "Multi", SummaryT.ToString().ToLowerInvariant(), FullT.ToString().ToLowerInvariant(), HiddenT.ToString().ToLowerInvariant());
         }
 
         public void Dispose()
@@ -65,7 +65,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
     }
 
     private static WebApplicationFactory<Program> Configure(
-        WebApplicationFactory<Program> factory, string tenancyMode, bool rebac = false, params string[] sharedTables) =>
+        WebApplicationFactory<Program> factory, string tenancyMode, params string[] sharedTables) =>
         factory.WithWebHostBuilder(b =>
         {
             for (var i = 0; i < sharedTables.Length; i++)
@@ -89,7 +89,6 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
                 b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = null }));
             }
 
-            b.UseSetting("Gateway:Rebac:Enabled", rebac ? "true" : "false");
         });
 
     private static async Task SeedAsync(WebApplicationFactory<Program> factory)
@@ -297,7 +296,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
             return (_fixture.TierFactory, await ClientAsync(sid, tenant, roles, _fixture.TierFactory));
         }
 
-        var factory = Configure(_fixture.Root, mode, rebac: false, SummaryT.ToString().ToLowerInvariant(), FullT.ToString().ToLowerInvariant(), HiddenT.ToString().ToLowerInvariant());
+        var factory = Configure(_fixture.Root, mode, SummaryT.ToString().ToLowerInvariant(), FullT.ToString().ToLowerInvariant(), HiddenT.ToString().ToLowerInvariant());
         await SeedTiersAsync(factory);
         return (factory, await ClientAsync(sid, tenant, roles, factory));
     }

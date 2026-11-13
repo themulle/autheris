@@ -20,7 +20,6 @@ public static class VirtualSystemTables
 
     public static readonly TableIdentifier DataSourcesId = new(Domain, Schema, "datasources");
     public static readonly TableIdentifier PoliciesId = new(Domain, Schema, "policies");
-    public static readonly TableIdentifier RebacTuplesId = new(Domain, Schema, "rebac_tuples");
     public static readonly TableIdentifier VirtualFiltersId = new(Domain, Schema, "virtual_filters");
     public static readonly TableIdentifier AuditTrailId = new(Domain, Schema, "audit_trail");
 
@@ -77,29 +76,6 @@ public static class VirtualSystemTables
             new() { ColumnName = "classification_tags", DataType = "varchar", IsSensitive = false }
         },
         PrimaryKeyColumns = new[] { "id" }
-    };
-
-    public static readonly TableMetadata RebacTuplesTable = new()
-    {
-        Identifier = RebacTuplesId,
-        Table = new Table
-        {
-            SourceName = Domain,
-            SchemaName = Schema,
-            TableName = "rebac_tuples",
-            DisplayName = "ReBAC Tuples",
-            Description = "Relationship tuples (Google Zanzibar / OpenFGA) controlling authorization.",
-            Sensitivity = "CONFIDENTIAL",
-            DataSourceType = DataSourceType.Sql,
-            IsActive = true
-        },
-        Columns = new TableColumn[]
-        {
-            new() { ColumnName = "user", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "relation", DataType = "varchar", IsSensitive = false },
-            new() { ColumnName = "object", DataType = "varchar", IsSensitive = false }
-        },
-        PrimaryKeyColumns = new[] { "user", "relation", "object" }
     };
 
     public static readonly TableMetadata VirtualFiltersTable = new()
@@ -159,7 +135,6 @@ public static class VirtualSystemTables
     {
         DataSourcesTable,
         PoliciesTable,
-        RebacTuplesTable,
         VirtualFiltersTable,
         AuditTrailTable
     };

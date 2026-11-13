@@ -23,7 +23,7 @@ using Autheris.Application.Catalog.Interfaces;
 /// <summary>
 /// MCP dataset tools (list_datasets, describe_dataset, sample_rows). Visibility follows the GraphQL catalog
 /// (<see cref="McpCatalogVisibility"/>); rows are read only through <see cref="IGatewayExecutionService"/>, so consent,
-/// ReBAC, Casbin, row filters and masking apply exactly as for REST and GraphQL.
+/// Casbin, row filters and masking apply exactly as for REST and GraphQL.
 /// </summary>
 public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 {
@@ -1153,7 +1153,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         return endpoints;
     }
 
-    /// <summary>Dataset ids use the same <c>domain.schema.table</c> form as ReBAC objects.</summary>
+    /// <summary>Dataset ids use the same <c>domain.schema.table</c> form as catalog objects.</summary>
     public static string DatasetId(TableIdentifier id) => $"{id.Domain}.{id.Schema}.{id.TableName}".ToLowerInvariant();
 
     /// <summary>Parses a <c>domain.schema.table</c> dataset id.</summary>
@@ -1220,7 +1220,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             throw new ArgumentException("The dataset id must have the form 'domain.schema.table'.", nameof(dataset));
         }
 
-        // A table the caller may not see (consent, tier, ReBAC), an inactive and an unknown one are reported identically
+        // A table the caller may not see (consent, tier), an inactive and an unknown one are reported identically
         // (no enumeration oracle).
         if (IsBypassed)
         {

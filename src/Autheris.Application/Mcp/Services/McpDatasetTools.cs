@@ -347,7 +347,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: GetMyPermissions,
-            Description: "Checks effective permissions, ReBAC authorization, column masking rules and row filters for the current caller on a dataset.",
+            Description: "Checks effective permissions, column masking rules and row filters for the current caller on a dataset.",
             InputJsonSchema: """
             {
               "type": "object",

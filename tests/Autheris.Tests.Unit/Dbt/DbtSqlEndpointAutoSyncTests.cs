@@ -86,7 +86,6 @@ public sealed class DbtSqlEndpointAutoSyncTests : IDisposable
             sqlEndpointLoader: new SqlEndpointLoader(new InMemorySqlEndpointRegistry(), NullLogger<SqlEndpointLoader>.Instance),
             relationRepository: null,
             virtualFilterAdmin: null,
-            rebacStore: null,
             tagImport: null,
             syntheticRowGenerator: null,
             logger: log);

@@ -234,7 +234,12 @@ public static partial class GovernanceEndpoints
         // every individual grant is time-bound within the class maximum (also for bulk grants).
         if (!Enum.TryParse<GranteeType>(subjectType, ignoreCase: true, out var bulkGranteeType) || !Enum.IsDefined(bulkGranteeType))
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The subjectType is invalid. Supported values: User, Group, Role, ServicePrincipal.", context);
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The subjectType is invalid. Supported values: User, Group, ServicePrincipal.", context);
+        }
+
+        if (bulkGranteeType == GranteeType.Role)
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Role assignees are not supported; grant to a group or a user instead.", context);
         }
 
         var grantPolicy = context.RequestServices.GetService<IGrantPolicy>() ?? new GrantPolicy();
@@ -278,7 +283,6 @@ public static partial class GovernanceEndpoints
         var assignmentSubjectType = bulkGranteeType switch
         {
             GranteeType.Group => AccessProfileSubjectType.Group,
-            GranteeType.Role => AccessProfileSubjectType.Role,
             _ => AccessProfileSubjectType.User
         };
         try

@@ -78,7 +78,6 @@ public sealed class CasbinActionClaimSpoofingTests
             ResolvesTo(true),
             cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             casbinMock,
-            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);
@@ -113,7 +112,6 @@ public sealed class CasbinActionClaimSpoofingTests
             ResolvesTo(true),
             cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             casbinMock,
-            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);

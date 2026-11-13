@@ -29,7 +29,7 @@ public interface ISemanticMcpCompiler
 
     /// <summary>
     /// One page of semantic resource descriptors (URI, name, description, MIME type; <c>Text</c> is empty) for the tables the caller may
-    /// see, including ReBAC. Nothing is rendered and no golden query is loaded. <paramref name="cursor"/> is the opaque
+    /// see. Nothing is rendered and no golden query is loaded. <paramref name="cursor"/> is the opaque
     /// <see cref="McpResourcePage.NextCursor"/> of the previous page; an invalid cursor yields an empty page.
     /// </summary>
     Task<McpResourcePage> ListSemanticResourceUrisAsync(

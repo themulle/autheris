@@ -11,7 +11,7 @@ namespace Autheris.Tests.Architecture;
 public class IndividualGrantPolicyArchitectureTests
 {
     private static readonly Regex GrantWriter = new(
-        @"\.(CreateConsentAsync|ExtendConsentExpiryAsync|ReplaceConsentsAsync|UpsertProfileAsync|ActivateConsentAsync|ActivateConsentForAutoApproveAsync|CreateConsentRequestAsync|AddTupleAsync|AddTuplesAsync)\(",
+        @"\.(CreateConsentAsync|ExtendConsentExpiryAsync|ReplaceConsentsAsync|UpsertProfileAsync|ActivateConsentAsync|ActivateConsentForAutoApproveAsync|CreateConsentRequestAsync)\(",
         RegexOptions.Compiled);
 
     /// <summary>Files that write grants without calling the policy, each with the reason it is safe.</summary>
@@ -21,12 +21,6 @@ public class IndividualGrantPolicyArchitectureTests
             "Decorator of IConsentRepository (REQ-GOV-129): validates caller attribute row filters and forwards unchanged; it neither creates nor extends a validity window.",
         ["Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs"] =
             "System reconcile of consents derived from OpenMetadata rules; short validity refreshed on each run and covered by the read-time clamp.",
-        ["Autheris.Api/Extensions/DependencyInjection/RebacSeedHostedService.cs"] =
-            "Operator-configured seed tuples (Rebac.SeedTuples / development defaults) written at startup; not a runtime grant path.",
-        ["Autheris.Extensions/DataCatalog/DataCatalogSyncService.cs"] =
-            "Writes only structural 'parent' tuples (schema/domain hierarchy); no user grant.",
-        ["Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs"] =
-            "Writes only structural 'parent' tuples (schema/domain hierarchy); no user grant.",
     };
 
     [Fact]
@@ -101,7 +95,7 @@ public class IndividualGrantPolicyArchitectureTests
             {
                 Task Guarded() { policy.Evaluate(new GrantRequest()); return repo.CreateConsentAsync(c); }
                 Task Unguarded() { return repo.CreateConsentAsync(c); }
-                Task Nested() { foreach (var x in xs) { if (x) { repo.AddTupleAsync(x); } } }
+                Task Nested() { foreach (var x in xs) { if (x) { repo.ReplaceConsentsAsync(x); } } }
             }
             """;
         var matches = GrantWriter.Matches(code);

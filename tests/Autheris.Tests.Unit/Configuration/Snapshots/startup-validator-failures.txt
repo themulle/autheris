@@ -54,7 +54,6 @@ ProductionGovernance_MigrationsSkip [Production]: ValidationException: Security 
 ProductionGovernance_TestAuthHandler [Production]: ValidationException: Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.
 ProductionGovernance_EntraIdHttpsMetadata [Production]: ValidationException: Security violation: RequireHttpsMetadata must not be false outside Development.
 ProductionGovernance_AnonymousAccess [Production]: ValidationException: Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.
-ProductionGovernance_DemoRebacSeed [Production]: ValidationException: Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.
 ProductionGovernance_DangerBypass [Production]: ValidationException: Critical security violation: The following security bypasses may be active ONLY in the Development environment:\n  - DANGER:danger_disable_column_masking
 ProductionGovernance_DangerBypassAllowedInDevelopment [Development]: OK
 ProductionTransport_Introspection [Production]: ValidationException: Security violation: Outside Development, GraphQL introspection (GraphQL:EnableIntrospection or warn_enable_introspection) may be active only with an explicit opt-in (AllowInsecureWarnFlagsInProduction = true).
@@ -65,7 +64,6 @@ ProductionTransport_OpenMetadataPlainHttp [Production]: ValidationException: Sec
 ProductionTransport_DataSourceWithoutTls [Production]: ValidationException: Sicherheitsverletzung: DataSources:Connections:pg: PostgreSQL connections must use 'SSL Mode=VerifyFull' (or 'VerifyCA') outside Development.
 ProductionTransport_WildcardOrigin [Production]: ValidationException: Security violation: TrustedOrigins '*' (wildcard CORS) is prohibited outside the Development environment for security reasons (CSRF protection).
 ProductionTransport_PlainHttpOrigin [Production]: ValidationException: Security violation: Outside Development, TrustedOrigins must contain only HTTPS URLs.
-ProductionTransport_RebacClusterWithoutRedis [Production]: ValidationException: Security violation: ReBAC in MultiNodeClusterMode requires Caching.Redis.Enabled = true for cluster-wide invalidation (RR-L4-04).
 ProductionTransport_ReplicasWithoutRedis [Production]: ValidationException: NF-HA-02 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide cache and epoch invalidation requires Caching.Redis.Enabled = true.
 ProductionTransport_PluginsWithoutManifest [Production]: ValidationException: Security violation: Outside Development, a configured plugin directory requires Plugins.RequireIntegrityManifest = true.
 ProductionAuthentication_PlaintextPassword [Production]: ValidationException: Security violation (DEP-14): Outside Development, BasicAuth passwords must be stored as a hash ($argon2id$... or $pbkdf2$...). Plaintext passwords are prohibited.

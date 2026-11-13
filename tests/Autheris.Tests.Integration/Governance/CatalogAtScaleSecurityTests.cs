@@ -307,7 +307,7 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
     public void T_CAT138_25_CatalogVisibilityCache_ValidationAndMultiEpochInvalidation()
     {
         var cache = new CatalogVisibilityLruCache(ttl: TimeSpan.FromSeconds(30), maxEntries: 100);
-        var key1 = new CatalogVisibilityCacheKey("S-1-5-21-user1", "sales", 1, 1, 1, 1);
+        var key1 = new CatalogVisibilityCacheKey("S-1-5-21-user1", "sales", 1, 1, 1);
         var bitset1 = new CatalogVisibleBitSet(10);
         bitset1.Set(0);
 
@@ -318,7 +318,7 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
         retrieved.IsSet(0).ShouldBeTrue();
 
         // Increment structure_version in key -> miss (multi-epoch invalidation)
-        var key2 = new CatalogVisibilityCacheKey("S-1-5-21-user1", "sales", 2, 1, 1, 1);
+        var key2 = new CatalogVisibilityCacheKey("S-1-5-21-user1", "sales", 2, 1, 1);
         cache.TryGet(key2, out _).ShouldBeFalse();
 
         // InvalidateAll clears

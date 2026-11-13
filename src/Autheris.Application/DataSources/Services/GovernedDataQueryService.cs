@@ -21,7 +21,7 @@ using Autheris.Domain.Security;
 
 /// <summary>
 /// Universal Governed REST Data API service.
-/// Enforces ReBAC, ABAC, Mandatory Row Filters, Column Masking and Oracle Inference Guardrails.
+/// Enforces ABAC, Mandatory Row Filters, Column Masking and Oracle Inference Guardrails.
 /// Routes execution between GovernedSqlExecutionService and FederatedDuckDbExecutionService.
 /// </summary>
 public sealed class GovernedDataQueryService : IGovernedDataQueryService
@@ -93,7 +93,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             throw new TableNotFoundException(request.Table);
         }
 
-        // 2. Authorization stage: unified PDP (ReBAC, ABAC, Consent, Virtual Filters) plus the non-canonical
+        // 2. Authorization stage: unified PDP (ABAC, Consent, Virtual Filters) plus the non-canonical
         // ClusterAdmin fail-closed check. The row policy is not spliced from this decision (WP-X0n): the rewriter's own
         // decision is the only one that restricts rows, so both must be computed from the same inputs.
         var decision = await GovernedQueryStages.AuthorizeTableAsync(

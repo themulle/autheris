@@ -128,12 +128,6 @@ public static class AuditEventTypes
     public const string DocIngestionDocumentApplied = "DOC_INGESTION_DOCUMENT_APPLIED";
     public const string DocDiscoveryRead = "DOC_DISCOVERY_READ";
 
-    // ReBAC relationship administration
-    public const string RebacTupleAdded = "REBAC_TUPLE_ADDED";
-    public const string RebacTupleRemoved = "REBAC_TUPLE_REMOVED";
-    public const string RebacInvalidationFailed = "REBAC_INVALIDATION_FAILED";
-    public const string RebacTupleSeed = "REBAC_TUPLE_SEED";
-
     // Governed Aggregation & Semantic Layer Metrics (#28, #37, #38)
     public const string AggregateQuery = "AGGREGATE_QUERY";
     public const string GovernedAggregation = AggregateQuery;

@@ -51,7 +51,6 @@ public sealed class GatewayOptions
     [Required] public FinOpsOptions FinOps { get; init; } = new();
     [Required] public SchemaContractsOptions SchemaContracts { get; init; } = new();
     [Required] public IncrementalDeliveryOptions IncrementalDelivery { get; init; } = new();
-    [Required] public RebacOptions Rebac { get; init; } = new();
     [Required] public ArrowExportOptions Arrow { get; init; } = new();
     [Required] public DuckDbOlapOptions DuckDbOlap { get; init; } = new();
     [Required] public RowFilterOptions RowFilters { get; init; } = new();
@@ -105,7 +104,6 @@ public sealed class GatewayOptions
     public bool IsMcpAuthBypassed => Insecure.danger_bypass_mcp_auth;
     public bool IsMcpUnmaskedAllowed => Insecure.warn_allow_unmasked_ai_access;
     public bool IsLakehouseAuthBypassed => Insecure.danger_bypass_lakehouse_auth;
-    public bool IsRebacBypassed => Insecure.danger_bypass_rebac;
     public bool AreUnsignedS3RequestsAllowed => Insecure.warn_allow_unsigned_s3_requests;
     public bool IsWebSqlDmlAllowed => WebSql.AllowDml;
 
@@ -189,7 +187,6 @@ public sealed class GatewayOptions
         if (AreUntrustedCertificatesAllowed) list.Add("DANGER:danger_allow_untrusted_certificates");
         if (IsMcpAuthBypassed) list.Add("DANGER:danger_bypass_mcp_auth");
         if (IsLakehouseAuthBypassed) list.Add("DANGER:danger_bypass_lakehouse_auth");
-        if (IsRebacBypassed) list.Add("DANGER:danger_bypass_rebac");
         if (IsWebSqlGovernanceBypassed) list.Add("DANGER:danger_bypass_websql_governance");
         if (IsMcpUnmaskedAllowed) list.Add("DANGER:warn_allow_unmasked_ai_access");
         if (AreExternalSystemsMockedIfUnreachable) list.Add("DANGER:warn_mock_external_systems_if_unreachable");

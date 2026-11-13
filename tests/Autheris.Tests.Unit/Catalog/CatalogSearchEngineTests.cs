@@ -54,7 +54,7 @@ public sealed class CatalogSearchEngineTests
     }
 
     [Fact]
-    public async Task Search_EnforcesRebacVisibility_HidesUnauthorizedTables()
+    public async Task Search_EnforcesVisibility_HidesUnauthorizedTables()
     {
         var engine = new CatalogSearchEngine(_embedder, _options, NullLogger<CatalogSearchEngine>.Instance);
 

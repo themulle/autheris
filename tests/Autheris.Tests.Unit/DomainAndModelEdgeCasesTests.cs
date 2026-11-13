@@ -275,7 +275,7 @@ public class DomainAndModelEdgeCasesTests
     }
 
     [Fact]
-    public void Consent_Validate_WhenRoleMissingRoleIdAndRoleName_ThrowsInvalidOperationException()
+    public void Consent_Validate_WhenGranteeIsRole_ThrowsInvalidOperationException()
     {
         var consent = new Consent
         {
@@ -289,7 +289,7 @@ public class DomainAndModelEdgeCasesTests
         };
 
         var ex = Should.Throw<InvalidOperationException>(() => consent.Validate());
-        ex.Message.ShouldContain("RoleId or RoleName must be specified");
+        ex.Message.ShouldContain("Role grantees are not supported");
     }
 
     [Fact]

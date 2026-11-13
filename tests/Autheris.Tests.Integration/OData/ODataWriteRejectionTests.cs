@@ -62,7 +62,6 @@ public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejection
                 builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "Sqlite");
                 builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={dbPath}");
                 builder.UseSetting("Gateway:OData:Enabled", "true");
-                builder.UseSetting("Gateway:Rebac:Enabled", "false");
                 builder.ConfigureServices(services =>
                 {
                     var original = services.Single(d => d.ServiceType == typeof(ISqlConnectionFactory));

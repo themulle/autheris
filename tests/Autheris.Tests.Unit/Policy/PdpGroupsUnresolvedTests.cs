@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
@@ -73,7 +72,6 @@ public sealed class PdpGroupsUnresolvedTests
             Autheris.Tests.Unit.Security.NullFake.Create<IConsentResolutionService>(),
             Autheris.Tests.Unit.Security.NullFake.Create<IConsentCacheService>(),
             Autheris.Tests.Unit.Security.NullFake.Create<IPolicyEnforcementService>(),
-            Autheris.Tests.Unit.Security.NullFake.Create<IRebacEvaluator>(),
             null,
             new GatewayOptions(),
             new Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver());

@@ -73,7 +73,6 @@ public sealed class GovernancePolicyEndToEndTests
         var accessPolicy = new TableAccessPolicy(repo, new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: new RowPolicyFactory(new PolicyPredicateRenderer()),
             maskPolicyFactory: new ColumnMaskPolicyFactory(new SqlDataMaskingProvider(Options.Create(new GatewayOptions()))));

@@ -45,7 +45,7 @@ public readonly record struct CatalogVisibleRow
     public CatalogOutputShape Shape { get; }
 }
 
-/// <summary>The discovery-visible tables of one caller, already shaped (NotFound rows dropped) and ReBAC-intersected.</summary>
+/// <summary>The discovery-visible tables of one caller, already shaped (NotFound rows dropped).</summary>
 public sealed class CatalogVisibleSet
 {
     private readonly Dictionary<TableIdentifier, int> _index = [];
@@ -86,13 +86,13 @@ public sealed class CatalogVisibleSet
 
 /// <summary>
 /// The only discovery visibility entry point (always the discovery surface): caller scope, consent and tier engine,
-/// shaping and ReBAC in one place. Every failure answers empty / null, never an unfiltered fallback.
+/// and shaping in one place. Every failure answers empty / null, never an unfiltered fallback.
 /// </summary>
 public interface ICatalogVisibilityService
 {
     ValueTask<CatalogVisibleSet> GetVisibleAsync(CatalogCaller caller, SchemaContractDefinition? contract = null, CancellationToken ct = default);
 
-    /// <summary>Null = unknown, inactive, hidden or ReBAC-denied (indistinguishable).</summary>
+    /// <summary>Null = unknown, inactive, hidden or denied (indistinguishable).</summary>
     ValueTask<CatalogVisibleRow?> FindVisibleAsync(CatalogCaller caller, TableIdentifier table, CancellationToken ct = default);
 
     ValueTask<IReadOnlySet<TableIdentifier>> FilterVisibleAsync(CatalogCaller caller, IReadOnlyCollection<TableIdentifier> candidates, CancellationToken ct = default);
