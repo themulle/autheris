@@ -90,7 +90,7 @@ internal static class ConformanceRunner
             {
                 // DML cannot be emitted without its injected security predicates: it goes through the governed Compile pipeline.
                 try { statement = Prepare(input, group, dialect); } catch (Exception) { /* the compile below reports it */ }
-                var compiledDml = Engine.Compile(input.AsMemory(), DmlRequest(dialect), CancellationToken.None);
+                var compiledDml = Engine.Compile(input.AsMemory(), DmlRequest(dialect).WithTestWritePermit(input), CancellationToken.None);
                 return new ConformanceObservation(statement, "ok", compiledDml.Sql,
                     compiledDml.Parameters.Select(ConformanceStore.Describe).ToImmutableArray(), null);
             }
