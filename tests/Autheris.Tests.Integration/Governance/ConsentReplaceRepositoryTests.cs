@@ -131,7 +131,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         third.Revoked.ShouldBe(1);
         epochAfterFirst.ShouldBe(epochBefore + 1);
         (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochAfterFirst + 1);
-        (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-MANIFEST-GROUP")], _table, DateTimeOffset.UtcNow, TenantA)).Count.ShouldBe(1);
+        (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-MANIFEST-GROUP")], _table, DateTimeOffset.UtcNow, TenantA)).Count(c => c.GranteeType == GranteeType.Group).ShouldBe(1);
     }
 
     private static System.Security.Claims.ClaimsPrincipal ManifestAdmin(string sid, string tenant) => new(new System.Security.Claims.ClaimsIdentity(

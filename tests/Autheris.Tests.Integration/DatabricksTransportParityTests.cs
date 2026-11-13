@@ -386,7 +386,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         _factory?.Dispose();
     }
 
-    private const string ReaderGroupSid = "S-1-5-21-PARITY-READERS";
+    private const string ReaderGroupSid = "S-1-5-21-7001-1001";
 
     private HttpClient CreateTransportClient(string tenant = "acme", string role = "Reader")
     {
