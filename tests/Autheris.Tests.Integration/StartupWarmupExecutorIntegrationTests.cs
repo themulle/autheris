@@ -93,9 +93,9 @@ public sealed class StartupWarmupExecutorIntegrationTests
 
         await WaitForStartupAsync(factory);
 
-        // The only startup audit entries come from pre-existing hosted services (ReBAC seed, catalog governance ingestion);
+        // The only startup audit entries come from pre-existing hosted services (catalog governance ingestion);
         // the warm-up adds none (the chain length is that baseline).
-        string[] startupBaseline = [AuditEventTypes.RebacTupleSeed, AuditEventTypes.CatalogVisibilityChanged, AuditEventTypes.TenancyDefaultTenantConfigured];
+        string[] startupBaseline = [AuditEventTypes.CatalogVisibilityChanged, AuditEventTypes.TenancyDefaultTenantConfigured];
         audit.ReceivedCalls().SelectMany(c => c.GetArguments().OfType<Autheris.Domain.Model.AuditLogEntry>())
             .Select(e => e.EventType).ShouldAllBe(t => startupBaseline.Contains(t));
         dataSource.ReceivedCalls().ShouldBeEmpty();

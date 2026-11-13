@@ -7,7 +7,6 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -19,7 +18,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Architecture Phase 2 (WP 2.2): Unified Policy Decision Point (PDP).
-/// Evaluates ReBAC graph relations, Casbin ABAC environment conditions, and Consent Engine
+/// Evaluates Casbin ABAC environment conditions and Consent Engine
 /// permissions under a single coherent pipeline and caches the authoritative decision.
 /// </summary>
 public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
@@ -28,7 +27,6 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
     private readonly IConsentResolutionService _resolutionService;
     private readonly IConsentCacheService _cacheService;
     private readonly IPolicyEnforcementService _policyEnforcementService;
-    private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<UnifiedPolicyDecisionPoint> _logger;
 
@@ -52,7 +50,6 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         IOptions<GatewayOptions> options,
         ILogger<UnifiedPolicyDecisionPoint> logger,
         IPolicyEnforcementService policyEnforcementService,
-        IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         TypedPolicySources? typedPolicies = null,
@@ -72,7 +69,6 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _policyEnforcementService = policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService));
-        _rebacEvaluator = rebacEvaluator;
     }
 
     public Task<TableAccessDecision> EvaluateAccessAsync(
@@ -100,7 +96,6 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             _resolutionService,
             _consentRepository,
             _cacheService,
-            _rebacEvaluator,
             clientIpResolver: null,
             _mandatoryFilters,
             _contractManager,

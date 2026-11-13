@@ -84,7 +84,6 @@ public static class ApiErrorCodes
     public const string InvalidTable = "INVALID_TABLE";
     public const string ApiVersionSunset = "API_VERSION_SUNSET";
     public const string ApiVersionUpgradeRequired = "API_VERSION_UPGRADE_REQUIRED";
-    public const string InvalidRebacSubject = "INVALID_REBAC_SUBJECT";
     public const string IndividualGrantExceedsMaximum = "INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM";
     public const string DbtManifestPartial = "DBT_MANIFEST_PARTIAL";
     public const string InvalidAggregateFunction = "INVALID_AGGREGATE_FUNCTION";

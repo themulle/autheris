@@ -645,7 +645,7 @@ public sealed class OlapStagingService(
             return (null, new Denial(new OlapStagingOutcome(403, $"Access denied to table '{rawTableName}'.")));
         }
 
-        // 05 / RR-L3-04 / Architecture 1: one access decision (ReBAC whenever enabled, consents, Casbin, RLS)
+        // 05 / RR-L3-04 / Architecture 1: one access decision (consents, Casbin, RLS)
         // without leaking internal policy details.
         var decision = await accessResolver.ResolveAccessAsync(user, meta.Identifier, meta, tenantId, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)

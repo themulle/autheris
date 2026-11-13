@@ -41,4 +41,16 @@ public interface IAccessProfileRepository
 
     /// <summary>removes one assignment; false when it did not exist.</summary>
     Task<bool> RemoveAssignmentAsync(TenantId tenantId, string profileId, AccessProfileSubjectType subjectType, string subject, CancellationToken ct = default);
+
+    /// <summary>Consents of role grantees that the authorization migration revoked, across tenants (report only).</summary>
+    Task<IReadOnlyList<RevokedRoleConsent>> GetRevokedRoleConsentsAsync(CancellationToken ct = default);
+
+    /// <summary>Profile assignments that the authorization migration deactivated, across tenants (report only).</summary>
+    Task<IReadOnlyList<DeactivatedProfileAssignment>> GetDeactivatedAssignmentsAsync(CancellationToken ct = default);
 }
+
+/// <summary>A consent with a role grantee that the authorization migration revoked.</summary>
+public sealed record RevokedRoleConsent(string ConsentId, string TenantId, string? RoleName, string TableId, string? RevokeReason);
+
+/// <summary>An access-profile assignment that the authorization migration deactivated.</summary>
+public sealed record DeactivatedProfileAssignment(string TenantId, string ProfileId, string Subject, string SubjectType, string Reason);

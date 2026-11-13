@@ -37,7 +37,7 @@ public sealed class FunctionalRightMapperTests
         var tenantId = new TenantId("tenant-1");
         var realmId = "workforce-entra";
         var groupOrRole = "engineers";
-        var right = FunctionalRight.DataUnmaskSensitive;
+        var right = FunctionalRight.SecurityAdmin;
 
         // Existing mapping created by user-alice
         var existingMapping = new FunctionalRightMapping(
@@ -211,7 +211,7 @@ public sealed class FunctionalRightMapperTests
         var tenantId = new TenantId("tenant-1");
         var realmId = "workforce-entra";
         var groupOrRole = "engineers";
-        var privilegedRight = FunctionalRight.DataUnmaskSensitive; // IsPrivileged = true
+        var privilegedRight = FunctionalRight.SecurityAdmin; // IsPrivileged = true
 
         var workforceRealm = new IdentityRealm(
             realmId,
@@ -262,7 +262,7 @@ public sealed class FunctionalRightMapperTests
             issuers: ["https://ext.example.com"]);
 
         var privilegedMapping = new FunctionalRightMapping(
-            "t1", "ext-realm", "external-users", FunctionalRight.DataUnmaskSensitive,
+            "t1", "ext-realm", "external-users", FunctionalRight.SecurityAdmin,
             ApprovedBy: null, ApprovedAt: null, RecertClass: RecertClass.Privileged.ToString(),
             CreatedBy: "admin", CreatedAt: DateTimeOffset.UtcNow);
 
@@ -370,7 +370,7 @@ public sealed class FunctionalRightMapperTests
         var realmId = "workforce-entra";
 
         var selfApprovedPrivileged = new FunctionalRightMapping(
-            tenantId.Value, realmId, "devs", FunctionalRight.DataUnmaskSensitive,
+            tenantId.Value, realmId, "devs", FunctionalRight.SecurityAdmin,
             ApprovedBy: "alice", ApprovedAt: DateTimeOffset.UtcNow,
             RecertClass: RecertClass.Privileged.ToString(), CreatedBy: "alice", // Self-approved!
             CreatedAt: DateTimeOffset.UtcNow);

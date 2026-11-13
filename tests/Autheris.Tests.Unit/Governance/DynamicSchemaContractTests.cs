@@ -316,7 +316,6 @@ public sealed class DynamicSchemaContractTests
             new Autheris.Application.Services.ConsentResolutionService(),
             cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
@@ -353,7 +352,6 @@ public sealed class DynamicSchemaContractTests
             new Autheris.Application.Services.ConsentResolutionService(),
             cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
@@ -403,7 +401,6 @@ public sealed class DynamicSchemaContractTests
             new Autheris.Application.Services.ConsentResolutionService(),
             cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,

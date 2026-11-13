@@ -138,7 +138,6 @@ public sealed class DemoRootFieldsRemovedIntegrationTests : IDisposable
             b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.CreateStable(_dbFile));
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            b.UseSetting("Gateway:Rebac:Enabled", "false");
             if (trustedDocumentsOnly)
             {
                 b.UseSetting("Gateway:GraphQL:PersistedQueriesOnly", "true");

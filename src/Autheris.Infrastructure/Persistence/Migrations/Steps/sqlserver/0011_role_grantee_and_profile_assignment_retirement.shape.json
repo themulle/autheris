@@ -1,0 +1,9 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "ACCESS_PROFILE_ASSIGNMENTS",
+      "column": { "name": "deactivated_reason", "type": "NVARCHAR", "family": "string", "nullable": true }
+    }
+  ]
+}

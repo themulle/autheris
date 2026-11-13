@@ -16,7 +16,7 @@ public sealed class VirtualSystemTablesTests
     [Fact]
     public void VirtualSystemTables_DefinesAllFiveCanonicalEntities()
     {
-        VirtualSystemTables.All.Count.ShouldBe(5);
+        VirtualSystemTables.All.Count.ShouldBe(4);
 
         // 1. governance.system.datasources
         var ds = VirtualSystemTables.Get(new TableIdentifier("governance", "system", "datasources"));
@@ -34,15 +34,7 @@ public sealed class VirtualSystemTablesTests
             "id", "table_id", "column_name", "sensitivity", "masking_type", "classification_tags"
         });
 
-        // 3. governance.system.rebac_tuples
-        var rebac = VirtualSystemTables.Get(new TableIdentifier("governance", "system", "rebac_tuples"));
-        rebac.ShouldNotBeNull();
-        rebac.Columns.Select(c => c.ColumnName).ShouldBe(new[]
-        {
-            "user", "relation", "object"
-        });
-
-        // 4. governance.system.virtual_filters
+        // 3. governance.system.virtual_filters
         var vf = VirtualSystemTables.Get(new TableIdentifier("governance", "system", "virtual_filters"));
         vf.ShouldNotBeNull();
         vf.Columns.Select(c => c.ColumnName).ShouldBe(new[]
@@ -50,7 +42,7 @@ public sealed class VirtualSystemTablesTests
             "id", "table_id", "principal", "filter_expression", "valid_until"
         });
 
-        // 5. governance.system.audit_trail
+        // 4. governance.system.audit_trail
         var audit = VirtualSystemTables.Get(new TableIdentifier("governance", "system", "audit_trail"));
         audit.ShouldNotBeNull();
         audit.Columns.Select(c => c.ColumnName).ShouldBe(new[]
@@ -66,10 +58,9 @@ public sealed class VirtualSystemTablesTests
 
         await VirtualSystemTables.RegisterSystemTablesAsync(repo, CancellationToken.None);
 
-        await repo.Received(5).UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+        await repo.Received(4).UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
         await repo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.Identifier == VirtualSystemTables.DataSourcesId), Arg.Any<CancellationToken>());
         await repo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.Identifier == VirtualSystemTables.PoliciesId), Arg.Any<CancellationToken>());
-        await repo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.Identifier == VirtualSystemTables.RebacTuplesId), Arg.Any<CancellationToken>());
         await repo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.Identifier == VirtualSystemTables.VirtualFiltersId), Arg.Any<CancellationToken>());
         await repo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m => m.Identifier == VirtualSystemTables.AuditTrailId), Arg.Any<CancellationToken>());
     }
@@ -81,7 +72,7 @@ public sealed class VirtualSystemTablesTests
 
         await VirtualSystemTables.RegisterSystemTablesAsync(repo, CancellationToken.None);
 
-        await repo.Received(5).UpsertTableMetadataAsync(
+        await repo.Received(4).UpsertTableMetadataAsync(
             Arg.Is<TableMetadata>(m => m.ReplaceKeyDefinition && m.PrimaryKeyColumns.Count > 0),
             Arg.Any<CancellationToken>());
     }

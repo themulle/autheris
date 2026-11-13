@@ -305,7 +305,7 @@ public sealed class SemanticMcpCompiler(
     }
 
     /// <summary>
-    /// The tables the caller may see: consent, tier and column rules intersected with the catalog visibility service (ReBAC, MCP-14).
+    /// The tables the caller may see: consent, tier and column rules intersected with the catalog visibility service (MCP-14).
     /// The explicit (production-blocked) MCP auth bypass opens the whole catalog (SEC H-02).
     /// </summary>
     private async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(

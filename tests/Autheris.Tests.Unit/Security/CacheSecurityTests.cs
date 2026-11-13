@@ -189,7 +189,6 @@ public sealed class CacheSecurityTests
             StructureVersion: 1,
             ContentVersion: 1,
             PolicyEpoch: 1,
-            RebacGeneration: 1,
             TenantId: "tenant-a",
             Groups: "g1,g2",
             Roles: "Analyst",
@@ -231,7 +230,7 @@ public sealed class CacheSecurityTests
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
 
-        var key = CatalogVisibilityCacheKey.From(principal, "domain1", 1, 1, 1, 1);
+        var key = CatalogVisibilityCacheKey.From(principal, "domain1", 1, 1, 1);
 
         key.SubjectSid.ShouldBe("S-1-5-21-42");
         key.TenantId.ShouldBe("tenant-alpha");

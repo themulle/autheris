@@ -16,7 +16,6 @@ using Autheris.Application.DataSources.Connectors.CrossDomain;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
@@ -33,8 +32,7 @@ using Xunit;
 
 /// <summary>
 /// Architecture 1 (SQL2-6, POL-6, API-10): REST/OData/GraphQL, WebSQL, procedures, OLAP and the unified PDP decide table
-/// access through one <see cref="TableAccessPolicy"/>. Before, OLAP had no consent cache and its own ReBAC check with a
-/// different object id, WebSQL and procedures read consents without the decision cache, and each path merged Casbin
+/// access through one <see cref="TableAccessPolicy"/>. Before, OLAP had no consent cache, WebSQL and procedures read consents without the decision cache, and each path merged Casbin
 /// restrictions differently.
 /// </summary>
 public sealed class TableAccessPolicyArch1Tests
@@ -87,42 +85,12 @@ public sealed class TableAccessPolicyArch1Tests
         return cache;
     }
 
-    private static IRebacEvaluator RebacDenyingAll()
+    private static GatewayOptions WebSqlOn() => new()
     {
-        var evaluator = Substitute.For<IRebacEvaluator>();
-        evaluator.IsEnabled.Returns(true);
-        evaluator.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<RebacCheckResult>(RebacCheckResult.Denied));
-        return evaluator;
-    }
-
-    private static IRebacEvaluator RebacAllowingAll()
-    {
-        var evaluator = Substitute.For<IRebacEvaluator>();
-        evaluator.IsEnabled.Returns(true);
-        evaluator.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<RebacCheckResult>(RebacCheckResult.Permitted));
-        return evaluator;
-    }
-
-    private static GatewayOptions RebacOptions(bool enforceOnQueryPaths = false) => new()
-    {
-        Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = enforceOnQueryPaths },
         WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 }
     };
 
     // ---- DuckDB OLAP resolver -------------------------------------------------------------------------------------
-
-    [Fact]
-    public async Task CrossDomainResolver_RebacDenies_IsDenied()
-    {
-        var resolver = new DefaultCrossDomainAccessResolver(
-            NoConsents(), ResolvesTo(allowed: true), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, options: Options.Create(RebacOptions()), rebacEvaluator: RebacDenyingAll());
-
-        var decision = await resolver.ResolveAccessAsync(User(), Table, Meta(), new TenantId(Tenant));
-
-        decision.IsAllowed.ShouldBeFalse();
-    }
 
     [Fact]
     public async Task CrossDomainResolver_UsesTheConsentDecisionCache()
@@ -136,7 +104,7 @@ public sealed class TableAccessPolicyArch1Tests
     }
 
     [Fact]
-    public async Task OlapEndpoint_RebacTupleOnTheCanonicalObject_IsNotRejected()
+    public async Task OlapEndpoint_ResolverIsTheSingleDecision_IsNotRejected()
     {
         var httpContext = new DefaultHttpContext();
         httpContext.Response.Body = new MemoryStream();
@@ -153,7 +121,7 @@ public sealed class TableAccessPolicyArch1Tests
         var registry = Substitute.For<IAutherisConnectorRegistry>();
         registry.TryGetConnectorForTable(Table, out Arg.Any<IAutherisConnector>()!).Returns(x => { x[1] = connector; return true; });
 
-        // The resolver is the single decision (it applies ReBAC); the endpoint must not add its own check.
+        // The resolver is the single decision; the endpoint must not add its own check.
         var resolver = Substitute.For<ICrossDomainAccessResolver>();
         resolver.ResolveAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(AllowAll());
@@ -201,41 +169,17 @@ public sealed class TableAccessPolicyArch1Tests
     private static TableAccessPolicy Policy(
         IConsentResolutionService resolution,
         IPolicyEnforcementService? casbin = null,
-        IRebacEvaluator? rebac = null,
         GatewayOptions? options = null,
         IConsentCacheService? cache = null) =>
         new(NoConsents(), resolution,
             cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             casbin ?? global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            rebac ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options ?? new GatewayOptions(),
             Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
 
-    private static TableAccessQuery Query(RebacEnforcement rebac = RebacEnforcement.QueryPaths, params Claim[] claims) =>
-        TableAccessQuery.ForPrincipal(User(claims), new Sid("S-1-5-21-USER"), new TenantId(Tenant), Meta(), rebac: rebac);
-
-    [Fact]
-    public async Task Policy_RebacOnQueryPaths_OnlyWithEnforceOnQueryPaths()
-    {
-        var policy = Policy(ResolvesTo(true), rebac: RebacDenyingAll(), options: RebacOptions(enforceOnQueryPaths: false));
-
-        (await policy.DecideAsync(Query(RebacEnforcement.QueryPaths), default)).IsAllowed.ShouldBeTrue();
-        (await policy.DecideAsync(Query(RebacEnforcement.WhenEnabled), default)).IsAllowed.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task Policy_WithDangerBypassRebac_AllowsQueryWhenEnabled()
-    {
-        var optionsWithBypass = new GatewayOptions
-        {
-            Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = true },
-            Insecure = new InsecureGettingStartedOptions { danger_bypass_rebac = true }
-        };
-        var policy = Policy(ResolvesTo(true), rebac: RebacDenyingAll(), options: optionsWithBypass);
-
-        (await policy.DecideAsync(Query(RebacEnforcement.WhenEnabled), default)).IsAllowed.ShouldBeTrue();
-    }
+    private static TableAccessQuery Query(params Claim[] claims) =>
+        TableAccessQuery.ForPrincipal(User(claims), new Sid("S-1-5-21-USER"), new TenantId(Tenant), Meta());
 
     [Fact]
     public async Task Policy_CasbinReceivesPurposeAttributesAndDialect()
@@ -246,7 +190,7 @@ public sealed class TableAccessPolicyArch1Tests
         casbin.EvaluatePolicyAsync(Arg.Do<SecurityEvaluationContext>(c => seen = c), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<TableAccessDecision>(AllowAll()));
 
-        await Policy(ResolvesTo(true), casbin).DecideAsync(Query(RebacEnforcement.QueryPaths, new Claim("purpose_id", "audit"), new Claim("department", "fin")), default);
+        await Policy(ResolvesTo(true), casbin).DecideAsync(Query(new Claim("purpose_id", "audit"), new Claim("department", "fin")), default);
 
         seen.ShouldNotBeNull();
         seen.PurposeId.ShouldBe("audit");
@@ -303,52 +247,5 @@ public sealed class TableAccessPolicyArch1Tests
 
         decision.IsAllowed.ShouldBeFalse();
         decision.DeniedReasons.ShouldContain(r => r.Contains("not active"));
-    }
-
-    [Fact]
-    public async Task Policy_RebacAllowed_ConsentDenied_IncludesDiagnosticAttribution()
-    {
-        var policy = Policy(
-            ResolvesTo(false),
-            rebac: RebacAllowingAll(),
-            options: RebacOptions(enforceOnQueryPaths: true));
-
-        var decision = await policy.DecideAsync(Query(), default);
-
-        decision.IsAllowed.ShouldBeFalse();
-        decision.DeniedReasons.ShouldContain("(ReBAC: Allowed, Consent: Denied - Zero-Trust requires an active ALLOW consent for subject or subject's groups)");
-        decision.DeniedReasons.ShouldContain("no consent");
-    }
-
-    [Fact]
-    public async Task Policy_RebacDenied_ReturnsImmediately_WithoutConsentEvaluation()
-    {
-        var consent = Substitute.For<IConsentResolutionService>();
-        var policy = Policy(
-            consent,
-            rebac: RebacDenyingAll(),
-            options: RebacOptions(enforceOnQueryPaths: true));
-
-        var decision = await policy.DecideAsync(Query(), default);
-
-        decision.IsAllowed.ShouldBeFalse();
-        decision.DeniedReasons.Count.ShouldBe(1);
-        decision.DeniedReasons.Single().ShouldBe(TableAccessPolicy.RebacDeniedReason);
-        consent.DidNotReceiveWithAnyArgs().ResolveAccess(default!, default!, default!, default!, default!, default!);
-    }
-
-    [Fact]
-    public async Task Policy_RebacDisabled_ConsentDenied_DoesNotIncludeRebacAttribution()
-    {
-        var policy = Policy(
-            ResolvesTo(false),
-            rebac: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
-            options: new GatewayOptions());
-
-        var decision = await policy.DecideAsync(Query(), default);
-
-        decision.IsAllowed.ShouldBeFalse();
-        decision.DeniedReasons.ShouldContain("no consent");
-        decision.DeniedReasons.ShouldNotContain("(ReBAC: Allowed, Consent: Denied - Zero-Trust requires an active ALLOW consent for subject or subject's groups)");
     }
 }

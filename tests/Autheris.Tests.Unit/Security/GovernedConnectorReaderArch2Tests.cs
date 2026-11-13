@@ -15,7 +15,6 @@ using Autheris.Application.DataSources.Connectors;
 using Autheris.Application.DataSources.Connectors.CrossDomain;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
@@ -99,10 +98,6 @@ public sealed class GovernedConnectorReaderArch2Tests
         var accessResolver = Substitute.For<ICrossDomainAccessResolver>();
         accessResolver.ResolveAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(EuOnly());
-
-        var rebac = Substitute.For<IRebacEvaluator>();
-        rebac.IsEnabled.Returns(false);
-
         OlapQueryRequest? staged = null;
         var engine = Substitute.For<IDuckDbOlapEngine>();
         engine.ExecuteOlapQueryAsync(Arg.Do<OlapQueryRequest>(r => staged = r), Arg.Any<CancellationToken>())

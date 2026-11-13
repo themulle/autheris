@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Policy;
@@ -350,7 +349,6 @@ public sealed class TypedVirtualFilterTests
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
             Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IRebacEvaluator>(),
             Substitute.For<IClientIpResolver>(),
             new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true } },
             resolver,

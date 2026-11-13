@@ -11,7 +11,6 @@ using System.Threading.Tasks;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Internal;
@@ -40,7 +39,7 @@ using TrinoSqlEngine.Governance;
 /// AR-05 / Security invariant 1: Modularized SQL Rewriter executing the 5 strictly ordered pipeline stages.
 /// Stage 1: AnalyseAndStatementPolicy (AST parse, statement type, function security)
 /// Stage 2: IdentityResolution (User, Tenant, Roles, DataSource validation)
-/// Stage 3: GovernanceResolution (ReBAC, TableAccessPolicy, RLS filters, column masking)
+/// Stage 3: GovernanceResolution (TableAccessPolicy, RLS filters, column masking)
 /// Stage 4: RewriteOptions (typed GovernancePolicy via GovernancePolicyFactory, CompileRequest, dialect, function allowlists)
 /// Stage 5: SecureRewrite (ISqlEngine.Compile: every value bound, value-free template cache inside the engine)
 /// </summary>
@@ -59,7 +58,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly ITableMetadataRepository? _tableRepository;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly ILogger? _logger;
-    private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly IConsentCacheService? _consentCache;
     private readonly IConsentRepository? _consentRepository;
     private readonly IMandatoryRowFilterResolver? _mandatoryFilters;
@@ -92,7 +90,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         ISqlEngine? sqlEngine = null,
         GovernancePolicyFactory? policyFactory = null,
         ISqlSecurityValidator? sqlSecurityValidator = null,
-        IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
         IMandatoryRowFilterResolver? mandatoryFilters = null,
         ISchemaContractManager? contractManager = null,
@@ -109,7 +106,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             consentResolution,
             consentRepository,
             consentCache,
-            rebacEvaluator,
             clientIpResolver,
             mandatoryFilters,
             contractManager,
@@ -125,7 +121,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         _logger = logger; _consentRepository = consentRepository;
         _sqlEngine = sqlEngine ?? FastSqlEngine.Default; _policyFactory = policyFactory;
         _sqlSecurityValidator = sqlSecurityValidator ?? new DefaultSqlSecurityValidator();
-        _rebacEvaluator = rebacEvaluator; _consentCache = consentCache;
+        _consentCache = consentCache;
         _mandatoryFilters = mandatoryFilters; _contractManager = contractManager;
         _accessProfileRepository = accessProfileRepository; _memoryCache = memoryCache;
         _dataSourceResolver = dataSourceResolver ?? new SqlDataSourceResolver(_options, logger);

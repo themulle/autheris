@@ -108,9 +108,9 @@ public sealed class ManifestIndividualGrantTests
     }
 
     [Fact]
-    public async Task SEC_SC_20_GroupAndRoleManifestGrants_KeepTheStandingDefaultOf365Days()
+    public async Task SEC_SC_20_GroupManifestGrants_KeepTheStandingDefaultOf365Days()
     {
-        var repo = await ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "Role", "Analysts", "Allow"));
+        var repo = await ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "Group", "S-1-5-21-1-2-3-2002", "Allow"));
 
         var c = repo.Active(DateTimeOffset.UtcNow).ShouldHaveSingleItem();
         (c.ValidTo - c.ValidFrom).TotalDays.ShouldBe(365, 0.01);

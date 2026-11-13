@@ -14,7 +14,6 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Mcp.Tools;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Domain.Common;
@@ -33,7 +32,7 @@ public sealed class AdminMcpTwoPhaseTests
     private const string DatasetId = "sales.public.orders";
 
     private readonly ITableMetadataRepository _tableRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly IRebacStore _rebacStore = Substitute.For<IRebacStore>();
+    private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
     private readonly ITotpSecretStore _totpSecretStore = new InMemoryTotpSecretStore();
     private readonly ITotpVerificationService _totpService;
@@ -43,7 +42,7 @@ public sealed class AdminMcpTwoPhaseTests
     public AdminMcpTwoPhaseTests()
     {
         _totpService = new TotpVerificationService();
-        _service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _rebacStore, _totpService, _totpSecretStore);
+        _service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _consentRepo, _totpService, _totpSecretStore);
 
         var tableId = Guid.NewGuid();
         _mockMetadata = new TableMetadata
@@ -137,9 +136,8 @@ public sealed class AdminMcpTwoPhaseTests
         result.Warnings.ShouldNotBeEmpty();
         result.Warnings.Any(w => w.Contains("customer_name") && w.Contains("PII", StringComparison.OrdinalIgnoreCase)).ShouldBeTrue();
 
-        // Invariant: Zero mutations to ReBAC store and Table metadata during planning phase!
-        await _rebacStore.DidNotReceiveWithAnyArgs().AddTupleAsync(default!);
-        await _rebacStore.DidNotReceiveWithAnyArgs().AddTuplesAsync(default!);
+        // Invariant: Zero mutations to grant records and Table metadata during planning phase!
+        await _consentRepo.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
         await _tableRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!);
     }
 
@@ -156,7 +154,7 @@ public sealed class AdminMcpTwoPhaseTests
             await service.ApplyAccessAsync(applyWithoutToken, AdminSid, "tenant-a");
         });
 
-        await _rebacStore.DidNotReceiveWithAnyArgs().AddTuplesAsync(default!);
+        await _consentRepo.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
         await _auditRepo.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!);
     }
 
@@ -212,11 +210,11 @@ public sealed class AdminMcpTwoPhaseTests
 
         // Assert
         applyResult.Success.ShouldBeTrue();
-        applyResult.AppliedTuplesCount.ShouldBeGreaterThan(0);
+        applyResult.AppliedGrantCount.ShouldBeGreaterThan(0);
 
-        // ReBAC mutation verification
-        await _rebacStore.Received(1).AddTuplesAsync(
-            Arg.Is<IEnumerable<RebacTuple>>(tuples => tuples.Any(t => t.User.Contains("analyst_bob")) && tuples.All(t => t.ExpiresAt != null)),
+        // grant record verification
+        await _consentRepo.Received(1).CreateConsentAsync(
+            Arg.Is<Consent>(c => c.GranteeSid!.Value.Value == "analyst_bob" && c.Effect == ConsentEffect.Allow && c.ValidTo > c.ValidFrom),
             Arg.Any<CancellationToken>());
 
         // WORM Audit Entry verification
@@ -243,7 +241,7 @@ public sealed class AdminMcpTwoPhaseTests
     {
         // Arrange: inline secrets are written to a writable secret provider (WP-ARC-A-10), never kept by the service.
         var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
-        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _rebacStore, _totpService, _totpSecretStore, secretProvider: secretProvider);
+        var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _consentRepo, _totpService, _totpSecretStore, secretProvider: secretProvider);
         const string cleartextSecret = "super-secret-vault-api-key-99999";
         var request = new AdminRegisterDatasourceRequest(
             Name: "sap_erp",
@@ -283,7 +281,7 @@ public sealed class AdminMcpTwoPhaseTests
     {
         var bus = Substitute.For<IGatewayEventBus>();
         var service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _rebacStore, _totpService, _totpSecretStore, eventBus: bus);
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _consentRepo, _totpService, _totpSecretStore, eventBus: bus);
 
         var plan = await service.PlanAccessAsync(
             new AdminPlanAccessRequest(
@@ -344,7 +342,7 @@ public sealed class AdminMcpTwoPhaseTests
         var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         devEnv.EnvironmentName.Returns("Development");
         var service = new AccessPlanningService(
-            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _rebacStore, _totpService, _totpSecretStore, hostEnvironment: devEnv);
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditRepo), _tableRepo, _consentRepo, _totpService, _totpSecretStore, hostEnvironment: devEnv);
 
         // Act: search with fuzzy query "philipp"
         var result = await service.ResolvePrincipalAsync(new AdminResolvePrincipalRequest("philipp"), AdminSid);
@@ -466,7 +464,7 @@ public sealed class AdminMcpTwoPhaseTests
         var planRequest = new AdminPlanAccessRequest(
             DatasetId: DatasetId,
             Grants: [new("user_eve", new Dictionary<string, string> { ["id"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))],
-            Reason: "ReBAC colon SID test");
+            Reason: "colon SID test");
 
         var planResult = await _service.PlanAccessAsync(planRequest, colonAdminSid, "tenant-a");
         var enrollment = _totpService.GenerateEnrollment(colonAdminSid, "admin@autheris.local");
@@ -487,7 +485,7 @@ public sealed class AdminMcpTwoPhaseTests
 
         // Assert
         applyResult.Success.ShouldBeTrue();
-        applyResult.AppliedTuplesCount.ShouldBeGreaterThan(0);
+        applyResult.AppliedGrantCount.ShouldBeGreaterThan(0);
     }
 
     [Fact]

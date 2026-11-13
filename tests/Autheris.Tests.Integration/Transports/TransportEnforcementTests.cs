@@ -91,7 +91,6 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-                b.UseSetting("Gateway:Rebac:Enabled", "false");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":Provider", "Sqlite");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":ConnectionString", $"Data Source={sPath}");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":Provider", "Sqlite");

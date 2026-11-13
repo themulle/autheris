@@ -66,7 +66,7 @@ public sealed class EffectiveAccessConsentDescriptionTests
         CreateService(consents, maxLength).Service.ExplainMyAccessAsync(caller, Orders);
 
     [Fact]
-    public async Task Explain_PersonGroupRole_ReturnsExactText()
+    public async Task Explain_PersonGroup_ReturnsExactText_RoleNeverGrants()
     {
         var user = await Explain([Grant(GranteeType.User, 30, "Person text", UserSid)], Caller());
         var group = await Explain([Grant(GranteeType.Group, 30, "Group text", Group)], Caller(groups: [Group]));
@@ -74,14 +74,14 @@ public sealed class EffectiveAccessConsentDescriptionTests
 
         user.ConsentDescription.ShouldBe("Person text");
         group.ConsentDescription.ShouldBe("Group text");
-        role.ConsentDescription.ShouldBe("Role text");
+        role.Decision.ShouldBe("DENIED", "a role grantee never grants");
         group.ConsentDescriptions.ShouldBe(["Group text"]);
     }
 
     [Fact]
-    public async Task Explain_NoDescription_Null_EvenWithRoleName()
+    public async Task Explain_NoDescription_Null()
     {
-        var dto = await Explain([Grant(GranteeType.Role, 30, null, roleName: "analyst")], Caller(roles: ["analyst"]));
+        var dto = await Explain([Grant(GranteeType.Group, 30, null, Group)], Caller(groups: [Group]));
 
         dto.Decision.ShouldBe("ALLOWED");
         dto.ConsentDescription.ShouldBeNull();
@@ -94,7 +94,6 @@ public sealed class EffectiveAccessConsentDescriptionTests
     {
         var consents = new List<Consent>
         {
-            Grant(GranteeType.Role, 5, "role", roleName: "analyst"),
             Grant(GranteeType.Group, 5, "group", Group),
             Grant(GranteeType.User, 20, "user-late", UserSid),
             Grant(GranteeType.User, 10, "user-early", UserSid),
@@ -102,14 +101,14 @@ public sealed class EffectiveAccessConsentDescriptionTests
         };
         for (var i = 0; i < 12; i++)
         {
-            consents.Add(Grant(GranteeType.Role, 40 + i, $"extra-{i:00}", roleName: "analyst"));
+            consents.Add(Grant(GranteeType.Group, 40 + i, $"extra-{i:00}", Group));
         }
 
         var dto = await Explain(consents, Caller(roles: ["analyst"], groups: [Group]));
 
         dto.ConsentDescription.ShouldBe("user-early");
         dto.ConsentDescriptions.Count.ShouldBe(10);
-        dto.ConsentDescriptions.Take(4).ShouldBe(["user-early", "user-late", "group", "role"]);
+        dto.ConsentDescriptions.Take(4).ShouldBe(["user-early", "user-late", "group", "extra-00"]);
         dto.ConsentDescriptions.Distinct().Count().ShouldBe(10);
     }
 

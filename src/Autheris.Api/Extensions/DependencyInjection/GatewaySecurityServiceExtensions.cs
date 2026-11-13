@@ -8,13 +8,10 @@ using Autheris.Application.Governance;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mesh.Interfaces;
 using Autheris.Application.Mesh.Services;
-using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Services;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Options;
-using Autheris.Infrastructure.Rebac;
 using Autheris.Infrastructure.Security;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -81,28 +78,6 @@ public static class GatewaySecurityServiceExtensions
             }
             return service;
         });
-
-        // ReBAC / OpenFGA Relationship-Based Access Control (F-)
-        // RR-L4-04: cluster-wide persistent tuple store whenever Redis/Garnet is configured; in-memory only for single-node.
-        services.AddSingleton<IRebacStore>(sp =>
-        {
-            var multiplexer = sp.GetService<StackExchange.Redis.IConnectionMultiplexer>();
-            var opts = sp.GetRequiredService<IOptions<GatewayOptions>>();
-            return multiplexer != null
-                ? new RedisRebacStore(
-                    multiplexer,
-                    opts,
-                    sp.GetRequiredService<ILogger<RedisRebacStore>>(),
-                    sp.GetService<TimeProvider>())
-                : new InMemoryRebacStore(
-                    sp.GetRequiredService<ILogger<InMemoryRebacStore>>(),
-                    sp.GetService<TimeProvider>());
-        });
-        services.AddSingleton<IRebacEvaluator, ZanzibarRebacEvaluator>();
-        services.AddScoped<IRebacBatchDataLoader, RebacBatchDataLoader>();
-
-        // AR-06 / SEC-Invariant 4: Async ReBAC seeding without sync-over-async blocking
-        services.AddHostedService<RebacSeedHostedService>();
 
         // Security, Context & Audit
         services.AddHttpContextAccessor();

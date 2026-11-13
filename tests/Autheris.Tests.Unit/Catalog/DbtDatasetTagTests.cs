@@ -50,7 +50,7 @@ public sealed class DbtDatasetTagTests
     }
 
     private DbtMetadataIngestionService Service() => new(Substitute.For<IDbtProposalRepository>(), _repo, Substitute.For<ILineageGraphStore>(),
-        null, null, null, null, null, null, _tags, NullLogger<DbtMetadataIngestionService>.Instance);
+        null, null, null, null, null, _tags, NullLogger<DbtMetadataIngestionService>.Instance);
 
     [Fact]
     public async Task ModelTags_AreImportedAfterTheUpsert_ColumnTagsAreNot()

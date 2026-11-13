@@ -15,7 +15,6 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -134,7 +133,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 Indexes: []);
         }
 
-        // An unknown table and one the caller may not see (consent, tier, ReBAC) take the same path and answer null (404): no existence oracle.
+        // An unknown table and one the caller may not see (consent, tier) take the same path and answer null (404): no existence oracle.
         var row = _visibility == null
             ? null
             : await _visibility.FindVisibleAsync(CallerOf(context), table, ct).ConfigureAwait(false);
@@ -523,7 +522,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     }
 
     /// <summary>
-    /// The tables the caller may discover (one visibility service: consent, tier shaping and ReBAC) together with the unfiltered
+    /// The tables the caller may discover (one visibility service: consent and tier shaping) together with the unfiltered
     /// catalog (only used to tell which columns a caller cannot see). Any failure answers the empty set, never the unfiltered catalog.
     /// </summary>
     private async Task<(IReadOnlyList<TableMetadata> Permitted, IReadOnlyList<TableMetadata> All)> VisibleForAsync(RequestContext context, CancellationToken ct)

@@ -122,7 +122,6 @@ public sealed class TableWritePermissionTests
             new ConsentResolutionService(),
             cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             policyEnforcementService: casbin,
-            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);
@@ -180,7 +179,6 @@ public sealed class TableWritePermissionTests
             new ConsentResolutionService(),
             cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             policyEnforcementService: casbin,
-            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);

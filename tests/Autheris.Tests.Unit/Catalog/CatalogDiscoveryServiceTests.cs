@@ -11,7 +11,6 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Interfaces;
@@ -23,7 +22,6 @@ using Xunit;
 public sealed class CatalogDiscoveryServiceTests
 {
     private readonly ITableMetadataRepository _metadataRepository = Substitute.For<ITableMetadataRepository>();
-    private readonly IRebacEvaluator _rebacEvaluator = Substitute.For<IRebacEvaluator>();
     private readonly IAuditLogRepository _auditLogRepository = Substitute.For<IAuditLogRepository>();
     private readonly IKeyVaultSecretProvider _secretProvider = Substitute.For<IKeyVaultSecretProvider>();
     private readonly IOpenApiIngestionService _openApiIngestionService = Substitute.For<IOpenApiIngestionService>();
@@ -31,14 +29,14 @@ public sealed class CatalogDiscoveryServiceTests
 
     private CatalogDiscoveryService CreateService(ICatalogSearchEngine? searchEngine = null)
     {
-        // Single-tenant deployment: a GovernanceAdmin without tenant claim is the unrestricted administrator view; ReBAC still intersects.
+        // Single-tenant deployment: a GovernanceAdmin without tenant claim is the unrestricted administrator view.
         var consents = Substitute.For<IConsentRepository>();
         var options = Wp0.Options(Autheris.Tests.Common.TenancyShape.Single);
         return new CatalogDiscoveryService(
             _metadataRepository,
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_auditLogRepository),
             Microsoft.Extensions.Options.Options.Create(options),
-            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadataRepository, consents, options, Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.WithBatchFromCheck(_rebacEvaluator)),
+            Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadataRepository, consents, options),
             _secretProvider,
             _openApiIngestionService,
             searchEngine ?? _searchEngine,
@@ -153,7 +151,6 @@ public sealed class CatalogDiscoveryServiceTests
         };
 
         _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
-        _rebacEvaluator.IsEnabled.Returns(false); // all permitted
 
         _searchEngine.IsIndexReady.Returns(true);
         var hit = new CatalogSearchHit(
@@ -211,7 +208,6 @@ public sealed class CatalogDiscoveryServiceTests
         };
 
         _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table, customers]);
-        _rebacEvaluator.IsEnabled.Returns(false);
 
         _searchEngine.IsIndexReady.Returns(true);
         var hit = new CatalogSearchHit(
@@ -268,7 +264,6 @@ public sealed class CatalogDiscoveryServiceTests
         };
 
         _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
-        _rebacEvaluator.IsEnabled.Returns(false);
 
         _searchEngine.IsIndexReady.Returns(false); // search engine not ready yet
 

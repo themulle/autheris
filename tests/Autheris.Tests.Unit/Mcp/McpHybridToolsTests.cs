@@ -298,7 +298,7 @@ public sealed class McpHybridToolsTests
     }
 
     [Fact]
-    public async Task ToolExecution_GetMyPermissions_ReturnsRebacAndColumnPermissions()
+    public async Task ToolExecution_GetMyPermissions_ReturnsTableAndColumnPermissions()
     {
         var handler = new McpToolExecutionHandler(
             _sqlExecutionService,

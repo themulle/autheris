@@ -1,0 +1,9 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "access_profile_assignments",
+      "column": { "name": "deactivated_reason", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": true }
+    }
+  ]
+}

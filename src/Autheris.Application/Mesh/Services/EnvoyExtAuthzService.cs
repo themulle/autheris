@@ -208,7 +208,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             var covering = snapshot.Profiles.FirstOrDefault(p =>
                 p.TenantId == tenantId &&
                 (p.GranteeType == GranteeType.Role ||
-                 Autheris.Application.Policy.GranteeMatcher.Matches(p.GranteeType, p.GranteeSid, p.RoleName, null, callerSid, groups, new HashSet<string>())) &&
+                 Autheris.Application.Policy.GranteeMatcher.MatchesRestriction(p.GranteeType, p.GranteeSid, p.RoleName, null, callerSid, groups, new HashSet<string>())) &&
                 ObjectPattern.Parse(p.Scope).MatchesObject(targetTable));
             if (covering != null)
             {

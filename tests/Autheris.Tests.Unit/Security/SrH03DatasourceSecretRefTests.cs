@@ -11,7 +11,6 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
 using Autheris.Domain.Common;
@@ -122,7 +121,7 @@ public sealed class SrH03DatasourceSecretRefTests
     public async Task SR_H_03_AccessPlanning_ForeignSecretRef_IsRejected()
     {
         var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+            Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "ConnectionStrings:Default"));
 
@@ -133,7 +132,7 @@ public sealed class SrH03DatasourceSecretRefTests
     public async Task RegisterDatasource_ForeignSecretRef_IsRejected()
     {
         var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+            Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "datasource:other-domain:crane:auth_secret"));
 
@@ -144,7 +143,7 @@ public sealed class SrH03DatasourceSecretRefTests
     public async Task SR_H_03_AccessPlanning_OwnNamespaceRef_IsAccepted()
     {
         var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+            Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             Auth: new DatasourceAuthDto("apiKey", SecretRef: "datasource:telemetry:crane:auth_secret"));
 
@@ -156,7 +155,7 @@ public sealed class SrH03DatasourceSecretRefTests
     public async Task RegisterDatasource_InvalidBaseUrl_IsRejected()
     {
         var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+            Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             BaseUrl: "not-a-valid-uri");
 
@@ -170,7 +169,7 @@ public sealed class SrH03DatasourceSecretRefTests
     public async Task RegisterDatasource_RestrictedBaseUrl_IsRejected(string restrictedUrl)
     {
         var service = new AccessPlanningService(global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+            Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             BaseUrl: restrictedUrl);
 
@@ -186,7 +185,7 @@ public sealed class SrH03DatasourceSecretRefTests
             .Returns(Task.CompletedTask);
 
         var service = new AccessPlanningService(auditWriter, Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IRebacStore>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
+            Substitute.For<IConsentRepository>(), new TotpVerificationService(), new InMemoryTotpSecretStore());
         var request = new AdminRegisterDatasourceRequest("crane", "telemetry",
             BaseUrl: "https://admin:super-secret-password@api.example.com/v1");
 

@@ -73,6 +73,87 @@ public sealed partial class ParityIsolationArchitectureTests
         return lines.Count == 0 ? throw new InvalidOperationException("No 'dotnet test Autheris.sln' line matched: vacuous guard.") : lines;
     }
 
+    /// <summary>Joined workflow lines that mention the parity project (any case) other than the compile-only restore/build lines.</summary>
+    /// <remarks>An allowed line must sit directly in a literal <c>run: |</c> block (no folded or plain multi-line scalar can extend it)
+    /// and be exactly the restore line or the build line with the allowlisted arguments, each exactly once in any order.</remarks>
+    internal static IReadOnlyList<string> ParityProjectMentionViolations(string workflowText)
+    {
+        var lines = JoinedLines(workflowText);
+        return lines.Where((l, i) => l.Contains(ParityProject, StringComparison.OrdinalIgnoreCase) && !(InLiteralRunBlock(lines, i) && IsCompileOnlyParityLine(l.Trim())))
+            .ToList();
+    }
+
+    internal const string RestoreLine = "dotnet restore tests/Autheris.Tests.Parity/Autheris.Tests.Parity.csproj --locked-mode";
+    internal const string BuildLine = "dotnet build tests/Autheris.Tests.Parity/Autheris.Tests.Parity.csproj -c Release --no-restore -p:AutherisIncludeTestAuth=true -warnaserror";
+    private static readonly string[] AllowedBuildArgs = ["--no-restore", "-c Release", "-p:AutherisIncludeTestAuth=true", "-warnaserror"];
+
+    /// <summary>ci.yml must compile the parity project in build-and-test, in one unconditional step that cannot be softened.</summary>
+    internal static IReadOnlyList<string> CompileGuardViolations(string ciText)
+    {
+        if (!SimulationIsolationArchitectureTests.Jobs(ciText).TryGetValue("build-and-test", out var job))
+        {
+            return ["build-and-test job missing"];
+        }
+
+        var steps = SimulationIsolationArchitectureTests.Steps(job).Where(s => s.Contains(ParityProject, StringComparison.Ordinal)).ToList();
+        if (steps.Count != 1)
+        {
+            return ["exactly one build-and-test step must compile the parity project"];
+        }
+
+        var lines = steps[0].Split('\n').Select(l => l.Trim()).ToList();
+        var bad = new List<string>();
+        if (!lines.Contains(RestoreLine)) bad.Add("locked-mode restore line missing");
+        if (!lines.Contains(BuildLine)) bad.Add("build line missing");
+        if (lines.Any(l => l.StartsWith("if:", StringComparison.Ordinal))) bad.Add("the step must not be conditional");
+        if (lines.Any(l => l.StartsWith("continue-on-error", StringComparison.Ordinal))) bad.Add("the step must not continue on error");
+        return bad;
+    }
+
+    private static bool InLiteralRunBlock(IReadOnlyList<string> lines, int index)
+    {
+        var indent = Indent(lines[index]);
+        for (var j = index - 1; j >= 0; j--)
+        {
+            if (lines[j].Trim().Length == 0 || Indent(lines[j]) >= indent)
+            {
+                continue;
+            }
+
+            return Regex.IsMatch(lines[j], @"^\s*(?:-\s+)?run:\s*\|\s*$");
+        }
+
+        return false;
+    }
+
+    private static int Indent(string line) => line.Length - line.TrimStart().Length;
+
+    private static bool IsCompileOnlyParityLine(string line)
+    {
+        var m = CompileOnlyParityLine().Match(line);
+        if (!m.Success)
+        {
+            return false;
+        }
+
+        var tokens = m.Groups["args"].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (m.Groups["verb"].Value == "restore")
+        {
+            return tokens is ["--locked-mode"];
+        }
+
+        var args = new List<string>();
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            args.Add(tokens[i] == "-c" && i + 1 < tokens.Length ? $"-c {tokens[++i]}" : tokens[i]);
+        }
+
+        return args.Order(StringComparer.Ordinal).SequenceEqual(AllowedBuildArgs.Order(StringComparer.Ordinal));
+    }
+
+    [GeneratedRegex(@"^dotnet (?<verb>restore|build) tests/Autheris\.Tests\.Parity/Autheris\.Tests\.Parity\.csproj(?<args>(?: \S+)*)$")]
+    private static partial Regex CompileOnlyParityLine();
+
     internal static IReadOnlyList<string> LinesMissingParityExclusion(IReadOnlyList<string> lines) =>
         lines.Where(l => !l.Contains("Category!=Parity", StringComparison.Ordinal)).ToList();
 
@@ -198,8 +279,81 @@ public sealed partial class ParityIsolationArchitectureTests
     {
         var workflows = ReadWorkflows(FindRepoRoot());
         workflows.ShouldContainKey(NightlyWorkflow);
-        workflows.Where(w => w.Key != NightlyWorkflow && w.Value.Contains(ParityProject, StringComparison.Ordinal)).Select(w => w.Key).ShouldBeEmpty();
+        workflows.Where(w => w.Key != NightlyWorkflow).SelectMany(w => ParityProjectMentionViolations(w.Value).Select(l => $"{w.Key}: {l.Trim()}")).ShouldBeEmpty();
         workflows[NightlyWorkflow].ShouldContain(ParityProject);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ParityIsolation_OtherWorkflowsOnlyRestoreAndBuildTheProject()
+    {
+        const string Csproj = "tests/Autheris.Tests.Parity/Autheris.Tests.Parity.csproj";
+        const string Args = "-c Release --no-restore -p:AutherisIncludeTestAuth=true -warnaserror";
+        static string Lit(string command) => $"      - name: Compile-only guard\n        run: |\n          {command}\n";
+
+        ParityProjectMentionViolations($"      - name: Compile-only guard\n        run: |\n          {RestoreLine}\n          {BuildLine}\n").ShouldBeEmpty();
+        ParityProjectMentionViolations(Lit($"dotnet build {Csproj} -warnaserror -p:AutherisIncludeTestAuth=true --no-restore -c Release")).ShouldBeEmpty();
+
+        // negative self-checks: only an exact restore line and the allowlisted build arguments (each once) inside a literal run block pass
+        string[] rejected =
+        [
+            Lit($"dotnet test {Csproj} -c Release"),
+            Lit("dotnet run --project tests/Autheris.Tests.Parity"),
+            Lit($"dotnet msbuild {Csproj} -t:Build"),
+            Lit($"dotnet publish {Csproj} {Args}"),
+            Lit($"dotnet vstest {Csproj}"),
+            Lit($"dotnet build {Csproj} {Args} --filter Category=Parity"),
+            Lit($"dotnet build {Csproj} {Args} --filter"),
+            Lit($"dotnet build {Csproj} {Args} -p:VSTestTestCaseFilter=Category=Parity"),
+            Lit($"dotnet build {Csproj} {Args} -p:SomeOther=1"),
+            Lit($"dotnet build {Csproj} {Args} -p:CustomAfterMicrosoftCommonTargets=./x.targets"),
+            Lit($"dotnet build {Csproj} {Args} -t:VSTest"),
+            Lit($"dotnet build {Csproj} {Args} -t:Test"),
+            Lit($"dotnet build {Csproj} {Args} -t=Run"),
+            Lit($"dotnet build {Csproj} {Args} /t:VSTest"),
+            Lit($"dotnet build {Csproj} {Args} -target:VSTest"),
+            Lit($"dotnet build {Csproj} {Args} -getTargetResult:Test"),
+            Lit($"dotnet build {Csproj} {Args} other.csproj"),
+            Lit($"dotnet build {Csproj} -c Debug --no-restore -p:AutherisIncludeTestAuth=true -warnaserror"),
+            Lit($"dotnet build {Csproj} {Args} -warnaserror"),
+            Lit($"dotnet build {Csproj} -c Release -c Release --no-restore -p:AutherisIncludeTestAuth=true -warnaserror"),
+            Lit($"dotnet build {Csproj} -c Release --no-restore -p:AutherisIncludeTestAuth=true"),
+            Lit($"dotnet build {Csproj} {Args} && dotnet test {Csproj}"),
+            Lit($"dotnet build {Csproj} {Args}; dotnet test {Csproj}"),
+            Lit($"dotnet build {Csproj} {Args} $EXTRA_ARGS"),
+            Lit($"dotnet restore {Csproj}"),
+            Lit($"dotnet restore {Csproj} --locked-mode -p:X=1"),
+            Lit("dotnet build tests/Autheris.Tests.Parity"),
+            Lit($"dotnet test \\\n            {Csproj}"),
+            $"        run: {BuildLine}",
+            $"        run: >\n          {BuildLine}\n          -t:Test\n",
+            $"        run: >-\n          {BuildLine}\n",
+            $"        run:\n          {BuildLine}\n          -t:Test\n",
+            $"        run: |\n          if true; then\n            {BuildLine}\n          fi\n",
+            "      - name: Build Autheris.Tests.Parity",
+            "          path: tests/Autheris.Tests.Parity/bin",
+            "  # runs autheris.tests.parity nightly",
+        ];
+        foreach (var sample in rejected)
+        {
+            ParityProjectMentionViolations(sample).ShouldNotBeEmpty(sample);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ParityIsolation_CiCompilesTheProjectOnEveryRun()
+    {
+        CompileGuardViolations(RepositoryScan.ReadText(".github/workflows/ci.yml")).ShouldBeEmpty();
+
+        // negative self-checks: the guard cannot be dropped, skipped, softened or moved to another job
+        var good = $"jobs:\n  build-and-test:\n    steps:\n      - name: Test\n        run: dotnet test x\n      - name: Compile-only guard\n        run: |\n          {RestoreLine}\n          {BuildLine}\n  other:\n    steps: []\n";
+        CompileGuardViolations(good).ShouldBeEmpty();
+        CompileGuardViolations(good.Replace($"          {BuildLine}\n", string.Empty, StringComparison.Ordinal)).ShouldNotBeEmpty();
+        CompileGuardViolations(good.Replace(" --locked-mode", string.Empty, StringComparison.Ordinal)).ShouldNotBeEmpty();
+        CompileGuardViolations(good.Replace("        run: |", "        if: github.event_name == 'push'\n        run: |", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        CompileGuardViolations(good.Replace("        run: |", "        continue-on-error: true\n        run: |", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        CompileGuardViolations(good.Replace("  build-and-test:", "  build:", StringComparison.Ordinal)).ShouldNotBeEmpty();
     }
 
     [Fact]
@@ -354,7 +508,8 @@ public sealed partial class ParityIsolationArchitectureTests
     public void ParityWorkflow_PermissionsAreLeastPrivilege()
     {
         // SEC-PAR-01
-        var text = ReadWorkflow(NightlyWorkflow);
+        // The scheduled-failure job (issues: write, github.token) is pinned by ScheduledWorkflowFailureReportTests.
+        var text = ScheduledWorkflowFailureReportTests.WithoutReportFailureJob(ReadWorkflow(NightlyWorkflow));
         text.ShouldContain("\npermissions: {}\n");
         Regex.Count(text, @"^\s+permissions:\s*$", RegexOptions.Multiline).ShouldBe(Regex.Count(text, @"^\s+contents: read\s*$", RegexOptions.Multiline));
         Regex.Matches(text, @"^\s+(?!contents: read)[a-z\-]+: (read|write)\s*$", RegexOptions.Multiline).ShouldBeEmpty();

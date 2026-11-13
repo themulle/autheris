@@ -23,7 +23,6 @@ using Autheris.Application.Policy;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
 using Autheris.Application.Security;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Services;

@@ -13,8 +13,7 @@ public enum GrantKind
     ManifestPolicy,
     McpAdminGrant,
     BulkGrant,
-    Renewal,
-    RebacTuple
+    Renewal
 }
 
 /// <summary>Sensitivity class of the matched tables and columns.</summary>

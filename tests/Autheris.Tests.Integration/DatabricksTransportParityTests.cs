@@ -98,7 +98,6 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             builder.UseSetting("Gateway:WebSql:MaxAllowedRows", "500");
 
             builder.UseSetting("Gateway:Mcp:Enabled", "true");
-            builder.UseSetting("Gateway:Rebac:Enabled", "false");
 
             builder.ConfigureTestServices(services =>
             {
@@ -131,11 +130,11 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         };
         await repo.UpsertTableMetadataAsync(ordersMeta);
 
-        // Consent for Acme on Orders (Reader role, EU region filter, email redacted, amount clear)
+        // Consent for Acme on Orders (Readers group, EU region filter, email redacted, amount clear)
         await repo.CreateConsentAsync(new Consent
         {
             TableId = ordersMeta.Table.Id, TableIdentifier = OrdersId, TenantId = new TenantId("acme"), Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role, RoleName = "Reader", ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            GranteeType = GranteeType.Group, GranteeSid = new Sid(ReaderGroupSid), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
             ColumnRules = [CRule("id"), CRule("region"), CRule("status"), CRule("amount"), CRule("email", ColumnAccessLevel.Mask)],
             RowFilters = [new ConsentRowFilter { ColumnName = "region", Operator = "EQ", ValueJson = "\"EU\"" }]
         });
@@ -155,7 +154,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             await repo.CreateConsentAsync(new Consent
             {
                 TableId = ordersCiMeta.Table.Id, TableIdentifier = OrdersCiId, TenantId = new TenantId(t), Effect = ConsentEffect.Allow,
-                GranteeType = GranteeType.Role, RoleName = "Reader", ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                GranteeType = GranteeType.Group, GranteeSid = new Sid(ReaderGroupSid), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
                 ColumnRules = [CRule("id"), CRule("tenantid")]
             });
         }
@@ -172,7 +171,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         await repo.CreateConsentAsync(new Consent
         {
             TableId = ordersNoTrinoMeta.Table.Id, TableIdentifier = OrdersNoTrinoId, TenantId = new TenantId("acme"), Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Role, RoleName = "Reader", ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            GranteeType = GranteeType.Group, GranteeSid = new Sid(ReaderGroupSid), ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(1),
             ColumnRules = [CRule("id")]
         });
     }
@@ -387,11 +386,18 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
         _factory?.Dispose();
     }
 
+    private const string ReaderGroupSid = "S-1-5-21-PARITY-READERS";
+
     private HttpClient CreateTransportClient(string tenant = "acme", string role = "Reader")
     {
         var client = _factory!.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", $"S-1-5-21-PARITY-{tenant.ToUpperInvariant()}-{role.ToUpperInvariant()}");
         client.DefaultRequestHeaders.Add("X-Test-Roles", role);
+        if (role == "Reader")
+        {
+            client.DefaultRequestHeaders.Add("X-Test-Group-Sids", ReaderGroupSid);   // roles never grant access, a group does
+        }
+
         client.DefaultRequestHeaders.Add("X-Test-Tenant", tenant);
         client.DefaultRequestHeaders.Add("X-Tenant-Id", tenant);
         client.DefaultRequestHeaders.Add("X-Trino-User", $"user-{tenant}");

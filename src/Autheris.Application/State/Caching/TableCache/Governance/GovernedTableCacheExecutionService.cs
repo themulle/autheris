@@ -95,7 +95,7 @@ public sealed class GovernedTableCacheExecutionService
             : null;
 
         // -------------------------------------------------------------------
-        // Zero-Trust Governance Precedence (Casbin ABAC / ReBAC)
+        // Zero-Trust Governance Precedence (Casbin ABAC)
         // -------------------------------------------------------------------
         if (caller.Roles != null && caller.Roles.Contains("DENY_ALL"))
         {

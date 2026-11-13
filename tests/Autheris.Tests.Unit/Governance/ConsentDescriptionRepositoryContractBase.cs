@@ -68,7 +68,8 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         TableId = tableId, TableIdentifier = table, TenantId = Tenant, GranteeType = type,
         GranteeSid = type == GranteeType.Role ? (Sid?)null : Alice, RoleName = roleName,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = validTo ?? DateTimeOffset.UtcNow.AddDays(30),
-        CreatedBySid = Admin, Description = description
+        CreatedBySid = Admin, Description = description,
+        Effect = type == GranteeType.Role ? ConsentEffect.Deny : ConsentEffect.Allow   // role grantees only restrict
     };
 
     protected async Task<(TableIdentifier Table, Guid TableId)> SeedTableAsync()

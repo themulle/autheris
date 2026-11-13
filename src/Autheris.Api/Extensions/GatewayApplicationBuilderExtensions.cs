@@ -247,11 +247,11 @@ public static class GatewayApplicationBuilderExtensions
             mapSampleRows: switches.RestDataEndpointEnabled,
             mapQueryAnalysis: switches.QueryAnalysisEnabled);
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
+        app.MapAuthzMigrationReportEndpoints();
         app.MapTenantRegistryAdminEndpoints(); // M-A2: operator resolution of a tenant id collision
         app.MapTrustedDocumentAdminEndpointsWhenEnabled(gatewayOptions); // Issue #281
 
         app.MapFinOpsEndpoints();
-        app.MapRebacEndpoints();
         app.MapVirtualFilterEndpoints();
         app.MapCallerAttributeAdminEndpoints();
         app.MapScimUsersEndpoints();

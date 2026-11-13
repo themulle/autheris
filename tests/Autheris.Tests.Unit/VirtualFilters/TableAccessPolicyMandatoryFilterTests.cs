@@ -64,7 +64,6 @@ public sealed class TableAccessPolicyMandatoryFilterTests
         new(consents, new ConsentResolutionService(),
             cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             casbin ?? global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options ?? new GatewayOptions(),
             new MandatoryRowFilterResolver(new MandatoryRowFilterResolverTests.FixedSnapshot(Snapshot), new MandatoryRowFilterResolverTests.PlaceholderPredicates()));

@@ -16,7 +16,6 @@ using Autheris.Application.Policy;
 using Autheris.Application.Policy.Exceptions;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.Policy.Services;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.State;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
@@ -79,7 +78,6 @@ public sealed class AccessProfileDistributedStateTests
                 ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         var cacheService = Substitute.For<IConsentCacheService>();
         var policyEnforcementService = Substitute.For<IPolicyEnforcementService>();
-        var rebacEvaluator = Substitute.For<IRebacEvaluator>();
         var clientIpResolver = Substitute.For<IClientIpResolver>();
         var mandatoryFilters = NullMandatoryRowFilterResolver.Instance;
         var options = new GatewayOptions();
@@ -89,7 +87,6 @@ public sealed class AccessProfileDistributedStateTests
             resolutionService,
             cacheService,
             policyEnforcementService,
-            rebacEvaluator,
             clientIpResolver,
             options,
             mandatoryFilters,

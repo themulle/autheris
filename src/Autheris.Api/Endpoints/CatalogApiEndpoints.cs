@@ -805,7 +805,7 @@ public static partial class CatalogApiEndpoints
 
     /// <summary>
     /// MCP-01: curation counterpart of the PUT. Governance administrators only; the dataset is resolved through the
-    /// visibility service (tenant confinement, tier, ReBAC) and rows are projected onto the table's own columns.
+    /// visibility service (tenant confinement, tier) and rows are projected onto the table's own columns.
     /// Invisible, other-tenant and unknown datasets answer identically.
     /// </summary>
     internal static async Task<IResult> GetDatasetSyntheticSamplesHandler(

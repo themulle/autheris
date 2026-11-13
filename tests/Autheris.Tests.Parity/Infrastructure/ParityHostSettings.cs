@@ -32,7 +32,6 @@ public static class ParityHostSettings
         b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
         b.UseSetting("Gateway:GovernanceDb:ConnectionString", governanceConnectionString);
         b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-        b.UseSetting("Gateway:Rebac:Enabled", "false");
         b.UseSetting("Gateway:Mcp:Enabled", "true");
         b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
     }

@@ -15,7 +15,6 @@ using Autheris.Domain.Model;
 
 public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
 {
-    private static readonly HashSet<string> EmptyRoles = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly IConsentRepository _consentRepository;
     private readonly IRowPolicyDependencyIndex? _policyDependencyIndex;
@@ -97,15 +96,12 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
             if (consent.TenantId == query.Tenant &&
                 consent.TableIdentifier.Equals(query.Table.Identifier) &&
                 consent.IsActive(now) &&
-                GranteeMatcher.Matches(
+                GranteeMatcher.MatchesGrant(
                     consent.GranteeType,
                     consent.GranteeSid,
-                    roleName: null,
-                    roleId: null,
-                    userSid: userSid.Value,
-                    groupSids: groupSids,
-                    roles: EmptyRoles,
-                    allUserSids: allUserSids))
+                    userSid.Value,
+                    groupSids,
+                    allUserSids))
             {
                 matchingConsents.Add(consent);
             }

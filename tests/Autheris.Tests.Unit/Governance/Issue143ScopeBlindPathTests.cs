@@ -11,7 +11,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Streaming.Services;
 using Autheris.Application.VirtualFilters;
@@ -324,7 +323,6 @@ public sealed class Issue143ScopeBlindPathTests
             new ConsentResolutionService(null, restricted),
             cache ?? Substitute.For<IConsentCacheService>(),
             abac ?? Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IRebacEvaluator>(),
             Substitute.For<IClientIpResolver>(),
             new GatewayOptions(),
             NullMandatoryRowFilterResolver.Instance,

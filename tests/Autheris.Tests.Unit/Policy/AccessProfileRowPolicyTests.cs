@@ -4,7 +4,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Policy;
 using Autheris.Application.VirtualFilters;
@@ -74,7 +73,6 @@ public sealed class AccessProfileRowPolicyTests
             resolution,
             Substitute.For<IConsentCacheService>(),
             Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IRebacEvaluator>(),
             Substitute.For<IClientIpResolver>(),
             new GatewayOptions(),
             NullMandatoryRowFilterResolver.Instance,

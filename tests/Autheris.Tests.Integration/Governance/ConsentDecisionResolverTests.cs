@@ -471,9 +471,8 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     }
 
     [Theory]
-    [InlineData(GranteeType.Role)]
     [InlineData(GranteeType.Group)]
-    public async Task W5_RoleAndGroupGrantees_StillSkipThePolicy(GranteeType grantee)
+    public async Task W5_GroupGrantees_StillSkipThePolicy(GranteeType grantee)
     {
         using var services = DecisionServices.Build();
         var req = await NewRequestAsync(grantee: grantee, validDays: 400);

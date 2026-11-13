@@ -14,7 +14,6 @@ using Autheris.Application.Olap;
 using Autheris.Application.Observability.IncrementalDelivery;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Common.Serialization;
 using Autheris.Application.Services;
 using Autheris.Application.Sql;
@@ -83,7 +82,6 @@ public static class GatewayExecutionServiceExtensions
             sp.GetService<IClientIpResolver>(),
             sp.GetService<IAutherisConnectorRegistry>(),
             sp.GetService<ITableReadConcurrencyGate>(),
-            sp.GetService<IRebacEvaluator>(),
             sp.GetRequiredService<IMandatoryRowFilterResolver>(),
             typedPolicies: sp.GetService<Autheris.Application.Policy.TypedPolicySources>(),
             auditWriter: sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),

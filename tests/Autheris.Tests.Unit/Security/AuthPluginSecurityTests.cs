@@ -544,7 +544,6 @@ public sealed class AuthPluginSecurityTests
             new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options,
             NullMandatoryRowFilterResolver.Instance,
@@ -634,7 +633,7 @@ public sealed class AuthPluginSecurityTests
         new(
             new Sid("user-1"),
             new TenantId("tenant-1"),
-            new HashSet<Sid>(),
+            new HashSet<Sid> { new("S-analyst-group") },
             new HashSet<string> { "Analyst" },
             new TableMetadata
             {
@@ -656,8 +655,8 @@ public sealed class AuthPluginSecurityTests
                 {
                     TableIdentifier = new TableIdentifier("data_source", "public", "customers"),
                     TenantId = new TenantId("tenant-1"),
-                    GranteeType = GranteeType.Role,
-                    RoleName = "Analyst",
+                    GranteeType = GranteeType.Group,
+                    GranteeSid = new Sid("S-analyst-group"),
                     Effect = ConsentEffect.Allow,
                     ColumnRules = columnRules ?? Array.Empty<ConsentColumnRule>(),
                     ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
@@ -670,7 +669,6 @@ public sealed class AuthPluginSecurityTests
             new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options,
             NullMandatoryRowFilterResolver.Instance,

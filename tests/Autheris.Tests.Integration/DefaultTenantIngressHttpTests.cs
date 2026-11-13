@@ -34,7 +34,6 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
         { "GET", "/api/v1/governance/audit", null },
         { "GET", "/api/v1/governance/grants", null },
         { "POST", "/mcp", """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_datasets","arguments":{}}}""" },
-        { "GET", "/api/v1/rebac/tuples", null },
         { "POST", "/api/v1/consents/bulk", """{"subject":"user:a","tables":[]}""" },
         { "GET", "/modules/lakehouse/iceberg/v1/p/namespaces", null },
     };
@@ -89,32 +88,8 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
         response.StatusCode.ShouldNotBe(HttpStatusCode.InternalServerError, $"{method} {path}: {Truncate(text)}");
     }
 
-    [Fact]
-    public async Task DT_SC_01_Rebac_Works_For_The_Default_Tenant_Of_A_Claimless_Principal()
-    {
-        var host = Host(DefaultTenant);
-        using (var scope = host.Services.CreateScope())
-        {
-            var store = scope.ServiceProvider.GetRequiredService<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>();
-            await store.AddTuplesAsync(new[] { new Autheris.Domain.Model.RebacTuple(DefaultTenant, "S-1-5-21-DT7-ALICE", "viewer", "table:sales.public.dt7_orders") }, CancellationToken.None);
-            await store.AddTuplesAsync(new[] { new Autheris.Domain.Model.RebacTuple("other-tenant", "S-1-5-21-DT7-BOB", "viewer", "table:sales.public.dt7_invoices") }, CancellationToken.None);
-        }
-
-        using var client = host.CreateClient();
-        var request = Request("GET", "/api/v1/rebac/tuples", null, authenticated: true);
-        request.Headers.Remove("X-Test-Roles");
-        request.Headers.Add("X-Test-Roles", "ClusterAdmin");
-        var response = await client.SendAsync(request);
-        var text = await response.Content.ReadAsStringAsync();
-
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, Truncate(text));
-        text.ShouldContain("S-1-5-21-DT7-ALICE");
-        text.ShouldNotContain("S-1-5-21-DT7-BOB");
-    }
-
     [Theory]
     [InlineData("/api/v1/governance/audit")]
-    [InlineData("/api/v1/rebac/tuples")]
     [InlineData("/graphql")]
     [InlineData("/mcp")]
     [InlineData("/odata/v4/dom/sch/tbl")]
@@ -187,7 +162,6 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Mcp:Enabled", "true");
                 b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-                b.UseSetting("Gateway:Rebac:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:Arrow:Enabled", "true");
                 b.UseSetting("Gateway:Modules:Enabled:0", "lakehouse");

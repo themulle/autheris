@@ -12,7 +12,6 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Plugins.Auth;
 using Autheris.Application.Policy;
 using Autheris.Application.Policy.Services;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
@@ -137,7 +136,6 @@ public sealed class NarrowingTests
             new ConsentResolutionService(),
             NullConsentCacheService.Instance,
             NullPolicyEnforcementService.Instance,
-            NullRebacEvaluator.Instance,
             clientIpResolver: null,
             opts,
             NullMandatoryRowFilterResolver.Instance,
@@ -209,7 +207,6 @@ public sealed class PluginEnrichmentTests
             new ConsentResolutionService(),
             NullConsentCacheService.Instance,
             NullPolicyEnforcementService.Instance,
-            NullRebacEvaluator.Instance,
             clientIpResolver: null,
             opts,
             NullMandatoryRowFilterResolver.Instance);

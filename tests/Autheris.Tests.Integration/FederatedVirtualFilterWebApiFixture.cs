@@ -223,7 +223,6 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "10000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Tables"));
-            b.UseSetting("Gateway:Rebac:Enabled", "false");
             b.UseSetting("Gateway:VirtualFilters:GenerationCheckSeconds", "0");
             b.UseSetting("Gateway:VirtualFilters:Federation:KeyCacheTtlSeconds", "1");
 

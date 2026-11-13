@@ -207,7 +207,7 @@ public sealed class PostgreSqlGovernanceSchemaShapeTests : IClassFixture<Postgre
         await GovernanceSchemaTestSupport.RunPostgreSqlAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Apply);
         await GovernanceSchemaTestSupport.RunPostgreSqlAsync(_shared.Db.ConnectionString, GovernanceMigrationMode.Verify);
 
-        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(10, "baseline and steps 0002 to 0010");
+        (await ScalarAsync(_shared.Db.ConnectionString, "SELECT COUNT(*) FROM autheris_schema_migrations")).ShouldBe(SqlMigrationStep.LoadEmbedded("postgresql").Count + 1, "the baseline and every embedded step");
     }
 
     [Fact]

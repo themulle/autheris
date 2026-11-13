@@ -389,26 +389,6 @@ public sealed class Phase1AndPhase2SecurityExpertTests
     }
 
     [Fact]
-    public void SEC_EXP_HA_01_Rebac_MultiNode_Requires_Redis()
-    {
-        var options = new GatewayOptions
-        {
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
-            HighAvailability = new HighAvailabilityOptions { MultiNodeClusterMode = true },
-            Rebac = new RebacOptions { Enabled = true },
-            Caching = new CachingOptions { Redis = new RedisOptions { Enabled = false } }
-        };
-
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Production");
-
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
-
-        ex.Message.ShouldContain("ReBAC in MultiNodeClusterMode requires Caching.Redis.Enabled = true");
-    }
-
-    [Fact]
     public async Task SEC_EXP_DUCKDB_01_LockConfiguration_SetOnConnection()
     {
         var options = Options.Create(new GatewayOptions

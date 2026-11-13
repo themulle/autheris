@@ -70,7 +70,7 @@ public sealed class AuthPluginAuthorizationHookTests
         new(
             new Sid("user-1"),
             TestTenant,
-            new HashSet<Sid>(),
+            new HashSet<Sid> { new("S-analyst-group") },
             new HashSet<string> { "Analyst" },
             CreateMetadata(),
             RequestedColumns: ["id", "name", "ssn", "region"]);
@@ -90,8 +90,8 @@ public sealed class AuthPluginAuthorizationHookTests
                 {
                     TableIdentifier = TestTable,
                     TenantId = TestTenant,
-                    GranteeType = GranteeType.Role,
-                    RoleName = "Analyst",
+                    GranteeType = GranteeType.Group,
+                    GranteeSid = new Sid("S-analyst-group"),
                     Effect = ConsentEffect.Allow,
                     ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
                     ValidTo = DateTimeOffset.UtcNow.AddDays(1)
@@ -103,7 +103,6 @@ public sealed class AuthPluginAuthorizationHookTests
             new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             opts,
             NullMandatoryRowFilterResolver.Instance,

@@ -57,7 +57,6 @@ public sealed class ODataInteropTests : IClassFixture<ODataInteropTests.Fixture>
                 builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={dbPath}");
                 builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "erp");
                 builder.UseSetting("Gateway:OData:Enabled", "true");
-                builder.UseSetting("Gateway:Rebac:Enabled", "false");
             });
         }
 

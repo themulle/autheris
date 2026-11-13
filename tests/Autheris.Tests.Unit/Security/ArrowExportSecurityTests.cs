@@ -10,8 +10,6 @@ using Apache.Arrow;
 using Apache.Arrow.Ipc;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Security;
-using Autheris.Application.Security.Rebac.Interfaces;
-using Autheris.Application.Security.Rebac.Services;
 using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
@@ -37,10 +35,6 @@ public sealed class ArrowExportSecurityTests
                 Enabled = true,
                 MaxExportRows = maxRows,
                 BatchSize = 1000
-            },
-            Rebac = new RebacOptions
-            {
-                Enabled = true
             }
         });
     }

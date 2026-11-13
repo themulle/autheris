@@ -275,7 +275,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         {
             sections.Add("""
                 Catalog & Discovery API
-                - **GET /api/v1/catalog/datasets**: Lists all datasets visible to the caller (ReBAC filtered).
+                - **GET /api/v1/catalog/datasets**: Lists all datasets visible to the caller (grant filtered).
                 - **GET /api/v1/catalog/datasets/{datasetId}**: Returns detailed column schema and masking states.
                 - **GET /api/v1/catalog/datasources**: Lists registered datasources without leaking secrets.
                 - **GET /api/v1/catalog/search?q={query}&domain={domain}**: Fulltext search over datasets and columns.
@@ -357,7 +357,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
                 {
                     _200 = new { description = "Dataset query envelope with columns and rows", type = "DatasetQueryEnvelope" },
                     _400 = new { description = "Invalid query or predicate targeting denied columns" },
-                    _403 = new { description = "Access denied by ReBAC or table policy" }
+                    _403 = new { description = "Access denied by table policy" }
                 }
             };
         }

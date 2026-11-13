@@ -100,11 +100,6 @@ public sealed class SemanticMetricConsentPdpTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public Task MetricConsent_RebacDenied_StaysDenied() =>
-        AssertStaysDeniedAsync("ReBAC: relation check failed.");
-
-    [Fact]
-    [Trait("Category", "Security")]
     public Task MetricConsent_ContractDenied_StaysDenied() =>
         AssertStaysDeniedAsync("Contract violation: schema contract denies access.");
 

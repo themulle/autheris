@@ -13,7 +13,6 @@ using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Application.Tenancy;
@@ -39,7 +38,6 @@ public sealed partial class DbtMetadataIngestionService
         SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
-        IRebacStore? rebacStore,
         IDatasetTagImportService? tagImport,
         ISyntheticSampleRowGenerator? syntheticRowGenerator,
         IDbtTestTargetMap? testTargetMap,
@@ -58,7 +56,6 @@ public sealed partial class DbtMetadataIngestionService
         _sqlEndpointLoader = sqlEndpointLoader;
         _relationRepository = relationRepository;
         _virtualFilterAdmin = virtualFilterAdmin;
-        _rebacStore = rebacStore;
         _physicalKeys = physicalKeys;
         _auditWriter = auditWriter;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));

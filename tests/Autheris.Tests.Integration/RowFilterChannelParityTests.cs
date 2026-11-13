@@ -30,7 +30,6 @@ using Autheris.Tests.Integration.Governance;
 /// Virtual filters, phase 0 (docs/plans/2026-10-08-umsetzungsplan-virtuelle-filter.md): the same correlated consent row
 /// filter (the "David case": only rows of clients whose crane is not delivered yet) must yield the same rows in every
 /// transport. Real consents (no consent bypass), real SQLite data. The expected set is computed directly in SQLite.
-/// ReBAC is disabled: it is an independent gate and not what this test compares.
 /// Run: dotnet test tests/Autheris.Tests.Integration --filter "FullyQualifiedName~RowFilterChannelParityTests"
 /// </summary>
 public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannelParityTests.Fixture>
@@ -290,6 +289,9 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         /// <summary>The caller of <see cref="Client"/> (default: David). Variants that compare callers set it before a channel call; the tests of one class run one after the other.</summary>
         public string CallerSid { get; set; } = DavidSid;
 
+        /// <summary>Group every caller of <see cref="Client"/> belongs to; roles never grant access, so consents that apply to all callers address this group.</summary>
+        public const string ReadersGroupSid = "S-1-5-21-PARITY-READERS";
+
         /// <summary>More test headers for <see cref="Client"/> (for example an application-only caller).</summary>
         public Dictionary<string, string> ExtraHeaders { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -335,7 +337,6 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
                 b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("run"));
-                b.UseSetting("Gateway:Rebac:Enabled", "false");
 
                 b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
                 b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
@@ -377,6 +378,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
             var client = _factory!.CreateClient();
             client.DefaultRequestHeaders.Add("X-Test-User-Sid", CallerSid);
             client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
+            client.DefaultRequestHeaders.Add("X-Test-Group-Sids", ReadersGroupSid);
             client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
             foreach (var (name, value) in ExtraHeaders)
             {

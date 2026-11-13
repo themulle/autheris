@@ -13,7 +13,6 @@ using Autheris.Application.Audit;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Pipeline;
@@ -78,7 +77,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             rewrite.SqlEngine,
             rewrite.PolicyFactory,
             rewrite.SqlSecurityValidator,
-            rewrite.RebacEvaluator,
             rewrite.ConsentCache,
             rewrite.MandatoryFilters,
             rewrite.ContractManager,

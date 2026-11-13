@@ -6,7 +6,6 @@ src/Autheris.Api/Endpoints/FinOpsEndpoints.cs|2
 src/Autheris.Api/Endpoints/GovernanceClassificationEndpoints.cs|1
 src/Autheris.Api/Endpoints/GovernanceEndpoints.Access.cs|1
 src/Autheris.Api/Endpoints/HealthEndpoints.cs|8
-src/Autheris.Api/Endpoints/RebacEndpoints.cs|1
 src/Autheris.Api/Endpoints/RecertificationEndpoints.cs|1
 src/Autheris.Api/Endpoints/TableStreamEndpoints.cs|3
 src/Autheris.Api/Endpoints/TokenRevocationEndpoints.cs|1

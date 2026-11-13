@@ -14,7 +14,6 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -32,60 +31,6 @@ public sealed class CatalogVisibilityServiceTests
     private static readonly TableIdentifier T1 = new("sales", "dbo", "t1");
     private static readonly TableIdentifier T2 = new("sales", "dbo", "t2");
 
-    private sealed class FakeRebac : IRebacEvaluator
-    {
-        private int _inFlight;
-        private int _maxInFlight;
-        public bool IsEnabled { get; set; } = true;
-        public HashSet<string> Allowed { get; } = [];
-        public bool AllowAll { get; set; }
-        public Func<RebacBatchCheckRequest, RebacBatchCheckResult?>? Override { get; set; }
-        public ConcurrentBag<RebacBatchCheckRequest> Requests { get; } = [];
-        public int CheckCalls;
-        public int MaxInFlight => _maxInFlight;
-        public TimeSpan Delay { get; set; } = TimeSpan.Zero;
-
-        public ValueTask<RebacCheckResult> CheckAsync(RebacCheckRequest request, CancellationToken ct = default)
-        {
-            Interlocked.Increment(ref CheckCalls);
-            return ValueTask.FromResult(RebacCheckResult.Denied);
-        }
-
-        public async ValueTask<RebacBatchCheckResult> BatchCheckAsync(RebacBatchCheckRequest request, CancellationToken ct = default)
-        {
-            Requests.Add(request);
-            var now = Interlocked.Increment(ref _inFlight);
-            int seen;
-            while (now > (seen = _maxInFlight) && Interlocked.CompareExchange(ref _maxInFlight, now, seen) != seen)
-            {
-            }
-
-            try
-            {
-                if (Delay > TimeSpan.Zero)
-                {
-                    await Task.Delay(Delay, ct);
-                }
-
-                ct.ThrowIfCancellationRequested();
-                if (Override?.Invoke(request) is { } custom)
-                {
-                    return custom;
-                }
-
-                return new RebacBatchCheckResult(request.Checks.ToDictionary(c => c, c => AllowAll || Allowed.Contains(c.Object)));
-            }
-            finally
-            {
-                Interlocked.Decrement(ref _inFlight);
-            }
-        }
-
-        public void RegisterInheritance(string baseRelation, params string[] inheritedBy) { }
-
-        public Task InvalidateTenantCacheAsync(string tenantId, CancellationToken ct = default) => Task.CompletedTask;
-    }
-
     private static ClaimsPrincipal Subject(string sid = "S-USER") => Wp0.User(sid, "tenant-a");
 
     private static TableMetadata Row(TableIdentifier id) => Wp0.Table(id.Domain, id.TableName, "Short " + id.TableName, ["id"]);
@@ -96,19 +41,17 @@ public sealed class CatalogVisibilityServiceTests
     private static IConsentRepository ConsentsFor(IEnumerable<TableMetadata> tables, string sid = "S-USER") =>
         Wp0.Consents(tables.Select(t => Wp0.Allow(t.Identifier, sid, Wp0.TenantA, "id")).ToArray());
 
-    private static GatewayOptions Opts(TenancyShape mode = TenancyShape.Multi, bool rebacEnabled = false) =>
+    private static GatewayOptions Opts(TenancyShape mode = TenancyShape.Multi) =>
         new()
         {
             Tenancy = mode.Options(),
-            Catalog = new DataCatalogOptions { SharedTables = [] },
-            Rebac = new RebacOptions { Enabled = rebacEnabled }
+            Catalog = new DataCatalogOptions { SharedTables = [] }
         };
 
     private static CatalogVisibilityService Svc(
-        ITableMetadataRepository? tables, IConsentRepository? consents, IRebacEvaluator? rebac = null,
+        ITableMetadataRepository? tables, IConsentRepository? consents,
         GatewayOptions? options = null, ILogger<CatalogVisibilityService>? logger = null)
-        => CatalogVisibilityTestFactory.Create(tables, consents, options ?? Opts(rebacEnabled: rebac != null), rebac, logger,
-            omitEvaluator: rebac == null && options?.Rebac?.Enabled == true);
+        => CatalogVisibilityTestFactory.Create(tables, consents, options ?? Opts(), logger);
 
     private static CatalogCaller Caller(ClaimsPrincipal? p) => CatalogVisibilityTestFactory.Caller(p);
 
@@ -141,8 +84,7 @@ public sealed class CatalogVisibilityServiceTests
     {
         var tables = Wp0.Tables(Row(T1));
         var consents = Wp0.Consents(Wp0.Allow(T1, "S-USER", Wp0.TenantA, "id"));
-        var rebac = new FakeRebac { AllowAll = true };
-        var service = Svc(tables, consents, rebac);
+        var service = Svc(tables, consents);
         var denied = DeniedPrincipal(kind);
         var caller = kind == "invalid-tenant-claim" ? new CatalogCaller(denied, Wp0.TenantA, CatalogChannel.Rest) : Caller(denied);
 
@@ -153,7 +95,6 @@ public sealed class CatalogVisibilityServiceTests
         await tables.DidNotReceiveWithAnyArgs().GetAllTablesAsync(default);
         await tables.DidNotReceiveWithAnyArgs().GetTableMetadataAsync(default, default);
         consents.ReceivedCalls().ShouldBeEmpty();
-        rebac.Requests.ShouldBeEmpty();
     }
 
     [Theory]
@@ -162,7 +103,7 @@ public sealed class CatalogVisibilityServiceTests
     [InlineData("subject", "", "tenant-a")]
     [InlineData("single-unrestricted", "GovernanceAdmin", null)]
     [Trait("Category", "Security")]
-    public async Task NameOnlyPrincipal_NoSid_Empty_AllClasses_NoRepositoryOrRebacCall(string label, string role, string? tenant)
+    public async Task NameOnlyPrincipal_NoSid_Empty_AllClasses_NoRepositoryCall(string label, string role, string? tenant)
     {
         _ = label;
         var claims = new List<Claim> { new(ClaimTypes.Name, "alice") };
@@ -179,16 +120,14 @@ public sealed class CatalogVisibilityServiceTests
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
         var tables = Wp0.Tables(Row(T1));
         var consents = Wp0.Consents();
-        var rebac = new FakeRebac { AllowAll = true };
         var mode = tenant == null ? TenancyShape.Single : TenancyShape.Multi;
-        var service = Svc(tables, consents, rebac, Opts(mode, rebacEnabled: true));
+        var service = Svc(tables, consents, Opts(mode));
 
         CallerScopeResolver.Resolve(principal, mode.Owner()).ShouldBe(CallerScope.None);
         (await service.GetVisibleAsync(Caller(principal))).Tables.ShouldBeEmpty();
         (await service.FindVisibleAsync(Caller(principal), T1)).ShouldBeNull();
         (await service.FilterVisibleAsync(Caller(principal), [T1])).ShouldBeEmpty();
         await tables.DidNotReceiveWithAnyArgs().GetAllTablesAsync(default);
-        rebac.Requests.ShouldBeEmpty();
         consents.ReceivedCalls().ShouldBeEmpty();
     }
 
@@ -247,22 +186,6 @@ public sealed class CatalogVisibilityServiceTests
         var tables = Wp0.Tables(Row(T1));
         (await Svc(tables, Wp0.Consents()).FilterVisibleAsync(Caller(Subject()), [])).ShouldBeEmpty();
         await tables.DidNotReceiveWithAnyArgs().GetAllTablesAsync(default);
-    }
-
-    // ------------------------------------------------------------------------------------------------------------------------------
-    // ReBAC (SEC-CAT138-02..04, 06)
-    // ------------------------------------------------------------------------------------------------------------------------------
-
-    [Fact]
-    public async Task RebacDisabled_EqualsConsentAndTierSet()
-    {
-        var rows = new[] { Row(T1), Row(T2) };
-        var rebac = new FakeRebac { IsEnabled = false };
-
-        var set = await Svc(Wp0.Tables(rows), ConsentsFor(rows), rebac, Opts()).GetVisibleAsync(Caller(Subject()));
-
-        set.Tables.Select(t => t.Identifier).ShouldBe([T1, T2], ignoreOrder: true);
-        rebac.Requests.ShouldBeEmpty();
     }
 
     [Fact]
@@ -466,19 +389,15 @@ public sealed class CatalogVisibilityServiceTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task WPSIMPL46_Discovery_ListsAllNonHiddenObjects_WithoutAnyRebacFilter_HiddenStaysHidden()
+    public async Task WPSIMPL46_Discovery_ListsAllNonHiddenObjects_HiddenStaysHidden()
     {
-        // WP-SIMPL-46 step 5: ApplyRebacAsync is deleted; a ReBAC evaluator that would deny everything has no effect, and the service takes no
-        // ReBAC dependency at all. Hidden (unmarked / unknown view) rows stay hidden.
-        typeof(CatalogVisibilityService).GetConstructors()
-            .SelectMany(c => c.GetParameters())
-            .ShouldNotContain(p => p.ParameterType.Name.Contains("Rebac", StringComparison.OrdinalIgnoreCase));
+        // Discovery lists every non-hidden object; hidden (unmarked / unknown view) rows stay hidden.
 
         var unmarked = WithView("unmarked_t", CatalogView.Unmarked);
         var unknown = WithView("unknown_t", (CatalogView)42);
         var granted = WithView("granted_t", CatalogView.Granted);
         var service = CatalogVisibilityTestFactory.Create(
-            Wp0.Tables(unmarked, unknown, granted), Wp0.Consents(), Opts(rebacEnabled: true), new FakeRebac(),
+            Wp0.Tables(unmarked, unknown, granted), Wp0.Consents(), Opts(),
             engineOutput: (_, _, _) => Task.FromResult<IReadOnlyList<TableMetadata>>([unmarked, unknown, granted]));
 
         var set = await service.GetVisibleAsync(Caller(Subject()));

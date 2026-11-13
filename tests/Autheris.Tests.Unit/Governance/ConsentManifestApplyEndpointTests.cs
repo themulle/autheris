@@ -55,4 +55,20 @@ public sealed class ConsentManifestApplyEndpointTests
         text.ShouldNotContain("System.");
         text.ShouldNotContain("Path:");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task RoleGranteePolicy_Returns400_WithACuratedMessage_NotAServerError()
+    {
+        var service = Substitute.For<IDeclarativeConsentApplyService>();
+        service.ApplyManifestAsync(default!, default!, default, default, default)
+            .ReturnsForAnyArgs(Task.FromException<Autheris.Domain.Model.DeclarativeApplyResult>(
+                new ArgumentException("Role grantees are not supported (table '" + Marker + "'); grant to a group or a user instead.", "manifest")));
+        var context = Request("{ \"version\": \"1\", \"policies\": [] }");
+
+        var (status, text) = await ExecuteAsync(await GovernanceEndpoints.ApplyConsentManifestAsync(context, service, CancellationToken.None), context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        text.ShouldNotContain(Marker);
+    }
 }

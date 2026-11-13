@@ -6,7 +6,6 @@ using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Pipeline;
@@ -45,7 +44,6 @@ public static class GovernedSqlExecutionServiceFactory
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
-        IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
         IMandatoryRowFilterResolver? mandatoryFilters = null,
         ISchemaContractManager? contractManager = null,
@@ -61,7 +59,7 @@ public static class GovernedSqlExecutionServiceFactory
     {
         var rewrite = new GovernedSqlRewriteDependencies(
             policyEnforcement, consentResolution, tableRepository, clientIpResolver, consentRepository, sqlEngine, policyFactory,
-            sqlSecurityValidator, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository,
+            sqlSecurityValidator, consentCache, mandatoryFilters, contractManager, accessProfileRepository,
             memoryCache, typedPolicies, timeZoneState);
         var execution = new GovernedSqlExecutionDependencies(connectionFactory, environment, concurrencyGate, sessionInitializer, secretProvider, auditDigester, PageTokenCodec: pageTokenCodec);
         var lazyFederated = federatedExecutionService is null ? null : new Lazy<IFederatedQueryExecutionService>(() => federatedExecutionService);

@@ -4,7 +4,7 @@ namespace Autheris.Infrastructure.Cache;
 
 /// <summary>
 /// Stable log event ids of the consent cache. The 411x range belongs to the consent cache L2 tier
-/// (4101 is taken by the ReBAC table gate).
+/// (4101 is reserved).
 /// </summary>
 internal static class ConsentCacheLogEvents
 {

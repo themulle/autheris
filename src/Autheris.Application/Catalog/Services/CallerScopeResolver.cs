@@ -18,7 +18,7 @@ public enum CallerScope
 
     /// <summary>
     /// GovernanceAdmin of the default tenant, the catalog owner (DT-A-7): the whole physical catalog metadata. Never widens a
-    /// tenant-scoped object (virtual tables, consents, ReBAC, audit, lineage, subscriptions, jobs, access profiles; DT-SC-08).
+    /// tenant-scoped object (virtual tables, consents, audit, lineage, subscriptions, jobs, access profiles; DT-SC-08).
     /// </summary>
     CatalogOwner,
 

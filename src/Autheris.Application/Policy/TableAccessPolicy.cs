@@ -9,23 +9,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Plugins.Auth;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Plugins.Auth;
-
-/// <summary>Where the ReBAC <c>can_query</c> gate applies (see <see cref="RebacTableGate"/>).</summary>
-public enum RebacEnforcement
-{
-    /// <summary>OData, GraphQL, WebSQL, procedures: only with <c>Rebac.EnforceOnQueryPaths</c>.</summary>
-    QueryPaths,
-
-    /// <summary>Unified PDP (MCP-RAG) and DuckDB OLAP: whenever ReBAC is enabled.</summary>
-    WhenEnabled
-}
 
 /// <summary>
 /// One caller and one catalog table. <paramref name="Claims"/> feed the Casbin attributes and the purpose;
@@ -40,7 +29,6 @@ public sealed record TableAccessQuery(
     TableMetadata Metadata,
     IEnumerable<Claim>? Claims = null,
     IReadOnlyList<string>? RequestedColumns = null,
-    RebacEnforcement Rebac = RebacEnforcement.QueryPaths,
     IPAddress? ClientIp = null,
     IReadOnlyDictionary<string, object?>? ExtraAttributes = null,
     FilterObjectKinds ObjectKind = FilterObjectKinds.Relation,
@@ -55,7 +43,6 @@ public sealed record TableAccessQuery(
         TenantId tenant,
         TableMetadata metadata,
         IReadOnlyList<string>? requestedColumns = null,
-        RebacEnforcement rebac = RebacEnforcement.QueryPaths,
         IReadOnlyDictionary<string, object?>? extraAttributes = null,
         SchemaContractDefinition? contract = null)
     {
@@ -68,7 +55,6 @@ public sealed record TableAccessQuery(
             metadata,
             principal.Claims,
             requestedColumns,
-            rebac,
             ClientIp: null,
             extraAttributes,
             AllUserSids: principal.GetAllUserSids(),
@@ -82,7 +68,6 @@ public sealed record TableAccessQuery(
 /// (<see cref="Autheris.Application.Services.GatewayExecutionService"/>), WebSQL, stored procedures, DuckDB OLAP and the unified PDP all decide here, in
 /// the same order:
 /// <list type="number">
-/// <item>ReBAC <c>can_query</c> (<see cref="RebacEnforcement"/>);</item>
 /// <item>consents: bypass switch, else decision cache (epoch compare-and-set) or the consent repository, tenant-filtered;</item>
 /// <item>Casbin ABAC only when consent allowed and the switch is off; a deny wins, its restriction is merged by
 /// <see cref="Restrict"/>.</item>
@@ -91,13 +76,10 @@ public sealed record TableAccessQuery(
 /// </summary>
 public sealed partial class TableAccessPolicy
 {
-    public const string RebacDeniedReason = "ReBAC Access Denied: Not authorized by relationship graph.";
-
     private readonly IConsentRepository _consentRepository;
     private readonly IConsentResolutionService _resolutionService;
     private readonly IConsentCacheService _cacheService;
     private readonly IPolicyEnforcementService _policyEnforcementService;
-    private readonly IRebacEvaluator _rebacEvaluator;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly GatewayOptions _options;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
@@ -121,7 +103,6 @@ public sealed partial class TableAccessPolicy
         IConsentResolutionService resolutionService,
         IConsentCacheService cacheService,
         IPolicyEnforcementService policyEnforcementService,
-        IRebacEvaluator rebacEvaluator,
         IClientIpResolver? clientIpResolver,
         GatewayOptions options,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters,
@@ -148,7 +129,6 @@ public sealed partial class TableAccessPolicy
         _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
         ArgumentNullException.ThrowIfNull(policyEnforcementService);
         _policyEnforcementService = policyEnforcementService;
-        _rebacEvaluator = rebacEvaluator ?? throw new ArgumentNullException(nameof(rebacEvaluator));
         _clientIpResolver = clientIpResolver;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _contractManager = contractManager;
@@ -283,23 +263,6 @@ public sealed partial class TableAccessPolicy
             }
         }
 
-        var rebacBypassed = _options?.IsRebacBypassed == true;
-        var rebacEnforced = !rebacBypassed && (query.Rebac switch
-        {
-            RebacEnforcement.WhenEnabled => _rebacEvaluator is { IsEnabled: true },
-            _ => RebacTableGate.IsEnforcedOnQueryPaths(_options)
-        });
-
-        bool rebacAllowed = false;
-        if (rebacEnforced)
-        {
-            rebacAllowed = await RebacTableGate.IsAllowedAsync(_rebacEvaluator, query.Tenant, query.UserSid, table, ct).ConfigureAwait(false);
-            if (!rebacAllowed)
-            {
-                return TableAccessDecision.Denied(table, RebacDeniedReason);
-            }
-        }
-
         var consentBypassed = _options?.IsConsentBypassed == true;
         IReadOnlyList<AccessProfile> profiles;
         try
@@ -383,16 +346,6 @@ public sealed partial class TableAccessPolicy
 
         if (!decision.IsAllowed)
         {
-            if (rebacAllowed)
-            {
-                const string diagnosticNote = "(ReBAC: Allowed, Consent: Denied - Zero-Trust requires an active ALLOW consent for subject or subject's groups)";
-                var reasons = new List<string>(decision.DeniedReasons);
-                if (!reasons.Contains(diagnosticNote))
-                {
-                    reasons.Add(diagnosticNote);
-                }
-                decision = decision with { DeniedReasons = reasons };
-            }
             return decision;
         }
 
