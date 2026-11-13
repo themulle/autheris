@@ -37,6 +37,8 @@ public sealed class AuditPolicyTableTests
         AuditPolicyTable.For(AuditEventTypes.TableQuery).ShouldBe(AuditFailurePolicy.FailClosed);
         AuditPolicyTable.For(AuditEventTypes.AuditConfigChanged).ShouldBe(AuditFailurePolicy.FailClosed);
         AuditPolicyTable.For(AuditEventTypes.TenantCollisionDenied).ShouldBe(AuditFailurePolicy.FailClosed);
+        AuditPolicyTable.For(AuditEventTypes.AuthzExplain).ShouldBe(AuditFailurePolicy.FailClosed);
+        AuditPolicyTable.For(AuditEventTypes.AuthzGrantsList).ShouldBe(AuditFailurePolicy.FailClosed);
     }
 
     [Fact]
