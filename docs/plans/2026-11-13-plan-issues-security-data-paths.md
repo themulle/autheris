@@ -153,6 +153,22 @@
 - Delta check only: #475 (WP-SIMPL-36 PR 5c, add the null-key and invalidation conditions above) and #508 (WP-SIMPL-36 PR 4c, re-verify line numbers after WP-SIMPL-46 PR 3).
 - Not needed: WP-OI-SEC-DP-6 and -7 (robustness and test-only), unless the reviewer wants the dbt message change in scope.
 
+## Phase 3 result (2026-11-13, group 1)
+
+Review: [`2026-11-13-sec-issues-group-1.md`](2026-11-13-sec-issues-group-1.md). Binding conditions `SEC-OI-<issue>-<n>` apply to Phase 4.
+
+| Work package | Verdict | Developer-ready |
+|---|---|---|
+| WP-OI-SEC-DP-1 (#473 shutdown) | APPROVED WITH CONDITIONS (SEC-OI-473-1..3) | yes |
+| WP-OI-SEC-DP-2 (#473 redaction) | CHANGES REQUIRED: redaction moves to the persistence chokepoint (SEC-OI-473-4..7, Q-SEC1-1) | after amendment |
+| WP-OI-SEC-DP-10 (#503 plugins) | CHANGES REQUIRED: integrity failures stay fatal, two-phase collision check (SEC-OI-503-1..3, Q-SEC1-2) | after amendment |
+| WP-OI-SEC-DP-11 (#503 OpenLineage, OpenJev) | APPROVED WITH CONDITIONS (SEC-OI-503-4, -5) | yes |
+| WP-OI-SEC-DP-12 (#503 OLAP) | APPROVED WITH CONDITIONS (SEC-OI-503-6) | yes |
+| WP-OI-SEC-DP-13 (#503 WebSocket) | APPROVED WITH CONDITIONS (SEC-OI-503-7) | no, waits for WP-SIMPL-46 PR 3 (#683) |
+
+Other issues of this plan (#475, #476, #485, #491, #505, #508) are not yet reviewed (later Phase 3 groups).
+
 ## Owner decisions (2026-11-13)
+
 
 The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.
