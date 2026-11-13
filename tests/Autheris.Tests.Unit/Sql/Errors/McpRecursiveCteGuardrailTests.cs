@@ -23,7 +23,7 @@ public sealed class McpRecursiveCteGuardrailTests
             TargetGraphQLOperation: ""));
         var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
-            registry, options, NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+            registry, options, NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var session = new McpSessionContext("sess-1", "user-principal", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var query = System.Text.Json.JsonSerializer.Serialize(new { query = sql });
 

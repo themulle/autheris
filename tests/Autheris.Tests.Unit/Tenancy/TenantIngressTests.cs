@@ -432,7 +432,7 @@ public sealed class TenantIngressTests
     [Fact]
     public async Task ExtAuthz_Authenticated_Claimless_Caller_Is_Denied_Not_Given_A_Tenant()
     {
-        var service = new EnvoyExtAuthzService(Substitute.For<IPolicyEnforcementService>(), NullLogger<EnvoyExtAuthzService>.Instance);
+        var service = new EnvoyExtAuthzService(Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>(), Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(), NullLogger<EnvoyExtAuthzService>.Instance);
 
         var denied = await service.CheckHttpAsync("GET", "/api/v1/x", new Dictionary<string, string>(), User(null));
         var invalid = await service.CheckHttpAsync("GET", "/api/v1/x", new Dictionary<string, string>(), User("bad tenant!!"));

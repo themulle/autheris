@@ -81,8 +81,7 @@ public sealed class StreamRlsCallerAttributeTests : IDisposable
         resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["cost_center"] = ColumnAccessLevel.Clear }, rowFilterSql: legacyText, hasUnconstrainedColumnAllow: true)
                 with { ConsentFilterRecipe = recipe });
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.HasPolicies(Arg.Any<TenantId>()).Returns(false);
+        var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
         return new StreamRlsPolicyEnforcer(
             policy, metadataRepo, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IEpochValidationService>(),
             NullLogger<StreamRlsPolicyEnforcer>.Instance, consents, resolution, Substitute.For<IConsentCacheService>(),

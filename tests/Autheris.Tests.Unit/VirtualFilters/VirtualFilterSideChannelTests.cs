@@ -75,7 +75,7 @@ public sealed class VirtualFilterSideChannelTests
         var metadata = Substitute.For<ITableMetadataRepository>();
         metadata.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Meta());
         var enforcer = new StreamRlsPolicyEnforcer(
-            Substitute.For<IPolicyEnforcementService>(), metadata, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IEpochValidationService>(),
+            Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), metadata, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IEpochValidationService>(),
             NullLogger<StreamRlsPolicyEnforcer>.Instance, Substitute.For<IConsentRepository>(), AllowAll(), Substitute.For<IConsentCacheService>(),
             mandatoryFilters: new FixedOutcome(Outcome(outcome)));
         var subscriber = new ClaimsPrincipal(new ClaimsIdentity([new Claim("tenant_id", "tenant-1"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-STREAM-USER")], "Test"));
@@ -96,13 +96,12 @@ public sealed class VirtualFilterSideChannelTests
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
         var options = Options.Create(new GatewayOptions());
-        var adp = new AccessDecisionPoint(
+        var adp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
             Substitute.For<IPolicyEnforcementService>(),
-            consentService: AllowAll(),
-            consentRepo: consents,
-            mandatoryFilters: new FixedOutcome(Outcome(outcome)),
-            metadataRepo: metadata);
+            AllowAll(),
+            consents,
+            mandatoryFilters: new FixedOutcome(Outcome(outcome)));
         var service = new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(), metadata, options, NullLogger<IcebergRestCatalogFederationService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,

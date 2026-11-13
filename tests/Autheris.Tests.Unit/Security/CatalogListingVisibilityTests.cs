@@ -81,12 +81,11 @@ public sealed class CatalogListingVisibilityTests
     {
         var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
         var metaRepo = Tables();
-        var adp = new AccessDecisionPoint(
+        var adp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
             Substitute.For<IPolicyEnforcementService>(),
-            consentService: new ConsentResolutionService(),
-            consentRepo: consents,
-            metadataRepo: metaRepo);
+            new ConsentResolutionService(),
+            consents);
         return new(
             Substitute.For<IIcebergMetadataReader>(),
             metaRepo,

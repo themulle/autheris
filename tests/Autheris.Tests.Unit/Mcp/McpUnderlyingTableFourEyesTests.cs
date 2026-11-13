@@ -82,7 +82,8 @@ public sealed class McpUnderlyingTableFourEyesTests
             queryExecutor: executor,
             tableMetadataRepository: withMetadata ? MetadataRepo() : null,
             procedureRegistry: procedures,
-            semanticCatalog: semanticCatalog);
+            semanticCatalog: semanticCatalog,
+            decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
 
     private static McpSessionContext Session() =>
         new("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER", Roles: ["DataAnalyst"]);
@@ -149,8 +150,9 @@ public sealed class McpUnderlyingTableFourEyesTests
 
         var result = await CallProcedure(guardrail, """{"procedure_name":"GetData"}""");
 
+        // The decision point decides the real tables first: a table without catalog metadata is denied there (fail closed).
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        result.ErrorMessage!.ShouldContain("Access denied");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 

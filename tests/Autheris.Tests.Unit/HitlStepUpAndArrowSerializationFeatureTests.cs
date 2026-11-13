@@ -200,7 +200,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
             logger: NullLogger<AiDataGuardrailService>.Instance,
             queryExecutor: queryExecutor,
             tableMetadataRepository: metaRepo,
-            stepUpApprovalService: hitlService, auditLogRepository: global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+            stepUpApprovalService: hitlService, auditLogRepository: global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
 
         var sessionContext = new McpSessionContext("sess-1", "sp-agent", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "agent-bob");
         var request = new McpToolCallRequest("query_secret_data", "{}");
