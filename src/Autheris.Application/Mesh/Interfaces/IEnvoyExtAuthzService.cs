@@ -12,13 +12,13 @@ public interface IEnvoyExtAuthzService
 {
     /// <summary>
     /// Evaluates direct Envoy HTTP check request with forwarded headers.
-    /// SEC C-1: Identity is bound strictly to the validated ClaimsPrincipal or verified mTLS source principal.
+    /// SEC C-1: Identity is bound strictly to the request security context of the validated principal.
     /// </summary>
     ValueTask<EnvoyCheckResponse> CheckHttpAsync(
         string method,
         string path,
         IReadOnlyDictionary<string, string> headers,
-        System.Security.Claims.ClaimsPrincipal? caller = null,
+        Autheris.Domain.Security.SecurityPrincipalContext? subject = null,
         CancellationToken ct = default);
 
     /// <summary>

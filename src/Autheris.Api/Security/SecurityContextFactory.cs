@@ -169,7 +169,10 @@ public static class SecurityContextFactory
         var normalizedQry = CallerLabelNormalizer.NormalizeQueryName(qry);
         var normalizedClientId = CallerLabelNormalizer.NormalizeClientId(clientId);
 
-        return new CallerContext(normalizedApp, normalizedVer, normalizedQry, normalizedClientId);
+        return new CallerContext(normalizedApp, normalizedVer, normalizedQry, normalizedClientId)
+        {
+            IsClientAsserted = app != null || ver != null || qry != null
+        };
     }
 
     private static string? GetRawHeader(HttpContext context, string primary, string alt)

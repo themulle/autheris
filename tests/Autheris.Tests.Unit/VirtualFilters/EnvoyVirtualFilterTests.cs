@@ -36,7 +36,7 @@ public sealed class EnvoyVirtualFilterTests
         MandatoryRowFilterResolverTests.Profile(UncoveredPolicy.Skip, new FilterBinding { FilterName = "filter_a" }) with { Scope = scope };
 
     private static Task<EnvoyCheckResponse> CheckAsync(EnvoyExtAuthzService service, string sid) =>
-        service.CheckHttpAsync("GET", "/api/v1/air1", new Dictionary<string, string>(), Caller(sid), CancellationToken.None).AsTask();
+        service.CheckHttpAsync("GET", "/api/v1/air1", new Dictionary<string, string>(), Autheris.Tests.Unit.TestSupport.EnvoySubjects.From(Caller(sid)), CancellationToken.None).AsTask();
 
     [Fact]
     public async Task CallerWithAProfileCoveringTheTable_IsDenied()

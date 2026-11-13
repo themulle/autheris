@@ -178,6 +178,30 @@ public sealed partial class CallerAttributeArchitectureTests
     [GeneratedRegex(@"MandatoryRowPredicateSql|\.PredicateSql\b|RowFiltersAfterVirtualFilters|MandatoryPredicateSql")]
     private static partial Regex ReaderPattern();
 
+    /// <summary>
+    /// The client-asserted flag marks header labels for audit and usage reading only: no authorization, grant, filter, mask, rate-limit or Envoy
+    /// decision may read it. The only readers are its definition, the factory that sets it and the audit details writer.
+    /// </summary>
+    [Fact]
+    public void Client_asserted_flag_is_read_by_audit_only()
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "src/Autheris.Domain/Security/CallerContext.cs",
+            "src/Autheris.Api/Security/SecurityContextFactory.cs",
+            "src/Autheris.Domain/Model/GovernanceModels.cs"
+        };
+
+        var readers = Sources("src")
+            .Where(s => s.Text.Contains("IsClientAsserted", StringComparison.Ordinal))
+            .Select(s => s.Path)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        readers.ShouldNotBeEmpty();
+        readers.Where(r => !allowed.Contains(r)).ShouldBeEmpty("IsClientAsserted must not be read by an authorization path; only audit and usage readers are allowed.");
+    }
+
     [Fact]
     public void ST_129_23_TheAstSecurityVisitor_KnowsNothingOfCallerAttributes()
     {
