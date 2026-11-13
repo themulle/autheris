@@ -73,6 +73,30 @@ public sealed partial class ParityIsolationArchitectureTests
         return lines.Count == 0 ? throw new InvalidOperationException("No 'dotnet test Autheris.sln' line matched: vacuous guard.") : lines;
     }
 
+    /// <summary>Joined workflow lines that mention the parity project (any case) other than the compile-only restore/build lines.</summary>
+    internal static IReadOnlyList<string> ParityProjectMentionViolations(string workflowText) =>
+        JoinedLines(workflowText).Where(l => l.Contains(ParityProject, StringComparison.OrdinalIgnoreCase) && !IsCompileOnlyParityLine(l.Trim())).ToList();
+
+    private static bool IsCompileOnlyParityLine(string line)
+    {
+        var m = CompileOnlyParityLine().Match(line);
+        if (!m.Success)
+        {
+            return false;
+        }
+
+        var args = m.Groups["args"].Value.Trim();
+        return m.Groups["verb"].Value == "restore"
+            ? args == "--locked-mode"
+            : !ForbiddenBuildArgs.Any(t => args.Contains(t, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static readonly string[] ForbiddenBuildArgs = ["--filter", "Category", "Parity", "VSTest", "-t:", "/t:", "-target", "/target", "--target"];
+
+    // Only plain tokens may follow the csproj: no quotes, $, ;, & or | (no chaining, no expansion).
+    [GeneratedRegex(@"^(?:-\s+)?(?:run:\s*)?dotnet (?<verb>restore|build) tests/Autheris\.Tests\.Parity/Autheris\.Tests\.Parity\.csproj(?<args>(?:\s+[-\w:=./]+)*)$")]
+    private static partial Regex CompileOnlyParityLine();
+
     internal static IReadOnlyList<string> LinesMissingParityExclusion(IReadOnlyList<string> lines) =>
         lines.Where(l => !l.Contains("Category!=Parity", StringComparison.Ordinal)).ToList();
 
@@ -198,8 +222,43 @@ public sealed partial class ParityIsolationArchitectureTests
     {
         var workflows = ReadWorkflows(FindRepoRoot());
         workflows.ShouldContainKey(NightlyWorkflow);
-        workflows.Where(w => w.Key != NightlyWorkflow && w.Value.Contains(ParityProject, StringComparison.Ordinal)).Select(w => w.Key).ShouldBeEmpty();
+        workflows.Where(w => w.Key != NightlyWorkflow).SelectMany(w => ParityProjectMentionViolations(w.Value).Select(l => $"{w.Key}: {l.Trim()}")).ShouldBeEmpty();
         workflows[NightlyWorkflow].ShouldContain(ParityProject);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ParityIsolation_OtherWorkflowsOnlyRestoreAndBuildTheProject()
+    {
+        const string Csproj = "tests/Autheris.Tests.Parity/Autheris.Tests.Parity.csproj";
+        ParityProjectMentionViolations(
+            $"      - name: Compile-only guard\n        run: |\n          dotnet restore {Csproj} --locked-mode\n          dotnet build {Csproj} -c Release --no-restore -p:AutherisIncludeTestAuth=true -warnaserror\n")
+            .ShouldBeEmpty();
+
+        // negative self-checks: running, filtering, chaining, MSBuild test targets and any other mention stay rejected
+        string[] rejected =
+        [
+            $"        run: dotnet test {Csproj} -c Release",
+            "        run: dotnet run --project tests/Autheris.Tests.Parity",
+            $"        run: dotnet build {Csproj} --filter Category=Parity",
+            $"        run: dotnet build {Csproj} -p:VSTestTestCaseFilter=Category=Parity",
+            $"        run: dotnet build {Csproj} -t:VSTest",
+            $"        run: dotnet build {Csproj} /t:Test",
+            $"        run: dotnet build {Csproj} -target:VSTest",
+            $"        run: dotnet build {Csproj} && dotnet test {Csproj}",
+            $"        run: dotnet build {Csproj}; dotnet test {Csproj}",
+            $"        run: dotnet build {Csproj} $EXTRA_ARGS",
+            $"        run: dotnet restore {Csproj} --locked-mode -p:X=1",
+            "        run: dotnet build tests/Autheris.Tests.Parity",
+            $"        run: |\n          dotnet test \\\n            {Csproj}",
+            "      - name: Build Autheris.Tests.Parity",
+            "          path: tests/Autheris.Tests.Parity/bin",
+            "  # runs autheris.tests.parity nightly",
+        ];
+        foreach (var sample in rejected)
+        {
+            ParityProjectMentionViolations(sample).Count.ShouldBe(1, sample);
+        }
     }
 
     [Fact]
@@ -354,7 +413,8 @@ public sealed partial class ParityIsolationArchitectureTests
     public void ParityWorkflow_PermissionsAreLeastPrivilege()
     {
         // SEC-PAR-01
-        var text = ReadWorkflow(NightlyWorkflow);
+        // The scheduled-failure job (issues: write, github.token) is pinned by ScheduledWorkflowFailureReportTests.
+        var text = ScheduledWorkflowFailureReportTests.WithoutReportFailureJob(ReadWorkflow(NightlyWorkflow));
         text.ShouldContain("\npermissions: {}\n");
         Regex.Count(text, @"^\s+permissions:\s*$", RegexOptions.Multiline).ShouldBe(Regex.Count(text, @"^\s+contents: read\s*$", RegexOptions.Multiline));
         Regex.Matches(text, @"^\s+(?!contents: read)[a-z\-]+: (read|write)\s*$", RegexOptions.Multiline).ShouldBeEmpty();

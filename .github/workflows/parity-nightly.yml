@@ -144,3 +144,25 @@ jobs:
           path: ${{ github.workspace }}/parity-report-dialects
           retention-days: 14
           if-no-files-found: ignore
+
+  # Opens or updates one issue per workflow when a scheduled run fails (only the run URL and failed job ids are posted).
+  report-failure:
+    name: Report scheduled failure
+    needs: [parity-sqlite, parity-dialects]
+    if: failure() && github.event_name == 'schedule' && github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bash .github/scripts/report-scheduled-failure.sh

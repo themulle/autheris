@@ -97,9 +97,10 @@ public sealed partial class SimulationIsolationArchitectureTests
 
     private static string Root => ParityIsolationArchitectureTests.FindRepoRoot();
 
+    /// <summary>The simulation workflow without its scheduled-failure job, which ScheduledWorkflowFailureReportTests pins separately.</summary>
     private static string SimWorkflowText() =>
         ParityIsolationArchitectureTests.ReadWorkflows(Root).TryGetValue(Workflow, out var text)
-            ? text
+            ? ScheduledWorkflowFailureReportTests.WithoutReportFailureJob(text)
             : throw new InvalidOperationException($"{Workflow} not found: the simulation guard fails closed.");
 
     /// <summary>Workflow plus the simulation scripts (scripts/sim/*.sh, .github/scripts/sim-*.py) that exist; used by the tool and container scanners.</summary>
