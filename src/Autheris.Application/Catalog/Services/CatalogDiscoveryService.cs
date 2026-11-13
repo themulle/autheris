@@ -61,7 +61,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IConsentResolutionService? consentResolution = null,
         IConsentRepository? consentRepository = null,
         TimeProvider? timeProvider = null,
-        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
+        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
+        Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? graphQlMap = null)
     {
         _transportResolver = transportResolver;
         _timeProvider = timeProvider ?? TimeProvider.System;

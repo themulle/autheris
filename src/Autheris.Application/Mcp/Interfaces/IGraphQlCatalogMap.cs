@@ -14,6 +14,12 @@ public interface IGraphQlCatalogMap
     /// <summary>GraphQL names of a table; null when the table is not part of the GraphQL schema.</summary>
     Task<GraphQlTableMapping?> GetTableAsync(TableIdentifier table, CancellationToken ct = default);
 
+    /// <summary>The GraphQL root query field of a table; null when the table is not part of the GraphQL schema.</summary>
+    Task<string?> GetRootFieldAsync(TableIdentifier table, CancellationToken ct = default);
+
+    /// <summary>The table behind a GraphQL root query field (exact, case-sensitive); null when no catalog table has this root field.</summary>
+    Task<TableIdentifier?> ResolveRootFieldAsync(string field, CancellationToken ct = default);
+
     /// <summary>
     /// Every catalog table a query document reads (root fields and nested relations; fragments expanded). Empty for a
     /// pure introspection query. Null (fail-closed) when the document cannot be parsed, is not a single query operation
