@@ -166,7 +166,24 @@ Review: [`2026-11-13-sec-issues-group-1.md`](2026-11-13-sec-issues-group-1.md). 
 | WP-OI-SEC-DP-12 (#503 OLAP) | APPROVED WITH CONDITIONS (SEC-OI-503-6) | yes |
 | WP-OI-SEC-DP-13 (#503 WebSocket) | APPROVED WITH CONDITIONS (SEC-OI-503-7) | no, waits for WP-SIMPL-46 PR 3 (#683) |
 
-Other issues of this plan (#475, #476, #485, #491, #505, #508) are not yet reviewed (later Phase 3 groups).
+## Phase 3 result (2026-11-13, group 2)
+
+Review: [`2026-11-13-sec-issues-group-2.md`](2026-11-13-sec-issues-group-2.md). Binding conditions `SEC-OI-<issue>-<n>` apply to Phase 4. `Q-SEC2-1..3` are not yet confirmed.
+
+| Work package | Verdict | Developer-ready |
+|---|---|---|
+| WP-OI-SEC-DP-4 (#476 poller) | APPROVED WITH CONDITIONS: wire the validator, dialect from data source (SEC-OI-476-1..5) | yes |
+| WP-OI-SEC-DP-5 (#485 transport gate) | APPROVED WITH CONDITIONS (SEC-OI-485-1) | yes |
+| WP-OI-SEC-DP-6 (#485 validation, caches) | APPROVED WITH CONDITIONS (SEC-OI-485-2..6) | yes |
+| WP-OI-SEC-DP-7 (#485 DI scopes) | APPROVED (SEC-OI-485-7) | yes |
+| WP-OI-SEC-DP-8 (#491 deletions) | CHANGES REQUIRED: keep `GovernedTableCacheExecutionService`, account for deleted security tests (SEC-OI-491-1..3, Q-SEC2-1) | after amendment |
+| WP-OI-SEC-DP-9 (#491 YAML, stream, switch) | APPROVED WITH CONDITIONS (SEC-OI-491-4..6) | YAML and switch yes; stream waits WP-SIMPL-46 PR 3 (#683) |
+| WP-SIMPL-45 PR 5 (#505) | APPROVED WITH CONDITIONS (SEC-OI-505-1..4) | per WP-45 order |
+| WP-OI-SEC-DP-14 (#505 read-only reads) | APPROVED WITH CONDITIONS (SEC-OI-505-5, -6) | no, after WP-SIMPL-45 PR 5 |
+| WP-SIMPL-36 PR 4c (#508) | APPROVED WITH CONDITIONS (SEC-OI-508-1..6) | no, after WP-SIMPL-46 PR 3 and WP-SIMPL-43 PR 4a |
+| WP-SIMPL-36 PR 5c (#475) | APPROVED WITH CONDITIONS (SEC-OI-475-1..5) | yes |
+
+All issues of this plan are now reviewed (groups 1 and 2).
 
 ## Owner decisions (2026-11-13)
 
