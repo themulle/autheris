@@ -80,8 +80,22 @@ public static class GatewayMcpServer
         return ValueTask.FromResult(new ListToolsResult { Tools = tools });
     }
 
-    internal static Tool ToTool(McpToolDefinition definition, bool readOnlySession, bool sqlDmlAllowed) =>
-        new() { Name = definition.Name, Description = definition.Description, InputSchema = Schema(definition.InputJsonSchema) };
+    /// <summary>Issue #706: every listed tool carries its behaviour hints from <see cref="McpToolAnnotations"/>.</summary>
+    internal static Tool ToTool(McpToolDefinition definition, bool readOnlySession, bool sqlDmlAllowed)
+    {
+        var hints = McpToolAnnotations.For(definition.Name, readOnlySession, sqlDmlAllowed);
+        return new Tool
+        {
+            Name = definition.Name,
+            Description = definition.Description,
+            InputSchema = Schema(definition.InputJsonSchema),
+            Annotations = new ToolAnnotations
+            {
+                ReadOnlyHint = hints.ReadOnly,
+                DestructiveHint = hints.ReadOnly ? null : hints.Destructive,
+            },
+        };
+    }
 
     internal static async ValueTask<CallToolResult> CallToolAsync(RequestContext<CallToolRequestParams> context, CancellationToken ct)
     {

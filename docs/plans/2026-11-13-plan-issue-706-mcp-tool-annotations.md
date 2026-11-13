@@ -54,4 +54,11 @@ One closed, name-keyed effect table next to the group table (`McpToolGroups`), s
 
 ## Phase 4 and 5
 
-- Branch `fix/706-mcp-tool-annotations`; red tests first, then the table and the two call sites.
+- Branch `fix/706-mcp-tool-annotations`; red commit first (20 of 30 new cases failed against a fail-safe stub), then
+  the table and the two call sites. 117 net lines in `src/`.
+- `McpSdkTransportTests.StandardClient_ListsTheDatasetTools_WithValidSchemas` additionally pins that a standard SDK
+  client receives the annotations.
+- Review (Phase 5): the table rejects duplicate names at type initialisation; `destructiveHint` is omitted for read-only
+  tools (meaningless per specification); no change to tool definitions, so no conflict with work on `McpDatasetTools.cs`.
+- Follow-ups (not in this PR): classify dynamic GraphQL-discovery tools by their operation type instead of fail-safe;
+  `request_access` gets its row when WP-SIMPL-41 PR 5 adds it (the completeness test enforces this).

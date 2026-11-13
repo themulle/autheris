@@ -194,11 +194,17 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
 
         foreach (var t in tools)
         {
+            // Issue #706: behaviour hints; destructiveHint is only meaningful (and only sent) for a tool that is not read-only.
+            var hints = McpToolAnnotations.For(t.Name, session.IsReadOnly, _options.IsWebSqlDmlAllowed);
+            var annotations = hints.ReadOnly
+                ? """{"readOnlyHint":true}"""
+                : hints.Destructive ? """{"readOnlyHint":false,"destructiveHint":true}""" : """{"readOnlyHint":false,"destructiveHint":false}""";
             toolItems.Add($$"""
             {
               "name": "{{EscapeJson(t.Name)}}",
               "description": "{{EscapeJson(t.Description)}}",
-              "inputSchema": {{SafeRawJson(t.InputJsonSchema)}}
+              "inputSchema": {{SafeRawJson(t.InputJsonSchema)}},
+              "annotations": {{annotations}}
             }
             """);
         }
