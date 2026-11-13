@@ -41,4 +41,4 @@ xUnit 2 cannot skip a single row of a theory at run time. The cases of one featu
 ## Phase 4 and 5
 
 - Tests only: no red-green cycle on `src/`. The report test runs the skipped cases too and shows them `NOT MET` on the base (table above); the `full-identifier` cases were run unskipped once (see deviations).
-- Delivery: UNDER REVIEW (PR to be linked).
+- Delivery: UNDER REVIEW in PR #734.
