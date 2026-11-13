@@ -46,7 +46,6 @@ src/Autheris.Application/Governance/Services/DeclarativeConsentApplyService.cs|1
 src/Autheris.Application/Governance/Services/EffectiveAccessExplanationService.cs|1
 src/Autheris.Application/Governance/Services/EuAiActAuditExporter.cs|1
 src/Autheris.Application/Governance/Services/InMemoryDataContractEngine.cs|2
-src/Autheris.Application/Governance/Services/PolicySimulationService.cs|1
 src/Autheris.Application/Governance/Services/SchemaSunsettingService.cs|1
 src/Autheris.Application/Governance/Services/WormConfigurationAuditService.cs|1
 src/Autheris.Application/Governance/Workflows/ConsentRecertificationWorkflowService.cs|6

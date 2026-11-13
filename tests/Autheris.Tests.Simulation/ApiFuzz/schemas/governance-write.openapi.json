@@ -113,29 +113,6 @@
     ]
    }
   },
-  "/api/governance/policy-simulation/replay": {
-   "post": {
-    "requestBody": {
-     "required": false,
-     "content": {
-      "application/json": {
-       "schema": {
-        "type": "object",
-        "additionalProperties": true
-       }
-      }
-     }
-    },
-    "responses": {
-     "200": {
-      "description": "OK"
-     },
-     "default": {
-      "description": "Any governed error"
-     }
-    }
-   }
-  },
   "/api/governance/sunsetting/rules": {
    "post": {
     "requestBody": {

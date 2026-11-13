@@ -69,45 +69,6 @@ public sealed class GovernanceEmptyBodyValidationTests
     [Theory]
     [InlineData("{}")]
     [InlineData("null")]
-    [InlineData("{\"draftPolicyCsv\":\"  \"}")]
-    public async Task Replay_EmptyOrBlankBody_Returns400(string json)
-    {
-        var service = Substitute.For<IPolicySimulationService>();
-        var context = CreateContext("GovernanceAdmin");
-
-        var result = await GovernanceEndpoints.ReplayPolicySimulationAsync(Bind<PolicySimulationRequest>(json), service, context);
-
-        AssertSanitizedBadRequest(await ExecuteAsync(result, context));
-        await service.DidNotReceiveWithAnyArgs().SimulateAsync(default!, default, default);
-    }
-
-    [Fact]
-    public async Task Replay_EmptyBody_NonPrivilegedCaller_StillGets403()
-    {
-        var context = CreateContext("Reader");
-
-        var result = await GovernanceEndpoints.ReplayPolicySimulationAsync(
-            Bind<PolicySimulationRequest>("{}"), Substitute.For<IPolicySimulationService>(), context);
-
-        (await ExecuteAsync(result, context)).Status.ShouldBe(StatusCodes.Status403Forbidden);
-    }
-
-    [Fact]
-    public async Task Replay_ValidBody_Succeeds()
-    {
-        var service = Substitute.For<IPolicySimulationService>();
-        var context = CreateContext("GovernanceAdmin");
-        var request = Bind<PolicySimulationRequest>("{\"draftPolicyCsv\":\"p, a, b\"}");
-
-        var result = await GovernanceEndpoints.ReplayPolicySimulationAsync(request, service, context);
-
-        (await ExecuteAsync(result, context)).Status.ShouldBe(StatusCodes.Status200OK);
-        await service.Received(1).SimulateAsync(request!, Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
-    }
-
-    [Theory]
-    [InlineData("{}")]
-    [InlineData("null")]
     [InlineData("{\"targetTable\":\"a.b.c\"}")]
     public async Task RegisterRule_EmptyOrIncompleteBody_Returns400(string json)
     {

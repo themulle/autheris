@@ -229,6 +229,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapCdcStreamAdminEndpoints();
         app.MapDbtEndpoints();
         app.MapGovernanceEndpoints();
+        app.MapAuthorizationExplainEndpoints();
         app.MapDataContractEndpoints();
         app.MapDocIngestionEndpoints();
         app.MapGovernanceClassificationEndpoints();

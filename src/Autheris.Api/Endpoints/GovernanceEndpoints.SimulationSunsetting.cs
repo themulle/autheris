@@ -19,39 +19,6 @@ public static partial class GovernanceEndpoints
     private static IResult InvalidRequest(HttpContext context) =>
         SafeErrorResults.BadRequest(ApiErrorCodes.BadRequest, "The request body is missing or contains invalid or missing required fields.", context);
 
-    internal static async Task<IResult> ReplayPolicySimulationAsync(
-        PolicySimulationRequest? request,
-        IPolicySimulationService simulationService,
-        HttpContext context)
-    {
-        // A-2: the replay exposes the tenant audit trail (ActorSid, TargetTable, ...). Only audit/governance roles
-        // may replay tenant-wide; a DataOwner only for one concrete table they own or are delegate of.
-        if (!await IsAuthorizedForSimulationAsync(context, request?.TargetTable).ConfigureAwait(false))
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
-
-        if (request is null || string.IsNullOrWhiteSpace(request.DraftPolicyCsv))
-        {
-            return InvalidRequest(context);
-        }
-
-        // SEC H-05: Tenant is enforced server-side from the resolved principal tenant;
-        // a foreign tenant from the request body is honored only for ClusterAdmin.
-        var effectiveTenant = EndpointSecurity.GetRequestTenant(context);
-        if (request.Tenant is { } requestedTenant && requestedTenant != effectiveTenant)
-        {
-            if (!GatewayPolicies.HasRole(context.User, GatewayRole.ClusterAdmin))
-            {
-                return Results.StatusCode(StatusCodes.Status403Forbidden);
-            }
-            effectiveTenant = requestedTenant;
-        }
-
-        var result = await simulationService.SimulateAsync(request, effectiveTenant, context.RequestAborted);
-        return Results.Ok(result);
-    }
-
     internal static async Task<IResult> RegisterSunsettingRuleAsync(
         FieldSunsettingRule? rule,
         ISchemaSunsettingService sunsettingService,
