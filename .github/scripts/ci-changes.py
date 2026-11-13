@@ -11,6 +11,7 @@ still run a narrowed filter (see ci.yml), because architecture and unit tests re
 import fnmatch
 import os
 import posixpath
+import re
 import subprocess
 import sys
 
@@ -23,6 +24,7 @@ DENY = (
 DOC_ONLY = ("docs/*", "*.md", "benchmarks/*", "deploy/*", ".github/ISSUE_TEMPLATE/*", "LICENSE")
 
 ZERO_SHA = "0" * 40
+SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _normalize(path):
@@ -73,7 +75,7 @@ def _git(*args):
 
 def _diff(rev):
     # -z: NUL separated, never quoted; --no-renames: both sides of a rename are listed as separate paths.
-    out = _git("diff", "-z", "--no-renames", "--name-only", rev)
+    out = _git("diff", "-z", "--no-renames", "--name-only", rev, "--")
     return [p for p in out.split("\0") if p]
 
 
@@ -81,7 +83,7 @@ def changed_paths(event, base, head):
     """Return the changed paths, or None when the diff cannot be trusted (fail-closed)."""
     try:
         if event == "pull_request":
-            if not base or set(base) == {"0"} or not head:
+            if not SHA.match(base or "") or base == ZERO_SHA or not SHA.match(head or ""):
                 return None
             return _diff(f"{base}...{head}")
         # push (main) is never narrowed: with coalescing a docs-only push can supersede a pending code push.

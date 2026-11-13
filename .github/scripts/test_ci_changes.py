@@ -1,4 +1,6 @@
 import importlib.util
+import os
+import tempfile
 import pathlib
 import unittest
 
@@ -53,6 +55,29 @@ class CiChangesTests(unittest.TestCase):
     def test_rename_from_src_to_docs_runs_dotnet(self):
         # --no-renames lists both sides; the src side is code.
         self.assertTrue(ci.classify(["src/Autheris.Api/A.md", "docs/A.md"]))
+
+    def test_git_failure_runs_dotnet(self):
+        self.assertTrue(ci.changed_paths("pull_request", "deadbeef" * 5, "cafebabe" * 5) is None)
+        self.assertTrue(ci.decide("pull_request", "deadbeef" * 5, "cafebabe" * 5))
+
+    def test_non_sha_base_or_head_runs_dotnet(self):
+        for base, head in [("HEAD", "b" * 40), ("a" * 40, "HEAD~1"), ("--output=x", "b" * 40), ("A" * 40, "b" * 40), ("a" * 39, "b" * 40)]:
+            self.assertTrue(ci.changed_paths("pull_request", base, head) is None, (base, head))
+
+    def test_main_writes_dotnet_true_to_github_output(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "out")
+            saved = {k: os.environ.get(k) for k in ("CI_EVENT", "CI_BASE", "CI_HEAD", "GITHUB_OUTPUT")}
+            try:
+                os.environ.update(CI_EVENT="schedule", CI_BASE="", CI_HEAD="", GITHUB_OUTPUT=out)
+                self.assertEqual(0, ci.main())
+                self.assertEqual("dotnet=true\n", open(out, encoding="utf-8").read())
+            finally:
+                for k, v in saved.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
 
     def test_push_event_always_runs_dotnet(self):
         self.assertTrue(ci.changed_paths("push", "a" * 40, "b" * 40) is None)

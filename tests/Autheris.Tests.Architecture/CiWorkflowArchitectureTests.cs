@@ -162,6 +162,39 @@ public sealed partial class CiWorkflowArchitectureTests
         job.ShouldContain(l => l.Contains("FullyQualifiedName~Autheris.Tests.Architecture.|Category=Security", StringComparison.Ordinal));
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Codeql_analyze_is_skipped_only_when_classifier_says_false()
+    {
+        var analyze = Job("codeql.yml", "analyze");
+        JobIf(analyze).ShouldBe("${{ !cancelled() && needs.changes.outputs.dotnet != 'false' }}", "a fail-open gate: anything but the literal 'false' must analyze");
+        analyze.Count(l => l.StartsWith("    needs:", StringComparison.Ordinal)).ShouldBe(1);
+        analyze.ShouldContain("    needs: changes");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Changes_jobs_are_read_only_and_never_interpolate_event_data_into_scripts()
+    {
+        foreach (var workflow in new[] { "ci.yml", "codeql.yml" })
+        {
+            var job = Job(workflow, "changes");
+            job.ShouldContain("      contents: read", customMessage: workflow);
+            job.Count(l => l.Trim().StartsWith("contents:", StringComparison.Ordinal)).ShouldBe(1, workflow);
+            job.ShouldContain("          fetch-depth: 0", customMessage: workflow);
+            job.ShouldNotContain(l => l.Contains("write", StringComparison.Ordinal) && l.Contains(':'), workflow);
+        }
+
+        foreach (var path in Directory.EnumerateFiles(Path.Combine(RepositoryScan.RepoRoot, ".github", "workflows"), "*.yml"))
+        {
+            foreach (var line in File.ReadAllLines(path).Where(l => l.TrimStart().StartsWith("run:", StringComparison.Ordinal)))
+            {
+                line.ShouldNotContain("${{ needs.changes", customMessage: path);
+                line.ShouldNotContain("${{ github.event.pull_request", customMessage: path);
+            }
+        }
+    }
+
     private static List<string> Tuple(string script, string name)
     {
         var match = Regex.Match(script, name + @" = \((?<body>.*?)\n?\)\s*\n", RegexOptions.Singleline);
