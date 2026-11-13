@@ -84,6 +84,7 @@ public class SecurityMutantGateTests(ITestOutputHelper output)
             SecurityControl.TenantRegistryFailClosed,
             SecurityControl.CatalogLoadFailureDenies,
             // WP-SIMPL-45 D-45-4: unreachable while MERGE is rejected; its mutant is retired to SecurityMutants.Pending.
+            // Remove this exemption when PendingMutant_IsActivated_WhenItsControlExists moves the MERGE mutants back to Active.
             SecurityControl.MergeClauseClosedSet
         };
         var used = SecurityMutants.Active.SelectMany(m => m.Seam.DisabledControls ?? Enumerable.Empty<SecurityControl>()).ToHashSet();
