@@ -142,7 +142,7 @@ public sealed class McpPromptGuardrailHardeningTests
             new McpToolRegistry(Options.Create(new GatewayOptions()), new NoDemo()),
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
-            audit, queryExecutor: executor, tableMetadataRepository: metadata);
+            audit, queryExecutor: executor, tableMetadataRepository: metadata, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(
             new McpToolCallRequest("describe_dataset", """{"dataset":"sales.public.orders"}"""), Session());
@@ -167,7 +167,7 @@ public sealed class McpPromptGuardrailHardeningTests
             new McpToolRegistry(Options.Create(new GatewayOptions()), new NoDemo()),
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
-            audit, docSearchService: search);
+            audit, docSearchService: search, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDocTools.SearchDocs, """{"query":"x"}"""), Session());
 

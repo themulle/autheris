@@ -159,7 +159,7 @@ public sealed class LayerSecurityAuditRemediationTests
     public async Task Application_StreamRls_EnforcesCombinedRowFilterOnPayload()
     {
         // CRIT-02: Streaming CDC event row filtering must drop non-matching payloads
-        var policyMock = Substitute.For<IPolicyEnforcementService>();
+        var policyMock = Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
         var metadataMock = Substitute.For<ITableMetadataRepository>();
         var maskingMock = Substitute.For<IColumnMaskingProvider>();
         var epochMock = Substitute.For<IEpochValidationService>();
@@ -168,7 +168,7 @@ public sealed class LayerSecurityAuditRemediationTests
         var tenant = new TenantId("tenant-1");
 
         // Policy allows read but with RLS filter: department = 'HR'
-        policyMock.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+        policyMock.DecideAsync(Arg.Any<Autheris.Application.Policy.Pdp.AccessRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(
                 table,
                 new Dictionary<string, ColumnAccessLevel>(),
@@ -176,7 +176,6 @@ public sealed class LayerSecurityAuditRemediationTests
                 hasUnconstrainedColumnAllow: true)));
 
         // SEC H-09: Consent decision first (allowed, unconstrained), Casbin RLS filter as additional gate.
-        policyMock.HasPolicies(Arg.Any<TenantId>()).Returns(true);
         metadataMock.GetTableMetadataAsync(table, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(new TableMetadata
             {

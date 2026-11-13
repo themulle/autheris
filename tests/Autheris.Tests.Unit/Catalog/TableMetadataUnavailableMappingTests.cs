@@ -133,7 +133,7 @@ public sealed class TableMetadataUnavailableMappingTests
             Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
             Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
-            tableMetadataRepository: metadataRepo);
+            tableMetadataRepository: metadataRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(
             new McpToolCallRequest("sample_rows", """{"dataset":"sales.public.orders"}"""),

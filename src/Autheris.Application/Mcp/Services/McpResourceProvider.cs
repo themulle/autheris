@@ -101,6 +101,13 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     public static bool IsStaticDocumentation(string uri) =>
         Is(uri, OpenApiUri) || Is(uri, EndpointsDocUri) || Is(uri, McpToolsDocUri);
 
+    /// <summary>
+    /// The fixed catalog-level resources (catalog summary, data source list, the caller's own access, static API documentation): they read no
+    /// data table, so the guardrail decides no table for them. Keyed on the URI, never on a table name.
+    /// </summary>
+    public static bool IsCatalogLevelResource(string uri) =>
+        Is(uri, CatalogSummaryUri) || Is(uri, CatalogDatasourcesUri) || Is(uri, MyAccessUri) || IsStaticDocumentation(uri);
+
     public bool IsNativeResource(string uri) =>
         uri.StartsWith("autheris://catalog/", StringComparison.OrdinalIgnoreCase) ||
         uri.StartsWith("autheris://governance/", StringComparison.OrdinalIgnoreCase) ||

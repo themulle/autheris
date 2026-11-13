@@ -73,7 +73,7 @@ public sealed class McpServerTests
             Mcp = new McpOptions { Enabled = true }
         });
         var logger = NullLogger<AiDataGuardrailService>.Instance;
-        var guardrail = new AiDataGuardrailService(registry, options, logger, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+        var guardrail = new AiDataGuardrailService(registry, options, logger, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-1", "agent-principal", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -109,7 +109,7 @@ public sealed class McpServerTests
             Insecure = new InsecureGettingStartedOptions { warn_allow_unmasked_ai_access = true }
         });
         var logger = NullLogger<AiDataGuardrailService>.Instance;
-        var guardrail = new AiDataGuardrailService(registry, options, logger, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+        var guardrail = new AiDataGuardrailService(registry, options, logger, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-2", "agent-principal", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -134,7 +134,7 @@ public sealed class McpServerTests
             Mcp = new McpOptions { Enabled = true, MaxTokensPerCall = 30 } // Very small token budget
         });
         var logger = NullLogger<AiDataGuardrailService>.Instance;
-        var guardrail = new AiDataGuardrailService(registry, options, logger, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+        var guardrail = new AiDataGuardrailService(registry, options, logger, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-3", "agent-principal", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -156,7 +156,7 @@ public sealed class McpServerTests
         // Arrange
         var registry = new McpToolRegistry();
         var options = Options.Create(new GatewayOptions());
-        var guardrail = new AiDataGuardrailService(registry, options, NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+        var guardrail = new AiDataGuardrailService(registry, options, NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var session = new McpSessionContext("sess-invalid-ds", "agent-principal", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("describe_dataset", "{}");
 
@@ -205,7 +205,7 @@ public sealed class McpServerTests
         // Arrange
         var registry = new McpToolRegistry();
         var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
-        var guardrail = new AiDataGuardrailService(registry, options, NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance);
+        var guardrail = new AiDataGuardrailService(registry, options, NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var sessionStore = new McpSessionStore(NullLogger<McpSessionStore>.Instance);
         var handler = new McpProtocolHandler(sessionStore, registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
 
@@ -265,7 +265,7 @@ public sealed class McpServerTests
             registry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            auditLogRepository: auditRepo);
+            auditLogRepository: auditRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-audit-1", "agent-audit", "tenant-audit", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -288,14 +288,15 @@ public sealed class McpServerTests
         var registry = new McpToolRegistry();
         var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
         var auditRepo = Substitute.For<IAuditLogRepository>();
-        var policyService = new DenyingPolicyService();
+        var policyService = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(r => TableAccessDecision.Denied(r.Object.Identifier, "not authorized"));
 
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
             auditLogRepository: auditRepo,
-            policyEnforcementService: policyService);
+            decisionPoint: policyService,
+            tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-deny-1", "agent-unauthorized", "tenant-test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -337,7 +338,7 @@ public sealed class McpServerTests
             options,
             NullLogger<AiDataGuardrailService>.Instance,
             auditLogRepository: auditRepo,
-            tableMetadataRepository: metadataRepo);
+            tableMetadataRepository: metadataRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
 
         var session = new McpSessionContext("sess-4eyes-1", "agent-claude", "tenant-test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -403,7 +404,7 @@ public sealed class McpServerTests
             auditLogRepository: auditRepo,
             tableMetadataRepository: metadataRepo,
             stepUpApprovalService: stepUpService,
-            consentRepository: consentRepo);
+            consentRepository: consentRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
 
         var session = new McpSessionContext("sess-1", "sp-analyst", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "user-analyst");
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -451,7 +452,7 @@ public sealed class McpServerTests
             options,
             NullLogger<AiDataGuardrailService>.Instance,
             auditLogRepository: auditRepo,
-            tableMetadataRepository: metadataRepo);
+            tableMetadataRepository: metadataRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
 
         var session = new McpSessionContext("sess-1", "sp-analyst", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "user-analyst");
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -497,22 +498,6 @@ public sealed class McpServerTests
         dispatchedAfterRemove.ShouldBeFalse();
     }
 
-    private sealed class DenyingPolicyService : IPolicyEnforcementService
-    {
-        public ValueTask<TableAccessDecision> EvaluatePolicyAsync(SecurityEvaluationContext context, System.Threading.CancellationToken ct = default)
-        {
-            return ValueTask.FromResult(TableAccessDecision.Denied(
-                context.TargetTable,
-                $"Role 'AiAgent' not authorized for table '{context.TargetTable}'."));
-        }
-
-        public bool HasPolicies(TenantId tenant) => true;
-        public Task ReloadPoliciesAsync(TenantId tenant, System.Threading.CancellationToken ct = default) => Task.CompletedTask;
-        public void LoadPolicyFromText(TenantId tenant, string policyText) { }
-        public void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false) { }
-    }
-
-
     [Fact]
     public async Task AiDataGuardrailService_ShouldEmitGenAiOpenTelemetrySpanAndAttributes()
     {
@@ -542,7 +527,7 @@ public sealed class McpServerTests
             registry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var request = new McpToolCallRequest("query_customers", """{"limit":1}""");
         var session = new McpSessionContext("session-otel", "agent-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);

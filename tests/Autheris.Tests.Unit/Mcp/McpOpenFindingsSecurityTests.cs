@@ -61,19 +61,14 @@ public sealed class McpOpenFindingsSecurityTests
     private static McpSessionContext AppOnlySession(IReadOnlyList<string>? groups = null) =>
         new("s1", "app-client", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: null, GroupSids: groups);
 
-    private static IPolicyEnforcementService PolicyDenying(params TableIdentifier[] denied)
-    {
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                var target = ci.Arg<SecurityEvaluationContext>().TargetTable;
-                return ValueTask.FromResult(denied.Contains(target)
-                    ? TableAccessDecision.Denied(target, "no policy")
-                    : TableAccessDecision.Allowed(target, new Dictionary<string, ColumnAccessLevel>()));
-            });
-        return policy;
-    }
+    private static Autheris.Application.Policy.Pdp.IAccessDecisionPoint PolicyDenying(params TableIdentifier[] denied) =>
+        Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(r =>
+        {
+            var target = r.Object.Identifier;
+            return denied.Contains(target)
+                ? TableAccessDecision.Denied(target, "no policy")
+                : TableAccessDecision.Allowed(target, new Dictionary<string, ColumnAccessLevel>());
+        });
 
     private static IMcpQueryExecutor Executor(string json = """{"totalTables":0,"tables":[]}""")
     {
@@ -84,17 +79,18 @@ public sealed class McpOpenFindingsSecurityTests
     }
 
     private static AiDataGuardrailService Guardrail(
-        IPolicyEnforcementService? policy = null,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? policy = null,
         IMcpQueryExecutor? executor = null,
         IAuditLogRepository? audit = null,
         IAccessPlanningService? planning = null) =>
         new(
             new McpToolRegistry(Options.Create(new GatewayOptions()), new NoDemo()),
-            Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = policy != null }, Mcp = new McpOptions { Enabled = true } }),
+            Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
             NullLogger<AiDataGuardrailService>.Instance,
             audit ?? global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             queryExecutor: executor ?? Executor(),
-            policyEnforcementService: policy,
+            decisionPoint: policy ?? Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(),
+            tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(),
             accessPlanningService: planning);
 
     private static McpToolDefinition Tool(string name) =>
@@ -185,8 +181,8 @@ public sealed class McpOpenFindingsSecurityTests
             UserSession());
 
         result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
-        await policy.Received(1).EvaluatePolicyAsync(Arg.Is<SecurityEvaluationContext>(c => c.TargetTable == Orders), Arg.Any<CancellationToken>());
-        await policy.Received(1).EvaluatePolicyAsync(Arg.Is<SecurityEvaluationContext>(c => c.TargetTable == Payroll), Arg.Any<CancellationToken>());
+        await policy.Received(1).DecideAsync(Arg.Is<Autheris.Application.Policy.Pdp.AccessRequest>(c => c.Object.Identifier == Orders), Arg.Any<CancellationToken>());
+        await policy.Received(1).DecideAsync(Arg.Is<Autheris.Application.Policy.Pdp.AccessRequest>(c => c.Object.Identifier == Payroll), Arg.Any<CancellationToken>());
     }
 
     private static (McpToolExecutionHandler Handler, ICatalogDiscoveryService Discovery) Handler()
@@ -435,19 +431,22 @@ public sealed class McpOpenFindingsSecurityTests
     [Fact]
     public async Task GuardrailAbac_AppOnlySession_IsEvaluatedWithoutGroups()
     {
-        var captured = new List<SecurityEvaluationContext>();
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.EvaluatePolicyAsync(Arg.Do<SecurityEvaluationContext>(captured.Add), Arg.Any<CancellationToken>())
-            .Returns(ci => ValueTask.FromResult(TableAccessDecision.Allowed(ci.Arg<SecurityEvaluationContext>().TargetTable, new Dictionary<string, ColumnAccessLevel>())));
-        var guardrail = Guardrail(policy, Executor("""{"datasets":[]}"""));
+        var captured = new List<Autheris.Application.Policy.Pdp.AccessRequest>();
+        var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(r =>
+        {
+            captured.Add(r);
+            return TableAccessDecision.Allowed(r.Object.Identifier, new Dictionary<string, ColumnAccessLevel>());
+        });
+        var guardrail = Guardrail(policy, Executor("""{"rows":[]}"""));
+        var args = """{"dataset":"sales.public.orders"}""";
 
-        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.ListDatasets, "{}"), AppOnlySession(["S-1-5-21-1-2-3-4001"]));
-        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.ListDatasets, "{}"), UserSession(["S-1-5-21-1-2-3-4001"]));
+        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.SampleRows, args), AppOnlySession(["S-1-5-21-1-2-3-4001"]));
+        await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.SampleRows, args), UserSession(["S-1-5-21-1-2-3-4001"]));
 
         captured.Count.ShouldBe(2);
-        captured[0].UserSid.Value.ShouldBe("app-client");
-        captured[0].GroupSids.ShouldBeEmpty();
-        captured[1].GroupSids.Select(g => g.Value).ShouldBe(["S-1-5-21-1-2-3-4001"]);
+        captured[0].Subject.UserSid.Value.ShouldBe("app-client");
+        captured[0].Subject.GroupSids.ShouldBeEmpty();
+        captured[1].Subject.GroupSids.Select(g => g.Value).ShouldBe(["S-1-5-21-1-2-3-4001"]);
     }
 
     // ---- 4. Mutating admin tools: two-phase confirmation, audit row, fixed errors ----------------------------------------------

@@ -80,7 +80,7 @@ public sealed class GoldenQuerySecurityTests
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, tableMetadataRepository: _metadataRepo,
             goldenQueryService: _goldenService,
-            consentRepository: _consentRepo);
+            consentRepository: _consentRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
     }
 
     private static List<string> ExtractQueryIds(string contentJson)
@@ -239,7 +239,7 @@ public sealed class GoldenQuerySecurityTests
             Options.Create(new GatewayOptions()),
             NullLogger<AiDataGuardrailService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, tableMetadataRepository: _metadataRepo,
-            goldenQueryService: _goldenService);
+            goldenQueryService: _goldenService, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
         var session = new McpSessionContext(
             SessionId: "sess-norepo",
             ServicePrincipalId: "sp-1",
@@ -342,7 +342,8 @@ public sealed class GoldenQuerySecurityTests
         global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
         tableMetadataRepository: _metadataRepo,
         goldenQueryService: golden,
-        consentRepository: withConsentRepo ? _consentRepo : null);
+        consentRepository: withConsentRepo ? _consentRepo : null,
+        decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
 
     private static McpSessionContext Session(string sid, string role) => new(
         SessionId: "sess-" + sid,

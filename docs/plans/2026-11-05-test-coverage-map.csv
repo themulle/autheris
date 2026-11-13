@@ -201,3 +201,16 @@ Autheris.Tests.Architecture.ArchitectureNoSourceKeyCatalogQueriesTests.EachPatte
 Autheris.Tests.Architecture.ArchitectureNoSourceKeyCatalogQueriesTests.GovernanceTablesAndColumnReads_AreNotKeyCatalogReads,Autheris.Tests.Architecture.ArchitectureNoSourceMetadataReadsTests.GovernanceTables_AreNotMetadataReads (WP-SIMPL-44: the key-only catalog scan widened to all source metadata reads),Security
 Autheris.Tests.Architecture.ArchitectureNoSourceKeyCatalogQueriesTests.MigrationsOutOfScope,Autheris.Tests.Architecture.ArchitectureNoSourceMetadataReadsTests.MigrationsOutOfScope (WP-SIMPL-44: the key-only catalog scan widened to all source metadata reads),Security
 Autheris.Tests.Architecture.ArchitectureNoSourceKeyCatalogQueriesTests.KeyIndexReaders_AreReferencedOnlyByTheGovernedCatalogProviderAndComposition,Autheris.Tests.Architecture.ArchitectureNoSourceMetadataReadsTests.KeyIndexReaders_AreReferencedOnlyByTheGovernedCatalogProviderAndComposition (WP-SIMPL-44: the key-only catalog scan widened to all source metadata reads),Security
+Autheris.Tests.Unit.Catalog.CatalogDiscoveryConsentVisibilityTests.ReBacOn_IsAnAdditionalFilter_NeverAUnion,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.CatalogVisibilityServiceHardeningTests.EvaluatorTimeout_TaskCanceled_TokenNotCancelled_ChunkHidden_NoThrow,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.CatalogVisibilityServiceHardeningTests.RealCancellation_StillPropagates,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.FakeRebac.Batching_Chunk32_Parallel8_Enforced_RelationCandidatesCappedAndDeduped,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.FakeRebac.FindVisible_UnknownHiddenInactiveRebacDenied_AllNull,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.FakeRebac.Logs_Metrics_NoSidTenantTableName_OnChunkFailureAndDeny,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.FakeRebac.Pipeline_NonAdminUnmarkedRow_DroppedBeforeRebacAndMemo,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.FakeRebac.RebacAppliesToAdminClasses,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.FakeRebac.RebacChunkThrows_OnlyThatChunkHidden_CancellationPropagates_NoPartialMemo,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.FakeRebac.RebacEnabled_IsIntersection_NeverUnion,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.FakeRebac.RebacEvaluatorNullOrDisabledResultMissingKey_Denies,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Catalog.FakeRebac.UsesBatchCheck_RebacSubjectIsPrincipalSid_TenantIsCallerTenant_NoPerTableCheckAsync,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Mcp.McpDatasetDisplayNameTests.RebacDeniedTable_DisplayNameAbsentFromListAndDescribe,feature deleted (WP-SIMPL-46),Security

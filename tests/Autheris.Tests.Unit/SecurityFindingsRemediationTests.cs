@@ -436,7 +436,7 @@ public class SecurityFindingsRemediationTests
     {
         // Finding F-02 Verification:
         // A CDC event with null or empty TenantId must fail closed and be denied.
-        var policyEnforcement = Substitute.For<IPolicyEnforcementService>();
+        var policyEnforcement = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var maskingProvider = Substitute.For<IColumnMaskingProvider>();
         var epochService = Substitute.For<IEpochValidationService>();
@@ -478,52 +478,17 @@ public class SecurityFindingsRemediationTests
     // =========================================================================
 
     [Fact]
-    public async Task AiDataGuardrailService_UnmappedTool_WhenPolicyDenies_FailsClosedAndReturnsError()
-    {
-        // Finding B2 Verification:
-        // A generic tool with no physical table mapping MUST NOT bypass Casbin ABAC.
-        // It must evaluate tool-level permission and fail closed if denied.
-        var registry = new McpToolRegistry();
-        var unmappedTool = new McpToolDefinition(
-            Name: "unmapped_generic_tool",
-            Description: "A generic tool without direct table mapping",
-            InputJsonSchema: "{}",
-            TargetGraphQLOperation: "query UnknownOp { randomData { val } }"
-        );
-        registry.RegisterTool(unmappedTool);
-
-        var policyService = new TestPolicyEnforcementService(ctx =>
-            TableAccessDecision.Denied(ctx.TargetTable, "Access denied by ABAC policy for tool"));
-
-        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
-        var guardrail = new AiDataGuardrailService(
-            registry,
-            options,
-            NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, policyEnforcementService: policyService);
-
-        var session = new McpSessionContext("sess-b2", "agent-unauthorized", "tenant-test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
-        var request = new McpToolCallRequest("unmapped_generic_tool", "{}");
-
-        var result = await guardrail.ExecuteToolWithGuardrailAsync(request, session);
-
-        result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldContain("Access denied to tool 'unmapped_generic_tool'");
-    }
-
-    [Fact]
     public async Task AiDataGuardrailService_CustomClientIp_PassedToSecurityContext()
     {
         // Finding B2 / F-03 Verification:
         // ClientIp in McpSessionContext must be passed to SecurityEvaluationContext rather than hardcoded 127.0.0.1.
         var registry = new McpToolRegistry();
-        SecurityEvaluationContext? capturedContext = null;
+        Autheris.Application.Policy.Pdp.AccessRequest? capturedContext = null;
 
-        var policyService = new TestPolicyEnforcementService(ctx =>
+        var policyService = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(ctx =>
         {
             capturedContext = ctx;
-            return TableAccessDecision.Allowed(ctx.TargetTable, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+            return TableAccessDecision.Allowed(ctx.Object.Identifier, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         });
 
         var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
@@ -531,7 +496,7 @@ public class SecurityFindingsRemediationTests
             registry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, policyEnforcementService: policyService);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: policyService, tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext(
             SessionId: "sess-ip-test",
@@ -547,7 +512,7 @@ public class SecurityFindingsRemediationTests
 
         result.IsSuccess.ShouldBeTrue();
         capturedContext.ShouldNotBeNull();
-        capturedContext.ClientIp.ToString().ShouldBe("198.51.100.42");
+        capturedContext.Subject.ClientIp!.ToString().ShouldBe("198.51.100.42");
     }
 
     [Fact]
@@ -566,10 +531,10 @@ public class SecurityFindingsRemediationTests
         registry.RegisterTool(dealTool);
 
         TableIdentifier? evaluatedTable = null;
-        var policyService = new TestPolicyEnforcementService(ctx =>
+        var policyService = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(ctx =>
         {
-            evaluatedTable = ctx.TargetTable;
-            return TableAccessDecision.Allowed(ctx.TargetTable, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+            evaluatedTable = ctx.Object.Identifier;
+            return TableAccessDecision.Allowed(ctx.Object.Identifier, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         });
 
         var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
@@ -577,7 +542,7 @@ public class SecurityFindingsRemediationTests
             registry,
             options,
             NullLogger<AiDataGuardrailService>.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, policyEnforcementService: policyService);
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: policyService, tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-deals", "agent-deals", "tenant-sales", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         var request = new McpToolCallRequest("query_deals", "{}");
@@ -1248,25 +1213,5 @@ public class SecurityFindingsRemediationTests
         await TrinoProtocolEndpoints.HandleTrinoCancel("stmt-foreign-tenant", 0, context, statementManager);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
-    }
-
-    private sealed class TestPolicyEnforcementService : IPolicyEnforcementService
-    {
-        private readonly Func<SecurityEvaluationContext, TableAccessDecision> _decider;
-
-        public TestPolicyEnforcementService(Func<SecurityEvaluationContext, TableAccessDecision> decider)
-        {
-            _decider = decider;
-        }
-
-        public ValueTask<TableAccessDecision> EvaluatePolicyAsync(SecurityEvaluationContext context, System.Threading.CancellationToken ct = default)
-        {
-            return ValueTask.FromResult(_decider(context));
-        }
-
-        public bool HasPolicies(TenantId tenant) => true;
-        public Task ReloadPoliciesAsync(TenantId tenant, System.Threading.CancellationToken ct = default) => Task.CompletedTask;
-        public void LoadPolicyFromText(TenantId tenant, string policyText) { }
-        public void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false) { }
     }
 }

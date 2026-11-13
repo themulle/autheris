@@ -1,0 +1,18 @@
+namespace Autheris.Tests.Common;
+
+/// <summary>
+/// Single source of truth for every container image the tests start (WP-OI-CI-4). All images are pinned by multi-arch index
+/// digest. <c>tests/test-images.txt</c> mirrors these values (one per line) so CI can pre-pull them; an architecture test keeps both in sync.
+/// </summary>
+public static class TestImages
+{
+    public const string PostgreSql = "postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663";
+
+    public const string SqlServer = "mcr.microsoft.com/mssql/server:2022-CU14-ubuntu-22.04@sha256:c1aa8afe9b06eab64c9774a4802dcd032205d1be785b1fd51e1c0151e7586b74";
+
+    public const string Oracle = "gvenzl/oracle-free:23-slim-faststart@sha256:d86d09794ae138a8951e97d7ee010778dcd43088e8d0f83a51002abab8c6d7fd";
+
+    public const string Spark = "apache/spark:4.0.0-python3@sha256:9e2f63442ba1a672ea70d780d56da28f42ce515d0be18840569a3054cc6d2314";
+
+    public const string Ryuk = "testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0";
+}

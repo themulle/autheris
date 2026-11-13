@@ -242,17 +242,6 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         sources.ShouldContain("dom_b");
     }
 
-    // ReBAC stays an additional filter: with ReBAC enabled and no tuples a consented caller sees nothing (intersection, never a union).
-    [Fact]
-    public async Task ReBacEnabledWithoutTuples_ConsentedCallerSeesNothing()
-    {
-        using var rebac = Configure(_fixture.Root, "Multi", rebac: true);
-        await SeedAsync(rebac);
-        var client = await ClientAsync("S-A-USER", TenantA, "Reader", rebac);
-
-        (await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets"))).ShouldBe("[]");
-    }
-
     [Fact]
     public async Task DefaultTenant_GovernanceAdminWithoutTenantClaim_SeesTheWholeCatalog()
     {

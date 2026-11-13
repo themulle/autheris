@@ -22,7 +22,6 @@ public sealed class RebacOptions
     public int MaxTraversalDepth { get; init; } = 10;
     public int CacheTtlSeconds { get; init; } = 60;
     [Range(0, 5000)] public int GenerationCacheMilliseconds { get; init; } = 1000;
-    public bool EnforceOnStreaming { get; init; } = false;
 
     /// <summary>
     /// INF-15: Maximum number of entries in the per-check memo during graph traversal recursion.
