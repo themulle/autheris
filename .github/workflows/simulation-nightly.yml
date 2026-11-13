@@ -467,7 +467,7 @@ jobs:
     name: Report scheduled failure
     needs: [sim-corpus, sim-api-fuzz, sim-parser-fuzz, sim-corpus-weekly, sim-parser-fuzz-weekly]
     if: failure() && github.event_name == 'schedule' && github.event.repository.fork == false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read

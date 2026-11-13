@@ -42,6 +42,13 @@ public sealed class ScheduledWorkflowFailureReportTests
     private static IReadOnlyList<string> Scalars(IReadOnlyList<string> lines, string key) =>
         lines.Where(l => l.StartsWith($"    {key}:", StringComparison.Ordinal)).Select(l => l[(key.Length + 5)..].Trim()).ToList();
 
+    /// <summary>Jobs bound to a GitHub environment (required reviewers): they can wait for approval indefinitely.</summary>
+    internal static IReadOnlyList<string> ApprovalGatedJobs(string workflow) =>
+        SimulationIsolationArchitectureTests.Jobs(workflow).Where(j => Regex.IsMatch(j.Value, @"(?m)^    environment:")).Select(j => j.Key).ToList();
+
+    private static string RunsOn(string jobBlock) =>
+        Regex.Match(jobBlock, @"(?m)^    runs-on:\s*(?<value>[^#\r\n]*?)\s*(#.*)?$").Groups["value"].Value;
+
     internal static IReadOnlyList<string> ReportJobViolations(string workflow)
     {
         var jobs = SimulationIsolationArchitectureTests.Jobs(workflow);
@@ -59,13 +66,31 @@ public sealed class ScheduledWorkflowFailureReportTests
         }
 
         var needs = Scalars(lines, "needs");
-        var expected = jobs.Keys.Where(k => k != ReportJob).Order(StringComparer.Ordinal).ToList();
+        var gated = ApprovalGatedJobs(workflow);
+        var expected = jobs.Keys.Where(k => k != ReportJob && !gated.Contains(k)).Order(StringComparer.Ordinal).ToList();
         var actual = needs.Count == 1 && needs[0].StartsWith('[') && needs[0].EndsWith(']')
             ? needs[0][1..^1].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Order(StringComparer.Ordinal).ToList()
             : [];
         if (!actual.SequenceEqual(expected))
         {
-            bad.Add($"needs must list every other job: [{string.Join(", ", expected)}]");
+            bad.Add($"needs must list every other job that is not approval-gated: [{string.Join(", ", expected)}]");
+        }
+
+        var timeouts = Scalars(lines, "timeout-minutes");
+        if (timeouts.Count != 1 || !int.TryParse(timeouts[0], out var minutes) || minutes is < 1 or > 15)
+        {
+            bad.Add("timeout-minutes must be set (1..15)");
+        }
+
+        if (block.Contains("continue-on-error", StringComparison.Ordinal))
+        {
+            bad.Add("continue-on-error is not allowed");
+        }
+
+        var runners = jobs.Where(j => j.Key != ReportJob).Select(j => RunsOn(j.Value)).ToHashSet(StringComparer.Ordinal);
+        if (!runners.Contains(RunsOn(block)))
+        {
+            bad.Add("runs-on must be a runner the other jobs of the workflow use");
         }
 
         if (!Children(lines, "permissions").Order(StringComparer.Ordinal).SequenceEqual(["contents: read", "issues: write"]))
@@ -113,7 +138,14 @@ public sealed class ScheduledWorkflowFailureReportTests
         if (script.Contains("secrets", StringComparison.OrdinalIgnoreCase) || script.Contains("${{", StringComparison.Ordinal)) bad.Add("secrets or expressions in the script");
         if (!script.Contains("label=\"ci-nightly-failure\"", StringComparison.Ordinal)) bad.Add("label ci-nightly-failure missing");
         if (!script.Contains("title=\"Scheduled workflow failed: ${GITHUB_WORKFLOW}\"", StringComparison.Ordinal)) bad.Add("title missing");
-        if (!Regex.IsMatch(script, @"(?m)^gh label create .*\|\| true$")) bad.Add("label creation must tolerate an existing label");
+        if (script.Contains("|| true", StringComparison.Ordinal)) bad.Add("no blanket error suppression");
+        if (!script.Contains("label_error=\"$(gh label create ", StringComparison.Ordinal) || !script.Contains("*\"already exists\"*)", StringComparison.Ordinal)
+            || !Regex.IsMatch(script, @"(?m)^\s*\*\) echo ""::warning::[^$""]*"" ;;"))
+        {
+            bad.Add("label creation may only tolerate an existing label and must warn (without echoing the error) otherwise");
+        }
+
+        if (!script.Contains("gh issue view ", StringComparison.Ordinal)) bad.Add("the duplicate-comment check is missing");
 
         var bodies = Regex.Matches(script, "--body\\s+(?<arg>\\S+)").Select(m => m.Groups["arg"].Value).ToList();
         if (bodies.Count == 0 || bodies.Any(a => a != "\"$body\"")) bad.Add("every --body argument must be \"$body\"");
@@ -143,6 +175,12 @@ public sealed class ScheduledWorkflowFailureReportTests
         }
 
         scheduled.Where(w => !Exempt.Contains(w.Key)).SelectMany(w => ReportJobViolations(w.Value).Select(v => $"{w.Key}: {v}")).ShouldBeEmpty();
+
+        // SEC-CI-1: approval-gated jobs never finish without a reviewer, so report-failure must not wait for them. The exemption is pinned
+        // to the one known job (the G9 Databricks job fails by design until a live Databricks test exists and would need its own alert);
+        // it expires when the environment binding is removed, because the job then has to be in needs again.
+        scheduled.Where(w => !Exempt.Contains(w.Key)).SelectMany(w => ApprovalGatedJobs(w.Value).Select(j => $"{w.Key}/{j}"))
+            .ShouldBe(["sql-compiler-gate-nightly.yml/sql-compiler-gate-databricks-g9"]);
         workflows.Where(w => !scheduled.ContainsKey(w.Key) && SimulationIsolationArchitectureTests.Jobs(w.Value).ContainsKey(ReportJob)).Select(w => w.Key)
             .ShouldBeEmpty("only scheduled workflows carry a report-failure job");
     }
@@ -168,7 +206,9 @@ public sealed class ScheduledWorkflowFailureReportTests
 
         // negative self-checks
         const string Good = "set -euo pipefail\nlabel=\"ci-nightly-failure\"\ntitle=\"Scheduled workflow failed: ${GITHUB_WORKFLOW}\"\n"
-                            + "body=\"$(printf 'x %s %s' \"$run_url\" \"$failed_jobs\")\"\ngh label create \"$label\" || true\ngh issue create --body \"$body\"\n";
+                            + "body=\"$(printf 'x %s %s' \"$run_url\" \"$failed_jobs\")\"\n"
+                            + "if ! label_error=\"$(gh label create \"$label\" 2>&1 >/dev/null)\"; then\n  case \"$label_error\" in\n    *\"already exists\"*) ;;\n"
+                            + "    *) echo \"::warning::Could not create the label.\" ;;\n  esac\nfi\nlast=\"$(gh issue view 1 --json comments)\"\ngh issue create --body \"$body\"\n";
         ScriptViolations(Good).ShouldBeEmpty();
         ScriptViolations(Good.Replace("set -euo pipefail", "set -euxo pipefail", StringComparison.Ordinal)).ShouldNotBeEmpty();
         ScriptViolations(Good + "printenv\n").ShouldNotBeEmpty();
@@ -176,7 +216,10 @@ public sealed class ScheduledWorkflowFailureReportTests
         ScriptViolations(Good.Replace("\"$failed_jobs\"", "\"$(cat log.txt)\"", StringComparison.Ordinal)).ShouldNotBeEmpty();
         ScriptViolations(Good + "gh issue comment 1 --body \"$(cat log.txt)\"\n").ShouldNotBeEmpty();
         ScriptViolations(Good + "echo ${{ secrets.X }}\n").ShouldNotBeEmpty();
-        ScriptViolations(Good.Replace(" || true", string.Empty, StringComparison.Ordinal)).ShouldNotBeEmpty();
+        ScriptViolations(Good + "gh label create \"$label\" || true\n").ShouldNotBeEmpty();
+        ScriptViolations(Good.Replace("*\"already exists\"*) ;;", "*) ;;", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        ScriptViolations(Good.Replace("Could not create the label.", "$label_error", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        ScriptViolations(Good.Replace("gh issue view 1", "true", StringComparison.Ordinal)).ShouldNotBeEmpty();
     }
 
     [Fact]
@@ -184,17 +227,19 @@ public sealed class ScheduledWorkflowFailureReportTests
     public void Report_job_scanner_rejects_unsafe_variants()
     {
         const string Good =
-            "on:\n  schedule:\n    - cron: '0 2 * * *'\njobs:\n  a:\n    runs-on: x\n  b:\n    runs-on: x\n"
+            "on:\n  schedule:\n    - cron: '0 2 * * *'\njobs:\n  a:\n    runs-on: ubuntu-latest\n  b:\n    runs-on: ubuntu-latest # note\n"
+            + "  g:\n    runs-on: ubuntu-latest\n    environment: gated\n"
             + "  report-failure:\n    name: Report scheduled failure\n    needs: [a, b]\n"
             + "    if: failure() && github.event_name == 'schedule' && github.event.repository.fork == false\n"
-            + "    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      issues: write\n    steps:\n"
+            + "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      issues: write\n    steps:\n"
             + "      - name: Checkout repository\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
             + "        with:\n          persist-credentials: false\n          sparse-checkout: .github/scripts\n"
             + "      - name: Open or update the failure issue\n        env:\n          GH_TOKEN: ${{ github.token }}\n"
             + "          NEEDS_JSON: ${{ toJSON(needs) }}\n        run: bash .github/scripts/report-scheduled-failure.sh\n";
         ReportJobViolations(Good).ShouldBeEmpty();
         WithoutReportFailureJob(Good).ShouldNotContain(ReportJob);
-        WithoutReportFailureJob(Good).ShouldContain("  b:\n    runs-on: x\n");
+        WithoutReportFailureJob(Good).ShouldContain("  g:\n    runs-on: ubuntu-latest\n    environment: gated\n");
+        ApprovalGatedJobs(Good).ShouldBe(["g"]);
 
         string R(string from, string to) => Good.Replace(from, to, StringComparison.Ordinal);
         string[] rejected =
@@ -204,6 +249,10 @@ public sealed class ScheduledWorkflowFailureReportTests
             R("      issues: write\n", "      issues: write\n      actions: write\n"),
             R("      contents: read\n", "      contents: write\n"),
             R("needs: [a, b]", "needs: [a]"),
+            R("needs: [a, b]", "needs: [a, b, g]"),
+            R("    timeout-minutes: 5\n", string.Empty),
+            R("    timeout-minutes: 5\n", "    timeout-minutes: 5\n    continue-on-error: true\n"),
+            R("    runs-on: ubuntu-latest\n    timeout-minutes", "    runs-on: self-hosted\n    timeout-minutes"),
             R("run: bash .github/scripts/report-scheduled-failure.sh", "run: echo \"${{ github.event.head_commit.message }}\""),
             R("run: bash .github/scripts/report-scheduled-failure.sh", "run: bash .github/scripts/report-scheduled-failure.sh\n        run: gh issue create --body \"$LOG\""),
             R("GH_TOKEN: ${{ github.token }}", "GH_TOKEN: ${{ secrets.PAT }}"),
