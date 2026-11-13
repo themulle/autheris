@@ -41,9 +41,10 @@ public sealed partial class SemanticPromptGuardrail(ILogger<SemanticPromptGuardr
         matchTimeoutMilliseconds: 200)]
     private static partial Regex InstructionDelimiterRegex();
 
-    // 4. Exfiltration and Admin Coercion
+    // 4. Exfiltration and Admin Coercion. Whole words and phrases only (#701): the bare word "leak" and prefixes such as
+    // "export all" inside "export allocation" are ordinary catalog vocabulary and must not be rejected.
     [GeneratedRegex(
-        @"(?:exfiltrate|leak|export\s+all|dump\s+database|drop\s+table|grant\s+admin|elevate\s+privileges|disable\s+guardrails)",
+        @"\b(?:exfiltrat(?:e[sd]?|ing|ion)|leak\s+(?:all|every|the\s+(?:entire|whole|full))|export\s+all|dump\s+(?:the\s+)?databases?|drop\s+tables?|grant\s+admin\w*|elevate\s+privileges?|disable\s+guardrails?)\b",
         RegexOptions.IgnoreCase,
         matchTimeoutMilliseconds: 200)]
     private static partial Regex ExfiltrationCoercionRegex();

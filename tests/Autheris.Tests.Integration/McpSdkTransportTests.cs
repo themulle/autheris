@@ -114,6 +114,10 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
         names.ShouldContain("describe_dataset");
         names.ShouldContain("sample_rows");
         tools.Single(t => t.Name == "describe_dataset").JsonSchema.GetProperty("required")[0].GetString().ShouldBe("dataset");
+
+        // Issue #706: every tool reaches a standard client with its behaviour hints.
+        tools.ShouldAllBe(t => t.ProtocolTool.Annotations != null && t.ProtocolTool.Annotations.ReadOnlyHint != null);
+        tools.Single(t => t.Name == "describe_dataset").ProtocolTool.Annotations!.ReadOnlyHint.ShouldBe(true);
     }
 
     [Fact]
