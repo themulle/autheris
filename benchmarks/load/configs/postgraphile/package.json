@@ -8,6 +8,6 @@
   },
   "dependencies": {
     "express": "5.3.0",
-    "postgraphile": "5.2.0"
+    "postgraphile": "5.2.1"
   }
 }
