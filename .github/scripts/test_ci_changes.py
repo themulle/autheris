@@ -54,6 +54,10 @@ class CiChangesTests(unittest.TestCase):
         # --no-renames lists both sides; the src side is code.
         self.assertTrue(ci.classify(["src/Autheris.Api/A.md", "docs/A.md"]))
 
+    def test_push_event_always_runs_dotnet(self):
+        self.assertTrue(ci.changed_paths("push", "a" * 40, "b" * 40) is None)
+        self.assertTrue(ci.decide("push", "a" * 40, "b" * 40))
+
     def test_unknown_event_runs_dotnet(self):
         self.assertTrue(ci.changed_paths("schedule", "a", "b") is None)
         self.assertTrue(ci.decide("workflow_dispatch", "a", "b"))

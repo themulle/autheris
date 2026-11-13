@@ -2,7 +2,7 @@
 """Classify a change set for the CI `changes` job (WP-OI-CI-1, #518).
 
 Writes `dotnet=true|false` to $GITHUB_OUTPUT. `false` only when every changed path matches the positive DOC_ONLY list and
-no DENY rule. Fail-closed: an empty diff, a git error, an unknown event, a missing/zero/force-pushed base, an unnormalized
+no DENY rule. Only pull_request events are ever narrowed; push and every other event yield dotnet=true. Fail-closed: an empty diff, a git error, an unknown event, a missing/zero/force-pushed base, an unnormalized
 path or any exception always yields `dotnet=true`.
 
 `dotnet=false` never skips a Security-trait suite wholesale: build-and-test, the integration shards and the Spark job
@@ -84,12 +84,7 @@ def changed_paths(event, base, head):
             if not base or set(base) == {"0"} or not head:
                 return None
             return _diff(f"{base}...{head}")
-        if event == "push":
-            if not base or set(base) == {"0"} or not head:
-                return None
-            # A force push (the previous tip is not an ancestor) or a missing object is not trusted.
-            subprocess.run(["git", "merge-base", "--is-ancestor", base, head], check=True, capture_output=True)
-            return _diff(f"{base}..{head}")
+        # push (main) is never narrowed: with coalescing a docs-only push can supersede a pending code push.
     except Exception:
         return None
     return None

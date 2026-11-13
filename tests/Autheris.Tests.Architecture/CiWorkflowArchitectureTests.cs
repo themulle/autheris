@@ -129,6 +129,7 @@ public sealed partial class CiWorkflowArchitectureTests
         var docOnly = Tuple(script, "DOC_ONLY");
         var deny = Tuple(script, "DENY");
 
+        script.ShouldNotContain("event == \"push\"", customMessage: "only pull_request events may be narrowed; main pushes always run the full suites");
         docOnly.ShouldNotBeEmpty();
         foreach (var glob in docOnly)
         {
