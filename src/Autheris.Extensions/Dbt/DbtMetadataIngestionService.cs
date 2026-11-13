@@ -407,7 +407,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
         // Issue #680: auto-sync follows SqlEndpoints.Enabled (fail-closed: missing options = off); the directory is prepared once per run.
         var autoSyncOptions = _gatewayOptions?.Value?.SqlEndpoints;
-        var autoSyncActive = !dryRun && _sqlEndpointLoader != null && autoSyncOptions is { Enabled: true, AutoSyncFromDbt: true };
+        var autoSyncActive = !dryRun && _sqlEndpointLoader != null && autoSyncOptions is not null && autoSyncOptions.Enabled && autoSyncOptions.AutoSyncFromDbt;
         var autoSyncDir = autoSyncOptions?.Directory ?? string.Empty;
         var autoSyncFailed = false;
         var autoSyncSkipped = 0;

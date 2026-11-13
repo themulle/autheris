@@ -37,6 +37,12 @@ public class AuditEndpointCoverageTests : IClassFixture<WebApplicationFactory<Pr
     /// </summary>
     private static readonly Dictionary<string, string> ApprovedDelegatedRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["POST /api/v1/authz/explain"] =
+            "AccessExplanationService writes the AUTHZ_EXPLAIN record fail-closed for every outcome; " +
+            "HTTP denials, failures and exceptions are finalized by AccessAuditMiddleware.",
+        ["GET /api/v1/authz/objects/{objectName}/grants"] =
+            "AccessExplanationService writes the AUTHZ_GRANTS_LIST record fail-closed for every outcome; " +
+            "HTTP denials, failures and exceptions are finalized by AccessAuditMiddleware.",
         ["POST /api/v1/jobs/query"] =
             "AsyncQueryJobManager.SubmitJobAsync writes the ASYNC_JOB_SUBMITTED ALLOW record fail-closed before enqueueing; " +
             "denials, failures and exceptions are finalized by AccessAuditMiddleware.",

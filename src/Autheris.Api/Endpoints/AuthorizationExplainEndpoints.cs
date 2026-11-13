@@ -4,8 +4,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Errors;
+using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Application.Policy.Pdp;
+using Autheris.Domain.Audit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -15,8 +17,10 @@ public static class AuthorizationExplainEndpoints
 {
     public static IEndpointRouteBuilder MapAuthorizationExplainEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/v1/authz/explain", ExplainAsync).WithName("AuthzExplain").RequireAuthorization();
-        app.MapGet("/api/v1/authz/objects/{objectName}/grants", ListGrantsAsync).WithName("AuthzListGrants").RequireAuthorization();
+        app.MapPost("/api/v1/authz/explain", ExplainAsync).WithName("AuthzExplain").RequireAuthorization()
+            .WithAudit(AuditLevel.Delegated, AuditEventTypes.AuthzExplain);
+        app.MapGet("/api/v1/authz/objects/{objectName}/grants", ListGrantsAsync).WithName("AuthzListGrants").RequireAuthorization()
+            .WithAudit(AuditLevel.Delegated, AuditEventTypes.AuthzGrantsList);
         return app;
     }
 
