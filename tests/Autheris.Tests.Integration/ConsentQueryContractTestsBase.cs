@@ -92,13 +92,13 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         await Add(tableId, table, TenantA, GranteeType.User, "s-1-5-21-bob", null, ConsentEffect.Allow, -1, 10);
         await Add(tableId, table, TenantA, GranteeType.Group, "S-1-5-21-GROUP-1", null, ConsentEffect.Allow, -1, 10);
         await Add(tableId, table, TenantA, GranteeType.User, "alias:alice@corp", null, ConsentEffect.Allow, -1, 10);
-        await Add(tableId, table, TenantA, GranteeType.Role, null, "analyst", ConsentEffect.Allow, -1, 10);
+        await Add(tableId, table, TenantA, GranteeType.Role, null, "analyst", ConsentEffect.Deny, -1, 10);
         await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Deny, 2, 10);
         await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, 2, 10);
         await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -10, -1);
         await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Carol", null, ConsentEffect.Allow, -1, 10, revoke: true);
         await Add(tableId, table, TenantB, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10);
-        await Add(tableId, table, TenantB, GranteeType.Role, null, "analyst", ConsentEffect.Allow, -1, 10);
+        await Add(tableId, table, TenantB, GranteeType.Role, null, "analyst", ConsentEffect.Deny, -1, 10);
         await Add(otherId, other, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10);
         return new Seed(now, table, other, tableId, consents, revoked);
     }
@@ -269,7 +269,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
             new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GOVERNANCE_ADMIN"),
             new System.Security.Claims.Claim("tenant_id", TenantA.Value)
         ], "test"));
-        var policy = new DeclarativeConsentPolicy(seed.Table.Domain, seed.Table.Schema, seed.Table.TableName, "Role", "manifest-role", "Allow");
+        var policy = new DeclarativeConsentPolicy(seed.Table.Domain, seed.Table.Schema, seed.Table.TableName, "Group", "S-1-5-21-MANIFEST-GROUP", "Allow");
         var epochBefore = await Repo.GetTableEpochAsync(seed.Table);
 
         var first = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
@@ -284,7 +284,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         third.Revoked.ShouldBe(1);
         epochAfterFirst.ShouldBe(epochBefore + 1);
         (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(epochAfterFirst + 1);
-        (await Repo.GetActiveRoleConsentsAsync(seed.Table, "manifest-role", TenantA, DateTimeOffset.UtcNow)).Count.ShouldBe(1);
+        (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-MANIFEST-GROUP")], seed.Table, DateTimeOffset.UtcNow, TenantA)).Count.ShouldBe(1);
     }
 
     [Fact]

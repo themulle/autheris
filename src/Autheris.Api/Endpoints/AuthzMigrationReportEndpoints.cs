@@ -4,6 +4,7 @@ using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Interfaces;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -20,6 +21,7 @@ public static class AuthzMigrationReportEndpoints
         app.MapGet("/api/v1/admin/authz/migration-report", (HttpContext context, IAccessProfileRepository repository, CancellationToken ct) =>
                 GetAsync(context, repository, ct))
             .RequireAuthorization(GatewayPolicies.ClusterAdmin)
+            .WithIngressTransport(DataSourceTransportFlags.Rest)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         return app;
     }

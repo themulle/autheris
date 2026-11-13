@@ -116,8 +116,8 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
                     "default",
                     "sales",
                     "orders",
-                    "Role",
-                    "DataScientist",
+                    "Group",
+                    "S-1-5-21-DATA-SCIENTISTS",
                     "Allow"
                 )
             ]);
@@ -137,8 +137,8 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
         await consentRepo.Received(1).ReplaceConsentsAsync(
             Arg.Any<IReadOnlyList<Guid>>(),
             Arg.Is<IReadOnlyList<Consent>>(l => l.Count == 1 &&
-                l[0].RoleName == "DataScientist" &&
-                l[0].GranteeType == GranteeType.Role &&
+                l[0].GranteeSid == new Sid("S-1-5-21-DATA-SCIENTISTS") &&
+                l[0].GranteeType == GranteeType.Group &&
                 l[0].Effect == ConsentEffect.Allow),
             Arg.Any<Sid>(),
             Arg.Any<string>(),

@@ -71,13 +71,13 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
         await Add(_tableId, _table, TenantA, GranteeType.User, "s-1-5-21-bob", null, ConsentEffect.Allow, -1, 10);
         await Add(_tableId, _table, TenantA, GranteeType.Group, "S-1-5-21-GROUP-1", null, ConsentEffect.Allow, -1, 10);
         await Add(_tableId, _table, TenantA, GranteeType.User, "alias:alice@corp", null, ConsentEffect.Allow, -1, 10);
-        await Add(_tableId, _table, TenantA, GranteeType.Role, null, "analyst", ConsentEffect.Allow, -1, 10);
+        await Add(_tableId, _table, TenantA, GranteeType.Role, null, "analyst", ConsentEffect.Deny, -1, 10);
         await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Deny, 2, 10); // future deny
         await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, 2, 10); // future allow
         await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -10, -1); // expired
         await Add(_tableId, _table, TenantA, GranteeType.User, "S-1-5-21-Carol", null, ConsentEffect.Allow, -1, 10, revoke: true);
         await Add(_tableId, _table, TenantB, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10); // other tenant
-        await Add(_tableId, _table, TenantB, GranteeType.Role, null, "analyst", ConsentEffect.Allow, -1, 10);
+        await Add(_tableId, _table, TenantB, GranteeType.Role, null, "analyst", ConsentEffect.Deny, -1, 10);
         await Add(_otherId, _other, TenantA, GranteeType.User, "S-1-5-21-Alice", null, ConsentEffect.Allow, -1, 10); // other table
     }
 

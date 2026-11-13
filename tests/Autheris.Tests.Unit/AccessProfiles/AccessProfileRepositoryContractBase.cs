@@ -206,17 +206,18 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GroupAndRoleAssignments_AreFoundThroughGroupsAndRoles_NotThroughUsers()
+    public async Task GroupAssignments_AreFoundThroughGroups_NotThroughUsers_AndRoleAssigneesAreRejected()
     {
         if (!Available) return;
         var p = await NewProfileAsync(MaskingPolicyMode.Strict);
         var group = Id("grp");
         var role = Id("role");
         await Repo.AssignProfileAsync(TenantA, p.ProfileId, Group(group));
-        await Repo.AssignProfileAsync(TenantA, p.ProfileId, new AccessProfileAssignment { Subject = role, SubjectType = AccessProfileSubjectType.Role, CreatedBy = "admin1" });
+        await Should.ThrowAsync<AccessProfileAssignmentRejectedException>(() => Repo.AssignProfileAsync(
+            TenantA, p.ProfileId, new AccessProfileAssignment { Subject = role, SubjectType = AccessProfileSubjectType.Role, CreatedBy = "admin1" }));
 
         Ids(await Repo.GetProfilesForSubjectsAsync(TenantA, [], [group.ToUpperInvariant()], [])).ShouldContain(p.ProfileId);
-        Ids(await Repo.GetProfilesForSubjectsAsync(TenantA, [], [], [role])).ShouldContain(p.ProfileId);
+        Ids(await Repo.GetProfilesForSubjectsAsync(TenantA, [], [], [role])).ShouldNotContain(p.ProfileId);
         Ids(await Repo.GetProfilesForSubjectsAsync(TenantA, [group, role], [], [])).ShouldNotContain(p.ProfileId);
         Ids(await Repo.GetProfilesForSubjectsAsync(TenantB, [], [group], [role])).ShouldNotContain(p.ProfileId);
         (await Repo.GetProfilesForSubjectsAsync(TenantA, [], [], [])).ShouldBeEmpty();

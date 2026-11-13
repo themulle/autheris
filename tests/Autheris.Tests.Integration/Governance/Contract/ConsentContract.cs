@@ -97,7 +97,7 @@ public abstract class ConsentContract : GovernanceContractBase
             Id = Guid.NewGuid(),
             TableIdentifier = table,
             ConsentRequestId = requestId,
-            Effect = ConsentEffect.Allow,
+            Effect = granteeType == GranteeType.Role ? ConsentEffect.Deny : ConsentEffect.Allow,   // role grantees only restrict
             GranteeType = granteeType,
             GranteeSid = granteeType == GranteeType.Role ? (Sid?)null : (granteeSid ?? GranteeSid),
             RoleName = granteeType == GranteeType.Role ? (roleName ?? "DataAnalyst") : null,

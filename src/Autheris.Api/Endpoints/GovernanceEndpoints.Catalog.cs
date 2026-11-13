@@ -133,6 +133,11 @@ public static partial class GovernanceEndpoints
             // fixed message naming only the policy index, never the rejected text.
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, $"Manifest policy at index {ex.PolicyIndex} has an invalid description.", context);
         }
+        catch (ArgumentException ex) when (ex.ParamName == "manifest")
+        {
+            // an unsupported grantee (a role) or an invalid effect: a client error with a fixed message, never the rejected text.
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The manifest contains a policy that is not supported.", context);
+        }
         catch (Autheris.Application.Governance.Grants.GrantPolicyViolationException ex)
         {
             return ApiProblems.BadRequest(
