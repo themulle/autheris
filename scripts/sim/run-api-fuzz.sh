@@ -329,14 +329,14 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$RUNNER_TEMP/st/out"
 : >"$RUNNER_TEMP/sim-canaries.txt"
-
-phase_read
-phase_write
-
 # SEC-CI-8-7: the checker also treats the governance DB password and connection string as canaries (never uploaded, never printed).
 for secret in "${SIM_GOV_PASSWORD:-}" "${AUTHERIS_SIM_GOVERNANCE_DB:-}"; do
   [ -z "$secret" ] || printf '%s\n' "$secret" >>"$RUNNER_TEMP/sim-canaries.txt"
 done
+
+phase_read
+phase_write
+
 # The same canaries appear in both phases; keep the list unique for the checker.
 sort -u "$RUNNER_TEMP/sim-canaries.txt" -o "$RUNNER_TEMP/sim-canaries.txt"
 [ "$FAILED" -eq 0 ] || die "at least one Schemathesis run did not complete (see messages above)"

@@ -178,8 +178,8 @@ jobs:
           rm -f ca.key ca.srl server.csr server.ext
           chmod 0644 ca.crt server.crt
           # SEC-CI-8-2: PostgreSQL (alpine uid 70) refuses a key that is group/world readable or owned by another user.
-          sudo chown 70:70 server.key
           chmod 0600 server.key
+          sudo chown 70:70 server.key
           # SEC-CI-8-4: the password is masked before any other use; the container reads it from a 0600 env file, never from process arguments.
           pw="$(openssl rand -hex 24)"
           echo "::add-mask::$pw"
@@ -240,7 +240,7 @@ jobs:
         if: always()
         run: |
           docker rm -f sim-gov-pg >/dev/null 2>&1 || true
-          rm -rf "$RUNNER_TEMP"/sim-pg-tls.*
+          sudo rm -rf "$RUNNER_TEMP"/sim-pg-tls.*
 
   sim-parser-fuzz:
     name: Simulation parser fuzz (SharpFuzz and AFL++)

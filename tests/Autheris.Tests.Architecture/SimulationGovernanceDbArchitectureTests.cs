@@ -43,9 +43,13 @@ public sealed partial class SimulationIsolationArchitectureTests
             bad.Add("CA key must be deleted and never mounted");
         }
 
-        if (job.Contains("chmod 644 server.key", StringComparison.Ordinal) || !job.Contains("chown 70:70 server.key", StringComparison.Ordinal) || !job.Contains("chmod 0600 server.key", StringComparison.Ordinal))
+        // Mode 0600 must be set while the runner still owns the key (an unprivileged chmod after the chown fails), or via sudo.
+        var chown = job.IndexOf("sudo chown 70:70 server.key", StringComparison.Ordinal);
+        var chmod = job.IndexOf("chmod 0600 server.key", StringComparison.Ordinal);
+        var chmodOk = chmod >= 0 && (chmod < chown || job.Contains("sudo chmod 0600 server.key", StringComparison.Ordinal));
+        if (Regex.IsMatch(job, @"chmod\s+(0?644|0?640|0?666|0?777)\s+server\.key") || chown < 0 || !chmodOk)
         {
-            bad.Add("server.key must be uid 70 with mode 0600");
+            bad.Add("server.key must be uid 70 with mode 0600 (chmod before chown, or sudo chmod)");
         }
 
         return bad;
@@ -170,6 +174,9 @@ public sealed partial class SimulationIsolationArchitectureTests
         GovernanceDbViolations(good.Replace("    env:\n      AUTHERIS_SIM_RUN", "    env:\n      ASPNETCORE_ENVIRONMENT: Development\n      AUTHERIS_SIM_RUN")).ShouldNotBeEmpty();
         GovernanceDbViolations(good.Replace("-c ssl=on", "-c ssl=off")).ShouldNotBeEmpty();
         GovernanceDbViolations(good.Replace("chmod 0600 server.key", "chmod 644 server.key")).ShouldNotBeEmpty();
+        GovernanceDbViolations(good.Replace("          chmod 0600 server.key\n          sudo chown 70:70 server.key\n", "          sudo chown 70:70 server.key\n          chmod 0600 server.key\n")).ShouldNotBeEmpty();
+        GovernanceDbViolations(good.Replace("          chmod 0600 server.key\n          sudo chown 70:70 server.key\n", "          sudo chown 70:70 server.key\n          sudo chmod 0600 server.key\n")).ShouldBeEmpty();
+        GovernanceDbViolations(good.Replace("          chmod 0600 server.key\n", "")).ShouldNotBeEmpty();
         GovernanceDbViolations(good.Replace("rm -f ca.key", "rm -f ca.srl")).ShouldNotBeEmpty();
     }
 
@@ -185,6 +192,13 @@ public sealed partial class SimulationIsolationArchitectureTests
         script.ShouldContain("ENVIRON[\"SIM_GOV_PASSWORD\"]");
         script.ShouldContain("ENVIRON[\"AUTHERIS_SIM_GOVERNANCE_DB\"]");
         script.ShouldContain("\"${SIM_GOV_PASSWORD:-}\" \"${AUTHERIS_SIM_GOVERNANCE_DB:-}\"");
+
+        // the DockerRunViolations exemption holds for exactly one postgres docker run, inside sim-api-fuzz
+        var pgRun = "docker run -d --rm --env-file x -p \"127.0.0.1:$port:5432\" \"$SIM_POSTGRES_IMAGE\"";
+        var wf = SimWorkflowText();
+        DockerRunViolations([wf, "docker run --rm $SIM_POSTGRES_IMAGE"]).ShouldNotBeEmpty();
+        DockerRunViolations([wf.Replace("jobs:\n", "jobs:\n  other:\n    steps:\n      - run: " + pgRun + "\n", StringComparison.Ordinal)]).ShouldNotBeEmpty();
+        DockerRunViolations(WorkflowAndScriptTexts()).ShouldBeEmpty();
 
         // negative self-check
         var good = SimWorkflowText();
