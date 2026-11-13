@@ -49,9 +49,22 @@ public sealed class CatalogGraphQlMap(
             entry.Relations.Select(r => new GraphQlRelationMapping(r.FieldName, r.TargetTableIdentifier, r.IsList, r.ParentColumns, r.ChildColumns)).ToList());
     }
 
-    public Task<string?> GetRootFieldAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<string?>(null);
+    public async Task<string?> GetRootFieldAsync(TableIdentifier table, CancellationToken ct = default)
+    {
+        var model = await ModelAsync(ct).ConfigureAwait(false);
+        return model.TablesByIdentifier.TryGetValue(table, out var entry) ? entry.QueryFieldName : null;
+    }
 
-    public Task<TableIdentifier?> ResolveRootFieldAsync(string field, CancellationToken ct = default) => Task.FromResult<TableIdentifier?>(null);
+    public async Task<TableIdentifier?> ResolveRootFieldAsync(string field, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(field))
+        {
+            return null;
+        }
+
+        var model = await ModelAsync(ct).ConfigureAwait(false);
+        return model.TablesByQueryFieldName.TryGetValue(field, out var entry) ? entry.Identifier : null;
+    }
 
     public async Task<IReadOnlyList<TableIdentifier>?> ResolveDocumentTablesAsync(string document, CancellationToken ct = default)
     {
