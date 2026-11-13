@@ -46,7 +46,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         string method,
         string path,
         IReadOnlyDictionary<string, string> headers,
-        System.Security.Claims.ClaimsPrincipal? caller = null,
+        Autheris.Domain.Security.SecurityPrincipalContext? subject = null,
         CancellationToken ct = default)
     {
         try
@@ -57,7 +57,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
                 headers,
                 new Dictionary<string, string>(),
                 null,
-                caller,
+                subject,
                 ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -73,7 +73,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         IReadOnlyDictionary<string, string>? headers,
         IReadOnlyDictionary<string, string> contextExtensions,
         string? clientIpStr,
-        System.Security.Claims.ClaimsPrincipal? caller,
+        Autheris.Domain.Security.SecurityPrincipalContext? subject,
         CancellationToken ct)
     {
         var headerDict = headers != null
@@ -98,40 +98,31 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             return EnvoyCheckResponse.Deny(400, "Bad Request: Invalid or traversing path.");
         }
 
-        // 2./3. Identity (SEC C-1 / SG-17 / DEF-SC-10): only the validated ClaimsPrincipal selects tenant and user. Neither contextExtensions nor a
-        // source principal can, and there is no "default" tenant or "anonymous" user: an unauthenticated caller, or an authenticated one without
-        // a SID, is denied before any policy evaluation.
-        if (caller?.Identity?.IsAuthenticated != true)
+        // 2./3. Identity (SEC C-1 / SG-17 / DEF-SC-10): only the request security context selects tenant, user and groups. Neither
+        // contextExtensions, headers nor a source principal can, and there is no "default" tenant or "anonymous" user.
+        if (subject is not { IsAuthenticated: true })
         {
             _logger.LogWarning("Unauthenticated Envoy ext_authz call denied.");
             return EnvoyCheckResponse.Deny(401, "Unauthorized: authentication required.");
         }
 
-        if (caller.GetUserSid() is not { } userSid)
+        // Explicit precondition before the catalog lookup: unresolved groups never reach a decision.
+        if (subject.GroupResolutionStatus != Autheris.Domain.Identity.GroupResolutionStatus.Complete)
         {
-            _logger.LogWarning("Envoy ext_authz call denied: the authenticated caller carries no user SID.");
-            return EnvoyCheckResponse.Deny(403, "Forbidden: caller identity is incomplete.");
+            _logger.LogWarning("Envoy ext_authz call denied: the group resolution is not complete.");
+            return EnvoyCheckResponse.Deny(403, "Forbidden: identity.groups_unresolved.");
         }
 
-        // DT-A-3: claims only; a caller without a resolvable tenant (or with an invalid claim) is denied, never given a default.
-        TenantId tenantId;
-        try
+        // DT-A-3: a caller without a resolvable tenant (invalid claim, none, or selected by header) is denied, never given a default.
+        if (subject.TenantClaimInvalid || subject.ResolvedTenant is not { } tenantId || subject.TenantSelectedByHeader)
         {
-            tenantId = caller.GetTenantId();
-        }
-        catch (Autheris.Domain.Exceptions.GatewaySecurityException ex)
-        {
-            _logger.LogWarning("ext_authz denied: the caller has no valid tenant ({Code}).", LogSanitizer.Sanitize(ex.ErrorCode));
+            _logger.LogWarning("ext_authz denied: the caller has no claim-resolved tenant.");
             return EnvoyCheckResponse.Deny(403, "Forbidden: tenant unresolved.");
         }
 
+        var userSid = subject.UserSid;
         var tenantStr = tenantId.Value;
         var principal = userSid.Value;
-
-        // 4. Subject: the request SecurityPrincipalContext of the validated principal. Roles are never grantees and a
-        // degraded group resolution carries no groups, so the decision point denies group grants.
-        var subject = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(caller, tenantId);
-        var groupList = subject.GroupSids;
 
         // 5. Determine Resource / Table
         string resourceName = "default";
@@ -198,17 +189,15 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         }
 
         // Virtual filters (decision 7): ext_authz enforces no row filters. A caller whose access profile has the table in
-        // its scope must read it through a channel that applies the filter. Roles are unknown here, so a role profile
+        // its scope must read it through a channel that applies the filter. A role profile
         // covering the table denies as well (fail closed).
         if (_virtualFilters != null)
         {
             var snapshot = await _virtualFilters.GetAsync(ct).ConfigureAwait(false);
-            var callerSid = userSid;
-            var groups = new HashSet<Sid>(groupList);
             var covering = snapshot.Profiles.FirstOrDefault(p =>
                 p.TenantId == tenantId &&
                 (p.GranteeType == GranteeType.Role ||
-                 Autheris.Application.Policy.GranteeMatcher.MatchesRestriction(p.GranteeType, p.GranteeSid, p.RoleName, null, callerSid, groups, new HashSet<string>())) &&
+                 Autheris.Application.Policy.GranteeMatcher.MatchesGrant(p.GranteeType, p.GranteeSid, userSid, subject.GroupSids)) &&
                 ObjectPattern.Parse(p.Scope).MatchesObject(targetTable));
             if (covering != null)
             {

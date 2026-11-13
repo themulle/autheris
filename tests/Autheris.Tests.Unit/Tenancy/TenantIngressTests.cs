@@ -434,8 +434,8 @@ public sealed class TenantIngressTests
     {
         var service = new EnvoyExtAuthzService(Substitute.For<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>(), Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable(), NullLogger<EnvoyExtAuthzService>.Instance);
 
-        var denied = await service.CheckHttpAsync("GET", "/api/v1/x", new Dictionary<string, string>(), User(null));
-        var invalid = await service.CheckHttpAsync("GET", "/api/v1/x", new Dictionary<string, string>(), User("bad tenant!!"));
+        var denied = await service.CheckHttpAsync("GET", "/api/v1/x", new Dictionary<string, string>(), Autheris.Tests.Unit.TestSupport.EnvoySubjects.From(User(null)));
+        var invalid = await service.CheckHttpAsync("GET", "/api/v1/x", new Dictionary<string, string>(), Autheris.Tests.Unit.TestSupport.EnvoySubjects.From(User("bad tenant!!")));
 
         denied.HttpResponse.DeniedResponse.ShouldNotBeNull();
         denied.HttpResponse.DeniedResponse!.Status.Code.ShouldBe(403);

@@ -113,7 +113,9 @@ public sealed class AuditLogEntry
                 {
                     app = Caller.Application,
                     ver = Caller.Version,
-                    query = Caller.QueryName
+                    query = Caller.QueryName,
+                    asserted = Caller.IsClientAsserted,
+                    clientId = Caller.ClientId
                 };
 
                 return System.Text.Json.JsonSerializer.Serialize(dict);

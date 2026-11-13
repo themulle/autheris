@@ -116,7 +116,7 @@ public sealed class FinalErrorBodyFixesTests
                 new System.Security.Claims.Claim("tenant_id", "corp")
             ],
             "MeshTls"));
-        var response = await service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), caller);
+        var response = await service.CheckHttpAsync("GET", "/api/v1/customers", new Dictionary<string, string>(), Autheris.Tests.Unit.TestSupport.EnvoySubjects.From(caller));
 
         var body = response.HttpResponse.DeniedResponse?.Body;
         if (body is not null)
