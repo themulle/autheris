@@ -405,6 +405,27 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
         }
 
+        // Issue #680: auto-sync follows SqlEndpoints.Enabled (fail-closed: missing options = off); the directory is prepared once per run.
+        var autoSyncOptions = _gatewayOptions?.Value?.SqlEndpoints;
+        var autoSyncActive = !dryRun && _sqlEndpointLoader != null && autoSyncOptions is { Enabled: true, AutoSyncFromDbt: true };
+        var autoSyncDir = autoSyncOptions?.Directory ?? string.Empty;
+        var autoSyncFailed = false;
+        var autoSyncSkipped = 0;
+        var autoSyncRejected = 0;
+        if (autoSyncActive)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetFullPath(autoSyncDir));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                autoSyncActive = false;
+                autoSyncFailed = true;
+                _logger.LogWarning("SQL_ENDPOINT_AUTOSYNC_FAILED: dbt SQL endpoint auto-sync failed ({Error}); skipping auto-sync for this run.", ex.GetType().Name);
+            }
+        }
+
         foreach (var model in models)
         {
             ct.ThrowIfCancellationRequested();
@@ -741,28 +762,48 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
 
             // 4. SQL-to-API Sync (Option B): Automatically generate .sql query file in queries directory for declarative API exposure
-            if (!dryRun && _sqlEndpointLoader != null && _gatewayOptions?.Value?.SqlEndpoints?.AutoSyncFromDbt == true)
+            if (autoSyncActive)
             {
                 try
                 {
-                    string queriesDir = _gatewayOptions.Value.SqlEndpoints.Directory;
-
                     // SEC H-20: identifiers are validated and quoted, header values sanitized, paths contained and
                     // non-dbt endpoint files are never overwritten (enforced in SqlEndpointLoader).
-                    _sqlEndpointLoader.SyncDbtModelDefinitionToFile(
-                        directoryPath: queriesDir,
+                    _sqlEndpointLoader!.SyncDbtModelDefinitionToFile(
+                        directoryPath: autoSyncDir,
                         name: model.Name,
                         schema: model.Schema,
                         columns: model.Columns.Keys,
                         summary: model.Description ?? $"dbt model {model.Name}",
                         dataSource: model.Database);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    _logger.LogWarning(ex, "Failed to auto-sync dbt model '{ModelName}' to SQL endpoints directory.", model.Name);
-                    warnings.Add("SQL endpoint auto-sync rejected for dbt model.");
+                    // Issue #680: stop for the rest of the run; one warning and one log entry (no per-model stack trace).
+                    autoSyncActive = false;
+                    autoSyncFailed = true;
+                    autoSyncSkipped++;
+                    _logger.LogWarning("SQL_ENDPOINT_AUTOSYNC_FAILED: dbt SQL endpoint auto-sync failed ({Error}); skipping auto-sync for the rest of this run.", ex.GetType().Name);
+                }
+                catch (Exception)
+                {
+                    autoSyncRejected++;
                 }
             }
+            else if (autoSyncFailed)
+            {
+                autoSyncSkipped++;
+            }
+        }
+
+        if (autoSyncFailed)
+        {
+            warnings.Add($"SQL_ENDPOINT_AUTOSYNC_FAILED: SQL endpoint directory is not writable; {autoSyncSkipped} dbt model(s) were not auto-synced.");
+        }
+
+        if (autoSyncRejected > 0)
+        {
+            _logger.LogWarning("SQL endpoint auto-sync rejected {Count} dbt model(s) (identifier or path validation).", autoSyncRejected);
+            warnings.Add($"SQL endpoint auto-sync rejected for {autoSyncRejected} dbt model(s).");
         }
 
         // R-31 / issue #151: persist relationships (all ordered key pairs, reason-coded warnings, dry-run parity)
