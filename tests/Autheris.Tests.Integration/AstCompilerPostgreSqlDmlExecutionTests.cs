@@ -131,7 +131,8 @@ public sealed class AstCompilerPostgreSqlDmlExecutionTests : AstCompilerDmlContr
             await setup.ExecuteNonQueryAsync();
         }
 
-        var compiled = Engine.Compile($"UPDATE {O} SET status = 'real' WHERE id > 0".AsMemory(), Request("acme"), default);
+        var realSql = $"UPDATE {O} SET status = 'real' WHERE id > 0";
+        var compiled = Engine.Compile(realSql.AsMemory(), Request("acme", realSql), default);
         await using var cmd = conn.CreateCommand();
         _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
         (await cmd.ExecuteNonQueryAsync()).ShouldBe(3);

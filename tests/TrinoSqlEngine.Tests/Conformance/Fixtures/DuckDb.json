@@ -6736,268 +6736,89 @@
       "Id": "dml-merge-001",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\" ON (\"orders\".\"id\" = \"entitlements\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN MATCHED THEN UPDATE SET \"Status\" = $2",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "$2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-002",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN DELETE",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\" ON (\"orders\".\"id\" = \"entitlements\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN MATCHED THEN DELETE",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-003",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\" ON (\"orders\".\"id\" = \"entitlements\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN NOT MATCHED THEN INSERT (\"Id\", \"TenantId\") VALUES (\"entitlements\".\"id\", $1)",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-004",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x' WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\" ON (\"orders\".\"id\" = \"entitlements\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN MATCHED THEN UPDATE SET \"Status\" = $2 WHEN NOT MATCHED THEN INSERT (\"Id\", \"TenantId\") VALUES (\"entitlements\".\"id\", $1)",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "$2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-005",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED AND entitlements.id > 1 THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\" ON (\"orders\".\"id\" = \"entitlements\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN MATCHED AND \"entitlements\".\"id\" > $2 THEN UPDATE SET \"Status\" = $3",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "$2",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        },
-        {
-          "Marker": "$3",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-006",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED AND entitlements.id = 1 THEN DELETE WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\" ON (\"orders\".\"id\" = \"entitlements\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN MATCHED AND \"entitlements\".\"id\" = $2 THEN DELETE WHEN MATCHED THEN UPDATE SET \"Status\" = $3",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "$2",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        },
-        {
-          "Marker": "$3",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-007",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING (SELECT id, orderid FROM entitlements) AS e ON orders.id = e.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"id\", \"orderid\" FROM (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\") AS \"e\" ON (\"orders\".\"id\" = \"e\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN MATCHED THEN UPDATE SET \"Status\" = $2",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "$2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-008",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders AS o USING entitlements AS e ON o.id = e.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"o\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"e\" ON (\"o\".\"id\" = \"e\".\"orderid\") AND (\"o\".\"TenantId\" = $1 AND ENCODE(CAST(\"o\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN MATCHED THEN UPDATE SET \"Status\" = $2",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "$2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-009",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN NOT MATCHED AND entitlements.id > 1 THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\" ON (\"orders\".\"id\" = \"entitlements\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN NOT MATCHED AND \"entitlements\".\"id\" > $2 THEN INSERT (\"Id\", \"TenantId\") VALUES (\"entitlements\".\"id\", $1)",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "$2",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-010",
       "Group": "dml-merge",
       "Sql": "MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x', region = 'EU' WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (entitlements.id, 'acme', 'n')",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\" ON (\"orders\".\"id\" = \"entitlements\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN MATCHED THEN UPDATE SET \"Status\" = $2, \"Region\" = $3 WHEN NOT MATCHED THEN INSERT (\"Id\", \"TenantId\", \"Status\") VALUES (\"entitlements\".\"id\", $1, $4)",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "$2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        },
-        {
-          "Marker": "$3",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "EU"
-        },
-        {
-          "Marker": "$4",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "n"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-011",
       "Group": "dml-merge",
       "Sql": "MERGE INTO dbo.orders USING dbo.entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x'",
-      "Outcome": "ok",
-      "Expected": "MERGE INTO \"dbo\".\"Orders\" AS \"orders\" USING (SELECT \"Id\" AS \"Id\", \"TenantId\" AS \"TenantId\", \"OrderId\" AS \"OrderId\" FROM \"dbo\".\"Entitlements\" WHERE (\"TenantId\" = $1 AND ENCODE(CAST(\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar)))) AS \"entitlements\" ON (\"orders\".\"id\" = \"entitlements\".\"orderid\") AND (\"orders\".\"TenantId\" = $1 AND ENCODE(CAST(\"orders\".\"TenantId\" AS varchar)) = ENCODE(CAST($1 AS varchar))) WHEN MATCHED THEN UPDATE SET \"Status\" = $2",
-      "Parameters": [
-        {
-          "Marker": "$1",
-          "Type": "String",
-          "Origin": "Tenant",
-          "ValueType": "String",
-          "Value": "acme"
-        },
-        {
-          "Marker": "$2",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "x"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SecurityException"
     },
     {
       "Id": "dml-merge-012",

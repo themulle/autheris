@@ -21,6 +21,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Databricks;
+using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -85,6 +86,16 @@ public sealed class GovernedSqlExecutorX1Tests
     /// <summary>Compiles a statement through the real governed pipeline (catalog, policies, engine) for a source type.</summary>
     internal static async Task<CompiledSql> CompileAsync(string sourceType, string sql, ClaimsPrincipal? user = null, bool allowRecursive = false)
     {
+        var service = BuildService(sourceType, allowRecursive, withWritePermit: true, connectionFactory: null);
+        return await service.CompileAsync(sql, user ?? Writer(), new TenantId(Tenant));
+    }
+
+    /// <summary>
+    /// The governed service over the real pipeline. <paramref name="withWritePermit"/> wraps the engine in the test-only decorator
+    /// (WP-SIMPL-45 PR 3 CI repair, R-6); without it the service uses the production engine, which denies every DML statement.
+    /// </summary>
+    private static GovernedSqlExecutionService BuildService(string sourceType, bool allowRecursive, bool withWritePermit, ISqlConnectionFactory? connectionFactory)
+    {
         // Test-only seam: the production write decision denies every DML target.
         Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         var table = Orders(sourceType);
@@ -102,8 +113,10 @@ public sealed class GovernedSqlExecutorX1Tests
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
-            consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
-        return await service.CompileAsync(sql, user ?? Writer(), new TenantId(Tenant));
+            consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+            connectionFactory: connectionFactory,
+            sqlEngine: withWritePermit ? new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()) : new TrinoSqlEngine.FastSqlEngine());
+        return service;
     }
 
     private static GovernedRewrite Rewrite(CompiledSql compiled) => new(compiled, [], DataSource);
@@ -152,7 +165,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var log = new CapturingLogger<GovernedSqlExecutor>();
         var opts = Options.Create(gateway);
         var executor = new GovernedSqlExecutor(
-            new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(auditRepo), guard ?? PassThroughExecutionGuard.Instance, factory, environment: environment, logger: log, sessionInitializer: session, secretProvider: secrets);
+            new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine())), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(auditRepo), guard ?? PassThroughExecutionGuard.Instance, factory, environment: environment, logger: log, sessionInitializer: session, secretProvider: secrets);
         return new Harness { Executor = executor, Factory = factory, Connection = connection, Audit = audit, Log = log };
     }
 
@@ -192,6 +205,45 @@ public sealed class GovernedSqlExecutorX1Tests
         }
 
         h.Audit.ShouldContain(e => e.EventType == "WEBSQL_DML_EXECUTED" && e.DetailsJson.Contains("sql.compiled_digest"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task WebSqlDml_WithTheProductionEngine_IsDeniedForLackOfAWritePermit_AndNothingIsExecuted()
+    {
+        // WP-SIMPL-45 PR 3 CI repair, SEC-CIFIX-2: without the test-only decorator the production engine denies every DML statement
+        // (SEC-SIMPL-120), also for a writer role, and no command reaches a connection.
+        var connectionFactory = Substitute.For<ISqlConnectionFactory>();
+        var service = BuildService("Sqlite", allowRecursive: false, withWritePermit: false, connectionFactory);
+        bool written = false;
+
+        var ex = await Should.ThrowAsync<SecurityException>(() => service.ExecuteGovernedQueryAsync(
+            new GovernedSqlQueryRequest("UPDATE orders SET amount = 1 WHERE id = 1"), Writer(), new TenantId(Tenant),
+            (_, _) => { written = true; return Task.CompletedTask; }));
+
+        ex.Message.ShouldContain("A write permit is required for DML operations.");
+        written.ShouldBeFalse();
+        connectionFactory.ReceivedCalls().ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void WebSqlDml_MaskedColumnWrite_WithoutExplicitGrant_IsRejected()
+    {
+        // SEC-CIFIX-5 and -6: the default test permit never covers a masked column, so writing one is rejected with the
+        // not-covered message; only an explicit alsoWritable grant (SEC-SIMPL-121) lets the same statement compile.
+        const string Sql = "UPDATE orders SET amount = 1 WHERE id = 1";
+        var env = new TestCompileEnv(TargetSqlDialect.Sqlite)
+            .Table("orders", "tenant_id", "id:int", "amount:decimal", "tenant_id:varchar")
+            .Mask("orders", "amount", Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService.Redact("amount", "***"));
+        var decorated = new Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(env.Engine);
+
+        var ex = Should.Throw<SecurityException>(() =>
+            decorated.Compile(Sql.AsMemory(), env.Request(statements: StatementPermissions.Update), CancellationToken.None));
+        ex.Message.ShouldBe("A column is not covered by a write grant.");
+
+        var explicitGrant = env.Request(statements: StatementPermissions.Update).WithTestWritePermit(Sql, alsoWritable: ["amount"]);
+        Should.NotThrow(() => env.Engine.Compile(Sql.AsMemory(), explicitGrant, CancellationToken.None));
     }
 
     [Fact]
@@ -349,7 +401,7 @@ public sealed class GovernedSqlExecutorX1Tests
                 .Returns(Task.FromResult<DbTransaction?>(null));
             var opts = Options.Create(gateway);
             var executor = new GovernedSqlExecutor(
-                new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
+                new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine())), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
                 factory, null, NullLogger.Instance, null, session);
             await Should.ThrowAsync<TimeoutException>(() => executor.ExecuteRewrittenAsync(
                 new GovernedSqlQueryRequest(Sql), Writer(), new TenantId(Tenant), Rewrite(compiled), new DmlAuditContext(),
@@ -602,7 +654,8 @@ public sealed class GovernedSqlExecutorX1Tests
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = webSqlEnabled, DefaultDataSourceName = DataSource } }), auditLog, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
-            environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+            sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
     }
 
     [Fact]

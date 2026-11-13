@@ -77,11 +77,10 @@ internal static class SecurityProbes
             TenantPredicates(env.Compile("DELETE FROM orders WHERE id = 1"), 1);
         });
 
-        PerDialect("TenantPredicate_MergeTargetAndSource", "tenant-predicate", d =>
+        PerDialect("Merge_IsRejected_BeforeSecuring", "merge-rejected", d =>
         {
             var env = new ProbeEnv(d);
-            var c = env.Compile("MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
-            Assert.True(TenantMarkerMentions(c) >= 2 * MentionsPerTenantPredicate(d), "the MERGE target (ON) and the source must both carry the tenant predicate");
+            AssertMergeRejected(env, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
         }, MergeDialects);
 
         PerDialect("ConsentFilter_AppliesInsideTheTenant", "tenant-predicate", d =>
@@ -109,13 +108,11 @@ internal static class SecurityProbes
             Assert.Equal(0, env.Engine.CompileCache.Stats.Entries);
         });
 
-        PerDialect("Verifier_RejectsAnUnknownMergeClause", "merge-clause-set", d =>
+        PerDialect("Merge_UnknownClause_IsRejected_BeforeSecuring", "merge-rejected", d =>
         {
             var env = new ProbeEnv(d);
             using var _ = MutantContext.Overlay(injector: Rewrite(new AddUnknownMergeClauseRewriter()));
-            Assert.Throws<SecurityCoverageException>(() =>
-                env.Compile("MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'"));
-            Assert.Equal(0, env.Engine.CompileCache.Stats.Entries);
+            AssertMergeRejected(env, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
         }, MergeDialects);
 
         PerDialect("TextChecker_RejectsASmuggledLiteral", "text-checker", d =>
@@ -190,7 +187,12 @@ internal static class SecurityProbes
             var env = new ProbeEnv(d);
             Assert.Throws<UnfilteredDmlException>(() => env.Compile("DELETE FROM orders"));
             Assert.Throws<UnfilteredDmlException>(() => env.Compile("UPDATE orders SET status = 'x' WHERE 1 = 1"));
-            Assert.Throws<UnfilteredDmlException>(() => env.Compile("MERGE INTO orders t USING entitlements s ON 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'"));
+        }, MergeDialects);
+
+        PerDialect("Merge_TriviallyTrueOn_IsRejected_BeforeSecuring", "merge-rejected", d =>
+        {
+            var env = new ProbeEnv(d);
+            AssertMergeRejected(env, "MERGE INTO orders t USING entitlements s ON 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'");
         }, MergeDialects);
 
         // ---- binder and checked execution (CR-ADG-43, CR-ADG-45, SEC-ADG-03) --------------------------------------------------
@@ -300,9 +302,10 @@ internal static class SecurityProbes
         Add("Cache_KeyContainsTheStatementPermissions", "cache-key", () =>
         {
             var env = new ProbeEnv(TargetSqlDialect.PostgreSql);
-            env.Engine.Compile("DELETE FROM orders WHERE id = 1".AsMemory(), env.Request(), CancellationToken.None);
+            const string delete = "DELETE FROM orders WHERE id = 1";
+            env.Engine.Compile(delete.AsMemory(), env.Request().WithTestWritePermit(delete), CancellationToken.None);
             Assert.Throws<SqlCompileNotSupportedException>(() =>
-                env.Engine.Compile("DELETE FROM orders WHERE id = 1".AsMemory(), env.Request(statements: StatementPermissions.ReadOnly), CancellationToken.None));
+                env.Engine.Compile(delete.AsMemory(), env.Request(statements: StatementPermissions.ReadOnly).WithTestWritePermit(delete), CancellationToken.None));
         });
 
         Add("Cache_KeyContainsTheTokenGuards", "cache-key", () =>

@@ -21,9 +21,10 @@ public sealed class DmlLimitAndAliasSql78Tests
     {
         var env = new ProbeEnv(dialect);
 
+        const string sql = "DELETE FROM orders WHERE id IN (SELECT id FROM orders o WHERE o.amount > 3)";
         var compiled = env.Engine.Compile(
-            "DELETE FROM orders WHERE id IN (SELECT id FROM orders o WHERE o.amount > 3)".AsMemory(),
-            env.Request(enforcedMaxRows: 100), CancellationToken.None);
+            sql.AsMemory(),
+            env.Request(enforcedMaxRows: 100).WithTestWritePermit(sql), CancellationToken.None);
 
         Assert.DoesNotContain("LIMIT", compiled.Sql, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("FETCH NEXT", compiled.Sql, StringComparison.OrdinalIgnoreCase);

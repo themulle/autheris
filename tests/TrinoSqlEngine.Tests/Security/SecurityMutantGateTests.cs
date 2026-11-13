@@ -82,7 +82,10 @@ public class SecurityMutantGateTests(ITestOutputHelper output)
             SecurityControl.SessionPinReadBack,
             SecurityControl.ErrorMapperFixedMessage,
             SecurityControl.TenantRegistryFailClosed,
-            SecurityControl.CatalogLoadFailureDenies
+            SecurityControl.CatalogLoadFailureDenies,
+            // WP-SIMPL-45 D-45-4: unreachable while MERGE is rejected; its mutant is retired to SecurityMutants.Pending.
+            // Remove this exemption when PendingMutant_IsActivated_WhenItsControlExists moves the MERGE mutants back to Active.
+            SecurityControl.MergeClauseClosedSet
         };
         var used = SecurityMutants.Active.SelectMany(m => m.Seam.DisabledControls ?? Enumerable.Empty<SecurityControl>()).ToHashSet();
         var unused = Enum.GetValues<SecurityControl>().Where(c => !nonEngineControls.Contains(c) && !used.Contains(c)).ToList();
@@ -103,7 +106,7 @@ public class SecurityMutantGateTests(ITestOutputHelper output)
             "allow-policy-column-assignment-in-update", "accept-when-not-matched-by-source", "omit-policy-values-from-cache-rebind",
             "cte-case-insensitive-scope", "accept-dollar-brace-in-databricks-identifier", "skip-execution-stack-guard"
         };
-        var known = SecurityMutants.Active.Select(m => m.Id).ToHashSet();
+        var known = SecurityMutants.Active.Select(m => m.Id).Concat(SecurityMutants.Pending.Select(m => m.Id)).ToHashSet();
         foreach (string id in required) Assert.Contains(id, known);
     }
 
