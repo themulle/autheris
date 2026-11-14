@@ -14,9 +14,11 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -25,20 +27,28 @@ using Autheris.Tests.Integration.Governance;
 /// checks on save and the epoch bump. The governance store is the in-memory SQLite database of the test host.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<RowFilterEvaluationEndpointAuthTests.HostFixture>
 {
     private const string OwnTenant = "tenant-default";
     private const string OtherTenant = "tenant-other";
     private readonly WebApplicationFactory<Program> _factory;
 
-    public RowFilterEvaluationEndpointAuthTests(WebApplicationFactory<Program> factory)
+    public RowFilterEvaluationEndpointAuthTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("RowFilterEvaluationEndpointAuthTests"));
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("RowFilterEvaluationEndpointAuthTests"),
+            });
+        }
     }
 
     private HttpClient CreateClient(string? roles, string tenant = OwnTenant)
@@ -342,7 +352,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<WebAppl
     [Fact]
     public void Startup_WithInvalidKeySetCacheOptions_FailsValidation_ProvingTheValidatorIsWired()
     {
-        var factory = _factory.WithWebHostBuilder(builder =>
+        using var factory = _factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:RowFilters:KeySetCache:MaxConcurrentKeyQueries", "0");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("RowFilterEvaluationEndpointAuthTests"));

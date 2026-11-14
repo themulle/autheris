@@ -26,6 +26,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -806,20 +807,6 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
             public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
                 sink.Enqueue($"[{logLevel}] {category}: {formatter(state, exception)} {exception?.GetType().Name}");
         }
-    }
-
-    internal sealed class ReloadableConfig : ConfigurationProvider
-    {
-        public void Put(string key, string value)
-        {
-            Data[key] = value;
-            OnReload();
-        }
-    }
-
-    private sealed class ReloadableConfigSource(ReloadableConfig provider) : IConfigurationSource
-    {
-        public IConfigurationProvider Build(IConfigurationBuilder builder) => provider;
     }
 
     internal sealed class ConnectionCounter
