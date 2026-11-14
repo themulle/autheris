@@ -72,6 +72,16 @@ public sealed class DeletedFeaturesArchitectureTests
     }
 
     [Theory]
+    [InlineData("CasbinEnforcementService")]
+    [InlineData("IPolicyEnforcementService")]
+    [InlineData("CasbinModelContract")]
+    [InlineData("CasbinDecisionCache")]
+    [InlineData("CasbinOptions")]
+    [InlineData("CasbinDecisionCacheOptions")]
+    public void Deleted_Casbin_Types_Do_Not_Exist_In_Production_Assemblies(string typeName) =>
+        Deleted_Types_Do_Not_Exist_In_Production_Assemblies(typeName);
+
+    [Theory]
     [InlineData("Purview")]
     [InlineData("Collibra")]
     [InlineData("Alation")]

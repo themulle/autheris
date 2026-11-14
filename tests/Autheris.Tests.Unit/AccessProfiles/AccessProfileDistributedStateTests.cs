@@ -77,7 +77,6 @@ public sealed class AccessProfileDistributedStateTests
             .ReturnsForAnyArgs(ci => TableAccessDecision.Allowed(
                 ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
         var cacheService = Substitute.For<IConsentCacheService>();
-        var policyEnforcementService = Substitute.For<IPolicyEnforcementService>();
         var clientIpResolver = Substitute.For<IClientIpResolver>();
         var mandatoryFilters = NullMandatoryRowFilterResolver.Instance;
         var options = new GatewayOptions();

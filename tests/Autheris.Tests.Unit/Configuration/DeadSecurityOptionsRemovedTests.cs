@@ -51,15 +51,6 @@ public sealed class DeadSecurityOptionsRemovedTests
         defaults.Insecure.danger_bypass_mcp_auth.ShouldBeFalse();
     }
 
-    [Fact]
-    public void ARCH_MNT_06_T_04_CasbinEnforcement_AppliedWithoutEnforceInQueryPipelineKey()
-    {
-        Has(typeof(CasbinOptions), "EnforceInQueryPipeline").ShouldBeFalse();
-        // Casbin:Enabled is the only switch; the guardrail and the query path read it (see McpDatasetToolWiringTests.Guardrail_AsksCasbin_OnlyWhenCasbinIsEnabled).
-        typeof(CasbinOptions).GetProperties().Select(p => p.Name).ShouldContain("Enabled");
-        new CasbinOptions().Enabled.ShouldBeFalse();
-    }
-
     [Theory]
     [InlineData(typeof(ScimOptions), "EnableMassChangeProtection")]
     [InlineData(typeof(ScimOptions), "MassChangeThresholdPercentage")]

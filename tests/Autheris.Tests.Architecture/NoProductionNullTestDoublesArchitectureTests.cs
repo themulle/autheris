@@ -5,13 +5,13 @@ namespace Autheris.Tests.Architecture;
 
 /// <summary>
 /// WP-ARC-A-05: a mis-registered container must fail at startup instead of silently dropping audit or policy. The Null object test doubles for
-/// the audit store, the policy enforcement and the compiled plan cache live in the test projects only; no production type references them.
+/// the audit store and the compiled plan cache live in the test projects only; no production type references them.
 /// </summary>
 public sealed class NoProductionNullTestDoublesArchitectureTests
 {
     private static readonly string[] TestDoubleNames =
     [
-        "NullAuditLogRepository", "NullPolicyEnforcementService", "NullCompiledSqlQueryPlanCache"
+        "NullAuditLogRepository", "NullCompiledSqlQueryPlanCache"
     ];
 
     private static string RepositoryRoot()
@@ -49,6 +49,6 @@ public sealed class NoProductionNullTestDoublesArchitectureTests
     public void NullTestDoubles_ExistInTheUnitTestProject_PositiveControl()
     {
         // The scan works on real files: the doubles are found where they now live.
-        FilesReferencing("tests/Autheris.Tests.Unit/TestDoubles").Count.ShouldBeGreaterThanOrEqualTo(2);
+        FilesReferencing("tests/Autheris.Tests.Unit/TestDoubles").Count.ShouldBeGreaterThanOrEqualTo(1);
     }
 }

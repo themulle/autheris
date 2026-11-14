@@ -40,7 +40,6 @@ internal static class ModuleSecurityGuards
         typeof(IAuthenticationSchemeProvider),
         typeof(IAuthenticationHandlerProvider),
         typeof(IAuthenticationService),
-        typeof(IPolicyEnforcementService),
         typeof(IColumnMaskingProvider),
         typeof(IAuthPluginHost),
         typeof(IPluginRoleProvider),

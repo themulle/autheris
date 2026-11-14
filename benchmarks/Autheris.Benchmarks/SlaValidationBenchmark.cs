@@ -26,7 +26,7 @@ public static class SlaValidationBenchmark
     {
         Console.WriteLine();
         Console.WriteLine("================================================================================");
-        Console.WriteLine(" SLA Validation Suite: Casbin (<=0.5ms), Lineage (<=15ms), Complexity (<=2ms)");
+        Console.WriteLine(" SLA Validation Suite: Lineage (<=15ms), Complexity (<=2ms)");
         Console.WriteLine("================================================================================");
 
         // 1. SLA-06: Complexity calculation (AST Traversierung <= 2ms)
@@ -34,14 +34,11 @@ public static class SlaValidationBenchmark
 
         // 2. SLA-04: Lineage 10,000 nodes traversal (p99 <= 15ms)
         await RunLineageSlaCheckAsync();
-
-        // 3. SLA-01 & SLA-02: Casbin ABAC evaluation with 50,000 rules (p50 <= 0.1ms, p99 <= 0.5ms)
-        await RunCasbinSlaCheckAsync();
     }
 
     public static void RunComplexitySlaCheck()
     {
-        Console.WriteLine("--- [SLA Check 1/3] QueryCostAnalyzerRule (AST Traversierung, Target: <= 2ms) ---");
+        Console.WriteLine("--- [SLA Check 1/2] QueryCostAnalyzerRule (AST Traversierung, Target: <= 2ms) ---");
         var rule = new QueryCostAnalyzerRule(maxAllowedCost: 1_000_000, defaultListMultiplier: 10, maxResponseRows: 200_000);
 
         var queryText = @"
@@ -123,7 +120,7 @@ public static class SlaValidationBenchmark
 
     public static async Task RunLineageSlaCheckAsync()
     {
-        Console.WriteLine("--- [SLA Check 2/3] Lineage Impact Analyzer (10,000 Nodes, Target: p99 <= 15ms) ---");
+        Console.WriteLine("--- [SLA Check 2/2] Lineage Impact Analyzer (10,000 Nodes, Target: p99 <= 15ms) ---");
         var graphStore = new LineageGraphStore();
 
         var rootId = "perf.dbo.root";
@@ -207,70 +204,6 @@ public static class SlaValidationBenchmark
         Console.WriteLine($" P99 Latency: {p99Ms:F2} ms");
         Console.WriteLine($" Max Latency: {maxMs:F2} ms");
         Console.WriteLine($" SLA-04 Gate: P99 <= 15.0 ms -> {(p99Ms <= 15.0 ? "PASS [COMPLIANT]" : "FAIL")}");
-        Console.WriteLine();
-    }
-
-    public static async Task RunCasbinSlaCheckAsync()
-    {
-        Console.WriteLine("--- [SLA Check 3/3] Casbin ABAC Evaluation (50,000 Rules, Target: p50 <= 0.1ms, p99 <= 0.5ms) ---");
-        var service = new CasbinEnforcementService();
-        var tenant = new TenantId("tenant-perf");
-
-        Console.WriteLine(" Populating Casbin with 50,000 rules...");
-        var swPop = Stopwatch.StartNew();
-
-        // 50,000 rules
-        for (int i = 1; i <= 50_000; i++)
-        {
-            var userSid = $"S-1-5-21-USER-{i:D5}";
-            var table = $"domain_{i % 10}.dbo.table_{i % 500}";
-            service.AddPolicy(tenant, userSid, table, "read", "true", "allow");
-        }
-        swPop.Stop();
-        Console.WriteLine($" Populated 50,000 rules in {swPop.Elapsed.TotalSeconds:F2} s.");
-
-        var testUser = new Sid("S-1-5-21-USER-25000"); // middle of the pack
-        var testTable = new TableIdentifier("domain_0", "dbo", "table_0");
-
-        var context = new SecurityEvaluationContext(
-            testUser,
-            [],
-            tenant,
-            testTable,
-            ["col1"],
-            IPAddress.Loopback,
-            DateTimeOffset.UtcNow,
-            "read");
-
-        // Warmup
-        for (int i = 0; i < 2; i++)
-        {
-            await service.EvaluatePolicyAsync(context);
-        }
-
-        const int iterations = 20;
-        var latencies = new double[iterations];
-        var sw = new Stopwatch();
-
-        for (int i = 0; i < iterations; i++)
-        {
-            sw.Restart();
-            var dec = await service.EvaluatePolicyAsync(context);
-            sw.Stop();
-            latencies[i] = sw.Elapsed.TotalMicroseconds;
-        }
-
-        Array.Sort(latencies);
-        double p50Ms = latencies[(int)(iterations * 0.50)] / 1000.0;
-        double p99Ms = latencies[(int)(iterations * 0.99)] / 1000.0;
-        double maxMs = latencies[iterations - 1] / 1000.0;
-
-        Console.WriteLine($" Iterations : {iterations:N0}");
-        Console.WriteLine($" P50 Latency: {p50Ms:F4} ms ({latencies[(int)(iterations * 0.50)]:F2} µs)");
-        Console.WriteLine($" P99 Latency: {p99Ms:F4} ms ({latencies[(int)(iterations * 0.99)]:F2} µs)");
-        Console.WriteLine($" Max Latency: {maxMs:F4} ms");
-        Console.WriteLine($" SLA-02 Gate: P50 <= 0.1 ms -> {(p50Ms <= 0.1 ? "PASS [COMPLIANT]" : "FAIL")}");
-        Console.WriteLine($" SLA-01 Gate: P99 <= 0.5 ms -> {(p99Ms <= 0.5 ? "PASS [COMPLIANT]" : "FAIL")}");
         Console.WriteLine();
     }
 

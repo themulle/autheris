@@ -136,19 +136,6 @@ public sealed class CallerAttributeSecurityTests : IDisposable
 
     // ---- ST-129-18 -----------------------------------------------------------------------------------------------------------------
 
-    [Theory]
-    [InlineData("region = {{caller.dept}}")]
-    [InlineData("region = '{{caller.dept}}'")]
-    [InlineData("region = '__autheris_caller__dept'")]
-    public void ST_129_18_ACasbinRule_WithAPlaceholder_IsRefused_OnEveryEntryPoint(string rlsFilter)
-    {
-        var service = new CasbinEnforcementService();
-        var tenant = new TenantId("tenant-corp");
-        Should.Throw<ArgumentException>(() => service.AddPolicy(tenant, "role:analyst", "sales.public.orders", "read", "true", "allow", rlsFilter));
-        Should.Throw<ArgumentException>(() => service.AddPolicy(tenant, "role:analyst", "sales.public.orders", "read", rlsFilter, "allow"));
-        Should.Throw<ArgumentException>(() => service.AddPolicies(tenant, [new CasbinRuleInput("role:analyst", "sales.public.orders", "read", "true", "allow", rlsFilter)]));
-    }
-
     [Fact]
     public void ST_129_18_ARuleThatMentionsAPlaceholder_IsNeverShareableBetweenUsers()
     {

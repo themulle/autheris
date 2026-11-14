@@ -317,7 +317,7 @@ public sealed class McpOpenFindingsSecurityTests
 
         var services = new ServiceCollection();
         services.AddSingleton(accessor);
-        services.AddSingleton(Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } }));
+        services.AddSingleton(Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }));
         services.AddSingleton(guardrail);
         return services.BuildServiceProvider();
     }

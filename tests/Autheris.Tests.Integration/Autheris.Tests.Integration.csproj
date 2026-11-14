@@ -62,7 +62,6 @@
     <Compile Include="..\Autheris.Tests.Unit\Catalog\Wp0CatalogFixtures.cs" Link="Catalog\Wp0CatalogFixtures.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Identity\Attributes\CallerAttributeTestSupport.cs" Link="Identity\CallerAttributeTestSupport.cs" />
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\AuditWriterTestServices.cs" Link="TestDoubles\AuditWriterTestServices.cs" />
-    <Compile Include="..\Autheris.Tests.Unit\TestDoubles\NullPolicyEnforcementService.cs" Link="TestDoubles\NullPolicyEnforcementService.cs" />
     <Compile Include="..\Autheris.Tests.Unit\DefaultTenantCaller.cs" Link="DefaultTenantCaller.cs" />
     <Compile Include="..\Autheris.Tests.Unit\ConsentRequests\DecisionTestSupport.cs" Link="ConsentRequests\DecisionTestSupport.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Webhooks\WebhookTestSupport.cs" Link="Webhooks\WebhookTestSupport.cs" />
