@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="22222222-2222-2222-2222-222222222222" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Results>
+    <UnitTestResult executionId="e4" testId="t1" testName="Autheris.Tests.Integration.AlphaTests.First" duration="00:00:01.0000000" startTime="2026-11-14T09:00:00.0000000+00:00" endTime="2026-11-14T09:00:01.0000000+00:00" outcome="Passed" />
+    <UnitTestResult executionId="e5" testId="t2" testName="Autheris.Tests.Integration.AlphaTests.Second" duration="00:00:02.0000000" startTime="2026-11-14T09:00:18.0000000+00:00" endTime="2026-11-14T09:00:20.0000000+00:00" outcome="Passed" />
+    <UnitTestResult executionId="e6" testId="t3" testName="Autheris.Tests.Integration.Sub.BetaTests.Only" duration="00:00:04.4000000" startTime="2026-11-14T09:01:00.0000000+00:00" endTime="2026-11-14T09:01:04.4000000+00:00" outcome="Passed" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Autheris.Tests.Integration.AlphaTests.First" id="t1">
+      <TestMethod codeBase="Autheris.Tests.Integration.dll" className="Autheris.Tests.Integration.AlphaTests" name="First" />
+    </UnitTest>
+    <UnitTest name="Autheris.Tests.Integration.AlphaTests.Second" id="t2">
+      <TestMethod codeBase="Autheris.Tests.Integration.dll" className="Autheris.Tests.Integration.AlphaTests" name="Second" />
+    </UnitTest>
+    <UnitTest name="Autheris.Tests.Integration.Sub.BetaTests.Only" id="t3">
+      <TestMethod codeBase="Autheris.Tests.Integration.dll" className="Autheris.Tests.Integration.Sub.BetaTests" name="Only" />
+    </UnitTest>
+  </TestDefinitions>
+</TestRun>
