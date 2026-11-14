@@ -49,7 +49,8 @@ public sealed partial class DbtMetadataIngestionService
         IDataOwnerIdentityVerifier? ownerIdentityVerifier = null,
         IPhysicalKeyCatalog? physicalKeys = null,
         IAuditWriter? auditWriter = null,
-        IDataOwnershipRepository? ownershipRepo = null)
+        IDataOwnershipRepository? ownershipRepo = null,
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
             virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, physicalKeys, auditWriter, logger)
     {
@@ -57,6 +58,7 @@ public sealed partial class DbtMetadataIngestionService
         _ownerAssignments = ownerAssignments;
         _ownerIdentityVerifier = ownerIdentityVerifier;
         _ownershipRepo = ownershipRepo;
+        _catalogWriteScopes = catalogWriteScopeFactory;
     }
 
     private const int MaxOwnerAssignmentsPerImport = 5000;

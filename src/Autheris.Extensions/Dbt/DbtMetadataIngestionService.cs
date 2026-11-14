@@ -44,6 +44,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly IAuditWriter? _auditWriter;
     private readonly IDataOwnershipRepository? _ownershipRepo;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
+    private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
 
     public DbtMetadataIngestionService(
         IDbtProposalRepository proposalRepository,
@@ -227,6 +228,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     {
         ArgumentNullException.ThrowIfNull(manifestStream);
         ArgumentNullException.ThrowIfNull(caller);
+
+        // One catalog version bump and one catalog:changed event per sync chunk instead of one per table (and per relation).
+        await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "dbt-manifest-sync");
 
         var warnings = new List<string>();
         var rejectedModels = new List<string>();
@@ -1058,6 +1062,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             // The sync actor skips the approval workflow and the managed-resource lock; a direct import never runs as the sync.
             throw new ArgumentException("The dbt governance import must run as the calling user, not as the sync actor.", nameof(caller));
         }
+
+        await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "dbt-governance-import");
 
         var warnings = new List<string>();
         var rejections = new List<string>();

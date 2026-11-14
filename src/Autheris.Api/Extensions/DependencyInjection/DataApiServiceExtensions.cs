@@ -56,7 +56,7 @@ public sealed class VirtualSystemTablesHostedService : IHostedService
             var repository = scope.ServiceProvider.GetService<ITableMetadataRepository>();
             if (repository != null)
             {
-                await VirtualSystemTables.RegisterSystemTablesAsync(repository, cancellationToken).ConfigureAwait(false);
+                await VirtualSystemTables.RegisterSystemTablesAsync(repository, scope.ServiceProvider.GetService<Autheris.Application.Catalog.ICatalogWriteScopeFactory>(), cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation("Successfully registered virtual system tables (governance.system.*) in metadata repository.");
             }
         }
