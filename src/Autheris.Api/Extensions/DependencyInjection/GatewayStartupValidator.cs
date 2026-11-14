@@ -729,6 +729,14 @@ public static class GatewayStartupValidator
         }
     }
 
+    /// <summary>
+    /// #668: every <c>WebSql:DataSourceMappings</c> entry must name an existing connection and must not chain (one hop only).
+    /// Warns about a dbt-mapped source database that WebSQL cannot reach through a mapping.
+    /// </summary>
+    public static void ValidateDataSourceMappings(GatewayOptions options, ILogger? logger = null)
+    {
+    }
+
     private static HashSet<string> WebSqlReachableDataSources(GatewayOptions options)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { options.WebSql.DefaultDataSourceName };

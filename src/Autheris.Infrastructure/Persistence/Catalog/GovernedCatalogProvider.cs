@@ -87,8 +87,10 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
         }
     }
 
-    public async ValueTask<ITableCatalog> GetCatalogAsync(string dataSourceName, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
+    public async ValueTask<ITableCatalog> GetCatalogAsync(GovernedDataSource dataSource, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(dataSource);
+        var dataSourceName = dataSource.LogicalName;
         ArgumentException.ThrowIfNullOrWhiteSpace(dataSourceName);
         ArgumentNullException.ThrowIfNull(tables);
 

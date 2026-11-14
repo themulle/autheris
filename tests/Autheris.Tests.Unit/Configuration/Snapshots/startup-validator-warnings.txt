@@ -30,6 +30,10 @@ outcome: OK
 outcome: OK
 log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 log: Warning: Gateway:Catalog:AllowAuthenticatedCatalogDiscovery is deprecated and has no effect: non-administrators see only consented tables in the GraphQL catalog.
+## Warnings_DevelopmentDbtMappedDatabaseWithoutWebSqlMapping [Development]
+outcome: OK
+log: Warning: Gateway:Dbt:DatabaseMappings maps database 'sales' to a connection and Gateway:WebSql:AllowedDataSources lists it, but Gateway:WebSql:DataSourceMappings has no entry for it; WebSQL cannot reach the tables of that database. Add Gateway:WebSql:DataSourceMappings:sales.
+log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.
 ## Warnings_ProductionDefault [Production]
 outcome: OK
 log: Warning: Gateway:Tenancy:DefaultTenantId is not configured; a principal without tenant claim is rejected (TENANT_UNRESOLVED). Single-tenant deployments must set Gateway:Tenancy:DefaultTenantId.

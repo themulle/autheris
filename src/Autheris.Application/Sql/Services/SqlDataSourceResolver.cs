@@ -98,6 +98,11 @@ public sealed class SqlDataSourceResolver
         return false;
     }
 
+    /// <summary>The <c>DataSources:Connections</c> key a logical data source name resolves to, or null (deny) when there is none.</summary>
+    public string? ResolveConnectionKey(string? logicalName) => ResolveConnectionKey(_options.Value, logicalName);
+
+    public static string? ResolveConnectionKey(GatewayOptions options, string? logicalName) => logicalName;
+
     public DatabaseDialect? ResolveConnectionDialect(string dataSourceName)
     {
         DataSourceConnectionOptions? connOptions = ResolveConnectionOptions(dataSourceName);

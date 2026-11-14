@@ -10,5 +10,15 @@ namespace Autheris.Application.Sql.Catalog;
 /// </summary>
 public interface IGovernedCatalogProvider
 {
-    ValueTask<ITableCatalog> GetCatalogAsync(string dataSourceName, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct);
+    ValueTask<ITableCatalog> GetCatalogAsync(GovernedDataSource dataSource, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct);
+}
+
+/// <summary>
+/// The two names of one WebSQL data source (#668): the logical name the caller requested (catalog domain, allowlists) and the key of the
+/// <c>DataSources:Connections</c> entry it resolves to (connection, dialect, admission of a catalog entry's <c>SourceName</c>). They differ
+/// only through <c>WebSql:DataSourceMappings</c>. An unmapped name is its own connection key (the implicit conversion).
+/// </summary>
+public sealed record GovernedDataSource(string LogicalName, string ConnectionKey)
+{
+    public static implicit operator GovernedDataSource(string name) => new(name, name);
 }
