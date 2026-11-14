@@ -16,6 +16,8 @@ public interface IScimUserStore
     Task<ScimUser?> GetUserByImmutableIdAsync(TenantId tenantId, string realmId, string onPremisesImmutableId, CancellationToken ct = default);
     Task<ScimUser?> GetUserByEntraObjectIdAsync(TenantId tenantId, string realmId, string entraObjectId, CancellationToken ct = default);
     Task<ScimUser?> GetUserByUpnAsync(TenantId tenantId, string realmId, string userPrincipalName, CancellationToken ct = default);
+    Task<IReadOnlyList<ScimUser>> GetUsersByEntraObjectIdOrExternalIdAsync(TenantId tenantId, string realmId, string identifier, CancellationToken ct = default);
+    Task<IReadOnlyList<ScimUser>> GetUsersByUpnOrUserNameAsync(TenantId tenantId, string realmId, string userPrincipalName, CancellationToken ct = default);
     Task UpsertUserAsync(ScimUser user, TenantId tenantId, string realmId, CancellationToken ct = default);
     Task CreateUserAsync(TenantId tenantId, string realmId, ScimUser user, CancellationToken ct = default);
     Task UpdateUserAsync(TenantId tenantId, string realmId, ScimUser user, CancellationToken ct = default);
@@ -24,11 +26,17 @@ public interface IScimUserStore
     Task<IReadOnlyList<ScimUser>> ListUsersAsync(TenantId tenantId, string realmId, int startIndex = 1, int count = 100, string? filter = null, CancellationToken ct = default);
 }
 
+public sealed record EffectiveScimGroupsResult(
+    IReadOnlySet<string> GroupObjectSids,
+    bool MaxDepthExceeded,
+    bool HasNonCanonicalSid = false);
+
 public interface IScimGroupStore
 {
     Task<ScimGroup?> GetGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default);
     Task<ScimGroup?> GetGroupByExternalIdAsync(TenantId tenantId, string realmId, string externalId, CancellationToken ct = default);
     Task<ScimGroup?> GetGroupByObjectSidAsync(TenantId tenantId, string realmId, string objectSid, CancellationToken ct = default);
+    Task<EffectiveScimGroupsResult> GetEffectiveGroupSidsForUserAsync(TenantId tenantId, string realmId, string userKey, int maxDepth = 32, CancellationToken ct = default);
     Task UpsertGroupAsync(ScimGroup group, TenantId tenantId, string realmId, CancellationToken ct = default);
     Task CreateGroupAsync(TenantId tenantId, string realmId, ScimGroup group, CancellationToken ct = default);
     Task UpdateGroupAsync(TenantId tenantId, string realmId, ScimGroup group, CancellationToken ct = default);

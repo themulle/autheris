@@ -29,10 +29,15 @@ public sealed class ScimStoreRoleProvider : IRoleProvider
 
         try
         {
-            var groups = await _repository.GetGroupMembershipsForUserAsync(
-                identity.TenantId, realm.Id, identity.UserKey, cancellationToken).ConfigureAwait(false);
+            var effective = await _repository.GetEffectiveGroupSidsForUserAsync(
+                identity.TenantId, realm.Id, identity.UserKey, maxDepth: 16, ct: cancellationToken).ConfigureAwait(false);
 
-            var groupSet = new HashSet<string>(groups, StringComparer.OrdinalIgnoreCase);
+            if (effective.MaxDepthExceeded || effective.HasNonCanonicalSid)
+            {
+                return ProviderRoleResult.FailedResult;
+            }
+
+            var groupSet = new HashSet<string>(effective.GroupObjectSids, StringComparer.OrdinalIgnoreCase);
             return new ProviderRoleResult(
                 groupSet,
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase),

@@ -37,8 +37,27 @@ public sealed class IdentityRealmConfigOptions
 
 public sealed class ScimRealmSecretOptions
 {
+    public const int MinMaxSyncAgeMinutes = 10;
+    public const int MaxMaxSyncAgeMinutes = 10080;
+    public const int DefaultMaxSyncAgeMinutes = 180;
+
+    /// <summary>Primary bearer secret for inbound SCIM 2.0 provisioning requests to this realm (minimum 32 characters).</summary>
     public string? PrimarySecret { get; set; }
+
+    /// <summary>Optional secondary bearer secret accepted during zero-downtime SCIM token rotation.</summary>
     public string? SecondarySecret { get; set; }
+
+    /// <summary>Whether SCIM identity correlation may fall back to matching UPN or userName when stronger keys are absent. Default false.</summary>
+    public bool AllowUpnCorrelation { get; set; }
+
+    /// <summary>Whether an authenticated caller in a SCIM-provisioned realm must match a provisioned SCIM user. Default true.</summary>
+    public bool RequireCorrelation { get; set; } = true;
+
+    /// <summary>Maximum age in minutes since the last authenticated SCIM contact before the realm's SCIM sync is considered stale (10..10080, default 180).</summary>
+    public int MaxSyncAgeMinutes { get; set; } = DefaultMaxSyncAgeMinutes;
+
+    /// <summary>Behavior when SCIM sync is older than MaxSyncAgeMinutes: Degrade (default, denies data access) or DropScimGroups (uses token groups only when no SCIM-only group carries a deny).</summary>
+    public ScimStaleSyncBehavior StaleSyncBehavior { get; set; } = ScimStaleSyncBehavior.Degrade;
 }
 
 public sealed class ScimOptions

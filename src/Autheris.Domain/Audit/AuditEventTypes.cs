@@ -158,5 +158,8 @@ public static class AuditEventTypes
 
     // Issue #447: a data source refused the ingress transport of the request (fail-closed gate)
     public const string TransportNotAllowed = "TRANSPORT_NOT_ALLOWED";
+
+    // SCIM identity correlation ambiguity
+    public const string IdentityCorrelationAmbiguous = "IDENTITY_CORRELATION_AMBIGUOUS";
 }
 

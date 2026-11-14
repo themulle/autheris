@@ -241,6 +241,24 @@ public sealed class ScimServiceGroupNestingAndCorrelationTests
                 string.Equals(u.UserPrincipalName, normalized, StringComparison.OrdinalIgnoreCase)));
         }
 
+        public Task<IReadOnlyList<ScimUser>> GetUsersByEntraObjectIdOrExternalIdAsync(TenantId tenantId, string realmId, string identifier, CancellationToken ct = default)
+        {
+            var normalized = identifier.Trim();
+            var matches = ScopedUsers(tenantId, realmId).Where(u =>
+                string.Equals(u.EntraObjectId, normalized, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(u.ExternalId, normalized, StringComparison.OrdinalIgnoreCase)).ToList();
+            return Task.FromResult<IReadOnlyList<ScimUser>>(matches);
+        }
+
+        public Task<IReadOnlyList<ScimUser>> GetUsersByUpnOrUserNameAsync(TenantId tenantId, string realmId, string userPrincipalName, CancellationToken ct = default)
+        {
+            var normalized = userPrincipalName.Trim();
+            var matches = ScopedUsers(tenantId, realmId).Where(u =>
+                string.Equals(u.UserPrincipalName, normalized, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(u.UserName, normalized, StringComparison.OrdinalIgnoreCase)).ToList();
+            return Task.FromResult<IReadOnlyList<ScimUser>>(matches);
+        }
+
         public Task UpsertUserAsync(ScimUser user, TenantId tenantId, string realmId, CancellationToken ct = default)
         {
             Users[(tenantId.Value, realmId, user.UserKey)] = user;
@@ -281,6 +299,9 @@ public sealed class ScimServiceGroupNestingAndCorrelationTests
 
         public Task<ScimGroup?> GetGroupByObjectSidAsync(TenantId tenantId, string realmId, string objectSid, CancellationToken ct = default) =>
             Task.FromResult(Groups.Where(kv => kv.Key.Tenant == tenantId.Value && kv.Key.Realm == realmId).Select(kv => kv.Value).FirstOrDefault(g => g.ObjectSid == objectSid));
+
+        public Task<EffectiveScimGroupsResult> GetEffectiveGroupSidsForUserAsync(TenantId tenantId, string realmId, string userKey, int maxDepth = 32, CancellationToken ct = default) =>
+            Task.FromResult(new EffectiveScimGroupsResult(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false));
 
         public Task UpsertGroupAsync(ScimGroup group, TenantId tenantId, string realmId, CancellationToken ct = default)
         {

@@ -20,6 +20,7 @@ public sealed class ScimService : IScimService
     private readonly ScimGroupMembershipValidator? _membershipValidator;
     private readonly IRoleResolverCache? _roleCache;
     private readonly ScimMassChangeGuard? _massChangeGuard;
+    private readonly IScimSyncStateTracker? _syncStateTracker;
     private readonly TimeProvider _timeProvider;
 
     public ScimService(
@@ -28,7 +29,8 @@ public sealed class ScimService : IScimService
         ScimGroupMembershipValidator? membershipValidator = null,
         IRoleResolverCache? roleCache = null,
         ScimMassChangeGuard? massChangeGuard = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IScimSyncStateTracker? syncStateTracker = null)
     {
         _massChangeGuard = massChangeGuard;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
@@ -36,11 +38,14 @@ public sealed class ScimService : IScimService
         _membershipValidator = membershipValidator;
         _roleCache = roleCache;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _syncStateTracker = syncStateTracker;
     }
 
     public async Task<ScimUser?> GetUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
     {
-        return await _repository.GetUserAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
+        var user = await _repository.GetUserAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
+        await RecordReadContactAsync(tenantId, realmId, ct).ConfigureAwait(false);
+        return user;
     }
 
     public async Task<ScimUser> CreateUserAsync(TenantId tenantId, string realmId, ScimUser user, CancellationToken ct = default)
@@ -67,7 +72,7 @@ public sealed class ScimService : IScimService
             EntraObjectId: ScimRequestValidator.NormalizeEntraObjectId(user.ResolvedEntraObjectId));
 
         await _repository.CreateUserAsync(tenantId, realmId, entity, ct).ConfigureAwait(false);
-        await _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct).ConfigureAwait(false);
+        await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return entity;
     }
 
@@ -103,13 +108,15 @@ public sealed class ScimService : IScimService
             await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
             await _deprovisioningService.DeprovisionAndLockSubjectAsync(
                 tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_PUT", ct).ConfigureAwait(false);
+            await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
+            _roleCache?.Invalidate(realmId, userKey);
         }
         else
         {
             await _repository.UpdateUserAsync(tenantId, realmId, updated, ct).ConfigureAwait(false);
         }
 
-        await _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct).ConfigureAwait(false);
+        await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return updated;
     }
 
@@ -153,7 +160,9 @@ public sealed class ScimService : IScimService
             await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
             await _deprovisioningService.DeprovisionAndLockSubjectAsync(
                 tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_PATCH", ct).ConfigureAwait(false);
-            await _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct).ConfigureAwait(false);
+            await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
+            _roleCache?.Invalidate(realmId, userKey);
+            await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
 
             return existing with { Active = false, DeactivatedAt = now, UpdatedAt = now };
         }
@@ -171,7 +180,7 @@ public sealed class ScimService : IScimService
         };
 
         await _repository.UpdateUserAsync(tenantId, realmId, updated, ct).ConfigureAwait(false);
-        await _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct).ConfigureAwait(false);
+        await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return updated;
     }
 
@@ -189,21 +198,38 @@ public sealed class ScimService : IScimService
             tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_DELETE", ct).ConfigureAwait(false);
 
         await _repository.DeleteUserAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
+        await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
         _roleCache?.Invalidate(realmId, userKey);
-        await _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct).ConfigureAwait(false);
+        await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return true;
     }
 
     private Task EnsureMassChangeAllowedAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct) =>
         _massChangeGuard?.EnsureAllowedAsync(tenantId, realmId, userKey, ct) ?? Task.CompletedTask;
 
+    private Task RecordReadContactAsync(TenantId tenantId, string realmId, CancellationToken ct) =>
+        _syncStateTracker?.RecordAuthenticatedContactAsync(tenantId, realmId, isWrite: false, ct) ?? Task.CompletedTask;
+
+    private Task RecordWriteContactAsync(TenantId tenantId, string realmId, DateTimeOffset now, CancellationToken ct) =>
+        _syncStateTracker is not null
+            ? _syncStateTracker.RecordAuthenticatedContactAsync(tenantId, realmId, isWrite: true, ct)
+            : _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct);
+
     public async Task<ScimListResponse<ScimUser>> ListUsersAsync(TenantId tenantId, string realmId, int startIndex = 1, int count = 100, string? filter = null, CancellationToken ct = default)
     {
         var users = await _repository.ListUsersAsync(tenantId, realmId, startIndex, count, filter, ct).ConfigureAwait(false);
+        await RecordReadContactAsync(tenantId, realmId, ct).ConfigureAwait(false);
         return new ScimListResponse<ScimUser>(users.Count, startIndex, count, users, [ScimSchemaUris.ListResponse]);
     }
 
     public async Task<ScimGroup?> GetGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default)
+    {
+        var group = await GetGroupInternalAsync(tenantId, realmId, groupId, ct).ConfigureAwait(false);
+        await RecordReadContactAsync(tenantId, realmId, ct).ConfigureAwait(false);
+        return group;
+    }
+
+    private async Task<ScimGroup?> GetGroupInternalAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct)
     {
         var group = await _repository.GetGroupAsync(tenantId, realmId, groupId, ct).ConfigureAwait(false);
         if (group == null)
@@ -265,7 +291,7 @@ public sealed class ScimService : IScimService
             }
         }
 
-        await _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct).ConfigureAwait(false);
+        await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return entity;
     }
 
@@ -326,7 +352,8 @@ public sealed class ScimService : IScimService
                 _roleCache?.Invalidate(realmId, addedUser);
             }
 
-            foreach (var removedChild in currentChildren.Except(targetChildren, StringComparer.Ordinal))
+            var removedChildren = currentChildren.Except(targetChildren, StringComparer.Ordinal).ToList();
+            foreach (var removedChild in removedChildren)
             {
                 await _repository.RemoveGroupNestingEdgeAsync(tenantId, realmId, groupId, removedChild, ct).ConfigureAwait(false);
             }
@@ -335,9 +362,14 @@ public sealed class ScimService : IScimService
             {
                 await _repository.AddGroupNestingEdgeAsync(tenantId, realmId, groupId, addedChild, ct).ConfigureAwait(false);
             }
+
+            if (usersToRemove.Count > 0 || removedChildren.Count > 0)
+            {
+                await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
+            }
         }
 
-        await _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct).ConfigureAwait(false);
+        await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return updated;
     }
 
@@ -468,8 +500,13 @@ public sealed class ScimService : IScimService
             }
         }
 
-        await _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct).ConfigureAwait(false);
-        return await GetGroupAsync(tenantId, realmId, groupId, ct).ConfigureAwait(false);
+        if (membersToRemove.Count > 0)
+        {
+            await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
+        }
+
+        await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
+        return await GetGroupInternalAsync(tenantId, realmId, groupId, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> DeleteGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default)
@@ -487,13 +524,15 @@ public sealed class ScimService : IScimService
             _roleCache?.Invalidate(realmId, memberKey);
         }
 
-        await _repository.UpsertRealmSyncStateAsync(tenantId, realmId, now, now, ct).ConfigureAwait(false);
+        await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
+        await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return true;
     }
 
     public async Task<ScimListResponse<ScimGroup>> ListGroupsAsync(TenantId tenantId, string realmId, int startIndex = 1, int count = 100, string? filter = null, CancellationToken ct = default)
     {
         var groups = await _repository.ListGroupsAsync(tenantId, realmId, startIndex, count, filter, ct).ConfigureAwait(false);
+        await RecordReadContactAsync(tenantId, realmId, ct).ConfigureAwait(false);
         return new ScimListResponse<ScimGroup>(groups.Count, startIndex, count, groups, [ScimSchemaUris.ListResponse]);
     }
 

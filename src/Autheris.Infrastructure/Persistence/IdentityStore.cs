@@ -76,6 +76,16 @@ internal sealed class IdentityStore(
             UserSelectColumns + "FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND upn = @upn",
             tenantId, realmId, "@upn", userPrincipalName.Trim().ToLowerInvariant(), ct);
 
+    public Task<IReadOnlyList<ScimUser>> GetUsersByEntraObjectIdOrExternalIdAsync(TenantId tenantId, string realmId, string identifier, CancellationToken ct = default) =>
+        QueryUsersAsync(
+            UserSelectColumns + "FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND (entra_object_id = @lookup OR LOWER(external_id) = @lookup)",
+            tenantId, realmId, "@lookup", identifier.Trim().ToLowerInvariant(), ct);
+
+    public Task<IReadOnlyList<ScimUser>> GetUsersByUpnOrUserNameAsync(TenantId tenantId, string realmId, string userPrincipalName, CancellationToken ct = default) =>
+        QueryUsersAsync(
+            UserSelectColumns + "FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND (upn = @lookup OR LOWER(user_name) = @lookup)",
+            tenantId, realmId, "@lookup", userPrincipalName.Trim().ToLowerInvariant(), ct);
+
     public async Task CreateUserAsync(TenantId tenantId, string realmId, ScimUser user, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
@@ -102,7 +112,18 @@ internal sealed class IdentityStore(
         await EnsureUserCorrelationUniqueAsync(scope.Connection, tenantId, realmId, userKey, normalized, ct).ConfigureAwait(false);
         try
         {
-            await ExecuteUserUpsertAsync(scope.Connection, normalized, tenantId, realmId, userKey, ct).ConfigureAwait(false);
+            if (!normalized.Active)
+            {
+                await using var tx = await scope.Connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                await ExecuteUserUpsertAsync(scope.Connection, normalized, tenantId, realmId, userKey, ct, tx).ConfigureAwait(false);
+                await ExecuteDeleteUserMembershipsAsync(scope.Connection, tx, tenantId, realmId, userKey, ct).ConfigureAwait(false);
+                await ExecuteIncrementEpochAsync(scope.Connection, tx, tenantId, realmId, ct).ConfigureAwait(false);
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await ExecuteUserUpsertAsync(scope.Connection, normalized, tenantId, realmId, userKey, ct).ConfigureAwait(false);
+            }
         }
         catch (DbException ex) when (IsUniqueViolation(ex))
         {
@@ -122,17 +143,25 @@ internal sealed class IdentityStore(
     public async Task DeactivateUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);
-        await using var cmd = scope.Connection.CreateCommand();
+        await using var tx = await scope.Connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         var now = DateTimeOffset.UtcNow;
-        cmd.CommandText = "UPDATE IDENTITY_USERS SET active = @active, deactivated_at = @deactivatedAt, updated_at = @updatedAt WHERE tenant_id = @tenantId AND realm_id = @realmId AND user_key = @userKey";
-        AddParam(cmd, "@tenantId", tenantId.Value);
-        AddParam(cmd, "@realmId", realmId);
-        AddParam(cmd, "@userKey", userKey);
-        AddParam(cmd, "@active", DialectValueCodec.Bool(Sql, false));
-        AddParam(cmd, "@deactivatedAt", DialectValueCodec.Ts(Sql, now));
-        AddParam(cmd, "@updatedAt", DialectValueCodec.Ts(Sql, now));
 
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        await using (var cmd = scope.Connection.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "UPDATE IDENTITY_USERS SET active = @active, deactivated_at = @deactivatedAt, updated_at = @updatedAt WHERE tenant_id = @tenantId AND realm_id = @realmId AND user_key = @userKey";
+            AddParam(cmd, "@tenantId", tenantId.Value);
+            AddParam(cmd, "@realmId", realmId);
+            AddParam(cmd, "@userKey", userKey);
+            AddParam(cmd, "@active", DialectValueCodec.Bool(Sql, false));
+            AddParam(cmd, "@deactivatedAt", DialectValueCodec.Ts(Sql, now));
+            AddParam(cmd, "@updatedAt", DialectValueCodec.Ts(Sql, now));
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await ExecuteDeleteUserMembershipsAsync(scope.Connection, tx, tenantId, realmId, userKey, ct).ConfigureAwait(false);
+        await ExecuteIncrementEpochAsync(scope.Connection, tx, tenantId, realmId, ct).ConfigureAwait(false);
+        await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
     public async Task DeleteUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
@@ -140,15 +169,7 @@ internal sealed class IdentityStore(
         await using var scope = await open(true, ct).ConfigureAwait(false);
         await using var tx = await scope.Connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        await using (var members = scope.Connection.CreateCommand())
-        {
-            members.Transaction = tx;
-            members.CommandText = "DELETE FROM IDENTITY_GROUP_MEMBERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND user_key = @userKey";
-            AddParam(members, "@tenantId", tenantId.Value);
-            AddParam(members, "@realmId", realmId);
-            AddParam(members, "@userKey", userKey);
-            await members.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
+        await ExecuteDeleteUserMembershipsAsync(scope.Connection, tx, tenantId, realmId, userKey, ct).ConfigureAwait(false);
 
         await using (var cmd = scope.Connection.CreateCommand())
         {
@@ -160,6 +181,7 @@ internal sealed class IdentityStore(
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
+        await ExecuteIncrementEpochAsync(scope.Connection, tx, tenantId, realmId, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
@@ -382,6 +404,101 @@ WHERE m.tenant_id = @tenantId AND m.realm_id = @realmId AND m.user_key = @userKe
         return list;
     }
 
+    public async Task<EffectiveScimGroupsResult> GetEffectiveGroupSidsForUserAsync(
+        TenantId tenantId,
+        string realmId,
+        string userKey,
+        int maxDepth = 32,
+        CancellationToken ct = default)
+    {
+        if (maxDepth < 0)
+        {
+            maxDepth = 0;
+        }
+
+        await using var scope = await open(false, ct).ConfigureAwait(false);
+        await using var cmd = scope.Connection.CreateCommand();
+        cmd.CommandText = dialect switch
+        {
+            IdentityStoreDialect.SqlServer => @"WITH group_tree AS (
+  SELECT m.group_id, 1 AS depth, CAST('/' + m.group_id + '/' AS NVARCHAR(MAX)) AS path
+  FROM dbo.IDENTITY_GROUP_MEMBERS m
+  WHERE m.tenant_id = @tenantId AND m.realm_id = @realmId AND m.user_key = @userKey
+  UNION ALL
+  SELECT n.parent_group_id, gt.depth + 1, gt.path + CAST(n.parent_group_id AS NVARCHAR(MAX)) + '/'
+  FROM dbo.IDENTITY_GROUP_NESTING n
+  INNER JOIN group_tree gt ON n.child_group_id = gt.group_id
+  WHERE n.tenant_id = @tenantId AND n.realm_id = @realmId
+    AND gt.depth <= @maxDepth
+    AND CHARINDEX('/' + CAST(n.parent_group_id AS NVARCHAR(MAX)) + '/', gt.path) = 0
+)
+SELECT g.object_sid, CASE WHEN gt.depth > @maxDepth THEN 1 ELSE 0 END AS over_depth
+FROM group_tree gt
+LEFT JOIN dbo.IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId AND g.group_id = gt.group_id
+OPTION (MAXRECURSION 100);",
+            IdentityStoreDialect.PostgreSql => @"WITH RECURSIVE group_tree(group_id, depth, path) AS (
+  SELECT m.group_id, 1, '/' || m.group_id || '/'
+  FROM IDENTITY_GROUP_MEMBERS m
+  WHERE m.tenant_id = @tenantId AND m.realm_id = @realmId AND m.user_key = @userKey
+  UNION ALL
+  SELECT n.parent_group_id, gt.depth + 1, gt.path || n.parent_group_id || '/'
+  FROM IDENTITY_GROUP_NESTING n
+  INNER JOIN group_tree gt ON n.child_group_id = gt.group_id
+  WHERE n.tenant_id = @tenantId AND n.realm_id = @realmId
+    AND gt.depth <= @maxDepth
+    AND POSITION('/' || n.parent_group_id || '/' IN gt.path) = 0
+)
+SELECT g.object_sid, CASE WHEN gt.depth > @maxDepth THEN 1 ELSE 0 END AS over_depth
+FROM group_tree gt
+LEFT JOIN IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId AND g.group_id = gt.group_id",
+            _ => @"WITH RECURSIVE group_tree(group_id, depth, path) AS (
+  SELECT m.group_id, 1, '/' || m.group_id || '/'
+  FROM IDENTITY_GROUP_MEMBERS m
+  WHERE m.tenant_id = @tenantId AND m.realm_id = @realmId AND m.user_key = @userKey
+  UNION ALL
+  SELECT n.parent_group_id, gt.depth + 1, gt.path || n.parent_group_id || '/'
+  FROM IDENTITY_GROUP_NESTING n
+  INNER JOIN group_tree gt ON n.child_group_id = gt.group_id
+  WHERE n.tenant_id = @tenantId AND n.realm_id = @realmId
+    AND gt.depth <= @maxDepth
+    AND INSTR(gt.path, '/' || n.parent_group_id || '/') = 0
+)
+SELECT g.object_sid, CASE WHEN gt.depth > @maxDepth THEN 1 ELSE 0 END AS over_depth
+FROM group_tree gt
+LEFT JOIN IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId AND g.group_id = gt.group_id"
+        };
+
+        AddParam(cmd, "@tenantId", tenantId.Value);
+        AddParam(cmd, "@realmId", realmId);
+        AddParam(cmd, "@userKey", userKey);
+        AddParam(cmd, "@maxDepth", maxDepth);
+
+        var sids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool maxDepthExceeded = false;
+        bool hasNonCanonicalSid = false;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (Convert.ToInt32(reader.GetValue(1), System.Globalization.CultureInfo.InvariantCulture) != 0)
+            {
+                maxDepthExceeded = true;
+            }
+
+            var sid = reader.IsDBNull(0) ? null : reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(sid) || !SidFormat.IsCanonical(sid))
+            {
+                hasNonCanonicalSid = true;
+            }
+            else
+            {
+                sids.Add(sid);
+            }
+        }
+
+        return new EffectiveScimGroupsResult(sids, maxDepthExceeded, hasNonCanonicalSid);
+    }
+
     public async Task<IReadOnlyList<string>> GetGroupMembersAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default)
     {
         await using var scope = await open(false, ct).ConfigureAwait(false);
@@ -529,7 +646,24 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, last_contact_at, last_write_a
     public async Task<long> IncrementRealmDeprovisionEpochAsync(TenantId tenantId, string realmId, CancellationToken ct = default)
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);
-        await using var cmd = scope.Connection.CreateCommand();
+        return await ExecuteIncrementEpochAsync(scope.Connection, null, tenantId, realmId, ct).ConfigureAwait(false);
+    }
+
+    private async Task ExecuteDeleteUserMembershipsAsync(DbConnection conn, DbTransaction? tx, TenantId tenantId, string realmId, string userKey, CancellationToken ct)
+    {
+        await using var members = conn.CreateCommand();
+        members.Transaction = tx;
+        members.CommandText = "DELETE FROM IDENTITY_GROUP_MEMBERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND user_key = @userKey";
+        AddParam(members, "@tenantId", tenantId.Value);
+        AddParam(members, "@realmId", realmId);
+        AddParam(members, "@userKey", userKey);
+        await members.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task<long> ExecuteIncrementEpochAsync(DbConnection conn, DbTransaction? tx, TenantId tenantId, string realmId, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         if (dialect == IdentityStoreDialect.Sqlite || dialect == IdentityStoreDialect.PostgreSql)
         {
             cmd.CommandText = @"INSERT INTO SCIM_REALM_SYNC_STATE (tenant_id, realm_id, deprovision_epoch)
@@ -726,6 +860,25 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, reason, source, loc
         return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadUser(reader) : null;
     }
 
+    private async Task<IReadOnlyList<ScimUser>> QueryUsersAsync(string sql, TenantId tenantId, string realmId, string paramName, string paramValue, CancellationToken ct)
+    {
+        await using var scope = await open(false, ct).ConfigureAwait(false);
+        await using var cmd = scope.Connection.CreateCommand();
+        cmd.CommandText = sql;
+        AddParam(cmd, "@tenantId", tenantId.Value);
+        AddParam(cmd, "@realmId", realmId);
+        AddParam(cmd, paramName, paramValue);
+
+        var users = new List<ScimUser>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            users.Add(ReadUser(reader));
+        }
+
+        return users;
+    }
+
     private async Task<ScimGroup?> QuerySingleGroupAsync(string sql, TenantId tenantId, string realmId, string paramName, string paramValue, CancellationToken ct)
     {
         await using var scope = await open(false, ct).ConfigureAwait(false);
@@ -758,9 +911,10 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, reason, source, loc
             ObjectSid = group.ResolvedObjectSid
         };
 
-    private async Task ExecuteUserUpsertAsync(DbConnection conn, ScimUser user, TenantId tenantId, string realmId, string userKey, CancellationToken ct)
+    private async Task ExecuteUserUpsertAsync(DbConnection conn, ScimUser user, TenantId tenantId, string realmId, string userKey, CancellationToken ct, DbTransaction? tx = null)
     {
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         var now = DateTimeOffset.UtcNow;
         var createdAt = user.CreatedAt ?? now;
         var updatedAt = user.UpdatedAt ?? now;
