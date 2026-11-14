@@ -3,8 +3,10 @@ namespace Autheris.Application.State.Caching.TableCache.Engines;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Streaming.Crypto;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Caching.TableCache;
 using Autheris.Domain.Common;
@@ -23,19 +25,25 @@ public sealed class CdcTableCacheConsumer
     private readonly ITableCacheCatalog _catalog;
     private readonly ITableCacheManager _manager;
     private readonly ILogger<CdcTableCacheConsumer>? _logger;
+    private readonly ICdcStreamCrypto? _crypto;
+    private readonly ITableCacheInvalidator? _invalidator;
 
     public CdcTableCacheConsumer(
         ICdcStreamStore streamStore,
         ITableCacheStore cacheStore,
         ITableCacheCatalog catalog,
         ITableCacheManager manager,
-        ILogger<CdcTableCacheConsumer>? logger = null)
+        ILogger<CdcTableCacheConsumer>? logger = null,
+        ICdcStreamCrypto? crypto = null,
+        ITableCacheInvalidator? invalidator = null)
     {
         _streamStore = streamStore ?? throw new ArgumentNullException(nameof(streamStore));
         _cacheStore = cacheStore ?? throw new ArgumentNullException(nameof(cacheStore));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _manager = manager ?? throw new ArgumentNullException(nameof(manager));
         _logger = logger;
+        _crypto = crypto;
+        _invalidator = invalidator;
     }
 
     public async Task ProcessStreamBatchAsync(
@@ -88,12 +96,36 @@ public sealed class CdcTableCacheConsumer
 
                 if (evt.Kind == CdcStreamEventKind.Change && evt.Operation.HasValue)
                 {
-                    var pkDict = new Dictionary<string, object?>();
-                    var rowDict = new Dictionary<string, object?>();
+                    if (_crypto is null)
+                    {
+                        throw new InvalidOperationException("CDC stream crypto is unavailable to decode change payload.");
+                    }
 
-                    // In real CDC batches, values are decoded from payload; for mutation records we build a TableCacheMutation
+                    var plaintext = await _crypto.UnprotectEventAsync(evt, ct).ConfigureAwait(false);
+                    CdcChangePayload payload;
+                    try
+                    {
+                        payload = CdcPayloadCodec.DecodeChange(plaintext);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(plaintext);
+                    }
+
+                    var op = evt.Operation.Value;
+                    var pkDict = payload.Key;
+                    var rowDict = op == CdcOperation.Delete
+                        ? payload.Before ?? new Dictionary<string, object?>()
+                        : payload.After ?? payload.Before ?? new Dictionary<string, object?>();
+
+                    if (pkDict is null || pkDict.Count == 0 ||
+                        ((op == CdcOperation.Insert || op == CdcOperation.Snapshot || op == CdcOperation.Update) && rowDict.Count == 0))
+                    {
+                        throw new InvalidOperationException("CDC change event payload carried no decoded values.");
+                    }
+
                     mutations.Add(new TableCacheMutation(
-                        evt.Operation.Value,
+                        op,
                         pkDict,
                         rowDict,
                         evt.Offset,
@@ -117,9 +149,22 @@ public sealed class CdcTableCacheConsumer
             };
             _catalog.Upsert(updatedMeta);
         }
-        catch (CdcGapDetectedException gapEx)
+        catch (CdcGapDetectedException)
         {
-            _logger?.LogWarning(gapEx, "SEC-BL04-08: CDC stream gap encountered for '{Table}'. Triggering resync.", table);
+            _logger?.LogWarning("CDC stream gap encountered for '{Table}' ({ErrorType}). Fencing table and triggering resync.", table, nameof(CdcGapDetectedException));
+            await FenceTableAndTriggerResyncAsync(table, metadata, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(
+                "Failed applying CDC mutation batch for table '{Table}' ({ErrorType}, count={EventCount}). Fencing table and triggering resync.",
+                table,
+                ex.GetType().Name,
+                metadata.RowCount);
+            if (_invalidator is not null)
+            {
+                await _invalidator.InvalidateAsync(table, "CDC mutation batch failed; fencing table.", ct).ConfigureAwait(false);
+            }
             await FenceTableAndTriggerResyncAsync(table, metadata, ct).ConfigureAwait(false);
         }
     }

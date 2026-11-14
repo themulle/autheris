@@ -282,7 +282,8 @@ public sealed class TableCacheManager : ITableCacheManager
         {
             CachedColumns = loadResult.Columns,
             FilterPredicate = targetOpt?.FilterPredicate,
-            OfflinePolicy = targetOpt?.OfflinePolicy ?? _options.Tables.FirstOrDefault()?.OfflinePolicy ?? TableCacheOfflinePolicy.FailClosed
+            OfflinePolicy = targetOpt?.OfflinePolicy ?? _options.Tables.FirstOrDefault()?.OfflinePolicy ?? TableCacheOfflinePolicy.FailClosed,
+            PrimaryKeyColumns = targetOpt?.PrimaryKeyColumns ?? meta.PrimaryKeyColumns
         };
 
         return enrichedMeta;

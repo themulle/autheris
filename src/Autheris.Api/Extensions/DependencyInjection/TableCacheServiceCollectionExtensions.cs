@@ -1,6 +1,7 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State.Caching.TableCache;
 using Autheris.Application.State.Caching.TableCache.Engines;
 using Autheris.Application.State.Caching.TableCache.Governance;
@@ -11,6 +12,8 @@ using Autheris.Api.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 public static class TableCacheServiceCollectionExtensions
 {
@@ -30,11 +33,18 @@ public static class TableCacheServiceCollectionExtensions
         var tableCacheOptions = section.Get<TableCacheOptions>() ?? new TableCacheOptions();
         if (tableCacheOptions.DefaultStorageTier == TableCacheStorageTier.Memory)
         {
-            services.TryAddSingleton<ITableCacheStore, InMemoryTableCacheStore>();
+            services.TryAddSingleton<ITableCacheStore>(sp => new InMemoryTableCacheStore(
+                sp.GetRequiredService<IOptions<TableCacheOptions>>(),
+                sp.GetService<ILogger<InMemoryTableCacheStore>>(),
+                sp.GetService<ITableCacheCatalog>()));
         }
         else
         {
-            services.TryAddSingleton<ITableCacheStore, DuckDbPersistentTableCacheStore>();
+            services.TryAddSingleton<ITableCacheStore>(sp => new DuckDbPersistentTableCacheStore(
+                sp.GetRequiredService<IOptions<TableCacheOptions>>(),
+                sp.GetService<IKeyVaultSecretProvider>(),
+                sp.GetService<ILogger<DuckDbPersistentTableCacheStore>>(),
+                catalog: sp.GetService<ITableCacheCatalog>()));
         }
 
         services.TryAddSingleton<ITableCacheManager, TableCacheManager>();
