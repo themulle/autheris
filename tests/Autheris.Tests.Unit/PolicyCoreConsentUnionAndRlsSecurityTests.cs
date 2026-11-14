@@ -139,23 +139,7 @@ public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
     }
 
     // =====================================================================================
-    // H-12 / M-18 / M-19: Casbin
-    // =====================================================================================
-
-    private static SecurityEvaluationContext CasbinContext(TableIdentifier table, Dictionary<string, object?>? attributes = null, IReadOnlyCollection<Sid>? groups = null) =>
-        new(
-            UserSid: UserSid,
-            GroupSids: groups ?? Array.Empty<Sid>(),
-            Tenant: TenantA,
-            TargetTable: table,
-            RequestedColumns: ["id"],
-            ClientIp: IPAddress.Parse("10.1.2.3"),
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: "AUDIT",
-            Attributes: attributes);
-
-    // =====================================================================================
-    // H-09: Streaming uses consent -> Casbin -> catalog masking
+    // H-09: Streaming uses consent -> decision point -> catalog masking
     // =====================================================================================
 
     private sealed class StreamFixture

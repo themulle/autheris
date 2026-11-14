@@ -31,10 +31,6 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> EventBusHandlerFailedCounter =
         Meter.CreateCounter<long>("autheris_event_bus_handler_failed_total", description: "Redis event bus subscriber handlers that failed");
 
-    /// <summary>A-14: a local policy change could not be propagated to the cluster policy epoch (other nodes converge via cache TTL).</summary>
-    public static readonly Counter<long> PolicyEpochPropagationFailedCounter =
-        Meter.CreateCounter<long>("autheris_policy_epoch_propagation_failed_total", description: "Casbin policy epoch increments that failed or found the cluster state unavailable");
-
     public static readonly Counter<long> UnroutedRequestCounter =
         Meter.CreateCounter<long>("autheris_unrouted_requests_total", description: "Requests answered by the router without a matching endpoint (404/405/400); not written to the audit chain");
 
@@ -80,9 +76,6 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> GatewayEventBusHandlerTimeoutCounter =
         Meter.CreateCounter<long>("autheris_event_bus_handler_timeout_total", description: "Gateway event handler invocations that exceeded the per-handler timeout");
 
-    public static readonly Histogram<double> PolicyEvaluationDuration =
-        Meter.CreateHistogram<double>("autheris_policy_evaluation_duration_ms", "ms", description: "Duration of Casbin ABAC policy evaluation");
-
     public static readonly Histogram<double> LineageTraversalDuration =
         Meter.CreateHistogram<double>("autheris_lineage_traversal_duration_ms", "ms", description: "Duration of cycle-safe lineage traversal");
 
@@ -120,7 +113,6 @@ public static class GatewayDiagnostics
     private static readonly FrozenDictionary<string, FrozenSet<string>> SpanTagAllowList = new Dictionary<string, FrozenSet<string>>
     {
         ["Governance.EvaluateConsent"] = (FrozenSet<string>)new[] { "user.sid", "tenant.id", "decision", "table.id", "policy.epoch" }.ToFrozenSet(),
-        ["Governance.CasbinAbacEnforcement"] = (FrozenSet<string>)new[] { "user.sid", "tenant.id", "policy.match", "rule.count", "latency.ms" }.ToFrozenSet(),
         ["SqlExecution.Pushdown"] = (FrozenSet<string>)new[] { "db.system", "db.statement", "tenant.id", "rows.affected" }.ToFrozenSet(),
         ["AuditLog.AppendHmacEntry"] = (FrozenSet<string>)new[] { "audit.entry_id", "tenant.id", "chain.height" }.ToFrozenSet(),
         ["Lineage.Traverse"] = (FrozenSet<string>)new[] { "tenant.id", "root.node_id", "nodes.visited", "cycle.detected" }.ToFrozenSet()

@@ -36,8 +36,7 @@ internal static class AdvancedRlsPredicateBuilder
     /// <summary>
     /// The correlated EXISTS over the reserved target alias. Always the EXISTS form: the SQL Server IN-strategy was a text-level optimisation.
     /// Issue #107: the node is registered as a correlated filter site (side table, reference identity); this does not change the AST or the
-    /// generated SQL. <paramref name="source"/> says where the rule comes from: a consent rule carries its own evaluation settings, a Casbin
-    /// rule has none (object and global settings only).
+    /// generated SQL. <paramref name="source"/> says where the rule comes from; a consent rule carries its own evaluation settings.
     /// </summary>
     internal static Expression CorrelatedExpression(ConsentRowFilter filter, PolicyParameterNamer namer, CorrelatedFilterSource source)
     {
@@ -119,17 +118,8 @@ internal static class AdvancedRlsPredicateBuilder
         return exists;
     }
 
-    // Casbin sites carry no per-rule data, so two shared immutable instances replace one allocation per correlated build.
-    private static readonly CorrelatedFilterSite CasbinSite = new(null, CorrelatedFilterSource.Casbin, null, true);
-    private static readonly CorrelatedFilterSite CasbinTemporalSite = new(null, CorrelatedFilterSource.Casbin, null, false);
-
     private static CorrelatedFilterSite Site(ConsentRowFilter filter, CorrelatedFilterSource source, bool temporal)
     {
-        if (source == CorrelatedFilterSource.Casbin)
-        {
-            return temporal ? CasbinTemporalSite : CasbinSite;
-        }
-
         RowFilterEvaluationSettings? settings = filter.KeySetStrategy is null && filter.KeySetDurationSeconds is null && filter.KeySetMaxKeys is null
             ? null
             : new RowFilterEvaluationSettings(filter.KeySetStrategy, filter.KeySetDurationSeconds, filter.KeySetMaxKeys);

@@ -42,4 +42,4 @@ graph TD
 
 - **Filter Pushdown**: OData-Filterausdrücke (`eq`, `ne`, `gt`, `contains`) werden in SQL/AST Prädikate übersetzt und direkt an die Datenbank weitergereicht.
 - **Keyset Paging**: Wenn möglich, werden `$top` und `$skip` in deterministisches Keyset-Paginieren umgewandelt, um Latenz-Spitzen bei großen Offsets zu vermeiden.
-- **Sicherheits-Enforcement**: Sämtliche Tenant-Isolation- (`TenantId`) und Casbin-ABAC-Regeln greifen auch über den OData-Pfad identisch wie bei GraphQL-Queries.
+- **Sicherheits-Enforcement**: Sämtliche Tenant-Isolation- (`TenantId`), Consent- und Row-Filter-Regeln greifen auch über den OData-Pfad identisch wie bei GraphQL-Queries.

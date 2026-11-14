@@ -448,7 +448,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
 
         // SEC (Low): the token "ip" claim is caller-influenced and is not used as a fallback.
         // SEC H-09: Never fall back to Loopback (which may satisfy "internal network" ABAC rules).
-        // SecurityEvaluationContext.ClientIp is non-nullable, so the unroutable IPAddress.None is used as "unknown".
+        // The client IP of the request security context is non-nullable, so the unroutable IPAddress.None is used as "unknown".
         return IPAddress.None;
     }
 

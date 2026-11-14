@@ -270,11 +270,11 @@ sequenceDiagram
 - **Apache Iceberg v2 Lakehouse Engine**: Direct querying of tabular datasets stored in open table formats on object storage (Amazon S3 with SigV4, Azure Blob, and local filesystems).
 - **Vectorized Partition & Stats Pruning**: Evaluates table snapshot manifests and column min/max statistics to prune unneeded Parquet files prior to data loading.
 - **Lakehouse Metadata Caching**: Two-tier caching of table metadata and manifest lists with configurable TTL (`MetadataCacheTtlMinutes`).
-- **Pushdown Zero-Trust Governance**: Applies column-level masking and Casbin ABAC row-level security pushdown directly to lakehouse execution plans (`Casbin:Enabled` defaults to `false` and validates against `CasbinModelContract`).
+- **Pushdown Zero-Trust Governance**: Applies column-level masking and row-level security pushdown (consents, virtual filters, access profiles decided by the access decision point) directly to lakehouse execution plans.
 
-### 8.7 Realtime Event Subscriptions & In-Stream Casbin RLS
+### 8.7 Realtime Event Subscriptions & In-Stream RLS
 - **GraphQL Subscriptions Engine**: WebSocket (`graphql-transport-ws`) and Server-Sent Events (SSE) streaming.
-- **In-Stream Casbin RLS Policy Enforcement**: `StreamRlsPolicyEnforcer` evaluates dynamic ABAC rules per emitted event; unconsented events are dropped in real-time.
+- **In-Stream RLS Policy Enforcement**: `StreamRlsPolicyEnforcer` asks the access decision point and applies its row filters per emitted event; unconsented events are dropped in real-time.
 - **Debezium & Kafka CDC Ingestion**: `DebeziumCdcParser` decodes relational change-data-capture payloads (`op: c, u, d`) into typed subscription channels with strict tenant isolation.
 
 ### 8.8 Hot Chocolate Fusion Subgraph Federation

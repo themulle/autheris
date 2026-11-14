@@ -14,7 +14,7 @@ public sealed record ResolvedTableAccess(
     ClaimsPrincipal Principal);
 
 /// <summary>
-/// G5: The single place that turns a caller and a table into an access decision (consents, decision cache, Casbin ABAC,
+/// G5: The single place that turns a caller and a table into an access decision (consents, decision cache,
 /// row filters). Implemented by GatewayExecutionService; GraphQL tree queries use it per table and request.
 /// </summary>
 public interface ITableAccessResolver

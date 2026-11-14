@@ -169,7 +169,7 @@ public sealed class SqlDialectRegistryTests
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo, logger: null, dialectRegistry: registry);
         model.Tables.Select(t => t.Identifier).ShouldBe([dbxTable.Identifier]);
 
-        var denied = GatewayStartupValidator.ListDeniedTables(new PolicyLintInput([oracleTable, dbxTable], [], [], []), dialectRegistry: registry);
+        var denied = GatewayStartupValidator.ListDeniedTables(new PolicyLintInput([oracleTable, dbxTable], [], []), dialectRegistry: registry);
         denied.ShouldContain(d => d.Table == "erp.app.invoices" && d.Code == GatewayStartupValidator.DeniedDialectNotAdmitted);
         denied.ShouldNotContain(d => d.Table == "lake.gold.events");
     }

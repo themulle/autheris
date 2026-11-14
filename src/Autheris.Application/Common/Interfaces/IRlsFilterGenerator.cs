@@ -18,7 +18,7 @@ public interface IRlsFilterGenerator
     PolicyPredicate BuildCorrelatedPredicate(ConsentRowFilter filter, string parameterPrefix = "__gql_rls_");
 
     /// <summary>
-    /// Issue #107: the same predicate with the origin of the rule (a Casbin rule has no rule-level key-set settings). The default
+    /// Issue #107: the same predicate with the origin of the rule. The default
     /// implementation keeps the consent source of <see cref="BuildCorrelatedPredicate(ConsentRowFilter, string)"/>.
     /// </summary>
     PolicyPredicate BuildCorrelatedPredicate(ConsentRowFilter filter, string parameterPrefix, CorrelatedFilterSource source)

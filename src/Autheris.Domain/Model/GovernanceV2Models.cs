@@ -5,46 +5,6 @@ using System.Collections.Generic;
 using System.Net;
 using Autheris.Domain.Common;
 
-public sealed record SecurityEvaluationContext(
-    Sid UserSid,
-    IReadOnlyCollection<Sid> GroupSids,
-    TenantId Tenant,
-    TableIdentifier TargetTable,
-    IReadOnlyCollection<string> RequestedColumns,
-    IPAddress ClientIp,
-    DateTimeOffset Timestamp,
-    string? PurposeId,
-    IReadOnlyDictionary<string, object?>? Attributes = null,
-    // SQL dialect of the target table; correlated row filters are generated with its quoting rules.
-    DatabaseDialect? TargetDialect = null
-)
-{
-    /// <summary>
-    /// The catalog columns of the target table (WP-X0l). A typed row filter parsed from a rule's admin text may reference only these;
-    /// without it, the requested columns bound the check.
-    /// </summary>
-    public IReadOnlyList<string>? TableColumns { get; init; }
-
-    /// <summary>
-    /// true when the data source evaluates access as the end user (delegated / OBO enforcement). Decisions for
-    /// such sources are never shared between users: the decision cache key always carries the user.
-    /// </summary>
-    public bool IsDelegatedSource { get; init; }
-
-    public string? Department => GetAttribute("department") ?? GetAttribute("dept");
-    public string? Region => GetAttribute("region") ?? GetAttribute("country");
-    public string? ClearanceLevel => GetAttribute("clearance") ?? GetAttribute("clearance_level");
-
-    public string? GetAttribute(string key)
-    {
-        if (Attributes != null && Attributes.TryGetValue(key, out var val) && val != null)
-        {
-            return val.ToString();
-        }
-        return null;
-    }
-}
-
 public enum LineageNodeType
 {
     Table = 0,

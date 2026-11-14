@@ -201,7 +201,7 @@ public static class GatewayMcpServer
     }
 
     /// <summary>
-    /// A native resource read through the guardrail (Casbin ABAC on the objects the resource discloses, PII scrubbing, token budget,
+    /// A native resource read through the guardrail (the access decision point on the objects the resource discloses, PII scrubbing, token budget,
     /// MCP_TOOL_EXECUTION audit), like the dataset template's describe_dataset call. Unknown, closed and denied resources answer alike.
     /// </summary>
     internal static async Task<ReadResourceResult> ReadGuardedNativeResourceAsync(IServiceProvider services, string uri, IMcpResourceProvider provider, CancellationToken ct)

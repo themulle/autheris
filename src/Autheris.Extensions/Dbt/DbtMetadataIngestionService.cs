@@ -507,31 +507,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
 
             // Model-level Policy & RLS auto-sync (F-DBT-6)
-            if (model.Meta.TryGetValue("casbin_roles", out var casbinRoles) && !string.IsNullOrWhiteSpace(casbinRoles))
-            {
-                if (!existingPending.Any(p => string.Equals(p.ColumnName, "*", StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("CASBIN_ROLES:")))
-                {
-                    var proposal = new DbtMetadataProposal(
-                        Id: Guid.NewGuid(),
-                        Table: tableId,
-                        ColumnName: "*",
-                        SuggestedRuleType: $"CASBIN_ROLES:{casbinRoles}",
-                        SuggestedSensitivity: "HIGH",
-                        SuggestedOwnerTeam: ownerTeam,
-                        SourceDbtTag: "meta.casbin_roles",
-                        Status: DbtProposalStatus.PendingReview,
-                        CreatedAt: DateTimeOffset.UtcNow
-                    );
-
-                    if (!dryRun)
-                    {
-                        await _proposalRepository.AddProposalAsync(proposal, ct).ConfigureAwait(false);
-                    }
-
-                    generatedProposals++;
-                }
-            }
-
             if (model.Meta.TryGetValue("rls_filter", out var modelRls) && !string.IsNullOrWhiteSpace(modelRls))
             {
                 if (!existingPending.Any(p => string.Equals(p.ColumnName, "*", StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("RLS_FILTER:")))
@@ -1774,15 +1749,13 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         }
 
         // R-EXT-1: every check runs before the status changes, so "Approved" always means "applied".
-        // RLS filter and Casbin role proposals have no column masking equivalent; they must be implemented through
-        // consent row filters or the Casbin policy file and are rejected here instead of being marked Approved.
-        bool isPolicyOrRls = proposal.SuggestedRuleType.StartsWith("RLS_FILTER:", StringComparison.OrdinalIgnoreCase)
-            || proposal.SuggestedRuleType.StartsWith("CASBIN_ROLES:", StringComparison.OrdinalIgnoreCase);
-        if (isPolicyOrRls)
+        // Structured proposals ("KIND:payload", e.g. RLS filters) have no column masking equivalent; they must be implemented
+        // as consent row filters or virtual filters and are rejected here instead of being marked Approved.
+        if (proposal.SuggestedRuleType.Contains(':', StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"Dbt proposal '{proposalId}' ({proposal.SuggestedRuleType.Split(':')[0]}) cannot be applied automatically. " +
-                "Implement it as a consent row filter or Casbin policy and reject the proposal.");
+                "Implement it as a consent row filter or a virtual filter and reject the proposal.");
         }
 
         var tableMeta = await _metadataRepository.GetTableMetadataAsync(proposal.Table, ct).ConfigureAwait(false)

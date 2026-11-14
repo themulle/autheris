@@ -151,7 +151,7 @@ public static class DbtEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                // R-EXT-1: not pending, not applicable (RLS/Casbin) or blocked by the ratchet; the status is unchanged.
+                // R-EXT-1: not pending, not applicable (RLS) or blocked by the ratchet; the status is unchanged.
                 SafeErrorResults.LogFailure(context, ex, "DBT_PROPOSAL_CONFLICT");
                 return SafeErrorResults.Conflict("DBT_PROPOSAL_CONFLICT", "The proposal cannot be approved in its current state.", context);
             }

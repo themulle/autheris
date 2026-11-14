@@ -401,7 +401,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
     /// <summary>
     /// query_graphql: one read-only GraphQL query against the gateway schema. The catalog resolvers authorize every
-    /// table with the caller's identity (consent, Casbin, row filters, masking), as for POST /graphql.
+    /// table with the caller's identity (consent, row filters, masking), as for POST /graphql.
     /// </summary>
     private async Task<string> ExecuteGraphQlQueryAsync(
         McpToolDefinition tool,

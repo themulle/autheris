@@ -95,31 +95,29 @@ public sealed class DbtPolicyAutoSyncTests
 
         syncResult.Success.ShouldBeTrue();
         syncResult.ParsedModelsCount.ShouldBe(1);
-        syncResult.GeneratedProposalsCount.ShouldBe(3); // 1 casbin_roles + 1 model rls_filter + 1 column rls_filter
+        // 1 model rls_filter + 1 column rls_filter; the legacy meta.casbin_roles key produces no proposal.
+        syncResult.GeneratedProposalsCount.ShouldBe(2);
 
         var pending = await proposalRepo.GetPendingProposalsAsync(tableId);
-        pending.Count.ShouldBe(3);
-
-        var casbinProposal = pending.FirstOrDefault(p => p.SourceDbtTag == "meta.casbin_roles");
-        casbinProposal.ShouldNotBeNull();
-        casbinProposal.SuggestedRuleType.ShouldBe("CASBIN_ROLES:FinanceAdmin,Auditor");
-        casbinProposal.SuggestedOwnerTeam.ShouldBe("FinanceDataTeam");
+        pending.Count.ShouldBe(2);
+        pending.ShouldNotContain(p => p.SourceDbtTag == "meta.casbin_roles");
 
         var modelRlsProposal = pending.FirstOrDefault(p => p.SourceDbtTag == "meta.rls_filter" && p.ColumnName == "*");
         modelRlsProposal.ShouldNotBeNull();
         modelRlsProposal.SuggestedRuleType.ShouldBe("RLS_FILTER:tenant_id = @current_tenant");
+        modelRlsProposal.SuggestedOwnerTeam.ShouldBe("FinanceDataTeam");
 
         var colRlsProposal = pending.FirstOrDefault(p => p.SourceDbtTag == "meta.rls_filter" && p.ColumnName == "amount");
         colRlsProposal.ShouldNotBeNull();
         colRlsProposal.SuggestedRuleType.ShouldBe("RLS_FILTER:amount > 0");
 
-        // R-EXT-1: Casbin and RLS proposals have no automatic implementation; approving them is refused and the
+        // R-EXT-1: RLS proposals have no automatic implementation; approving them is refused and the
         // proposal stays pending (previously it was marked Approved without any effect).
-        await Should.ThrowAsync<InvalidOperationException>(() => ingestionService.ApproveProposalAsync(casbinProposal.Id, "security_officer"));
+        await Should.ThrowAsync<InvalidOperationException>(() => ingestionService.ApproveProposalAsync(colRlsProposal.Id, "security_officer"));
         await Should.ThrowAsync<InvalidOperationException>(() => ingestionService.ApproveProposalAsync(modelRlsProposal.Id, "security_officer"));
-        (await proposalRepo.GetPendingProposalsAsync(tableId)).Count.ShouldBe(3);
+        (await proposalRepo.GetPendingProposalsAsync(tableId)).Count.ShouldBe(2);
 
-        var rejected = await ingestionService.RejectProposalAsync(casbinProposal.Id, "security_officer");
+        var rejected = await ingestionService.RejectProposalAsync(modelRlsProposal.Id, "security_officer");
         rejected.Status.ShouldBe(DbtProposalStatus.Rejected);
     }
 }

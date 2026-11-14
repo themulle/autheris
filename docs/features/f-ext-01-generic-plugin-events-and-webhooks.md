@@ -61,7 +61,7 @@ flowchart TD
   - `AccessPlanCreatedEvent`: Emitted when an access plan is generated.
   - `AccessPlanAppliedEvent`: Emitted when an access plan is confirmed and applied to REBAC policies.
   - `DatasetStateChangedEvent`: Emitted when a dataset is activated, quarantined, or deprecated.
-  - `PolicyDeniedEvent`: Emitted when Casbin ABAC or REBAC rejects an access request. Carries a stable `ReasonCode` (`POLICY_DENIED`) and never the verbatim denial text (`Reason` holds the same code); full reasons are only written to the audit log.
+  - `PolicyDeniedEvent`: Emitted when the access decision point rejects an access request. Carries a stable `ReasonCode` (`POLICY_DENIED`) and never the verbatim denial text (`Reason` holds the same code); full reasons are only written to the audit log.
   - `SecurityAlertEvent`: Emitted when prompt injections, jailbreaks, or brute force attempts are intercepted.
   - `DocumentDepositedEvent`: Emitted when a document is deposited into the Universal Doc Store. Carries `RelativePath` (`{appId}/{category}/{docId}`), never an absolute filesystem path. There is no `SourceFilePath` property; plugins and webhook consumers read `RelativePath` (the serialized payload carries `relativePath` only).
 - **`IGatewayEventBus` (`Autheris.Application.Events`):**
@@ -301,7 +301,7 @@ A subscription matches an event of its own tenant when it is enabled, `filterTab
 
 ### 4.4.1 Creator Snapshot and Authorisation
 
-At creation the server captures the creating admin's SID, distinct group SIDs and roles from the authenticated principal and persists them with the subscription. A snapshot in the request body is ignored. For every event the delivery service rebuilds a minimal principal from the snapshot (the tenant claim always comes from the subscription) and authorises the event through `IStreamRlsPolicyEnforcer` against the policies in force at event time: tenant, consent, Casbin, ReBAC, row filter and column masking.
+At creation the server captures the creating admin's SID, distinct group SIDs and roles from the authenticated principal and persists them with the subscription. A snapshot in the request body is ignored. For every event the delivery service rebuilds a minimal principal from the snapshot (the tenant claim always comes from the subscription) and authorises the event through `IStreamRlsPolicyEnforcer` against the policies in force at event time: tenant, consent, row filter and column masking.
 
 - Revoking the creator's access, or changing policies, stops new deliveries at the next event. Outbox rows that were already enqueued are still delivered until the subscription is deleted. The roles and groups themselves stay frozen, so after a change of the creator's group membership delete and re-create the subscription.
 - A snapshot older than `CreatorSnapshotMaxAgeDays` (measured from `createdAt`) denies delivery (`snapshot_expired`). The remedy is to delete and re-create the subscription as a current admin.

@@ -26,7 +26,7 @@ public interface IAiDataGuardrailService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Reads an MCP resource under the governance of a tool call: Casbin ABAC on every one of <paramref name="targetTables"/>, PII
+    /// Reads an MCP resource under the governance of a tool call: the access decision point on every one of <paramref name="targetTables"/>, PII
     /// scrubbing, the token budget (when <paramref name="applyTokenBudget"/> is set) and an <c>MCP_TOOL_EXECUTION</c> audit row.
     /// <paramref name="readContent"/> runs only when every target is allowed; a <see cref="McpResourceNotFoundException"/> it raises is a
     /// failed result. The result carries the (scrubbed) resource text in <see cref="McpToolCallResult.ContentJson"/>. The default

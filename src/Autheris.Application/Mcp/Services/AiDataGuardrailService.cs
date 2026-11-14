@@ -25,7 +25,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Enterprise Guardrail engine enforcing zero-trust data protection, Casbin ABAC enforcement,
+/// Enterprise Guardrail engine enforcing zero-trust data protection, access decision point enforcement,
 /// automated PII scrubbing, token budgeting, Four-Eyes justification gating, and SHA-256 tamper-evident
 /// audit logging on all data supplied to AI agents via the Model Context Protocol (MCP).
 /// </summary>

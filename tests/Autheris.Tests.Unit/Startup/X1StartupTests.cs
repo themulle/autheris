@@ -166,7 +166,7 @@ public sealed class X1StartupTests
                 Orders("unsupported") with { Table = new Table { SourceType = "unsupported", SourceName = "ext", SchemaName = "s", TableName = "denied_table" }, Identifier = new TableIdentifier("ext", "s", "denied_table") }
             ],
             [Profile("p-good", "region = 'EU'"), Profile("p-bad", $"region = '{SecretValue}' AND [name] = '{SecretValue}'")],
-            [], []);
+            []);
 
         var report = GatewayStartupValidator.ListDeniedTables(input, log);
 
@@ -190,7 +190,7 @@ public sealed class X1StartupTests
     {
         var log = new CapturingLogger<X1StartupTests>();
 
-        var report = GatewayStartupValidator.ListDeniedTables(new PolicyLintInput([Orders()], [Profile("p-good", "region = 'EU'")], [], []), log);
+        var report = GatewayStartupValidator.ListDeniedTables(new PolicyLintInput([Orders()], [Profile("p-good", "region = 'EU'")], []), log);
 
         report.ShouldBeEmpty();
         string.Join('\n', log.Lines).ShouldNotContain("denied");

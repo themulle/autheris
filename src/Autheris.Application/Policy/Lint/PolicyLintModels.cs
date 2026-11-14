@@ -9,22 +9,14 @@ using VirtualFilter = Autheris.Domain.Model.VirtualFilter;
 public enum PolicyLintKind
 {
     AccessProfileRowFilter,
-    VirtualFilter,
-    CasbinRowFilter,
-    CasbinCorrelatedRowFilter
+    VirtualFilter
 }
-
-/// <summary>A Casbin row filter to lint: a text rls filter and/or a correlated row filter of one rule.</summary>
-/// <param name="RuleId">Identifier of the rule or consent (never the predicate text).</param>
-/// <param name="TableId">Object pattern of the rule (<c>domain.schema.table</c>, wildcards allowed).</param>
-public sealed record CasbinLintRule(string RuleId, string TableId, string? RlsFilter, ConsentRowFilter? CorrelatedRowFilter);
 
 /// <summary>Everything the lint reads from the governance store.</summary>
 public sealed record PolicyLintInput(
     IReadOnlyList<TableMetadata> Catalog,
     IReadOnlyList<AccessProfile> AccessProfiles,
-    IReadOnlyList<VirtualFilter> VirtualFilters,
-    IReadOnlyList<CasbinLintRule> CasbinRules)
+    IReadOnlyList<VirtualFilter> VirtualFilters)
 {
     public IReadOnlyList<string> AdditionalAllowedFunctions { get; init; } = [];
 
