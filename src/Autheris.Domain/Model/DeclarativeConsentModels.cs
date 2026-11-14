@@ -9,7 +9,8 @@ using System.Collections.Generic;
 public sealed record DeclarativeConsentManifest(
     string Version,
     IReadOnlyList<DeclarativeConsentPolicy> Policies,
-    IReadOnlyList<DeclarativeDatasetCatalog>? Datasets = null);
+    IReadOnlyList<DeclarativeDatasetCatalog>? Datasets = null,
+    string? TenantId = null);
 
 /// <summary>
 /// Issue #111: declarative dataset catalog settings. A null field is "unchanged" (never a reset); an empty <c>Tags</c> list
@@ -20,7 +21,8 @@ public sealed record DeclarativeDatasetCatalog(
     string Schema,
     string TableName,
     IReadOnlyList<string>? Tags = null,
-    string? Visibility = null);
+    string? Visibility = null,
+    string? TenantId = null);
 
 /// <remarks>
 /// <c>ValidUntil</c> is an absolute expiry and is mandatory for individual (User / ServicePrincipal) grantees; group and role
@@ -37,7 +39,8 @@ public sealed record DeclarativeConsentPolicy(
     IReadOnlyList<DeclarativeRowFilter>? RowFilters = null,
     int? ValidityDays = null,
     string? Description = null,
-    DateTimeOffset? ValidUntil = null);
+    DateTimeOffset? ValidUntil = null,
+    string? TenantId = null);
 
 public sealed record DeclarativeColumnRule(
     string ColumnName,

@@ -101,7 +101,7 @@ public sealed class Issue271SecurityAuditVerificationTests
 
         var identity = new ClaimsIdentity([DefaultTenantCaller.Claim, 
             new Claim(ClaimTypes.PrimarySid, actorSid),
-            new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")
+            new Claim(ClaimTypes.Role, "GovernanceAdmin")
         ], "TestAuth");
         var caller = new ClaimsPrincipal(identity);
 
