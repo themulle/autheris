@@ -69,7 +69,7 @@ public class OpenTelemetryPiiScannerTests
         using (var act = source.StartActivity("AuditLog.AppendHmacEntry"))
         {
             act.ShouldNotBeNull();
-            GatewayDiagnostics.SetSafeTag(act, "AuditLog.AppendHmacEntry", "audit.entry_id", Guid.NewGuid().ToString());
+            GatewayDiagnostics.SetSafeTag(act, "AuditLog.AppendHmacEntry", "audit.entry_id", "audit-entry-00000000-0000-0000-0000-000000000001");
             GatewayDiagnostics.SetSafeTag(act, "AuditLog.AppendHmacEntry", "tenant.id", "tenant-100");
             GatewayDiagnostics.SetSafeTag(act, "AuditLog.AppendHmacEntry", "chain.height", 42L);
 

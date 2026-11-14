@@ -105,7 +105,7 @@ public sealed partial class ParityIsolationArchitectureTests
         var bad = new List<string>();
         if (!lines.Contains(RestoreLine)) bad.Add("locked-mode restore line missing");
         if (!lines.Contains(BuildLine)) bad.Add("build line missing");
-        if (lines.Any(l => l.StartsWith("if:", StringComparison.Ordinal))) bad.Add("the step must not be conditional");
+        if (lines.Any(l => l.StartsWith("if:", StringComparison.Ordinal) && l != "if: ${{ !cancelled() }}")) bad.Add("the step must not be conditional");
         if (lines.Any(l => l.StartsWith("continue-on-error", StringComparison.Ordinal))) bad.Add("the step must not continue on error");
         return bad;
     }
@@ -349,9 +349,11 @@ public sealed partial class ParityIsolationArchitectureTests
         // negative self-checks: the guard cannot be dropped, skipped, softened or moved to another job
         var good = $"jobs:\n  build-and-test:\n    steps:\n      - name: Test\n        run: dotnet test x\n      - name: Compile-only guard\n        run: |\n          {RestoreLine}\n          {BuildLine}\n  other:\n    steps: []\n";
         CompileGuardViolations(good).ShouldBeEmpty();
+        CompileGuardViolations(good.Replace("        run: |", "        if: ${{ !cancelled() }}\n        run: |", StringComparison.Ordinal)).ShouldBeEmpty();
         CompileGuardViolations(good.Replace($"          {BuildLine}\n", string.Empty, StringComparison.Ordinal)).ShouldNotBeEmpty();
         CompileGuardViolations(good.Replace(" --locked-mode", string.Empty, StringComparison.Ordinal)).ShouldNotBeEmpty();
         CompileGuardViolations(good.Replace("        run: |", "        if: github.event_name == 'push'\n        run: |", StringComparison.Ordinal)).ShouldNotBeEmpty();
+        CompileGuardViolations(good.Replace("        run: |", "        if: always()\n        run: |", StringComparison.Ordinal)).ShouldNotBeEmpty();
         CompileGuardViolations(good.Replace("        run: |", "        continue-on-error: true\n        run: |", StringComparison.Ordinal)).ShouldNotBeEmpty();
         CompileGuardViolations(good.Replace("  build-and-test:", "  build:", StringComparison.Ordinal)).ShouldNotBeEmpty();
     }

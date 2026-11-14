@@ -102,6 +102,7 @@ jobs:
       # The parity project is outside Autheris.sln and runs only in parity-nightly.yml; this step only compiles it so a broken
       # project fails the PR. ParityIsolationArchitectureTests allows exactly these two lines outside the nightly.
       - name: Compile-only guard for the parity test project (never run here)
+        if: ${{ !cancelled() }}
         timeout-minutes: 10
         run: |
           dotnet restore tests/Autheris.Tests.Parity/Autheris.Tests.Parity.csproj --locked-mode
