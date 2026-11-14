@@ -150,7 +150,8 @@ public sealed class StepSqlLintTests
                 (8, "column_collation"),
                 (9, "write_grants"),
                 (10, "table_column_ordinal"),
-                (11, "role_grantee_and_profile_assignment_retirement")
+                (11, "role_grantee_and_profile_assignment_retirement"),
+                (12, "dbt_unique_id")
             ]);
         }
     }

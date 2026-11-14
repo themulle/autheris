@@ -147,6 +147,8 @@ public sealed record Table
     public string Sensitivity { get; init; } = "NORMAL";
     public bool RequiresFourEyes { get; init; }
     public bool IsActive { get; init; } = true;
+    /// <summary>Issue #666: dbt unique id of the node that owns this entry; internal to the catalog, never mapped to an API.</summary>
+    public string? DbtUniqueId { get; init; }
 
     public DataSourceType DataSourceType { get; init; } = DataSourceType.Sql;
     public Autheris.Domain.Options.EnforcementMode EnforcementMode { get; init; } = Autheris.Domain.Options.EnforcementMode.AutherisEnforced;
