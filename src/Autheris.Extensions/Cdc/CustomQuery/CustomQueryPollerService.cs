@@ -13,14 +13,16 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
 using Autheris.Application.Streaming;
 using Autheris.Application.Streaming.Interfaces;
+using Autheris.Application.Streaming.Validation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Governed multi-watermark query poller service running on distributed cluster leases (101 D-5, D-6).
+/// Governed multi-watermark query poller service running on distributed cluster leases.
 /// Fetches batches under read-only transaction semantics, classifies operations, and appends atomically to ICdcStreamStore.
 /// </summary>
 public class CustomQueryPollerService : ClusterPartitionedService
@@ -34,6 +36,14 @@ public class CustomQueryPollerService : ClusterPartitionedService
     private readonly ICdcStreamCrypto? _crypto;
     private readonly ICdcPayloadCodec? _codec;
     private readonly ILogger<CustomQueryPollerService> _logger;
+    private readonly IOptionsMonitor<GatewayOptions>? _gatewayOptions;
+    private readonly CustomQueryPollerValidator _validator;
+    private readonly ITableMetadataRepository? _tableMetadataRepository;
+    private readonly Lock _stateLock = new();
+    private readonly Dictionary<string, CustomQueryPollerStreamOptions> _activePollers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _validatedTemplateHashes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly IDisposable? _optionsChangeRegistration;
+    private bool _enabled;
 
     public CustomQueryPollerService(
         IOptionsMonitor<CustomQueryPollerOptions> options,
@@ -46,7 +56,10 @@ public class CustomQueryPollerService : ClusterPartitionedService
         ICdcStreamCrypto? crypto = null,
         ICdcPayloadCodec? codec = null,
         IDataSourceConnectionFactory? dataSourceFactory = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOptionsMonitor<GatewayOptions>? gatewayOptions = null,
+        CustomQueryPollerValidator? validator = null,
+        ITableMetadataRepository? tableMetadataRepository = null)
         : base(clusterState, logger, timeProvider)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -58,8 +71,15 @@ public class CustomQueryPollerService : ClusterPartitionedService
         _crypto = crypto;
         _codec = codec;
         _dataSourceConnectionFactory = dataSourceFactory;
+        _gatewayOptions = gatewayOptions;
+        _validator = validator ?? new CustomQueryPollerValidator();
+        _tableMetadataRepository = tableMetadataRepository;
+
+        ReconcileOptionsSnapshot(_options.CurrentValue, invalidateCache: true);
+        _optionsChangeRegistration = _options.OnChange(next => OnOptionsReloaded(next));
     }
 
+    [ActivatorUtilitiesConstructor]
     public CustomQueryPollerService(
         IOptionsMonitor<CustomQueryPollerOptions> options,
         ICdcStreamStore streamStore,
@@ -70,7 +90,10 @@ public class CustomQueryPollerService : ClusterPartitionedService
         ILogger<CustomQueryPollerService> logger,
         ICdcStreamCrypto? crypto = null,
         ICdcPayloadCodec? codec = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOptionsMonitor<GatewayOptions>? gatewayOptions = null,
+        CustomQueryPollerValidator? validator = null,
+        ITableMetadataRepository? tableMetadataRepository = null)
         : base(clusterState, logger, timeProvider)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -81,28 +104,99 @@ public class CustomQueryPollerService : ClusterPartitionedService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _crypto = crypto;
         _codec = codec;
+        _gatewayOptions = gatewayOptions;
+        _validator = validator ?? new CustomQueryPollerValidator();
+        _tableMetadataRepository = tableMetadataRepository;
+
+        ReconcileOptionsSnapshot(_options.CurrentValue, invalidateCache: true);
+        _optionsChangeRegistration = _options.OnChange(next => OnOptionsReloaded(next));
+    }
+
+    private void OnOptionsReloaded(CustomQueryPollerOptions nextOptions)
+    {
+        if (nextOptions is null)
+        {
+            return;
+        }
+
+        ReconcileOptionsSnapshot(nextOptions, invalidateCache: true);
+    }
+
+    private void ReconcileOptionsSnapshot(CustomQueryPollerOptions opt, bool invalidateCache)
+    {
+        lock (_stateLock)
+        {
+            if (invalidateCache)
+            {
+                _validatedTemplateHashes.Clear();
+            }
+
+            _enabled = opt.Enabled;
+            var nextActive = new Dictionary<string, CustomQueryPollerStreamOptions>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var poller in opt.Pollers)
+            {
+                if (poller is null || string.IsNullOrWhiteSpace(poller.StreamName))
+                {
+                    continue;
+                }
+
+                var validationResult = _validator.ValidatePollerOptions(poller);
+                var dialectOk = _gatewayOptions is null || TryResolveDialect(poller, out _);
+                if (!validationResult.IsValid || !dialectOk)
+                {
+                    _logger.LogError(
+                        "Rejected invalid custom query poller configuration for stream '{StreamName}'. Keeping prior valid definition if present.",
+                        poller.StreamName);
+
+                    if (_activePollers.TryGetValue(poller.StreamName, out var previousValid))
+                    {
+                        nextActive[poller.StreamName] = previousValid;
+                    }
+
+                    continue;
+                }
+
+                var templateHash = CustomQueryPollerValidator.ComputeTemplateHash(poller);
+                nextActive[poller.StreamName] = poller;
+                _validatedTemplateHashes[poller.StreamName] = templateHash;
+            }
+
+            _activePollers.Clear();
+            foreach (var kv in nextActive)
+            {
+                _activePollers[kv.Key] = kv.Value;
+            }
+        }
     }
 
     protected override IReadOnlyList<ClusterPartition> GetPartitions()
     {
-        var opt = _options.CurrentValue;
-        if (!opt.Enabled) return [];
+        lock (_stateLock)
+        {
+            if (!_enabled) return [];
 
-        return opt.Pollers.Select(p => new ClusterPartition(
-            $"cdc:query:poll:{p.StreamName.ToLowerInvariant()}",
-            new ClusterSchedule(
-                true,
-                TimeSpan.FromMilliseconds(Math.Max(250, p.PollingIntervalMilliseconds)),
-                TimeSpan.Zero,
-                TimeSpan.FromSeconds(Math.Max(15, (p.PollingIntervalMilliseconds * 3) / 1000)),
-                TimeSpan.Zero)
-        )).ToList();
+            return _activePollers.Values.Select(p => new ClusterPartition(
+                $"cdc:query:poll:{p.StreamName.ToLowerInvariant()}",
+                new ClusterSchedule(
+                    true,
+                    TimeSpan.FromMilliseconds(Math.Max(250, p.PollingIntervalMilliseconds)),
+                    TimeSpan.Zero,
+                    TimeSpan.FromSeconds(Math.Max(15, (p.PollingIntervalMilliseconds * 3) / 1000)),
+                    TimeSpan.Zero)
+            )).ToList();
+        }
     }
 
     protected override async Task ExecutePartitionAsync(ClusterPartition partition, ClusterJobContext context, CancellationToken ct)
     {
         var streamName = partition.Key.Replace("cdc:query:poll:", string.Empty, StringComparison.OrdinalIgnoreCase);
-        var settings = _options.CurrentValue.Pollers.FirstOrDefault(p => p.StreamName.Equals(streamName, StringComparison.OrdinalIgnoreCase));
+        CustomQueryPollerStreamOptions? settings;
+        lock (_stateLock)
+        {
+            _activePollers.TryGetValue(streamName, out settings);
+        }
+
         if (settings is null) return;
 
         await PollStreamBatchAsync(settings, context.FencingToken, ct).ConfigureAwait(false);
@@ -112,7 +206,12 @@ public class CustomQueryPollerService : ClusterPartitionedService
     {
         ArgumentNullException.ThrowIfNull(poller);
 
+        EnsureValidated(poller);
+        var dialect = ResolveDialectOrThrow(poller);
+
         var tableId = TableIdentifier.Parse(poller.Table);
+        await ValidateOwnerTenantAsync(poller, tableId, ct).ConfigureAwait(false);
+
         var stream = await _streamStore.EnsureStreamAsync("query_poller", tableId, ct).ConfigureAwait(false);
 
         // 1. Acquire read-only database connection
@@ -128,24 +227,37 @@ public class CustomQueryPollerService : ClusterPartitionedService
         var timeout = Math.Min(poller.QueryTimeoutSeconds > 0 ? poller.QueryTimeoutSeconds : 30, 60);
         cmd.CommandTimeout = timeout;
 
-        await using var readOnlyTransaction = await EnforceReadOnlySemanticsAsync(conn, cmd, ct).ConfigureAwait(false);
-
-        // 4. Strictly bind parameters (Zero dynamic SQL concatenation)
-        QueryPollerParameterBinder.BindParameters(cmd, poller.Watermarks, vector, poller.BatchSize);
-
-        // 5. Stream read batch with SequentialAccess
         var rawRows = new List<Dictionary<string, object?>>();
-        await using (var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
+        DbTransaction? readOnlyTransaction = null;
+        try
         {
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            readOnlyTransaction = await EnforceReadOnlySemanticsAsync(conn, cmd, dialect, ct).ConfigureAwait(false);
+
+            // 4. Strictly bind parameters (Zero dynamic SQL concatenation)
+            QueryPollerParameterBinder.BindParameters(cmd, poller.Watermarks, vector, poller.BatchSize);
+
+            // 5. Stream read batch with SequentialAccess
+            await using (var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
             {
-                var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
-                for (var i = 0; i < reader.FieldCount; i++)
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                    var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
+                    for (var i = 0; i < reader.FieldCount; i++)
+                    {
+                        row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                    }
+                    rawRows.Add(row);
                 }
-                rawRows.Add(row);
             }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogSanitizedPollFailure(poller.StreamName, ex);
+            throw;
+        }
+        finally
+        {
+            await RollbackAndDisposeAsync(readOnlyTransaction).ConfigureAwait(false);
         }
 
         if (rawRows.Count == 0)
@@ -346,6 +458,97 @@ public class CustomQueryPollerService : ClusterPartitionedService
         return dict;
     }
 
+    public override void Dispose()
+    {
+        _optionsChangeRegistration?.Dispose();
+        base.Dispose();
+    }
+
+    private void EnsureValidated(CustomQueryPollerStreamOptions poller)
+    {
+        var templateHash = CustomQueryPollerValidator.ComputeTemplateHash(poller);
+        var key = poller.StreamName ?? string.Empty;
+
+        lock (_stateLock)
+        {
+            if (_validatedTemplateHashes.TryGetValue(key, out var cachedHash) &&
+                string.Equals(cachedHash, templateHash, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+
+        _validator.ValidateOrThrow(poller);
+
+        lock (_stateLock)
+        {
+            _validatedTemplateHashes[key] = templateHash;
+        }
+    }
+
+    private bool TryResolveDialect(CustomQueryPollerStreamOptions poller, out DatabaseDialect dialect)
+    {
+        dialect = default;
+        if (string.IsNullOrWhiteSpace(poller.DataSource) || _gatewayOptions is null)
+        {
+            return false;
+        }
+
+        var connections = _gatewayOptions.CurrentValue.DataSources?.Connections;
+        if (connections is null ||
+            !connections.TryGetValue(poller.DataSource, out var dsOptions) ||
+            string.IsNullOrWhiteSpace(dsOptions.ConnectionString))
+        {
+            return false;
+        }
+
+        return CustomQueryPollerValidator.TryResolveSupportedDialect(dsOptions.Provider, out dialect);
+    }
+
+    private DatabaseDialect ResolveDialectOrThrow(CustomQueryPollerStreamOptions poller)
+    {
+        if (string.IsNullOrWhiteSpace(poller.DataSource))
+        {
+            throw new InvalidOperationException($"Poller '{poller.StreamName}' must specify a configured DataSource.");
+        }
+
+        var connections = _gatewayOptions?.CurrentValue.DataSources?.Connections;
+        if (connections is null ||
+            !connections.TryGetValue(poller.DataSource, out var dsOptions) ||
+            string.IsNullOrWhiteSpace(dsOptions.ConnectionString))
+        {
+            throw new InvalidOperationException(
+                $"Data source '{poller.DataSource}' for poller '{poller.StreamName}' is not configured in Gateway:DataSources:Connections.");
+        }
+
+        if (!CustomQueryPollerValidator.TryResolveSupportedDialect(dsOptions.Provider, out var dialect))
+        {
+            throw new NotSupportedException(
+                $"Data source '{poller.DataSource}' provider '{dsOptions.Provider}' is not supported by CustomQueryPollerService.");
+        }
+
+        return dialect;
+    }
+
+    private async Task ValidateOwnerTenantAsync(CustomQueryPollerStreamOptions poller, TableIdentifier tableId, CancellationToken ct)
+    {
+        if (_tableMetadataRepository is null)
+        {
+            return;
+        }
+
+        var tableMeta = await _tableMetadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+        if (tableMeta is not null && !string.IsNullOrWhiteSpace(tableMeta.OwnerTenantId))
+        {
+            if (string.IsNullOrWhiteSpace(poller.OwnerTenantId) ||
+                !string.Equals(poller.OwnerTenantId, tableMeta.OwnerTenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new GovernedCdcConfigurationException(
+                    $"Poller '{poller.StreamName}' OwnerTenantId does not match the registered owner tenant of table '{poller.Table}'.");
+            }
+        }
+    }
+
     private async Task<DbConnection> OpenSourceConnectionAsync(CustomQueryPollerStreamOptions poller, CancellationToken ct)
     {
         if (_dataSourceConnectionFactory != null)
@@ -355,52 +558,111 @@ public class CustomQueryPollerService : ClusterPartitionedService
 
         if (_sqlConnectionFactory != null)
         {
-            return await _sqlConnectionFactory.CreateOpenConnectionAsync(
-                new DataSourceConnectionOptions { ConnectionString = poller.DataSource ?? string.Empty }, ct).ConfigureAwait(false);
+            var dataSourceName = poller.DataSource ?? string.Empty;
+            var connections = _gatewayOptions?.CurrentValue.DataSources?.Connections;
+            if (connections is null || !connections.TryGetValue(dataSourceName, out var dsOptions))
+            {
+                throw new InvalidOperationException(
+                    $"Data source '{dataSourceName}' is not configured in Gateway:DataSources:Connections.");
+            }
+
+            return await _sqlConnectionFactory.CreateOpenConnectionAsync(dsOptions, ct).ConfigureAwait(false);
         }
 
         throw new InvalidOperationException("No database connection factory is configured for CustomQueryPollerService.");
     }
 
-    /// <summary>
-    /// 03 / EXT-10: SQLite gets<c>query_only</c>; PostgreSQL runs the poll inside an explicit <c>READ ONLY</c> transaction
-    /// (a bare <c>SET TRANSACTION</c> outside a transaction block is a warning and changes nothing). Failing to establish read-only mode
-    /// is fatal. The statement shape itself (single SELECT) is enforced by <c>CustomQueryPollerValidator</c>. The returned transaction (if any)
-    /// is already attached to <paramref name="cmd"/> and must be disposed by the caller.
-    /// </summary>
-    internal static async Task<DbTransaction?> EnforceReadOnlySemanticsAsync(DbConnection conn, DbCommand cmd, CancellationToken ct)
+    private void LogSanitizedPollFailure(string? streamName, Exception ex)
     {
-        var typeName = conn.GetType().Name.ToLowerInvariant();
-        var connStr = conn.ConnectionString?.ToLowerInvariant() ?? string.Empty;
-        var ds = conn.DataSource?.ToLowerInvariant() ?? string.Empty;
+        var sqlState = (ex as DbException)?.SqlState;
+        _logger.LogError(
+            "Custom query poller execution failed for stream '{StreamName}'. ErrorType={ErrorType}, SqlState={SqlState}.",
+            streamName ?? "<unnamed>",
+            ex.GetType().Name,
+            string.IsNullOrWhiteSpace(sqlState) ? "none" : sqlState);
+    }
 
-        if (typeName.Contains("sqlite") || connStr.Contains("sqlite") || ds.Contains("sqlite"))
+    private static async Task RollbackAndDisposeAsync(DbTransaction? transaction)
+    {
+        if (transaction is null)
         {
-            using var pragma = conn.CreateCommand();
-            pragma.CommandText = "PRAGMA query_only = ON;";
-            await pragma.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            return null;
+            return;
         }
 
-        if (typeName.Contains("npgsql") || typeName.Contains("postgres") || connStr.Contains("postgres") || ds.Contains("postgres"))
+        try
         {
-            var transaction = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-            try
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Dispose always follows so an already-faulted connection does not mask the root error.
+        }
+        finally
+        {
+            await transaction.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Enforces dialect-specific read-only transaction semantics strictly from the configured <see cref="DatabaseDialect"/>.
+    /// Returned transactions are attached to <paramref name="cmd"/> and must always be rolled back and disposed (never committed).
+    /// </summary>
+    internal static async Task<DbTransaction?> EnforceReadOnlySemanticsAsync(
+        DbConnection conn,
+        DbCommand cmd,
+        DatabaseDialect dialect,
+        CancellationToken ct)
+    {
+        switch (dialect)
+        {
+            case DatabaseDialect.PostgreSql:
+                return await BeginReadOnlyStatementTransactionAsync(conn, cmd, "SET TRANSACTION READ ONLY;", ct).ConfigureAwait(false);
+
+            case DatabaseDialect.Oracle:
+                return await BeginReadOnlyStatementTransactionAsync(conn, cmd, "SET TRANSACTION READ ONLY", ct).ConfigureAwait(false);
+
+            case DatabaseDialect.SqlServer:
             {
-                using var setReadOnly = conn.CreateCommand();
-                setReadOnly.Transaction = transaction;
-                setReadOnly.CommandText = "SET TRANSACTION READ ONLY;";
-                await setReadOnly.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                // SQL Server relies on read-only login permissions / ApplicationIntent=ReadOnly and an explicit transaction unconditionally rolled back.
+                var transaction = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
                 cmd.Transaction = transaction;
                 return transaction;
             }
-            catch
-            {
-                await transaction.DisposeAsync().ConfigureAwait(false);
-                throw;
-            }
-        }
 
-        return null;
+            case DatabaseDialect.Sqlite:
+            {
+                await using var pragma = conn.CreateCommand();
+                pragma.CommandText = "PRAGMA query_only = ON;";
+                await pragma.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                return null;
+            }
+
+            case DatabaseDialect.Databricks:
+            default:
+                throw new NotSupportedException($"Database dialect '{dialect}' is not supported for read-only custom query polling.");
+        }
+    }
+
+    private static async Task<DbTransaction> BeginReadOnlyStatementTransactionAsync(
+        DbConnection conn,
+        DbCommand cmd,
+        string readOnlyStatement,
+        CancellationToken ct)
+    {
+        var transaction = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var setReadOnly = conn.CreateCommand();
+            setReadOnly.Transaction = transaction;
+            setReadOnly.CommandText = readOnlyStatement;
+            await setReadOnly.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            cmd.Transaction = transaction;
+            return transaction;
+        }
+        catch
+        {
+            await RollbackAndDisposeAsync(transaction).ConfigureAwait(false);
+            throw;
+        }
     }
 }

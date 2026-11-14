@@ -247,17 +247,23 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
     [Fact]
     public async Task CustomQueryPollerService_EnforcesReadOnlyTransactionMode()
     {
-        // Enforces SEC-CDC101-03: Verifies that source database connection is configured with read-only transaction semantics
+        // Verifies that source database connection is configured with read-only transaction semantics
         var poller = BaseOptions("SELECT id FROM customers WHERE id > @p_wm_id");
+        poller.DataSource = "sqlite_src";
         var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
         monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+
+        var gateway = new GatewayOptions();
+        gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" };
+        var gwMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
+        gwMonitor.CurrentValue.Returns(gateway);
 
         var executedCommands = new List<string>();
         var fakeConn = new ReadOnlyTrackingDbConnection(executedCommands);
         var factory = Substitute.For<IDataSourceConnectionFactory>();
         factory.CreateConnectionAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(fakeConn);
 
-        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance);
+        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, gatewayOptions: gwMonitor);
         await service.PollStreamBatchAsync(poller, fencingToken: 1);
 
         executedCommands.ShouldContain(c => c.Contains("PRAGMA query_only = ON"));
@@ -317,10 +323,16 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
     [Fact]
     public async Task CustomQueryPollerService_EventPayloads_EnvelopeEncryptedWithAes256Gcm()
     {
-        // Enforces SEC-CDC101-05: Verifies events and stored row images are encrypted with stream DEKs
+        // Verifies events and stored row images are encrypted with stream DEKs
         var poller = BaseOptions("SELECT id FROM customers WHERE id > @p_wm_id");
+        poller.DataSource = "sqlite_src";
         var monitor = Substitute.For<IOptionsMonitor<CustomQueryPollerOptions>>();
         monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
+
+        var gateway = new GatewayOptions();
+        gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" };
+        var gwMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
+        gwMonitor.CurrentValue.Returns(gateway);
 
         var rows = new List<Dictionary<string, object?>>
         {
@@ -330,7 +342,7 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         var factory = Substitute.For<IDataSourceConnectionFactory>();
         factory.CreateConnectionAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(conn);
 
-        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance);
+        var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, gatewayOptions: gwMonitor);
         await service.PollStreamBatchAsync(poller, fencingToken: 1);
 
         var desc = await _streamStore.EnsureStreamAsync("query_poller", TableIdentifier.Parse(poller.Table));
