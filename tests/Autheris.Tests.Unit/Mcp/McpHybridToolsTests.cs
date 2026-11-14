@@ -566,10 +566,11 @@ public sealed class McpHybridToolsTests
         var exploreMsg = explorePrompt.Messages[0].Content as TextContentBlock;
         exploreMsg!.Text.ShouldContain("sales.public.orders");
 
-        var auditPrompt = GatewayMcpServer.BuildPrompt("audit_access_compliance", new Dictionary<string, string?> { ["dataset"] = "sales.public.orders", ["principal"] = "user:bob" });
+        var auditPrompt = GatewayMcpServer.BuildPrompt("audit_access_compliance", new Dictionary<string, string?> { ["dataset"] = "sales.public.orders" });
         auditPrompt.ShouldNotBeNull();
         auditPrompt.Messages.ShouldNotBeEmpty();
         var auditMsg = auditPrompt.Messages[0].Content as TextContentBlock;
-        auditMsg!.Text.ShouldContain("user:bob");
+        auditMsg!.Text.ShouldContain("sales.public.orders");
+        auditMsg.Text.ShouldNotContain("user:bob");
     }
 }

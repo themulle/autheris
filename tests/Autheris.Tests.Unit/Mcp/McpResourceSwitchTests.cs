@@ -216,7 +216,7 @@ public sealed class McpResourceSwitchTests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Table()]));
 
-        var open = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, switches: Switches());
+        var open = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, options: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }), switches: Switches());
         (await open.GetSemanticResourcesAsync()).ShouldNotBeEmpty();
 
         repo.ClearReceivedCalls();

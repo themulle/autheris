@@ -108,7 +108,7 @@ public sealed class McpResultEmptyMembersTests
 
     private static GatewayMcpQueryExecutor Executor(IMcpDatasetCatalog catalog) => new(
         Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance,
-        McpRowCapTests.Options(100), datasetCatalog: catalog);
+        McpRowCapTests.Options(100), datasetCatalog: catalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
     private static McpToolDefinition Tool(string name) =>
         McpDatasetTools.Definitions().FirstOrDefault(t => t.Name == name)

@@ -35,7 +35,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     private readonly IGatewayExecutionService _gatewayExecutionService;
     private readonly IPreFlightQuerySimulator? _querySimulator;
     private readonly IMcpProvenanceEnricher? _provenanceEnricher;
-    private readonly IPersistedToolValidator? _persistedToolValidator;
+    private readonly IPersistedToolValidator _persistedToolValidator;
     private readonly IMcpDatasetCatalog? _datasetCatalog;
     private readonly IMcpToolExecutionHandler? _toolExecutionHandler;
     private readonly ILogger<GatewayMcpQueryExecutor> _logger;
@@ -66,9 +66,9 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         IGatewayExecutionService gatewayExecutionService,
         ILogger<GatewayMcpQueryExecutor> logger,
         IOptionsMonitor<GatewayOptions> gatewayOptions,
+        IPersistedToolValidator persistedToolValidator,
         IPreFlightQuerySimulator? querySimulator = null,
         IMcpProvenanceEnricher? provenanceEnricher = null,
-        IPersistedToolValidator? persistedToolValidator = null,
         IMcpDatasetCatalog? datasetCatalog = null,
         IMcpToolExecutionHandler? toolExecutionHandler = null,
         IServiceProvider? services = null)
@@ -80,7 +80,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _querySimulator = querySimulator;
         _provenanceEnricher = provenanceEnricher;
-        _persistedToolValidator = persistedToolValidator;
+        // SEC-OI-508-1: the validator is required; a host without it fails at startup instead of running tools unchecked.
+        _persistedToolValidator = persistedToolValidator ?? throw new ArgumentNullException(nameof(persistedToolValidator));
         _datasetCatalog = datasetCatalog;
         _toolExecutionHandler = toolExecutionHandler;
     }
@@ -99,38 +100,43 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
         var principal = BuildPrincipal(sessionContext);
 
-        // Parse input arguments if provided
-        var variables = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(argumentsJson) && argumentsJson.Trim() != "{}")
+        // SEC-OI-508-1: arguments are validated for every call (empty ones included) against the closed tool schema.
+        // Property names are compared ordinally; the validator already rejected duplicates and case variants.
+        var variables = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var effectiveArguments = string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson;
+        if (System.Text.Encoding.UTF8.GetByteCount(effectiveArguments) > PersistedToolValidator.MaxArgumentsBytes)
         {
-            try
-            {
-                using var doc = JsonDocument.Parse(argumentsJson);
-                // F-AI-11: Validate tool parameters and prompt injection shield
-                if (_persistedToolValidator != null && !_persistedToolValidator.ValidateToolInvocation(tool, doc.RootElement, out var failureReason))
-                {
-                    _logger.LogWarning("MCP tool '{ToolName}' failed persisted tool validation: {Reason}", tool.Name, failureReason);
-                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, $"Invocation blocked by MCP Persisted Tool Guardrail: {failureReason}");
-                }
+            _logger.LogWarning("MCP tool '{ToolName}' rejected: arguments exceed the size limit.", tool.Name);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, PersistedToolValidator.InvalidArgumentsCode);
+        }
 
-                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+        try
+        {
+            using var doc = JsonDocument.Parse(effectiveArguments);
+            // F-AI-11: Validate tool parameters and prompt injection shield. The failure text is the fixed code only.
+            if (!_persistedToolValidator.ValidateToolInvocation(tool, doc.RootElement, out _))
+            {
+                _logger.LogWarning("MCP tool '{ToolName}' failed persisted tool validation.", tool.Name);
+                return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, PersistedToolValidator.InvalidArgumentsCode);
+            }
+
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in doc.RootElement.EnumerateObject())
                 {
-                    foreach (var prop in doc.RootElement.EnumerateObject())
-                    {
-                        variables[prop.Name] = ConvertJsonElement(prop.Value);
-                    }
+                    variables[prop.Name] = ConvertJsonElement(prop.Value);
                 }
             }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "Failed to parse arguments JSON for tool '{ToolName}'.", tool.Name);
-                return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "Invalid arguments JSON payload.");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Unexpected error parsing arguments JSON for tool '{ToolName}'.", tool.Name);
-                return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "Invalid arguments JSON payload.");
-            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse arguments JSON for tool '{ToolName}'.", tool.Name);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "Invalid arguments JSON payload.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Unexpected error parsing arguments JSON for tool '{ToolName}'.", tool.Name);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "Invalid arguments JSON payload.");
         }
 
         // a bad client row limit is rejected before any tool runs.
@@ -387,13 +393,14 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         var list = await _datasetCatalog.ListDatasetsAsync(principal, search: tableName, domain: null, ct: cancellationToken).ConfigureAwait(false);
 
         var datasets = list?.Datasets ?? Array.Empty<McpDatasetSummary>();
+        // SEC-OI-508-4: only catalog data is reported. The summary carries no owner, so the field is omitted (never a fabricated
+        // address), and tags come from the catalog record or are omitted.
         var assets = datasets.Select(d => new
         {
             tableName = d.Id,
             sensitivity = d.Sensitivity,
             classification = d.Sensitivity,
-            owner = "data-governance@autheris.local",
-            tags = new string[] { "catalog", d.Sensitivity.ToLowerInvariant() }
+            tags = d.Tags is { Count: > 0 } ? d.Tags : null
         }).ToList();
 
         return JsonSerializer.Serialize(new { tenantId = sessionContext.TenantId, assets }, CamelCaseJsonOptions);

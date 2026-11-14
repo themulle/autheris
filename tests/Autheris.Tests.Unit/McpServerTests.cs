@@ -183,9 +183,9 @@ public sealed class McpServerTests
             Substitute.For<IRequestExecutorProvider>(),
             Substitute.For<IGatewayExecutionService>(),
             NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-            datasetCatalog: datasetCatalog);
+            datasetCatalog: datasetCatalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
-        var tool = new McpToolDefinition("query_data_catalog", "Query data catalog", "{}", "query_data_catalog");
+        var tool = new McpToolDefinition("query_data_catalog", "Query data catalog", """{"type":"object","properties":{"tableName":{"type":"string"}}}""", "query_data_catalog");
         var session = new McpSessionContext("sess-cat", "agent-principal", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
         // Act
@@ -197,6 +197,9 @@ public sealed class McpServerTests
         assets.GetArrayLength().ShouldBe(1);
         assets[0].GetProperty("tableName").GetString().ShouldBe("sales.public.orders");
         assets[0].GetProperty("classification").GetString().ShouldBe("Confidential");
+        assets[0].TryGetProperty("owner", out _).ShouldBeFalse();
+        assets[0].TryGetProperty("tags", out _).ShouldBeFalse();
+        json.ShouldNotContain("data-governance@autheris.local");
     }
 
     [Fact]

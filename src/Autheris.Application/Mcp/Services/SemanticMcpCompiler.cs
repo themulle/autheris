@@ -318,18 +318,19 @@ public sealed class SemanticMcpCompiler(
             return allTables;
         }
 
+        // SEC-OI-508-5: no caller identity, no tables. Only the explicit (production-blocked) auth bypass above opens the catalog.
+        if (principal is null)
+        {
+            return Array.Empty<TableMetadata>();
+        }
+
         if (_consentRepo != null)
         {
             return await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, _options?.Value, _catalogVisibility, ct).ConfigureAwait(false);
         }
 
-        if (principal != null)
-        {
-            return Array.Empty<TableMetadata>();
-        }
-
-        // No principal and no consent repository (tests and tools without a caller); a visibility service never opens this case.
-        return _catalogVisibility is null ? allTables : Array.Empty<TableMetadata>();
+        // A principal without a consent repository sees nothing; a visibility service never opens this case.
+        return Array.Empty<TableMetadata>();
     }
 
     private static List<TableColumn> VisibleColumns(TableMetadata t) => t.Columns.Where(col =>
