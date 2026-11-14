@@ -26,7 +26,9 @@ public static class DuckDbOlapEndpoints
     public static IEndpointRouteBuilder MapDuckDbOlapEndpoints(this IEndpointRouteBuilder app)
     {
         // Issue #447: every route of this group declares its ingress transport via endpoint metadata.
-        var ingress = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.Rest);
+        var ingress = app.MapGroup("")
+            .RequireAuthorization()
+            .WithIngressTransport(DataSourceTransportFlags.Rest);
         ingress.MapPost("/api/v1/olap/query", HandleOlapQueryAsync)
            .WithName("ExecuteDuckDbOlapQueryV1")
            .WithTags("Analytics & OLAP")
@@ -54,8 +56,7 @@ public static class DuckDbOlapEndpoints
         }
 
         var user = httpContext.User;
-        if (user?.Identity?.IsAuthenticated != true &&
-            !gatewayOptions.Value.IsQuickstartProfile)
+        if (user?.Identity?.IsAuthenticated != true)
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status401Unauthorized, ApiErrorCodes.Unauthorized, "Authentication required for analytical OLAP execution.", ct);
             return;
@@ -81,7 +82,7 @@ public static class DuckDbOlapEndpoints
 
         var secContext = EndpointSecurity.GetSecurityContext(httpContext);
         var outcome = await stagingService.ExecuteAsync(
-            user ?? new ClaimsPrincipal(new ClaimsIdentity()), secContext, dto, isDev, httpContext.TraceIdentifier, ct).ConfigureAwait(false);
+            user!, secContext, dto, isDev, httpContext.TraceIdentifier, ct).ConfigureAwait(false);
 
         httpContext.Response.StatusCode = outcome.StatusCode;
         if (outcome.Result is { } result)

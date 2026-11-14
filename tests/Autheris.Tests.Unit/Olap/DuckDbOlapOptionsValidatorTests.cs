@@ -28,35 +28,35 @@ public sealed class DuckDbOlapOptionsValidatorTests
             .Validate(null, new GatewayOptions { DuckDbOlap = olap }).Succeeded;
 
     [Fact]
-    public void Defaults_FitHelmLimit2GiB() => Valid(new DuckDbOlapOptions(), (2 * GiB).ToString()).ShouldBeTrue();
+    public void Defaults_FitHelmLimit2GiB() => Valid(new DuckDbOlapOptions { Enabled = true }, (2 * GiB).ToString()).ShouldBeTrue();
 
     [Fact]
-    public void Defaults_FitCompose2GiB() => Valid(new DuckDbOlapOptions(), (2 * GiB).ToString()).ShouldBeTrue();
+    public void Defaults_FitCompose2GiB() => Valid(new DuckDbOlapOptions { Enabled = true }, (2 * GiB).ToString()).ShouldBeTrue();
 
     [Fact]
     public void OverCommit_FailsValidation() =>
-        Valid(new DuckDbOlapOptions { MaxMemory = "1GB", MaxConcurrentQueries = 4 }, (2 * GiB).ToString()).ShouldBeFalse();
+        Valid(new DuckDbOlapOptions { Enabled = true, MaxMemory = "1GB", MaxConcurrentQueries = 4 }, (2 * GiB).ToString()).ShouldBeFalse();
 
     [Fact]
     public void UnparseableMaxMemory_Fails() =>
-        Valid(new DuckDbOlapOptions { MaxMemory = "lots" }, (2 * GiB).ToString()).ShouldBeFalse();
+        Valid(new DuckDbOlapOptions { Enabled = true, MaxMemory = "lots" }, (2 * GiB).ToString()).ShouldBeFalse();
 
     [Fact]
-    public void NoLimitNoBudget_Production_Fails() => Valid(new DuckDbOlapOptions(), null).ShouldBeFalse();
+    public void NoLimitNoBudget_Production_Fails() => Valid(new DuckDbOlapOptions { Enabled = true }, null).ShouldBeFalse();
 
     [Fact]
-    public void NoLimitNoBudget_Development_Passes() => Valid(new DuckDbOlapOptions(), null, "Development").ShouldBeTrue();
+    public void NoLimitNoBudget_Development_Passes() => Valid(new DuckDbOlapOptions { Enabled = true }, null, "Development").ShouldBeTrue();
 
     [Fact]
     public void CgroupV2Max_TreatedAsNoLimit()
     {
         ContainerMemoryLimit.Read(Cgroup("max")).ShouldBeNull();
-        Valid(new DuckDbOlapOptions(), "max").ShouldBeFalse();
+        Valid(new DuckDbOlapOptions { Enabled = true }, "max").ShouldBeFalse();
     }
 
     [Fact]
     public void ExplicitBudget_OverridesCgroup() =>
-        Valid(new DuckDbOlapOptions { MemoryBudgetBytes = 4 * GiB }, (1 * GiB).ToString()).ShouldBeTrue();
+        Valid(new DuckDbOlapOptions { Enabled = true, MemoryBudgetBytes = 4 * GiB }, (1 * GiB).ToString()).ShouldBeTrue();
 
     [Fact]
     public void Disabled_IsNotChecked() => Valid(new DuckDbOlapOptions { Enabled = false, MaxMemory = "lots" }, null).ShouldBeTrue();

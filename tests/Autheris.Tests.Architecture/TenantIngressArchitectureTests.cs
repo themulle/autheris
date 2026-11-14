@@ -12,7 +12,6 @@ public sealed class TenantIngressArchitectureTests
     // caller context or be unresolved by construction (it then throws TenantUnresolvedException on tenant use), and be added here.
     private static readonly Dictionary<string, int> Allowlist = new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        ["src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs"] = 1,                      // empty fallback: unresolved
         ["src/Autheris.Api/Security/BasicAuthSession.cs"] = 1,                          // ingress (claims transformation stamps)
         ["src/Autheris.Api/Security/BasicAuthenticationHandler.cs"] = 1,                // ingress
         ["src/Autheris.Api/Security/ForwardAuthAuthenticationHandler.cs"] = 1,          // ingress

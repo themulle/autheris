@@ -56,7 +56,7 @@ public sealed class LakehouseOptions
 /// </summary>
 public sealed class DuckDbOlapOptions
 {
-    public bool Enabled { get; init; } = true;
+    public bool Enabled { get; init; }
     /// <summary>
     /// DuckDB <c>max_memory</c> per query database (default 256MB). MISC-05: the start-up validator checks
     /// <c>MaxConcurrentQueries x (MaxMemory + 3 x MaxTotalStagedBytes)</c> against the memory budget of the container.
