@@ -182,7 +182,14 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                     Provisioning: config.Provisioning,
                     AllowedGatewayRoles: allowedRoles,
                     Delegable: config.Delegable
-                );
+                )
+                {
+                    ScimSettings = new RealmScimSettings(
+                        AllowUpnCorrelation: config.Scim?.AllowUpnCorrelation ?? false,
+                        RequireCorrelation: config.Scim?.RequireCorrelation ?? true,
+                        MaxSyncAgeMinutes: config.Scim?.MaxSyncAgeMinutes ?? ScimRealmSecretOptions.DefaultMaxSyncAgeMinutes,
+                        StaleSyncBehavior: config.Scim?.StaleSyncBehavior ?? ScimStaleSyncBehavior.Degrade)
+                };
 
                 RegisterRealm(realm);
             }

@@ -36,6 +36,21 @@ public sealed class IdentityRealmOptionsValidator : IValidateOptions<IdentityRea
         // 1. Validate all tenant IDs across all realms and collect workforce tenants
         foreach (var (realmId, config) in options.Realms)
         {
+            if (config.Scim is not null)
+            {
+                if (config.Scim.MaxSyncAgeMinutes is < ScimRealmSecretOptions.MinMaxSyncAgeMinutes or > ScimRealmSecretOptions.MaxMaxSyncAgeMinutes)
+                {
+                    throw new ValidationException(
+                        $"Authentication:Realms:Realms:{realmId}:Scim:MaxSyncAgeMinutes must be between {ScimRealmSecretOptions.MinMaxSyncAgeMinutes} and {ScimRealmSecretOptions.MaxMaxSyncAgeMinutes}.");
+                }
+
+                if (!Enum.IsDefined(config.Scim.StaleSyncBehavior))
+                {
+                    throw new ValidationException(
+                        $"Authentication:Realms:Realms:{realmId}:Scim:StaleSyncBehavior is invalid.");
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(config.FixedTenantId))
             {
                 if (!TenantId.TryParse(config.FixedTenantId, out var fixedId))

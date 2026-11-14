@@ -76,6 +76,28 @@ public class IdentityRealmsScimOptionsValidator : IValidateOptions<IdentityRealm
             }
 
             var scim = config.Scim;
+            if (scim is not null)
+            {
+                if (scim.MaxSyncAgeMinutes is < ScimRealmSecretOptions.MinMaxSyncAgeMinutes or > ScimRealmSecretOptions.MaxMaxSyncAgeMinutes)
+                {
+                    return ValidateOptionsResult.Fail(
+                        $"Authentication:Realms:Realms:{realmId}:Scim:MaxSyncAgeMinutes must be between {ScimRealmSecretOptions.MinMaxSyncAgeMinutes} and {ScimRealmSecretOptions.MaxMaxSyncAgeMinutes}.");
+                }
+
+                if (!Enum.IsDefined(scim.StaleSyncBehavior))
+                {
+                    return ValidateOptionsResult.Fail(
+                        $"Authentication:Realms:Realms:{realmId}:Scim:StaleSyncBehavior is invalid.");
+                }
+
+                if (scim.StaleSyncBehavior == ScimStaleSyncBehavior.DropScimGroups)
+                {
+                    _logger?.LogWarning(
+                        "SCIM realm {RealmId} uses StaleSyncBehavior=DropScimGroups: grants assigned to SCIM-only groups will not be applied while SCIM sync is stale, whereas denies on SCIM-only groups still degrade and deny access.",
+                        realmId);
+                }
+            }
+
             var primary = scim?.PrimarySecret;
             var secondary = scim?.SecondarySecret;
 

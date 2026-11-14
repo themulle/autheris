@@ -7,9 +7,12 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Identity.Caching;
 using Autheris.Application.Identity.Providers;
+using Autheris.Application.Identity.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -23,6 +26,7 @@ using Microsoft.Extensions.Options;
 public sealed class GroupSidResolver : IGroupSidResolver
 {
     private const string TokenIdClaimGroups = "groups";
+    private const int DefaultMaxGroupNestingDepth = 16;
     private static readonly string[] EntraGroupClaimTypes = [TokenIdClaimGroups, "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"];
     private static readonly string[] AdfsGroupClaimTypes = ["groupsid", ClaimTypes.GroupSid];
 
@@ -34,6 +38,12 @@ public sealed class GroupSidResolver : IGroupSidResolver
     private readonly int _ttlMinutes;
     private readonly int _maxGroups;
     private readonly string? _adfsAuthority;
+    private readonly IScimIdentityCorrelator? _scimCorrelator;
+    private readonly IScimGroupStore? _scimGroupStore;
+    private readonly IScimProvisioningStore? _scimProvisioningStore;
+    private readonly IGroupDenyInspector? _denyInspector;
+    private readonly IScimSyncStateTracker? _syncStateTracker;
+    private readonly IRoleResolverCache? _roleCache;
 
     public GroupSidResolver(
         IRoleResolver? roleResolver,
@@ -41,7 +51,13 @@ public sealed class GroupSidResolver : IGroupSidResolver
         IOptions<GatewayOptions> options,
         ILogger<GroupSidResolver>? logger = null,
         TimeProvider? timeProvider = null,
-        bool? isWindowsHost = null)
+        bool? isWindowsHost = null,
+        IScimIdentityCorrelator? scimCorrelator = null,
+        IScimGroupStore? scimGroupStore = null,
+        IScimProvisioningStore? scimProvisioningStore = null,
+        IGroupDenyInspector? denyInspector = null,
+        IScimSyncStateTracker? syncStateTracker = null,
+        IRoleResolverCache? roleCache = null)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(options);
@@ -50,6 +66,12 @@ public sealed class GroupSidResolver : IGroupSidResolver
         _logger = logger;
         _time = timeProvider ?? TimeProvider.System;
         _isWindowsHost = isWindowsHost ?? OperatingSystem.IsWindows();
+        _scimCorrelator = scimCorrelator;
+        _scimGroupStore = scimGroupStore;
+        _scimProvisioningStore = scimProvisioningStore;
+        _denyInspector = denyInspector;
+        _syncStateTracker = syncStateTracker;
+        _roleCache = roleCache;
         var auth = options.Value.Authentication;
         _ttlMinutes = auth.GroupCacheTtlMinutes is >= 1 and <= 60 ? auth.GroupCacheTtlMinutes : 5;
         _maxGroups = auth.MaxGroupSidsPerCaller is >= 1 and <= 4096 ? auth.MaxGroupSidsPerCaller : 1024;
@@ -65,16 +87,46 @@ public sealed class GroupSidResolver : IGroupSidResolver
         var now = _time.GetUtcNow();
         var expiresAt = now.AddMinutes(_ttlMinutes);
 
-        if (realm.GroupSource == RealmGroupSource.None)
-        {
-            return new GroupResolution(new HashSet<Sid>(), GroupResolutionStatus.Complete, "none", expiresAt);
-        }
-
         try
         {
+            CorrelationResult? correlation = null;
+            if (realm.Provisioning == RealmProvisioningMode.Scim && _scimCorrelator is not null)
+            {
+                correlation = await _scimCorrelator.CorrelateAsync(normalized, realm, tenant, ct).ConfigureAwait(false);
+                switch (correlation.Status)
+                {
+                    case CorrelationStatus.Ambiguous:
+                        return Degraded("scim-ambiguous", expiresAt);
+                    case CorrelationStatus.Deprovisioned:
+                        return Degraded("scim-deprovisioned", expiresAt);
+                    case CorrelationStatus.NotProvisioned when realm.ScimSettings.RequireCorrelation:
+                        return Degraded("scim-not-provisioned", expiresAt);
+                }
+            }
+
+            if (realm.GroupSource == RealmGroupSource.None)
+            {
+                return new GroupResolution(new HashSet<Sid>(), GroupResolutionStatus.Complete, "none", expiresAt);
+            }
+
+            var correlatedUserKey = correlation?.Status == CorrelationStatus.Matched ? correlation.ScimUserKey : null;
             var outcome = realm.GroupSource == RealmGroupSource.Resolver
-                ? await ResolveFromChainAsync(normalized, realm, tenant, ct).ConfigureAwait(false)
+                ? await ResolveFromChainAsync(normalized, realm, tenant, ct, correlatedUserKey).ConfigureAwait(false)
                 : await ResolveFromSchemeAsync(normalized, realm, tenant, scheme, ct).ConfigureAwait(false);
+
+            if (outcome.Degraded)
+            {
+                _logger?.LogWarning("Group resolution degraded for source {Source}.", outcome.Source);
+                return Degraded(outcome.Source, expiresAt);
+            }
+
+            if (realm.Provisioning == RealmProvisioningMode.Scim
+                && _scimCorrelator is not null
+                && correlation is { Status: CorrelationStatus.Matched }
+                && !string.IsNullOrEmpty(correlation.ScimUserKey))
+            {
+                outcome = await ApplyScimSupplementAsync(tenant, realm, correlation.ScimUserKey, outcome, now, expiresAt, ct).ConfigureAwait(false);
+            }
 
             if (outcome.Sids.Count > _maxGroups || outcome.Degraded)
             {
@@ -251,9 +303,134 @@ public sealed class GroupSidResolver : IGroupSidResolver
         return new Outcome(sids, source, degraded, true, null);
     }
 
-    private async ValueTask<Outcome> ResolveFromChainAsync(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, CancellationToken ct)
+    private async ValueTask<Outcome> ApplyScimSupplementAsync(
+        TenantId tenant,
+        IdentityRealm realm,
+        string scimUserKey,
+        Outcome baseOutcome,
+        DateTimeOffset now,
+        DateTimeOffset expiresAt,
+        CancellationToken ct)
     {
-        var identity = BuildIdentity(principal, realm, tenant);
+        if (_scimGroupStore is null || _scimProvisioningStore is null)
+        {
+            return Outcome.Failed("scim-unconfigured");
+        }
+
+        var syncState = await _scimProvisioningStore.GetRealmSyncStateAsync(tenant, realm.Id, ct).ConfigureAwait(false);
+        var epoch = syncState?.DeprovisionEpoch ?? 0;
+
+        bool isStale = _syncStateTracker is not null
+            ? await _syncStateTracker.IsSyncStaleAsync(tenant, realm, syncState, ct).ConfigureAwait(false)
+            : syncState?.LastContactAt is not { } lastContact || (now - lastContact) > TimeSpan.FromMinutes(Math.Max(1, realm.ScimSettings.MaxSyncAgeMinutes));
+
+        if (isStale && realm.ScimSettings.StaleSyncBehavior == ScimStaleSyncBehavior.Degrade)
+        {
+            return Outcome.Failed("scim-stale");
+        }
+
+        var scimSids = await ResolveScimEffectiveSidsAsync(tenant, realm.Id, scimUserKey, epoch, now, expiresAt, ct).ConfigureAwait(false);
+        if (scimSids is null)
+        {
+            return Outcome.Failed("scim-groups");
+        }
+
+        if (isStale)
+        {
+            if (scimSids.Count > 0)
+            {
+                if (_denyInspector is null
+                    || await _denyInspector.AnyGroupCarriesDenyAsync(tenant, scimSids, ct).ConfigureAwait(false))
+                {
+                    return Outcome.Failed("scim-stale-deny");
+                }
+            }
+
+            return baseOutcome;
+        }
+
+        if (scimSids.Count == 0)
+        {
+            return baseOutcome;
+        }
+
+        var merged = new HashSet<Sid>(baseOutcome.Sids);
+        merged.UnionWith(scimSids);
+        return baseOutcome with { Sids = merged };
+    }
+
+    private async ValueTask<HashSet<Sid>?> ResolveScimEffectiveSidsAsync(
+        TenantId tenant,
+        string realmId,
+        string scimUserKey,
+        long epoch,
+        DateTimeOffset now,
+        DateTimeOffset expiresAt,
+        CancellationToken ct)
+    {
+        var cacheKey = $"e{epoch}:scim:{scimUserKey}";
+        if (_roleCache is not null)
+        {
+            var cached = await _roleCache.GetAsync(realmId, cacheKey, ct).ConfigureAwait(false);
+            if (cached is not null)
+            {
+                var cachedSids = new HashSet<Sid>();
+                foreach (var g in cached.Groups)
+                {
+                    if (!SidFormat.IsCanonical(g))
+                    {
+                        return null;
+                    }
+
+                    cachedSids.Add(new Sid(g));
+                }
+
+                return cachedSids;
+            }
+        }
+
+        var effective = await _scimGroupStore!.GetEffectiveGroupSidsForUserAsync(
+            tenant, realmId, scimUserKey, DefaultMaxGroupNestingDepth, ct).ConfigureAwait(false);
+
+        if (effective.MaxDepthExceeded || effective.HasNonCanonicalSid)
+        {
+            return null;
+        }
+
+        var sids = new HashSet<Sid>();
+        var rawStrings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rawSid in effective.GroupObjectSids)
+        {
+            if (!SidFormat.IsCanonical(rawSid))
+            {
+                return null;
+            }
+
+            rawStrings.Add(rawSid);
+            sids.Add(new Sid(rawSid));
+        }
+
+        if (_roleCache is not null)
+        {
+            var resolution = new RoleResolution(
+                rawStrings,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                now,
+                expiresAt,
+                "scim")
+            {
+                Status = RoleResolutionStatus.Resolved
+            };
+            await _roleCache.SetAsync(realmId, cacheKey, resolution, ct).ConfigureAwait(false);
+        }
+
+        return sids;
+    }
+
+    private async ValueTask<Outcome> ResolveFromChainAsync(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, CancellationToken ct, string? correlatedUserKey = null)
+    {
+        var identity = BuildIdentity(principal, realm, tenant, correlatedUserKey);
         if (_roleResolver is null || identity is null)
         {
             return Outcome.Failed("resolver");
@@ -281,9 +458,10 @@ public sealed class GroupSidResolver : IGroupSidResolver
     }
 
     /// <summary>The user key comes from the validated subject only (oid, sub, user SID), never from upn, name or email.</summary>
-    private static ResolvedIdentity? BuildIdentity(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant)
+    private static ResolvedIdentity? BuildIdentity(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, string? correlatedUserKey = null)
     {
-        var userKey = principal.FindFirst("oid")?.Value
+        var userKey = correlatedUserKey
+            ?? principal.FindFirst("oid")?.Value
             ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
             ?? principal.FindFirst("sub")?.Value
             ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
