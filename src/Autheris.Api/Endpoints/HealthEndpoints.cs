@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
+using Autheris.Api.Endpoints.Health;
 using Autheris.Api.Extensions;
 using Autheris.Api.Hosting.Warmup;
 using Microsoft.AspNetCore.Builder;
@@ -53,7 +54,7 @@ public static class HealthEndpoints
 
         app.MapGet("/health/ready", async (
             ITrafficDrainController controller,
-            IGatewayHealthCheckService? healthCheckService,
+            [FromServices] ReadinessProbe? readinessProbe,
             [FromServices] IGraphQlExecutorGate? executorGate,
             [FromServices] IStartupWarmupState? warmupState,
             CancellationToken ct) =>
@@ -63,9 +64,9 @@ public static class HealthEndpoints
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
 
-            if (healthCheckService != null)
+            if (readinessProbe != null)
             {
-                var report = await healthCheckService.CheckHealthAsync(ct).ConfigureAwait(false);
+                var report = await readinessProbe.CheckHealthAsync(ct).ConfigureAwait(false);
                 if (!report.IsHealthy)
                 {
                     if (environment.IsDevelopment())
