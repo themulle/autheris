@@ -135,7 +135,8 @@ public sealed record ScimRealmSyncState(
     TenantId TenantId,
     string RealmId,
     DateTimeOffset? LastContactAt,
-    DateTimeOffset? LastWriteAt);
+    DateTimeOffset? LastWriteAt,
+    long DeprovisionEpoch = 0);
 
 public sealed class ScimUniquenessConflictException : Exception
 {
@@ -308,6 +309,7 @@ public interface IScimProvisioningStore
 {
     Task<ScimRealmSyncState?> GetRealmSyncStateAsync(TenantId tenantId, string realmId, CancellationToken ct = default);
     Task UpsertRealmSyncStateAsync(TenantId tenantId, string realmId, DateTimeOffset lastContactAt, DateTimeOffset? lastWriteAt, CancellationToken ct = default);
+    Task<long> IncrementRealmDeprovisionEpochAsync(TenantId tenantId, string realmId, CancellationToken ct = default);
 
     Task LockIdentityAsync(TenantId tenantId, string realmId, string subjectId, DateTimeOffset expiresAt, string reason, CancellationToken ct = default);
     Task<bool> IsIdentityLockedAsync(TenantId tenantId, string realmId, string subjectId, CancellationToken ct = default);
@@ -388,6 +390,7 @@ CREATE TABLE IF NOT EXISTS SCIM_REALM_SYNC_STATE (
     realm_id VARCHAR(128) NOT NULL,
     last_contact_at TIMESTAMPTZ NULL,
     last_write_at TIMESTAMPTZ NULL,
+    deprovision_epoch BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (tenant_id, realm_id)
 );
 
@@ -454,6 +457,7 @@ CREATE INDEX IF NOT EXISTS ix_identity_group_nesting_child
     {
       "name": "scim_realm_sync_state",
       "columns": [
+        { "name": "deprovision_epoch", "type": "BIGINT", "family": "integer", "nullable": false, "hasDefault": true },
         { "name": "last_contact_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true, "hasDefault": false },
         { "name": "last_write_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true, "hasDefault": false },
         { "name": "realm_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false, "hasDefault": false },
@@ -571,6 +575,7 @@ CREATE TABLE SCIM_REALM_SYNC_STATE (
     realm_id NVARCHAR(128) NOT NULL,
     last_contact_at NVARCHAR(64) NULL,
     last_write_at NVARCHAR(64) NULL,
+    deprovision_epoch BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (tenant_id, realm_id)
 );
 -- batch
@@ -644,6 +649,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_identity_group_nesting
     {
       "name": "SCIM_REALM_SYNC_STATE",
       "columns": [
+        { "name": "deprovision_epoch", "type": "BIGINT", "family": "integer", "nullable": false, "hasDefault": true },
         { "name": "last_contact_at", "type": "NVARCHAR", "family": "string", "nullable": true, "hasDefault": false },
         { "name": "last_write_at", "type": "NVARCHAR", "family": "string", "nullable": true, "hasDefault": false },
         { "name": "realm_id", "type": "NVARCHAR", "family": "string", "nullable": false, "hasDefault": false },
