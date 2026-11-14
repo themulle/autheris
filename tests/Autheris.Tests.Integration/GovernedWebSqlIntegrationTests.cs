@@ -17,48 +17,80 @@ using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
-public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSqlIntegrationTests.HostFixture>
 {
+    private readonly HostFixture _fixture;
     private readonly WebApplicationFactory<Program> _factory;
-    private readonly string _workDir;
-    private readonly string _dbPath;
 
     // X1: the governed pipeline compiles against the catalog of the database, so every table of these tests exists in a real SQLite
     // data source (tenant rows of several tenants), and the assertions are on rows, not on SQL text.
-    public GovernedWebSqlIntegrationTests(WebApplicationFactory<Program> factory)
+    public GovernedWebSqlIntegrationTests(HostFixture fixture)
     {
-        _workDir = Path.Combine(Path.GetTempPath(), "autheris-gws-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_workDir);
-        _dbPath = Path.Combine(_workDir, "data.db");
-        Seed(_dbPath);
-
-        _factory = factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
-            builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GovernedWebSqlIntegrationTests"));
-            builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}");
-            builder.UseSetting("Gateway:WebSql:Enabled", "true");
-            builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
-            builder.UseSetting("Gateway:WebSql:AllowDml", "false");
-            builder.UseSetting("Gateway:WebSql:DefaultMaxRows", "200");
-            builder.UseSetting("Gateway:WebSql:MaxAllowedRows", "500");
-        });
+        _fixture = fixture;
+        _factory = fixture;
     }
 
-    public void Dispose()
+    public sealed class HostFixture : IntegrationHost<HostFixture>
     {
-        _factory.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        private readonly string _workDir;
+        private readonly string _dbPath;
+
+        public IntegrationHost RecursiveHost { get; }
+
+        public HostFixture()
+        {
+            _workDir = Path.Combine(Path.GetTempPath(), "autheris-gws-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_workDir);
+            _dbPath = Path.Combine(_workDir, "data.db");
+            Seed(_dbPath);
+
+            var recursiveSettings = BaseSettings(_dbPath);
+            recursiveSettings["Gateway:WebSql:AllowRecursiveCte"] = "true";
+            recursiveSettings["Gateway:WebSql:MaxRecursionDepth"] = "100";
+            recursiveSettings["Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity"] = "5000";
+            recursiveSettings["Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery"] = "5000";
+            RecursiveHost = new IntegrationHost(recursiveSettings);
+        }
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(BaseSettings(_dbPath));
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                RecursiveHost.Dispose();
+            }
+
+            base.Dispose(disposing);
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        }
+
+        private static Dictionary<string, string?> BaseSettings(string dbPath) => new()
+        {
+            ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+            ["Gateway:Insecure:danger_allow_anonymous_access"] = "true",
+            ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+            ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+            ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("GovernedWebSqlIntegrationTests"),
+            ["Gateway:DataSources:Connections:default:Provider"] = "Sqlite",
+            ["Gateway:DataSources:Connections:default:ConnectionString"] = $"Data Source={dbPath}",
+            ["Gateway:WebSql:Enabled"] = "true",
+            ["Gateway:WebSql:DefaultDataSourceName"] = "default",
+            ["Gateway:WebSql:AllowDml"] = "false",
+            ["Gateway:WebSql:DefaultMaxRows"] = "200",
+            ["Gateway:WebSql:MaxAllowedRows"] = "500",
+        };
     }
 
     private static void Seed(string path)
@@ -313,14 +345,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     private const string OrgWalk =
         "WITH RECURSIVE w(id, name) AS (SELECT id, name FROM org WHERE parent_id IS NULL UNION ALL SELECT o.id, o.name FROM org o JOIN w ON o.parent_id = w.id) SELECT id, name FROM w ORDER BY id";
 
-    private WebApplicationFactory<Program> RecursiveEnabled() =>
-        _factory.WithWebHostBuilder(builder =>
-        {
-            builder.UseSetting("Gateway:WebSql:AllowRecursiveCte", "true");
-            builder.UseSetting("Gateway:WebSql:MaxRecursionDepth", "100");
-            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "5000");
-            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "5000");
-        });
+    private WebApplicationFactory<Program> RecursiveEnabled() => _fixture.RecursiveHost;
 
     private static async Task RegisterOrgAsync(WebApplicationFactory<Program> factory, bool withSsn, Dictionary<string, MaskingRule>? masking = null)
     {
@@ -512,7 +537,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicatio
     [Fact]
     public async Task WebSql_UnauthenticatedRequest_WhenAnonymousDisabled_Returns401()
     {
-        var secureFactory = _factory.WithWebHostBuilder(builder =>
+        await using var secureFactory = _factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "false");
         });

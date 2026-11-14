@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -140,9 +141,8 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
 
     public sealed class Fixture : IDisposable
     {
-        private readonly WebApplicationFactory<Program> _root = new();
-        private readonly WebApplicationFactory<Program> _withoutDefaultTenant;
-        private readonly WebApplicationFactory<Program> _withDefaultTenant;
+        private readonly IntegrationHost _withoutDefaultTenant;
+        private readonly IntegrationHost _withDefaultTenant;
 
         public Fixture()
         {
@@ -153,36 +153,31 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
         public WebApplicationFactory<Program> Host(string? defaultTenantId) =>
             defaultTenantId is null ? _withoutDefaultTenant : _withDefaultTenant;
 
-        private WebApplicationFactory<Program> CreateHost(string? defaultTenantId) =>
-            _root.WithWebHostBuilder(b =>
+        private static IntegrationHost CreateHost(string? defaultTenantId)
+        {
+            var settings = new Dictionary<string, string?>
             {
-                b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-                b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-                b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-                b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
-                b.UseSetting("Gateway:Mcp:Enabled", "true");
-                b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-                b.UseSetting("Gateway:WebSql:Enabled", "true");
-                b.UseSetting("Gateway:Arrow:Enabled", "true");
-                b.UseSetting("Gateway:Modules:Enabled:0", "lakehouse");
-                LakehouseWorkspaceTestSettings.Apply((k, v) => b.UseSetting(k, v));
-                b.UseSetting("Gateway:Lakehouse:Enabled", "true");
-                if (defaultTenantId is not null)
-                {
-                    b.UseSetting("Gateway:Tenancy:DefaultTenantId", defaultTenantId);
-                }
-                else
-                {
-                    // appsettings.Development.json configures D; an empty value is rejected, so the key is nulled.
-                    b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = null }));
-                }
-            });
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "1000",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("Fixture"),
+                ["Gateway:Mcp:Enabled"] = "true",
+                ["Gateway:Mcp:EndpointPath"] = "/mcp",
+                ["Gateway:WebSql:Enabled"] = "true",
+                ["Gateway:Arrow:Enabled"] = "true",
+                ["Gateway:Modules:Enabled:0"] = "lakehouse",
+                ["Gateway:Lakehouse:Enabled"] = "true",
+                // appsettings.Development.json configures D; an empty value is rejected, so the key is nulled when omitted.
+                ["Gateway:Tenancy:DefaultTenantId"] = defaultTenantId,
+            };
+            LakehouseWorkspaceTestSettings.Apply((k, v) => settings[k] = v);
+            return new IntegrationHost(settings);
+        }
 
         public void Dispose()
         {
             _withoutDefaultTenant.Dispose();
             _withDefaultTenant.Dispose();
-            _root.Dispose();
             Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         }
     }

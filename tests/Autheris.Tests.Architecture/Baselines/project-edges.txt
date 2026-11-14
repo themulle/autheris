@@ -29,6 +29,7 @@ Autheris.Tests.Architecture->Autheris.Infrastructure
 Autheris.Tests.Architecture->Autheris.Modules.Abstractions
 Autheris.Tests.Architecture->Autheris.Modules.Lakehouse
 Autheris.Tests.Architecture->TrinoSqlEngine
+Autheris.Tests.Common->Autheris.Api
 Autheris.Tests.Common->Autheris.Application
 Autheris.Tests.Fuzz->TrinoSqlEngine
 Autheris.Tests.Integration->Autheris.Api

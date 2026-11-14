@@ -8,29 +8,44 @@ using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
-public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class WalkingSkeletonIntegrationTests : IClassFixture<WalkingSkeletonIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public WalkingSkeletonIntegrationTests(WebApplicationFactory<Program> factory)
+    public WalkingSkeletonIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("WalkingSkeletonIntegrationTests"));
-            builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "500");
+            base.ConfigureWebHost(builder);
             builder.UseSyntheticSqlData();
-        });
+        }
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Tenancy:DefaultTenantId"] = Autheris.Tests.Common.TestTenants.Default.Value,
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("WalkingSkeletonIntegrationTests"),
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "500",
+            });
+        }
     }
 
     private HttpClient CreateClient(bool antiCsrf = true)
