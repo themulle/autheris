@@ -14,6 +14,7 @@ using Xunit;
 /// INF-1: a Redis error on an established connection must not silently fall back to the node-local epoch. Otherwise a
 /// revocation published by another node is ignored until the L1 TTL expires; the cached decision must be re-evaluated.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class EpochRedisFailureInf1Tests
 {
     private static readonly TableIdentifier Table = new("corp", "public", "orders");

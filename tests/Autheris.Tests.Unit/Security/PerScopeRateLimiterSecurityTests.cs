@@ -12,6 +12,7 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class PerScopeRateLimiterSecurityTests
 {
     private static ClientTierResolver CreateResolver(ClientTierOptions? tierOptions = null)

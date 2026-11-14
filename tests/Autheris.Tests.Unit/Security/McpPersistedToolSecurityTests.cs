@@ -10,6 +10,7 @@ using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class McpPersistedToolSecurityTests
 {
     private readonly IPersistedToolValidator _validator = new PersistedToolValidator();

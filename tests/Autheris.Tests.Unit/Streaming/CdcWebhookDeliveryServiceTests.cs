@@ -110,6 +110,8 @@ public sealed class CdcWebhookDeliveryServiceTests
         public FakeOutbox Outbox { get; } = new();
         public FakeEnforcer Enforcer { get; } = new();
         public IStreamRlsPolicyEnforcer? EnforcerOverride { get; set; }
+        public IIdentityStoreRepository? IdentityStore { get; set; }
+        public Autheris.Application.Identity.IIdentityRealmRegistry? RealmRegistry { get; set; }
         public FakeChannel Channel { get; } = new();
         public ICloudEventSubscriptionStore Store { get; set; } = new InMemoryCloudEventSubscriptionStore();
         public IAuditWriter Audit { get; } = Substitute.For<IAuditWriter>();
@@ -133,6 +135,16 @@ public sealed class CdcWebhookDeliveryServiceTests
         {
             var services = new ServiceCollection();
             services.AddScoped<IStreamRlsPolicyEnforcer>(_ => EnforcerOverride ?? Enforcer);
+            if (IdentityStore is not null)
+            {
+                services.AddScoped(_ => IdentityStore);
+            }
+
+            if (RealmRegistry is not null)
+            {
+                services.AddScoped(_ => RealmRegistry);
+            }
+
             var monitor = Substitute.For<IOptionsMonitor<CdcWebhooksOptions>>();
             monitor.CurrentValue.Returns(_ => Options);
             return new CdcWebhookDeliveryService(
@@ -710,5 +722,57 @@ public sealed class CdcWebhookDeliveryServiceTests
 
         public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
             Entries.Add((logLevel, formatter(state, exception)));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Drops_events_for_locked_inactive_and_foreign_realm_subjects()
+    {
+        var partnerRealm = new Autheris.Domain.Identity.IdentityRealm("partner-realm", Autheris.Domain.Identity.IdentityRealmKind.EntraWorkforce, Autheris.Domain.Identity.TenantBindingSpecification.Fixed(new TenantId("tenant-a")));
+        var lockedDefault = new Fixture
+        {
+            IdentityStore = Autheris.Tests.Unit.Security.NullFake.Create<IIdentityStoreRepository>((method, args) =>
+                method.Name == nameof(IIdentityStoreRepository.IsSubjectLockedAsync) && (string?)args?[1] == "default" ? Task.FromResult(true) : Autheris.Tests.Unit.Security.NullFake.UseDefault)
+        };
+        await lockedDefault.AddSubscription(sid: "S-1-5-21-LOCKED");
+        await lockedDefault.Create().ProcessEventAsync(Event(), default);
+        lockedDefault.Outbox.Rows.ShouldBeEmpty();
+
+        var inactiveUser = new Autheris.Domain.Identity.ScimUser("S-1-5-21-INACTIVE", "ext-1", "inactive@example.com", "Inactive", "inactive@example.com", false, null, Now, Now, ObjectSid: "S-1-5-21-INACTIVE");
+        var inactiveDefault = new Fixture
+        {
+            IdentityStore = Autheris.Tests.Unit.Security.NullFake.Create<IIdentityStoreRepository>((method, args) =>
+                method.Name == nameof(IIdentityStoreRepository.GetUserAsync) && (string?)args?[1] == "default" ? Task.FromResult<Autheris.Domain.Identity.ScimUser?>(inactiveUser) : Autheris.Tests.Unit.Security.NullFake.UseDefault)
+        };
+        await inactiveDefault.AddSubscription(sid: "S-1-5-21-INACTIVE");
+        await inactiveDefault.Create().ProcessEventAsync(Event(), default);
+        inactiveDefault.Outbox.Rows.ShouldBeEmpty();
+
+        var lockedForeignRealm = new Fixture
+        {
+            RealmRegistry = new Autheris.Tests.Unit.Security.FakeIdentityRealmRegistry([partnerRealm]),
+            IdentityStore = Autheris.Tests.Unit.Security.NullFake.Create<IIdentityStoreRepository>((method, args) =>
+                method.Name == nameof(IIdentityStoreRepository.IsSubjectLockedAsync) && (string?)args?[1] == "partner-realm" ? Task.FromResult(true) : Autheris.Tests.Unit.Security.NullFake.UseDefault)
+        };
+        await lockedForeignRealm.AddSubscription(sid: "S-1-5-21-PARTNER-LOCKED");
+        await lockedForeignRealm.Create().ProcessEventAsync(Event(), default);
+        lockedForeignRealm.Outbox.Rows.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Allowed_subject_is_delivered_positive_control()
+    {
+        var partnerRealm = new Autheris.Domain.Identity.IdentityRealm("partner-realm", Autheris.Domain.Identity.IdentityRealmKind.EntraWorkforce, Autheris.Domain.Identity.TenantBindingSpecification.Fixed(new TenantId("tenant-a")));
+        var activeUser = new Autheris.Domain.Identity.ScimUser("S-1-5-21-CREATOR", "ext-1", "creator@example.com", "Creator", "creator@example.com", true, null, Now, Now, ObjectSid: "S-1-5-21-CREATOR");
+        var f = new Fixture
+        {
+            RealmRegistry = new Autheris.Tests.Unit.Security.FakeIdentityRealmRegistry([partnerRealm]),
+            IdentityStore = Autheris.Tests.Unit.Security.NullFake.Create<IIdentityStoreRepository>((method, _) =>
+                method.Name == nameof(IIdentityStoreRepository.GetUserAsync) ? Task.FromResult<Autheris.Domain.Identity.ScimUser?>(activeUser) : Autheris.Tests.Unit.Security.NullFake.UseDefault)
+        };
+        await f.AddSubscription(sid: "S-1-5-21-CREATOR");
+        await f.Create().ProcessEventAsync(Event(), default);
+        f.Outbox.Rows.ShouldHaveSingleItem().SubscriptionId.ShouldBe("sub-1");
     }
 }

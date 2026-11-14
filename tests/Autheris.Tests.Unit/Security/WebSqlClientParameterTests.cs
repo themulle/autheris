@@ -9,6 +9,7 @@ namespace Autheris.Tests.Unit.Security;
 /// <summary>
 /// Client parameters (@name) are parsed as placeholder identifiers and bound by name by the compiler (CompiledSql, ParameterOrigin.ClientNamed).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlClientParameterTests
 {
     private static readonly Dictionary<string, object?> CraneType = new() { ["crane_type"] = "Mobilkran", ["@crane_type"] = "Mobilkran" };

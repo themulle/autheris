@@ -15,6 +15,7 @@ using Xunit;
 /// <summary>
 /// GQL-03: the page offset is bounded centrally in the execution service, so every resolver inherits the bound.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Gql03OffsetBoundTests
 {
     [Theory]

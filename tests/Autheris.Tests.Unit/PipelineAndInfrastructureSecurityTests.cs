@@ -16,6 +16,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit;
 
+[Trait("Category", "Security")]
 public class PipelineAndInfrastructureSecurityTests
 {
     [Fact]

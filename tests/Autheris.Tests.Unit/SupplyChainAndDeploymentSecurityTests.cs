@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit;
 
+[Trait("Category", "Security")]
 public class SupplyChainAndDeploymentSecurityTests
 {
     private static string? FindRepoRoot()

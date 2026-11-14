@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class CatalogSearchIncrementalIndexSecurityTests
 {
     private static readonly float[] BaseVec = [1f, 0f, 0f, 0f];

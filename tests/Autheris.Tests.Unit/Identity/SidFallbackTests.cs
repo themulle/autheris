@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Issue #469: application identifiers never stand in for a user subject, and the realm lookup is not a static global.</summary>
+[Trait("Category", "Security")]
 public sealed class SidFallbackTests
 {
     private static ClaimsPrincipal Principal(params Claim[] claims) => new(new ClaimsIdentity(claims, "TestAuth"));

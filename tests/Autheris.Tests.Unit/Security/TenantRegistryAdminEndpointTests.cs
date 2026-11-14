@@ -14,6 +14,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>M-A2: the audited ClusterAdmin operation that resolves a tenant id collision.</summary>
+[Trait("Category", "Security")]
 public sealed class TenantRegistryAdminEndpointTests
 {
     private static DefaultHttpContext Context(params string[] roles)

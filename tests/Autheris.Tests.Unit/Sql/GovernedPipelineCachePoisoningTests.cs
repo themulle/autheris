@@ -31,6 +31,7 @@ using Xunit;
 /// values of the current request and revalidates the table dependencies; it never serves another principal's, tenant's or catalog
 /// version's compilation. All tests share one engine instance, so each compile can hit what the previous one inserted.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class GovernedPipelineCachePoisoningTests
 {
     private const string Tenant = "acme";

@@ -14,6 +14,7 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Visitors;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class WebSqlCommentPolicyTests
 {
     private static readonly TargetSqlDialect[] TestedDialects =

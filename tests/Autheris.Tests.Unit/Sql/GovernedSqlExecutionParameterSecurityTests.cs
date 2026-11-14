@@ -28,6 +28,7 @@ using Shouldly;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class GovernedSqlExecutionParameterSecurityTests
 {
     private const string Tenant = "tenant_test";

@@ -30,6 +30,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class WebSocketReadOnlyMutationSecurityTests
 {
     private readonly SymmetricSecurityKey _signingKey = new(Encoding.UTF8.GetBytes("a-very-secret-test-key-of-at-least-256-bits-length!"));

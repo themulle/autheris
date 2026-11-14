@@ -5,6 +5,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review 2026-10-05 (A-2): the dev login redirect accepts only plain same-site paths.</summary>
+[Trait("Category", "Security")]
 public sealed class DevRedirectTests
 {
     [Theory]

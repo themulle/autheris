@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>SEC-X1-13: positive-only cache, no cached allow for collisions or outages, per-issuer budget for new registrations.</summary>
+[Trait("Category", "Security")]
 public sealed class TenantRegistryGateTests
 {
     private sealed class ManualClock : TimeProvider

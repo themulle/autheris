@@ -19,6 +19,7 @@ using Xunit;
 /// SQL2-9: the OLAP timeout interrupts a running DuckDB query (not only between rows), and generator functions and
 /// recursive CTEs are rejected also when tables are staged.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class DuckDbInterruptSql29Tests
 {
     private static OlapTableSource Source(int rows)

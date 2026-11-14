@@ -18,6 +18,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class Sql6JoinGuardrailTests
 {
     private const string Tenant = "tenant_a";

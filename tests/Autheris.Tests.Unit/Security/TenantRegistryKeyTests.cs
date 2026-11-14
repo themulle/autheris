@@ -4,6 +4,7 @@ using Autheris.Domain.Common;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class TenantRegistryKeyTests
 {
     [Theory]

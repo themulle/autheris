@@ -20,6 +20,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class TableWritePermissionTests
 {
     private static readonly TableIdentifier OrdersTable = new("sales", "dbo", "orders");

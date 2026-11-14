@@ -12,6 +12,7 @@ using Xunit;
 /// R-SQL-8 / SQL2-8: procedure results read LOB values in chunks against the remaining budget (sequential access),
 /// and binary values count with the Base64 factor of their JSON representation.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ProcedureLobBudgetRSql8Tests : IDisposable
 {
     private readonly SqliteConnection _connection = new("Data Source=:memory:");

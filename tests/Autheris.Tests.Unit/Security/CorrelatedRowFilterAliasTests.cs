@@ -29,6 +29,7 @@ namespace Autheris.Tests.Unit.Security;
 /// Correlated row filters (EXISTS ... WHERE dep.pk = target.fk) bind to the reserved target alias that the query
 /// builders put on the filtered table.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class CorrelatedRowFilterAliasTests : IDisposable
 {
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-corr-{Guid.NewGuid():N}.db");

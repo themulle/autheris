@@ -24,6 +24,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class ArrowExportSecurityTests
 {
     private static IOptions<GatewayOptions> CreateOptions(int maxRows = 1000)

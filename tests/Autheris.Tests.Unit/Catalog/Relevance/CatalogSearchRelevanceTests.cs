@@ -29,6 +29,7 @@ using Xunit.Abstractions;
 /// (the <c>Skip</c> on the matching <see cref="RelevanceCasesAttribute"/>). The test output names the rank of every expected
 /// table, so a ranking change shows which cases it improves.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class CatalogSearchRelevanceTests(ITestOutputHelper output)
 {
     /// <summary>Hits requested per query: the whole fixture, so the report can name ranks beyond <c>maxRank</c>.</summary>

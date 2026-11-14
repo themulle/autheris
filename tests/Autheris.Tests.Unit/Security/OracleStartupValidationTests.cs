@@ -14,6 +14,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>CR-ADG-08: Oracle runtime startup rules (WP-F1) and the tenant collision check (decision B-1).</summary>
+[Trait("Category", "Security")]
 public sealed class OracleStartupValidationTests
 {
     private const string Tcps = "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCPS)(HOST=db.example)(PORT=2484))(CONNECT_DATA=(SERVICE_NAME=APP)))";

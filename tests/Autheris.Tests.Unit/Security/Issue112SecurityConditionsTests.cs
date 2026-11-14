@@ -33,6 +33,7 @@ using static Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost;
 /// <summary>
 /// Mandatory Phase 3 security tests for Issue #112: SEC-112-01..12 and conditions C-1..C-11 (T_SEC_DATA112_*).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Issue112SecurityConditionsTests
 {
     private static readonly TableIdentifier OrdersTableId = new("sales", "dbo", "orders");

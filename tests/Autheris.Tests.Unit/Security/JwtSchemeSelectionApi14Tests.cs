@@ -18,6 +18,7 @@ using Xunit;
 /// API-14: with Entra ID and AD FS both enabled, AD FS tokens are validated by an own scheme that loads the AD FS
 /// signing keys; tokens are routed by their issuer.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class JwtSchemeSelectionApi14Tests
 {
     private const string AdfsAuthority = "https://adfs.corp.example/adfs";

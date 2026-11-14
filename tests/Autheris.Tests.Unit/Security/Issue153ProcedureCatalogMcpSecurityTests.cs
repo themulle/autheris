@@ -35,6 +35,7 @@ using Xunit;
 /// Security Verification Suite for Issue #153: Governed Stored Procedures in Catalog and MCP.
 /// Covers binding guardrails SEC-GOV153-01..05 and conditions T_SEC_GOV153_01..08.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Issue153ProcedureCatalogMcpSecurityTests
 {
     private const string TenantA = "tenant-a";

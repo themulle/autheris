@@ -25,6 +25,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>SR-H-03: client-supplied Auth.SecretRef must never be used verbatim as vault key.</summary>
+[Trait("Category", "Security")]
 public sealed class SrH03DatasourceSecretRefTests
 {
     private const string Spec = """{"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{"/a":{"get":{"summary":"x"}}},"components":{"schemas":{"A":{"type":"object","properties":{"id":{"type":"string"}}}}}}""";

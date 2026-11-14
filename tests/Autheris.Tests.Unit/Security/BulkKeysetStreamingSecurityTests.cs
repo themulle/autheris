@@ -29,6 +29,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class BulkKeysetStreamingSecurityTests
 {
     private static ClaimsPrincipal CreateReadOnlyPrincipal(string sid = "user-readonly")

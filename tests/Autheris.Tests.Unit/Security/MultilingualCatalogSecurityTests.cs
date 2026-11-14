@@ -30,6 +30,7 @@ using Xunit;
 /// Security Verification Suite for Multilingual Catalog Texts, Language Negotiation & Search (#146).
 /// Covers binding guardrails SEC-CAT146-01..07.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class MultilingualCatalogSecurityTests
 {
     /// <summary>

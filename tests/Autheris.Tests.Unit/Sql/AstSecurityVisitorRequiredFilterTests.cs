@@ -11,6 +11,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class AstSecurityVisitorRequiredFilterTests
 {
     private static readonly TableIdentity Orders = new("dbo", "orders");

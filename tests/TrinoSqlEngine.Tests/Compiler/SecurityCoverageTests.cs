@@ -12,6 +12,7 @@ using static TrinoSqlEngine.Ast.Nodes.BinaryOperator;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public class SecurityCoverageTests
 {
     private static readonly SecurityPredicateId RootId = new("dbo.t", 0);

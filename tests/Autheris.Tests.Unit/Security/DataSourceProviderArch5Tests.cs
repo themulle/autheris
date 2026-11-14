@@ -14,6 +14,7 @@ using Xunit;
 /// factory, the TLS policy, WebSQL and the procedure path each had their own alias list ("pgsql" was PostgreSQL for
 /// procedures, unsupported for the factory and skipped by the TLS policy).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class DataSourceProviderArch5Tests
 {
     [Theory]

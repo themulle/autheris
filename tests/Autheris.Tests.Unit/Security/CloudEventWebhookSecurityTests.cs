@@ -23,6 +23,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class CloudEventWebhookSecurityTests
 {
     private readonly ICloudEventTransformer _transformer = new CloudEventTransformer();

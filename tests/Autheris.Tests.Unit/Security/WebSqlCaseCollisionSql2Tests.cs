@@ -24,6 +24,7 @@ using Xunit;
 /// identifiers, SQL Server with a case-sensitive collation); their policies would then overwrite each other.
 /// Such statements are rejected.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlCaseCollisionSql2Tests
 {
     private const string Tenant = "tenant_a";

@@ -17,6 +17,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>CR-ADG-31 / WP-X0p: the registry check of <see cref="SecurityContextResolutionMiddleware"/>.</summary>
+[Trait("Category", "Security")]
 public sealed class TenantRegistryMiddlewareTests
 {
     private sealed class Monitor(GatewayOptions options) : IOptionsMonitor<GatewayOptions>

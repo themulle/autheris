@@ -14,6 +14,7 @@ using Xunit;
 /// <summary>
 /// INF-10: a later revocation must never shorten the Redis TTL of an earlier, longer one (atomic max via script).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Inf10RedisRevocationKeepLongestTests
 {
     [Fact]

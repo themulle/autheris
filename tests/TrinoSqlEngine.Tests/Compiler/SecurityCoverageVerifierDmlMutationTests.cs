@@ -14,6 +14,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// proves on the final tree that every write is confined to the tenant and the policy, and rejects with the typed reason otherwise.
 /// </summary>
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public class SecurityCoverageVerifierDmlMutationTests
 {
     private const string TenantName = "__tenant";

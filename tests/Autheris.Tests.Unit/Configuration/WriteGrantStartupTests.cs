@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Configuration;
 
+[Trait("Category", "Security")]
 public sealed class WriteGrantStartupTests
 {
     private static IWebHostEnvironment Env(string name)

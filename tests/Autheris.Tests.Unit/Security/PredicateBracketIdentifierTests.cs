@@ -11,6 +11,7 @@ namespace Autheris.Tests.Unit.Security;
 /// <summary>
 /// Filter predicates in SQL Server notation ([schema].[table]) are validated as the double-quoted identifiers they are.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class PredicateBracketIdentifierTests
 {
     [Fact]

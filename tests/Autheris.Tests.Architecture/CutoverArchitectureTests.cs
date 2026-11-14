@@ -9,8 +9,8 @@ namespace Autheris.Tests.Architecture;
 /// <summary>
 /// WP-X1 step X1.6: the guards of the cutover to the AST compiler. Every scan reads the IL of the production assemblies, so a
 /// different spelling, a variable or a reflection-free alias cannot slip past it the way a text search could. Each scan has a
-/// positive control (a known hit) so that a rename cannot turn a test green vacuously.
-/// </summary>
+/// positive control (a known hit) so that a rename cannot turn a test green vacuously.</summary>
+[Trait("Category", "Security")]
 public sealed class CutoverArchitectureTests
 {
     /// <summary>

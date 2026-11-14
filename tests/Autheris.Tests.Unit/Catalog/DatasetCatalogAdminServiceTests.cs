@@ -16,6 +16,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Issue #111 WP-4 (F-C5, SEC-111-08/09/12, A-5, A-9): the single writer of dataset tags and tiers.</summary>
+[Trait("Category", "Security")]
 public sealed class DatasetCatalogAdminServiceTests
 {
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");

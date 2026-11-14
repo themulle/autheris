@@ -17,6 +17,7 @@ using Shouldly;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class WebSqlPagingTokenTests
 {
     private sealed class TestSecretProvider(byte[] secret) : IKeyVaultSecretProvider

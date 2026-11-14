@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class LakehouseModuleAbsentSecurityTests : IClassFixture<LakehouseModuleAbsentSecurityTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;

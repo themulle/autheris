@@ -32,6 +32,7 @@ using Xunit;
 /// projections attributed to the right source. Mirrors the parity host catalog (SQL tables, columns with a TableId,
 /// <c>SourceName</c> = source) in process.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class FederatedSameTableNameTests
 {
     private static readonly FastSqlEngine Engine = new();

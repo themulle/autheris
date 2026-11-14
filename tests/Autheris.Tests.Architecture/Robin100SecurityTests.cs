@@ -5,6 +5,7 @@ using Xunit;
 namespace Autheris.Tests.Architecture;
 
 /// <summary>Robin-100 binding security conditions that can be checked on the test sources.</summary>
+[Trait("Category", "Security")]
 public sealed class Robin100SecurityTests
 {
     /// <summary>SEC-R100-07: the raw JSON helper uses the same authenticated host client as every other helper.</summary>

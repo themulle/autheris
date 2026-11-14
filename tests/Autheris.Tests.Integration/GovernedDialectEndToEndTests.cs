@@ -253,6 +253,7 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     }
 }
 
+[Trait("Category", "Security")]
 public sealed class SqliteGovernedEndToEndTests : GovernedDialectEndToEndBase
 {
     private string? _dir;
@@ -286,6 +287,7 @@ public sealed class SqliteGovernedEndToEndTests : GovernedDialectEndToEndBase
     }
 }
 
+[Trait("Category", "Security")]
 public sealed class PostgreSqlGovernedEndToEndTests : GovernedDialectEndToEndBase, IAsyncLifetime
 {
     private PostgreSqlTestDatabase? _db;
@@ -330,6 +332,7 @@ public sealed class PostgreSqlGovernedEndToEndTests : GovernedDialectEndToEndBas
     }
 }
 
+[Trait("Category", "Security")]
 public sealed class SqlServerGovernedEndToEndTests : GovernedDialectEndToEndBase, IAsyncLifetime
 {
     private SqlServerTestDatabase? _db;
@@ -369,6 +372,7 @@ public sealed class SqlServerGovernedEndToEndTests : GovernedDialectEndToEndBase
 
 [Collection(OracleCollection.Name)]
 [Trait("Category", "Oracle")]
+[Trait("Category", "Security")]
 public sealed class OracleGovernedEndToEndTests(AstCompilerOracleFixture fixture) : GovernedDialectEndToEndBase
 {
     protected override DialectTarget? Target { get; } = new("Oracle", "Oracle", fixture.AppConnectionString, AstCompilerOracleFixture.AppUser, AstCompilerOracleFixture.AppUser, "X1_ORDERS", ConversionFails: true);

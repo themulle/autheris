@@ -14,6 +14,7 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class DataSourceSafetyCeilingSecurityTests
 {
     [Fact]

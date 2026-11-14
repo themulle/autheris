@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review 2026-10-06 (recheck 4): PG-3, PG-4, PG-5 (shared approval policy), R4-4.</summary>
+[Trait("Category", "Security")]
 public sealed class SecurityReviewRecheck4Tests
 {
     private static ConsentRequest Request(string requester, params string[] identifiers)

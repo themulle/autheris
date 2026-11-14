@@ -39,6 +39,7 @@ using Xunit;
 /// <summary>
 /// Regression tests for the extension findings of security review 2026-10-02 (H-18 .. H-20, M-32 .. M-35, low findings).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class LakehouseAndCatalogExtensionsSecurityTests
 {
     private static readonly string AzureKey = Convert.ToBase64String(Encoding.UTF8.GetBytes("12345678901234567890123456789012"));

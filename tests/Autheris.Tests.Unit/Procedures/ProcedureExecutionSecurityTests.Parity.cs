@@ -8,6 +8,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Procedures;
 
 /// <summary>Hidden and unknown procedures answer and audit alike on REST and MCP.</summary>
+[Trait("Category", "Security")]
 public partial class ProcedureExecutionSecurityTests
 {
     [Fact]

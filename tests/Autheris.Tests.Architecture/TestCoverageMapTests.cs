@@ -11,19 +11,19 @@ using Xunit;
 internal static partial class TestInventoryScanner
 {
     [GeneratedRegex(@"^\s*namespace\s+([A-Za-z0-9_.]+)\s*[;{]", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex NamespaceRegex();
+    internal static partial Regex NamespaceRegex();
 
     [GeneratedRegex(@"^\s*(?:public|internal|private|protected)\s+(?:(?:sealed|abstract|static|partial)\s+)*(?:class|record)\s+([A-Za-z0-9_]+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex TypeDeclRegex();
+    internal static partial Regex TypeDeclRegex();
 
     [GeneratedRegex(@"\[\s*(?:Fact|Theory|ParityFact|ParityTheory|SparkFact|SparkTheory|RequiresContainerRuntimeFact|RequiresContainerRuntimeTheory|Property)(?:Attribute)?\b", RegexOptions.CultureInvariant)]
-    private static partial Regex FactAttrRegex();
+    internal static partial Regex FactAttrRegex();
 
     [GeneratedRegex(@"\[\s*Trait(?:Attribute)?\s*\(\s*""Category""\s*,\s*""Security""\s*\)\s*\]", RegexOptions.CultureInvariant)]
-    private static partial Regex SecurityTraitRegex();
+    internal static partial Regex SecurityTraitRegex();
 
     [GeneratedRegex(@"^\s*(?:public|internal|private|protected)\s+(?:(?:static|async|virtual|override|sealed)\s+)*[A-Za-z0-9_<>,.?\[\]\s]+\s+([A-Za-z0-9_]+)\s*\(", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex MethodDeclRegex();
+    internal static partial Regex MethodDeclRegex();
 
     public static (HashSet<string> AllTests, HashSet<string> SecurityTests) ScanRepository()
     {
@@ -44,11 +44,16 @@ internal static partial class TestInventoryScanner
         var nsMatch = NamespaceRegex().Match(source);
         var ns = nsMatch.Success ? nsMatch.Groups[1].Value : "Global";
 
-        var typeMatches = TypeDeclRegex().Matches(source);
+        var typeMatches = TypeDeclRegex().Matches(source)
+            .Where(m => !string.Equals(m.Groups[1].Value, "HostFixture", StringComparison.Ordinal))
+            .ToList();
         if (typeMatches.Count == 0)
         {
             return;
         }
+
+        int outerClassEnd = -1;
+        bool outerClassIsSecurity = false;
 
         for (int i = 0; i < typeMatches.Count; i++)
         {
@@ -66,7 +71,14 @@ internal static partial class TestInventoryScanner
                 classAttrWindow = classAttrWindow[(lastSep + 1)..];
             }
 
-            bool classIsSecurity = SecurityTraitRegex().IsMatch(classAttrWindow);
+            bool ownClassIsSecurity = SecurityTraitRegex().IsMatch(classAttrWindow);
+            if (classStart > outerClassEnd)
+            {
+                outerClassEnd = FindTypeBodyEnd(source, tMatch.Index + tMatch.Length);
+                outerClassIsSecurity = ownClassIsSecurity;
+            }
+
+            bool classIsSecurity = ownClassIsSecurity || (classStart < outerClassEnd && outerClassIsSecurity);
 
             int bodyStart = tMatch.Index + tMatch.Length;
             if (bodyStart >= bodyEnd)
@@ -142,8 +154,38 @@ internal static partial class TestInventoryScanner
 
         return result;
     }
+
+    internal static int FindTypeBodyEnd(string source, int searchStart)
+    {
+        int openBrace = source.IndexOf('{', searchStart);
+        if (openBrace < 0)
+        {
+            return source.Length;
+        }
+
+        int depth = 0;
+        for (int i = openBrace; i < source.Length; i++)
+        {
+            char c = source[i];
+            if (c == '{')
+            {
+                depth++;
+            }
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return source.Length;
+    }
 }
 
+[Trait("Category", "Security")]
 public sealed partial class TestCoverageMapTests
 {
     private const string BaselineRelativePath = "tests/Autheris.Tests.Architecture/Baselines/security-tests-base.txt";

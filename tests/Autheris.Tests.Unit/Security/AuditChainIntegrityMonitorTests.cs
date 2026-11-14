@@ -15,6 +15,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review 2026-10-06 (E-10, E-11): runtime chain verification and audit entries of the approval workflow.</summary>
+[Trait("Category", "Security")]
 public sealed class AuditChainIntegrityMonitorTests
 {
     private static AuditChainIntegrityMonitor Monitor(IAuditLogRepository repo) =>

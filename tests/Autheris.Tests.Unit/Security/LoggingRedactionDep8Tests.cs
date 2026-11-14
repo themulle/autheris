@@ -15,6 +15,7 @@ using Xunit;
 /// DEP-8: OpenTelemetry logging replaces Serilog. Log redaction processor enforces query string stripping,
 /// sensitive keyword masking, and exception message redaction.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class LoggingRedactionDep8Tests
 {
     private sealed record LogRecordSnapshot(

@@ -38,6 +38,7 @@ using Xunit;
 /// <summary>
 /// Security regression tests for GraphQL subscriptions, CDC governors, and Apollo Federation signature validation.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class GraphQlSubscriptionAndFederationSecurityTests
 {
     private sealed class IsolatedHttpContextAccessor(HttpContext context) : IHttpContextAccessor

@@ -23,6 +23,7 @@ using Xunit;
 /// replacement value (NULL or '***'): text comparisons silently returned 0 rows, numeric comparisons failed with 500.
 /// Such predicates are now rejected up front with a policy violation (403).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlRedactedPredicateGuardrailTests
 {
     private const string Tenant = "tenant_a";

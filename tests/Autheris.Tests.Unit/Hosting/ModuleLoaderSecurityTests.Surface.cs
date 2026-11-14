@@ -9,6 +9,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Module service guard and configuration claim rules (WP-SIMPL-50 B12, C12).</summary>
+[Trait("Category", "Security")]
 public sealed partial class ModuleLoaderSecurityTests
 {
     private void AssertModuleRejected(string moduleId, Type entryType, string reasonFragment)

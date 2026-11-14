@@ -13,6 +13,7 @@ using TrinoSqlEngine.Tests.Security;
 using Xunit;
 
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public class SecurityRemediationTests
 {
     private readonly FastSqlEngine _engine = new();

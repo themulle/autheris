@@ -23,6 +23,7 @@ using Xunit;
 /// row filter / column masking are refused on the first step of a four-eyes request (they would be dropped and the second approver could
 /// approve unrestricted), and the atomic final approval carries the description.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ApproveConsentRequestFourEyesMutationTests
 {
     private static readonly Sid Approver = new("S-1-5-21-APPROVER-1");

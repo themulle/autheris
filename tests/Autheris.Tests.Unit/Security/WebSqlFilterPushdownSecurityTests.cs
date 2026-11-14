@@ -27,6 +27,7 @@ using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class WebSqlFilterPushdownSecurityTests
 {
     private static readonly FastSqlEngine Engine = new();

@@ -18,6 +18,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit;
 
+[Trait("Category", "Security")]
 public class AuthenticationSecurityTests
 {
     private static IOptions<GatewayOptions> CreateGatewayOptions(BasicAuthOptions? basicAuth = null)

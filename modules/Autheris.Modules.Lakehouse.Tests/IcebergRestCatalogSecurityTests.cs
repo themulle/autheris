@@ -22,6 +22,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class IcebergRestCatalogSecurityTests
 {
     private readonly IIcebergMetadataReader _metadataReader = Substitute.For<IIcebergMetadataReader>();

@@ -34,6 +34,7 @@ using Xunit;
 /// WP-X1.2 / X1.3: the execution half of the governed pipeline. The tests hand a compiled statement to the executor
 /// (<c>ExecuteRewrittenAsync</c>) and observe what reaches the connection: which text, which transaction, which errors and which audit.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class GovernedSqlExecutorX1Tests
 {
     private const string Tenant = "tenant_a";

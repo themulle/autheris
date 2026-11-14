@@ -14,6 +14,7 @@ using Xunit;
 /// <summary>
 /// DEP-7 / INF-6: outside Development database connections must encrypt and verify the server certificate.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ConnectionTlsPolicyDep7Tests
 {
     [Theory]

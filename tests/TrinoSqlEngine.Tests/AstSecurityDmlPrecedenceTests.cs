@@ -11,6 +11,7 @@ using Xunit;
 /// precedence (OR below AND), and composite operands keep their parentheses. Asserted on the compiled text of the AST path.
 /// </summary>
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public sealed class AstSecurityDmlPrecedenceTests
 {
     private static CompiledSql Compile(TargetSqlDialect dialect, string sql) => new ProbeEnv(dialect).Compile(sql);

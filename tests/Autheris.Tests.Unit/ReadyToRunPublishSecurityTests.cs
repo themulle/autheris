@@ -14,6 +14,7 @@ namespace Autheris.Tests.Unit;
 /// Guards the publish settings after #509 (ReadyToRun removed, spike NO-GO) without touching the
 /// workflows, the locked restore or the supply-chain gates (SEC-OPS150-13, SEC-OPS150-19).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed partial class ReadyToRunPublishSecurityTests
 {
     [Fact]

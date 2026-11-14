@@ -14,6 +14,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Security;
 
 /// <summary>WP-X3: the federated DuckDB plan binds its values as <c>$n</c> parameters; user-facing OLAP SQL still rejects <c>$</c>.</summary>
+[Trait("Category", "Security")]
 public sealed class DuckDbBoundParameterTests
 {
     private static DuckDbOlapEngine CreateEngine() => new(

@@ -27,6 +27,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class Issue271SecurityAuditVerificationTests
 {
     private static string FindRepositoryRoot()

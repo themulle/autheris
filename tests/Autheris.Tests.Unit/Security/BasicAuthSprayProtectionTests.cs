@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review E-13 / A-4: per-address failure limit over all users, IPv6 /64 grouping.</summary>
+[Trait("Category", "Security")]
 public sealed class BasicAuthSprayProtectionTests
 {
     [Fact]

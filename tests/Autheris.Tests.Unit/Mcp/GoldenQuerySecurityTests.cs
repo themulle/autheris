@@ -18,6 +18,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class GoldenQuerySecurityTests
 {
     private readonly IMcpToolRegistry _toolRegistry = Substitute.For<IMcpToolRegistry>();

@@ -31,6 +31,7 @@ using Xunit;
 /// object is never readable, and the base object is reachable only when it is registered itself. A synonym that cannot be used
 /// names its reason in the log (not registered, no declared columns, inactive) while the caller receives the same denial for all.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlSqlServerSynonymTests : IAsyncLifetime, IDisposable
 {
     private const string Source = "synsrc";

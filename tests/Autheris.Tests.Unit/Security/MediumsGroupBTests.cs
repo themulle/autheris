@@ -23,6 +23,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Review E-14 (shared FinOps budget), E-15 (row-level lakehouse isolation), R3-4 (cached anonymous health probe).</summary>
+[Trait("Category", "Security")]
 public sealed class MediumsGroupBTests
 {
     // ---------------------------------------------------------------- E-14

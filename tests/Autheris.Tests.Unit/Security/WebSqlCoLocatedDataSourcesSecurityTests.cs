@@ -35,6 +35,7 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Security;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class WebSqlCoLocatedDataSourcesSecurityTests
 {
     [Fact]

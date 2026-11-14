@@ -16,6 +16,7 @@ using Shouldly;
 using TrinoSqlEngine.Analysis;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class QueryRoutingTests
 {
     private const string Tenant = "tenant_test";

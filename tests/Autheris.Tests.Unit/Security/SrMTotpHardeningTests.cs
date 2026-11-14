@@ -11,6 +11,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public class SrMTotpHardeningTests
 {
     private const string Sid = "user-sr-m";

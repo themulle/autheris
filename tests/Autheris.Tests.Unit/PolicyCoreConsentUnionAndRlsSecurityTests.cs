@@ -24,6 +24,7 @@ using Xunit;
 /// <summary>
 /// Security review 2026-10-02, work package C (policy core): H-05, H-09, H-11, H-12, M-18, M-19, M-21 and low findings.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
 {
     private static readonly TableIdentifier HrTable = new("hr", "dbo", "employees");

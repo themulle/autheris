@@ -13,6 +13,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class EuAiActArticle10ComplianceSecurityTests
 {
     private readonly IAuditChainExportSource _auditSource = Substitute.For<IAuditChainExportSource>();

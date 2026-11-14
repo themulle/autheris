@@ -17,6 +17,7 @@ using Xunit;
 /// rewriter (<c>PlannedTableRead: true</c>) is the single place that applies tenant RLS, consent/access-profile row filters and Virtual Filters.
 /// These tests carry the tenant guarantee that T_SEC_DATA178_06 (BulkKeysetStreamingSecurityTests) used to assert as planner SQL text.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class BulkKeysetPlannedReadTenantSecurityTests
 {
     private static TableMetadata Orders() => new()

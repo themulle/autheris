@@ -10,6 +10,7 @@ using Autheris.Infrastructure.Persistence;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class AuditChainCompatibilityTests
 {
     private static readonly byte[] TestHmacKey = Encoding.UTF8.GetBytes("autheris-v1-5-0-audit-golden-key-32b!!");

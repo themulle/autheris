@@ -5,6 +5,7 @@ using Autheris.Application.Security;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class SrMOutboundPathPolicyTests
 {
     private static readonly Uri Base = new("https://api.example.com/v1/");

@@ -45,6 +45,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review G5: subscriptions, MCP, SSRF/outbound HTTP, webhooks, ITSM, Iceberg guard, audit anchors.</summary>
+[Trait("Category", "Security")]
 public sealed class SecurityReviewG5Tests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "g5-" + Guid.NewGuid().ToString("N"));

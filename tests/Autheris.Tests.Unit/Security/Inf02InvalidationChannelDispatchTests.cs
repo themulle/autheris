@@ -8,6 +8,7 @@ using Xunit;
 /// <summary>
 /// INF-02: the default consent invalidation channel must use the synchronous, never-dropped dispatch path.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Inf02InvalidationChannelDispatchTests
 {
     [Theory]

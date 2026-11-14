@@ -26,6 +26,7 @@ using Xunit;
 /// Mandatory Phase 3 security tests for REQ-DATA-75 / Issue #75 Addendum:
 /// SEC-DATA75-01..05 cross-source GraphQL relations wiring and security guardrails.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class CrossSourceRelationsSecurityTests : IDisposable
 {
     private static readonly TableIdentifier OrdersTableId = new("sales", "dbo", "orders");

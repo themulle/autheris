@@ -22,6 +22,7 @@ using Xunit;
 using RequiredFilterColumnMissingException = TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException;
 
 /// <summary>MISC-03/MISC-04: the shared required-filter-column rule matches whole identifiers only.</summary>
+[Trait("Category", "Security")]
 public sealed class RequiredFilterColumnRuleTests
 {
     private static readonly TableIdentifier Id = new("sales", "public", "orders");

@@ -7,6 +7,7 @@ using Autheris.Domain.Options;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class GatewayMcpOAuthTests
 {
     [Fact]

@@ -23,6 +23,7 @@ using Xunit;
 /// reference is named), the ForwardAuth secret is checked at startup, and prefix aliases no longer fall back to a
 /// global secret.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class SecretKeyLengthRDep1Tests
 {
     private static IHostEnvironment Env(string name)

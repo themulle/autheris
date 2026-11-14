@@ -36,6 +36,7 @@ using Xunit;
 /// WARN is permitted and reported, regular options are silent).
 /// DML_*: WebSQL DML guardrails (unfiltered UPDATE/DELETE rejected, WebSql.MaxAffectedRows with rollback, DML audit).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class BypassSemanticsAndDmlGuardrailTests
 {
     private static readonly Func<string, string?> NoEnvironmentVariables = _ => null;
