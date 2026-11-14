@@ -96,7 +96,7 @@ public class LineagePdfAndOpenLineageTests
         {
             Catalog = new DataCatalogOptions
             {
-                OpenLineageEndpoint = "http://openlineage.internal/api/v1/lineage",
+                OpenLineageEndpoint = "https://openlineage.internal/api/v1/lineage",
                 OpenLineageApiKey = "api-token-test"
             }
         });

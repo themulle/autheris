@@ -104,9 +104,6 @@ public static partial class GatewayGovernanceServiceExtensions
 
     private static void AddTriageAndContracts(IServiceCollection services)
     {
-        // AI Assisted Governance (Triage)
-        services.AddScoped<IJustificationTriageService, JustificationTriageService>();
-
         // Dynamic Schema Contracts (@tag / @inaccessible) (F-GOV-08)
         services.AddSingleton<ISchemaContractManager, SchemaContractManager>();
 

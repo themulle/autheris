@@ -38,7 +38,7 @@ public sealed class DataCatalogOptions
     /// </summary>
     public DatasetVisibility DefaultVisibility { get; init; } = DatasetVisibility.Hidden;
 
-    public string OpenLineageEndpoint { get; init; } = "http://localhost:5000/api/v1/lineage";
+    public string OpenLineageEndpoint { get; init; } = string.Empty;
     public string OpenLineageApiKey { get; init; } = string.Empty;
 
     /// <summary>

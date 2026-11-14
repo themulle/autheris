@@ -34,14 +34,6 @@ public static class LineageExportServiceCollectionExtensions
         services.AddHttpClient<OpenLineageClient>().AddSecureOutboundHandlers(EgressIntegrations.Lineage);
         services.TryAddScoped<IOpenLineageClient>(sp => sp.GetRequiredService<OpenLineageClient>());
 
-        services.AddHttpClient(OpenJevHttpClientName).AddSecureOutboundHandlers(EgressIntegrations.Lineage);
-        services.TryAddSingleton<IOpenJevClient>(sp =>
-        {
-            var factory = sp.GetRequiredService<IHttpClientFactory>();
-            var logger = sp.GetRequiredService<ILogger<OpenJevClient>>();
-            return new OpenJevClient(logger, factory.CreateClient(OpenJevHttpClientName));
-        });
-
         return services;
     }
 

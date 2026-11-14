@@ -505,7 +505,6 @@ public sealed class OutboundEgressAllowlistHardeningTests
     [Theory]
     [InlineData("IOpenMetadataClient")]
     [InlineData("OpenLineageClient")]
-    [InlineData("OpenJev")]
     [InlineData("S3LakehouseStorageProvider")]
     [InlineData("AzureBlobStorageProvider")]
     [InlineData("IAuditWormExportService")]
