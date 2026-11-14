@@ -32,7 +32,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
     private readonly IConsentRepository? _consentRepository;
     private readonly IConsentResolutionService? _resolutionService;
     private readonly IConsentCacheService? _cacheService;
-    private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly ISchemaContractManager? _contractManager;
@@ -48,7 +47,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
 
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
-        IPolicyEnforcementService? policyEnforcementService = null,
         IConsentResolutionService? resolutionService = null,
         IConsentRepository? consentRepository = null,
         IConsentCacheService? cacheService = null,
@@ -65,7 +63,6 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         ILogger<AccessDecisionPoint>? logger = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _policyEnforcementService = policyEnforcementService;
         _resolutionService = resolutionService;
         _consentRepository = consentRepository;
         _cacheService = cacheService ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance;
@@ -81,14 +78,12 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         _auditWriter = auditWriter;
         _logger = logger ?? NullLogger<AccessDecisionPoint>.Instance;
 
-        if (_consentRepository != null && _resolutionService != null && _policyEnforcementService != null)
+        if (_consentRepository != null && _resolutionService != null)
         {
             _policy = new TableAccessPolicy(
                 _consentRepository,
                 _resolutionService,
                 _cacheService,
-                _policyEnforcementService,
-                _clientIpResolver,
                 _options.Value,
                 _mandatoryFilters,
                 _contractManager,

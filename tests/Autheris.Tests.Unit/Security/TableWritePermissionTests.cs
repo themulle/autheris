@@ -121,8 +121,6 @@ public sealed class TableWritePermissionTests
             consentRepo,
             new ConsentResolutionService(),
             cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            policyEnforcementService: casbin,
-            clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);
 
@@ -178,8 +176,6 @@ public sealed class TableWritePermissionTests
             consentRepo,
             new ConsentResolutionService(),
             cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            policyEnforcementService: casbin,
-            clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);
 

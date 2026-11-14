@@ -46,9 +46,7 @@ public sealed class TypedMaskAttachmentTests
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<System.DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
         return new TableAccessPolicy(consents, resolution,
-            Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             maskPolicyFactory: masks);
     }
 

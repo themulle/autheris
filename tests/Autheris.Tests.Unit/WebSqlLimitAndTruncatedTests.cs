@@ -90,7 +90,6 @@ public sealed class WebSqlLimitAndTruncatedTests
 
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: resolution,
             tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null,

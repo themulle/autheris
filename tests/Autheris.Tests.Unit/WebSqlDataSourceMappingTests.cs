@@ -115,7 +115,6 @@ public sealed class WebSqlDataSourceMappingTests
 
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: factory,
@@ -150,7 +149,7 @@ public sealed class WebSqlDataSourceMappingTests
 
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
-            logger: NullLogger<GovernedSqlExecutionService>.Instance, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            logger: NullLogger<GovernedSqlExecutionService>.Instance);
 
         var request = new GovernedSqlQueryRequest("SELECT 1", null, "unmapped_datasource");
 

@@ -128,7 +128,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             tableRepository: metaRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(metaRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(options, secretProvider),
             secretProvider: secretProvider,
-            logger: NullLogger<GovernedSqlExecutionService>.Instance, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            logger: NullLogger<GovernedSqlExecutionService>.Instance);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {

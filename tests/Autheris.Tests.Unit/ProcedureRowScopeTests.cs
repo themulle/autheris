@@ -148,8 +148,7 @@ public class ProcedureRowScopeTests
         {
             Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
-                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, masking: null,
-                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance, rowScope: withResolver ? RowScope : null);
+                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, masking: null, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance, rowScope: withResolver ? RowScope : null);
         }
     }
 

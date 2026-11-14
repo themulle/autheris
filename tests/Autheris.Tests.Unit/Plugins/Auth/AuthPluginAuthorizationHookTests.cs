@@ -102,8 +102,6 @@ public sealed class AuthPluginAuthorizationHookTests
             consentRepo,
             new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            clientIpResolver: null,
             opts,
             NullMandatoryRowFilterResolver.Instance,
             authPluginHost: host);

@@ -543,8 +543,6 @@ public sealed class AuthPluginSecurityTests
             consentRepo,
             new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            clientIpResolver: null,
             options,
             NullMandatoryRowFilterResolver.Instance,
             authPluginHost: host);
@@ -668,8 +666,6 @@ public sealed class AuthPluginSecurityTests
             consentRepo,
             new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            clientIpResolver: null,
             options,
             NullMandatoryRowFilterResolver.Instance,
             authPluginHost: host);

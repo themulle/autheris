@@ -64,7 +64,6 @@ public class ProcedureRowBudgetAndScanCapTests
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(options), Audit, Tables, Consents, Resolution, masking: null,
                 logger: Logger,
-                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
                 concurrencyGate: Gate ?? global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance,
                 rowScope: RowScope);
         }

@@ -44,8 +44,7 @@ public sealed class GovernedRewriteBypassVirtualFilterTests
         });
         var rewriter = new GovernedSqlRewriter(
             options, tableRepository: repo, mandatoryFilters: filters,
-            policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
-            policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies());
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-L19"), new Claim("tenant_id", "tenant_a")], "Test"));
 
         await Should.ThrowAsync<WebSqlTableDeniedException>(() =>

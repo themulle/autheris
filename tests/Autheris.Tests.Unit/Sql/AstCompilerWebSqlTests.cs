@@ -82,7 +82,7 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
-            consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            consentRepository: consents);
     }
 
     private static Consent AllowConsent(TableMetadata table, ConsentRowFilter filter) => new()

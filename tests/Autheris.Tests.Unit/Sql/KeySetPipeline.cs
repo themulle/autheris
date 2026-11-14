@@ -123,7 +123,7 @@ using Xunit;
         fixture.Rewriter = new GovernedSqlRewriter(
             options, consentResolution: resolution, tableRepository: repo, consentRepository: consents, sqlEngine: engine,
             policyFactory: GovernedTestSupport.PolicyFactory(repo, options, wireStage ? stage : null),
-            typedPolicies: GovernedTestSupport.TypedPolicies(), policyEnforcement: TestDoubles.NullPolicyEnforcementService.Instance,
+            typedPolicies: GovernedTestSupport.TypedPolicies(),
             logger: new ListLogger<GovernedSqlRewriter>(logs));
         return fixture;
     }

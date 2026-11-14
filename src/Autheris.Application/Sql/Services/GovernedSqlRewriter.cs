@@ -53,7 +53,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly GovernancePolicyFactory? _policyFactory;
     private readonly ISqlSecurityValidator _sqlSecurityValidator;
     private readonly IOptions<GatewayOptions> _options;
-    private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IConsentResolutionService? _consentResolution;
     private readonly ITableMetadataRepository? _tableRepository;
     private readonly IClientIpResolver? _clientIpResolver;
@@ -81,7 +80,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
     public GovernedSqlRewriter(
         IOptions<GatewayOptions> options,
-        IPolicyEnforcementService? policyEnforcement = null,
         IConsentResolutionService? consentResolution = null,
         ITableMetadataRepository? tableRepository = null,
         IClientIpResolver? clientIpResolver = null,
@@ -102,7 +100,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     {
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
-            policyEnforcement,
             consentResolution,
             consentRepository,
             consentCache,
@@ -116,7 +113,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         _timeZoneState = timeZoneState;
         _typedPolicies = typedPolicies;
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _policyEnforcement = policyEnforcement; _consentResolution = consentResolution;
+        _consentResolution = consentResolution;
         _tableRepository = tableRepository; _clientIpResolver = clientIpResolver;
         _logger = logger; _consentRepository = consentRepository;
         _sqlEngine = sqlEngine ?? FastSqlEngine.Default; _policyFactory = policyFactory;

@@ -161,7 +161,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
             cache,
             Substitute.For<IColumnMaskingProvider>(),
             options: Options.Create(new GatewayOptions()),
-            dataSourceExecutors: [executor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            dataSourceExecutors: [executor]);
         return (service, executor);
     }
 

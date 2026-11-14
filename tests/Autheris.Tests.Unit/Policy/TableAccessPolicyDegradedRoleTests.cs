@@ -37,8 +37,6 @@ public sealed class TableAccessPolicyDegradedRoleTests
             consents,
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
-            Substitute.For<IPolicyEnforcementService>(),
-            null,
             new GatewayOptions(),
             Substitute.For<Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver>());
         var principal = new ClaimsPrincipal(new ClaimsIdentity(

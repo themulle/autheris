@@ -718,8 +718,7 @@ public sealed class GovernedAggregationAndMetricsTests
             resolutionService,
             new Autheris.Application.Policy.Services.NullConsentCacheService(),
             Options.Create(new GatewayOptions()),
-            NullLogger<Autheris.Application.Policy.UnifiedPolicyDecisionPoint>.Instance,
-            Substitute.For<IPolicyEnforcementService>());
+            NullLogger<Autheris.Application.Policy.UnifiedPolicyDecisionPoint>.Instance);
 
         var aggService = new GovernedAggregationService(
             metadataRepository: metaRepo,

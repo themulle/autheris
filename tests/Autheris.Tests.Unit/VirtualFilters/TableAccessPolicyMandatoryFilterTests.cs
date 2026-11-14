@@ -21,7 +21,7 @@ using Xunit;
 /// <summary>
 /// Virtual filters, phase 3: the mandatory predicate joins the consent decision with AND in the single access
 /// decision (<see cref="TableAccessPolicy"/>). An additional consent without row filter cannot lift it, a binding
-/// never grants, the consent cache stays free of it, and Casbin restrictions still apply on top.
+/// never grants and the consent cache stays free of it.
 /// </summary>
 public sealed class TableAccessPolicyMandatoryFilterTests
 {
@@ -59,12 +59,9 @@ public sealed class TableAccessPolicyMandatoryFilterTests
     private static TableAccessPolicy Policy(
         IConsentRepository consents,
         IConsentCacheService? cache = null,
-        IPolicyEnforcementService? casbin = null,
         GatewayOptions? options = null) =>
         new(consents, new ConsentResolutionService(),
             cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            casbin ?? global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            clientIpResolver: null,
             options ?? new GatewayOptions(),
             new MandatoryRowFilterResolver(new MandatoryRowFilterResolverTests.FixedSnapshot(Snapshot), new MandatoryRowFilterResolverTests.PlaceholderPredicates()));
 
@@ -112,18 +109,13 @@ public sealed class TableAccessPolicyMandatoryFilterTests
     }
 
     [Fact]
-    public async Task Restrict_AfterVirtualFilter_ResidualKeepsAbacFilter()
+    public async Task WithoutEnforcedVirtualFilters_KeepsTheConsentFilter()
     {
         // F-GOV-14 WI-3: once the gateway enforces the Virtual Filter itself, only its predicate is dropped; the consent
-        // filter before it and the Casbin restriction after it stay in force.
-        var casbin = Substitute.For<IPolicyEnforcementService>();
-        casbin.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        casbin.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(TableAccessDecision.Allowed(Air1.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: "CASBIN", hasUnconstrainedColumnAllow: true));
+        // filter before it stays in force.
+        var decision = await Policy(Consents(Allow(Air1.Identifier, RegionEu()))).DecideAsync(Query(Air1), CancellationToken.None);
 
-        var decision = await Policy(Consents(Allow(Air1.Identifier, RegionEu())), casbin: casbin).DecideAsync(Query(Air1), CancellationToken.None);
-
-        decision.CombinedRowFilterSql.ShouldNotBeNull().ShouldEndWith(" AND (P_filter_a(client_id))) AND (CASBIN)");
+        decision.CombinedRowFilterSql.ShouldNotBeNull().ShouldContain("P_filter_a(client_id)");
         var pair = decision.AppliedVirtualFilterBindings.ShouldNotBeNull().ShouldHaveSingleItem();
         pair.Filter.Name.ShouldBe("filter_a");
         pair.SnapshotGeneration.ShouldBe(1);
@@ -131,22 +123,8 @@ public sealed class TableAccessPolicyMandatoryFilterTests
         var residual = decision.WithoutEnforcedVirtualFilters([pair]);
 
         residual.CombinedRowFilterSql.ShouldNotBeNull().ShouldContain("region");
-        residual.CombinedRowFilterSql.ShouldEndWith(") AND (CASBIN)");
         residual.CombinedRowFilterSql.ShouldNotContain("P_filter_a");
         residual.MandatoryRowPredicateSql.ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task CasbinRestriction_IsAddedOnTop()
-    {
-        var casbin = Substitute.For<IPolicyEnforcementService>();
-        casbin.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        casbin.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(TableAccessDecision.Allowed(Air1.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: "CASBIN", hasUnconstrainedColumnAllow: true));
-
-        var decision = await Policy(Consents(Allow(Air1.Identifier)), casbin: casbin).DecideAsync(Query(Air1), CancellationToken.None);
-
-        decision.CombinedRowFilterSql.ShouldBe("(P_filter_a(client_id)) AND (CASBIN)");
     }
 
     [Fact]

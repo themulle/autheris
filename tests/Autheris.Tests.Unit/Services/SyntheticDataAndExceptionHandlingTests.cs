@@ -84,7 +84,7 @@ public sealed class SyntheticDataAndExceptionHandlingTests
             _maskingProvider,
             Options.Create(new GatewayOptions()),
             drainController: null,
-            dataSourceExecutors: [], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance); // explicitly empty
+            dataSourceExecutors: []); // explicitly empty
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-123"),
@@ -109,7 +109,7 @@ public sealed class SyntheticDataAndExceptionHandlingTests
             consentResolution: _resolutionService,
             consentRepository: _consentRepo,
             tableRepository: _metadataRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(_metadataRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
-            environment: null, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance); // null environment
+            environment: null); // null environment
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-123"),

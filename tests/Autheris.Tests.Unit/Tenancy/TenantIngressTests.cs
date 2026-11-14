@@ -364,8 +364,7 @@ public sealed class TenantIngressTests
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
             Substitute.For<IColumnMaskingProvider>(),
-            options: Options.Create(options),
-            policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            options: Options.Create(options));
     }
 
     private static readonly TableIdentifier Table = new("sales", "dbo", "orders");

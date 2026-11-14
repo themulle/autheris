@@ -41,7 +41,7 @@ public sealed class GovernedSqlExecutionServiceConstructionTests
     {
         var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions());
 
-        Should.Throw<ArgumentNullException>(() => global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(options, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: null!, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance))
+        Should.Throw<ArgumentNullException>(() => global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(options, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: null!))
             .ParamName.ShouldBe("executionGuard");
     }
 
@@ -100,7 +100,7 @@ public sealed class GovernedSqlExecutionServiceConstructionTests
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, global::Autheris.Tests.Unit.GovernedTestSupport.Guard,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
-            sqlEngine: FastSqlEngine.Default, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            sqlEngine: FastSqlEngine.Default);
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"), new Claim("tenant_id", "tenant_test")], "Test"));
         var request = new GovernedSqlQueryRequest(
             "SELECT o.id, s.status FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.tracking_id = s.id", Transport: "WebSql");

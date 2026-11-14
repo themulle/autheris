@@ -31,7 +31,6 @@ public static class GovernedSqlExecutionServiceFactory
         IOptions<GatewayOptions> options,
         IAuditLogRepository auditLogRepository,
         IProviderExecutionGuard executionGuard,
-        IPolicyEnforcementService? policyEnforcement = null,
         IConsentResolutionService? consentResolution = null,
         ITableMetadataRepository? tableRepository = null,
         ISqlConnectionFactory? connectionFactory = null,
@@ -57,8 +56,7 @@ public static class GovernedSqlExecutionServiceFactory
         Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null,
         Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null)
     {
-        var rewrite = new GovernedSqlRewriteDependencies(
-            policyEnforcement, consentResolution, tableRepository, clientIpResolver, consentRepository, sqlEngine, policyFactory,
+        var rewrite = new GovernedSqlRewriteDependencies( consentResolution, tableRepository, clientIpResolver, consentRepository, sqlEngine, policyFactory,
             sqlSecurityValidator, consentCache, mandatoryFilters, contractManager, accessProfileRepository,
             memoryCache, typedPolicies, timeZoneState);
         var execution = new GovernedSqlExecutionDependencies(connectionFactory, environment, concurrencyGate, sessionInitializer, secretProvider, auditDigester, PageTokenCodec: pageTokenCodec);

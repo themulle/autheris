@@ -86,8 +86,6 @@ public sealed class AccessProfileDistributedStateTests
             consentRepo,
             resolutionService,
             cacheService,
-            policyEnforcementService,
-            clientIpResolver,
             options,
             mandatoryFilters,
             contractManager: null,

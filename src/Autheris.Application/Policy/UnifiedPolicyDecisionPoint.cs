@@ -17,16 +17,14 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Architecture Phase 2 (WP 2.2): Unified Policy Decision Point (PDP).
-/// Evaluates Casbin ABAC environment conditions and Consent Engine
-/// permissions under a single coherent pipeline and caches the authoritative decision.
+/// Adapter from the table-level read decision to the access decision point: every call is decided by
+/// <see cref="Autheris.Application.Policy.Pdp.AccessDecisionPoint"/>.
 /// </summary>
 public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
 {
     private readonly IConsentRepository _consentRepository;
     private readonly IConsentResolutionService _resolutionService;
     private readonly IConsentCacheService _cacheService;
-    private readonly IPolicyEnforcementService _policyEnforcementService;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<UnifiedPolicyDecisionPoint> _logger;
 
@@ -49,7 +47,6 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         IConsentCacheService cacheService,
         IOptions<GatewayOptions> options,
         ILogger<UnifiedPolicyDecisionPoint> logger,
-        IPolicyEnforcementService policyEnforcementService,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         TypedPolicySources? typedPolicies = null,
@@ -68,7 +65,6 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _policyEnforcementService = policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService));
     }
 
     public Task<TableAccessDecision> EvaluateAccessAsync(
@@ -92,7 +88,6 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
 
         var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             _options,
-            _policyEnforcementService,
             _resolutionService,
             _consentRepository,
             _cacheService,

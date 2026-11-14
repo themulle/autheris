@@ -89,7 +89,7 @@ public sealed class GatewayExecutionRequestValidationTests
             Substitute.For<IColumnMaskingProvider>(),
             options: Options.Create(options ?? new GatewayOptions()),
             dataSourceExecutors: [executor],
-            concurrencyGate: gate, policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            concurrencyGate: gate);
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public sealed class GatewayExecutionRequestValidationTests
             cache,
             Substitute.For<IColumnMaskingProvider>(),
             options: Options.Create(new GatewayOptions()),
-            dataSourceExecutors: [new CapturingExecutor()], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            dataSourceExecutors: [new CapturingExecutor()]);
 
         var filter = new TableFilterClause("secret_col = @p0", new Dictionary<string, object?> { ["@p0"] = "val" }, ["secret_col"]);
         var request = new TablePageRequest(100, 0, Filter: filter);
@@ -264,7 +264,7 @@ public sealed class GatewayExecutionRequestValidationTests
             cache,
             Substitute.For<IColumnMaskingProvider>(),
             options: Options.Create(new GatewayOptions()),
-            dataSourceExecutors: [new CapturingExecutor()], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            dataSourceExecutors: [new CapturingExecutor()]);
 
         var orderBy = new[] { new TableOrderBy("secret_col", false) };
         var request = new TablePageRequest(100, 0, OrderBy: orderBy);

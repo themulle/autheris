@@ -25,7 +25,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly GatewayOptions? _options;
     private readonly ITrafficDrainController? _drainController;
     private readonly IEnumerable<IDataSourceExecutor>? _dataSourceExecutors;
-    private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly Autheris.Application.DataSources.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
@@ -50,7 +49,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IOptions<GatewayOptions>? options = null,
         ITrafficDrainController? drainController = null,
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
-        IPolicyEnforcementService? policyEnforcementService = null,
         IClientIpResolver? clientIpResolver = null,
         Autheris.Application.DataSources.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
@@ -66,7 +64,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     {
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options ?? Microsoft.Extensions.Options.Options.Create(new GatewayOptions()),
-            policyEnforcementService,
             resolutionService,
             consentRepository,
             cacheService,
@@ -96,7 +93,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _options = options?.Value;
         _drainController = drainController;
         _dataSourceExecutors = dataSourceExecutors ?? Array.Empty<IDataSourceExecutor>();
-        _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
         _concurrencyGate = concurrencyGate;
@@ -111,9 +107,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IColumnMaskingProvider maskingProvider,
         IOptions<GatewayOptions>? options = null,
         ITrafficDrainController? drainController = null,
-        IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
-        IPolicyEnforcementService? policyEnforcementService = null)
-        : this(repository, repository, repository, resolutionService, cacheService, maskingProvider, options, drainController, dataSourceExecutors, policyEnforcementService)
+        IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null)
+        : this(repository, repository, repository, resolutionService, cacheService, maskingProvider, options, drainController, dataSourceExecutors)
     {
     }
 
@@ -456,7 +451,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     }
 
     /// <summary>
-    /// G5: Resolves catalog metadata and the effective access decision (consents, cache, Casbin ABAC and row filters)
+    /// G5: Resolves catalog metadata and the effective access decision (consents, cache and row filters)
     /// for one table, without auditing and without reading data. A denied decision is returned, not thrown.
     /// Used by ExecuteTableQueryAsync and by the GraphQL tree queries, so both apply the same decision.
     /// </summary>

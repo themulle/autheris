@@ -18,8 +18,8 @@ using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// DuckDB OLAP access decision. Validates the caller and delegates to <see cref="TableAccessPolicy"/> (Architecture 1):
-/// consents with the decision cache, Casbin.
+/// DuckDB OLAP access decision. Validates the caller and delegates to the access decision point (Architecture 1):
+/// consents with the decision cache.
 /// </summary>
 public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolver
 {
@@ -30,7 +30,6 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
     public DefaultCrossDomainAccessResolver(
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
-        IPolicyEnforcementService policyEnforcementService,
         IClientIpResolver? clientIpResolver = null,
         IOptions<GatewayOptions>? options = null,
         IConsentCacheService? consentCache = null,
@@ -45,7 +44,6 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         _options = options?.Value ?? new GatewayOptions();
         _pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             Microsoft.Extensions.Options.Options.Create(_options),
-            policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService)),
             resolutionService ?? throw new ArgumentNullException(nameof(resolutionService)),
             consentRepository ?? throw new ArgumentNullException(nameof(consentRepository)),
             consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,

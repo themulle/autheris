@@ -23,7 +23,7 @@ public sealed class TableAccessPolicyDenialKindTests
 {
     private static readonly TableMetadata Meta = CreateTable();
 
-    private static TableAccessPolicy Policy(IReadOnlyList<Consent> consents, IPolicyEnforcementService? abac = null)
+    private static TableAccessPolicy Policy(IReadOnlyList<Consent> consents)
     {
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetActiveConsentsForSubjectsAsync(default!, default, default, default, default)
@@ -32,8 +32,6 @@ public sealed class TableAccessPolicyDenialKindTests
             consentRepo,
             new ConsentResolutionService(),
             Substitute.For<IConsentCacheService>(),
-            abac ?? Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IClientIpResolver>(),
             new GatewayOptions(),
             NullMandatoryRowFilterResolver.Instance,
             contractManager: null);
@@ -62,35 +60,4 @@ public sealed class TableAccessPolicyDenialKindTests
         decision.DenialKind.ShouldBe(TableAccessDenialKind.ConsentDeny);
     }
 
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task CasbinDeny_DenialKindPolicy()
-    {
-        var abac = Substitute.For<IPolicyEnforcementService>();
-        abac.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        abac.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(TableAccessDecision.Denied(Orders, "denied")));
-
-        var decision = await Policy([Allow(Rule("id", ColumnAccessLevel.Clear))], abac).DecideAsync(Query(), CancellationToken.None);
-
-        decision.IsAllowed.ShouldBeFalse();
-        decision.DenialKind.ShouldBe(TableAccessDenialKind.Policy);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task SupplementalConsent_CuresConsentMissing_ButNotCasbinDeny()
-    {
-        var supplemental = new[] { Allow(Rule("id", ColumnAccessLevel.Clear)) };
-
-        var cured = await Policy([]).DecideAsync(Query(supplemental), CancellationToken.None);
-        cured.IsAllowed.ShouldBeTrue();
-
-        var abac = Substitute.For<IPolicyEnforcementService>();
-        abac.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        abac.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(TableAccessDecision.Denied(Orders, "denied")));
-        var stillDenied = await Policy([], abac).DecideAsync(Query(supplemental), CancellationToken.None);
-        stillDenied.IsAllowed.ShouldBeFalse();
-    }
 }

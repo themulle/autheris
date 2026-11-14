@@ -98,7 +98,6 @@ public sealed class GovernedSqlPlanCacheTests
 
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             options: options, executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: consentResolution,
             tableRepository: repository, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repository), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null,

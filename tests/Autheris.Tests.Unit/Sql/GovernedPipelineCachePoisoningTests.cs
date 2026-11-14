@@ -93,7 +93,7 @@ public sealed class GovernedPipelineCachePoisoningTests
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
             sqlEngine: grantWritePermit ? new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(engine ?? _engine) : engine ?? _engine,
-            logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consentRepository, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consentRepository);
     }
 
     [Fact]

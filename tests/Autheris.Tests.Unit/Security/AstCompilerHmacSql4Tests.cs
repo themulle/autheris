@@ -74,7 +74,7 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consents,
-            secretProvider: secrets, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            secretProvider: secrets);
     }
 
     [Theory]

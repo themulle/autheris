@@ -78,7 +78,6 @@ public static class GatewayExecutionServiceExtensions
             sp.GetService<IOptions<GatewayOptions>>(),
             sp.GetService<ITrafficDrainController>(),
             sp.GetServices<IDataSourceExecutor>(),
-            sp.GetRequiredService<IPolicyEnforcementService>(),
             sp.GetService<IClientIpResolver>(),
             sp.GetService<IAutherisConnectorRegistry>(),
             sp.GetService<ITableReadConcurrencyGate>(),
