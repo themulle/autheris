@@ -30,7 +30,7 @@ public partial class GovernanceRepository
         public const string SelectExpiringConsentsSql = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                   c.tenant_id, c.renewal_count
+                                   c.tenant_id, c.renewal_count, " + ConsentWorkflowSql.ConsentColumns + @"
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.is_revoked = 0 AND c.valid_to > @now AND c.valid_to <= @threshold
@@ -40,21 +40,24 @@ public partial class GovernanceRepository
         public const string SelectConsentRequestByIdSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        t.source_name, t.schema_name, t.table_name, r.itsm_ticket_id, r.tenant_id,
-                                       r.requester_identifiers_json, r.context_json, r.requested_write_rules_json
+                                       r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
+                                       " + ConsentWorkflowSql.RequestColumns + @"
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.id = @id";
 
         public const string SelectRequestsByRequesterBaseSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-                                       t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json
+                                       t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
+                                       " + ConsentWorkflowSql.RequestColumns + @"
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.requester_sid = @reqSid";
 
         public const string SelectPendingRequestsForApproverSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                    r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-                                   t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json
+                                   t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
+                                   " + ConsentWorkflowSql.RequestColumns + @"
                             FROM CONSENT_REQUESTS r
                             JOIN TABLES t ON r.table_id = t.id
                             WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
@@ -144,7 +147,7 @@ public partial class GovernanceRepository
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                        c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
-                                       c.tenant_id
+                                       c.tenant_id, " + ConsentWorkflowSql.ConsentColumns + @"
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
@@ -207,7 +210,7 @@ public partial class GovernanceRepository
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                        c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                       c.tenant_id
+                                       c.tenant_id, " + ConsentWorkflowSql.ConsentColumns + @"
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.is_revoked = 0" + tenantFilter + ConsentSubjectFilter.InListPredicate(chunk.Count);
@@ -278,8 +281,8 @@ public partial class GovernanceRepository
         var tableId = await ConsentSqlCore.ResolveTableIdOrThrowAsync(conn, tx, ConsentSql.FindTableIdSql, consent.TableId, consent.TableIdentifier, "consent", ct).ConfigureAwait(false);
         var tenantIdStr = StoredTenant.RequireWritable(consent.TenantId);
 
-        const string insertConsentSql = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id, description)
-                                VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId, @description)";
+        const string insertConsentSql = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id, description, grant_source, grant_record_seq, profile_assignment_id, expiry_notice_sent_at)
+                                VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId, @description, @grantSource, @grantRecordSeq, @profileAssignmentId, @expiryNoticeSentAt)";
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = insertConsentSql;
@@ -296,6 +299,7 @@ public partial class GovernanceRepository
         cmd.AddBound("@validTo", consent.ValidTo.ToUniversalTime().ToString("O"));
         cmd.AddBound("@tenantId", tenantIdStr);
         cmd.AddBound("@description", (object?)consent.Description ?? DBNull.Value);
+        ConsentWorkflowSql.BindConsentParameters(cmd, consent.GrantSource, consent.GrantRecordSeq, consent.ProfileAssignmentId, consent.ExpiryNoticeSentAt);
         await ExecuteNonQueryAsync(cmd, "Consent.InsertConsent", ct).ConfigureAwait(false);
 
         var created = new Consent
@@ -318,6 +322,10 @@ public partial class GovernanceRepository
             RevokedAt = consent.RevokedAt,
             RevokeReason = consent.RevokeReason,
             RenewalCount = consent.RenewalCount,
+            GrantSource = consent.GrantSource,
+            GrantRecordSeq = consent.GrantRecordSeq,
+            ProfileAssignmentId = consent.ProfileAssignmentId,
+            ExpiryNoticeSentAt = consent.ExpiryNoticeSentAt,
             Description = consent.Description,
             ColumnRules = consent.ColumnRules,
             RowFilters = consent.RowFilters,

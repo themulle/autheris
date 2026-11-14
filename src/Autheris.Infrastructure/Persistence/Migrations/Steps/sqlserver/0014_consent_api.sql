@@ -1,0 +1,182 @@
+-- phase3: MIG-0014
+-- External consent API schema and workflow foundation.
+
+IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'version') IS NULL
+ALTER TABLE dbo.CONSENT_REQUESTS ADD version INT NOT NULL CONSTRAINT DF_CONSENT_REQUESTS_version DEFAULT 1;
+-- batch
+IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'workflow_mode') IS NULL
+ALTER TABLE dbo.CONSENT_REQUESTS ADD workflow_mode NVARCHAR(16) NOT NULL CONSTRAINT DF_CONSENT_REQUESTS_workflow_mode DEFAULT N'INTERNAL';
+-- batch
+IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'external_system_id') IS NULL
+ALTER TABLE dbo.CONSENT_REQUESTS ADD external_system_id NVARCHAR(36) NULL;
+-- batch
+IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'external_reference') IS NULL
+ALTER TABLE dbo.CONSENT_REQUESTS ADD external_reference NVARCHAR(256) NULL;
+-- batch
+IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'requested_valid_from') IS NULL
+ALTER TABLE dbo.CONSENT_REQUESTS ADD requested_valid_from DATETIMEOFFSET NULL;
+-- batch
+IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'updated_at') IS NULL
+ALTER TABLE dbo.CONSENT_REQUESTS ADD updated_at DATETIMEOFFSET NULL;
+-- batch
+IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'request_kind') IS NULL
+ALTER TABLE dbo.CONSENT_REQUESTS ADD request_kind NVARCHAR(24) NOT NULL CONSTRAINT DF_CONSENT_REQUESTS_request_kind DEFAULT N'CONSENT';
+-- batch
+IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'profile_id') IS NULL
+ALTER TABLE dbo.CONSENT_REQUESTS ADD profile_id NVARCHAR(36) NULL;
+-- batch
+UPDATE dbo.CONSENT_REQUESTS
+SET
+    external_reference = COALESCE(external_reference, itsm_ticket_id),
+    requested_valid_from = COALESCE(requested_valid_from, COALESCE(TRY_CONVERT(DATETIMEOFFSET, requested_at), SYSUTCDATETIME())),
+    updated_at = COALESCE(updated_at, COALESCE(TRY_CONVERT(DATETIMEOFFSET, requested_at), SYSUTCDATETIME()))
+WHERE requested_valid_from IS NULL
+   OR updated_at IS NULL
+   OR (external_reference IS NULL AND itsm_ticket_id IS NOT NULL);
+-- batch
+ALTER TABLE dbo.CONSENT_REQUESTS ALTER COLUMN requested_valid_from DATETIMEOFFSET NOT NULL;
+-- batch
+ALTER TABLE dbo.CONSENT_REQUESTS ALTER COLUMN updated_at DATETIMEOFFSET NOT NULL;
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CONSENT_REQUESTS_TENANT_UPDATED' AND object_id = OBJECT_ID(N'dbo.CONSENT_REQUESTS'))
+CREATE INDEX IX_CONSENT_REQUESTS_TENANT_UPDATED ON dbo.CONSENT_REQUESTS (tenant_id, updated_at, id);
+-- batch
+IF COL_LENGTH(N'dbo.CONSENTS', N'expiry_notice_sent_at') IS NULL
+ALTER TABLE dbo.CONSENTS ADD expiry_notice_sent_at DATETIMEOFFSET NULL;
+-- batch
+IF COL_LENGTH(N'dbo.CONSENTS', N'grant_record_seq') IS NULL
+ALTER TABLE dbo.CONSENTS ADD grant_record_seq BIGINT NOT NULL CONSTRAINT DF_CONSENTS_grant_record_seq DEFAULT 0;
+-- batch
+IF COL_LENGTH(N'dbo.CONSENTS', N'grant_source') IS NULL
+ALTER TABLE dbo.CONSENTS ADD grant_source NVARCHAR(24) NOT NULL CONSTRAINT DF_CONSENTS_grant_source DEFAULT N'CONSENT_REQUEST';
+-- batch
+IF COL_LENGTH(N'dbo.CONSENTS', N'profile_assignment_id') IS NULL
+ALTER TABLE dbo.CONSENTS ADD profile_assignment_id NVARCHAR(36) NULL;
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_CONSENTS_TENANT_GRANT_SOURCE' AND object_id = OBJECT_ID(N'dbo.CONSENTS'))
+CREATE INDEX IX_CONSENTS_TENANT_GRANT_SOURCE ON dbo.CONSENTS (tenant_id, grant_source);
+-- batch
+IF OBJECT_ID(N'dbo.PROFILE_ASSIGNMENT_ITEMS', N'U') IS NULL
+CREATE TABLE dbo.PROFILE_ASSIGNMENT_ITEMS (
+    tenant_id NVARCHAR(128) NOT NULL,
+    request_id NVARCHAR(36) NOT NULL,
+    item_no INT NOT NULL,
+    object_ref NVARCHAR(512) NOT NULL,
+    owner_sid NVARCHAR(256) NOT NULL,
+    owner_decision NVARCHAR(24) NOT NULL,
+    decided_by NVARCHAR(256) NULL,
+    decided_at DATETIMEOFFSET NULL,
+    CONSTRAINT PK_PROFILE_ASSIGNMENT_ITEMS PRIMARY KEY (tenant_id, request_id, item_no, owner_sid)
+);
+-- batch
+IF OBJECT_ID(N'dbo.CONSENT_WORKFLOW_ROUTES', N'U') IS NULL
+CREATE TABLE dbo.CONSENT_WORKFLOW_ROUTES (
+    tenant_id NVARCHAR(128) NOT NULL,
+    scope_kind NVARCHAR(24) NOT NULL,
+    scope_ref NVARCHAR(256) NOT NULL,
+    mode NVARCHAR(16) NOT NULL,
+    external_system_id NVARCHAR(36) NULL,
+    max_duration_days INT NOT NULL,
+    request_timeout_days INT NOT NULL CONSTRAINT DF_CONSENT_WORKFLOW_ROUTES_request_timeout_days DEFAULT 30,
+    expiry_notice_lead_hours INT NOT NULL CONSTRAINT DF_CONSENT_WORKFLOW_ROUTES_expiry_notice_lead_hours DEFAULT 72,
+    require_resolvable_approver BIT NOT NULL CONSTRAINT DF_CONSENT_WORKFLOW_ROUTES_require_resolvable_approver DEFAULT 1,
+    updated_by NVARCHAR(256) NOT NULL,
+    updated_at DATETIMEOFFSET NOT NULL,
+    CONSTRAINT PK_CONSENT_WORKFLOW_ROUTES PRIMARY KEY (tenant_id, scope_kind, scope_ref)
+);
+-- batch
+IF OBJECT_ID(N'dbo.EXTERNAL_WORKFLOW_SYSTEMS', N'U') IS NULL
+CREATE TABLE dbo.EXTERNAL_WORKFLOW_SYSTEMS (
+    id NVARCHAR(36) NOT NULL PRIMARY KEY,
+    tenant_id NVARCHAR(128) NOT NULL,
+    name NVARCHAR(256) NOT NULL,
+    client_id NVARCHAR(256) NOT NULL,
+    webhook_url NVARCHAR(2048) NOT NULL,
+    webhook_secret_protected NVARCHAR(MAX) NOT NULL,
+    enabled BIT NOT NULL CONSTRAINT DF_EXTERNAL_WORKFLOW_SYSTEMS_enabled DEFAULT 1,
+    created_by NVARCHAR(256) NOT NULL,
+    created_at DATETIMEOFFSET NOT NULL,
+    disabled_at DATETIMEOFFSET NULL
+);
+-- batch
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_EXTERNAL_WORKFLOW_SYSTEMS_TENANT_CLIENT' AND object_id = OBJECT_ID(N'dbo.EXTERNAL_WORKFLOW_SYSTEMS'))
+CREATE UNIQUE INDEX UX_EXTERNAL_WORKFLOW_SYSTEMS_TENANT_CLIENT ON dbo.EXTERNAL_WORKFLOW_SYSTEMS (tenant_id, client_id);
+-- batch
+IF OBJECT_ID(N'dbo.GRANT_RECORDS', N'U') IS NULL
+CREATE TABLE dbo.GRANT_RECORDS (
+    tenant_id NVARCHAR(128) NOT NULL,
+    seq BIGINT NOT NULL,
+    id NVARCHAR(36) NOT NULL,
+    record_type NVARCHAR(24) NOT NULL,
+    consent_id NVARCHAR(36) NULL,
+    request_id NVARCHAR(36) NULL,
+    grant_source NVARCHAR(24) NOT NULL,
+    profile_assignment_id NVARCHAR(36) NULL,
+    grantee_type NVARCHAR(32) NOT NULL,
+    grantee_ref NVARCHAR(256) NOT NULL,
+    object_id NVARCHAR(512) NOT NULL,
+    scope_json NVARCHAR(MAX) NOT NULL,
+    valid_from DATETIMEOFFSET NULL,
+    valid_until DATETIMEOFFSET NULL,
+    requested_by NVARCHAR(256) NOT NULL,
+    decision_json NVARCHAR(MAX) NOT NULL,
+    decided_at DATETIMEOFFSET NOT NULL,
+    recorded_at DATETIMEOFFSET NOT NULL,
+    prev_hash CHAR(64) NOT NULL,
+    record_hash CHAR(64) NOT NULL,
+    signature NVARCHAR(MAX) NOT NULL,
+    key_id NVARCHAR(64) NOT NULL,
+    CONSTRAINT PK_GRANT_RECORDS PRIMARY KEY (tenant_id, seq)
+);
+-- batch
+IF OBJECT_ID(N'dbo.GRANT_RECORD_HEADS', N'U') IS NULL
+CREATE TABLE dbo.GRANT_RECORD_HEADS (
+    tenant_id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    last_seq BIGINT NOT NULL,
+    last_hash CHAR(64) NOT NULL
+);
+-- batch
+IF OBJECT_ID(N'dbo.CONSENT_EVENTS', N'U') IS NULL
+CREATE TABLE dbo.CONSENT_EVENTS (
+    tenant_id NVARCHAR(128) NOT NULL,
+    seq BIGINT NOT NULL,
+    id NVARCHAR(36) NOT NULL,
+    type NVARCHAR(64) NOT NULL,
+    subject_id NVARCHAR(256) NOT NULL,
+    payload_json NVARCHAR(MAX) NOT NULL,
+    created_at DATETIMEOFFSET NOT NULL,
+    CONSTRAINT PK_CONSENT_EVENTS PRIMARY KEY (tenant_id, seq)
+);
+-- batch
+IF OBJECT_ID(N'dbo.CONSENT_EVENT_DELIVERIES', N'U') IS NULL
+CREATE TABLE dbo.CONSENT_EVENT_DELIVERIES (
+    event_id NVARCHAR(36) NOT NULL,
+    external_system_id NVARCHAR(36) NOT NULL,
+    attempts INT NOT NULL CONSTRAINT DF_CONSENT_EVENT_DELIVERIES_attempts DEFAULT 0,
+    next_attempt_at DATETIMEOFFSET NOT NULL,
+    delivered_at DATETIMEOFFSET NULL,
+    dead_lettered_at DATETIMEOFFSET NULL,
+    lease_owner NVARCHAR(128) NULL,
+    lease_until DATETIMEOFFSET NULL,
+    CONSTRAINT PK_CONSENT_EVENT_DELIVERIES PRIMARY KEY (event_id, external_system_id)
+);
+-- batch
+IF OBJECT_ID(N'dbo.CATALOG_OBJECT_VERSIONS', N'U') IS NULL
+CREATE TABLE dbo.CATALOG_OBJECT_VERSIONS (
+    tenant_id NVARCHAR(128) NOT NULL,
+    object_id NVARCHAR(512) NOT NULL,
+    content_hash CHAR(64) NOT NULL,
+    seq BIGINT NOT NULL,
+    removed BIT NOT NULL CONSTRAINT DF_CATALOG_OBJECT_VERSIONS_removed DEFAULT 0,
+    CONSTRAINT PK_CATALOG_OBJECT_VERSIONS PRIMARY KEY (tenant_id, object_id)
+);
+-- batch
+IF OBJECT_ID(N'dbo.CATALOG_CHANGES', N'U') IS NULL
+CREATE TABLE dbo.CATALOG_CHANGES (
+    tenant_id NVARCHAR(128) NOT NULL,
+    seq BIGINT NOT NULL,
+    object_id NVARCHAR(512) NOT NULL,
+    kind NVARCHAR(16) NOT NULL,
+    changed_at DATETIMEOFFSET NOT NULL,
+    CONSTRAINT PK_CATALOG_CHANGES PRIMARY KEY (tenant_id, seq)
+);
