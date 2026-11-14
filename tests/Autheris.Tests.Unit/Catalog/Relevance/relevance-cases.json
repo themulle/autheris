@@ -1,0 +1,259 @@
+{
+  "description": "Relevance cases for catalog-relevance-fixture.json (#624). 'row' is the row of the table in issue #624, 'needs' the search feature that must be built before the case is expected to pass, 'issue' the issue that builds it. Cases were written from the observations in the issues before any change to the ranking.",
+  "cases": [
+    {
+      "id": "baseline-exact-table-name",
+      "row": "baseline",
+      "query": "gps_positions",
+      "expected": [
+        "fleet.telemetry.gps_positions"
+      ],
+      "maxRank": 1,
+      "needs": "baseline",
+      "issue": 624,
+      "note": "The exact technical table name ranks the table first."
+    },
+    {
+      "id": "baseline-unique-display-name",
+      "row": "baseline",
+      "query": "Kreditoren",
+      "expected": [
+        "finance.accounts.kreditoren"
+      ],
+      "maxRank": 1,
+      "needs": "baseline",
+      "issue": 624,
+      "note": "A word that only occurs in the name and display name of one table."
+    },
+    {
+      "id": "baseline-unique-description-word",
+      "row": "baseline",
+      "query": "Sendungsverfolgung",
+      "expected": [
+        "logistics.transport.shipment_tracking"
+      ],
+      "maxRank": 1,
+      "needs": "baseline",
+      "issue": 624,
+      "note": "A word that only occurs in one table."
+    },
+    {
+      "id": "baseline-umlaut-folding",
+      "row": "baseline",
+      "query": "Laengengrad",
+      "expected": [
+        "fleet.telemetry.gps_positions"
+      ],
+      "maxRank": 1,
+      "needs": "baseline",
+      "issue": 624,
+      "note": "A transliterated umlaut finds the column text 'Längengrad'."
+    },
+    {
+      "id": "baseline-word-in-column-name",
+      "row": "baseline",
+      "query": "Lieferant",
+      "expected": [
+        "logistics.master.lieferantenstamm"
+      ],
+      "maxRank": 1,
+      "needs": "baseline",
+      "issue": 624,
+      "note": "'Lieferant' is a whole word of the column name lieferant_nr; the table name 'Lieferantenstamm' is a compound."
+    },
+    {
+      "id": "field-weights-word-in-most-key-columns",
+      "row": "field-weights",
+      "query": "Fahrzeug",
+      "expected": [
+        "fleet.master.vehicles"
+      ],
+      "maxRank": 3,
+      "needs": "field-weights",
+      "issue": 625,
+      "note": "Most fleet tables describe their key column as 'Fahrzeug-ID'; the master table has the word in its display name."
+    },
+    {
+      "id": "field-weights-english-word-in-most-column-names",
+      "row": "field-weights",
+      "query": "vehicle",
+      "expected": [
+        "fleet.master.vehicles"
+      ],
+      "maxRank": 3,
+      "needs": "field-weights",
+      "issue": 625,
+      "note": "Most fleet tables have a column vehicle_id; the master table has the word in its English display name."
+    },
+    {
+      "id": "field-weights-word-in-key-columns-and-descriptions",
+      "row": "field-weights",
+      "query": "Lager",
+      "expected": [
+        "logistics.master.warehouses"
+      ],
+      "maxRank": 3,
+      "needs": "field-weights",
+      "issue": 625,
+      "note": "Logistics tables describe a key column as 'Lager-ID'; the master table has the word in its display name."
+    },
+    {
+      "id": "partial-words-compound-suffix",
+      "row": "partial-words",
+      "query": "Betriebsstunden",
+      "expected": [
+        "fleet.telemetry.engine_hours"
+      ],
+      "maxRank": 3,
+      "needs": "partial-words",
+      "issue": 626,
+      "note": "The table is described as 'Motorbetriebsstunden'; another table contains the single word in a column description."
+    },
+    {
+      "id": "partial-words-master-table-with-compounds-only",
+      "row": "partial-words",
+      "query": "Fahrzeug",
+      "expected": [
+        "fleet.master.model_series"
+      ],
+      "maxRank": 3,
+      "needs": "partial-words",
+      "issue": 626,
+      "note": "The table only contains compounds ('Fahrzeugbaureihen', 'Fahrzeugspezifikationen', 'Fahrzeugtyp') while most tables have 'Fahrzeug-ID'; also relies on field weights (#625)."
+    },
+    {
+      "id": "partial-words-compound-suffix-in-name",
+      "row": "partial-words",
+      "query": "Verbrauch",
+      "expected": [
+        "fleet.telemetry.fuel_usage"
+      ],
+      "maxRank": 3,
+      "needs": "partial-words",
+      "issue": 626,
+      "note": "The table is named 'Kraftstoffverbrauch'."
+    },
+    {
+      "id": "word-forms-plural-umlaut",
+      "row": "word-forms",
+      "query": "Aufträge",
+      "expected": [
+        "fleet.service.repair_jobs"
+      ],
+      "maxRank": 3,
+      "needs": "word-forms",
+      "issue": 624,
+      "note": "The table is named 'Reparatur-Auftrag'. Stemming is not planned (owner decision Q-SRCH-6)."
+    },
+    {
+      "id": "word-forms-plural-en-suffix",
+      "row": "word-forms",
+      "query": "Rechnungen",
+      "expected": [
+        "finance.billing.rechnungskoepfe"
+      ],
+      "maxRank": 3,
+      "needs": "word-forms",
+      "issue": 624,
+      "note": "The table speaks of 'Rechnung' only. Stemming is not planned (owner decision Q-SRCH-6)."
+    },
+    {
+      "id": "word-forms-plural-en-suffix-short",
+      "row": "word-forms",
+      "query": "Fahrten",
+      "expected": [
+        "fleet.telemetry.trips"
+      ],
+      "maxRank": 3,
+      "needs": "word-forms",
+      "issue": 624,
+      "note": "The table speaks of 'Fahrt' only. Stemming is not planned (owner decision Q-SRCH-6)."
+    },
+    {
+      "id": "cross-language-invoice",
+      "row": "cross-language",
+      "query": "invoice",
+      "expected": [
+        "finance.billing.rechnungskoepfe"
+      ],
+      "maxRank": 3,
+      "needs": "embeddings",
+      "issue": 628,
+      "note": "English word for a table with German texts only."
+    },
+    {
+      "id": "cross-language-maintenance",
+      "row": "cross-language",
+      "query": "maintenance",
+      "expected": [
+        "fleet.service.wartungsplaene"
+      ],
+      "maxRank": 3,
+      "needs": "embeddings",
+      "issue": 628,
+      "note": "English word for a table with German texts only."
+    },
+    {
+      "id": "cross-language-supplier",
+      "row": "cross-language",
+      "query": "supplier",
+      "expected": [
+        "logistics.master.lieferantenstamm"
+      ],
+      "maxRank": 3,
+      "needs": "embeddings",
+      "issue": 628,
+      "note": "English word for a table with German texts only; another table mentions its main supplier in English."
+    },
+    {
+      "id": "related-term-location",
+      "row": "related-term",
+      "query": "Standort",
+      "expected": [
+        "fleet.telemetry.gps_positions"
+      ],
+      "maxRank": 3,
+      "needs": "embeddings",
+      "issue": 628,
+      "note": "No table contains the word; the table about GPS positions answers the question."
+    },
+    {
+      "id": "related-term-staff",
+      "row": "related-term",
+      "query": "Personal",
+      "expected": [
+        "hr.core.employees"
+      ],
+      "maxRank": 3,
+      "needs": "embeddings",
+      "issue": 628,
+      "note": "No table contains the word; the employee master answers the question."
+    },
+    {
+      "id": "full-identifier-german",
+      "row": "full-identifier",
+      "query": "Bestellungen",
+      "expected": [
+        "sales.retail.orders",
+        "sales.wholesale.orders"
+      ],
+      "maxRank": 3,
+      "needs": "full-identifier",
+      "issue": 627,
+      "note": "The table name 'orders' exists in two schemas; both are found and distinguishable in search_catalog."
+    },
+    {
+      "id": "full-identifier-english",
+      "row": "full-identifier",
+      "query": "orders",
+      "expected": [
+        "sales.retail.orders",
+        "sales.wholesale.orders"
+      ],
+      "maxRank": 3,
+      "needs": "full-identifier",
+      "issue": 627,
+      "note": "The table name 'orders' exists in two schemas; both are found and distinguishable in search_catalog."
+    }
+  ]
+}
