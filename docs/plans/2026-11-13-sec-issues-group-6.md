@@ -11,7 +11,7 @@
 | #626 | WP-OI-SRCH-626 | APPROVED WITH CONDITIONS (query DoS bounds, expansion oracle) | yes, after #625 |
 | #628 | 628a fail-loud | APPROVED WITH CONDITIONS (light) | yes |
 | #628 | 628b model loading | APPROVED WITH CONDITIONS (supply chain, native runtime) | after Q-SRCH-4 (post-freeze) |
-| #628 | 628c focused text and per-column vectors | CHANGES REQUIRED (plan text contradicts Q-SRCH-5) | after amendment below |
+| #628 | 628c focused text and per-column vectors | APPROVED WITH CONDITIONS (plan revised 2026-11-14 per Q-SRCH-5 and SEC-OI-628-5/6) | yes (after 628b) |
 | #628 | 628d latency test | APPROVED | yes |
 
 Order and scope changes: SEC-OI-628-5 (table-level vector text excludes column names; the plan's focused text includes them). #625/#626 add per-caller score computation for restricted-column tables (about +40 src each).
@@ -72,7 +72,7 @@ Order and scope changes: SEC-OI-628-5 (table-level vector text excludes column n
 - SEC-OI-628-3: SHA-256 is verified over the bytes that are then loaded (read once into memory or a locked stream; no hash-then-reopen by path); model **and** tokenizer/vocabulary files are pinned; configured paths are canonicalised, symlinks resolved and required to stay inside the configured model directory. ONNX session options disable custom-op library registration and external-data paths outside that directory.
 - SEC-OI-628-4: bounds: maximum token count per input (model limit, truncate), batch size cap, a concurrency semaphore for inference, a per-call timeout; the query-embedding cache stays bounded. Model files are never downloaded at runtime (mounted only); a hash mismatch fails startup naming the setting only.
 
-**628c (CHANGES REQUIRED).** Plan text: the focused embedding text contains "names, display names, table descriptions, column names", while Q-SRCH-5 and the test `TableVector_ContainsNoColumnText` require a table vector without column text. A table vector containing column names is a similarity oracle for hidden columns.
+**628c (APPROVED WITH CONDITIONS; plan revised 2026-11-14).** Original plan text had the focused embedding text include column names, which contradicted Q-SRCH-5 and `TableVector_ContainsNoColumnText`. Revised in `2026-11-13-plan-issues-catalog-search.md` so the table-level vector excludes column names and column descriptions.
 - SEC-OI-628-5: the table-level vector text is table name, display name and table description only; column names and descriptions appear only in per-column vectors, built only for columns without HIDDEN catalog text.
 - SEC-OI-628-6: visibility filtering happens before fusion and before top-k truncation (filter the candidate set per caller, then rank), so hidden-column vectors never occupy or displace result slots; a per-column vector contributes for a caller only when that column is visible and unmasked for the caller.
 - SEC-OI-628-7: the embedding cache key (#676) contains provider, model id and dimension plus the SHA-256 of the scrubbed text; text is scrubbed before hashing; the cache stores vectors only and is bounded.

@@ -1,5 +1,5 @@
 # WP-SIMPL-52 Governance data model consolidation and classification-based masking
-Status: Draft (Phase 3 security review pending)
+Status: Draft (Phase 2, 2026-11-07); Phase 3 security review APPROVED WITH CONDITIONS (2026-11-14)
 Parent: [plan](../2026-11-05-plan-project-simplification.md) | Owner decision: OD-45 (2026-11-07, "there is not only PII but also other masking rules") | Related: WP-SIMPL-20 (forward-only steps, `GovernanceTable`), WP-SIMPL-41 (discovery), WP-SIMPL-42 (usage), WP-SIMPL-45 (write grants), WP-SIMPL-46 (decision point), WP-SIMPL-47 (consent API, grant records), WP-SIMPL-48 (row scopes, patterns, per-cell), WP-SIMPL-49 (data products), WP-SIMPL-51 (WebSQL `masked`) | Freeze: feature work (OD-45), schema decisions of part B are binding for the owning WPs.
 
 How to read this plan: part A (sections 5.1-5.9) is the classification-based masking feature implemented by this WP. Part B (section 5.10) fixes open data-model points; the owning WP implements each table in its own step, using the DDL of section 6 as the single source. Section 12 lists the required wording edits to other WPs.
@@ -12,7 +12,7 @@ Measurable: (a) `git grep -n -i -E "is_sensitive|IsSensitive|COLUMN_MASKING_RULE
 - After: WP-SIMPL-11/20 (PostgreSQL and SQL Server only, unified repository and `IGovernanceSqlDialect`, OD-1), WP-SIMPL-46 PR 1-2 (decision point owns column levels), WP-SIMPL-21 parity harness (new mask kinds are parity cells).
 - Before: WP-SIMPL-47 step 1 (grant records carry classification access), WP-SIMPL-48 PR 2/4/5 (row scopes, per-cell, patterns use classifications instead of "PII"), WP-SIMPL-41 PR with column states, WP-SIMPL-49 A1 (product columns inherit classifications), WP-SIMPL-51 PR 2 (mask lineage unchanged, boolean only; D-52k).
 - PR 6 (drop step) after WP-SIMPL-46 (role grantees revoked), WP-SIMPL-47 step 9 (ITSM column backfilled), WP-SIMPL-48 PR 2 (subquery filters converted) and the access-profile item backfill of WP-SIMPL-47.
-- Schema baseline: `governance-shape.{postgresql,sqlserver}.v0001.json` plus steps 0002-0006 (last: `0006_remove_breakglass_assignments`). All new steps are forward-only `NNNN_<name>.sql` + `.shape.json` per engine, next free number at merge time (frozen v1.5.0 base policy, SEC-SIMPL-16).
+- Schema baseline: `governance-shape.{postgresql,sqlserver}.v0001.json` plus steps 0002-0012 (verified on `origin/main` @ `2d6715a0`, 2026-11-14; last landed step: `0012_scim_identity_correlation`). All new steps are forward-only `NNNN_<name>.sql` + `.shape.json` per engine, next free number (`0013+`) at merge time (frozen v1.5.0 base policy, SEC-SIMPL-16).
 
 ## 3. Scope
 In: classification vocabulary, column assignment, mask rules, mask function catalogue (renderer and in-memory evaluator), effective-mask resolution, grant/profile classification access, per-classification clear-access requests, audit/discovery fields, ingestion mapping (dbt/OpenMetadata `pii` meta -> classification), migration from `is_sensitive`/`column_masking_rules`, drop of superseded columns/tables, SQLite wording in WP-45/47.
@@ -27,6 +27,10 @@ Out: reversible tokenization (vault-backed detokenize), filter/join on pseudonym
 - Planned but without column-level DDL: `CONSENT_ROW_SCOPES`, `consents` pattern/approving-owner/workflow columns, virtual-filter parameters (WP-48 step 7), `DATA_PRODUCTS`, `DATA_PRODUCT_VERSIONS`, `DATA_SOURCE_OWNERS` (WP-49 step 1). No table for access-profile read items (only `ACCESS_PROFILE_WRITE_RULES`, WP-45). `GRANT_RECORDS.object_id` cannot hold a pattern (WP-47 step 1). Grant id: `DecisionGrantRef.GrantId = CONSENTS.id` (WP-46), `USAGE_GRANT_DAILY.grant_id VARCHAR(128)` (WP-42), `GRANT_RECORDS.id UUID` + `seq`.
 - Live users of tables flagged as dead in review: `RECERT_CAMPAIGNS/ITEMS` (`RecertificationEndpoints`), `FUNCTIONAL_RIGHT_MAPPINGS` (`FunctionalRightEndpoints`), `CONSUMER_APP_QUERYNAME_DAILY` (`ConsumerAggregationStore`, kept by WP-42). `ACCESS_POLICIES*`: no writer in src (read only by `RecertificationService` asset type `ACCESS_POLICIES` and `GovernanceSchemaValidator`). `ROLES/ROLE_MEMBERS`: seeded in `*GovernanceRepository.Schema.cs`, joined for role grantees (removed by OD-30).
 - `TenantId` accepts only `^[a-zA-Z0-9_-]{1,64}$` (`Domain/Common/TenantId.cs:13`), so `*` can never be a tenant id.
+- **Re-verified on `origin/main` (`2d6715a0`, 2026-11-14):**
+  - Migration steps `0002`–`0012` have landed (`0007_usage_metering`, `0008_governance_audit_hash_chain`, `0009_write_grants`, `0010_table_column_ordinal`, `0011_role_grantee_and_profile_assignment_retirement`, `0012_scim_identity_correlation`); next free migration step is `0013+` at merge time. Step `0011` already retired active `grantee_type = 'Role'` consents (`status = 'Revoked'`, `revocation_reason = 'Retired: role grantees removed (OD-30)'`), added `ACCESS_PROFILE_ASSIGNMENTS.deactivated_reason`, and deleted `Data.UnmaskSensitive` / `Data.ExportClearText` from `FUNCTIONAL_RIGHT_MAPPINGS`.
+  - `WP-SIMPL-14` (Casbin deletion), `WP-SIMPL-43 PR 5a–5c` (AD/SCIM group SID correlation), `WP-SIMPL-46 PR 1–5` (single decision point, functional rights removal, role grantee retirement, profile failure visibility), and issues `#672`/`#674` (`CatalogWriteScope` with `CatalogWriteClassification.Restrictive` immediate version flush and `CatalogTablePersistedProjection` structural equality diffing) are merged on `main`.
+  - `git grep -n -i -E "is_sensitive|IsSensitive|COLUMN_MASKING_RULES" -- src ':!**/Migrations/**'` currently matches 151 occurrences across `src/` (including `CatalogTablePersistedProjection.cs`).
 
 ## 5. Design
 ### 5.1 Vocabulary (`data_classifications`)
@@ -172,3 +176,70 @@ PR 1 2 pd, PR 2 2.5 pd, PR 3 3 pd, PR 4 2 pd, PR 4b 1.5 pd, PR 5 2.5 pd, PR 6 1 
 - Anna's result (DE rows): `CUSTOMER_ID` clear; `EMAIL` clear (named, PII Clear); `IBAN` masked with `PARTIAL keep_last=4` (FINANCIAL not Clear; PII is Clear so its HASH candidate is not used); `SALARY` masked `PARTIAL` -> type mismatch on numeric -> `TYPE_SAFE_REDACT` (NULL) and metric (owner should set `BUCKET_NUMBER`); `DIAGNOSIS` absent (classification Deny). Audit: `IBAN {FINANCIAL, PARTIAL}`, `SALARY {FINANCIAL, TYPE_SAFE_REDACT}`, grants `[c-4711]`; usage `grant_id = c-4711`.
 - A second grant `c-4712` to Anna personally without row scope, PII `MASK` (all else as above), contributes too: `EMAIL` stays Clear only in rows covered by `c-4711` (per cell), elsewhere `EMAIL_DOMAIN` (override of the PII candidate); `IBAN` mask = most restrictive of `PARTIAL` (`c-4711`) and `HASH` (`c-4712`) = `HASH` (D-52e).
 - If an owner later adds `PII_SPECIAL` to `EMAIL`, the catalog epoch changes and `EMAIL` disappears for `c-4711` (classification Deny) without any grant change.
+
+## 15. Phase 3 Security Review (2026-11-14, csharp-security-expert)
+
+**Verdict:** `APPROVED WITH CONDITIONS` (all 7 PRs: PR 1, PR 2, PR 3, PR 4, PR 4b, PR 5, PR 6a/6b).
+**Baseline verified:** `origin/main` @ `2d6715a0` (migrations `0002`–`0012` landed; next step `0013+`; `WP-SIMPL-14`, `WP-SIMPL-43 PR 5a–5c`, `WP-SIMPL-46 PR 1–5`, and `#672`/`#674` merged).
+
+### 15.1 Binding Security Conditions (`SEC-52-01` .. `SEC-52-10`)
+
+- **SEC-52-01 (Fail-Closed Unknown or Inactive Classification, Mask Function, or Key Ref):**
+  - If any classification `k` in a column's effective classification set `K_T(c)` (union of scope `*` and tenant `T`) is unknown (no row in `data_classifications` for `T` or `*`), has `is_active = false`, or fails code regex validation (`^[A-Z][A-Z0-9_]{1,63}$`), `ClassificationAccessResolver` MUST resolve the column to `ColumnAccessLevel.Deny` (never `Mask` or `Clear`).
+  - If a resolved `MaskFunction` is unrecognised or if `HASH`/`TOKENIZE` references a `key_ref` that is null/empty or cannot be resolved via `IKeyVaultSecretProvider`, the resolver MUST fail closed to `ColumnAccessLevel.Deny` with audit/diagnostic reason `MASK_KEY_UNAVAILABLE` (never falling back to `Clear` or weak partial masking).
+  - A classified column whose classification has no explicit row in `classification_mask_rules` and no inherited parent rule MUST fall back to the tenant/global `_DEFAULT` rule (`TYPE_SAFE_REDACT '***'`), never `Clear`.
+
+- **SEC-52-02 (`CREDENTIALS` Floor & Hierarchy Non-Inheritance of `Clear`):**
+  - Built-in classification `CREDENTIALS` (rank 90, `clear_grantable = false`) MUST NEVER resolve to `ColumnAccessLevel.Clear` at decision time even if a corrupted or manually inserted row in `consent_classification_access` or `access_profile_item_classification_access` carries `access_level = 2` (`Clear`). Both the grant/profile write path and `ClassificationAccessResolver` at decision time MUST enforce `CREDENTIALS -> Mask` (or `Deny` if the grant specifies `Deny`).
+  - Classification hierarchy inheritance applies strictly to mask rules (`parent_code` rule inheritance when child has no rule) and NEVER to `Clear` access: holding `Clear` on `PII` MUST NOT grant `Clear` on child `PII_SPECIAL` (or any custom child classification).
+  - Hierarchy validation on write and load MUST reject cycles and enforce `child.restriction_rank >= parent.restriction_rank`.
+
+- **SEC-52-03 (Multi-Classification Restrictiveness Ordering & Per-Column Override Scope):**
+  - When a column carries multiple classifications `K_T(c)`, `ColumnAccessLevel.Clear` requires: (a) the column is in the grant's column set and explicitly named `Clear` in the grant's column rules (`OD-40`: columns classified or added after approval stay `Mask`), AND (b) for every classification `k in K_T(c)` with `separate_approval = true`, the grant holds an unexpired (`valid_until == null || valid_until > now`) `Clear` entry for `k`.
+  - When a grant resolves to `Mask` on column `c`, its candidate mask is the most restrictive (per §5.3 strict ordering: `NULLIFY > REDACT = TYPE_SAFE_REDACT > HASH > TOKENIZE > BUCKET_NUMBER > ROUND_NUMBER > TRUNCATE_DATE > EMAIL_DOMAIN > GEO_JITTER > PARTIAL`, ties broken by `restriction_rank` descending then `code` ordinal ascending) across all `k in K_T(c)` that are NOT `Clear` on that grant.
+  - A per-column override `(c, k)` replaces ONLY the candidate mask for classification `k` (or `(c, NULL)` replaces unkeyed default candidates); it MUST NOT silence a more restrictive mask required by a second classification `k2 in K_T(c)` on the same column for which the caller lacks `Clear` and has no `(c, k2)` override.
+  - Across multiple contributing grants (`OD-41`, `D-52e`), the single SQL mask expression emitted for column `c` is the most restrictive candidate among all non-`Clear` contributing grants covering `c`. Expiration of `valid_until` on `consent_classification_access` degrades that classification's access from `Clear` to `Mask` at decision time without mutating stored rows.
+
+- **SEC-52-04 (Bound Parameters Only in `MaskSpecRenderer` & `params_json` Validation — INV-4):**
+  - `MaskSpecRenderer` across all 6 dialects (`PostgreSql`, `SqlServer`, `Oracle`, `Databricks`, `DuckDb`, `Ansi`) MUST bind user/admin-configurable mask parameters (`constant`, `mask_char`, `domain`, derived HMAC hex key, `width`, `digits`, `decimals`) via dialect parameters or validated numeric/enum AST nodes — NEVER via raw SQL string interpolation of `params_json` or `replacement`.
+  - `TRUNCATE_DATE` `unit` MUST be validated against the closed enum `{YEAR, MONTH, DAY}` before rendering.
+  - `PARTIAL` MUST enforce `keep_first >= 0`, `keep_last >= 0`, `keep_first + keep_last <= 16` (`MaskingRule.MaxRevealedChars`), and `fixed_length >= keep_first + keep_last`; any violation is rejected on write and falls back to `TYPE_SAFE_REDACT` at decision time.
+  - When a mask function is incompatible with the column's physical data type at decision time, the engine MUST fall back to `TYPE_SAFE_REDACT` (`'***'` for text, `NULL` for non-text) and increment `autheris_mask_type_fallback_total`.
+
+- **SEC-52-05 (Tenant-Isolated Key Derivation & Zero Key Exposure):**
+  - `HASH` and `TOKENIZE` MUST derive keys per `(masterKey, tenantId, keyRef)` via `DeriveHexKey` so pseudorandom hashes/tokens are unlinkable across tenants even when two tenants reference the same `key_ref` on the same global catalog column.
+  - `PreventInDbHmacKeyExposure` MUST be honored for both `HASH` and `TOKENIZE` (falling back to redaction/in-memory evaluation rather than sending raw or derived HMAC keys in SQL text when configured).
+  - Neither governance tables nor audit events (`CLASSIFICATION_CHANGED`, `MASK_RULE_CHANGED`, `MASK_OVERRIDE_CHANGED`, data-access audit) may persist or emit secret key bytes or mask constant values; data-access audit records `{column, classifications[], maskFunction, keyRef}` only.
+
+- **SEC-52-06 (Engine Guards on All Non-Clear Columns):**
+  - Every column whose effective access level is `Mask` (including deterministic `HASH` and `TOKENIZE`, `TRUNCATE_DATE`, `BUCKET_NUMBER`, `ROUND_NUMBER`, `EMAIL_DOMAIN`, `GEO_JITTER`, `PARTIAL`, `REDACT`, `TYPE_SAFE_REDACT`, `NULLIFY`) MUST remain blocked in `WHERE`, `HAVING`, `JOIN ON`, `GROUP BY`, `ORDER BY`, set operations, and aggregate arguments (`MaskedColumnPredicateException` / `MaskedAggregationException` in `AstSecurityVisitor.MaskGuards*.cs`). Deterministic `HASH`/`TOKENIZE` output is for display/post-processing correlation only and MUST NOT be joinable or filterable in SQL (`D-52g`).
+  - Row-policy predicates continue to evaluate against underlying unmasked table columns server-side, and policy parameters MUST never bind a masked expression.
+
+- **SEC-52-07 (Admin Authority, Scope Isolation, Ingestion Non-Downgrade, & Four-Eyes Clear Approval):**
+  - Global scope `*` cannot be a valid `TenantId` (`^[a-zA-Z0-9_-]{1,64}$` rejects `*`). Only a principal with `ClusterAdmin` authority may write `*`-scoped rows in `data_classifications`, `classification_mask_rules`, `column_classifications`, or `column_mask_overrides`. Tenant `GovernanceAdmin` writes are strictly bound to their authenticated `tenant_id`; cross-tenant reads/writes return `404`/`403`.
+  - Removing a classification from a column (`DELETE /catalog/columns/{columnId}/classifications/{code}`) lifts masking and therefore requires data-owner/delegate or `GovernanceAdmin` (for tenant scope) / `ClusterAdmin` (for `*` scope) authority and emits `COLUMN_CLASSIFICATION_CHANGED`.
+  - Ingestion (`source = 'INGESTION'` from dbt/OpenMetadata) is strictly additive on `column_classifications`: re-ingestion MUST NOT delete existing `OWNER`, `ADMIN`, `MIGRATION`, or prior `INGESTION` classifications without an explicit owner/admin removal action.
+  - Per-classification `Clear` requests MUST enforce self-approval prohibition (the requester SID cannot approve either step), sequential four-eyes when `approver_mode = 'DATA_OWNER_AND_STEWARD'` (both data owner/delegate and a member of `steward_group_sid` must approve), `valid_until <= min(grant.valid_until, approved_at + max_clear_days)`, and external-workflow narrowing-only (`External_DecisionMayOnlyNarrow` extended to classification levels).
+
+- **SEC-52-08 (Immediate Restrictive Catalog Flush & Persisted Projection Integration — `#672` / `#674`):**
+  - Adding a classification to a column, deactivating a classification, increasing `restriction_rank`, changing a mask rule or override, or setting `catalog_text = 'HIDDEN'` is a restrictive governance mutation (`CatalogWriteClassification.Restrictive` per `#672` `SEC-OI-672-2`). It MUST increment the table epoch and flush the catalog version immediately (bypassing deferred `ICatalogWriteScope` batching) and trigger the process-wide dirty-flag repair path on flush failure (`SEC-OI-672-3`).
+  - `CatalogTablePersistedProjection` (`#674`) MUST replace `IsSensitive` / `ColumnMaskingRules` structural comparison with the column's persisted `*`-scope classifications and mask overrides so ingestion diffing remains deterministic.
+
+- **SEC-52-09 (Catalog Text Suppression for `HIDDEN` Masked Columns — `#571`):**
+  - When a column resolves to `ColumnAccessLevel.Mask` for the caller and any applicable rule/override across its classifications or contributing grants has `catalog_text = 'HIDDEN'` (`HIDDEN` wins over `VISIBLE`), every catalog/discovery surface (MCP `describe_dataset` full and `brief`, `list_datasets`, catalog REST detail, GraphQL catalog, and catalog search results/snippets) MUST emit only the column name and technical data type — omitting description, display name, semantic tags, value profile, and sample values, and dropping any golden query or GraphQL example query that selects that column.
+  - Catalog search indexing (`#628c` per-column vectors and lexical search) MUST NOT index description/display text of any column that has a `HIDDEN` rule or override (`D-52p`). Columns with `ColumnAccessLevel.Deny` remain completely invisible (including column name and classifications).
+
+- **SEC-52-10 (Migration Step Numbering, Backfill Parity, & Role-Grantee Pre-Check):**
+  - All migration steps use the next free step number (`0013+`) at merge time with paired `.sql` and `.shape.json` files for both PostgreSQL and SQL Server (`SEC-SIMPL-16`).
+  - Step 1 backfill MUST map every column with `is_sensitive = 1` OR a row in `column_masking_rules` to `column_classifications(*, c, 'PII', 'MIGRATION')` and preserve exact mask behavior via `column_mask_overrides(*, c, NULL, ...)` (`ClassificationMigrationParityTests.Decisions_identical_after_step_1_and_2`).
+  - Step 4 (`NNNN_drop_superseded_governance_columns`, PR 6b) MUST execute a pre-check aborting the migration if any unrevoked role-based consent (`role_id IS NOT NULL AND status = 'Active'`) exists (defense-in-depth behind `0011_role_grantee_and_profile_assignment_retirement`).
+
+### 15.2 PR Slicing Verification
+All 7 slices in §10 (`PR 1` ~380 lines, `PR 2` ~390 lines, `PR 3` ~400 lines with `size-exception` only for generated `.shape.json`, `PR 4` ~350 lines, `PR 4b` ~170 lines, `PR 5` ~380 lines, `PR 6a/6b` ~120 lines) respect the `<= 400` net added `src/` lines ceiling and have clean dependency ordering (`PR 1 -> PR 2 -> PR 3 -> PR 4 -> PR 4b`, `PR 5` after `PR 3` + `WP-SIMPL-47`, `PR 6a/6b` after `PR 4`/`PR 5`).
+
+### 15.3 Mandatory Security Test Checklist (`[Trait("Category","Security")]`)
+All `[Trait("Category","Security")]` tests specified in §9 are mandatory gate criteria for their respective PRs, plus:
+- `ClassificationMutationFlushTests.Restrictive_classification_or_mask_change_flushes_catalog_version_immediately_inside_write_scope` (`SEC-52-08`)
+- `ClassificationIngestionSyncTests.Ingestion_sync_never_removes_existing_column_classifications` (`SEC-52-07`)
+- `ClassificationOverrideIsolationTests.Column_override_for_one_classification_does_not_weaken_second_unapproved_classification` (`SEC-52-03`)
+
