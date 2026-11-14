@@ -344,7 +344,7 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogTagsChanged);
 
-        group.MapPut("/datasets/{id}/visibility", PutDatasetVisibilityHandler)
+        group.MapPut("/datasets/{id}/discovery", PutDatasetDiscoveryHandler)
         .RequireAuthorization()
         .WithAudit(AuditLevel.Full, AuditEventTypes.CatalogVisibilityChanged);
 
@@ -399,16 +399,16 @@ public static partial class CatalogApiEndpoints
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
-    internal static async Task<IResult> PutDatasetVisibilityHandler(
+    internal static async Task<IResult> PutDatasetDiscoveryHandler(
         string id,
-        SetDatasetVisibilityDto? request,
+        SetDatasetDiscoveryDto? request,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService service,
         HttpContext httpContext,
         CancellationToken ct)
     {
-        var edit = request?.Visibility is null
+        var edit = request is null || (!request.Hidden.HasValue && request.HiddenColumns is null && !request.SamplesDisabled.HasValue)
             ? new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null) { Malformed = true }
-            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, request.Visibility);
+            : new Autheris.Application.Governance.Interfaces.DatasetCatalogEdit(null, null, null, null, null, null, request.Hidden, request.HiddenColumns, request.SamplesDisabled);
         return MapCatalogResult(await service.ApplyAsync(httpContext.User, id, edit, "admin", ct).ConfigureAwait(false));
     }
 
@@ -436,6 +436,8 @@ public static partial class CatalogApiEndpoints
                 return ApiProblems.BadRequest(ApiErrorCodes.TagLimitExceeded, "The tag limit is exceeded.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidVisibility:
                 return ApiProblems.BadRequest(ApiErrorCodes.InvalidVisibility, "The visibility is invalid.");
+            case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidColumns:
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidColumns, "One or more column names are invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.InvalidRequest:
                 return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The request is invalid.");
             case Autheris.Application.Governance.Interfaces.DatasetCatalogOutcome.Unavailable:

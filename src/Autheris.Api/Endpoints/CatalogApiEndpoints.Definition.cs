@@ -318,8 +318,11 @@ public sealed record SetDatasetTagsDto(System.Collections.Generic.IReadOnlyList<
 /// <summary>Issue #111 (C-4): add and remove admin-source tags.</summary>
 public sealed record ChangeDatasetTagsDto(System.Collections.Generic.IReadOnlyList<string>? Add, System.Collections.Generic.IReadOnlyList<string>? Remove);
 
-/// <summary>Issue #111 (C-4): the requested tier name; parsed by the service, never bound to an enum.</summary>
-public sealed record SetDatasetVisibilityDto(string? Visibility);
+/// <summary>Discovery visibility settings of a dataset.</summary>
+public sealed record SetDatasetDiscoveryDto(
+    [property: System.Text.Json.Serialization.JsonPropertyName("hidden")] bool? Hidden = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("hiddenColumns")] System.Collections.Generic.IReadOnlyList<string>? HiddenColumns = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("samplesDisabled")] bool? SamplesDisabled = null);
 
 /// <summary>Issue #448: the requested privacy settings (minimum group size and non-personal flag).</summary>
 public sealed record SetDatasetPrivacyDto(string? MinGroupSize = null, bool? NonPersonal = null);

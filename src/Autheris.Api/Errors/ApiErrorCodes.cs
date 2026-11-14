@@ -75,6 +75,7 @@ public static class ApiErrorCodes
     public const string ProcedureRejected = "PROCEDURE_REJECTED";
     public const string InvalidTag = "INVALID_TAG";
     public const string InvalidVisibility = "INVALID_VISIBILITY";
+    public const string InvalidColumns = "INVALID_COLUMNS";
     public const string TagLimitExceeded = "TAG_LIMIT_EXCEEDED";
     public const string OffsetNotSupported = "OFFSET_NOT_SUPPORTED";
     public const string KeysetStreamingUnavailable = "KEYSET_STREAMING_UNAVAILABLE";
