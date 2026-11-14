@@ -7,3 +7,4 @@ src/Autheris.Api/Endpoints/CatalogApiEndpoints.Definition.cs | single-table data
 src/Autheris.Application/Common/Interfaces/IGovernanceRepository.cs | interface declaration, no writer
 src/Autheris.Application/Governance/Services/AccessPlanningService.cs | single-table activation change
 src/Autheris.Infrastructure/Persistence/GovernanceRepository.Catalog.cs | the repository implementation that honors the scope
+src/Autheris.Infrastructure/Persistence/GovernanceRepository.CatalogBatch.cs | the repository implementation that honors the scope

@@ -361,6 +361,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
         }
 
+        var pendingModelUpdates = new List<(TableMetadata Metadata, IReadOnlyList<string> Tags)>();
         foreach (var model in models)
         {
             ct.ThrowIfCancellationRequested();
@@ -664,8 +665,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                             _syntheticRowGenerator?.RegisterSyntheticSamples(updatedMetadata.Identifier, mergedSamples);
                         }
 
-                        await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
-                        await ImportModelTagsAsync(updatedMetadata.Identifier, model.Tags, warnings, ct).ConfigureAwait(false);
+                        pendingModelUpdates.Add((updatedMetadata, model.Tags));
                     }
                 }
             }
@@ -704,6 +704,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 autoSyncSkipped++;
             }
         }
+
+        await FlushPendingModelUpdatesAsync(pendingModelUpdates, warnings, ct).ConfigureAwait(false);
 
         if (autoSyncFailed)
         {
@@ -1559,12 +1561,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             ownerPlan = plan;
         }
 
-        if (!dryRun)
+        if (!dryRun && pendingUpserts.Count > 0)
         {
-            foreach (var updatedMetadata in pendingUpserts)
-            {
-                await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
-            }
+            await _metadataRepository.UpsertBatchWithFallbackAsync(pendingUpserts, ct).ConfigureAwait(false);
         }
 
         // R-50: virtual filters and access profiles are saved as the calling user (never as the sync), so the approval

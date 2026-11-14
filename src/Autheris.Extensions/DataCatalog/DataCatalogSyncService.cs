@@ -71,6 +71,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         int art9Tables = 0;
 
         var catalogOpts = _options.Value.Catalog;
+        var prepared = new List<(CatalogTableAsset Asset, TableMetadata? Existing, TableMetadata Metadata, PhysicalKeySnapshot Physical)>();
 
         // EXT-7: Newly discovered tables are created inactive unless ActivateNewTables is explicitly configured
         // (default: false, requiring data steward approval). For OpenMetadata, OpenMetadata.ActivateNewTables is also respected.
@@ -268,21 +269,13 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
             if (!dryRun)
             {
-                try
-                {
-                    await _metadataRepo.UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
-                    // Issue #404: physical non-unique indexes, after the table exists and before its epoch invalidation (I404-SC-14).
-                    await _physicalIndexSync.ApplyAsync(tableAsset.Identifier, existing, metadata, physical, restrictToTenant, warnings, ct).ConfigureAwait(false);
-                }
-                finally
-                {
-                    // the epoch of a table is invalidated right after its own upsert (also when the upsert
-                    // fails part-way), not after the whole loop: an exception or cancellation later in the run must not leave
-                    // an already written table (e.g. with tightened masking) behind cached decisions of the old metadata.
-                    // CancellationToken.None: a cancelled run still invalidates the table it may already have written.
-                    await _epochService.InvalidateEpochAsync(tableAsset.Identifier, CancellationToken.None).ConfigureAwait(false);
-                }
+                prepared.Add((tableAsset, existing, metadata, physical));
             }
+        }
+
+        if (!dryRun && prepared.Count > 0)
+        {
+            await FlushPreparedSyncAsync(prepared, restrictToTenant, warnings, ct).ConfigureAwait(false);
         }
 
         if (!dryRun && affectedTables.Count > 0)
@@ -302,6 +295,52 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             Warnings: warnings,
             Success: true
         );
+    }
+
+    private async Task FlushPreparedSyncAsync(
+        IReadOnlyList<(CatalogTableAsset Asset, TableMetadata? Existing, TableMetadata Metadata, PhysicalKeySnapshot Physical)> prepared,
+        TenantId? restrictToTenant,
+        List<string> warnings,
+        CancellationToken ct)
+    {
+        var batch = prepared.Select(static p => p.Metadata).ToList();
+        var batchResults = await _metadataRepo.UpsertTableMetadataBatchAsync(batch, ct).ConfigureAwait(false);
+
+        if (batchResults is { Count: var n } && n == prepared.Count)
+        {
+            var idx = 0;
+            try
+            {
+                for (; idx < prepared.Count; idx++)
+                {
+                    var item = prepared[idx];
+                    await _physicalIndexSync.ApplyAsync(item.Asset.Identifier, item.Existing, item.Metadata, item.Physical, restrictToTenant, warnings, ct).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                // All prepared tables were already written in the batch upsert; invalidate every table even if index sync fails mid-way.
+                for (var j = 0; j < prepared.Count; j++)
+                {
+                    await _epochService.InvalidateEpochAsync(prepared[j].Asset.Identifier, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+
+            return;
+        }
+
+        foreach (var item in prepared)
+        {
+            try
+            {
+                await _metadataRepo.UpsertTableMetadataAsync(item.Metadata, ct).ConfigureAwait(false);
+                await _physicalIndexSync.ApplyAsync(item.Asset.Identifier, item.Existing, item.Metadata, item.Physical, restrictToTenant, warnings, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                await _epochService.InvalidateEpochAsync(item.Asset.Identifier, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
     }
 
     // I403-SC-07: the audit record (direction lists and table id only; no index or constraint names) is written strictly before the upsert.

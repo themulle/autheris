@@ -396,6 +396,7 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
         if (_tableRepository != null)
         {
             await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "dbt-semantic-manifest");
+            var pendingTables = new List<TableMetadata>();
             foreach (var model in semanticModels)
             {
                 if (string.IsNullOrWhiteSpace(model.Name))
@@ -481,12 +482,18 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
                     PrimaryKeyColumns = primaryKeys
                 };
 
-                await _tableRepository.UpsertTableMetadataAsync(tableMeta, cancellationToken).ConfigureAwait(false);
+                pendingTables.Add(tableMeta);
+            }
 
-                // Issue #111 (A-2): the upsert ignores Table.Tags; the synthetic tags become dbt-source dataset tags (same cap and audit as dbt model tags).
+            if (pendingTables.Count > 0)
+            {
+                await _tableRepository.UpsertBatchWithFallbackAsync(pendingTables, cancellationToken).ConfigureAwait(false);
                 if (_tagImport is not null)
                 {
-                    await _tagImport.ImportDbtTagsAsync(tableMeta.Identifier, SemanticModelTags, cancellationToken).ConfigureAwait(false);
+                    foreach (var tableMeta in pendingTables)
+                    {
+                        await _tagImport.ImportDbtTagsAsync(tableMeta.Identifier, SemanticModelTags, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
         }
