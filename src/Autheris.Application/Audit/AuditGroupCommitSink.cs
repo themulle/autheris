@@ -145,7 +145,9 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
                 OnBatchCollected?.Invoke(batch.Count);
                 if (batch.Count > 0)
                 {
-                    await FlushBatchAsync(batch, entries, shutdownToken).ConfigureAwait(false);
+                    await FlushBatchAsync(batch, entries, CancellationToken.None).ConfigureAwait(false);
+                    batch.Clear();
+                    entries.Clear();
                 }
             }
         }
@@ -165,40 +167,58 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
             // holding, with AuditUnavailableException instead of persisting through a faulted pipeline.
             if (_drainFault is { } dead)
             {
-                var unavailable = new Autheris.Application.Audit.AuditUnavailableException("The audit group-commit loop stopped (fail-closed).", dead);
-                foreach (var held in batch)
-                {
-                    held.Completion.TrySetException(unavailable);
-                }
-
-                while (_channel.Reader.TryRead(out var queued))
-                {
-                    queued.Completion.TrySetException(unavailable);
-                }
-
-                batch.Clear();
+                FailPendingItems(batch, dead);
                 entries.Clear();
             }
-
-            batch.Clear();
-            entries.Clear();
-            while (_channel.Reader.TryRead(out var remaining))
+            else
             {
-                batch.Add(remaining);
-                entries.Add(remaining.Entry);
-                if (batch.Count >= maxBatchSize)
+                try
                 {
-                    await FlushBatchAsync(batch, entries, CancellationToken.None).ConfigureAwait(false);
-                    batch.Clear();
+                    while (_channel.Reader.TryRead(out var remaining))
+                    {
+                        batch.Add(remaining);
+                        entries.Add(remaining.Entry);
+                        if (batch.Count >= maxBatchSize)
+                        {
+                            await FlushBatchAsync(batch, entries, CancellationToken.None).ConfigureAwait(false);
+                            batch.Clear();
+                            entries.Clear();
+                        }
+                    }
+
+                    if (batch.Count > 0)
+                    {
+                        await FlushBatchAsync(batch, entries, CancellationToken.None).ConfigureAwait(false);
+                        batch.Clear();
+                        entries.Clear();
+                    }
+                }
+                catch (Exception drainEx)
+                {
+                    _logger.LogError(drainEx, "Failed to drain audit group-commit queue on shutdown (fail-closed).");
+                    FailPendingItems(batch, drainEx);
                     entries.Clear();
                 }
             }
-
-            if (batch.Count > 0)
-            {
-                await FlushBatchAsync(batch, entries, CancellationToken.None).ConfigureAwait(false);
-            }
         }
+    }
+
+    private void FailPendingItems(List<PendingAuditItem> batch, Exception cause)
+    {
+        var unavailable = cause as AuditUnavailableException
+            ?? new AuditUnavailableException("The audit group-commit loop stopped (fail-closed).", cause);
+
+        foreach (var held in batch)
+        {
+            held.Completion.TrySetException(unavailable);
+        }
+
+        while (_channel.Reader.TryRead(out var queued))
+        {
+            queued.Completion.TrySetException(unavailable);
+        }
+
+        batch.Clear();
     }
 
     private async Task FlushBatchAsync(
@@ -216,9 +236,10 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
         }
         catch (OperationCanceledException oce)
         {
+            var unavailable = new AuditUnavailableException("Audit persistence was canceled during flush (fail-closed).", oce);
             for (int i = 0; i < batch.Count; i++)
             {
-                batch[i].Completion.TrySetCanceled(oce.CancellationToken);
+                batch[i].Completion.TrySetException(unavailable);
             }
         }
         catch (Exception ex) when (batch.Count > 1 && ex is not Autheris.Application.Audit.AuditUnavailableException)
@@ -250,7 +271,7 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
         }
         catch (OperationCanceledException oce)
         {
-            item.Completion.TrySetCanceled(oce.CancellationToken);
+            item.Completion.TrySetException(new AuditUnavailableException("Audit persistence was canceled during flush (fail-closed).", oce));
         }
         catch (Exception ex)
         {
@@ -267,13 +288,13 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
         }
 
         _channel.Writer.TryComplete();
+        await _shutdownCts.CancelAsync().ConfigureAwait(false);
         try
         {
             await _drainLoopTask.ConfigureAwait(false);
         }
         finally
         {
-            await _shutdownCts.CancelAsync().ConfigureAwait(false);
             _shutdownCts.Dispose();
         }
     }
