@@ -238,7 +238,8 @@ phase_read() {
   PHASE_START=$SECONDS
   PHASE_CAP=$READ_CAP
   start_host read
-  fetch_schema "$BASE_URL/odata/v4/\$openapi" "$RUNNER_TEMP/st/odata.json" Reader
+  # The OData $openapi document is admin-only; fetch it as ClusterAdmin, the fuzz calls themselves keep the Reader role.
+  fetch_schema "$BASE_URL/odata/v4/\$openapi" "$RUNNER_TEMP/st/odata.json" ClusterAdmin
   fetch_schema "$BASE_URL/api/v1/sql/openapi.json" "$RUNNER_TEMP/st/websql.json" Reader
   # Read phase: GET plus the read-only POST query endpoints (WebSQL query, GraphQL queries); never PUT/PATCH/DELETE or GraphQL mutations.
   run_st read-odata 600 Reader /work/odata.json --url "$BASE_URL/odata/v4" "${READ_ONLY_FLAGS[@]}"
