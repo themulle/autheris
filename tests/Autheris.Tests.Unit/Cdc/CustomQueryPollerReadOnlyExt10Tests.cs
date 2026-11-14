@@ -87,7 +87,7 @@ public sealed class CustomQueryPollerReadOnlyExt10Tests
         var conn = new FakeNpgsqlConnection(log);
         var cmd = conn.CreateCommand();
 
-        var tx = await CustomQueryPollerService.EnforceReadOnlySemanticsAsync(conn, cmd, CancellationToken.None);
+        var tx = await CustomQueryPollerService.EnforceReadOnlySemanticsAsync(conn, cmd, Autheris.Domain.Common.DatabaseDialect.PostgreSql, CancellationToken.None);
 
         tx.ShouldNotBeNull();
         log.ShouldBe(["BEGIN", "EXEC SET TRANSACTION READ ONLY; tx=yes"]);
@@ -101,7 +101,7 @@ public sealed class CustomQueryPollerReadOnlyExt10Tests
         var conn = new FakeNpgsqlConnection(log, failReadOnly: true);
         var cmd = conn.CreateCommand();
 
-        await Should.ThrowAsync<InvalidOperationException>(() => CustomQueryPollerService.EnforceReadOnlySemanticsAsync(conn, cmd, CancellationToken.None));
+        await Should.ThrowAsync<InvalidOperationException>(() => CustomQueryPollerService.EnforceReadOnlySemanticsAsync(conn, cmd, Autheris.Domain.Common.DatabaseDialect.PostgreSql, CancellationToken.None));
 
         cmd.Transaction.ShouldBeNull();
     }

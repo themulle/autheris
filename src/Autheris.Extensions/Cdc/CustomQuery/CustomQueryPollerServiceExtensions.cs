@@ -6,6 +6,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 public static class CustomQueryPollerServiceExtensions
 {
@@ -17,10 +18,7 @@ public static class CustomQueryPollerServiceExtensions
         ArgumentNullException.ThrowIfNull(configuration);
 
         services.Configure<CustomQueryPollerOptions>(configuration.GetSection(CustomQueryPollerOptions.SectionName));
-        services.TryAddSingleton<CustomQueryPollerValidator>();
-        services.TryAddSingleton<IDataSourceConnectionFactory, DefaultDataSourceConnectionFactory>();
-        services.AddHostedService<CustomQueryPollerService>();
-        return services;
+        return AddCustomQueryPollerCore(services);
     }
 
     public static IServiceCollection AddCustomQueryPoller(
@@ -31,7 +29,13 @@ public static class CustomQueryPollerServiceExtensions
         ArgumentNullException.ThrowIfNull(configure);
 
         services.Configure(configure);
+        return AddCustomQueryPollerCore(services);
+    }
+
+    private static IServiceCollection AddCustomQueryPollerCore(IServiceCollection services)
+    {
         services.TryAddSingleton<CustomQueryPollerValidator>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<CustomQueryPollerOptions>, CustomQueryPollerOptionsValidator>());
         services.TryAddSingleton<IDataSourceConnectionFactory, DefaultDataSourceConnectionFactory>();
         services.AddHostedService<CustomQueryPollerService>();
         return services;
