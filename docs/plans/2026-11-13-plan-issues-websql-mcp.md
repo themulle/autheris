@@ -54,6 +54,7 @@ Suggested order: #669 test PR and #668 now (bug fixes, independent); #682 A now;
 - Dependencies: none blocking. Touches `GovernedSqlRewriter.cs` and `GovernedSqlExecutor.cs`, also edited by WP-SIMPL-45 PR 4-6 and WP-SIMPL-46 PR 3-5: not in parallel with those PRs; whichever merges second rebases. Related: #666 (dbt `identifier`/`alias` as physical name, catalog cluster) changes the same dbt factory; no ordering need.
 - Risks: per-source options keyed by logical vs connection name may disagree (step 4 covers it); existing deployments using the workaround (connection named like the dbt database) keep working because the mapping is optional.
 - Size: S, ~150 src / ~350 test, 1 PR, 1.5 person-days.
+- Delivery: UNDER REVIEW (draft PR #747), see [`2026-11-14-plan-issue-668-websql-mapped-connection.md`](2026-11-14-plan-issue-668-websql-mapped-connection.md). Deviation: the governance repository persists `Identifier.Domain` as `SourceName`, so a catalog entry never records its connection; admission stays on the logical name and only connection, dialect, fingerprint, transport gate and profile come from the mapped connection key (design step 2 and 3 adjusted, re-approval requested).
 
 ## #669 SQL Server: synonyms are registered but always denied
 
