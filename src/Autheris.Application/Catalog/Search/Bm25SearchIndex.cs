@@ -61,6 +61,18 @@ public sealed class Bm25SearchIndex
     private const double B = 0.75;
     private const int FirstColumnField = (int)Bm25Field.ColumnNames;
 
+    /// <summary>Query tokens shorter than this match whole words only.</summary>
+    public const int MinPartialMatchLength = 4;
+
+    /// <summary>Indexed tokens one query token may expand to (bounds the cost of a query).</summary>
+    public const int MaxPartialExpansions = 32;
+
+    /// <summary>Query tokens scored per search; further tokens are ignored (availability bound).</summary>
+    public const int MaxQueryTerms = 64;
+
+    /// <summary>A partial match scores this fraction of a whole-word match of the same field statistics.</summary>
+    private const double PartialMatchFactor = 0.4;
+
     private sealed record IndexedDocument(
         TableIdentifier TableId,
         Dictionary<string, int>?[] FieldTermFrequencies,
@@ -70,12 +82,20 @@ public sealed class Bm25SearchIndex
     private readonly IReadOnlyList<IndexedDocument> _baseDocuments;
     private readonly IReadOnlyDictionary<TableIdentifier, int> _baseTableToIndex;
     private readonly IReadOnlyDictionary<string, int> _baseTermDocCounts;
+    private readonly IReadOnlyDictionary<string, int> _baseTableLevelTermCounts;
     private readonly IReadOnlySet<int> _baseTombstones;
     private readonly IReadOnlyDictionary<TableIdentifier, IndexedDocument> _deltaDocuments;
     private readonly IReadOnlyDictionary<string, int> _termDocCountDeltas;
+    private readonly IReadOnlyDictionary<string, int> _tableLevelTermCountDeltas;
     private readonly int _activeDocCount;
     private readonly long[] _totalFieldLengths;
     private readonly double[] _weights;
+
+    // Distinct indexed tokens ordered by (length, ordinal): partial matches prefer the tokens closest to the whole word.
+    // The table-level vocabulary excludes tokens that occur only in column fields, so a caller with hidden columns
+    // never gets an expansion (or a cap slot) taken by hidden column text.
+    private readonly string[] _vocabulary;
+    private readonly string[] _tableLevelVocabulary;
 
     /// <summary>Single-field convenience: the whole text is indexed as the short description.</summary>
     public Bm25SearchIndex(IEnumerable<(TableIdentifier TableId, string Content)> source)
@@ -91,6 +111,7 @@ public sealed class Bm25SearchIndex
         var documents = new List<IndexedDocument>();
         var baseTableToIndex = new Dictionary<TableIdentifier, int>();
         var termDocCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var tableLevelTermCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var totalFieldLengths = new long[CatalogSearchFieldWeights.FieldCount];
 
         foreach (var entry in source)
@@ -99,7 +120,7 @@ public sealed class Bm25SearchIndex
             {
                 // Replace duplicate identifier cleanly so base segment never holds stale duplicate postings.
                 var prior = documents[priorIdx];
-                AdjustStats(prior, termDocCounts, totalFieldLengths, delta: -1);
+                AdjustStats(prior, termDocCounts, tableLevelTermCounts, totalFieldLengths, delta: -1);
 
                 var replacement = TokenizeDocument(entry);
                 if (replacement is null)
@@ -114,7 +135,7 @@ public sealed class Bm25SearchIndex
                 }
 
                 documents[priorIdx] = replacement;
-                AdjustStats(replacement, termDocCounts, totalFieldLengths, delta: +1);
+                AdjustStats(replacement, termDocCounts, tableLevelTermCounts, totalFieldLengths, delta: +1);
                 continue;
             }
 
@@ -123,26 +144,32 @@ public sealed class Bm25SearchIndex
 
             baseTableToIndex[entry.TableId] = documents.Count;
             documents.Add(doc);
-            AdjustStats(doc, termDocCounts, totalFieldLengths, delta: +1);
+            AdjustStats(doc, termDocCounts, tableLevelTermCounts, totalFieldLengths, delta: +1);
         }
 
         _baseDocuments = documents;
         _baseTableToIndex = baseTableToIndex;
         _baseTermDocCounts = termDocCounts;
+        _baseTableLevelTermCounts = tableLevelTermCounts;
         _baseTombstones = new HashSet<int>();
         _deltaDocuments = new Dictionary<TableIdentifier, IndexedDocument>();
         _termDocCountDeltas = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        _tableLevelTermCountDeltas = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         _activeDocCount = baseTableToIndex.Count;
         _totalFieldLengths = totalFieldLengths;
+        _vocabulary = BuildVocabulary(termDocCounts);
+        _tableLevelVocabulary = BuildVocabulary(tableLevelTermCounts);
     }
 
     private Bm25SearchIndex(
         IReadOnlyList<IndexedDocument> baseDocuments,
         IReadOnlyDictionary<TableIdentifier, int> baseTableToIndex,
         IReadOnlyDictionary<string, int> baseTermDocCounts,
+        IReadOnlyDictionary<string, int> baseTableLevelTermCounts,
         IReadOnlySet<int> baseTombstones,
         IReadOnlyDictionary<TableIdentifier, IndexedDocument> deltaDocuments,
         IReadOnlyDictionary<string, int> termDocCountDeltas,
+        IReadOnlyDictionary<string, int> tableLevelTermCountDeltas,
         int activeDocCount,
         long[] totalFieldLengths,
         double[] weights)
@@ -150,12 +177,16 @@ public sealed class Bm25SearchIndex
         _baseDocuments = baseDocuments;
         _baseTableToIndex = baseTableToIndex;
         _baseTermDocCounts = baseTermDocCounts;
+        _baseTableLevelTermCounts = baseTableLevelTermCounts;
         _baseTombstones = baseTombstones;
         _deltaDocuments = deltaDocuments;
         _termDocCountDeltas = termDocCountDeltas;
+        _tableLevelTermCountDeltas = tableLevelTermCountDeltas;
         _activeDocCount = activeDocCount;
         _totalFieldLengths = totalFieldLengths;
         _weights = weights;
+        _vocabulary = BuildVocabulary(baseTermDocCounts, termDocCountDeltas);
+        _tableLevelVocabulary = BuildVocabulary(baseTableLevelTermCounts, tableLevelTermCountDeltas);
     }
 
     public int ActiveDocumentCount => _activeDocCount;
@@ -187,6 +218,7 @@ public sealed class Bm25SearchIndex
         var tombstones = new HashSet<int>(_baseTombstones);
         var deltaDocuments = new Dictionary<TableIdentifier, IndexedDocument>(_deltaDocuments);
         var termDeltas = new Dictionary<string, int>(_termDocCountDeltas, StringComparer.OrdinalIgnoreCase);
+        var tableLevelTermDeltas = new Dictionary<string, int>(_tableLevelTermCountDeltas, StringComparer.OrdinalIgnoreCase);
         int activeDocCount = _activeDocCount;
         var totalFieldLengths = (long[])_totalFieldLengths.Clone();
 
@@ -195,14 +227,14 @@ public sealed class Bm25SearchIndex
             if (deltaDocuments.Remove(id, out var existingDelta))
             {
                 activeDocCount--;
-                AdjustStats(existingDelta, termDeltas, totalFieldLengths, delta: -1);
+                AdjustStats(existingDelta, termDeltas, tableLevelTermDeltas, totalFieldLengths, delta: -1);
                 return;
             }
 
             if (_baseTableToIndex.TryGetValue(id, out int baseIdx) && tombstones.Add(baseIdx))
             {
                 activeDocCount--;
-                AdjustStats(_baseDocuments[baseIdx], termDeltas, totalFieldLengths, delta: -1);
+                AdjustStats(_baseDocuments[baseIdx], termDeltas, tableLevelTermDeltas, totalFieldLengths, delta: -1);
             }
         }
 
@@ -223,7 +255,7 @@ public sealed class Bm25SearchIndex
 
             deltaDocuments[entry.TableId] = doc;
             activeDocCount++;
-            AdjustStats(doc, termDeltas, totalFieldLengths, delta: +1);
+            AdjustStats(doc, termDeltas, tableLevelTermDeltas, totalFieldLengths, delta: +1);
         }
 
         foreach (var removedId in removalSet)
@@ -235,13 +267,127 @@ public sealed class Bm25SearchIndex
             _baseDocuments,
             _baseTableToIndex,
             _baseTermDocCounts,
+            _baseTableLevelTermCounts,
             tombstones,
             deltaDocuments,
             termDeltas,
+            tableLevelTermDeltas,
             activeDocCount,
             totalFieldLengths,
             _weights);
     }
+
+    private static string[] BuildVocabulary(
+        IReadOnlyDictionary<string, int> baseCounts,
+        IReadOnlyDictionary<string, int>? deltaCounts = null)
+    {
+        var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (term, count) in baseCounts)
+        {
+            int total = count + (deltaCounts?.GetValueOrDefault(term) ?? 0);
+            if (total > 0) active.Add(term);
+        }
+
+        if (deltaCounts is not null)
+        {
+            foreach (var (term, delta) in deltaCounts)
+            {
+                if (!baseCounts.ContainsKey(term) && delta > 0) active.Add(term);
+            }
+        }
+
+        return SortVocabulary(active);
+    }
+
+    private static string[] SortVocabulary(IEnumerable<string> tokens)
+    {
+        var array = tokens.ToArray();
+        Array.Sort(array, static (a, b) =>
+        {
+            int byLength = a.Length.CompareTo(b.Length);
+            return byLength != 0 ? byLength : string.CompareOrdinal(a, b);
+        });
+        return array;
+    }
+
+    /// <summary>
+    /// Indexed tokens that contain <paramref name="term"/> (ordinal; tokens are already lower-cased invariantly by the tokenizer),
+    /// shortest first, at most <see cref="MaxPartialExpansions"/>. Empty for tokens below <see cref="MinPartialMatchLength"/>.
+    /// </summary>
+    private static List<string> Expand(string term, string[] vocabulary)
+    {
+        var result = new List<string>();
+        if (term.Length < MinPartialMatchLength) return result;
+
+        foreach (var candidate in vocabulary)
+        {
+            if (candidate.Length <= term.Length) continue;
+            if (candidate.Contains(term, StringComparison.Ordinal))
+            {
+                result.Add(candidate);
+                if (result.Count >= MaxPartialExpansions) break;
+            }
+        }
+
+        return result;
+    }
+
+    private sealed record QueryTermPlan(string Term, double? Idf, List<(string Token, double Idf)> Expansions);
+
+    private double? ComputeIdf(string term)
+    {
+        int df = _baseTermDocCounts.GetValueOrDefault(term) + _termDocCountDeltas.GetValueOrDefault(term);
+        if (df <= 0) return null;
+
+        // Robertson-Sparck Jones IDF with smoothing
+        return Math.Log(1.0 + (_activeDocCount - df + 0.5) / (df + 0.5));
+    }
+
+    private QueryTermPlan[] BuildPlan(string[] queryTerms, string[] vocabulary)
+    {
+        int count = Math.Min(queryTerms.Length, MaxQueryTerms);
+        var plan = new QueryTermPlan[count];
+        for (int i = 0; i < count; i++)
+        {
+            var term = queryTerms[i];
+            double? idf = ComputeIdf(term);
+            var expansions = new List<(string Token, double Idf)>();
+            foreach (var candidate in Expand(term, vocabulary))
+            {
+                if (ComputeIdf(candidate) is { } expansionIdf)
+                {
+                    expansions.Add((candidate, expansionIdf));
+                }
+            }
+
+            plan[i] = new QueryTermPlan(term, idf, expansions);
+        }
+
+        return plan;
+    }
+
+    private static double PseudoTf(
+        IndexedDocument doc,
+        string token,
+        double[] avgFieldLength,
+        double[] weights,
+        int fieldLimit)
+    {
+        double pseudoTf = 0.0;
+        for (int f = 0; f < fieldLimit; f++)
+        {
+            var tfMap = doc.FieldTermFrequencies[f];
+            if (tfMap is null || avgFieldLength[f] <= 0.0) continue;
+            if (!tfMap.TryGetValue(token, out var tf)) continue;
+
+            double norm = 1.0 - B + B * (doc.FieldLengths[f] / avgFieldLength[f]);
+            pseudoTf += weights[f] * tf / norm;
+        }
+
+        return double.IsFinite(pseudoTf) ? pseudoTf : 0.0;
+    }
+
+    private static double Saturate(double idf, double pseudoTf) => idf * (pseudoTf * (K1 + 1.0) / (pseudoTf + K1));
 
     private static double[] ValidateWeights(IReadOnlyList<double> weights)
     {
@@ -289,18 +435,13 @@ public sealed class Bm25SearchIndex
 
         if (!anyNonZeroField) return [];
 
-        var activeQueryTerms = new List<(string Term, double Idf)>(queryTerms.Length);
-        foreach (var term in queryTerms)
+        var fullPlan = BuildPlan(queryTerms, _vocabulary);
+        if (!Array.Exists(fullPlan, static e => e.Idf.HasValue || e.Expansions.Count > 0))
         {
-            int df = _baseTermDocCounts.GetValueOrDefault(term) + _termDocCountDeltas.GetValueOrDefault(term);
-            if (df <= 0) continue;
-
-            // Robertson-Sparck Jones IDF with smoothing
-            double idf = Math.Log(1.0 + (_activeDocCount - df + 0.5) / (df + 0.5));
-            activeQueryTerms.Add((term, idf));
+            return [];
         }
 
-        if (activeQueryTerms.Count == 0) return [];
+        var tableLevelPlan = isColumnRestricted != null ? BuildPlan(queryTerms, _tableLevelVocabulary) : fullPlan;
 
         var results = new List<(TableIdentifier TableId, double Score, IReadOnlyList<string> MatchedTerms)>();
 
@@ -312,12 +453,12 @@ public sealed class Bm25SearchIndex
                 continue;
             }
 
-            ScoreDocument(_baseDocuments[i], activeQueryTerms, avgFieldLength, _weights, isAllowed, isColumnRestricted, results);
+            ScoreDocument(_baseDocuments[i], fullPlan, tableLevelPlan, avgFieldLength, _weights, isAllowed, isColumnRestricted, results);
         }
 
         foreach (var doc in _deltaDocuments.Values)
         {
-            ScoreDocument(doc, activeQueryTerms, avgFieldLength, _weights, isAllowed, isColumnRestricted, results);
+            ScoreDocument(doc, fullPlan, tableLevelPlan, avgFieldLength, _weights, isAllowed, isColumnRestricted, results);
         }
 
         return results.OrderByDescending(x => x.Score).Take(topK).ToList();
@@ -325,7 +466,8 @@ public sealed class Bm25SearchIndex
 
     private static void ScoreDocument(
         IndexedDocument doc,
-        List<(string Term, double Idf)> activeQueryTerms,
+        QueryTermPlan[] fullPlan,
+        QueryTermPlan[] tableLevelPlan,
         double[] avgFieldLength,
         double[] weights,
         Func<TableIdentifier, bool>? isAllowed,
@@ -337,33 +479,49 @@ public sealed class Bm25SearchIndex
             return;
         }
 
-        int fieldLimit = isColumnRestricted != null && isColumnRestricted(doc.TableId)
-            ? FirstColumnField
-            : CatalogSearchFieldWeights.FieldCount;
+        bool restricted = isColumnRestricted != null && isColumnRestricted(doc.TableId);
+        int fieldLimit = restricted ? FirstColumnField : CatalogSearchFieldWeights.FieldCount;
+        var plan = restricted ? tableLevelPlan : fullPlan;
 
         double score = 0.0;
         List<string>? matched = null;
 
-        foreach (var (term, idf) in activeQueryTerms)
+        foreach (var entry in plan)
         {
             // BM25F: weighted, per-field length-normalized pseudo term frequency
-            double pseudoTf = 0.0;
-            for (int f = 0; f < fieldLimit; f++)
+            double pseudoTf = entry.Idf is not null
+                ? PseudoTf(doc, entry.Term, avgFieldLength, weights, fieldLimit)
+                : 0.0;
+            if (pseudoTf > 0.0)
             {
-                var tfMap = doc.FieldTermFrequencies[f];
-                if (tfMap is null || avgFieldLength[f] <= 0.0) continue;
-                if (!tfMap.TryGetValue(term, out var tf)) continue;
-
-                double norm = 1.0 - B + B * (doc.FieldLengths[f] / avgFieldLength[f]);
-                pseudoTf += weights[f] * tf / norm;
+                score += Saturate(entry.Idf!.Value, pseudoTf);
+                matched ??= [];
+                matched.Add(entry.Term);
+                continue;
             }
 
-            if (pseudoTf <= 0.0 || !double.IsFinite(pseudoTf)) continue;
+            // No whole-word match in this document: the best partial match counts, at a lower weight.
+            double bestPartial = 0.0;
+            string? bestToken = null;
+            foreach (var (token, expansionIdf) in entry.Expansions)
+            {
+                double partialTf = PseudoTf(doc, token, avgFieldLength, weights, fieldLimit);
+                if (partialTf <= 0.0) continue;
 
-            score += idf * (pseudoTf * (K1 + 1.0) / (pseudoTf + K1));
+                double partial = PartialMatchFactor * Saturate(expansionIdf, partialTf);
+                if (partial > bestPartial)
+                {
+                    bestPartial = partial;
+                    bestToken = token;
+                }
+            }
 
-            matched ??= [];
-            matched.Add(term);
+            if (bestToken is not null)
+            {
+                score += bestPartial;
+                matched ??= [];
+                matched.Add(bestToken);
+            }
         }
 
         if (double.IsFinite(score) && score > 0.001)
@@ -403,34 +561,48 @@ public sealed class Bm25SearchIndex
     private static void AdjustStats(
         IndexedDocument doc,
         Dictionary<string, int> termCounts,
+        Dictionary<string, int> tableLevelTermCounts,
         long[] totalFieldLengths,
         int delta)
     {
         if (!doc.HasTokens) return;
 
+        var seenAll = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenTableLevel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         for (int f = 0; f < CatalogSearchFieldWeights.FieldCount; f++)
         {
             totalFieldLengths[f] += delta * (long)doc.FieldLengths[f];
-        }
 
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var tf in doc.FieldTermFrequencies)
-        {
+            var tf = doc.FieldTermFrequencies[f];
             if (tf is null) continue;
+
+            bool isTableLevel = f < FirstColumnField;
             foreach (var term in tf.Keys)
             {
-                if (!seen.Add(term)) continue;
-
-                var updated = termCounts.GetValueOrDefault(term) + delta;
-                if (updated == 0)
+                if (seenAll.Add(term))
                 {
-                    termCounts.Remove(term);
+                    AddCountDelta(termCounts, term, delta);
                 }
-                else
+
+                if (isTableLevel && seenTableLevel.Add(term))
                 {
-                    termCounts[term] = updated;
+                    AddCountDelta(tableLevelTermCounts, term, delta);
                 }
             }
+        }
+    }
+
+    private static void AddCountDelta(Dictionary<string, int> counts, string term, int delta)
+    {
+        int updated = counts.GetValueOrDefault(term) + delta;
+        if (updated == 0)
+        {
+            counts.Remove(term);
+        }
+        else
+        {
+            counts[term] = updated;
         }
     }
 }

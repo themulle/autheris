@@ -1,6 +1,8 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using Autheris.Application.Catalog.Search;
 using Autheris.Domain.Common;
 using Shouldly;
@@ -153,5 +155,114 @@ public sealed class Bm25SearchIndexTests
 
         var restricted = index.Search("crane", isColumnRestricted: id => id == Master);
         restricted.Select(r => r.TableId).ShouldBe([Telemetry]);
+    }
+
+    [Fact]
+    public void Betriebsstunden_FindsMotorbetriebsstunden()
+    {
+        var docs = new List<Bm25Document>
+        {
+            new(Master, TechnicalName: "erp engine_hours", ShortDescription: "Motorbetriebsstunden je Fahrzeug"),
+            new(Telemetry, TechnicalName: "iot telemetry", ShortDescription: "Positionsdaten"),
+        };
+
+        var results = new Bm25SearchIndex(docs).Search("Betriebsstunden");
+
+        results.Select(r => r.TableId).ShouldBe([Master]);
+        results[0].MatchedTerms.ShouldContain("motorbetriebsstunden");
+    }
+
+    [Fact]
+    public void Kran_FindsKranspezifikationen()
+    {
+        var docs = new List<Bm25Document>
+        {
+            new(Master, TechnicalName: "erp model_series", LongDescription: "Kranspezifikationen, Krantyps und Kranbaureihen"),
+            new(Telemetry, TechnicalName: "iot telemetry", ShortDescription: "Positionsdaten"),
+        };
+
+        new Bm25SearchIndex(docs).Search("Kran").Select(r => r.TableId).ShouldBe([Master]);
+    }
+
+    [Fact]
+    public void WholeWord_OutranksPartialMatch()
+    {
+        var whole = TableIdentifier.Parse("erp.whole");
+        var partial = TableIdentifier.Parse("erp.partial");
+        var docs = new List<Bm25Document>
+        {
+            new(partial, TechnicalName: "erp partial", TagsAndOwner: "", ShortDescription: "Kranspezifikationen"),
+            new(whole, TechnicalName: "erp whole", ShortDescription: "Kran"),
+            new(Telemetry, TechnicalName: "iot telemetry", ShortDescription: "Positionsdaten"),
+        };
+
+        var results = new Bm25SearchIndex(docs).Search("Kran");
+
+        results.Select(r => r.TableId).ShouldBe([whole, partial]);
+        results[0].Score.ShouldBeGreaterThan(results[1].Score);
+    }
+
+    [Fact]
+    public void TokenShorterThan4_MatchesWholeWordsOnly()
+    {
+        var docs = new List<Bm25Document>
+        {
+            new(Master, TechnicalName: "erp master", ShortDescription: "Kranbau"),
+            new(Telemetry, TechnicalName: "iot telemetry", ShortDescription: "kra"),
+        };
+        var index = new Bm25SearchIndex(docs);
+
+        index.Search("kra").Select(r => r.TableId).ShouldBe([Telemetry]);
+        index.Search("kran").Select(r => r.TableId).ShouldBe([Master]);
+    }
+
+    [Fact]
+    public void ExpansionCap_BoundsCandidateTerms()
+    {
+        var docs = Enumerable.Range(0, Bm25SearchIndex.MaxPartialExpansions + 10)
+            .Select(i => new Bm25Document(TableIdentifier.Parse($"erp.t{i}"), ShortDescription: $"kran{i:D3}"))
+            .ToList();
+
+        var results = new Bm25SearchIndex(docs).Search("kran", topK: 1000);
+
+        results.Count.ShouldBe(Bm25SearchIndex.MaxPartialExpansions);
+    }
+
+    [Fact]
+    public void QueryWith1000Tokens_IsBoundedAndFast()
+    {
+        var docs = Enumerable.Range(0, 2000)
+            .Select(i => new Bm25Document(TableIdentifier.Parse($"erp.t{i}"), ShortDescription: $"alpha{i} beta{i} gamma{i}"))
+            .ToList();
+        var index = new Bm25SearchIndex(docs);
+        var query = string.Join(' ', Enumerable.Range(0, 1000).Select(i => $"alpha{i}"));
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var results = index.Search(query, topK: 5000);
+        sw.Stop();
+
+        results.Count.ShouldBeLessThanOrEqualTo(Bm25SearchIndex.MaxQueryTerms * (Bm25SearchIndex.MaxPartialExpansions + 1));
+        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public void Expansion_UsesTurkishCultureInvariantFolding()
+    {
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("tr-TR");
+            var docs = new List<Bm25Document>
+            {
+                new(Master, TechnicalName: "erp master", ShortDescription: "SUBTITLE of INFORMATION"),
+                new(Telemetry, TechnicalName: "iot telemetry", ShortDescription: "Positionsdaten"),
+            };
+
+            new Bm25SearchIndex(docs).Search("TITLE").Select(r => r.TableId).ShouldBe([Master]);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
     }
 }
