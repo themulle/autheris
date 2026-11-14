@@ -439,9 +439,22 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 }
             }
 
-            if (tableMeta == null || tableMeta.Columns.Count == 0 || !tableMeta.Table.IsActive)
+            // The log names the reason (#669); the caller receives the same denial for every unusable table.
+            if (tableMeta == null)
             {
-                _logger?.LogWarning("WebSQL rejected table {Table}: no catalog metadata registered or table is inactive.", target.FullName);
+                _logger?.LogWarning("WebSQL rejected table {Table}: no catalog metadata is registered.", target.FullName);
+                throw SqlDataSourceResolver.TableDenied(target);
+            }
+
+            if (!tableMeta.Table.IsActive)
+            {
+                _logger?.LogWarning("WebSQL rejected table {Table}: the catalog entry is inactive.", target.FullName);
+                throw SqlDataSourceResolver.TableDenied(target);
+            }
+
+            if (tableMeta.Columns.Count == 0)
+            {
+                _logger?.LogWarning("WebSQL rejected table {Table}: the catalog entry declares no columns.", target.FullName);
                 throw SqlDataSourceResolver.TableDenied(target);
             }
 
