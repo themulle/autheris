@@ -14,28 +14,38 @@ using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
 /// End-to-End FinOps: HTTP -> Auth -> FinOps-Middleware -> governed WebSQL -> echte SQLite-Datei,
 /// danach Kostenverbuchung (FOCUS), Budgetstatus und Sperre per 429 - als eine zusammenhaengende Kette.
 /// </summary>
-public sealed class FinOpsEndToEndSqliteTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class FinOpsEndToEndSqliteTests : IClassFixture<FinOpsEndToEndSqliteTests.HostFixture>
 {
     private const string Tenant = "fin_e2e";
-    private readonly string _workDir;
     private readonly WebApplicationFactory<Program> _factory;
 
-    public FinOpsEndToEndSqliteTests(WebApplicationFactory<Program> factory)
+    public FinOpsEndToEndSqliteTests(HostFixture factory)
     {
-        _workDir = Path.Combine(Path.GetTempPath(), "autheris-finops-e2e-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_workDir);
-        var dbPath = Path.Combine(_workDir, "data.db");
-        using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        private readonly string _workDir;
+        private readonly string _dbPath;
+
+        public HostFixture()
         {
+            _workDir = Path.Combine(Path.GetTempPath(), "autheris-finops-e2e-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_workDir);
+            _dbPath = Path.Combine(_workDir, "data.db");
+            using var conn = new SqliteConnection($"Data Source={_dbPath}");
             conn.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"CREATE TABLE fin_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL);
@@ -43,30 +53,32 @@ INSERT INTO fin_cranes VALUES (1,'LTM-1100'),(2,'LR-1600');";
             cmd.ExecuteNonQuery();
         }
 
-        _factory = factory.WithWebHostBuilder(b =>
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("FinOpsEndToEndSqliteTests"));
-            b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
-            b.UseSetting("Gateway:WebSql:Enabled", "true");
-            b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "1000",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("FinOpsEndToEndSqliteTests"),
+                ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+                ["Gateway:DataSources:Connections:default:Provider"] = "Sqlite",
+                ["Gateway:DataSources:Connections:default:ConnectionString"] = $"Data Source={_dbPath}",
+                ["Gateway:WebSql:Enabled"] = "true",
+                ["Gateway:WebSql:DefaultDataSourceName"] = "default",
+                ["Gateway:FinOps:Enabled"] = "true",
+                ["Gateway:FinOps:PricePerComputeSecond"] = "1000",   // 1 ms = 1 EUR
+                ["Gateway:FinOps:DefaultMonthlyBudget"] = "1000000",
+                [$"Gateway:FinOps:TenantMonthlyBudgets:{Tenant}"] = "0.5", // eine Abfrage sprengt es
+            });
+        }
 
-            b.UseSetting("Gateway:FinOps:Enabled", "true");
-            b.UseSetting("Gateway:FinOps:PricePerComputeSecond", "1000");   // 1 ms = 1 EUR
-            b.UseSetting("Gateway:FinOps:DefaultMonthlyBudget", "1000000");
-            b.UseSetting($"Gateway:FinOps:TenantMonthlyBudgets:{Tenant}", "0.5"); // eine Abfrage sprengt es
-        });
-    }
-
-    public void Dispose()
-    {
-        _factory.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        }
     }
 
     private HttpClient Client(string tenant, string roles)

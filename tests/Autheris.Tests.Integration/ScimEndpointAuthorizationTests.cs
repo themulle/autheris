@@ -4,6 +4,7 @@ using System;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,14 +13,19 @@ using Xunit;
 using Autheris.Tests.Integration.Governance;
 
 [Trait("Category", "Security")]
-public sealed class ScimEndpointAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ScimEndpointAuthorizationTests : IClassFixture<ScimEndpointAuthorizationTests.HostFixture>
 {
     private const string ScimSecret = "SecretForScimRealm_12345678901234567890";
     private readonly WebApplicationFactory<Program> _factory;
 
-    public ScimEndpointAuthorizationTests(WebApplicationFactory<Program> factory)
+    public ScimEndpointAuthorizationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("ScimEndpointAuthorizationTests"));
@@ -37,7 +43,7 @@ public sealed class ScimEndpointAuthorizationTests : IClassFixture<WebApplicatio
                     };
                 });
             });
-        });
+        }
     }
 
     [Fact]

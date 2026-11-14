@@ -8,29 +8,45 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
-public class FourEyesAndDelegationIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class FourEyesAndDelegationIntegrationTests : IClassFixture<FourEyesAndDelegationIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public FourEyesAndDelegationIntegrationTests(WebApplicationFactory<Program> factory)
+    public FourEyesAndDelegationIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("FourEyesAndDelegationIntegrationTests"));
-            builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
+            base.ConfigureWebHost(builder);
             builder.UseSyntheticSqlData();
-        });
+        }
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("FourEyesAndDelegationIntegrationTests"),
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "1000",
+            });
+        }
     }
 
     private HttpClient CreateClient(Sid? userSid = null, string[]? roles = null)

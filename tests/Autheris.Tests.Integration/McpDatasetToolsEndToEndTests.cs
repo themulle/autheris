@@ -13,6 +13,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -25,20 +26,27 @@ using Autheris.Tests.Integration.Governance;
 /// MCP dataset tools end to end as an authenticated user with a real consent on a real SQLite table:
 /// the agent sees only the granted columns and reads rows through the governed paths.
 /// </summary>
-public sealed class McpDatasetToolsEndToEndTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetToolsEndToEndTests.HostFixture>
 {
     private const string UserSid = "S-1-5-MCP-E2E-USER";
     private const string Tenant = "tenant_mcp";
     private static readonly TableIdentifier Cranes = new("default", "main", "mcp_cranes");
 
-    private readonly string _dbPath;
     private readonly WebApplicationFactory<Program> _factory;
 
-    public McpDatasetToolsEndToEndTests(WebApplicationFactory<Program> factory)
+    public McpDatasetToolsEndToEndTests(HostFixture factory)
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), "autheris-mcp-e2e-" + Guid.NewGuid().ToString("N") + ".db");
-        using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        private readonly string _dbPath;
+
+        public HostFixture()
         {
+            _dbPath = Path.Combine(Path.GetTempPath(), "autheris-mcp-e2e-" + Guid.NewGuid().ToString("N") + ".db");
+            using var conn = new SqliteConnection($"Data Source={_dbPath}");
             conn.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
@@ -47,24 +55,24 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
             cmd.ExecuteNonQuery();
         }
 
-        _factory = factory.WithWebHostBuilder(b =>
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("McpDatasetToolsEndToEndTests"));
-            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}");
-            b.UseSetting("Gateway:Mcp:Enabled", "true");
-            b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-        });
-    }
+            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+            builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("McpDatasetToolsEndToEndTests"));
+            builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
+            builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}");
+            builder.UseSetting("Gateway:Mcp:Enabled", "true");
+            builder.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+        }
 
-    public void Dispose()
-    {
-        _factory.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            SqliteConnection.ClearAllPools();
+            try { File.Delete(_dbPath); } catch { /* best effort */ }
+        }
     }
 
     private async Task SeedCatalogAndConsentAsync()

@@ -13,6 +13,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Autheris.Extensions.Lakehouse.Services;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,92 +21,102 @@ using Shouldly;
 using Xunit;
 using Autheris.Tests.Integration.Governance;
 
-public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public class LakehouseIntegrationTests : IClassFixture<LakehouseIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
-    private readonly string _testLakehouseDir;
 
-    public LakehouseIntegrationTests(WebApplicationFactory<Program> factory)
+    public LakehouseIntegrationTests(HostFixture factory)
     {
-        _testLakehouseDir = Path.Combine(Path.GetTempPath(), "iceberg_integration_" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(_testLakehouseDir);
+        _factory = factory;
+    }
 
-        // Setup test Iceberg metadata and manifest files
-        var metaDir = Path.Combine(_testLakehouseDir, "orders", "metadata");
-        Directory.CreateDirectory(metaDir);
+    public sealed class HostFixture : IntegrationHost
+    {
+        private readonly string _testLakehouseDir;
+        private readonly string _metaJsonPath;
 
-        var metaJsonPath = Path.Combine(metaDir, "v2.metadata.json");
-        var manifestJsonPath = Path.Combine(metaDir, "manifest-list.json");
-
-        File.WriteAllText(metaJsonPath, $$"""
+        public HostFixture()
         {
-          "format-version": 2,
-          "table-uuid": "lakehouse-orders-uuid",
-          "location": "{{metaJsonPath}}",
-          "last-sequence-number": 1,
-          "last-updated-ms": 1774692000000,
-          "current-snapshot-id": 5001,
-          "current-schema-id": 0,
-          "schemas": [
+            _testLakehouseDir = Path.Combine(Path.GetTempPath(), "iceberg_integration_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_testLakehouseDir);
+
+            // Setup test Iceberg metadata and manifest files
+            var metaDir = Path.Combine(_testLakehouseDir, "orders", "metadata");
+            Directory.CreateDirectory(metaDir);
+
+            _metaJsonPath = Path.Combine(metaDir, "v2.metadata.json");
+            var manifestJsonPath = Path.Combine(metaDir, "manifest-list.json");
+
+            File.WriteAllText(_metaJsonPath, $$"""
             {
-              "schema-id": 0,
-              "fields": [
-                { "id": 1, "name": "orderId", "type": "string" },
-                { "id": 2, "name": "customerEmail", "type": "string" },
-                { "id": 3, "name": "iban", "type": "string" },
-                { "id": 4, "name": "healthData", "type": "string" },
-                { "id": 5, "name": "secretInternalNotes", "type": "string" },
-                { "id": 6, "name": "tenantId", "type": "string" },
-                { "id": 7, "name": "orderDate", "type": "string" }
+              "format-version": 2,
+              "table-uuid": "lakehouse-orders-uuid",
+              "location": "{{_metaJsonPath}}",
+              "last-sequence-number": 1,
+              "last-updated-ms": 1774692000000,
+              "current-snapshot-id": 5001,
+              "current-schema-id": 0,
+              "schemas": [
+                {
+                  "schema-id": 0,
+                  "fields": [
+                    { "id": 1, "name": "orderId", "type": "string" },
+                    { "id": 2, "name": "customerEmail", "type": "string" },
+                    { "id": 3, "name": "iban", "type": "string" },
+                    { "id": 4, "name": "healthData", "type": "string" },
+                    { "id": 5, "name": "secretInternalNotes", "type": "string" },
+                    { "id": 6, "name": "tenantId", "type": "string" },
+                    { "id": 7, "name": "orderDate", "type": "string" }
+                  ]
+                }
+              ],
+              "default-spec-id": 0,
+              "partition-specs": [
+                {
+                  "spec-id": 0,
+                  "fields": [
+                    { "source-id": 6, "field-id": 1000, "name": "tenantId", "transform": "identity" },
+                    { "source-id": 7, "field-id": 1001, "name": "orderDate", "transform": "identity" }
+                  ]
+                }
+              ],
+              "snapshots": [
+                {
+                  "snapshot-id": 5001,
+                  "timestamp-ms": 1774692000000,
+                  "manifest-list": "{{manifestJsonPath}}"
+                }
               ]
             }
-          ],
-          "default-spec-id": 0,
-          "partition-specs": [
+            """);
+
+            File.WriteAllText(manifestJsonPath, """
             {
-              "spec-id": 0,
-              "fields": [
-                { "source-id": 6, "field-id": 1000, "name": "tenantId", "transform": "identity" },
-                { "source-id": 7, "field-id": 1001, "name": "orderDate", "transform": "identity" }
+              "entries": [
+                {
+                  "file_path": "orders/data/part-1.parquet",
+                  "file_format": "PARQUET",
+                  "record_count": 5,
+                  "file_size_in_bytes": 1024,
+                  "partition": { "tenantId": "tenant-lake-a", "orderDate": "2026-06-01" },
+                  "lower_bounds": { "orderDate": "2026-06-01" },
+                  "upper_bounds": { "orderDate": "2026-06-01" }
+                },
+                {
+                  "file_path": "orders/data/part-2.parquet",
+                  "file_format": "PARQUET",
+                  "record_count": 5,
+                  "file_size_in_bytes": 1024,
+                  "partition": { "tenantId": "tenant-lake-b", "orderDate": "2026-06-02" },
+                  "lower_bounds": { "orderDate": "2026-06-02" },
+                  "upper_bounds": { "orderDate": "2026-06-02" }
+                }
               ]
             }
-          ],
-          "snapshots": [
-            {
-              "snapshot-id": 5001,
-              "timestamp-ms": 1774692000000,
-              "manifest-list": "{{manifestJsonPath}}"
-            }
-          ]
+            """);
         }
-        """);
 
-        File.WriteAllText(manifestJsonPath, """
-        {
-          "entries": [
-            {
-              "file_path": "orders/data/part-1.parquet",
-              "file_format": "PARQUET",
-              "record_count": 5,
-              "file_size_in_bytes": 1024,
-              "partition": { "tenantId": "tenant-lake-a", "orderDate": "2026-06-01" },
-              "lower_bounds": { "orderDate": "2026-06-01" },
-              "upper_bounds": { "orderDate": "2026-06-01" }
-            },
-            {
-              "file_path": "orders/data/part-2.parquet",
-              "file_format": "PARQUET",
-              "record_count": 5,
-              "file_size_in_bytes": 1024,
-              "partition": { "tenantId": "tenant-lake-b", "orderDate": "2026-06-02" },
-              "lower_bounds": { "orderDate": "2026-06-02" },
-              "upper_bounds": { "orderDate": "2026-06-02" }
-            }
-          ]
-        }
-        """);
-
-        _factory = factory.WithWebHostBuilder(builder =>
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
@@ -115,23 +126,24 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
             builder.UseSetting("Gateway:Lakehouse:Enabled", "true");
             builder.UseSetting("Gateway:Lakehouse:Storage:Provider", "Local");
             builder.UseSetting("Gateway:Lakehouse:Storage:LocalBasePath", _testLakehouseDir);
-            builder.UseSetting("Gateway:Lakehouse:Tables:iceberg_orders:Location", metaJsonPath);
+            builder.UseSetting("Gateway:Lakehouse:Tables:iceberg_orders:Location", _metaJsonPath);
             builder.UseSetting("Gateway:Lakehouse:Tables:iceberg_orders:Format", "Iceberg");
-        });
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_testLakehouseDir))
-            {
-                Directory.Delete(_testLakehouseDir, true);
-            }
         }
-        catch
+
+        protected override void Dispose(bool disposing)
         {
-            // Ignore test cleanup error
+            base.Dispose(disposing);
+            try
+            {
+                if (Directory.Exists(_testLakehouseDir))
+                {
+                    Directory.Delete(_testLakehouseDir, true);
+                }
+            }
+            catch
+            {
+                // Ignore test cleanup error
+            }
         }
     }
 

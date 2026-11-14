@@ -4,6 +4,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,20 +14,25 @@ using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
-public class M2mIdentityIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class M2mIdentityIntegrationTests : IClassFixture<M2mIdentityIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public M2mIdentityIntegrationTests(WebApplicationFactory<Program> factory)
+    public M2mIdentityIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("M2mIdentityIntegrationTests"));
             builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "500");
             builder.UseSyntheticSqlData();
-        });
+        }
     }
 
     private HttpClient CreateM2mClient(string appId = "spn-etl-batch-01", string? tenant = "tenant-alpha")
