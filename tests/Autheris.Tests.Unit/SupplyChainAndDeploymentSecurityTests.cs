@@ -272,6 +272,9 @@ public class SupplyChainAndDeploymentSecurityTests
         dependabot.ShouldContain("package-ecosystem: \"github-actions\"");
         dependabot.ShouldContain("package-ecosystem: \"nuget\"");
         dependabot.ShouldContain("package-ecosystem: \"docker\"");
+        dependabot.ShouldContain("dependency-name: \"mcr.microsoft.com/dotnet/sdk\"");
+        dependabot.ShouldContain("dependency-name: \"mcr.microsoft.com/dotnet/aspnet\"");
+        dependabot.ShouldContain("update-types: [\"version-update:semver-major\"]");
     }
 
     // =========================================================================
