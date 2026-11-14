@@ -27,7 +27,6 @@ public sealed partial class TransportGateCoverageTests
         "src/Autheris.Application/Analytics/GovernedAggregationService.ValidationAndExecution.cs",
         "src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.cs",
         "src/Autheris.Application/Procedures/Services/GovernedProcedureExecutionService.cs",
-        "src/Autheris.Application/Policy/AccessDecisionPoint.cs",
         "src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs"
     ];
 
