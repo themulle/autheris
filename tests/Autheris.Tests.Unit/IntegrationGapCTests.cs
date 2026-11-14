@@ -455,10 +455,9 @@ public sealed class IntegrationGapCTests
         validator(new object(), otherCert, null, SslPolicyErrors.None).ShouldBeFalse();
         validator(new object(), null, null, SslPolicyErrors.RemoteCertificateNotAvailable).ShouldBeFalse();
 
-        // SHA-1 pins are supported as well
-        var sha1Validator = RedisConnectionSecurity.CreatePinnedCertificateValidator(
+        // SHA-1 pins are rejected
+        Should.Throw<InvalidOperationException>(() =>
             RedisConnectionSecurity.NormalizeThumbprints([pinnedCert.GetCertHashString()], "test"));
-        sha1Validator(new object(), pinnedCert, null, SslPolicyErrors.None).ShouldBeTrue();
     }
 
     // =========================================================================
