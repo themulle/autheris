@@ -71,7 +71,7 @@ internal sealed class SecuredTreeHarness : IDisposable
         }
 
         var provider = CatalogProvider = Substitute.For<IGovernedCatalogProvider>();
-        provider.GetCatalogAsync(Arg.Any<string>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
+        provider.GetCatalogAsync(Arg.Any<GovernedDataSource>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ITableCatalog>(new InMemoryTableCatalog(entries, "main")));
         var tables = MetadataRepository = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
