@@ -41,7 +41,7 @@ public sealed class CatalogSearchRelevanceTests(ITestOutputHelper output)
     [Theory]
     [RelevanceCases(RelevanceNeed.Baseline)]
     [RelevanceCases(RelevanceNeed.FieldWeights)]
-    [RelevanceCases(RelevanceNeed.PartialWords, Skip = "Needs partial-word matching (#626).")]
+    [RelevanceCases(RelevanceNeed.PartialWords)]
     [RelevanceCases(RelevanceNeed.WordForms, Skip = "Needs word forms (stemming); not planned, owner decision Q-SRCH-6 (#624).")]
     [RelevanceCases(RelevanceNeed.Embeddings, Skip = "Needs a multilingual embedding model (#628).")]
     [RelevanceCases(RelevanceNeed.FullIdentifier)]
