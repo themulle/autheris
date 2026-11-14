@@ -353,7 +353,8 @@ public sealed class SqlEndpointLoader : IDisposable
         string schema,
         IEnumerable<string>? columns,
         string? summary = null,
-        string? dataSource = null)
+        string? dataSource = null,
+        string? table = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directoryPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

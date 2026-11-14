@@ -43,6 +43,11 @@ public sealed record DbtModelDefinition(
     /// <summary>Synthetic sample rows declared in meta (e.g. meta.synthetic_samples); null when none declared.</summary>
     public IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples { get; init; }
 
+    private readonly string? _physicalName;
+
+    /// <summary>Issue #666: the physical table name (dbt alias for models, identifier for sources); defaults to <see cref="Name"/>.</summary>
+    public string PhysicalName { get => _physicalName ?? Name; init => _physicalName = value; }
+
     public TableIdentifier ToTableIdentifier() => new(Database, Schema, Name);
 }
 
@@ -136,6 +141,7 @@ public static class DbtSyncSkipReasons
     public const string Ineligible = "INELIGIBLE";
     public const string Duplicate = "DUPLICATE";
     public const string CreateFailed = "CREATE_FAILED";
+    public const string PhysicalNameCollision = "PHYSICAL_NAME_COLLISION";
 }
 
 public sealed record DbtContractBreakingChange(
