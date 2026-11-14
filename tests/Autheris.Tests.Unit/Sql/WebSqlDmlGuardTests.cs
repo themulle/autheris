@@ -26,7 +26,7 @@ public sealed class WebSqlDmlGuardTests
             claims.Add(new Claim(ClaimTypes.Role, role));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
     }
 
     private static Task Run(GovernedSqlExecutionService service, ClaimsPrincipal user, string sql) =>

@@ -30,13 +30,13 @@ internal static class FederatedVfPipelineHarness
     internal static readonly TenantId Tenant = new(TenantValue);
 
     internal static ClaimsPrincipal User(string sid = "S-1-5-21-VF-ALICE") =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, sid),
                 new Claim(ClaimTypes.Name, "alice"),
                 new Claim("tenant_id", TenantValue)
             ],
-            "Test"));
+            "Test")));
 
     internal static TableMetadata HttpTable(string domain, string schema, string table, params string[] columns) => new()
     {

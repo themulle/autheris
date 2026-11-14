@@ -50,8 +50,8 @@ public sealed class GovernedSqlExecutorX1Tests
         "WITH RECURSIVE t(id) AS (SELECT id FROM orders WHERE id = 1 UNION ALL SELECT id + 1 FROM t WHERE id < 3) SELECT id FROM t";
 
     internal static ClaimsPrincipal Writer() =>
-        new(new ClaimsIdentity(
-            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer"), new Claim("scp", "Sql.Write")], "Test"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-X1"), new Claim("tenant_id", Tenant), new Claim(ClaimTypes.Role, "Writer"), new Claim("scp", "Sql.Write")], "Test")));
 
     private static TableMetadata Orders(string sourceType)
     {

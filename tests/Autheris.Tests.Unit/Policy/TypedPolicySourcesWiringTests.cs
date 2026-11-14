@@ -75,7 +75,8 @@ public sealed class TypedPolicySourcesWiringTests
     }
 
     private static ClaimsPrincipal User() =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, UserSid.Value), new Claim("tenant_id", Tenant.Value)], "Bearer"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, UserSid.Value), new Claim("tenant_id", Tenant.Value)], "Bearer")));
 
     private static void AssertTyped(TableAccessDecision decision)
     {
@@ -97,6 +98,7 @@ public sealed class TypedPolicySourcesWiringTests
             UserSid = UserSid,
             TenantId = Tenant,
             GroupSids = new HashSet<Sid>(),
+            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Complete,
             TenantRoles = new HashSet<string>(),
             ClusterRoles = new HashSet<string>(),
             AuthenticationScheme = "Bearer"
@@ -202,6 +204,7 @@ public sealed class TypedPolicySourcesWiringTests
             UserSid = UserSid,
             TenantId = Tenant,
             GroupSids = new HashSet<Sid>(),
+            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Complete,
             TenantRoles = new HashSet<string>(),
             ClusterRoles = new HashSet<string>(),
             AuthenticationScheme = "Bearer"

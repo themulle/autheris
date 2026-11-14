@@ -12,6 +12,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
+/// <summary>Response body for the active grants listing endpoint.</summary>
+public sealed record GrantsListResponse(System.Collections.Generic.IReadOnlyList<GrantRecordView> Grants, bool Truncated);
+
 /// <summary>Explain and grants listing; every call is audited by the service, denied ones included.</summary>
 public static class AuthorizationExplainEndpoints
 {
@@ -38,7 +41,8 @@ public static class AuthorizationExplainEndpoints
     internal static async Task<IResult> ListGrantsAsync(string objectName, HttpContext context, IAccessExplanationService service, CancellationToken ct)
     {
         var result = await service.ListGrantsAsync(context.GetSecurityContext(), objectName, ct).ConfigureAwait(false);
-        return ToResult(result.Outcome, new { grants = result.Grants, truncated = result.Truncated }, context);
+        var payload = result.Grants is null ? null : new GrantsListResponse(result.Grants, result.Truncated);
+        return ToResult(result.Outcome, payload, context);
     }
 
     // Foreign-tenant, hidden and unknown objects share one body (no existence oracle).

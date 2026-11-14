@@ -98,7 +98,7 @@ public sealed class ProcedureVirtualFilterTests
         return f;
     }
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "test"));
+    private static ClaimsPrincipal User() => Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID")], "test")));
 
     [Fact]
     public async Task VirtualFilterOnTheResultTable_IsEnforcedByTheRowScope_AndAudited()

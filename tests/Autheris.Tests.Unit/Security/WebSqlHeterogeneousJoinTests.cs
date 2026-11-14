@@ -34,13 +34,13 @@ public sealed class WebSqlHeterogeneousJoinTests
     private const string Tenant = "tenant_test";
 
     private static ClaimsPrincipal CreateUser() =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),
                 new Claim(ClaimTypes.Name, "alice"),
                 new Claim("tenant_id", Tenant)
             ],
-            "Test"));
+            "Test")));
 
     private static TableMetadata CreateOrdersTable()
     {

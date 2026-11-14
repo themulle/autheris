@@ -165,8 +165,8 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
         return (service, executor);
     }
 
-    private static ClaimsPrincipal User() => new(new ClaimsIdentity(
-        [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FILTER-USER"), new Claim("tenant_id", "sales")], "Test"));
+    private static ClaimsPrincipal User() => Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
+        [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FILTER-USER"), new Claim("tenant_id", "sales")], "Test")));
 
     [Fact]
     public async Task Gateway_PassesFilterToExecutor_WhenColumnIsClear()

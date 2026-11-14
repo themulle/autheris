@@ -16,13 +16,13 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class GovernedLoggingGeneratedSqlTests
 {
-    private static readonly ClaimsPrincipal TestUser = new(new ClaimsIdentity(
+    private static readonly ClaimsPrincipal TestUser = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),
             new Claim("tenant_id", "tenant_a"),
             new Claim(ClaimTypes.Role, "Admin")
         ],
-        "Test"));
+        "Test")));
 
     [Fact]
     [Trait("Category", "Security")]

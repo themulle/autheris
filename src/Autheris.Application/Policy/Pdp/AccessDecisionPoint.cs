@@ -17,6 +17,7 @@ using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -107,10 +108,32 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         var metadata = request.Object;
         ArgumentNullException.ThrowIfNull(metadata);
         var table = metadata.Identifier;
+        bool consentBypassed = _options.Value.IsConsentBypassed;
+
+        if (subject is null
+            || (!subject.IsAuthenticated && !consentBypassed)
+            || (subject.IsAuthenticated && string.IsNullOrWhiteSpace(subject.UserSid.Value)))
+        {
+            return PreconditionDenied(table, "IDENTITY_INCOMPLETE", "Identity", null, "Access denied: caller identity is incomplete.");
+        }
+
+        if (subject.TenantClaimInvalid
+            || subject.ResolvedTenant is not { Value: { Length: > 0 } resolvedTenant }
+            || string.IsNullOrWhiteSpace(resolvedTenant))
+        {
+            return PreconditionDenied(table, "TENANT_UNRESOLVED", "Identity", null, "Access denied: tenant could not be resolved.");
+        }
+
+        if ((subject.IsAuthenticated && subject.GroupResolutionStatus != GroupResolutionStatus.Complete)
+            || (!subject.IsAuthenticated && !consentBypassed && subject.GroupResolutionStatus != GroupResolutionStatus.Complete)
+            || (subject.Principal != null && GroupResolutionClaims.IsMarkedDegraded(subject.Principal)))
+        {
+            return PreconditionDenied(table, "GROUPS_DEGRADED", "Identity", null, "identity.groups_unresolved: Group resolution unavailable (fail-closed).");
+        }
 
         if (!metadata.Table.IsActive)
         {
-            return TableAccessDecision.Denied(table, $"Table '{table.ToQualifiedName()}' is not active.");
+            return PreconditionDenied(table, "TABLE_INACTIVE", "Catalog", null, $"Table '{table.ToQualifiedName()}' is not active.");
         }
 
         if (request.Operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete)
@@ -122,11 +145,15 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
 
             if (!canWrite)
             {
-                return TableAccessDecision.Denied(table, $"Write access to table '{table.ToQualifiedName()}' is not permitted.");
+                return PreconditionDenied(
+                    table,
+                    "WRITE_TRANSPORT_NOT_WIRED",
+                    "Policy",
+                    null,
+                    $"Write access to table '{table.ToQualifiedName()}' is not permitted.");
             }
         }
 
-        bool consentBypassed = _options.Value.IsConsentBypassed;
         var roles = new HashSet<string>(subject.TenantRoles.Concat(subject.ClusterRoles), StringComparer.OrdinalIgnoreCase);
 
         if (_policy != null)
@@ -176,8 +203,24 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
             return allowed with { EvaluatedByPdp = true };
         }
 
-        return TableAccessDecision.Denied(table, $"Access to table '{table.ToQualifiedName()}' denied by policy (policy services unavailable).");
+        return TableAccessDecision.Denied(table, $"Access to table '{table.ToQualifiedName()}' denied by policy (policy services unavailable).") with
+        {
+            Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "POLICY_UNAVAILABLE", "Policy", null)],
+            EvaluatedByPdp = true
+        };
     }
+
+    private static TableAccessDecision PreconditionDenied(
+        TableIdentifier table,
+        string code,
+        string sourceKind,
+        string? sourceId,
+        string message) =>
+        TableAccessDecision.Denied(table, message) with
+        {
+            Reasons = [new DecisionReason(DecisionStep.Precondition, code, sourceKind, sourceId)],
+            EvaluatedByPdp = true
+        };
 
     public async ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(
         SecurityPrincipalContext subject,
@@ -200,10 +243,31 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
 
     public async ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         var decision = await DecideAsync(request, ct).ConfigureAwait(false);
-        var cols = decision.ColumnAccess.Select(kv => new ColumnStateExplanation(kv.Key, kv.Value)).ToList();
+        var sourceColumns = request.Object.Columns;
+        var cols = sourceColumns.Count > 0
+            ? sourceColumns
+                .Select(c =>
+                {
+                    var level = decision.GetEffectiveColumnAccess(c.ColumnName, request.Object);
+                    var maskType = level == ColumnAccessLevel.Mask
+                        ? ResolveMaskType(c.ColumnName, decision, request.Object)
+                        : null;
+                    return new ColumnStateExplanation(c.ColumnName, level, maskType);
+                })
+                .ToList()
+            : decision.ColumnAccess
+                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => new ColumnStateExplanation(
+                    kv.Key,
+                    kv.Value,
+                    kv.Value == ColumnAccessLevel.Mask ? ResolveMaskType(kv.Key, decision, request.Object) : null))
+                .ToList();
+
         var groups = new EffectiveGroupsExplanation(
-            request.Subject.GroupSids.Select(s => s.Value).ToList(),
+            request.Subject.GroupSids.Select(s => s.Value).OrderBy(v => v, StringComparer.Ordinal).ToList(),
             "Token",
             request.Subject.GroupResolutionStatus.ToString());
 
@@ -213,6 +277,33 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
             cols,
             groups,
             decision.Grants,
-            decision.PolicyEpoch);
+            decision.PolicyEpoch,
+            request.Subject.GroupResolutionStatus == GroupResolutionStatus.Complete);
+    }
+
+    private static string ResolveMaskType(string columnName, TableAccessDecision decision, TableMetadata metadata)
+    {
+        if (decision.ColumnMasks is ColumnMaskPolicy typedMasks
+            && typedMasks.TryGetSpec(columnName, out var spec))
+        {
+            return spec.Kind.ToString();
+        }
+
+        if (metadata.ColumnMaskingRules.TryGetValue(columnName, out var rule)
+            && !string.IsNullOrWhiteSpace(rule.RuleType))
+        {
+            return rule.RuleType;
+        }
+
+        foreach (var (key, value) in metadata.ColumnMaskingRules)
+        {
+            if (string.Equals(key, columnName, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(value.RuleType))
+            {
+                return value.RuleType;
+            }
+        }
+
+        return "Default";
     }
 }

@@ -425,7 +425,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             claims.Add(new Claim("scp", "Sql.Write"));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
     }
 
     internal static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000, bool permissiveWrite = true, bool withDependency = false, bool columnlessHolder = false, bool plainTable = false, bool requireTenantColumn = false, string[]? exemptTables = null)

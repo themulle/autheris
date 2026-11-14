@@ -44,6 +44,12 @@ internal static class Wp0
 
         claims.AddRange((roles ?? []).Select(r => new Claim(ClaimTypes.Role, r)));
         claims.AddRange(extra);
+        if (!extra.Any(c => c.Type is Autheris.Domain.Identity.GroupResolutionClaims.StatusClaimType or Autheris.Domain.Identity.GroupResolutionClaims.MarkerClaimType))
+        {
+            claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker());
+            claims.Add(Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete));
+        }
+
         return new ClaimsPrincipal(new ClaimsIdentity(claims, authType));
     }
 

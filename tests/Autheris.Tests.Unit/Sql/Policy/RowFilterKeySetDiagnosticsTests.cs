@@ -25,7 +25,8 @@ public sealed class RowFilterKeySetDiagnosticsTests
     private const string Tenant = "tenant_a";
 
     private static ClaimsPrincipal User() =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-KS"), new Claim("tenant_id", Tenant)], "Test"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-KS"), new Claim("tenant_id", Tenant)], "Test")));
 
     [Fact]
     public async Task NoKeyValueInLogsAuditOrMetrics_SEC_RF107_09()

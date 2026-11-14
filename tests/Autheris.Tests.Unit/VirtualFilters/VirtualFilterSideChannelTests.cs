@@ -105,7 +105,8 @@ public sealed class VirtualFilterSideChannelTests
             Substitute.For<IIcebergMetadataReader>(), metadata, options, NullLogger<IcebergRestCatalogFederationService>.Instance,
             global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             adp, consentRepo: consents);
-        var analyst = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "analyst"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ANALYST")], "Bearer"));
+        var analyst = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "analyst"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ANALYST")], "Bearer")));
 
         if (delivered)
         {

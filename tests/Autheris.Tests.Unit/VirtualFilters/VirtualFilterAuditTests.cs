@@ -45,7 +45,8 @@ public sealed class VirtualFilterAuditTests
         var audit = Substitute.For<IAuditLogRepository>();
         var service = new GatewayExecutionService(metadata, consents, audit, resolution, Substitute.For<IConsentCacheService>(), Substitute.For<IColumnMaskingProvider>(),
             options: Options.Create(new GatewayOptions()), dataSourceExecutors: [], mandatoryFilters: new FixedOutcome(Applied));
-        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID"), new Claim("tenant_id", "tenant_lwe")], "Test"));
+        var user = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LWE-DAVID"), new Claim("tenant_id", "tenant_lwe")], "Test")));
 
         await Should.ThrowAsync<System.Exception>(() => service.ExecuteTableQueryAsync(user, table.Identifier, 10, 0));   // no executor registered
 

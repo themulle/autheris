@@ -359,8 +359,8 @@ public sealed class SecurityReviewG5Tests : IDisposable
         return svc;
     }
 
-    private static ClaimsPrincipal Analyst() => new(new ClaimsIdentity(
-        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com")], "Bearer"));
+    private static ClaimsPrincipal Analyst() => Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
+        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com")], "Bearer")));
 
     [Fact]
     public async Task Iceberg_InactiveTable_IsNotServed()

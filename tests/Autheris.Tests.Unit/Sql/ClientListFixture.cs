@@ -174,14 +174,14 @@ internal sealed class ClientListFixture : IAsyncDisposable
     {
         // Test-only seam: the production write decision denies every DML target.
         Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
-        return new(new ClaimsIdentity(
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LIST-USER"),
                 new Claim("tenant_id", tenant),
                 new Claim(ClaimTypes.Role, writer ? WriterRole : "Reader"),
                 new Claim("scp", "Sql.Write")
             ],
-            "Test"));
+            "Test")));
     }
 
     public static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();

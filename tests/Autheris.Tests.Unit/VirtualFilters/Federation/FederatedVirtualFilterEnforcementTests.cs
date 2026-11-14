@@ -258,7 +258,8 @@ public sealed class FederatedVirtualFilterEnforcementTests
     // ----- WI-11: consent bypass without consent services still resolves Virtual Filters (SEC-19, ST-36) -----
 
     private static ClaimsPrincipal UserWithoutSid() =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.Name, "nobody"), new Claim("tenant_id", Tenant.Value)], "Test"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "nobody"), new Claim("tenant_id", Tenant.Value)], "Test")));
 
     private static (StubTableConnector Crm, FederatedServiceHarness.Pipeline Pipeline) BypassSetup(
         IMandatoryRowFilterResolver? resolver = null, VirtualFilterSnapshot? snapshot = null)

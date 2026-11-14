@@ -130,12 +130,12 @@ public sealed class DynamicMaskingAndConnectorGuardTests
             secretProvider: secretProvider,
             logger: NullLogger<GovernedSqlExecutionService>.Instance);
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        var user = Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim("sub", "S-1-USER-1"),
             new Claim(ClaimTypes.PrimarySid, "S-1-USER-1"),
             new Claim("tenant_id", "tenant-alpha")
-        }, "Bearer"));
+        }, "Bearer")));
 
         var compiled = await service.CompileAsync("SELECT id, ssn FROM hr.employees", user, new TenantId("tenant-alpha"));
 
