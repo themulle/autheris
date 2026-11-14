@@ -109,7 +109,7 @@ public sealed class TableMetadataUnavailableMappingTests
                 .Returns<McpDatasetDescription>(_ => throw ex);
             var executor = new GatewayMcpQueryExecutor(
                 Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
-                NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog);
+                NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
             return await executor.ExecuteOperationAsync(tool, """{"dataset":"sales.public.orders"}""",
                 new McpSessionContext("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER", Roles: ["Analyst"]));
         }

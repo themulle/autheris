@@ -206,12 +206,12 @@ public sealed class McpDatasetToolWiringTests
     [InlineData("""{"query":"query A { a } query B { b }"}""", "one operation")]
     [InlineData("""{"query":"{ broken "}""", "parse")]
     [InlineData("""{"variables":{}}""", "query")]
-    [InlineData("""{"query":"{ a }","variables":[1]}""", "variables")]
+    [InlineData("""{"query":"{ a }","variables":[1]}""", "invalid_arguments")]
     public async Task Executor_QueryGraphQl_RejectsAnythingButOneQuery(string args, string expected)
     {
         var provider = Substitute.For<IRequestExecutorProvider>();
         var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-            datasetCatalog: Substitute.For<IMcpDatasetCatalog>());
+            datasetCatalog: Substitute.For<IMcpDatasetCatalog>(), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         var json = await executor.ExecuteOperationAsync(Tool("query_graphql"), args, Session());
 
@@ -233,7 +233,7 @@ public sealed class McpDatasetToolWiringTests
             .Returns(Task.FromResult<IExecutionResult>(OperationResult.FromError(ErrorBuilder.New().SetMessage("success").Build())));
 
         var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-            datasetCatalog: Substitute.For<IMcpDatasetCatalog>());
+            datasetCatalog: Substitute.For<IMcpDatasetCatalog>(), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         var args = """
         {
@@ -277,7 +277,8 @@ public sealed class McpDatasetToolWiringTests
         Substitute.For<IRequestExecutorProvider>(),
         Substitute.For<IGatewayExecutionService>(),
         NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-        datasetCatalog: catalog);
+        datasetCatalog: catalog,
+        persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
     private static McpSessionContext Session() =>
         new("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER", Roles: ["Analyst"]);
@@ -323,7 +324,7 @@ public sealed class McpDatasetToolWiringTests
             .Returns(new McpDatasetSample("sales.public.orders", 0, [], IsSynthetic: true));
         var gateway = Substitute.For<IGatewayExecutionService>();
         var executor = new GatewayMcpQueryExecutor(
-            Substitute.For<IRequestExecutorProvider>(), gateway, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog);
+            Substitute.For<IRequestExecutorProvider>(), gateway, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         var json = await executor.ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders","count":3,"synthetic":true}""", Session());
 

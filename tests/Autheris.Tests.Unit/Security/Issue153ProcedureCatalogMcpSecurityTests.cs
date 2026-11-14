@@ -144,7 +144,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             Substitute.For<IRequestExecutorProvider>(),
             gatewayExec,
             NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-            datasetCatalog: catalog);
+            datasetCatalog: catalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.DescribeDataset);
         var session = CreateSession();

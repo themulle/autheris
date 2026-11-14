@@ -125,7 +125,7 @@ public sealed class McpResourceColumnFilterMcp1Tests
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { tableWithDeny }));
 
-        var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance);
+        var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, options: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }));
         var resources = await compiler.GetSemanticResourcesAsync("corp");
 
         var glossary = resources.FirstOrDefault(r => r.Uri.StartsWith("glossary://", StringComparison.Ordinal));

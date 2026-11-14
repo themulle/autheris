@@ -485,7 +485,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         new("sess-m17", "svc-agent", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-5-21-AGENT-USER");
 
     private static GatewayMcpQueryExecutor CreateMcpExecutor(IGatewayExecutionService executionService) =>
-        new(Substitute.For<IRequestExecutorProvider>(), executionService, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100));
+        new(Substitute.For<IRequestExecutorProvider>(), executionService, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
     private static void AssertStructuredError(string json, string expectedCode)
     {
@@ -517,7 +517,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var tool = new McpToolDefinition(
             "query_customers",
             "Customers",
-            "{}",
+            """{"type":"object","properties":{}}""",
             "query GetCustomers { customers { id } }",
             new TableIdentifier("finance", "dbo", "customers"));
 
@@ -529,7 +529,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     [Fact]
     public async Task M17_GraphQLExecutionFailure_ReturnsStructuredErrorInsteadOfMockData()
     {
-        var tool = new McpToolDefinition("custom_report", "Custom", "{}", "query { doesNotExist }");
+        var tool = new McpToolDefinition("custom_report", "Custom", """{"type":"object","properties":{}}""", "query { doesNotExist }");
 
         var json = await CreateMcpExecutor(Substitute.For<IGatewayExecutionService>()).ExecuteOperationAsync(tool, "{}", CreateMcpSession());
 
@@ -539,7 +539,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     [Fact]
     public async Task M17_ToolWithoutOperation_ReturnsNotAvailableError()
     {
-        var tool = new McpToolDefinition("query_data_catalog", "Catalog", "{}", string.Empty);
+        var tool = new McpToolDefinition("query_data_catalog", "Catalog", """{"type":"object","properties":{}}""", string.Empty);
 
         var json = await CreateMcpExecutor(Substitute.For<IGatewayExecutionService>()).ExecuteOperationAsync(tool, "{}", CreateMcpSession());
 
@@ -549,7 +549,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     [Fact]
     public async Task M17_SimulateQueryWithoutSimulator_DoesNotFakeApproval()
     {
-        var tool = new McpToolDefinition("simulate_query", "Simulator", "{}", string.Empty);
+        var tool = new McpToolDefinition("simulate_query", "Simulator", """{"type":"object","properties":{"query":{"type":"string"}}}""", string.Empty);
 
         var json = await CreateMcpExecutor(Substitute.For<IGatewayExecutionService>())
             .ExecuteOperationAsync(tool, "{\"query\":\"{ table(domain: \\\"a\\\", name: \\\"b\\\") { tableName } }\"}", CreateMcpSession());

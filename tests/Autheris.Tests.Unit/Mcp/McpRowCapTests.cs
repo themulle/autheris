@@ -85,7 +85,7 @@ public sealed class McpRowCapTests
 
         var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(),
             NullLogger<GatewayMcpQueryExecutor>.Instance, datasetCatalog: catalog, toolExecutionHandler: handler,
-            gatewayOptions: Options(maxRows));
+            gatewayOptions: Options(maxRows), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
         return new Fixture(executor, handler, catalog);
     }
 
@@ -330,7 +330,7 @@ public sealed class McpRowCapTests
         handler.ExecuteToolAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
             .Returns(RowsJson("rows", Produced, "rowCount"));
         var executor = new GatewayMcpQueryExecutor(Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
-            logger, Options(Cap), toolExecutionHandler: handler);
+            logger, Options(Cap), toolExecutionHandler: handler, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         await executor.ExecuteOperationAsync(Tool("query_sql"), ArgsFor("query_sql"), Session());
 
@@ -367,6 +367,7 @@ public sealed class McpRowCapTests
         handler.ExecuteToolAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
             .Returns(RowsJson("rows", Produced, "rowCount"));
         services.AddSingleton(handler);
+        services.AddSingleton<IPersistedToolValidator, Autheris.Application.Mcp.Services.PersistedToolValidator>();
         services.AddScoped<IMcpQueryExecutor, GatewayMcpQueryExecutor>();
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -382,6 +383,6 @@ public sealed class McpRowCapTests
     {
         Should.Throw<ArgumentNullException>(() => new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
-            NullLogger<GatewayMcpQueryExecutor>.Instance, null!));
+            NullLogger<GatewayMcpQueryExecutor>.Instance, null!, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator()));
     }
 }

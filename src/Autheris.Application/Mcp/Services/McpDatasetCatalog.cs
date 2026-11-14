@@ -1190,8 +1190,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             return false;
         }
 
-        id = new TableIdentifier(parts[0], parts[1], parts[2]);
-        return true;
+        // TryCreate answers false for control characters and newlines (SEC-OI-508-3) instead of throwing.
+        return TableIdentifier.TryCreate(parts[0], parts[1], parts[2], out id);
     }
 
     private bool IsBypassed => options?.Value.IsMcpAuthBypassed == true;

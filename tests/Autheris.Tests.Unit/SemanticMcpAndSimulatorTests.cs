@@ -61,7 +61,7 @@ public sealed class SemanticMcpAndSimulatorTests
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { table }));
 
-        var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance);
+        var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, options: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }));
         var resources = await compiler.GetSemanticResourcesAsync("finance");
 
         resources.Count.ShouldBe(1);

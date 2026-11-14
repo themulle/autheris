@@ -33,7 +33,7 @@ public sealed class McpQueryExecutorSecurityTests
             NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
             persistedToolValidator: toolValidator);
 
-        var tool = new McpToolDefinition("query_orders", "Query orders", "{}", "");
+        var tool = new McpToolDefinition("query_orders", "Query orders", """{"type":"object","properties":{}}""", "");
         var session = new McpSessionContext("s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Roles: ["Reader"]);
 
         var json = await mcpExecutor.ExecuteOperationAsync(tool, "{\"query\":\"test\"}", session);
@@ -66,9 +66,9 @@ public sealed class McpQueryExecutorSecurityTests
         var mcpExecutor = new GatewayMcpQueryExecutor(
             executorProvider,
             gatewayExec,
-            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100));
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
-        var tool = new McpToolDefinition("query_customers", "Query customers", "{}", "");
+        var tool = new McpToolDefinition("query_customers", "Query customers", """{"type":"object","properties":{}}""", "");
         var session = new McpSessionContext("s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Roles: null);
 
         await mcpExecutor.ExecuteOperationAsync(tool, "{}", session);
@@ -101,9 +101,9 @@ public sealed class McpQueryExecutorSecurityTests
         var mcpExecutor = new GatewayMcpQueryExecutor(
             executorProvider,
             gatewayExec,
-            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100));
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
-        var tool = new McpToolDefinition("query_customers", "Query customers", "{}", "");
+        var tool = new McpToolDefinition("query_customers", "Query customers", """{"type":"object","properties":{}}""", "");
         var session = new McpSessionContext(
             "s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             Roles: null,
@@ -127,10 +127,10 @@ public sealed class McpQueryExecutorSecurityTests
         var mcpExecutor = new GatewayMcpQueryExecutor(
             executorProvider,
             gatewayExec,
-            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100));
+            NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
         var mutationDoc = "mutation CreateUser { createUser(name: \"Alice\") { id } }";
-        var tool = new McpToolDefinition("create_user", "Create a user", "{}", mutationDoc);
+        var tool = new McpToolDefinition("create_user", "Create a user", """{"type":"object","properties":{}}""", mutationDoc);
         var session = new McpSessionContext(
             "s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             Roles: null,

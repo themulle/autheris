@@ -70,8 +70,7 @@ public sealed class McpPersistedToolSecurityTests
         // Assert
         isValid.ShouldBeFalse();
         failureReason.ShouldNotBeNull();
-        failureReason.ShouldContain("bypassRls");
-        failureReason.ShouldContain("Undeclared parameter");
+        failureReason.ShouldBe("invalid_arguments");
     }
 
     [Theory]
@@ -104,7 +103,7 @@ public sealed class McpPersistedToolSecurityTests
         // Assert
         isValid.ShouldBeFalse();
         failureReason.ShouldNotBeNull();
-        failureReason.ShouldContain("Prompt injection pattern detected");
+        failureReason.ShouldBe("invalid_arguments");
     }
 
     [Fact]
