@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -226,11 +227,18 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
         List<AuditLogEntry> entries,
         CancellationToken cancellationToken)
     {
+        var sanitized = new List<AuditLogEntry>(entries.Count);
+        for (int i = 0; i < entries.Count; i++)
+        {
+            sanitized.Add(ToRedactedEntry(entries[i]));
+        }
+
         try
         {
-            await _repository.RecordAuditEventsAsync(entries, cancellationToken).ConfigureAwait(false);
+            await _repository.RecordAuditEventsAsync(sanitized, cancellationToken).ConfigureAwait(false);
             for (int i = 0; i < batch.Count; i++)
             {
+                CopyChainMetadata(sanitized[i], batch[i].Entry);
                 batch[i].Completion.TrySetResult();
             }
         }
@@ -264,9 +272,11 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
 
     private async Task FlushSingleAsync(PendingAuditItem item, CancellationToken cancellationToken)
     {
+        var sanitized = ToRedactedEntry(item.Entry);
         try
         {
-            await _repository.RecordAuditEventsAsync([item.Entry], cancellationToken).ConfigureAwait(false);
+            await _repository.RecordAuditEventsAsync([sanitized], cancellationToken).ConfigureAwait(false);
+            CopyChainMetadata(sanitized, item.Entry);
             item.Completion.TrySetResult();
         }
         catch (OperationCanceledException oce)
@@ -302,6 +312,41 @@ public sealed class AuditGroupCommitSink : IAsyncDisposable, IDisposable
     public void Dispose()
     {
         DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static AuditLogEntry ToRedactedEntry(AuditLogEntry entry) => new()
+    {
+        Id = entry.Id,
+        TenantId = entry.TenantId,
+        OccurredAt = entry.OccurredAt,
+        EventType = entry.EventType,
+        ActorSid = entry.ActorSid,
+        TargetTable = entry.TargetTable,
+        TargetColumn = entry.TargetColumn,
+        Query = AuditDetailsBuilder.ScrubValue(entry.Query),
+        Decision = entry.Decision,
+        TraceId = entry.TraceId,
+        DetailsJson = AuditDetailsBuilder.RedactJson(entry.EffectiveDetailsJson),
+        Caller = entry.Caller is { } caller
+            ? new Autheris.Domain.Security.CallerContext(
+                AuditDetailsBuilder.ScrubValue(caller.Application),
+                AuditDetailsBuilder.ScrubValue(caller.Version),
+                AuditDetailsBuilder.ScrubValue(caller.QueryName),
+                AuditDetailsBuilder.ScrubValue(caller.ClientId))
+            {
+                IsClientAsserted = caller.IsClientAsserted
+            }
+            : null,
+        ChainSequence = entry.ChainSequence,
+        PrevHash = entry.PrevHash,
+        EntryHash = entry.EntryHash
+    };
+
+    private static void CopyChainMetadata(AuditLogEntry source, AuditLogEntry target)
+    {
+        target.ChainSequence = source.ChainSequence;
+        target.PrevHash = source.PrevHash;
+        target.EntryHash = source.EntryHash;
     }
 
     private readonly record struct PendingAuditItem(AuditLogEntry Entry, TaskCompletionSource Completion);

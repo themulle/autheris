@@ -17,6 +17,7 @@ public static class AuditChainEngine
     /// <summary>
     /// Computes the canonical entry hash for a single audit log entry using HMAC-SHA256 when an HMAC key is configured,
     /// or SHA-256 over the canonical payload when no HMAC key is provided.
+    /// When persisting entries, the hash covers the stored redacted <c>DetailsJson</c>; the canonical 12-field layout is unchanged.
     /// </summary>
     public static string ComputeEntryHash(
         byte[]? hmacKey,

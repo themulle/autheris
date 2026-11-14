@@ -664,19 +664,7 @@ public partial class GovernanceRepository : IAuditLogRepository, IAuditChainExpo
         long lastSequence = pendingState.LastSeq;
         string lastEntryHash = pendingState.LastHash;
 
-        var rows = new List<AuditInsertRow>(batch.Count);
-        for (int i = 0; i < batch.Count; i++)
-        {
-            var entry = batch[i];
-            long currentSequence = ++lastSequence;
-            var currentPrevHash = lastEntryHash;
-            var effectiveTenantId = StoredTenant.RequireWritable(entry.TenantId);
-            var entryHash = ComputeEntryHash(entry, currentSequence, currentPrevHash, effectiveTenantId);
-            entry.PrevHash = currentPrevHash;
-            entry.EntryHash = entryHash;
-            rows.Add(ToInsertRow(entry, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
-            lastEntryHash = entryHash;
-        }
+        var rows = BuildChainedRows(batch, ref lastSequence, ref lastEntryHash);
 
         await AuditSqlCore.InsertAuditRowsAsync(conn, existingTx, _dialect, rows, ct).ConfigureAwait(false);
 
@@ -710,19 +698,7 @@ public partial class GovernanceRepository : IAuditLogRepository, IAuditChainExpo
         long lastSequence = dbTailSeq;
         string lastEntryHash = effectiveDbHash;
 
-        var rows = new List<AuditInsertRow>(batch.Count);
-        for (int i = 0; i < batch.Count; i++)
-        {
-            var entry = batch[i];
-            long currentSequence = ++lastSequence;
-            var currentPrevHash = lastEntryHash;
-            var effectiveTenantId = StoredTenant.RequireWritable(entry.TenantId);
-            var entryHash = ComputeEntryHash(entry, currentSequence, currentPrevHash, effectiveTenantId);
-            entry.PrevHash = currentPrevHash;
-            entry.EntryHash = entryHash;
-            rows.Add(ToInsertRow(entry, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
-            lastEntryHash = entryHash;
-        }
+        var rows = BuildChainedRows(batch, ref lastSequence, ref lastEntryHash);
 
         await AuditSqlCore.InsertAuditRowsAsync(conn, tx, _dialect, rows, ct).ConfigureAwait(false);
 
@@ -930,11 +906,26 @@ public partial class GovernanceRepository : IAuditLogRepository, IAuditChainExpo
     private string ComputeAuditEntryHash(long? sequence, string id, string prevHash, DateTimeOffset occurredAt, string? eventType, string? actorSid, string? targetTable, string? targetColumn, string? decision, string? traceId, string? detailsJson, string? tenantId) =>
         AuditSqlCore.ComputeAuditEntryHash(_auditHmacKey, sequence, id, prevHash, occurredAt, eventType, actorSid, targetTable, targetColumn, decision, traceId, detailsJson, tenantId);
 
-    private string ComputeEntryHash(AuditLogEntry entry, long seq, string prevHash, string tenantId) =>
-        ComputeAuditEntryHash(seq, entry.Id.ToString(), prevHash, entry.OccurredAt, entry.EventType, entry.ActorSid.Value, entry.TargetTable, entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, tenantId);
+    private List<AuditInsertRow> BuildChainedRows(IReadOnlyList<AuditLogEntry> batch, ref long lastSequence, ref string lastEntryHash)
+    {
+        var rows = new List<AuditInsertRow>(batch.Count);
+        for (int i = 0; i < batch.Count; i++)
+        {
+            var entry = batch[i];
+            long currentSequence = ++lastSequence;
+            var currentPrevHash = lastEntryHash;
+            var effectiveTenantId = StoredTenant.RequireWritable(entry.TenantId);
+            // Hash covers the stored redacted DetailsJson (canonical 12-field layout unchanged).
+            string redactedDetails = AuditDetailsBuilder.RedactJson(entry.DetailsJson);
+            var entryHash = ComputeAuditEntryHash(currentSequence, entry.Id.ToString(), currentPrevHash, entry.OccurredAt, entry.EventType, entry.ActorSid.Value, entry.TargetTable, entry.TargetColumn, entry.Decision, entry.TraceId, redactedDetails, effectiveTenantId);
+            entry.PrevHash = currentPrevHash;
+            entry.EntryHash = entryHash;
+            rows.Add(new AuditInsertRow(entry.Id.ToString(), AuditTimestamp.ToStorage(entry.OccurredAt), entry.EventType, entry.ActorSid.Value, entry.TargetTable, entry.TargetColumn, entry.Decision, entry.TraceId, redactedDetails, currentPrevHash, entryHash, effectiveTenantId, currentSequence));
+            lastEntryHash = entryHash;
+        }
 
-    private static AuditInsertRow ToInsertRow(AuditLogEntry entry, string prevHash, string hash, string tenantId, long seq) =>
-        new(entry.Id.ToString(), AuditTimestamp.ToStorage(entry.OccurredAt), entry.EventType, entry.ActorSid.Value, entry.TargetTable, entry.TargetColumn, entry.Decision, entry.TraceId, entry.DetailsJson, prevHash, hash, tenantId, seq);
+        return rows;
+    }
 
     private AuditChainAnchor CreateSignedAnchor(long sequence, string entryHash) =>
         AuditSqlCore.CreateSignedAnchor(_auditAnchorKey, sequence, entryHash);
