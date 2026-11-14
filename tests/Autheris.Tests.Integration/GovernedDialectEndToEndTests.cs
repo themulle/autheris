@@ -369,6 +369,7 @@ public sealed class SqlServerGovernedEndToEndTests : GovernedDialectEndToEndBase
 }
 
 [Collection(OracleCollection.Name)]
+[Trait("Category", "Oracle")]
 public sealed class OracleGovernedEndToEndTests(AstCompilerOracleFixture fixture) : GovernedDialectEndToEndBase
 {
     protected override DialectTarget? Target { get; } = new("Oracle", "Oracle", fixture.AppConnectionString, AstCompilerOracleFixture.AppUser, AstCompilerOracleFixture.AppUser, "X1_ORDERS", ConversionFails: true);

@@ -41,6 +41,7 @@ internal sealed class DevelopmentEnvironment : IHostEnvironment
 /// with <c>BindByName</c>.
 /// </summary>
 [Collection(OracleCollection.Name)]
+[Trait("Category", "Oracle")]
 public sealed class AstCompilerOracleExecutionTests
 {
     private static readonly TableIdentity Orders = new(AstCompilerOracleFixture.AppUser, "ORDERS");

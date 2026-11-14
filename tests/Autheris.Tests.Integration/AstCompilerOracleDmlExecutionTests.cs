@@ -27,6 +27,7 @@ using Xunit;
 /// Oracle MERGE form (one UPDATE and one INSERT clause, no stand-alone DELETE).
 /// </summary>
 [Collection(OracleCollection.Name)]
+[Trait("Category", "Oracle")]
 public sealed class AstCompilerOracleDmlExecutionTests : AstCompilerDmlContract, IAsyncLifetime
 {
     private readonly AstCompilerOracleFixture _fx;

@@ -18,6 +18,7 @@ using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
+[Trait("Category", "Stress")]
 public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;

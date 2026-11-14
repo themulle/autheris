@@ -25,6 +25,8 @@ jobs:
       contents: read
     outputs:
       dotnet: ${{ steps.classify.outputs.dotnet }}
+      oracle: ${{ steps.classify.outputs.oracle }}
+      spark: ${{ steps.classify.outputs.spark }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -226,11 +228,63 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # WP-OI-CI-5 (#522): path-triggered PR smoke suite for Category=Oracle tests (runs on main pushes and when changes.outputs.oracle != 'false').
+  oracle-smoke:
+    name: Oracle Smoke Tests
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.oracle != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      # WP-OI-CI-4: use the pre-pulled, digest-pinned Ryuk image (TestImages.Ryuk).
+      TESTCONTAINERS_RYUK_CONTAINER_IMAGE: testcontainers/ryuk:0.14.0@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      - name: Pull pinned Oracle image
+        run: docker pull "$(grep '^gvenzl/oracle-free:' tests/test-images.txt)"
+
+      - name: Test Oracle Smoke Suite
+        timeout-minutes: 40
+        run: dotnet test tests/Autheris.Tests.Integration -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category=Oracle" --logger "trx" --results-directory ${{ runner.temp }}/test-results --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
+
+      - name: Upload Oracle test results (TRX)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-results-oracle
+          path: ${{ runner.temp }}/test-results
+          if-no-files-found: ignore
+
+      - name: Upload Oracle crash/hang diagnostics
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-oracle
+          path: |
+            **/Sequence_*.xml
+            **/*.dmp
+          retention-days: 7
+          if-no-files-found: ignore
+
   # WP-TS-03: run Databricks/Spark proxy execution tests in a dedicated parallel job so the main test job does not wait on the Spark container.
   spark-integration-tests:
     name: Spark Integration Tests
     needs: changes
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.changes.outputs.spark != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
