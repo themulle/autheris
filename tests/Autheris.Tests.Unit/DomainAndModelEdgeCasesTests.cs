@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Claims;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;
@@ -472,4 +473,11 @@ public class DomainAndModelEdgeCasesTests
     }
 
     #endregion
+
+    [Fact]
+    public void Column_access_levels_are_ordered_from_most_to_least_restrictive()
+    {
+        (ColumnAccessLevel.Deny < ColumnAccessLevel.Mask).ShouldBeTrue();
+        (ColumnAccessLevel.Mask < ColumnAccessLevel.Clear).ShouldBeTrue();
+    }
 }

@@ -63,7 +63,7 @@ public sealed class RemovedAuthzKeysTests
         {
             typeof(UnknownGatewayKeyGuard).Assembly,
             typeof(GatewayOptions).Assembly,
-            typeof(IAccessDecisionPoint).Assembly,
+            typeof(Autheris.Application.Policy.Pdp.IAccessDecisionPoint).Assembly,
             typeof(Autheris.GraphQL.Directives.McpToolDirectiveType).Assembly,
             typeof(Autheris.Infrastructure.Cache.ConsentCacheService).Assembly,
         };
