@@ -36,6 +36,7 @@ public sealed class AggregationIndexPricingTests
     private const string Sdl = """
         type Query {
           orders(first: Int = 10, where: OrderFilter, orderBy: [OrderSort!]): [Order!]!
+          ordersConnection(first: Int = 10, where: OrderFilter, orderBy: [OrderSort!]): OrderConnection!
           orders_aggregate(
             groupBy: [orders_column!],
             timeBuckets: [TimeBucketInput!],
@@ -70,6 +71,7 @@ public sealed class AggregationIndexPricingTests
         type Key { region: String customer_id: Int }
         type Value { alias: String! kind: String! intValue: Long }
         type MetricResult { metrics: [String!]! }
+        type OrderConnection { nodes: [Order!]! }
         type Order { id: Int! customer_id: Int! region: String! secret_col: String }
         scalar Long
         """;
@@ -543,6 +545,123 @@ public sealed class AggregationIndexPricingTests
             var deniedHints = deniedAutheris["indexHints"].ShouldBeAssignableTo<IReadOnlyList<GraphQlIndexHint>>()!;
             deniedHints.ShouldHaveSingleItem();
             deniedHints[0].HelpfulIndexColumns.ShouldBeEmpty();
+        }
+        finally
+        {
+            CatalogGraphQlTypeModule.CurrentLookup = prevLookup;
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Connection_AndAnonymousCallerWithPdp_EnforceFailClosedColumnVisibility()
+    {
+        var ordersMeta = CreateOrdersMetadata(indexCustomerId: false);
+        var rateLimiter = Substitute.For<IRateLimiterService>();
+        rateLimiter.ReserveCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new CostQuotaResult(Allowed: true, RemainingTokens: 500, RetryAfterSeconds: 0)));
+        rateLimiter.SettleCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new CostQuotaResult(Allowed: true, RemainingTokens: 450, RetryAfterSeconds: 0)));
+
+        var pdp = Substitute.For<IAccessDecisionPoint>();
+        var decision = TableAccessDecision.Allowed(
+            ordersMeta.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["region"] = ColumnAccessLevel.Clear,
+                ["secret_col"] = ColumnAccessLevel.Deny
+            });
+        pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<TableAccessDecision>(decision));
+
+        static DefaultHttpContext CreateHttpContext(bool authenticated) => new()
+        {
+            User = authenticated
+                ? new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.Name, "alice"),
+                        new Claim(ClaimTypes.PrimarySid, "user-1"),
+                        new Claim("sub", "user-1"),
+                        new Claim("tenant_id", "tenant-1")
+                    ],
+                    "TestAuth"))
+                : new ClaimsPrincipal(new ClaimsIdentity())
+        };
+
+        var accessor = new HttpContextAccessor { HttpContext = CreateHttpContext(authenticated: true) };
+        var gatewayOptions = new GatewayOptions
+        {
+            Insecure = new InsecureGettingStartedOptions { warn_disable_rate_limiting = true },
+            QueryCost = new QueryCostOptions { UnindexedRootListSurchargeMultiplier = 2.0 }
+        };
+
+        var services = new ServiceCollection();
+        services.AddSingleton(rateLimiter);
+        services.AddSingleton(pdp);
+        services.AddSingleton<IHttpContextAccessor>(accessor);
+        services.AddSingleton(Options.Create(gatewayOptions));
+        services.AddSingleton<IClientTierResolver>(new ClientTierResolver(NullLogger<ClientTierResolver>.Instance, Options.Create(gatewayOptions)));
+        services.AddSingleton<IQueryCostQuota, QueryCostQuota>();
+        var builder = services.AddGraphQLServer().AddDocumentFromString(Sdl);
+        foreach (var type in Utf8GraphQLParser.Parse(Sdl).Definitions.OfType<ObjectTypeDefinitionNode>())
+        {
+            foreach (var field in type.Fields)
+            {
+                object value = type.Name.Value switch
+                {
+                    "Query" when string.Equals(field.Name.Value, "ordersConnection", StringComparison.Ordinal) =>
+                        new Dictionary<string, object?> { ["nodes"] = Array.Empty<object>() },
+                    "OrderConnection" when string.Equals(field.Name.Value, "nodes", StringComparison.Ordinal) =>
+                        Array.Empty<object>(),
+                    "Query" when string.Equals(field.Name.Value, "orders", StringComparison.Ordinal) =>
+                        Array.Empty<object>(),
+                    "Query" => new Dictionary<string, object?> { ["count"] = 1L },
+                    _ => 1L
+                };
+                builder = builder.AddResolver(type.Name.Value, field.Name.Value, _ => value);
+            }
+        }
+
+        var executor = await builder
+            .UseRequest<CostAndQuotaMiddleware>()
+            .UseDefaultPipeline()
+            .BuildRequestExecutorAsync();
+
+        var prevLookup = CatalogGraphQlTypeModule.CurrentLookup;
+        try
+        {
+            CatalogGraphQlTypeModule.CurrentLookup = name =>
+                string.Equals(name, "orders", StringComparison.OrdinalIgnoreCase) ? ordersMeta : null;
+
+            // 1. Relay Connection field strips "Connection" and resolves PDP column visibility (allows clear "region")
+            var connClearQuery = "{ ordersConnection(first: 10, where: { region: { eq: \"EU\" } }) { nodes { id } } }";
+            var connClearResult = (OperationResult)await executor.ExecuteAsync(OperationRequestBuilder.New().SetDocument(connClearQuery).Build());
+            connClearResult.Errors.ShouldBeEmpty();
+            var connClearHints = connClearResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["indexHints"]
+                .ShouldBeAssignableTo<IReadOnlyList<GraphQlIndexHint>>()!;
+            connClearHints.ShouldHaveSingleItem();
+            connClearHints[0].Root.ShouldBe("ordersConnection");
+            connClearHints[0].HelpfulIndexColumns.ShouldBe(["region"]);
+
+            // 2. Relay Connection field with denied "secret_col" suppresses HelpfulIndexColumns (all-or-nothing)
+            accessor.HttpContext = CreateHttpContext(authenticated: true);
+            var connDeniedQuery = "{ ordersConnection(first: 10, where: { region: { eq: \"EU\" }, secret_col: { eq: \"x\" } }) { nodes { id } } }";
+            var connDeniedResult = (OperationResult)await executor.ExecuteAsync(OperationRequestBuilder.New().SetDocument(connDeniedQuery).Build());
+            connDeniedResult.Errors.ShouldBeEmpty();
+            var connDeniedHints = connDeniedResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["indexHints"]
+                .ShouldBeAssignableTo<IReadOnlyList<GraphQlIndexHint>>()!;
+            connDeniedHints.ShouldHaveSingleItem();
+            connDeniedHints[0].HelpfulIndexColumns.ShouldBeEmpty();
+
+            // 3. Anonymous request when IAccessDecisionPoint is registered fails closed -> EmptyVisibleColumns -> []
+            accessor.HttpContext = CreateHttpContext(authenticated: false);
+            var anonQuery = "{ orders_aggregate(groupBy: [region], aggregates: [{ fn: COUNT, alias: \"c\" }]) { count } }";
+            var anonResult = (OperationResult)await executor.ExecuteAsync(OperationRequestBuilder.New().SetDocument(anonQuery).Build());
+            anonResult.Errors.ShouldBeEmpty();
+            var anonHints = anonResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["indexHints"]
+                .ShouldBeAssignableTo<IReadOnlyList<GraphQlIndexHint>>()!;
+            anonHints.ShouldHaveSingleItem();
+            anonHints[0].HelpfulIndexColumns.ShouldBeEmpty();
         }
         finally
         {

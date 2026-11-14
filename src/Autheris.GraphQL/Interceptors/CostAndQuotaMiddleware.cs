@@ -131,6 +131,9 @@ public sealed class CostAndQuotaMiddleware
         opResult.Extensions = extensions.SetItem("autheris", autherisExt);
     }
 
+    private static readonly IReadOnlySet<string> EmptyVisibleColumns =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
     private static async ValueTask<Func<string, IReadOnlySet<string>?>?> ResolveVisibleColumnsLookupAsync(
         IServiceProvider? services,
         ClaimsPrincipal? principal,
@@ -138,7 +141,7 @@ public sealed class CostAndQuotaMiddleware
         Func<string, TableMetadata?>? metadataLookup,
         CancellationToken cancellationToken)
     {
-        if (services is null || metadataLookup is null || principal?.Identity?.IsAuthenticated != true)
+        if (services is null || metadataLookup is null)
         {
             return null;
         }
@@ -149,10 +152,15 @@ public sealed class CostAndQuotaMiddleware
             return null;
         }
 
+        if (principal?.Identity?.IsAuthenticated != true)
+        {
+            return _ => EmptyVisibleColumns;
+        }
+
         var rootFieldNames = CollectRootFieldNames(doc);
         if (rootFieldNames.Count == 0)
         {
-            return null;
+            return _ => EmptyVisibleColumns;
         }
 
         var resolvedByQualifiedName = new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase);
@@ -162,10 +170,18 @@ public sealed class CostAndQuotaMiddleware
         {
             var meta = metadataLookup(rootName);
             string? baseName = null;
-            if (meta is null && rootName.EndsWith("_aggregate", StringComparison.OrdinalIgnoreCase))
+            if (meta is null)
             {
-                baseName = rootName[..^"_aggregate".Length];
-                meta = metadataLookup(baseName);
+                if (rootName.EndsWith("_aggregate", StringComparison.OrdinalIgnoreCase))
+                {
+                    baseName = rootName[..^10];
+                    meta = metadataLookup(baseName);
+                }
+                else if (rootName.EndsWith("Connection", StringComparison.Ordinal))
+                {
+                    baseName = rootName[..^10];
+                    meta = metadataLookup(baseName);
+                }
             }
 
             if (meta is null)
@@ -196,7 +212,7 @@ public sealed class CostAndQuotaMiddleware
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    visibleCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    visibleCols = EmptyVisibleColumns;
                 }
 
                 resolvedByQualifiedName[qualifiedName] = visibleCols;
@@ -211,9 +227,7 @@ public sealed class CostAndQuotaMiddleware
             byTableKey[qualifiedName] = visibleCols;
         }
 
-        return byTableKey.Count == 0
-            ? null
-            : key => byTableKey.TryGetValue(key, out var cols) ? cols : null;
+        return key => byTableKey.TryGetValue(key, out var cols) ? cols : EmptyVisibleColumns;
     }
 
     private static List<string> CollectRootFieldNames(DocumentNode doc)
