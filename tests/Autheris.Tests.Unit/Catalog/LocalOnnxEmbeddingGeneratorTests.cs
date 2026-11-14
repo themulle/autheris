@@ -95,7 +95,7 @@ public sealed class LocalOnnxEmbeddingGeneratorTests
         var hits = await engine.SearchAsync(
             new CatalogSearchQuery("orders", Mode: CatalogSearchMode.Hybrid),
             _ => true,
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         hits.Count.ShouldBe(1);
         hits[0].EffectiveMode.ShouldBe("keyword");

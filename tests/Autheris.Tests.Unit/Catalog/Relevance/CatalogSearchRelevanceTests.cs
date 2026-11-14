@@ -41,7 +41,7 @@ public sealed class CatalogSearchRelevanceTests(ITestOutputHelper output)
 
     [Theory]
     [RelevanceCases(RelevanceNeed.Baseline)]
-    [RelevanceCases(RelevanceNeed.FieldWeights, Skip = "Needs per-field weights in the search index (#625).")]
+    [RelevanceCases(RelevanceNeed.FieldWeights)]
     [RelevanceCases(RelevanceNeed.PartialWords, Skip = "Needs partial-word matching (#626).")]
     [RelevanceCases(RelevanceNeed.WordForms, Skip = "Needs word forms (stemming); not planned, owner decision Q-SRCH-6 (#624).")]
     [RelevanceCases(RelevanceNeed.Embeddings, Skip = "Needs a multilingual embedding model (#628).")]
@@ -219,7 +219,7 @@ public sealed class CatalogSearchRelevanceTests(ITestOutputHelper output)
         var engine = await RelevanceFixture.EngineAsync(mode);
         var discovery = Substitute.For<ICatalogDiscoveryService>();
         discovery.SearchCatalogDetailedAsync(Arg.Any<CatalogSearchQuery>(), Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
-            .Returns(ci => engine.SearchAsync(ci.Arg<CatalogSearchQuery>(), _ => true, ci.Arg<CancellationToken>()));
+            .Returns(ci => engine.SearchAsync(ci.Arg<CatalogSearchQuery>(), _ => true, ct: ci.Arg<CancellationToken>()));
 
         var handler = new McpToolExecutionHandler(
             Substitute.For<IGovernedSqlExecutionService>(),

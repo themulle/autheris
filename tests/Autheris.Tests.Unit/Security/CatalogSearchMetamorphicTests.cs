@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Catalog.Search;
 using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;
 
@@ -339,6 +340,65 @@ public sealed class CatalogSearchMetamorphicTests
         camelTokens.ShouldBe(["customer", "invoice", "header"]);
         pascalTokens.ShouldBe(["customer", "invoice", "header"]);
         kebabTokens.ShouldBe(["customer", "invoice", "header"]);
+    }
+
+    #endregion
+
+    #region 6. BM25F column-field ranking oracle (restricted callers)
+
+    [Fact]
+    public void HiddenColumnTerm_DoesNotChangeRankForRestrictedCaller()
+    {
+        var restricted = TableIdentifier.Parse("hr.employees");
+        var other1 = TableIdentifier.Parse("hr.contracts");
+        var other2 = TableIdentifier.Parse("hr.teams");
+
+        Bm25Document Doc(TableIdentifier id, string desc, string colDesc) =>
+            new(id, TechnicalName: id.ToString(), ShortDescription: desc, ColumnDescriptions: colDesc);
+
+        var without = new[] { Doc(restricted, "people records", ""), Doc(other1, "people contracts", ""), Doc(other2, "people teams", "") };
+        var withHidden = new[] { Doc(restricted, "people records", "salary salary salary people"), Doc(other1, "people contracts", ""), Doc(other2, "people teams", "") };
+
+        var a = new Bm25SearchIndex(without).Search("people", isColumnRestricted: id => id == restricted);
+        var b = new Bm25SearchIndex(withHidden).Search("people", isColumnRestricted: id => id == restricted);
+
+        b.Select(r => r.TableId).ShouldBe(a.Select(r => r.TableId));
+        b.Single(r => r.TableId == restricted).Score.ShouldBe(a.Single(r => r.TableId == restricted).Score, 1e-9);
+    }
+
+    [Fact]
+    public void TableMatchingOnlyThroughHiddenColumnField_NotReturned()
+    {
+        var t = TableIdentifier.Parse("hr.employees");
+        var index = new Bm25SearchIndex(
+        [
+            new Bm25Document(t, TechnicalName: "hr employees", ColumnNames: "salary_band", ColumnDescriptions: "monthly salary"),
+            new Bm25Document(TableIdentifier.Parse("hr.teams"), TechnicalName: "hr teams"),
+        ]);
+
+        index.Search("salary", isColumnRestricted: id => id == t).ShouldBeEmpty();
+        index.Search("salary").Select(r => r.TableId).ShouldBe([t]);
+    }
+
+    [Fact]
+    public void RestrictedTable_ScoreStaysNull_AfterBm25F()
+    {
+        var id = TableIdentifier.Parse("sales.customers");
+        TableMetadata Meta(params string[] cols) => new()
+        {
+            Identifier = id,
+            Table = new Autheris.Domain.Model.Table { TableName = "customers", Description = "Customer information" },
+            Columns = cols.Select(c => new Autheris.Domain.Model.TableColumn { ColumnName = c, DataType = "text" }).ToList(),
+        };
+
+        var all = new Dictionary<TableIdentifier, TableMetadata> { [id] = Meta("id", "name") };
+        var permitted = new Dictionary<TableIdentifier, TableMetadata> { [id] = Meta("id") };
+        var hit = new CatalogSearchHit(id, "customers", "Customer information", "sales", "High", 0.9, 14.5, null, ["customer"], [], [], null);
+
+        var shaped = Autheris.Application.Catalog.Services.CatalogDiscoveryService.ShapeHit(hit, permitted, all, ["customer"]);
+
+        shaped.ShouldNotBeNull();
+        shaped.Bm25Score.ShouldBeNull();
     }
 
     #endregion

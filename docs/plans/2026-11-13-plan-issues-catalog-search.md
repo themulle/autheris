@@ -78,6 +78,7 @@ Recommended order: WP-OI-SRCH-501 -> 627 -> 628a -> 624 -> 625 -> 626 -> (owner 
 - Risks: ranking shifts for existing clients; intended. Index memory grows by per-field dictionaries (~7x small maps per table); measured by the scale cluster's 10k/50k fixture.
 - Owner questions: Q-SRCH-2.
 - Size: S-M, 1 PR.
+- Delivery (2026-11-14): implemented on `feat/oi-search-625`. `Bm25SearchIndex` is BM25F over seven fields (`Bm25Document`, internal weights `CatalogSearchFieldWeights`, optional weights constructor for the ranking test). Deviation: SEC-OI-625-1 is enforced by a new optional `isColumnRestricted` argument on `ICatalogSearchEngine.Search`/`SearchAsync` (before `ct`), supplied by `CatalogDiscoveryService`; restricted tables are scored from table-level fields only. The tags/owner field exists but stays empty (the catalog model has no tags or owner text yet). The `field-weights` relevance cases are switched on.
 
 ## #626 Catalog search: no match on parts of words (German compounds)
 

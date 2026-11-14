@@ -275,6 +275,7 @@ public sealed class DiscoveryService : IDiscoveryService
                 var hits = await _searchEngine.SearchAsync(
                     engineQuery,
                     id => visibleById.ContainsKey(id),
+                    isColumnRestricted: null,
                     ct).ConfigureAwait(false);
 
                 matchedTables = [];

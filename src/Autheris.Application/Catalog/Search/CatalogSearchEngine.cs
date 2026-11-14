@@ -357,9 +357,9 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         {
             ct.ThrowIfCancellationRequested();
             var table = tables[i];
-            var text = CatalogSearchDocumentBuilder.BuildScrubbedDocumentText(table);
+            var (bm25Doc, text) = CatalogSearchDocumentBuilder.BuildDocuments(table);
             var sha256 = CatalogSearchEmbeddingCache.ComputeContentSha256Hex(text);
-            docs[i] = new PreparedDocument(table, text, sha256);
+            docs[i] = new PreparedDocument(table, bm25Doc, text, sha256);
         }
         return docs;
     }
@@ -475,7 +475,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         ReadOnlyMemory<float>[] vectors,
         DateTimeOffset now)
     {
-        var bm25Docs = new List<(TableIdentifier, string)>(prepared.Length);
+        var bm25Docs = new List<Bm25Document>(prepared.Length);
         var vectorDocs = new List<(TableIdentifier, ReadOnlyMemory<float>)>(prepared.Length);
         var metadataBuilder = ImmutableDictionary.CreateBuilder<TableIdentifier, TableMetadata>();
         var fkBuilder = ImmutableDictionary.CreateBuilder<TableIdentifier, List<TableRelationship>>();
@@ -484,7 +484,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         {
             var doc = prepared[i];
             metadataBuilder[doc.Table.Identifier] = doc.Table;
-            bm25Docs.Add((doc.Table.Identifier, doc.ScrubbedText));
+            bm25Docs.Add(doc.Bm25Doc);
 
             if (!vectors[i].IsEmpty)
             {
@@ -547,7 +547,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         PreparedDeltaBatch batch,
         DateTimeOffset now)
     {
-        var bm25Upserts = batch.Upserts.Select(static u => (u.Doc.Table.Identifier, u.Doc.ScrubbedText));
+        var bm25Upserts = batch.Upserts.Select(static u => u.Doc.Bm25Doc);
         var nextBm25 = current.Bm25Index.ApplyDelta(bm25Upserts, batch.Removals);
 
         var vecUpserts = batch.Upserts
@@ -595,14 +595,15 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
             ? imm.ToBuilder()
             : dict.ToImmutableDictionary().ToBuilder();
 
-    private sealed record PreparedDocument(TableMetadata Table, string ScrubbedText, string ContentSha256Hex);
+    private sealed record PreparedDocument(TableMetadata Table, Bm25Document Bm25Doc, string ScrubbedText, string ContentSha256Hex);
     private sealed record PreparedUpsert(PreparedDocument Doc, ReadOnlyMemory<float> Vector);
     private sealed record PreparedDeltaBatch(IReadOnlyList<PreparedUpsert> Upserts, IReadOnlyCollection<TableIdentifier> Removals);
 
     public IReadOnlyList<CatalogSearchHit> Search(
         CatalogSearchQuery query,
-        Func<TableIdentifier, bool> isVisiblePredicate) =>
-        SearchCore(query, isVisiblePredicate, precomputedQueryVector: null);
+        Func<TableIdentifier, bool> isVisiblePredicate,
+        Func<TableIdentifier, bool>? isColumnRestricted = null) =>
+        SearchCore(query, isVisiblePredicate, precomputedQueryVector: null, isColumnRestricted);
 
     /// <summary>
     /// Asynchronous variant of <see cref="Search"/>: the query embedding is computed without blocking a thread and honours
@@ -611,6 +612,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
     public async Task<IReadOnlyList<CatalogSearchHit>> SearchAsync(
         CatalogSearchQuery query,
         Func<TableIdentifier, bool> isVisiblePredicate,
+        Func<TableIdentifier, bool>? isColumnRestricted = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
@@ -624,7 +626,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
             queryVector = await GetOrComputeQueryEmbeddingAsync(query.QueryText, ct).ConfigureAwait(false);
         }
 
-        return SearchCore(query, isVisiblePredicate, queryVector);
+        return SearchCore(query, isVisiblePredicate, queryVector, isColumnRestricted);
     }
 
     /// <summary>
@@ -659,7 +661,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
     private IReadOnlyList<CatalogSearchHit> SearchCore(
         CatalogSearchQuery query,
         Func<TableIdentifier, bool> isVisiblePredicate,
-        ReadOnlyMemory<float>? precomputedQueryVector)
+        ReadOnlyMemory<float>? precomputedQueryVector,
+        Func<TableIdentifier, bool>? isColumnRestricted = null)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(isVisiblePredicate);
@@ -686,7 +689,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
 
         // 1. BM25 Ausführung mit Pre-Filtering
         var bm25Hits = (effectiveMode == "keyword" || effectiveMode == "hybrid")
-            ? snapshot.Bm25Index.Search(query.QueryText, topK, isAllowed: isAllowed)
+            ? snapshot.Bm25Index.Search(query.QueryText, topK, isAllowed: isAllowed, isColumnRestricted: isColumnRestricted)
             : [];
 
         // 2. Vektor Ausführung mit Pre-Filtering

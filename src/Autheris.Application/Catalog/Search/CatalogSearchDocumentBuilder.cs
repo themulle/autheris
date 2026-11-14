@@ -13,29 +13,49 @@ using Autheris.Domain.Model;
 /// </summary>
 internal static class CatalogSearchDocumentBuilder
 {
-    public static string BuildScrubbedDocumentText(TableMetadata t)
+    public static string BuildScrubbedDocumentText(TableMetadata t) => BuildDocuments(t).CombinedText;
+
+    public static (Bm25Document Document, string CombinedText) BuildDocuments(TableMetadata t)
     {
-        var docBuilder = new StringBuilder(1024);
+        ArgumentNullException.ThrowIfNull(t);
 
-        docBuilder.Append($"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName} ");
-
-        if (!string.IsNullOrWhiteSpace(t.Table.DisplayName))
-            docBuilder.Append($"{SecretScrubber.Redact(t.Table.DisplayName)} ");
-        if (!string.IsNullOrWhiteSpace(t.Table.Description))
-            docBuilder.Append($"{SecretScrubber.Redact(t.Table.Description)} ");
-        if (!string.IsNullOrWhiteSpace(t.Table.LongDescription))
-            docBuilder.Append($"{SecretScrubber.Redact(t.Table.LongDescription)} ");
-
-        foreach (var (_, entry) in t.Table.Texts.Entries)
+        var fields = new StringBuilder[CatalogSearchFieldWeights.FieldCount];
+        for (int i = 0; i < fields.Length; i++)
         {
-            if (!string.IsNullOrWhiteSpace(entry.DisplayName))
-                docBuilder.Append($"{SecretScrubber.Redact(entry.DisplayName)} ");
-            if (!string.IsNullOrWhiteSpace(entry.Description))
-                docBuilder.Append($"{SecretScrubber.Redact(entry.Description)} ");
-            if (!string.IsNullOrWhiteSpace(entry.LongDescription))
-                docBuilder.Append($"{SecretScrubber.Redact(entry.LongDescription)} ");
+            fields[i] = new StringBuilder(64);
         }
 
+        var combined = new StringBuilder(1024);
+
+        void Add(Bm25Field field, string? text, bool scrub = true)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            var value = scrub ? SecretScrubber.Redact(text) : text;
+            fields[(int)field].Append(value).Append(' ');
+            combined.Append(value).Append(' ');
+        }
+
+        // Technical names
+        Add(Bm25Field.TechnicalName, $"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName}", scrub: false);
+
+        // Default language texts (scrubbed)
+        Add(Bm25Field.DisplayName, t.Table.DisplayName);
+        Add(Bm25Field.ShortDescription, t.Table.Description);
+        Add(Bm25Field.LongDescription, t.Table.LongDescription);
+
+        // All table translation texts (scrubbed), each in the field of its source text
+        foreach (var (_, entry) in t.Table.Texts.Entries)
+        {
+            Add(Bm25Field.DisplayName, entry.DisplayName);
+            Add(Bm25Field.ShortDescription, entry.Description);
+            Add(Bm25Field.LongDescription, entry.LongDescription);
+        }
+
+        // Columns: technical name, types and display names are names; descriptions are descriptions (scrubbed)
         foreach (var c in t.Columns)
         {
             if (c.DiscoveryHidden)
@@ -43,22 +63,28 @@ internal static class CatalogSearchDocumentBuilder
                 continue;
             }
 
-            docBuilder.Append($"{c.ColumnName} {c.DataType} ");
-            if (!string.IsNullOrWhiteSpace(c.DisplayName))
-                docBuilder.Append($"{SecretScrubber.Redact(c.DisplayName)} ");
-            if (!string.IsNullOrWhiteSpace(c.Description))
-                docBuilder.Append($"{SecretScrubber.Redact(c.Description)} ");
+            Add(Bm25Field.ColumnNames, $"{c.ColumnName} {c.DataType}", scrub: false);
+            Add(Bm25Field.ColumnNames, c.DisplayName);
+            Add(Bm25Field.ColumnDescriptions, c.Description);
 
             foreach (var (_, colEntry) in c.Texts.Entries)
             {
-                if (!string.IsNullOrWhiteSpace(colEntry.DisplayName))
-                    docBuilder.Append($"{SecretScrubber.Redact(colEntry.DisplayName)} ");
-                if (!string.IsNullOrWhiteSpace(colEntry.Description))
-                    docBuilder.Append($"{SecretScrubber.Redact(colEntry.Description)} ");
+                Add(Bm25Field.ColumnNames, colEntry.DisplayName);
+                Add(Bm25Field.ColumnDescriptions, colEntry.Description);
             }
         }
 
-        return docBuilder.ToString();
+        var doc = new Bm25Document(
+            t.Identifier,
+            TechnicalName: fields[(int)Bm25Field.TechnicalName].ToString(),
+            DisplayName: fields[(int)Bm25Field.DisplayName].ToString(),
+            TagsAndOwner: fields[(int)Bm25Field.TagsAndOwner].ToString(),
+            ShortDescription: fields[(int)Bm25Field.ShortDescription].ToString(),
+            LongDescription: fields[(int)Bm25Field.LongDescription].ToString(),
+            ColumnNames: fields[(int)Bm25Field.ColumnNames].ToString(),
+            ColumnDescriptions: fields[(int)Bm25Field.ColumnDescriptions].ToString());
+
+        return (doc, combined.ToString());
     }
 
     public static List<TableRelationship>? BuildForeignKeys(TableMetadata t)

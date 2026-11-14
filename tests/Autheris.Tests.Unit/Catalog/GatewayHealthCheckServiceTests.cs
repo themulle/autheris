@@ -182,8 +182,8 @@ public sealed class GatewayHealthCheckServiceTests
         public CatalogSearchIndexStatus GetStatus(DateTimeOffset? utcNow = null) => status;
 
         public Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default) => Task.CompletedTask;
-        public IReadOnlyList<CatalogSearchHit> Search(CatalogSearchQuery query, Func<TableIdentifier, bool> isVisiblePredicate) => [];
-        public Task<IReadOnlyList<CatalogSearchHit>> SearchAsync(CatalogSearchQuery query, Func<TableIdentifier, bool> isVisiblePredicate, CancellationToken ct = default) =>
+        public IReadOnlyList<CatalogSearchHit> Search(CatalogSearchQuery query, Func<TableIdentifier, bool> isVisiblePredicate, Func<TableIdentifier, bool>? isColumnRestricted = null) => [];
+        public Task<IReadOnlyList<CatalogSearchHit>> SearchAsync(CatalogSearchQuery query, Func<TableIdentifier, bool> isVisiblePredicate, Func<TableIdentifier, bool>? isColumnRestricted = null, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<CatalogSearchHit>>([]);
     }
 }
