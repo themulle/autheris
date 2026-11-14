@@ -47,6 +47,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
     private readonly RevocationWatchPolicy _revocationWatchPolicy;
     private readonly Autheris.Application.Identity.IIdentityRealmRegistry? _realmRegistry;
     private readonly IOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>? _realmOptions;
+    private readonly Autheris.Application.Identity.IGroupSidResolver? _groupSidResolver;
 
 
     public WebSocketAuthInterceptor(
@@ -58,7 +59,8 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         IOptions<GatewayOptions>? options = null,
         IOptions<RevocationWatchOptions>? revocationWatchOptions = null,
         Autheris.Application.Identity.IIdentityRealmRegistry? realmRegistry = null,
-        IOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>? realmOptions = null)
+        IOptions<Autheris.Domain.Options.Security.IdentityRealmsOptions>? realmOptions = null,
+        Autheris.Application.Identity.IGroupSidResolver? groupSidResolver = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tokenValidator = tokenValidator;
@@ -71,6 +73,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         _revalidationInterval = seconds > 0 ? TimeSpan.FromSeconds(seconds) : DefaultRevalidationInterval;
         _realmRegistry = realmRegistry;
         _realmOptions = realmOptions;
+        _groupSidResolver = groupSidResolver;
     }
 
     public override async ValueTask<ConnectionStatus> OnConnectAsync(
@@ -406,31 +409,52 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
     private ITokenRevocationService? ResolveRevocationService(HttpContext? httpContext)
         => _revocationService ?? httpContext?.RequestServices?.GetService<ITokenRevocationService>();
 
+    private Autheris.Application.Identity.IGroupSidResolver? ResolveGroupSidResolver(HttpContext? httpContext)
+        => _groupSidResolver ?? httpContext?.RequestServices?.GetService<Autheris.Application.Identity.IGroupSidResolver>();
+
+    private Autheris.Application.Identity.IIdentityRealmRegistry? ResolveRealmRegistry(HttpContext? httpContext)
+        => _realmRegistry ?? httpContext?.RequestServices?.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>();
+
     private void ScheduleRevocationChecks(HttpContext httpContext, ClaimsPrincipal principal, ITokenRevocationService? revocationService)
     {
-        if (revocationService == null)
+        var groupSidResolver = ResolveGroupSidResolver(httpContext);
+        if (revocationService == null && groupSidResolver == null)
         {
             return;
         }
 
-        // SEC M-14 (GAP-B): Periodic revocation check; on revocation the connection (incl. all subscriptions)
-        // is aborted, like the expiry timer. The watch is disposed together with the request.
-        var watch = new RevocationWatch(httpContext, principal, revocationService, _logger, _revocationWatchPolicy);
+        var realmRegistry = ResolveRealmRegistry(httpContext);
+        var initialGroupSids = principal.GetGroupSids();
+
+        // SEC M-14 (GAP-B): Periodic revocation and group membership revalidation; on revocation, group change, or failure
+        // the connection (incl. all subscriptions) is aborted. The watch is disposed together with the request.
+        var watch = new RevocationWatch(
+            httpContext,
+            principal,
+            revocationService,
+            _logger,
+            _revocationWatchPolicy,
+            groupSidResolver,
+            realmRegistry,
+            initialGroupSids);
         httpContext.Items[RevocationWatchItemKey] = watch;
         httpContext.Response.RegisterForDispose(watch);
         watch.Start(_timeProvider, _revalidationInterval);
     }
 
     /// <summary>
-    /// SEC M-14 (GAP-B): Re-checks token revocation for an open WebSocket session and aborts the connection
-    /// when the token was revoked.
+    /// SEC M-14 (GAP-B): Re-checks token revocation and canonical effective group SIDs for an open WebSocket session
+    /// and aborts the connection fail-closed when the token is revoked, group membership changed, or resolution fails.
     /// </summary>
     internal sealed class RevocationWatch : IDisposable
     {
         private readonly HttpContext _httpContext;
         private readonly ClaimsPrincipal _principal;
-        private readonly ITokenRevocationService _revocationService;
+        private readonly ITokenRevocationService? _revocationService;
         private readonly ILogger _logger;
+        private readonly Autheris.Application.Identity.IGroupSidResolver? _groupSidResolver;
+        private readonly Autheris.Application.Identity.IIdentityRealmRegistry? _realmRegistry;
+        private readonly HashSet<Sid> _initialGroupSids;
         private readonly CancellationTokenSource _cts = new();
         private readonly CancellationToken _token;
         private ITimer? _timer;
@@ -441,15 +465,21 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         public RevocationWatch(
             HttpContext httpContext,
             ClaimsPrincipal principal,
-            ITokenRevocationService revocationService,
+            ITokenRevocationService? revocationService,
             ILogger logger,
-            RevocationWatchPolicy? policy = null)
+            RevocationWatchPolicy? policy = null,
+            Autheris.Application.Identity.IGroupSidResolver? groupSidResolver = null,
+            Autheris.Application.Identity.IIdentityRealmRegistry? realmRegistry = null,
+            IReadOnlySet<Sid>? initialGroupSids = null)
         {
             _failures = new RevocationFailureCounter(policy);
             _httpContext = httpContext;
             _principal = principal;
             _revocationService = revocationService;
             _logger = logger;
+            _groupSidResolver = groupSidResolver;
+            _realmRegistry = realmRegistry;
+            _initialGroupSids = initialGroupSids != null ? new HashSet<Sid>(initialGroupSids) : principal.GetGroupSids();
             _token = _cts.Token;
         }
 
@@ -467,11 +497,42 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         }
 
         /// <summary>
-        /// Returns true if the token was found revoked (and the connection was aborted).
+        /// Returns true if the session was closed (token revoked, group membership changed, or fail-closed check failure).
         /// </summary>
         public async Task<bool> CheckAsync()
         {
             if (_disposed || Interlocked.Exchange(ref _checking, 1) == 1)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (await CheckTokenRevocationAsync().ConfigureAwait(false))
+                {
+                    return true;
+                }
+
+                if (await CheckGroupMembershipAsync().ConfigureAwait(false))
+                {
+                    return true;
+                }
+            }
+            catch (OperationCanceledException) when (_token.IsCancellationRequested)
+            {
+                // Connection closed while checking.
+            }
+            finally
+            {
+                Volatile.Write(ref _checking, 0);
+            }
+
+            return false;
+        }
+
+        private async Task<bool> CheckTokenRevocationAsync()
+        {
+            if (_revocationService == null)
             {
                 return false;
             }
@@ -489,7 +550,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             }
             catch (OperationCanceledException) when (_token.IsCancellationRequested)
             {
-                // Connection closed while checking.
+                throw;
             }
             catch (Exception ex)
             {
@@ -509,9 +570,115 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
 
                 _logger.LogWarning(ex, "WebSocket token revocation check failed ({Failures} consecutive).", _failures.ConsecutiveFailures);
             }
-            finally
+
+            return false;
+        }
+
+        private async Task<bool> CheckGroupMembershipAsync()
+        {
+            if (_groupSidResolver == null)
             {
-                Volatile.Write(ref _checking, 0);
+                return false;
+            }
+
+            var realmId = _principal.FindFirst("autheris:realm")?.Value;
+            var issuer = _principal.FindFirst("iss")?.Value;
+            var scheme = _principal.Identity?.AuthenticationType ?? "Bearer";
+            var realm = (!string.IsNullOrWhiteSpace(realmId) ? _realmRegistry?.GetRealm(realmId) : null)
+                ?? (!string.IsNullOrWhiteSpace(issuer) ? _realmRegistry?.ResolveRealmByIssuer(issuer) : null)
+                ?? _realmRegistry?.ResolveRealmForScheme(issuer, scheme)
+                ?? _realmRegistry?.GetDefaultRealm();
+            if (realm == null)
+            {
+                if (!_disposed)
+                {
+                    _logger.LogWarning("WebSocket session closed: identity realm could not be resolved during group revalidation (fail-closed).");
+                    _httpContext.Abort();
+                    return true;
+                }
+
+                return false;
+            }
+
+            var tenantClaim = Autheris.Domain.Tenancy.TenantClaimReader.Read(_principal);
+            if (tenantClaim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+            {
+                if (!_disposed)
+                {
+                    _logger.LogWarning("WebSocket session closed: tenant claim invalid during group revalidation (fail-closed).");
+                    _httpContext.Abort();
+                    return true;
+                }
+
+                return false;
+            }
+
+            var tenant = tenantClaim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? tenantClaim.Tenant : default;
+
+            Autheris.Application.Identity.GroupResolution resolution;
+            try
+            {
+                resolution = await _groupSidResolver.ResolveAsync(_principal, realm, tenant, scheme, _token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_token.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                if (!_disposed)
+                {
+                    _logger.LogWarning("WebSocket session closed: group SID revalidation failed ({ExceptionType}, fail-closed).", ex.GetType().Name);
+                    _httpContext.Abort();
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (resolution == null || resolution.Status != Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+            {
+                if (!_disposed)
+                {
+                    _logger.LogWarning("WebSocket session closed: group SID revalidation returned degraded status (fail-closed).");
+                    _httpContext.Abort();
+                    return true;
+                }
+
+                return false;
+            }
+
+            var currentGroups = new HashSet<Sid>();
+            foreach (var sid in resolution.GroupSids)
+            {
+                if (string.IsNullOrWhiteSpace(sid.Value) || !SidFormat.IsCanonical(sid.Value))
+                {
+                    if (!_disposed)
+                    {
+                        _logger.LogWarning("WebSocket session closed: group SID revalidation returned non-canonical SID (fail-closed).");
+                        _httpContext.Abort();
+                        return true;
+                    }
+
+                    return false;
+                }
+
+                currentGroups.Add(sid);
+            }
+
+            if (!_initialGroupSids.SetEquals(currentGroups))
+            {
+                if (!_disposed)
+                {
+                    _logger.LogWarning(
+                        "WebSocket session closed: effective group membership changed during session ({InitialCount} -> {CurrentCount}).",
+                        _initialGroupSids.Count,
+                        currentGroups.Count);
+                    _httpContext.Abort();
+                    return true;
+                }
+
+                return false;
             }
 
             return false;
