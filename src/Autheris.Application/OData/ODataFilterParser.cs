@@ -17,6 +17,7 @@ public static class ODataFilterParser
 {
     public const int MaxFilterLength = 4096;
     public const int MaxRecursionDepth = 32;
+    public const int MaxChainOperands = 1_000;
 
     public static TableFilterClause Parse(string filterExpression, DatabaseDialect defaultDialect = DatabaseDialect.PostgreSql, string paramPrefix = "@p_od_")
     {
@@ -412,13 +413,7 @@ public static class ODataFilterParser
             EnterRecursion();
             try
             {
-                var left = ParseAnd();
-                while (Match(TokenType.Or))
-                {
-                    var right = ParseAnd();
-                    left = new BinaryOpNode(left, "OR", right);
-                }
-                return left;
+                return ParseChain(TokenType.Or, "OR", ParseAnd);
             }
             finally
             {
@@ -427,15 +422,21 @@ public static class ODataFilterParser
         }
 
         // AndExpression := NotExpression ('and' NotExpression)*
-        private AstNode ParseAnd()
+        private AstNode ParseAnd() => ParseChain(TokenType.And, "AND", ParseNot);
+
+        private AstNode ParseChain(TokenType opToken, string sqlOp, Func<AstNode> parseOperand)
         {
-            var left = ParseNot();
-            while (Match(TokenType.And))
+            var operands = new List<AstNode> { parseOperand() };
+            while (Match(opToken))
             {
-                var right = ParseNot();
-                left = new BinaryOpNode(left, "AND", right);
+                operands.Add(parseOperand());
+                if (operands.Count > MaxChainOperands)
+                {
+                    throw new GatewayInvalidQueryException(
+                        $"OData $filter chain exceeds maximum operand count of {MaxChainOperands}.");
+                }
             }
-            return left;
+            return operands.Count == 1 ? operands[0] : new ChainNode(sqlOp, operands);
         }
 
         // NotExpression := ('not')? Comparison
@@ -777,6 +778,57 @@ public static class ODataFilterParser
             }
             Left.CollectReferencedColumns(columns, depth + 1);
             Right.CollectReferencedColumns(columns, depth + 1);
+        }
+    }
+
+    internal sealed class ChainNode(string op, IReadOnlyList<AstNode> operands) : AstNode
+    {
+        public string Op { get; } = op;
+        public IReadOnlyList<AstNode> Operands { get; } = operands;
+
+        public override string ToSql(SqlGenerationContext ctx)
+        {
+            ctx.EnterDepth();
+            try
+            {
+                if (Operands.Count == 0)
+                {
+                    throw new InvalidOperationException("ChainNode requires at least one operand.");
+                }
+
+                var sqlOp = Op.ToUpperInvariant();
+                var sb = new StringBuilder();
+                for (int i = 0; i < Operands.Count - 1; i++)
+                {
+                    sb.Append('(');
+                }
+
+                sb.Append(Operands[0].ToSql(ctx));
+                for (int i = 1; i < Operands.Count; i++)
+                {
+                    sb.Append(' ').Append(sqlOp).Append(' ').Append(Operands[i].ToSql(ctx)).Append(')');
+                }
+
+                return sb.ToString();
+            }
+            finally
+            {
+                ctx.ExitDepth();
+            }
+        }
+
+        public override void CollectReferencedColumns(List<string> columns, int depth = 0)
+        {
+            if (depth > MaxRecursionDepth + 5)
+            {
+                throw new GatewayInvalidQueryException(
+                    $"AST recursion depth exceeds maximum limit of {MaxRecursionDepth}.");
+            }
+
+            foreach (var operand in Operands)
+            {
+                operand.CollectReferencedColumns(columns, depth + 1);
+            }
         }
     }
 
