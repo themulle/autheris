@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -196,6 +197,69 @@ public class SupplyChainAndDeploymentSecurityTests
         File.Exists(Path.Combine(root!, ".github", "CODEOWNERS")).ShouldBeTrue();
         File.Exists(Path.Combine(root!, ".gitleaks.toml")).ShouldBeTrue();
         File.Exists(Path.Combine(root!, "global.json")).ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void PodmanPolicy_has_no_insecureAcceptAnything_and_a_rekor_key()
+    {
+        var root = FindRepoRoot();
+        root.ShouldNotBeNull("Repo root not found");
+
+        var policyPath = Path.Combine(root!, "deploy", "policy", "podman", "policy.json");
+        var json = File.ReadAllText(policyPath);
+        json.ShouldNotContain("insecureAcceptAnything");
+
+        using var doc = JsonDocument.Parse(json);
+        var transports = doc.RootElement.GetProperty("transports");
+        transports.TryGetProperty("dir", out _).ShouldBeFalse();
+        transports.TryGetProperty("tarball", out _).ShouldBeFalse();
+
+        var docker = transports.GetProperty("docker");
+        docker.TryGetProperty("", out _).ShouldBeFalse();
+        var autherisScope = docker.GetProperty("ghcr.io/themulle/autheris");
+        autherisScope.GetArrayLength().ShouldBe(1);
+
+        var rule = autherisScope[0];
+        rule.GetProperty("type").GetString().ShouldBe("sigstoreSigned");
+        var fulcio = rule.GetProperty("fulcio");
+        fulcio.GetProperty("oidc-issuer").GetString().ShouldBe("https://token.actions.githubusercontent.com");
+        var subjectRegex = fulcio.GetProperty("subject-regex").GetString();
+        subjectRegex.ShouldNotBeNullOrWhiteSpace();
+        subjectRegex.ShouldContain("docker-publish\\.yml");
+        subjectRegex.ShouldContain("heads/main|tags/v");
+        rule.GetProperty("rekorPublicKeyData").GetString().ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void PodmanPolicy_rekor_key_parses_and_default_is_reject()
+    {
+        var root = FindRepoRoot();
+        root.ShouldNotBeNull("Repo root not found");
+
+        var policyPath = Path.Combine(root!, "deploy", "policy", "podman", "policy.json");
+        using var doc = JsonDocument.Parse(File.ReadAllText(policyPath));
+
+        var defaultRules = doc.RootElement.GetProperty("default");
+        defaultRules.GetArrayLength().ShouldBe(1);
+        defaultRules[0].GetProperty("type").GetString().ShouldBe("reject");
+
+        var keyDataBase64 = doc.RootElement
+            .GetProperty("transports")
+            .GetProperty("docker")
+            .GetProperty("ghcr.io/themulle/autheris")[0]
+            .GetProperty("rekorPublicKeyData")
+            .GetString();
+
+        keyDataBase64.ShouldNotBeNullOrWhiteSpace();
+        var pemBytes = Convert.FromBase64String(keyDataBase64!);
+        var pem = Encoding.ASCII.GetString(pemBytes);
+        pem.ShouldContain("-----BEGIN PUBLIC KEY-----");
+
+        using var ecdsa = ECDsa.Create();
+        ecdsa.ImportFromPem(pem);
+        ecdsa.KeySize.ShouldBe(256);
     }
 
     [Fact]

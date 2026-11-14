@@ -73,10 +73,12 @@ public static class RedisConnectionSecurity
     }
 
     /// <summary>
-    /// SEC H-01: Normalizes certificate thumbprints (hex, separators removed, upper case). Invalid entries cause an error.
+    /// SEC H-01: Normalizes SHA-256 certificate thumbprints (hex, separators removed, upper case). Invalid or empty entries cause an error.
     /// </summary>
     public static IReadOnlyList<string> NormalizeThumbprints(IEnumerable<string>? thumbprints, string settingName)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(settingName);
+
         var result = new List<string>();
         if (thumbprints == null)
         {
@@ -87,7 +89,8 @@ public static class RedisConnectionSecurity
         {
             if (string.IsNullOrWhiteSpace(raw))
             {
-                continue;
+                throw new InvalidOperationException(
+                    $"Security error: Empty certificate fingerprint in {settingName} (expected: 64-hex SHA-256).");
             }
 
             var builder = new StringBuilder(raw.Length);
@@ -101,11 +104,11 @@ public static class RedisConnectionSecurity
 
             var normalized = builder.ToString();
 
-            // SHA-1 = 40 hex chars, SHA-256 = 64 hex chars
-            if ((normalized.Length != 40 && normalized.Length != 64) || !IsHex(normalized))
+            // SHA-256 = 64 hex chars (legacy 40-hex SHA-1 pins are rejected)
+            if (normalized.Length != 64 || !IsHex(normalized))
             {
                 throw new InvalidOperationException(
-                    $"Security error: Invalid certificate fingerprint in {settingName} (expected: SHA-1 or SHA-256 as hex).");
+                    $"Security error: Invalid certificate fingerprint in {settingName} (expected: 64-hex SHA-256).");
             }
 
             result.Add(normalized);
@@ -115,8 +118,8 @@ public static class RedisConnectionSecurity
     }
 
     /// <summary>
-    /// SEC H-01: Certificate pinning callback. A certificate is accepted only if its SHA-256 or SHA-1 thumbprint
-    /// is in the pin list (chain errors are tolerated for pinned certificates, e.g. self-signed ones).
+    /// SEC H-01: Certificate pinning callback. A certificate is accepted only if its SHA-256 thumbprint
+    /// is in the pin list (chain and hostname errors are tolerated for pinned certificates, e.g. self-signed ones).
     /// </summary>
     public static RemoteCertificateValidationCallback CreatePinnedCertificateValidator(IReadOnlyList<string> normalizedThumbprints)
     {
@@ -132,8 +135,7 @@ public static class RedisConnectionSecurity
             return false;
         }
 
-        return pins.Contains(certificate.GetCertHashString(HashAlgorithmName.SHA256)) ||
-               pins.Contains(certificate.GetCertHashString()); // SHA-1 thumbprint (legacy pin format)
+        return pins.Contains(certificate.GetCertHashString(HashAlgorithmName.SHA256));
     }
 
     /// <summary>
