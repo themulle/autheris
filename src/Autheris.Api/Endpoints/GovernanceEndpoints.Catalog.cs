@@ -72,7 +72,7 @@ public static partial class GovernanceEndpoints
         var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
         if (!isPrivileged)
         {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
+            return ApiProblems.Forbidden(httpContext: context);
         }
 
         var dryRun = context.Request.Query.TryGetValue("dryRun", out var dryRunVal) &&
@@ -123,6 +123,10 @@ public static partial class GovernanceEndpoints
         {
             var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, callerContext, ct);
             return Results.Ok(result);
+        }
+        catch (Autheris.Application.Governance.Services.ConsentApplyForbiddenException)
+        {
+            return ApiProblems.Forbidden(httpContext: context);
         }
         catch (Autheris.Application.Governance.Services.DeclarativeDatasetCatalogException ex)
         {
