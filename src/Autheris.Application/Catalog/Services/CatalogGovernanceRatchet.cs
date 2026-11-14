@@ -66,7 +66,10 @@ public static class CatalogGovernanceRatchet
             SmallGroupStrategy = exTable.SmallGroupStrategy ?? inTable.SmallGroupStrategy,
             RequiredFilterColumns = UnionRequiredFilterColumns(exTable.RequiredFilterColumns, inTable.RequiredFilterColumns),
             RequiredFilterColumnGroups = UnionRequiredFilterColumnGroups(exTable.RequiredFilterColumnGroups, inTable.RequiredFilterColumnGroups),
-            ExpectedRows = inTable.ExpectedRows ?? exTable.ExpectedRows
+            ExpectedRows = inTable.ExpectedRows ?? exTable.ExpectedRows,
+            DiscoveryHidden = exTable.DiscoveryHidden || inTable.DiscoveryHidden,
+            SamplesDisabled = exTable.SamplesDisabled || inTable.SamplesDisabled,
+            ObjectKind = exTable.ObjectKind != DiscoveryObjectKind.Table ? exTable.ObjectKind : inTable.ObjectKind
         };
 
         var existingColumns = new Dictionary<string, TableColumn>(StringComparer.OrdinalIgnoreCase);
@@ -100,7 +103,8 @@ public static class CatalogGovernanceRatchet
                 LongDescription = col.LongDescription ?? exCol?.LongDescription,
                 Texts = col.Texts is { IsEmpty: false } ? col.Texts : (exCol?.Texts ?? LocalizedTexts.Empty),
                 DocumentationSource = col.DocumentationSource ?? exCol?.DocumentationSource,
-                Meta = col.Meta is { Count: > 0 } ? col.Meta : (exCol?.Meta ?? col.Meta)
+                Meta = col.Meta is { Count: > 0 } ? col.Meta : (exCol?.Meta ?? col.Meta),
+                DiscoveryHidden = (exCol?.DiscoveryHidden == true) || col.DiscoveryHidden
             });
         }
 

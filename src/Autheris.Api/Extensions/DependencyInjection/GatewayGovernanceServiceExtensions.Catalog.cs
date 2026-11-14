@@ -44,6 +44,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IDatasetTagImportService, DatasetTagImportService>();
         services.AddSingleton<CatalogVisibilityMetrics>();
         services.AddSingleton<ICatalogVisibilityMetrics>(sp => sp.GetRequiredService<CatalogVisibilityMetrics>());
+        services.AddSingleton<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore>(sp => new DiscoveryArtifactStore(sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceRepository>()));
         services.AddHostedService<CatalogGovernanceHostedService>();
         services.AddSingleton<IDatasetCatalogAdminService>(sp => new DatasetCatalogAdminService(
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(),

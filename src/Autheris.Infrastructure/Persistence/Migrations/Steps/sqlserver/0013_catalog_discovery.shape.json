@@ -1,0 +1,42 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "TABLE_CATALOG_SETTINGS", "column": { "name": "discovery_hidden", "type": "BIT", "family": "boolean", "nullable": false } },
+    { "op": "addColumn", "table": "TABLE_CATALOG_SETTINGS", "column": { "name": "samples_disabled", "type": "BIT", "family": "boolean", "nullable": false } },
+    {
+      "op": "addTable",
+      "table": "COLUMN_CATALOG_SETTINGS",
+      "newTable": {
+        "name": "COLUMN_CATALOG_SETTINGS",
+        "columns": [
+          { "name": "table_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "column_name", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "discovery_hidden", "type": "BIT", "family": "boolean", "nullable": false },
+          { "name": "updated_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "NVARCHAR", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["table_id", "column_name"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "CATALOG_DISCOVERY_ARTIFACTS",
+      "newTable": {
+        "name": "CATALOG_DISCOVERY_ARTIFACTS",
+        "columns": [
+          { "name": "table_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "samples_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "statistics_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "content_sha256", "type": "CHAR", "family": "string", "nullable": false },
+          { "name": "uploaded_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "uploaded_at", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "schema_version", "type": "INT", "family": "integer", "nullable": false }
+        ],
+        "primaryKey": ["table_id"],
+        "indexes": []
+      }
+    },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "requested_columns_json", "type": "NVARCHAR", "family": "string", "nullable": true } }
+  ]
+}
