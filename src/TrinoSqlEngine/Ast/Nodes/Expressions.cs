@@ -97,7 +97,8 @@ public sealed record PageOffsetParameterExpression : Expression;
 public sealed record BinaryExpression(
     Expression Left,
     BinaryOperator Operator,
-    Expression Right) : Expression;
+    Expression Right,
+    bool IsIntegralDivision = false) : Expression;
 
 public enum BinaryOperator
 {

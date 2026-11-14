@@ -487,6 +487,32 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
         base.GenerateExpression(expression, ref builder, context);
     }
 
+    protected override bool RequiresCustomBinaryFormat(BinaryExpression b) =>
+        b.Operator == BinaryOperator.Modulo || (b.Operator == BinaryOperator.Divide && b.IsIntegralDivision);
+
+    protected override void FormatBinaryExpression(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
+    {
+        if (b.Operator == BinaryOperator.Modulo)
+        {
+            builder.Append("MOD(");
+            GenerateExpression(b.Left, ref builder, context);
+            builder.Append(", ");
+            GenerateExpression(b.Right, ref builder, context);
+            builder.Append(')');
+            return;
+        }
+
+        if (b.Operator == BinaryOperator.Divide && b.IsIntegralDivision)
+        {
+            builder.Append("TRUNC(");
+            FormatStandardBinary(ref builder, b, context);
+            builder.Append(')');
+            return;
+        }
+
+        base.FormatBinaryExpression(ref builder, b, context);
+    }
+
     private static bool IsPredicateExpression(Expression expr) => expr switch
     {
         BinaryExpression b => b.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual or
