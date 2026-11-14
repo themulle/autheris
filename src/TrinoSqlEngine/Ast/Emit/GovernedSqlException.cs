@@ -72,10 +72,12 @@ public static class GovernedSqlErrorCodes
     public const string ServiceUnavailable = "SERVICE_UNAVAILABLE";
     public const string PagingUnsupported = "SQL_PAGING_UNSUPPORTED";
     public const string PagingTokenInvalid = "SQL_PAGING_TOKEN_INVALID";
+    public const string MethodNotAllowed = "METHOD_NOT_ALLOWED";
 
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
     {
+        MethodNotAllowed => "This SQL endpoint cannot be executed via HTTP GET.",
         QueryCostExceeded => "The statement cost exceeds the allowed limit. Add a LIMIT, a filter or fewer joins.",
         RateLimitExceeded => "Query cost quota exhausted.",
         ServiceUnavailable => "The service is temporarily unavailable.",

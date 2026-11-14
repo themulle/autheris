@@ -155,7 +155,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         bool probeExtraRow = false,
         bool plannedTableRead = false,
         ClientListShapes? clientLists = null,
-        SqlPageWindow? page = null)
+        SqlPageWindow? page = null,
+        bool readOnlyRequired = false)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -229,6 +230,11 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         // answered from the analysis alone, before any table lookup, so the response never depends on whether a
         // name is an existing, a forbidden or an unknown table. A recursive WITH in DML is never permitted (read-only scope).
+        if (readOnlyRequired && metadata.StatementType != SqlStatementType.Select)
+        {
+            throw new WebSqlPolicyException("This SQL endpoint cannot be executed via HTTP GET.", GovernedSqlErrorCodes.MethodNotAllowed);
+        }
+
         if (dmlContext != null)
         {
             dmlContext.HasRecursiveCte = metadata.HasRecursiveCte;

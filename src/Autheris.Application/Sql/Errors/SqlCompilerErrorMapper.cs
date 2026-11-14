@@ -187,6 +187,7 @@ public static class SqlCompilerErrorMapper
             || (e is SecurityException sec && sec.Data.Contains(GovernedSqlErrorCodes.FilterOnMaskedColumn))
             ? Of(403, GovernedSqlErrorCodes.FilterOnMaskedColumn)
             : null,
+        e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.MethodNotAllowed } ? Of(405, GovernedSqlErrorCodes.MethodNotAllowed) : null,
         e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.EndpointDisabled } ? Of(403, GovernedSqlErrorCodes.EndpointDisabled) : null,
         e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.StatementNotPermitted } ? Of(403, GovernedSqlErrorCodes.StatementNotPermitted) : null,
         e => e is RequiredFilterColumnMissingException ? Of(400, GovernedSqlErrorCodes.RequiredFilterColumnMissing) : null,
@@ -221,6 +222,7 @@ public static class SqlCompilerErrorMapper
         GovernedSqlErrorCodes.CheckOptionViolation => Of(403, code),
         GovernedSqlErrorCodes.FilterOnMaskedColumn => Of(403, code),
         GovernedSqlErrorCodes.EndpointDisabled => Of(403, code),
+        GovernedSqlErrorCodes.MethodNotAllowed => Of(405, code),
         GovernedSqlErrorCodes.StatementNotPermitted => Of(403, code),
         GovernedSqlErrorCodes.ConstraintViolation => Of(409, code),
         GovernedSqlErrorCodes.AffectedRowsLimit => Of(422, code),

@@ -8,6 +8,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Sql.Endpoints.Interfaces;
 using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -170,7 +171,7 @@ public sealed class SqlEndpointsTests
             // minRevenue omitted -> should take default 100m
         };
 
-        var result = await executionService.ExecuteEndpointAsync("getCustomerRevenue", rawInputs, user, tenantId, CancellationToken.None);
+        var result = await executionService.ExecuteEndpointAsync("getCustomerRevenue", rawInputs, user, tenantId, SqlEndpointInvocation.Get, CancellationToken.None);
 
         result.ShouldNotBeNull();
         capturedRequest.ShouldNotBeNull();
@@ -200,7 +201,7 @@ public sealed class SqlEndpointsTests
 
         await Should.ThrowAsync<ArgumentException>(async () =>
         {
-            await executionService.ExecuteEndpointAsync("test_query", new Dictionary<string, object?>(), user, tenantId);
+            await executionService.ExecuteEndpointAsync("test_query", new Dictionary<string, object?>(), user, tenantId, SqlEndpointInvocation.Get);
         });
     }
 

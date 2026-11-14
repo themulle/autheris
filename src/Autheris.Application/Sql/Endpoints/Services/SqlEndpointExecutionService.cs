@@ -43,6 +43,7 @@ public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
         IReadOnlyDictionary<string, object?>? rawInputs,
         ClaimsPrincipal user,
         TenantId tenantId,
+        SqlEndpointInvocation invocation,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(endpointName);
@@ -51,6 +52,14 @@ public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
         if (!_registry.TryGet(endpointName, out var endpoint) || endpoint == null)
         {
             throw new KeyNotFoundException($"Declarative SQL endpoint '{endpointName}' is not registered.");
+        }
+
+        bool readOnlyRequired = invocation == SqlEndpointInvocation.Get;
+        if (readOnlyRequired &&
+            !string.IsNullOrWhiteSpace(endpoint.HttpMethod) &&
+            !string.Equals(endpoint.HttpMethod.Trim(), "GET", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new WebSqlPolicyException("This SQL endpoint cannot be executed via HTTP GET.", GovernedSqlErrorCodes.MethodNotAllowed);
         }
 
         var validatedParams = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -87,14 +96,15 @@ public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
         }
 
         var request = new GovernedSqlQueryRequest(
-            // Governed execution parses a single statement and rejects comments (SQ-02): the endpoint file's
+            // Governed execution parses a single statement and rejects comments: the endpoint file's
             // annotation header (-- @name ...) and trailing ';' are only meaningful to the loader.
-            Sql: SqlParameterExtractor.StripComments(endpoint.RawSql).Trim().TrimEnd(';').Trim(),
+            Sql: SqlStatementClassifier.NormalizeEndpointSql(endpoint.RawSql),
             Parameters: validatedParams,
             DataSourceName: endpoint.DataSource,
             RowLimit: SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions(), _options.Value.RowLimits?.SqlEndpoints),
             Transport: SqlTransports.SqlEndpoints,
-            TimeoutSeconds: endpoint.TimeoutSeconds);
+            TimeoutSeconds: endpoint.TimeoutSeconds,
+            ReadOnlyRequired: readOnlyRequired);
 
         _logger?.LogDebug("Executing declarative SQL endpoint '{EndpointName}' with {ParamCount} parameters.", endpointName, endpoint.Parameters.Count);
 
