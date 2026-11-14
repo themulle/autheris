@@ -41,7 +41,7 @@ public sealed class OpenLineageClientTenantFilterTests
         var options = Options.Create(new GatewayOptions
         {
             Tenancy = new TenancyOptions { DefaultTenantId = defaultTenant },
-            Catalog = new DataCatalogOptions { OpenLineageEndpoint = "http://openlineage.internal/api/v1/lineage" }
+            Catalog = new DataCatalogOptions { OpenLineageEndpoint = "https://openlineage.internal/api/v1/lineage" }
         });
         return (new OpenLineageClient(new HttpClient(handler), store, options, NullLogger<OpenLineageClient>.Instance), handler);
     }

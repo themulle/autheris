@@ -109,12 +109,11 @@ public sealed class ExtensionsRegistrationTests
         }
 
         services.Count(d => d.ServiceType == typeof(IOpenLineageClient)).ShouldBe(1);
-        services.Count(d => d.ServiceType == typeof(IOpenJevClient)).ShouldBe(1);
+        services.Count(d => d.ServiceType == typeof(IOpenJevClient)).ShouldBe(0);
 
         var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
         scope.ServiceProvider.GetRequiredService<IOpenLineageClient>().ShouldBeOfType<OpenLineageClient>();
-        provider.GetRequiredService<IOpenJevClient>().ShouldBeOfType<OpenJevClient>();
     }
 
     [Fact]
@@ -138,8 +137,7 @@ public sealed class ExtensionsRegistrationTests
         string[] clientNames =
         [
             "IOpenMetadataClient",
-            nameof(OpenLineageClient),
-            LineageExportServiceCollectionExtensions.OpenJevHttpClientName
+            nameof(OpenLineageClient)
         ];
 
         foreach (var name in clientNames)
