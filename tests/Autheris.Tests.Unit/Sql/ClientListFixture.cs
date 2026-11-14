@@ -88,7 +88,6 @@ internal sealed class ClientListFixture : IAsyncDisposable
             Enabled = true,
             AllowDml = true,
             CrossSource = new CrossSourceOptions { Enabled = crossSourceCatalog },
-            DmlWriterRoles = [WriterRole],
             DefaultMaxRows = 2000,
             MaxAllowedRows = 5000,
             MaxAffectedRows = 1000

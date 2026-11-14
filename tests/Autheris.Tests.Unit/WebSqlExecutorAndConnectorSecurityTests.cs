@@ -173,7 +173,6 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     private static GatewayOptions CreateOptions(
         bool enabled = true,
         bool allowDml = false,
-        List<string>? dmlWriterRoles = null,
         List<string>? allowedDataSources = null)
     {
         return new GatewayOptions
@@ -182,7 +181,6 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
             {
                 Enabled = enabled,
                 AllowDml = allowDml,
-                DmlWriterRoles = dmlWriterRoles ?? [],
                 AllowedDataSources = allowedDataSources ?? [],
                 DefaultMaxRows = 100,
                 MaxAllowedRows = 500
@@ -610,25 +608,16 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     [Fact]
     public async Task M20_Dml_WithoutWriteDecision_IsRejected_ForAnyRole()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]), permissiveWrite: false);
+        var service = CreateService(options: CreateOptions(allowDml: true), permissiveWrite: false);
 
         await Should.ThrowAsync<WebSqlTableDeniedException>(() =>
             service.RewriteSqlAsync("DELETE FROM orders WHERE id = 1", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
     }
 
     [Fact]
-    public async Task M20_Dml_WithNoWriterRolesConfigured_IsRejected()
-    {
-        var service = CreateService(options: CreateOptions(allowDml: true), permissiveWrite: false);
-
-        await Should.ThrowAsync<WebSqlPolicyException>(() =>
-            service.RewriteSqlAsync("DELETE FROM orders WHERE id = 1", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
-    }
-
-    [Fact]
     public async Task M20_Insert_IntoLibraryDefaultTenant42_IsRejected()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
+        var service = CreateService(options: CreateOptions(allowDml: true));
 
         // X1: a literal tenant value that is not the caller's is rejected by the compiler (typed SecurityException, SQL_POLICY_VIOLATION).
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
@@ -640,7 +629,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     [Fact]
     public async Task M20_Insert_WithoutTenantColumn_IsRejected()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
+        var service = CreateService(options: CreateOptions(allowDml: true));
 
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
             service.RewriteSqlAsync("INSERT INTO orders (id, amount) VALUES (1, 10)", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
@@ -651,7 +640,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     [Fact]
     public async Task M20_Insert_IntoOwnTenant_WithWriterRole_IsAccepted()
     {
-        var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
+        var service = CreateService(options: CreateOptions(allowDml: true));
 
         var compiled = await service.CompileAsync("INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, 'tenant_a')", CreateUser("WebSqlWriter"), new TenantId(Tenant));
 

@@ -83,30 +83,15 @@ public sealed class IntegrationGapATests
     [Fact]
     public void GAP04_ProductionWarnings_AndRegularDml_DoNotAbortStartup()
     {
-        // The regular option WebSql.AllowDml + DmlWriterRoles are allowed in Production.
+        // WebSql.AllowDml is allowed in Production without role configuration (authorization uses write consent grants).
         var options = new GatewayOptions
         {
-            WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] },
+            WebSql = new WebSqlOptions { AllowDml = true },
             DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }, Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
         Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
-    }
-
-    [Fact]
-    public void GAP04_WebSqlDml_WithoutWriterRoles_IsRejected()
-    {
-        var options = new GatewayOptions
-        {
-            WebSql = new WebSqlOptions { AllowDml = true },
-            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }
-        };
-
-        var ex = Should.Throw<ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
-
-        ex.Message.ShouldContain("DmlWriterRoles");
     }
 
     [Fact]
@@ -129,7 +114,7 @@ public sealed class IntegrationGapATests
         governanceBypass.HasAnyDangerBypassActive.ShouldBeTrue();
         governanceBypass.GetAllActiveBypasses().ShouldContain("DANGER:danger_bypass_websql_governance");
 
-        var dml = new GatewayOptions { WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] } };
+        var dml = new GatewayOptions { WebSql = new WebSqlOptions { AllowDml = true } };
         dml.HasAnySecurityBypassActive.ShouldBeFalse();
         dml.GetAllActiveBypasses().ShouldBeEmpty();
     }

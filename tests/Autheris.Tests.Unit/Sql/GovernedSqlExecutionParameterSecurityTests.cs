@@ -90,8 +90,7 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
             {
                 Enabled = true,
                 DefaultDataSourceName = DataSource,
-                AllowedDataSources = [DataSource],
-                DmlWriterRoles = ["Admin"]
+                AllowedDataSources = [DataSource]
             },
             DataSources = new SqlDataSourceOptions
             {

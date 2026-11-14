@@ -70,7 +70,6 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
             builder.UseSetting("Gateway:WebSql:AllowDml", "true");
             builder.UseSetting("Gateway:DataSources:RequireTenantColumn", "true");
             builder.ConfigureTestServices(s => s.AddSingleton<Autheris.Application.Common.Interfaces.IIdempotencyStore, ClusterWideTestIdempotencyStore>());
-            builder.UseSetting("Gateway:WebSql:DmlWriterRoles:0", "Writer");
             builder.UseSetting("Gateway:WebSql:MaxAffectedRows", MaxAffectedRows.ToString());
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", target.Provider);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", target.ConnectionString);

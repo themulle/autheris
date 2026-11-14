@@ -1,6 +1,7 @@
 namespace Autheris.Application.ConsentRequests;
 
 using System;
+using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,6 +19,9 @@ using Autheris.Domain.Model;
 /// <param name="UserSid">Authenticated requester.</param>
 /// <param name="Principal">Authenticated principal (claims used for tenant and identity resolution).</param>
 /// <param name="ContextTenant">Tenant resolved for the current request/connection context, or the legacy single tenant.</param>
+/// <param name="Context">Optional operational context provided by the requester.</param>
+/// <param name="RequestedWriteRules">Optional requested write rules for insert/update grants.</param>
+/// <param name="RequestWriteOnly">Optional flag controlling whether write requests omit read column grants.</param>
 public sealed record ConsentRequestSubmission(
     string Domain,
     string Schema,
@@ -28,7 +32,9 @@ public sealed record ConsentRequestSubmission(
     Sid UserSid,
     ClaimsPrincipal? Principal,
     TenantId ContextTenant,
-    AccessRequestContextInput? Context = null);
+    AccessRequestContextInput? Context = null,
+    IReadOnlyList<WriteRule>? RequestedWriteRules = null,
+    bool? RequestWriteOnly = null);
 
 /// <summary>Outcome of a consent request submission.</summary>
 public sealed class SubmitConsentRequestResult

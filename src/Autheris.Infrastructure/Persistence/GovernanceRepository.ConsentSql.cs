@@ -48,8 +48,8 @@ internal static class ConsentSqlCore
     public const string InsertConsentRequestSql = @"INSERT INTO CONSENT_REQUESTS (
                                     id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref,
                                     business_justification, status, requested_at, requested_valid_to,
-                                    itsm_ticket_id, tenant_id, requester_identifiers_json, context_json
-                                ) VALUES (@id, @tid, @sid, @gType, @gRef, @just, @status, @reqAt, @reqTo, @ticket, @tenantId, @reqIds, @ctx)";
+                                    itsm_ticket_id, tenant_id, requester_identifiers_json, context_json, requested_write_rules_json
+                                ) VALUES (@id, @tid, @sid, @gType, @gRef, @just, @status, @reqAt, @reqTo, @ticket, @tenantId, @reqIds, @ctx, @reqWriteRules)";
 
     public const string SelectApprovalStepsSql = "SELECT step_number, approver_sid, decision, rejection_reason, decided_at FROM APPROVAL_STEPS WHERE consent_request_id = @id ORDER BY step_number ASC";
 
@@ -304,6 +304,8 @@ internal static class ConsentSqlCore
             .ToDictionary(g => g.Key, _ => new List<ConsentColumnRule>(), StringComparer.OrdinalIgnoreCase);
         var filtersMap = consents.GroupBy(c => c.Id.ToString(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, _ => new List<ConsentRowFilter>(), StringComparer.OrdinalIgnoreCase);
+        var writeRulesMap = consents.GroupBy(c => c.Id.ToString(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, _ => new List<WriteRule>(), StringComparer.OrdinalIgnoreCase);
 
         for (int offset = 0; offset < consentIds.Count; offset += ConsentHydrateBatchSize)
         {
@@ -329,6 +331,17 @@ internal static class ConsentSqlCore
                     if (filtersMap.TryGetValue(cId, out var filterList)) filterList.Add(ReadRowFilter(reader, cId));
                 }
             }
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = ConsentWriteRulesSql.SelectWriteRulesPrefix + BindIdInClause(cmd, "cid", batch) + ")";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var cId = reader.GetString(1);
+                    if (writeRulesMap.TryGetValue(cId, out var writeRuleList)) writeRuleList.Add(ConsentWriteRulesSql.ReadWriteRule(reader));
+                }
+            }
         }
 
         foreach (var c in consents)
@@ -336,6 +349,7 @@ internal static class ConsentSqlCore
             var key = c.Id.ToString();
             c.ColumnRules = rulesMap[key];
             c.RowFilters = filtersMap[key];
+            c.WriteRules = writeRulesMap[key];
         }
     }
 
@@ -451,6 +465,8 @@ internal static class ConsentSqlCore
             filterCmd.AddBound("@ksMax", (object?)filter.KeySetMaxKeys ?? DBNull.Value);
             await filterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+
+        await ConsentWriteRulesSql.InsertWriteRulesAsync(conn, tx, consent, ct).ConfigureAwait(false);
     }
 
     public static async Task<Guid> ResolveTableIdOrThrowAsync(DbConnection conn, DbTransaction? tx, string? findTableIdSql, Guid existingTableId, TableIdentifier table, string operationLabel, CancellationToken ct)
@@ -569,6 +585,7 @@ internal static class ConsentSqlCore
             cmd.AddBound("@tenantId", request.TenantId.Value);
             cmd.AddBound("@reqIds", (object?)reqIdentifiersJson ?? DBNull.Value);
             cmd.AddBound("@ctx", (object?)request.ContextJson ?? DBNull.Value);
+            cmd.AddBound("@reqWriteRules", (object?)ConsentWriteRulesSql.SerializeRequestedWriteRules(request) ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
@@ -588,7 +605,9 @@ internal static class ConsentSqlCore
             TenantId = request.TenantId,
             RequesterIdentifiers = request.RequesterIdentifiers ?? new List<string>(),
             ApprovalSteps = request.ApprovalSteps ?? new List<ApprovalStep>(),
-            ContextJson = request.ContextJson
+            ContextJson = request.ContextJson,
+            RequestedWriteRules = request.RequestedWriteRules ?? [],
+            IncludeReadAccess = request.IncludeReadAccess
         };
     }
 
@@ -631,6 +650,8 @@ internal static class ConsentSqlCore
     {
         var reqIdsJson = reader.IsDBNull(14) ? null : reader.GetString(14);
         var reqIds = !string.IsNullOrWhiteSpace(reqIdsJson) ? JsonSerializer.Deserialize<List<string>>(reqIdsJson) : null;
+        var (writeRules, includeRead) = ConsentWriteRulesSql.DeserializeRequestedWriteRules(
+            reader.FieldCount > 16 && !reader.IsDBNull(16) ? reader.GetString(16) : null);
 
         return new ConsentRequest
         {
@@ -647,12 +668,17 @@ internal static class ConsentSqlCore
             ItsmTicketId = reader.IsDBNull(12) ? null : reader.GetString(12),
             TenantId = StoredTenant.Parse(reader.IsDBNull(13) ? null : reader.GetString(13)),
             RequesterIdentifiers = reqIds ?? new List<string>(),
-            ContextJson = reader.FieldCount > 15 && !reader.IsDBNull(15) ? reader.GetString(15) : null
+            ContextJson = reader.FieldCount > 15 && !reader.IsDBNull(15) ? reader.GetString(15) : null,
+            RequestedWriteRules = writeRules,
+            IncludeReadAccess = includeRead
         };
     }
 
-    public static ConsentRequest ReadSummaryConsentRequestRow(DbDataReader reader) =>
-        new()
+    public static ConsentRequest ReadSummaryConsentRequestRow(DbDataReader reader)
+    {
+        var (writeRules, includeRead) = ConsentWriteRulesSql.DeserializeRequestedWriteRules(
+            reader.FieldCount > 13 && !reader.IsDBNull(13) ? reader.GetString(13) : null);
+        return new ConsentRequest
         {
             Id = Guid.Parse(reader.GetString(0)),
             TableId = Guid.Parse(reader.GetString(1)),
@@ -664,8 +690,11 @@ internal static class ConsentSqlCore
             RequestedAt = DateTimeOffset.Parse(reader.GetString(7)),
             RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
             TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
-            ContextJson = reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null
+            ContextJson = reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null,
+            RequestedWriteRules = writeRules,
+            IncludeReadAccess = includeRead
         };
+    }
 
     public static async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(DbConnection conn, string baseSelectSql, Sid requesterSid, string? status, CancellationToken ct)
     {
@@ -871,36 +900,52 @@ internal static class ConsentSqlCore
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
-        var columnRules = new List<(Guid Id, Guid ColId, string ColName, int AccessLevel)>();
-        await using (var colCmd = conn.CreateCommand())
+        if (req.ShouldGrantReadColumns)
         {
-            colCmd.Transaction = tx;
-            colCmd.CommandText = SelectColumnSnapshotSql;
-            colCmd.AddBound("@tid", req.TableId.ToString());
-            await using var reader = await colCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            var columnRules = new List<(Guid Id, Guid ColId, string ColName, int AccessLevel)>();
+            await using (var colCmd = conn.CreateCommand())
             {
-                var colId = Guid.Parse(reader.GetString(0));
-                var colName = reader.GetString(1);
-                var isSensitive = Convert.ToInt32(reader.GetValue(2)) == 1;
-                var hasMask = Convert.ToInt32(reader.GetValue(3)) == 1;
-                int accessLevel = (int)ConsentColumnSnapshot.AccessLevelFor(isSensitive, hasMask);
-                columnRules.Add((Guid.NewGuid(), colId, colName, accessLevel));
+                colCmd.Transaction = tx;
+                colCmd.CommandText = SelectColumnSnapshotSql;
+                colCmd.AddBound("@tid", req.TableId.ToString());
+                await using var reader = await colCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var colId = Guid.Parse(reader.GetString(0));
+                    var colName = reader.GetString(1);
+                    var isSensitive = Convert.ToInt32(reader.GetValue(2)) == 1;
+                    var hasMask = Convert.ToInt32(reader.GetValue(3)) == 1;
+                    int accessLevel = (int)ConsentColumnSnapshot.AccessLevelFor(isSensitive, hasMask);
+                    columnRules.Add((Guid.NewGuid(), colId, colName, accessLevel));
+                }
+            }
+
+            foreach (var (ruleId, colId, colName, accessLevel) in columnRules)
+            {
+                await using var ruleCmd = conn.CreateCommand();
+                ruleCmd.Transaction = tx;
+                ruleCmd.CommandText = InsertColumnRuleSql;
+                ruleCmd.AddBound("@id", ruleId.ToString());
+                ruleCmd.AddBound("@consentId", consentId.ToString());
+                ruleCmd.AddBound("@colId", colId.ToString());
+                ruleCmd.AddBound("@colName", colName);
+                ruleCmd.AddBound("@level", accessLevel);
+                ruleCmd.AddBound("@scopes", string.Empty);
+                await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
         }
 
-        foreach (var (ruleId, colId, colName, accessLevel) in columnRules)
+        if (req.RequestedWriteRules.Count > 0)
         {
-            await using var ruleCmd = conn.CreateCommand();
-            ruleCmd.Transaction = tx;
-            ruleCmd.CommandText = InsertColumnRuleSql;
-            ruleCmd.AddBound("@id", ruleId.ToString());
-            ruleCmd.AddBound("@consentId", consentId.ToString());
-            ruleCmd.AddBound("@colId", colId.ToString());
-            ruleCmd.AddBound("@colName", colName);
-            ruleCmd.AddBound("@level", accessLevel);
-            ruleCmd.AddBound("@scopes", string.Empty);
-            await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            var writeConsent = new Consent
+            {
+                Id = consentId,
+                TableId = req.TableId,
+                TableIdentifier = req.TableIdentifier,
+                TenantId = req.TenantId,
+                WriteRules = req.RequestedWriteRules
+            };
+            await ConsentWriteRulesSql.InsertWriteRulesAsync(conn, tx, writeConsent, ct).ConfigureAwait(false);
         }
 
         return (true, consentId);

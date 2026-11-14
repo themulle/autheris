@@ -98,7 +98,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Prod("SecuritySwitchReport_WarnFlagsAndVirtualFilters", ("Insecure:warn_allow_all_cors_origins", "true"), ("AllowInsecureWarnFlagsInProduction", "true"), ("VirtualFilters:RequireApproval", "false")),
 
             // 11 OperationalInvariants
-            Prod("OperationalInvariants_DmlWithoutRoles", ("WebSql:AllowDml", "true")),
             Prod("OperationalInvariants_QuickstartInProduction", ("Dev:Preset", "Quickstart")),
             Prod("OperationalInvariants_ShutdownTimeout", ("HighAvailability:QueryTimeoutSeconds", "30"), ("HighAvailability:ShutdownTimeoutSeconds", "35")),
             Prod("OperationalInvariants_TerminationGrace", ("HighAvailability:TerminationGracePeriodSeconds", "20")),

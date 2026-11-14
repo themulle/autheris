@@ -148,13 +148,6 @@ internal static class GraphQlAndSwitchStartupChecks
         var options = context.Options;
         var isDevEnvironment = context.IsDevelopment;
 
-        if (options.WebSql.AllowDml && options.WebSql.DmlWriterRoles.Count == 0)
-        {
-            throw new ValidationException(
-                "Configuration error: WebSql.AllowDml=true requires at least one role in WebSql.DmlWriterRoles " +
-                "(SEC M-20: DML is allowed only for explicitly authorized roles).");
-        }
-
         if (!context.IsDevelopment && options.IsQuickstartProfile)
         {
             throw new ValidationException("Security violation: The GettingStarted profile 'Quickstart' may be active ONLY in the Development environment.");

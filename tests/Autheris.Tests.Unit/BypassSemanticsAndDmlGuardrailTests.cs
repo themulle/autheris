@@ -244,7 +244,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     {
         var options = new GatewayOptions
         {
-            WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] },
+            WebSql = new WebSqlOptions { AllowDml = true },
             DataMasking = ProdMasking(), Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
         };
 
@@ -256,11 +256,11 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     }
 
     [Fact]
-    public void SEM_AllowDml_WithoutWriterRoles_AbortsStartup_InEveryEnvironment()
+    public void SEM_AllowDml_WithoutRoles_SucceedsInEveryEnvironment()
     {
         var options = new GatewayOptions { WebSql = new WebSqlOptions { AllowDml = true } };
 
-        Should.Throw<ValidationException>(() =>
+        Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Development), NoEnvironmentVariables));
     }
 
@@ -442,7 +442,6 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             {
                 Enabled = true,
                 AllowDml = allowDml,
-                DmlWriterRoles = [WriterRole],
                 MaxAffectedRows = maxAffectedRows,
                 DefaultMaxRows = 100,
                 MaxAllowedRows = 500

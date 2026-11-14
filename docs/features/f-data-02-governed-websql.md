@@ -203,7 +203,6 @@ WebSQL adds no ordering of its own. A user `ORDER BY` on a column without an ind
       "AllowedDataSources": ["sales", "finance", "analytics"],
       "MaxResultRows": 5000,
       "AllowDml": false,
-      "DmlWriterRoles": ["DatabaseOperator"],
       "MaxAffectedRows": 1000,
       "RejectUnfilteredDml": true,
       "ExecutionTimeoutSeconds": 30

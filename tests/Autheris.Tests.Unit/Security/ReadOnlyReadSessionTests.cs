@@ -58,7 +58,6 @@ public sealed class ReadOnlyReadSessionTests
         {
             Enabled = true,
             AllowDml = true,
-            DmlWriterRoles = ["Writer"],
             DefaultDataSourceName = DataSource,
             MaxAffectedRows = 1000,
             ExecutionTimeoutSeconds = 30

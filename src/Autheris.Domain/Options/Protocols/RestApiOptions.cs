@@ -89,12 +89,6 @@ public sealed class WebSqlOptions
     public Dictionary<string, List<string>> TenantDataSourceAllowlist { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// SEC M-20: Roles that are authorized to execute DML via WebSQL (in addition to AllowDml).
-    /// Consents only evaluate read access, so DML is rejected unless the caller holds one of these roles.
-    /// </summary>
-    public List<string> DmlWriterRoles { get; init; } = [];
-
-    /// <summary>
     /// DML guardrail: maximum number of rows a single WebSQL DML statement may affect. The statement runs in a
     /// transaction; if more rows are affected it is rolled back and rejected. 0 = unlimited.
     /// </summary>
