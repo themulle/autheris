@@ -87,8 +87,18 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
                 visibility INTEGER NOT NULL,
                 min_group_size INTEGER NULL,
                 non_personal INTEGER NULL,
+                discovery_hidden INTEGER NOT NULL DEFAULT 0,
+                samples_disabled INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NULL,
                 updated_by TEXT NULL
+            );
+            CREATE TABLE COLUMN_CATALOG_SETTINGS (
+                table_id TEXT NOT NULL,
+                column_name TEXT NOT NULL,
+                discovery_hidden INTEGER NOT NULL DEFAULT 0,
+                updated_by TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (table_id, column_name)
             );
             CREATE TABLE TABLE_TAGS (
                 table_id TEXT NOT NULL,
