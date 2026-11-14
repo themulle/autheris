@@ -1,18 +1,16 @@
 namespace Autheris.Api.Endpoints;
 
-using System;
+using System.ComponentModel.DataAnnotations;
 using System.Threading;
-using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Identity.Services;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-
-using Autheris.Api.Extensions;
-using Autheris.Domain.Audit;
 
 public static class ScimGroupsEndpoints
 {
@@ -61,8 +59,19 @@ public static class ScimGroupsEndpoints
             CancellationToken ct) =>
         {
             var tenantId = httpContext.User.GetTenantId();
-            var created = await scimService.CreateGroupAsync(tenantId, realmId, groupModel, ct).ConfigureAwait(false);
-            return Results.Created($"/scim/v2/{realmId}/Groups/{created.GroupId}", created);
+            try
+            {
+                var created = await scimService.CreateGroupAsync(tenantId, realmId, groupModel, ct).ConfigureAwait(false);
+                return Results.Created($"/scim/v2/{realmId}/Groups/{created.GroupId}", created);
+            }
+            catch (ValidationException)
+            {
+                return ScimErrorResult.InvalidValue();
+            }
+            catch (ScimUniquenessConflictException conflict)
+            {
+                return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
+            }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapPut("/{id}", async (
@@ -74,8 +83,19 @@ public static class ScimGroupsEndpoints
             CancellationToken ct) =>
         {
             var tenantId = httpContext.User.GetTenantId();
-            var updated = await scimService.UpdateGroupAsync(tenantId, realmId, id, groupModel, ct).ConfigureAwait(false);
-            return updated != null ? Results.Ok(updated) : Results.NotFound();
+            try
+            {
+                var updated = await scimService.UpdateGroupAsync(tenantId, realmId, id, groupModel, ct).ConfigureAwait(false);
+                return updated != null ? Results.Ok(updated) : Results.NotFound();
+            }
+            catch (ValidationException)
+            {
+                return ScimErrorResult.InvalidValue();
+            }
+            catch (ScimUniquenessConflictException conflict)
+            {
+                return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
+            }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapPatch("/{id}", async (
@@ -87,8 +107,19 @@ public static class ScimGroupsEndpoints
             CancellationToken ct) =>
         {
             var tenantId = httpContext.User.GetTenantId();
-            var patched = await scimService.PatchGroupAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
-            return patched != null ? Results.Ok(patched) : Results.NotFound();
+            try
+            {
+                var patched = await scimService.PatchGroupAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
+                return patched != null ? Results.Ok(patched) : Results.NotFound();
+            }
+            catch (ValidationException)
+            {
+                return ScimErrorResult.InvalidValue();
+            }
+            catch (ScimUniquenessConflictException conflict)
+            {
+                return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
+            }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapDelete("/{id}", async (

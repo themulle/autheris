@@ -1,18 +1,16 @@
 namespace Autheris.Api.Endpoints;
 
-using System;
+using System.ComponentModel.DataAnnotations;
 using System.Threading;
-using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Identity.Services;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-
-using Autheris.Api.Extensions;
-using Autheris.Domain.Audit;
 
 public static class ScimUsersEndpoints
 {
@@ -61,8 +59,19 @@ public static class ScimUsersEndpoints
             CancellationToken ct) =>
         {
             var tenantId = httpContext.User.GetTenantId();
-            var created = await scimService.CreateUserAsync(tenantId, realmId, user, ct).ConfigureAwait(false);
-            return Results.Created($"/scim/v2/{realmId}/Users/{created.UserKey}", created);
+            try
+            {
+                var created = await scimService.CreateUserAsync(tenantId, realmId, user, ct).ConfigureAwait(false);
+                return Results.Created($"/scim/v2/{realmId}/Users/{created.UserKey}", created);
+            }
+            catch (ValidationException)
+            {
+                return ScimErrorResult.InvalidValue();
+            }
+            catch (ScimUniquenessConflictException conflict)
+            {
+                return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
+            }
         }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapPut("/{id}", async (
@@ -78,6 +87,14 @@ public static class ScimUsersEndpoints
             {
                 var updated = await scimService.UpdateUserAsync(tenantId, realmId, id, user, ct).ConfigureAwait(false);
                 return updated != null ? Results.Ok(updated) : Results.NotFound();
+            }
+            catch (ValidationException)
+            {
+                return ScimErrorResult.InvalidValue();
+            }
+            catch (ScimUniquenessConflictException conflict)
+            {
+                return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
             }
             catch (ScimMassChangeBlockedException blocked)
             {
@@ -98,6 +115,14 @@ public static class ScimUsersEndpoints
             {
                 var patched = await scimService.PatchUserAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
                 return patched != null ? Results.Ok(patched) : Results.NotFound();
+            }
+            catch (ValidationException)
+            {
+                return ScimErrorResult.InvalidValue();
+            }
+            catch (ScimUniquenessConflictException conflict)
+            {
+                return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
             }
             catch (ScimMassChangeBlockedException blocked)
             {

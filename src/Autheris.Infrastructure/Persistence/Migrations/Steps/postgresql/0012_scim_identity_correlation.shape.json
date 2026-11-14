@@ -1,0 +1,109 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "identity_users",
+      "column": { "name": "object_sid", "type": "CHARACTER VARYING(184)", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "identity_users",
+      "column": { "name": "immutable_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "identity_users",
+      "column": { "name": "upn", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "identity_users",
+      "column": { "name": "entra_object_id", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "identity_groups",
+      "column": { "name": "object_sid", "type": "CHARACTER VARYING(184)", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addTable",
+      "table": "identity_group_nesting",
+      "newTable": {
+        "name": "identity_group_nesting",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "realm_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "parent_group_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "child_group_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false }
+        ],
+        "primaryKey": [ "tenant_id", "realm_id", "parent_group_id", "child_group_id" ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "identity_group_nesting",
+      "name": "ix_identity_group_nesting_child",
+      "unique": false,
+      "columns": [ "tenant_id", "realm_id", "child_group_id" ]
+    },
+    {
+      "op": "addTable",
+      "table": "scim_realm_sync_state",
+      "newTable": {
+        "name": "scim_realm_sync_state",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "realm_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "last_contact_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true },
+          { "name": "last_write_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true },
+          { "name": "deprovision_epoch", "type": "BIGINT", "family": "integer", "nullable": false }
+        ],
+        "primaryKey": [ "tenant_id", "realm_id" ],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "identity_users",
+      "name": "ix_identity_users_tenant_realm_object_sid",
+      "unique": true,
+      "columns": [ "tenant_id", "realm_id", "object_sid" ]
+    },
+    {
+      "op": "addIndex",
+      "table": "identity_users",
+      "name": "ix_identity_users_tenant_realm_immutable_id",
+      "unique": true,
+      "columns": [ "tenant_id", "realm_id", "immutable_id" ]
+    },
+    {
+      "op": "addIndex",
+      "table": "identity_users",
+      "name": "ix_identity_users_tenant_realm_entra_oid",
+      "unique": true,
+      "columns": [ "tenant_id", "realm_id", "entra_object_id" ]
+    },
+    {
+      "op": "addIndex",
+      "table": "identity_users",
+      "name": "ix_identity_users_tenant_realm_upn",
+      "unique": true,
+      "columns": [ "tenant_id", "realm_id", "upn" ]
+    },
+    {
+      "op": "addIndex",
+      "table": "identity_users",
+      "name": "ix_identity_users_tenant_realm_external_id",
+      "unique": true,
+      "columns": [ "tenant_id", "realm_id", "external_id" ]
+    },
+    {
+      "op": "addIndex",
+      "table": "identity_groups",
+      "name": "ix_identity_groups_tenant_realm_object_sid",
+      "unique": true,
+      "columns": [ "tenant_id", "realm_id", "object_sid" ]
+    }
+  ]
+}
