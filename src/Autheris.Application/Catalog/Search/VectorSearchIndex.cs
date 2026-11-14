@@ -16,7 +16,10 @@ public sealed class VectorSearchIndex
 
     public VectorSearchIndex(IEnumerable<(TableIdentifier TableId, ReadOnlyMemory<float> Vector)> vectors)
     {
-        _records = vectors.Select(v => (v.TableId, v.Vector.ToArray())).ToArray();
+        _records = vectors
+            .Where(v => !v.Vector.IsEmpty)
+            .Select(v => (v.TableId, v.Vector.ToArray()))
+            .ToArray();
     }
 
     public int Count => _records.Length;

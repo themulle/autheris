@@ -17,7 +17,8 @@ public sealed class LocalOnnxEmbeddingGenerator : ICatalogEmbeddingGenerator
 
     public int EmbeddingDimensions => _dimensions;
     public string ModelIdentifier => "local-onnx-minilm-l6-v2";
-    public bool IsAvailable => _isValid;
+    // ONNX runtime is not linked in this build; report unavailable rather than misrepresenting keyword search as hybrid.
+    public bool IsAvailable => false;
 
     public LocalOnnxEmbeddingGenerator(
         string? modelPath,
