@@ -286,7 +286,7 @@ public sealed class McpServerTests
     public async Task AiDataGuardrailService_WhenPolicyDenies_ShouldReturnErrorAndRecordDenyAudit()
     {
         var registry = new McpToolRegistry();
-        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
         var auditRepo = Substitute.For<IAuditLogRepository>();
         var policyService = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(r => TableAccessDecision.Denied(r.Object.Identifier, "not authorized"));
 

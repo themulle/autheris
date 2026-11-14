@@ -232,31 +232,6 @@ public class SecurityFindingsRemediationTests
     // Finding 3: Casbin sub_rule Injection Defense
     // =========================================================================
 
-    [Fact]
-    public void CasbinEnforcementService_AddPolicy_WithDangerousSubRule_ThrowsArgumentException()
-    {
-        // Arrange
-        var service = new CasbinEnforcementService();
-        var tenant = new TenantId("tenant-audit");
-
-        // Act & Assert
-        var ex = Should.Throw<ArgumentException>(() =>
-            service.AddPolicy(tenant, "attacker", "table", "read", "System.IO.File.ReadAllText(\"/etc/passwd\")", "allow"));
-        ex.Message.ShouldContain("Casbin sub_rule contains disallowed expression");
-    }
-
-    [Fact]
-    public void CasbinEnforcementService_AddPolicy_WithSafeSubRule_Succeeds()
-    {
-        // Arrange
-        var service = new CasbinEnforcementService();
-        var tenant = new TenantId("tenant-audit");
-
-        // Act & Assert: Standard boolean expression succeeds
-        Should.NotThrow(() =>
-            service.AddPolicy(tenant, "safe_user", "table", "read", "true", "allow"));
-    }
-
     // =========================================================================
     // Finding 4: Bounded Candidate Derivation in DefaultEnvironmentSecretProvider
     // =========================================================================
@@ -491,7 +466,7 @@ public class SecurityFindingsRemediationTests
             return TableAccessDecision.Allowed(ctx.Object.Identifier, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         });
 
-        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
@@ -537,7 +512,7 @@ public class SecurityFindingsRemediationTests
             return TableAccessDecision.Allowed(ctx.Object.Identifier, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         });
 
-        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
@@ -592,36 +567,6 @@ public class SecurityFindingsRemediationTests
     }
 
 
-
-    [Theory]
-    [InlineData("Finance') OR ('1'='1")]
-    [InlineData("HR'; DROP TABLE CONSENTS; --")]
-    [InlineData("Sales' UNION SELECT * FROM secrets --")]
-    [InlineData("Ops<script>alert(1)</script>")]
-    public async Task CRIT02_InterpolateRlsFilter_MaliciousClaimValue_ThrowsSecurityException(string maliciousClaim)
-    {
-        var casbin = new CasbinEnforcementService();
-        var tenant = new TenantId("tenant-finance");
-        var table = new TableIdentifier("finance", "dbo", "invoices");
-
-        casbin.AddPolicy(tenant, "attacker", table.ToString(), "read", "true", "allow", rlsFilter: "dept = '${department}'");
-
-        var context = new SecurityEvaluationContext(
-            UserSid: new Sid("attacker"),
-            GroupSids: [],
-            Tenant: tenant,
-            TargetTable: table,
-            RequestedColumns: ["id"],
-            ClientIp: System.Net.IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: "AUDIT",
-            Attributes: new System.Collections.Generic.Dictionary<string, object?> { ["department"] = maliciousClaim });
-
-        var ex = await Should.ThrowAsync<System.Security.SecurityException>(async () =>
-            await casbin.EvaluatePolicyAsync(context));
-        ex.Message.ShouldContain("Security error");
-        ex.Message.ShouldContain("department");
-    }
 
     [Fact]
     public void HIGH01_UntrustedCertificatesAllowed_InProduction_ThrowsValidationException()
@@ -680,32 +625,6 @@ public class SecurityFindingsRemediationTests
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(async () =>
             await invoker.SendAsync(request, System.Threading.CancellationToken.None));
         ex.Message.ShouldContain("strictly forbidden");
-    }
-
-    [Fact]
-    public void MED02_Casbin_SubRule_ExceedingLength_ThrowsArgumentException()
-    {
-        var casbin = new CasbinEnforcementService();
-        var tenant = new TenantId("tenant-core");
-        var longSubRule = new string('a', 501);
-
-        var ex = Should.Throw<ArgumentException>(() =>
-            casbin.AddPolicy(tenant, "user1", "table1", "read", longSubRule, "allow"));
-        ex.Message.ShouldContain("exceeds the maximum length of 500 characters");
-    }
-
-    [Theory]
-    [InlineData("true; eval(unescape('hack'))")]
-    [InlineData("ctx.Clearance == 'ADMIN' \0 nullbyte")]
-    [InlineData("sub_rule || `cat /etc/passwd`")]
-    public void MED02_Casbin_SubRule_IllegalCharacters_ThrowsArgumentException(string illegalSubRule)
-    {
-        var casbin = new CasbinEnforcementService();
-        var tenant = new TenantId("tenant-core");
-
-        var ex = Should.Throw<ArgumentException>(() =>
-            casbin.AddPolicy(tenant, "user1", "table1", "read", illegalSubRule, "allow"));
-        ex.Message.ShouldContain("contains disallowed characters");
     }
 
     [Fact]
@@ -966,21 +885,6 @@ public class SecurityFindingsRemediationTests
     }
 
     [Fact]
-    public void CRIT04_CasbinEnforcementService_PatternMatchWildcards_DoesNotTimeoutOrThrow()
-    {
-        var casbin = new CasbinEnforcementService();
-        var tenant = new TenantId("tenant-a");
-
-        var policy = """
-        p, S-1-5-21-USER1, sales.*, read, allow, (true)
-        p, S-1-5-21-USER1, marketing.*_data, read, allow, (true)
-        """;
-
-        casbin.LoadPolicyFromText(tenant, policy);
-        casbin.HasPolicies(tenant).ShouldBeTrue();
-    }
-
-    [Fact]
     public void CRIT05_PayloadSizeLimits_Constants_ConfiguredSensibly()
     {
         // Verified in GatewayApplicationBuilderExtensions:
@@ -992,104 +896,6 @@ public class SecurityFindingsRemediationTests
 
         maxCdcPayloadBytes.ShouldBe(10485760);
         maxSchemaRegistryPayloadBytes.ShouldBe(10485760);
-    }
-
-    [Fact]
-    public void F7_ValidateGatewayOptions_InvalidModelPath_WhenCasbinDisabled_ThrowsValidationException()
-    {
-        var options = new GatewayOptions
-        {
-            Casbin = new CasbinOptions
-            {
-                Enabled = false,
-                ModelPath = "non_existent_model_file.conf"
-            }
-        };
-
-        var devEnv = Substitute.For<IHostEnvironment>();
-        devEnv.EnvironmentName.Returns(Environments.Development);
-
-        var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
-            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
-        ex.Message.ShouldContain("Casbin model file");
-        ex.Message.ShouldContain("was not found");
-    }
-
-    [Fact]
-    public void RPOL5_ValidateGatewayOptions_PolicyFileWithOnlyComments_ThrowsValidationException()
-    {
-        var tempModel = Path.GetTempFileName();
-        var tempPolicy = Path.GetTempFileName();
-        try
-        {
-            // Valid model from CasbinEnforcementService
-            File.WriteAllText(tempModel, Autheris.Application.Governance.CasbinEnforcementService.DefaultModelText);
-
-            // Policy with only comments
-            File.WriteAllText(tempPolicy, """
-                # This file contains only comments
-                # No p-rules are declared
-                """);
-
-            var options = new GatewayOptions
-            {
-                Casbin = new CasbinOptions
-                {
-                    Enabled = true,
-                    ModelPath = tempModel,
-                    PolicyPath = tempPolicy
-                }
-            };
-
-            var devEnv = Substitute.For<IHostEnvironment>();
-            devEnv.EnvironmentName.Returns(Environments.Development);
-
-            var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
-                GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
-            ex.Message.ShouldContain("contains no valid 'p' rules");
-        }
-        finally
-        {
-            if (File.Exists(tempModel)) File.Delete(tempModel);
-            if (File.Exists(tempPolicy)) File.Delete(tempPolicy);
-        }
-    }
-
-    [Fact]
-    public void RPOL5_ValidateGatewayOptions_ValidPolicyFile_Succeeds()
-    {
-        var tempModel = Path.GetTempFileName();
-        var tempPolicy = Path.GetTempFileName();
-        try
-        {
-            File.WriteAllText(tempModel, Autheris.Application.Governance.CasbinEnforcementService.DefaultModelText);
-
-            File.WriteAllText(tempPolicy, """
-                # Valid rule
-                p, alice, tenant-a, hr.employees, read, true, allow
-                """);
-
-            var options = new GatewayOptions
-            {
-                Casbin = new CasbinOptions
-                {
-                    Enabled = true,
-                    ModelPath = tempModel,
-                    PolicyPath = tempPolicy
-                }
-            };
-
-            var devEnv = Substitute.For<IHostEnvironment>();
-            devEnv.EnvironmentName.Returns(Environments.Development);
-
-            Should.NotThrow(() =>
-                GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
-        }
-        finally
-        {
-            if (File.Exists(tempModel)) File.Delete(tempModel);
-            if (File.Exists(tempPolicy)) File.Delete(tempPolicy);
-        }
     }
 
     // =========================================================================

@@ -52,7 +52,6 @@ public sealed class ArchitectureNoSourceMetadataReadsTests
         ["TrinoSqlEngine/SqlFunctionPolicy.cs"] = "denylist/emulation literal, never sent to a source",
         ["Autheris.Infrastructure/Persistence/SessionPinning.cs"] = "denylist/emulation literal, never sent to a source: pg_catalog is a search_path entry, not a read",
         ["Autheris.Application/Sql/Services/TrinoMetadataQueryHandler.cs"] = "denylist/emulation literal, never sent to a source: answers from the declared catalog",
-        ["Autheris.Application/Governance/CasbinEnforcementService.Columns.cs"] = "denylist/emulation literal, never sent to a source",
         ["Autheris.Application/Catalog/Services/CatalogSourceNameValidator.cs"] = "denylist literal, never sent to a source: validates against reserved catalog names",
         ["Autheris.Application/VirtualFilters/EffectiveFilterInspector.cs"] = "audit target label literal, never sent to a source"
     };

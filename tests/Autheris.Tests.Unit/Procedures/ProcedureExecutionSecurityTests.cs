@@ -114,7 +114,6 @@ public partial class ProcedureExecutionSecurityTests
         public CapturingLogger Logger { get; } = new();
         public GatewayOptions Options { get; set; } = new();
         public ProcedureDenialAuditLimiter? Limiter { get; set; }
-        public IPolicyEnforcementService PolicyEnforcement { get; set; } = global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance;
         public Func<string, ColumnAccessLevel, TableAccessDecision>? Decision { get; set; }
 
         private bool _auditWired;
@@ -663,8 +662,7 @@ public partial class ProcedureExecutionSecurityTests
 
     private static async Task<GovernedProcedureResult> RunCleared(
         Func<TableAccessDecision, TableAccessDecision> decision,
-        Func<TableMetadata, TableMetadata>? meta = null,
-        bool abac = false)
+        Func<TableMetadata, TableMetadata>? meta = null)
     {
         var e = Active(d => d with { ClearedResultColumns = ["salary"] });
         e.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(ci =>
@@ -678,14 +676,6 @@ public partial class ProcedureExecutionSecurityTests
         });
         e.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => decision(TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase), hasUnconstrainedColumnAllow: true)));
-        if (abac)
-        {
-            var pe = Substitute.For<IPolicyEnforcementService>();
-            pe.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-            pe.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-                .Returns(ci => ValueTask.FromResult(TableAccessDecision.Allowed(ci.Arg<SecurityEvaluationContext>().TargetTable, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
-            e.PolicyEnforcement = pe;
-        }
 
         return await Run(e);
     }
@@ -727,22 +717,6 @@ public partial class ProcedureExecutionSecurityTests
     {
         var r = await RunCleared(d => d);
         r.Rows[0]["salary"].ShouldBe(1000m);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task T_PROC152_10_ClearedColumns_WithAbacRewrite_SensitivityOnlyMaskStillLifted()
-    {
-        var r = await RunCleared(d => d, abac: true);
-        r.Rows[0]["salary"].ShouldBe(1000m);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task T_PROC152_10_ClearedColumns_WithAbacRewrite_ExplicitMaskNotLifted()
-    {
-        var r = await RunCleared(d => WithColumn(d, ColumnAccessLevel.Mask), abac: true);
-        r.Rows[0]["salary"].ShouldBe("***");
     }
 
     [Fact]

@@ -76,110 +76,13 @@ public sealed class MustFixRemediationTests
     // 2. R-POL-2: Global Casbin Deny rules take absolute precedence
     // =========================================================================
 
-    [Fact]
-    public async Task R_POL_2_GlobalCasbinDenyRule_BlocksTenant_EvenWhenTenantHasSpecificAllowRules()
-    {
-        var service = new CasbinEnforcementService();
-
-        // Policy with:
-        // 1. Global wildcard Deny for 'sensitive_orders'
-        // 2. Specific tenant-a Allow rule for all tables
-        var targetTable = new TableIdentifier("default", "public", "sensitive_orders");
-        var policy = $@"
-p, alice, *, {targetTable}, read, true, deny
-p, alice, tenant-a, *, read, true, allow
-";
-        service.LoadPolicyFromText(policy);
-
-        var evalContext = new SecurityEvaluationContext(
-            UserSid: new Sid("alice"),
-            GroupSids: Array.Empty<Sid>(),
-            Tenant: new TenantId("tenant-a"),
-            TargetTable: targetTable,
-            RequestedColumns: Array.Empty<string>(),
-            ClientIp: IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null);
-
-        var decision = await service.EvaluatePolicyAsync(evalContext);
-
-        decision.IsAllowed.ShouldBeFalse();
-        decision.DeniedReasons.ShouldContain(r => r.Contains("denied by ABAC policy"));
-    }
-
     // =========================================================================
     // 3. R-POL-3: Reloading policy file drops removed tenants immediately
     // =========================================================================
 
-    [Fact]
-    public async Task R_POL_3_PolicyReload_ImmediatelyRevokesTenants_RemovedFromNewPolicy()
-    {
-        var service = new CasbinEnforcementService();
-        var table = new TableIdentifier("default", "public", "docs");
-
-        // Initial policy granting access to tenant-a and tenant-b
-        var initialPolicy = $@"
-p, bob, tenant-a, {table}, read, true, allow
-p, bob, tenant-b, {table}, read, true, allow
-";
-        service.LoadPolicyFromText(initialPolicy);
-
-        var ctxTenantB = new SecurityEvaluationContext(
-            UserSid: new Sid("bob"),
-            GroupSids: Array.Empty<Sid>(),
-            Tenant: new TenantId("tenant-b"),
-            TargetTable: table,
-            RequestedColumns: Array.Empty<string>(),
-            ClientIp: IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null);
-
-        // Pre-reload: bob has access to tenant-b
-        var decisionBefore = await service.EvaluatePolicyAsync(ctxTenantB);
-        decisionBefore.IsAllowed.ShouldBeTrue();
-
-        // New policy: tenant-b is removed/revoked
-        var newPolicy = $@"
-p, bob, tenant-a, {table}, read, true, allow
-";
-        service.LoadPolicyFromText(newPolicy);
-
-        // Post-reload: tenant-b is immediately revoked
-        var decisionAfter = await service.EvaluatePolicyAsync(ctxTenantB);
-        decisionAfter.IsAllowed.ShouldBeFalse();
-    }
-
     // =========================================================================
     // 4. R-POL-1: Global Casbin Allow rules apply across tenants
     // =========================================================================
-
-    [Fact]
-    public async Task R_POL_1_GlobalCasbinAllowRule_GrantsAccess_ToAnyTenantWithoutOverrides()
-    {
-        var service = new CasbinEnforcementService();
-        var table = new TableIdentifier("default", "public", "reports");
-
-        // Policy with global wildcard Allow for reports
-        var policy = $@"
-p, auditor, *, {table}, read, true, allow
-";
-        service.LoadPolicyFromText(policy);
-
-        // Auditor evaluates in tenant-acme
-        var evalContext = new SecurityEvaluationContext(
-            UserSid: new Sid("auditor"),
-            GroupSids: Array.Empty<Sid>(),
-            Tenant: new TenantId("tenant-acme"),
-            TargetTable: table,
-            RequestedColumns: Array.Empty<string>(),
-            ClientIp: IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null);
-
-        var decision = await service.EvaluatePolicyAsync(evalContext);
-
-        decision.IsAllowed.ShouldBeTrue();
-    }
 
     // =========================================================================
     // 5. R-GQL-1: Masked numbers & booleans in GraphQL return null

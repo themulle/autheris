@@ -19,8 +19,6 @@ public static class GatewaySections
     public const string ApiKey = "Gateway:ApiKey";
     public const string Totp = "Gateway:Totp";
     public const string HitLStepUp = "Gateway:HitLStepUp";
-    public const string Casbin = "Gateway:Casbin";
-    public const string CasbinDecisionCache = "Gateway:Casbin:DecisionCache";
     public const string RowFilters = "Gateway:RowFilters";
     public const string CallerAttributes = "Gateway:CallerAttributes";
     public const string VirtualFilters = "Gateway:VirtualFilters";

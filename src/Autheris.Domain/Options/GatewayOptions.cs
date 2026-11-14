@@ -27,7 +27,6 @@ public sealed class GatewayOptions
     [Required] public LakehouseOptions Lakehouse { get; init; } = new();
     [Required] public FederationOptions Federation { get; init; } = new();
     [Required] public ExtensibilityOptions Extensibility { get; init; } = new();
-    [Required] public CasbinOptions Casbin { get; init; } = new();
     [Required] public DbtOptions Dbt { get; init; } = new();
     [Required] public ResourceGroupsOptions ResourceGroups { get; init; } = new();
     [Required] public SystemMetricsOptions SystemMetrics { get; init; } = new();

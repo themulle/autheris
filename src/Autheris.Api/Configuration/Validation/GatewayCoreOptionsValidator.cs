@@ -8,7 +8,7 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Api.Configuration.Validation;
 
 /// <summary>
-/// Validates core gateway options (row filter strategy, Casbin files, plugin manifest, and OpenMetadata HTTPS).
+/// Validates core gateway options (row filter strategy, plugin manifest, and OpenMetadata HTTPS).
 /// </summary>
 public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOptions>
 {
@@ -104,25 +104,6 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
         if (opts.Catalog.DefaultVisibility is not (Autheris.Domain.Model.DatasetVisibility.Hidden or Autheris.Domain.Model.DatasetVisibility.Summary))
         {
             failures.Add("Gateway:Catalog:DefaultVisibility must be Hidden or Summary (Full is not allowed as a default).");
-        }
-
-        if (opts.Casbin.Enabled &&
-            !string.IsNullOrWhiteSpace(opts.Casbin.ModelPath) &&
-            !_fileSystem.FileExists(opts.Casbin.ModelPath))
-        {
-            failures.Add("Gateway:Casbin is enabled, but the configured ModelPath file was not found.");
-        }
-
-        if (opts.Casbin.Enabled && string.IsNullOrWhiteSpace(opts.Casbin.PolicyPath))
-        {
-            failures.Add("Gateway:Casbin is enabled, but PolicyPath is not configured. Failing closed.");
-        }
-
-        if (opts.Casbin.Enabled &&
-            !string.IsNullOrWhiteSpace(opts.Casbin.PolicyPath) &&
-            !_fileSystem.FileExists(opts.Casbin.PolicyPath))
-        {
-            failures.Add("Gateway:Casbin is enabled, but the configured PolicyPath file was not found.");
         }
 
         failures.AddRange(TeamToGroupSidMapRules.Validate(opts.OpenMetadata.TeamToGroupSidMap, "Gateway:OpenMetadata:TeamToGroupSidMap"));

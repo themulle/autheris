@@ -13,9 +13,6 @@ public sealed partial class ModuleBoundaryTests
     [GeneratedRegex(@"new\s+(?:Autheris\.Application\.Policy\.)?AccessDecisionPoint\s*\(", RegexOptions.CultureInvariant)]
     private static partial Regex NewAccessDecisionPointRegex();
 
-    [GeneratedRegex(@"new\s+(?:Autheris\.Application\.Policy\.)?TableAccessPolicy\s*\(", RegexOptions.CultureInvariant)]
-    private static partial Regex NewTableAccessPolicyRegex();
-
     [Fact]
     [Trait("Category", "Security")]
     [Trait("SecurityCondition", "SEC-SIMPL-50-02")]
@@ -36,15 +33,6 @@ public sealed partial class ModuleBoundaryTests
             if (NewAccessDecisionPointRegex().IsMatch(text))
             {
                 violations.Add($"{file.RelativePath}: production code must not hand-construct AccessDecisionPoint");
-            }
-
-            if (NewTableAccessPolicyRegex().IsMatch(text))
-            {
-                // Verify that 4th parameter or policyEnforcementService argument is not null or null literal or NoOp
-                if (Regex.IsMatch(text, @"new\s+(?:Autheris\.Application\.Policy\.)?TableAccessPolicy\s*\([^,]*,[^,]*,[^,]*,\s*(?:null|new\s+NullPolicyEnforcementService)"))
-                {
-                    violations.Add($"{file.RelativePath}: constructs TableAccessPolicy with null or no-op policy service");
-                }
             }
         }
 

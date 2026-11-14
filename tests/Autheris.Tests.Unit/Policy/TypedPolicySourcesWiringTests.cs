@@ -352,13 +352,4 @@ public sealed class TypedPolicySourcesWiringTests
             .ShouldBeSameAs(provider.GetRequiredService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>());
     }
 
-    [Fact]
-    public void CasbinService_GetsTheRowPolicyFactory()
-    {
-        using var provider = BuildProvider();
-
-        var casbin = provider.GetRequiredService<IPolicyEnforcementService>();
-
-        FieldsOf(casbin, typeof(RowPolicyFactory)).ShouldHaveSingleItem().ShouldNotBeNull();
-    }
 }

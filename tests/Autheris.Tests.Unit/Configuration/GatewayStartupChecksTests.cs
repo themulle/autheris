@@ -94,15 +94,16 @@ public sealed class GatewayStartupChecksTests : IDisposable
     [Trait("SecurityCondition", "ARCH-MNT-14-SC-03")]
     public void Validator_FirstViolationWins_NoAggregation()
     {
-        // ARCH-MNT-14-T-06: two violations (egress and a missing Casbin model); only the first check reports, the second never runs.
+        // ARCH-MNT-14-T-06: two violations (egress and an invalid reverse proxy network); only the first check reports, the second never runs.
         var twoViolations = Prod(
             "TwoViolations",
             ("Egress:TrustedInternalNetworks:0", "10.0.0.0/4"),
-            ("Casbin:ModelPath", "{tmp}/missing.conf"));
+            ("ReverseProxy:Enabled", "true"),
+            ("ReverseProxy:KnownNetworks:0", "not-a-network"));
         var outcome = RunFailureOutcome(twoViolations, With(GatewayStartupChecks.All), _fixtureDir);
 
         outcome.ShouldContain("Egress allowlist configuration error");
-        outcome.ShouldNotContain("Casbin model file");
+        outcome.ShouldNotContain("ReverseProxy.KnownNetworks");
         outcome.ShouldNotContain("Aggregate");
 
         var ran = new List<string>();

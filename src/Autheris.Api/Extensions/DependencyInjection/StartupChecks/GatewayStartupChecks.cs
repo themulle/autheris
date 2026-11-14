@@ -38,8 +38,6 @@ internal static class GatewayStartupChecks
         new("QueryCostOptions", GatewayStartupChecks.QueryCostOptions),
         new("RecursiveCteWarning", GatewayStartupChecks.RecursiveCteWarning),
         new("Egress", PolicyAndNetworkStartupChecks.Egress),
-        new("CasbinModel", PolicyAndNetworkStartupChecks.CasbinModel),
-        new("CasbinPolicy", PolicyAndNetworkStartupChecks.CasbinPolicy),
         new("ReverseProxy", PolicyAndNetworkStartupChecks.ReverseProxy),
         new("DevelopmentInContainer", GraphQlAndSwitchStartupChecks.DevelopmentInContainer),
         new("GraphQlTrustedDocuments", GraphQlAndSwitchStartupChecks.GraphQlTrustedDocuments),

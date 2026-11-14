@@ -35,11 +35,6 @@ internal static class StartupValidatorGoldenSupport
     {
         var dir = Path.Combine(Path.GetTempPath(), "autheris-startup-golden-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir, "model-empty.conf"), string.Empty);
-        File.WriteAllText(Path.Combine(dir, "model-invalid.conf"), "this is not a casbin model\n");
-        File.WriteAllText(Path.Combine(dir, "policy-empty.csv"), string.Empty);
-        File.WriteAllText(Path.Combine(dir, "policy-norules.csv"), "# only a comment\n");
-        File.WriteAllText(Path.Combine(dir, "policy-invalid.csv"), "p, only-one-field\n");
         return dir;
     }
 

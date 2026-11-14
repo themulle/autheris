@@ -21,12 +21,6 @@ public static class BenchmarkRunnerApp
             return;
         }
 
-        if (args.Length > 0 && args[0].Equals("casbin", StringComparison.OrdinalIgnoreCase))
-        {
-            CasbinDecisionBenchmark.Run();
-            return;
-        }
-
         if (args.Length > 0 && args[0].Equals("vf", StringComparison.OrdinalIgnoreCase))
         {
             await VirtualFilterResolverBenchmark.RunAsync();
@@ -70,7 +64,7 @@ public static class BenchmarkRunnerApp
         // 4b. Governed AST compile path (cache hit and miss)
         CompilePathBenchmark.Run();
 
-        // 5. Explicit SLA Checks (Casbin, Lineage, Complexity)
+        // 5. Explicit SLA Checks (Lineage, Complexity)
         await SlaValidationBenchmark.RunAllSlaChecksAsync();
 
         Console.WriteLine("================================================================================");

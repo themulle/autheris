@@ -26,83 +26,9 @@ public sealed class TableWritePermissionTests
     private static readonly Sid AliceSid = new("S-1-5-21-ALICE");
     private static readonly TenantId TenantA = new("tenant-a");
 
-    private static SecurityEvaluationContext CreateContext(TableIdentifier table, string action)
-    {
-        return new SecurityEvaluationContext(
-            UserSid: AliceSid,
-            GroupSids: Array.Empty<Sid>(),
-            Tenant: TenantA,
-            TargetTable: table,
-            RequestedColumns: new[] { "id", "amount" },
-            ClientIp: IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null,
-            Attributes: new Dictionary<string, object?>
-            {
-                ["action"] = action,
-                ["gql.action"] = action
-            });
-    }
-
     [Fact]
-    public async Task User_With_Only_Read_Policy_Is_Denied_For_Write_And_Allowed_For_Read()
+    public async Task TableAccessPolicy_CanWriteTableAsync_Stays_Denied_With_Allow_Consent()
     {
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "read", "true", "allow");
-
-        var writeDecision = await casbin.EvaluatePolicyAsync(CreateContext(OrdersTable, "write"));
-        writeDecision.IsAllowed.ShouldBeFalse();
-
-        var readDecision = await casbin.EvaluatePolicyAsync(CreateContext(OrdersTable, "read"));
-        readDecision.IsAllowed.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task User_With_Only_Write_Policy_Is_Allowed_For_Write_And_Denied_For_Read()
-    {
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "write", "true", "allow");
-
-        var writeDecision = await casbin.EvaluatePolicyAsync(CreateContext(OrdersTable, "write"));
-        writeDecision.IsAllowed.ShouldBeTrue();
-
-        var readDecision = await casbin.EvaluatePolicyAsync(CreateContext(OrdersTable, "read"));
-        readDecision.IsAllowed.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task User_With_Wildcard_Action_Is_Allowed_For_Both_Read_And_Write()
-    {
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "*", "true", "allow");
-
-        var writeDecision = await casbin.EvaluatePolicyAsync(CreateContext(OrdersTable, "write"));
-        writeDecision.IsAllowed.ShouldBeTrue();
-
-        var readDecision = await casbin.EvaluatePolicyAsync(CreateContext(OrdersTable, "read"));
-        readDecision.IsAllowed.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task User_With_Explicit_Deny_For_Write_Is_Denied_For_Write_While_Read_Remains_Allowed()
-    {
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "*", "true", "allow");
-        casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "write", "true", "deny");
-
-        var writeDecision = await casbin.EvaluatePolicyAsync(CreateContext(OrdersTable, "write"));
-        writeDecision.IsAllowed.ShouldBeFalse();
-
-        var readDecision = await casbin.EvaluatePolicyAsync(CreateContext(OrdersTable, "read"));
-        readDecision.IsAllowed.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task TableAccessPolicy_CanWriteTableAsync_Stays_Denied_After_Casbin_Write_Grant()
-    {
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "read", "true", "allow");
-
         var consentRepo = Substitute.For<IConsentRepository>();
         var allowConsent = new Consent
         {
@@ -141,23 +67,12 @@ public sealed class TableWritePermissionTests
             }
         };
 
-        // When user only has "read" in Casbin:
-        var canWriteInitial = await tableAccessPolicy.CanWriteTableAsync(user, TenantA, tableMeta);
-        canWriteInitial.ShouldBeFalse();
-
-        // Writes are denied until a dedicated write decision exists; a Casbin write rule does not change that.
-        casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "write", "true", "allow");
-
-        var canWriteAfterGrant = await tableAccessPolicy.CanWriteTableAsync(user, TenantA, tableMeta);
-        canWriteAfterGrant.ShouldBeFalse();
+        (await tableAccessPolicy.CanWriteTableAsync(user, TenantA, tableMeta)).ShouldBeFalse();
     }
 
     [Fact]
     public async Task TableAccessPolicy_CanWriteTableAsync_WithContract_Stays_Denied()
     {
-        using var casbin = new CasbinEnforcementService();
-        casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "write", "true", "allow");
-
         var consentRepo = Substitute.For<IConsentRepository>();
         var allowConsent = new Consent
         {

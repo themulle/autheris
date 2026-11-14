@@ -29,6 +29,11 @@ public static class UnknownGatewayKeyGuard
         GatewayConfigurationSchema.Root + ":Insecure:danger_bypass_rebac"
     ];
 
+    private const string RemovedCasbinPrefix = GatewayConfigurationSchema.Root + ":Casbin";
+
+    private const string RemovedCasbinReplacement =
+        "removed by ADR-020; data access is granted only by grant records (consents), column rules and virtual filters";
+
     private static readonly string[] RemovedSimpl12Prefixes =
     [
         GatewayConfigurationSchema.Root + ":Itsm",
@@ -187,6 +192,17 @@ public static class UnknownGatewayKeyGuard
             }
         }
 
+        // Casbin is gone without a data-path successor: every key of the section fails startup with any value.
+        foreach (var key in configuration.AsEnumerable()
+                     .Select(kv => kv.Key)
+                     .Where(k => !string.IsNullOrEmpty(k) &&
+                                 (k.Equals(RemovedCasbinPrefix, StringComparison.OrdinalIgnoreCase) ||
+                                  k.StartsWith(RemovedCasbinPrefix + ":", StringComparison.OrdinalIgnoreCase)))
+                     .Order(StringComparer.OrdinalIgnoreCase))
+        {
+            unknown.Add($"{key} ({RemovedCasbinReplacement})");
+        }
+
         // Removed sections and keys fail startup with any value (including false or empty).
         foreach (var removedPrefix in RemovedSimpl12Prefixes)
         {
@@ -218,7 +234,7 @@ public static class UnknownGatewayKeyGuard
                 continue;
             }
 
-            if (IsClaimedByLoadedModule(fullKey, RemovedAuthzPrefixes))
+            if (IsClaimedByLoadedModule(fullKey, RemovedAuthzPrefixes) || IsClaimedByLoadedModule(fullKey, [RemovedCasbinPrefix]))
             {
                 continue;
             }

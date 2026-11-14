@@ -122,38 +122,6 @@ public sealed class RlsDeepDiveSecurityTests
     }
 
     [Fact]
-    public async Task Test3_CasbinTemplate_MissingClaimAttribute_ThrowsSecurityExceptionFailClosed()
-    {
-        // RLS-4 Verification:
-        // Casbin RLS Template with ${department} when user lacks department claim MUST throw SecurityException
-        var rlsGen = RlsFilterGenerator.Instance;
-        var casbinService = new CasbinEnforcementService(null, rlsGen);
-
-        var policyText = $$"""
-        p, {{_userSid.Value}}, tenant-rls-test, crm.dbo.customers, read, true, allow, department LIKE '${department}%'
-        """;
-        casbinService.LoadPolicyFromText(_tenantId, policyText);
-
-        var contextWithoutDept = new SecurityEvaluationContext(
-            UserSid: _userSid,
-            GroupSids: Array.Empty<Sid>(),
-            Tenant: _tenantId,
-            TargetTable: _testTable,
-            RequestedColumns: new[] { "id", "name" },
-            ClientIp: System.Net.IPAddress.Loopback,
-            Timestamp: DateTimeOffset.UtcNow,
-            PurposeId: null,
-            Attributes: new Dictionary<string, object?>() // No department!
-        );
-
-        // Act & Assert
-        await Should.ThrowAsync<SecurityException>(async () =>
-        {
-            await casbinService.EvaluatePolicyAsync(contextWithoutDept);
-        });
-    }
-
-    [Fact]
     public void Test4_InMemoryRls_MissingFilterColumn_FailsClosed()
     {
         // RLS-5 Verification:

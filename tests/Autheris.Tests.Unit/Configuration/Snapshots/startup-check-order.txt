@@ -9,8 +9,6 @@ WebhookSubscriptions
 QueryCostOptions
 RecursiveCteWarning
 Egress
-CasbinModel
-CasbinPolicy
 ReverseProxy
 DevelopmentInContainer
 GraphQlTrustedDocuments

@@ -71,6 +71,27 @@ public sealed class PackageBoundaryArchitectureTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void No_casbin_package()
+    {
+        // Casbin was removed (ADR-020): no project may reference it again, directly or through a lock file.
+        var files = RepositoryScan.EnumerateFiles("", "*.csproj")
+            .Concat(RepositoryScan.EnumerateFiles("", "packages.lock.json"));
+        var violations = new System.Collections.Generic.List<string>();
+
+        foreach (var relativePath in files)
+        {
+            var content = System.IO.File.ReadAllText(System.IO.Path.Combine(RepositoryScan.RepoRoot, relativePath));
+            if (content.Contains("\"Casbin", StringComparison.OrdinalIgnoreCase))
+            {
+                violations.Add($"{relativePath}: references a Casbin package");
+            }
+        }
+
+        violations.ShouldBeEmpty("Casbin packages are prohibited across all projects.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Api_extensions_usages_do_not_grow()
     {
         var allowedFiles = RepositoryScan.ReadBaseline("api-extensions-usages.txt")

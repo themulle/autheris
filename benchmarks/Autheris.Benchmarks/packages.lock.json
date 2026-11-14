@@ -58,44 +58,6 @@
         "resolved": "23.0.0",
         "contentHash": "i53VmQ505ASXsStf7y29Z5qvhN6PGgFGNb6UUU7z1WmbzEgSjKQuIJkKKVbh+K5rtXRiKyr1Ah3Rmvbeb2BEHQ=="
       },
-      "Azure.Core": {
-        "type": "Transitive",
-        "resolved": "1.50.0",
-        "contentHash": "GBNKZEhdIbTXxedvD3R7I/yDVFX9jJJEz02kCziFSJxspSQ5RMHc3GktulJ1s7+ffXaXD7kMgrtdQTaggyInLw==",
-        "dependencies": {
-          "Microsoft.Bcl.AsyncInterfaces": "8.0.0",
-          "System.ClientModel": "1.8.0",
-          "System.Memory.Data": "8.0.1"
-        }
-      },
-      "Azure.Identity": {
-        "type": "Transitive",
-        "resolved": "1.17.0",
-        "contentHash": "QZiMa1O5lTniWTSDPyPVdBKOS0/M5DWXTfQ2xLOot96yp8Q5A69iScGtzCIxfbg/4bmp/TynibZ2VK1v3qsSNA==",
-        "dependencies": {
-          "Azure.Core": "1.49.0",
-          "Microsoft.Identity.Client": "4.76.0",
-          "Microsoft.Identity.Client.Extensions.Msal": "4.76.0"
-        }
-      },
-      "Azure.Storage.Blobs": {
-        "type": "Transitive",
-        "resolved": "12.27.0",
-        "contentHash": "zI5rg1tTtnA8T2g2/21l+1iIUdDjpEQQ0FI1BabJVEQJ1JUyTQKrc41eNabAHs0SBHprl6pu/6OqIMK9Ve+4tQ==",
-        "dependencies": {
-          "Azure.Core": "1.50.0",
-          "Azure.Storage.Common": "12.26.0"
-        }
-      },
-      "Azure.Storage.Common": {
-        "type": "Transitive",
-        "resolved": "12.26.0",
-        "contentHash": "XaT6CDcSshZb7KaCTwc6m4EouZbLBg7ciOEpsJSdJCvkNsZJQCvPKw7V5TtXno19AA1NpwtsZriYque8mzbQVg==",
-        "dependencies": {
-          "Azure.Core": "1.50.0",
-          "System.IO.Hashing": "10.0.1"
-        }
-      },
       "BenchmarkDotNet.Annotations": {
         "type": "Transitive",
         "resolved": "0.15.8",
@@ -105,18 +67,6 @@
         "type": "Transitive",
         "resolved": "2.6.1",
         "contentHash": "wFFvDHne7d0mzh70dnryCyCs2YhBG5xGOlKPtObLF7SmtNEqNz3RXKffOcrjpi0IcqrvRgsL/MtH5rU++uK17g=="
-      },
-      "Casbin.NET": {
-        "type": "Transitive",
-        "resolved": "2.21.3",
-        "contentHash": "K17VAOGfYm6JOGw/QDnahOblsj2gP8En6RQ35v/5BrBMvPBl/cXzIiSXXzYWG6Ju7OkM+CVjBu3wisQ7j/tctg==",
-        "dependencies": {
-          "CsvHelper": "32.0.3",
-          "DotNet.Glob": "3.1.3",
-          "DynamicExpresso.Core": "2.16.1",
-          "Microsoft.Extensions.Configuration.Ini": "9.0.0-preview.4.24266.19",
-          "Microsoft.Extensions.Logging": "9.0.0-preview.4.24266.19"
-        }
       },
       "Castle.Core": {
         "type": "Transitive",
@@ -144,21 +94,6 @@
         "resolved": "8.4.2",
         "contentHash": "2hmtrrU18x6NL3mbuAqwy0KpnoEEJOuK6sH5RKQfD/jHijn2pqvqBUC7WGy9dgNBL9BDA7eOC0kirsNPMp2f4Q=="
       },
-      "CsvHelper": {
-        "type": "Transitive",
-        "resolved": "32.0.3",
-        "contentHash": "JNDkd4Wc2Tim5IuyL8Ai13RhzRvaHItseEvlJ2YRkx2SMBFrIsW8a5+/o4/O1jsb6mlviihR6Hfyn+nqY6CurA=="
-      },
-      "diskann-garnet": {
-        "type": "Transitive",
-        "resolved": "8.0.0",
-        "contentHash": "fE7PCCIQknC08A2ggK2nHTAF2rAMFRl9r+yFup8NFMeK/5hHnaw0761hVHNkqAz2xefLtGJS4IYaYCW4VUPx5A=="
-      },
-      "DotNet.Glob": {
-        "type": "Transitive",
-        "resolved": "3.1.3",
-        "contentHash": "hOfHw7MLJw/tbXaFwR1oiDb+dIXDp8URTxp5Pco42OOhiw77wrUNx6v6syNygHZbWwYdXQocL2Mo1l5FnfDVjg=="
-      },
       "DuckDB.NET.Bindings.Full": {
         "type": "Transitive",
         "resolved": "1.5.6.1",
@@ -172,11 +107,6 @@
           "Apache.Arrow": "23.0.0",
           "DuckDB.NET.Bindings.Full": "1.5.6.1"
         }
-      },
-      "DynamicExpresso.Core": {
-        "type": "Transitive",
-        "resolved": "2.16.1",
-        "contentHash": "RQxI6Ov/cfOcbTEQ8tLBJH5J7/W2uWvZjDCMTLAUZa91Z39Vj31wapSy6dyuEsw1FCZVqTipqoWw+t5qMi2ljA=="
       },
       "FluentValidation": {
         "type": "Transitive",
@@ -667,11 +597,6 @@
         "resolved": "1.3.8",
         "contentHash": "LhwlPa7c1zs1OV2XadMtAWdImjLIsqFJPoRcIWAadSRn0Ri1DepK65UbWLPmt4riLqx2d40xjXRk0ogpqNtK7g=="
       },
-      "KeraLua": {
-        "type": "Transitive",
-        "resolved": "1.4.9",
-        "contentHash": "oxor0U3bFxMRLY9TQ9QjDiiX1ojH2se5ei1T0hsSovqE+gAkC7ucqvApWBoClHUPOOsp/taWtzbZ+ZfP0Q4Nsw=="
-      },
       "Konscious.Security.Cryptography.Argon2": {
         "type": "Transitive",
         "resolved": "1.3.1",
@@ -734,11 +659,6 @@
         "type": "Transitive",
         "resolved": "10.0.14",
         "contentHash": "u4AX1M5Uzmw7V3NCdJJO4ITwH0DDDufyzmVlksE4QguVd23Co8adaREMp2VahlRB5f/rmtaFYVJIA1iIFnchmQ=="
-      },
-      "Microsoft.Bcl.AsyncInterfaces": {
-        "type": "Transitive",
-        "resolved": "8.0.0",
-        "contentHash": "3WA9q9yVqJp222P3x1wYIGDAkpjAku0TMUaaQV22g6L67AI0LdOIrVS7Ht2vJfLHGSPVuqN94vIr15qn+HEkHw=="
       },
       "Microsoft.Bcl.Cryptography": {
         "type": "Transitive",
@@ -930,17 +850,6 @@
           "Microsoft.Extensions.FileProviders.Abstractions": "10.0.14",
           "Microsoft.Extensions.FileProviders.Physical": "10.0.14",
           "Microsoft.Extensions.Primitives": "10.0.14"
-        }
-      },
-      "Microsoft.Extensions.Configuration.Ini": {
-        "type": "Transitive",
-        "resolved": "9.0.0-preview.4.24266.19",
-        "contentHash": "uRwBzwLMdjxytL70M+wtvFThfOuSgMLAQL+Fyide4ShcOLorT9NLBvCToFbB4zTU+RKEK02e8zGq+ejlhEoq5w==",
-        "dependencies": {
-          "Microsoft.Extensions.Configuration": "9.0.0-preview.4.24266.19",
-          "Microsoft.Extensions.Configuration.Abstractions": "9.0.0-preview.4.24266.19",
-          "Microsoft.Extensions.Configuration.FileExtensions": "9.0.0-preview.4.24266.19",
-          "Microsoft.Extensions.FileProviders.Abstractions": "9.0.0-preview.4.24266.19"
         }
       },
       "Microsoft.Extensions.Configuration.Json": {
@@ -1194,43 +1103,6 @@
         "resolved": "10.0.14",
         "contentHash": "1bbZqqCJTPba3inTADExbp/9PsGVyvGOX3zr6tFr7ySCgVkX9Lpw7BV0TizktNItd3SsbUu1sQfSAYm1GZMoNw=="
       },
-      "Microsoft.Garnet": {
-        "type": "Transitive",
-        "resolved": "2.2.5",
-        "contentHash": "gB5LlboBmmiCDoFnRk2ZelGQYBcge6OiP6alHHBbyrtwGndHjSMQsCp37k10xiUnJu2QzsZHBiSgepxlBn+wUQ==",
-        "dependencies": {
-          "Azure.Identity": "1.17.0",
-          "Azure.Storage.Blobs": "12.27.0",
-          "CommandLineParser": "2.9.1",
-          "KeraLua": "1.4.9",
-          "Microsoft.Extensions.Configuration.Binder": "10.0.5",
-          "Microsoft.Extensions.Logging": "10.0.5",
-          "Microsoft.Extensions.Logging.Configuration": "10.0.5",
-          "Microsoft.Extensions.Logging.Console": "10.0.5",
-          "Microsoft.Identity.Client": "4.76.0",
-          "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.17.0",
-          "Microsoft.IdentityModel.Validators": "8.17.0",
-          "System.IdentityModel.Tokens.Jwt": "8.17.0",
-          "diskann-garnet": "8.0.0"
-        }
-      },
-      "Microsoft.Identity.Client": {
-        "type": "Transitive",
-        "resolved": "4.76.0",
-        "contentHash": "j2FtmljuCveDJ7umBVYm6Bx3iVGA71U07Dc7byGr2Hrj7XlByZSknruCBUeYN3V75nn1VEhXegxE0MerxvxrXQ==",
-        "dependencies": {
-          "Microsoft.IdentityModel.Abstractions": "6.35.0"
-        }
-      },
-      "Microsoft.Identity.Client.Extensions.Msal": {
-        "type": "Transitive",
-        "resolved": "4.76.0",
-        "contentHash": "D0n3yMTa3gnDh1usrJmyxGWKYeqbQNCWLgQ0Tswf7S6nk9YobiCOX+M2V8EX5SPqkZxpwkTT6odAhaafu3TIeA==",
-        "dependencies": {
-          "Microsoft.Identity.Client": "4.76.0",
-          "System.Security.Cryptography.ProtectedData": "4.5.0"
-        }
-      },
       "Microsoft.IdentityModel.Abstractions": {
         "type": "Transitive",
         "resolved": "8.19.2",
@@ -1277,17 +1149,6 @@
           "Microsoft.Bcl.Cryptography": "10.0.2",
           "Microsoft.Extensions.Logging.Abstractions": "8.0.0",
           "Microsoft.IdentityModel.Logging": "8.19.2"
-        }
-      },
-      "Microsoft.IdentityModel.Validators": {
-        "type": "Transitive",
-        "resolved": "8.17.0",
-        "contentHash": "Q5nFG+xl7PXh1Blb2q8a1/PPZH+/7xee0nNwN/15tcuzPQKSHnzqvfg5dEdWm5Ax2GN9e6oX4K5wo22/VB+b/w==",
-        "dependencies": {
-          "Microsoft.IdentityModel.Protocols": "8.17.0",
-          "Microsoft.IdentityModel.Protocols.OpenIdConnect": "8.17.0",
-          "Microsoft.IdentityModel.Tokens": "8.17.0",
-          "System.IdentityModel.Tokens.Jwt": "8.17.0"
         }
       },
       "Microsoft.IO.RecyclableMemoryStream": {
@@ -1476,15 +1337,6 @@
           "System.IO.Hashing": "10.0.13"
         }
       },
-      "System.ClientModel": {
-        "type": "Transitive",
-        "resolved": "1.8.0",
-        "contentHash": "AqRzhn0v29GGGLj/Z6gKq4lGNtvPHT4nHdG5PDJh9IfVjv/nYUVmX11hwwws1vDFeIAzrvmn0dPu8IjLtu6fAw==",
-        "dependencies": {
-          "Microsoft.Extensions.Logging.Abstractions": "8.0.3",
-          "System.Memory.Data": "8.0.1"
-        }
-      },
       "System.CodeDom": {
         "type": "Transitive",
         "resolved": "9.0.5",
@@ -1544,11 +1396,6 @@
           "System.CodeDom": "9.0.5"
         }
       },
-      "System.Memory.Data": {
-        "type": "Transitive",
-        "resolved": "8.0.1",
-        "contentHash": "BVYuec3jV23EMRDeR7Dr1/qhx7369dZzJ9IWy2xylvb4YfXsrUxspWc4UWYid/tj4zZK58uGZqn2WQiaDMhmAg=="
-      },
       "System.Numerics.Tensors": {
         "type": "Transitive",
         "resolved": "10.0.14",
@@ -1595,12 +1442,12 @@
       "autheris.api": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.2.1, )",
-          "Autheris.Domain": "[1.2.1, )",
-          "Autheris.Extensions": "[1.2.1, )",
-          "Autheris.GraphQL": "[1.2.1, )",
-          "Autheris.Infrastructure": "[1.2.1, )",
-          "Autheris.Modules.Abstractions": "[1.2.1, )",
+          "Autheris.Application": "[0.0.0-dev, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
+          "Autheris.Extensions": "[0.0.0-dev, )",
+          "Autheris.GraphQL": "[0.0.0-dev, )",
+          "Autheris.Infrastructure": "[0.0.0-dev, )",
+          "Autheris.Modules.Abstractions": "[0.0.0-dev, )",
           "HotChocolate.AspNetCore": "[16.7.3, )",
           "Konscious.Security.Cryptography.Argon2": "[1.3.1, )",
           "Microsoft.AspNetCore.Authentication.JwtBearer": "[10.0.14, )",
@@ -1616,11 +1463,10 @@
         "type": "Project",
         "dependencies": {
           "Apache.Arrow": "[23.0.0, )",
-          "Autheris.Domain": "[1.2.1, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
           "BitFaster.Caching": "[2.6.1, )",
-          "Casbin.NET": "[2.21.3, )",
           "DuckDB.NET.Data.Full": "[1.5.6.1, )",
-          "FastSqlEngine": "[1.2.1, )",
+          "FastSqlEngine": "[0.0.0-dev, )",
           "FluentValidation": "[12.2.0, )",
           "HotChocolate.Language": "[16.7.3, )",
           "MemoryPack": "[1.21.4, )",
@@ -1647,8 +1493,8 @@
       "autheris.extensions": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.2.1, )",
-          "Autheris.Domain": "[1.2.1, )",
+          "Autheris.Application": "[0.0.0-dev, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
           "Microsoft.Extensions.Caching.Memory": "[10.0.14, )",
           "Microsoft.Extensions.Hosting.Abstractions": "[10.0.14, )",
           "Microsoft.Extensions.Http": "[10.0.14, )",
@@ -1659,8 +1505,8 @@
       "autheris.graphql": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.2.1, )",
-          "Autheris.Domain": "[1.2.1, )",
+          "Autheris.Application": "[0.0.0-dev, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
           "HotChocolate.AspNetCore": "[16.7.3, )",
           "HotChocolate.Data": "[16.7.3, )"
         }
@@ -1668,13 +1514,12 @@
       "autheris.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Application": "[1.2.1, )",
-          "Autheris.Domain": "[1.2.1, )",
+          "Autheris.Application": "[0.0.0-dev, )",
+          "Autheris.Domain": "[0.0.0-dev, )",
           "MemoryPack": "[1.21.4, )",
           "Microsoft.Data.SqlClient": "[7.1.1, )",
           "Microsoft.Data.Sqlite": "[10.0.14, )",
           "Microsoft.Extensions.Caching.Memory": "[10.0.14, )",
-          "Microsoft.Garnet": "[2.2.5, )",
           "Npgsql": "[10.0.3, )",
           "OpenTelemetry": "[1.20.1, )",
           "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.20.1, )",
@@ -1687,7 +1532,7 @@
       "autheris.modules.abstractions": {
         "type": "Project",
         "dependencies": {
-          "Autheris.Domain": "[1.2.1, )"
+          "Autheris.Domain": "[0.0.0-dev, )"
         }
       },
       "FastSqlEngine": {
