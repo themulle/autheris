@@ -41,13 +41,13 @@ security tests; this file records only the decisions.
 - CI guard: the compile-only Parity step runs with `if: ${{ !cancelled() }}`, so it also runs when the main test step fails (test updated accordingly).
 - Footprint budget gets a scheduled wrapper workflow with its own failure alert.
 
-## Plans that need rework before Phase 4
+## Plans that needed rework before Phase 4 (completed 2026-11-14)
 
-The group 6-9 review returned CHANGES REQUIRED for three work packages. The architect revises the plans first:
+The group 6-9 review returned CHANGES REQUIRED for three work packages; all three plans were revised on 2026-11-14 and are now `APPROVED WITH CONDITIONS`:
 
-- #628c: the table-level embedding text must not contain column names (Q-SRCH-5).
-- #672: restrictive writes must bump the catalog version immediately and a failed flush must be repaired (follows Q-SEC7-1).
-- #677: the plan assumes a tenant concept the catalog repository does not have; paging applies after visibility.
+- #628c (`2026-11-13-plan-issues-catalog-search.md`): revised so the table-level embedding text contains only technical table name, display name, and table description (strictly excluding column names and column descriptions per Q-SRCH-5 and SEC-OI-628-5/6).
+- #672 (`2026-11-13-plan-issues-catalog-scale.md`): revised so restrictive writes flush the catalog version immediately even inside a write scope and failed flushes set the process-wide dirty flag repaired by the 30 s snapshot poll (follows Q-SEC7-1 and SEC-OI-672-2/3; PR 1 `19b050e8` and PR 2 `f0e9f484` merged on `main`).
+- #677 (`2026-11-13-plan-issues-catalog-scale.md`): revised to document that the catalog repository has no tenant concept (unfiltered internal raw reads) and that paging, limit, cursor, and sort apply strictly after caller-level visibility, masking, and consent filtering (follows Q-SEC7-3 and SEC-OI-677-1/2).
 
 ## Phase 4 order
 
