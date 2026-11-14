@@ -19,3 +19,11 @@ CVE-2026-109518 # Exp: 2026-12-31, Justification: Base image libapt-pkg6.0t64 pa
 
 # Base image perl-base (Ubuntu 24.04 Noble) - CVE-2026-82560
 CVE-2026-82560 # Exp: 2026-12-31, Justification: Base image perl-base fix 5.38.2-3.2ubuntu0.7 pending in the dotnet/aspnet 10.0.15 image (installed 5.38.2-3.2ubuntu0.6); bump the base image digest once published
+
+# Base image libc-bin / libc6 (Ubuntu 24.04 Noble) - MEDIUM, fixed in 2.39-0ubuntu8.12
+CVE-2026-18374 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
+CVE-2026-84243 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
+CVE-2026-8674 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
+CVE-2026-86805 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
+CVE-2026-95818 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
+CVE-2026-97399 # Exp: 2026-12-14, Justification: Base image libc-bin/libc6 fix 2.39-0ubuntu8.12 pending in the dotnet/aspnet 10.0.15 image (installed 2.39-0ubuntu8.9); bump the base image digest once Microsoft publishes it and remove these entries (owner decision 2026-11-14)
