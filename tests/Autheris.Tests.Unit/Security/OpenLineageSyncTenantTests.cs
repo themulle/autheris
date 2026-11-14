@@ -18,6 +18,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class OpenLineageSyncTenantTests
 {
     private static async Task<int> GetStatusCodeAsync(IResult result, HttpContext context)

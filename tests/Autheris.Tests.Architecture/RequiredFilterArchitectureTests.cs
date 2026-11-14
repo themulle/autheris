@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class RequiredFilterArchitectureTests
 {
     private static readonly Regex RuleCallWithReferencedColumns = new(

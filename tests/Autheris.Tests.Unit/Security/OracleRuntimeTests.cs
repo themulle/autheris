@@ -11,6 +11,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Oracle runtime hardening (WP-F1, F2, F3, F4; SEC-ADG-03, -14, -24).</summary>
+[Trait("Category", "Security")]
 public sealed class OracleRuntimeTests
 {
     private const string Tcps = "(DESCRIPTION=(ADDRESS=(PROTOCOL=TCPS)(HOST=db.example)(PORT=2484))(CONNECT_DATA=(SERVICE_NAME=APP)))";

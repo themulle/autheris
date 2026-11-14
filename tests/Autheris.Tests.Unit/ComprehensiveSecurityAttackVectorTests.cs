@@ -40,6 +40,7 @@ using Xunit;
 /// 5. SSRF, Cloud Metadata (IMDS) & Private Network Evasion
 /// 6. Side-Channel Timing Attacks & Audit Hash-Chain Integrity
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ComprehensiveSecurityAttackVectorTests
 {
     // =========================================================================

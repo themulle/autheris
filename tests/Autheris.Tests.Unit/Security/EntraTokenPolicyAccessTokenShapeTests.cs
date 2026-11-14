@@ -8,6 +8,7 @@ using Autheris.Domain.Security;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class EntraTokenPolicyAccessTokenShapeTests
 {
     private static readonly IdentitySubjectResolver Resolver = new();

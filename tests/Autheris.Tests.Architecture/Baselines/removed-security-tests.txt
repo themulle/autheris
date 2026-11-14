@@ -1,0 +1,2 @@
+# Audit log of intentionally removed or consolidated [Trait("Category", "Security")] test methods (SEC-OI-504-3).
+# Format: <TestFqn>\t<PrOrIssueRef>\t<Reason>

@@ -19,6 +19,7 @@ using Xunit;
 
 namespace Autheris.Tests.Integration.Governance;
 
+[Trait("Category", "Security")]
 public class GovernanceSecurityTests : IDisposable
 {
     private readonly PostgreSqlGovernanceRepository _repository;

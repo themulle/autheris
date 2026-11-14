@@ -17,6 +17,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// trees, so every node kind and every comparison operator is exercised.
 /// </summary>
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public class AstSecurityVisitorGuardUnitTests
 {
     private sealed class Lookup(Func<string, string, bool> has) : IMaskedColumnLookup

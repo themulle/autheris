@@ -24,6 +24,7 @@ using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed partial class GovernanceRepositoryBatchUpsertTests : IDisposable
 {
     private readonly SqliteConnection _keepAlive;

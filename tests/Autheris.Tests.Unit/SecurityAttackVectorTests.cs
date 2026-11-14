@@ -36,6 +36,7 @@ using Xunit;
 /// 6. Cryptographic Constant-Time & Memory Dump Protection (CWE-208 / CWE-316)
 /// 7. Tamper-Evident Audit Hash Chain Integrity (CWE-353)
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class SecurityAttackVectorTests
 {
     // =========================================================================

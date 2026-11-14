@@ -15,6 +15,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
+[Trait("Category", "Security")]
 public sealed class EnvoyExtAuthzSecurityTests
 {
     private readonly IAccessDecisionPoint _policyService;

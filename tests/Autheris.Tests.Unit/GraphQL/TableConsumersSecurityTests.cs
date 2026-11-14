@@ -16,6 +16,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class TableConsumersSecurityTests
 {
     private readonly ILineageImpactAnalyzerService _lineageService = Substitute.For<ILineageImpactAnalyzerService>();

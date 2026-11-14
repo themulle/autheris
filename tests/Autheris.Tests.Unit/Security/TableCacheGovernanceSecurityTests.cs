@@ -27,6 +27,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class TableCacheGovernanceSecurityTests : IDisposable
 {
     private readonly string _testDir;

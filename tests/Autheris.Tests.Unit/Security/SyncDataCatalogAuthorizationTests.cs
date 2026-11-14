@@ -19,6 +19,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class SyncDataCatalogAuthorizationTests
 {
     private static IHttpContextAccessor Accessor(string authType, string tenant, params string[] roles)

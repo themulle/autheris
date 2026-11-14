@@ -14,6 +14,7 @@ using Xunit;
 /// GQL-8: when the last subscriber of a topic leaves while a new one joins, the new subscriber must not end up in the
 /// removed topic dictionary (it would never receive an event).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class CdcChannelRaceGql8Tests
 {
     private static CdcEvent Event(string id) =>

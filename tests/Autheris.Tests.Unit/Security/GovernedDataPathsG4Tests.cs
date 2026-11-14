@@ -43,6 +43,7 @@ using Xunit;
 using Autheris.Tests.Unit.Procedures;
 
 /// <summary>Review G4: E-3, D-1, D-2, D-3, D-4 and the related Low findings of the governed data paths.</summary>
+[Trait("Category", "Security")]
 public sealed class GovernedDataPathsG4Tests
 {
     private static readonly TenantId Tenant1 = new("tenant-1");

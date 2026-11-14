@@ -14,6 +14,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class SubgraphFederationSecurityTests
 {
     private const string Secret = "super-secret-signing-key-for-subgraphs-123!";

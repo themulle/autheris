@@ -14,6 +14,7 @@ using TrinoSqlEngine.Analysis;
 using Xunit;
 
 /// <summary>SEC-PG-17..19 (PARITY-GAP-017): the pushed-predicate parameter names are admitted on a planned table read only, anchored.</summary>
+[Trait("Category", "Security")]
 public sealed class PlannedReadParameterNameTests
 {
     private static IReadOnlyDictionary<string, object?> One(string name) => new Dictionary<string, object?> { [name] = 1 };

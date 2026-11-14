@@ -14,6 +14,7 @@ using Xunit;
 /// WP-SIMPL-38 PR 2 (#484): Read-only token query execution on /v1/statement and
 /// statement cancellation via DELETE on own statement paths.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ReadOnlyTokenStatementTests
 {
     private static ClaimsPrincipal ReadOnlyPrincipal()

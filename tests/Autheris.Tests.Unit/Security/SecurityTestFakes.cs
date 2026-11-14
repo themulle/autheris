@@ -236,15 +236,33 @@ internal sealed class FakeIdentityPipeline : IIdentityPipeline
 /// <summary>Generic dispatch-proxy fake returning default values for all interface members.</summary>
 internal static class NullFake
 {
-    public static T Create<T>() where T : class => DispatchProxy.Create<T, NullProxy>();
+    public static readonly object UseDefault = new();
+
+    public static T Create<T>(Func<MethodInfo, object?[]?, object?>? interceptor = null) where T : class
+    {
+        var proxy = DispatchProxy.Create<T, NullProxy>();
+        ((NullProxy)(object)proxy).Interceptor = interceptor;
+        return proxy;
+    }
 
 #pragma warning disable CA1852
     public class NullProxy : DispatchProxy
 #pragma warning restore CA1852
     {
+        public Func<MethodInfo, object?[]?, object?>? Interceptor { get; set; }
+
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
             if (targetMethod is null) return null;
+            if (Interceptor is not null)
+            {
+                var intercepted = Interceptor(targetMethod, args);
+                if (!ReferenceEquals(intercepted, UseDefault))
+                {
+                    return intercepted;
+                }
+            }
+
             var returnType = targetMethod.ReturnType;
             if (returnType == typeof(Task)) return Task.CompletedTask;
             if (returnType == typeof(ValueTask)) return ValueTask.CompletedTask;

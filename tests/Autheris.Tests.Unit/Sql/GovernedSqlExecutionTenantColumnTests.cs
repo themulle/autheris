@@ -21,6 +21,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class GovernedSqlExecutionTenantColumnTests
 {
     private const string Tenant = "tenant_test";

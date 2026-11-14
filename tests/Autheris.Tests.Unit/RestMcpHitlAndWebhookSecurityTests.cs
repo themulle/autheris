@@ -30,6 +30,7 @@ using Xunit;
 /// <summary>
 /// Security review 2026-10-02, work package D2: REST endpoints, MCP sessions, HitL and ITSM webhooks.
 /// </summary>
+[Trait("Category", "Security")]
 public class RestMcpHitlAndWebhookSecurityTests
 {
     // =========================================================================

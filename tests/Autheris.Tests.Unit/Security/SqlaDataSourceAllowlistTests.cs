@@ -16,6 +16,7 @@ using TrinoSqlEngine.Analysis;
 using Xunit;
 
 /// <summary>SQLA-07: the allowlist is checked on the data source a read really uses (catalog SourceName, mapped), not only on the identifier domain.</summary>
+[Trait("Category", "Security")]
 public sealed class SqlaDataSourceAllowlistTests
 {
     private const string TenantA = "tenant_a";

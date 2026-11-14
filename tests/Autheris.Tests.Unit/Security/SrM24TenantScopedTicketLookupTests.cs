@@ -8,6 +8,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Security;
 
 /// <summary>SR-M-24: every provider must implement the tenant-scoped ITSM ticket lookup; the interface default must not filter an unscoped lookup.</summary>
+[Trait("Category", "Security")]
 public sealed class SrM24TenantScopedTicketLookupTests
 {
     private static readonly Type[] ScopedSignature = [typeof(string), typeof(TenantId), typeof(CancellationToken)];

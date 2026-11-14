@@ -25,6 +25,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Procedures;
 
 /// <summary>PLAN-PROC-152-INC1: governed procedures INC-1 security slice (SEC-PROC152-01..11).</summary>
+[Trait("Category", "Security")]
 public partial class ProcedureExecutionSecurityTests
 {
     private const string NotFound = "Procedure endpoint not found.";

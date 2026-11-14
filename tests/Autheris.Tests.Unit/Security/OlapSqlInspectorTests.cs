@@ -17,6 +17,7 @@ using Xunit;
 /// BC-OLAP-01..03: the client SQL is judged by DuckDB's own parser. Several expectations about the shape of
 /// <c>json_serialize_sql</c> output are assumptions [verify]; each is a test so that a wrong assumption turns red.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class OlapSqlInspectorTests
 {
     private static DuckDbOlapEngine Engine() =>

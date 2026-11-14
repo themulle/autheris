@@ -17,6 +17,7 @@ namespace Autheris.Tests.Unit.Security;
 /// PLAN-PROC-152-INC2 WP-C (D-6, SEC-PROC152I2-09): a read-only token may POST to exactly one procedure segment below
 /// /api/v1/procedures, matched on the raw path without decoding.
 /// </summary>
+[Trait("Category", "Security")]
 public class ReadOnlyTokenProcedureRouteTests
 {
     private static ClaimsPrincipal ReadOnlyPrincipal()

@@ -44,6 +44,7 @@ namespace Autheris.Tests.Unit;
 /// Security review 2026-10-02, work package F (infrastructure + application integrations):
 /// H-01, H-17, M-25, M-26, M-27, M-28, M-29, M-30, M-31 and the MCP JSON-injection low finding.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class InfrastructureAndPluginSecurityTests : IDisposable
 {
     private readonly string _tempDir;

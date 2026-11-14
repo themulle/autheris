@@ -10,6 +10,7 @@ namespace Autheris.Tests.Integration.Governance;
 /// ARCH-MNT-22 runtime security pins of the revoke path on PostgreSQL (the PostgreSQL and SQL Server variants run in the Integration contract
 /// tests of CI, which need containers): the refactored statement-level core must keep authorisation, atomicity and the row-locked revoke by id.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class ConsentGrantDialectSecurityTests : IDisposable
 {
     private static readonly TenantId TenantA = new("tenant-a");

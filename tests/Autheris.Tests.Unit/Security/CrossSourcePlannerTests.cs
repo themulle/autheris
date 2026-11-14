@@ -19,6 +19,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class CrossSourcePlannerTests
 {
     private static readonly FastSqlEngine Engine = new();

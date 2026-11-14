@@ -29,6 +29,7 @@ using Shouldly;
 using TrinoSqlEngine;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class WebSqlHeterogeneousJoinTests
 {
     private const string Tenant = "tenant_test";

@@ -19,6 +19,7 @@ using Xunit;
 /// CR-ADG-08 / B-1: a tenant-id case collision denies only the colliding tenants at request time (403, stable code, audit
 /// entry); every other tenant keeps working.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class TenantCollisionRequestDenialTests
 {
     private static GatewayOptions Colliding() => new()

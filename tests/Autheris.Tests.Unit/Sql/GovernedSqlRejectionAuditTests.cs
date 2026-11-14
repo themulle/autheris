@@ -27,6 +27,7 @@ using Xunit;
 /// syntax error) is audited like a policy rejection, with the stable code of the error mapper and never its message, and is then rethrown
 /// unchanged so that every error surface still maps it.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class GovernedSqlRejectionAuditTests
 {
     private const string Tenant = "tenant_a";

@@ -20,6 +20,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Security;
 
+[Trait("Category", "Security")]
 public sealed class MustFixRemediationTests
 {
     // =========================================================================

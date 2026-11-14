@@ -10,6 +10,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Security;
 
 /// <summary>SR-M-19: quoted or schema-qualified function names must not bypass the OLAP SQL validator.</summary>
+[Trait("Category", "Security")]
 public sealed class SrM19DuckDbQuotedFunctionTests
 {
     private static DuckDbOlapEngine CreateEngine() => new(

@@ -37,6 +37,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class WebSqlCostQuotaTests
 {
     private static ClaimsPrincipal CreateUser(string sid = "user-1", string tenant = "tenant-1") =>

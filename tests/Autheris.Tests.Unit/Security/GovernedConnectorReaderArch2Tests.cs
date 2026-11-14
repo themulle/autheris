@@ -33,6 +33,7 @@ using Xunit;
 /// not push it down, masking exactly once, capacity limit). Before, only the REST/GraphQL path filtered after a connector
 /// that ignored the row filter; OLAP staged every row the connector returned.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class GovernedConnectorReaderArch2Tests
 {
     private static readonly TableIdentifier Table = new("sales", "public", "orders");

@@ -28,6 +28,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Security;
 
+[Trait("Category", "Security")]
 public sealed class DuckDbOlapSecurityTests
 {
     private readonly DuckDbOlapOptions _defaultOptions = new()

@@ -20,6 +20,7 @@ using Xunit;
 /// MCP-1: resources/list and resources/read must apply the same table and column visibility as the GraphQL catalog:
 /// unconditional Deny consents hide the table, denied or not granted columns appear in no resource.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class McpResourceColumnFilterMcp1Tests
 {
     private const string Tenant = "tenant-a";

@@ -43,6 +43,7 @@ using Xunit;
 
 namespace Autheris.Tests.Integration.Governance;
 
+[Trait("Category", "Security")]
 public sealed class SecurityReviewG5GovernanceTests
 {
     [Fact]

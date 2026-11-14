@@ -28,6 +28,7 @@ using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
 
+[Trait("Category", "Security")]
 public class Issue175SecurityConditionsTests
 {
     public sealed class User

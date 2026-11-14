@@ -7,6 +7,7 @@ using Xunit;
 /// <summary>
 /// MCP-10: the MCP PII scrubber covers IBANs with letters / lowercase IBANs and JSON-escaped e-mail local parts.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Mcp10PiiScrubberTests
 {
     [Theory]

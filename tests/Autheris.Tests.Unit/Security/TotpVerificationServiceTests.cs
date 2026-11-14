@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public class TotpVerificationServiceTests
 {
     private readonly InMemoryClusterStateProvider _clusterState;

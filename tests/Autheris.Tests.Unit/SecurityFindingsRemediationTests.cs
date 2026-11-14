@@ -39,6 +39,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public class SecurityFindingsRemediationTests
 {
     // =========================================================================

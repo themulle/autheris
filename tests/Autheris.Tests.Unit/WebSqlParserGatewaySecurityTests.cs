@@ -28,6 +28,7 @@ using Xunit;
 /// Round 4 (Nachprüfung 2026-10-02): WebSQL gateway side of P-01, P-02/SQ-06, P-05, P-06/SQ-11/SQ-13 and SQ-15.
 /// Parser-level tests live in gql_sqlparser/SecurityRemediationTests.cs (R4_*).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class WebSqlParserGatewaySecurityTests
 {
     private const string Tenant = "tenant_a";

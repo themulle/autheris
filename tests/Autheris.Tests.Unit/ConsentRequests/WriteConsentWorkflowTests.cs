@@ -33,6 +33,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.ConsentRequests;
 
+[Trait("Category", "Security")]
 public sealed class WriteConsentWorkflowTests
 {
     private static readonly Sid Requester = new("S-1-5-21-WRITE-REQ");

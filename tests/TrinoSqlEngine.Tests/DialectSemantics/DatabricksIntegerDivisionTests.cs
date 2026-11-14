@@ -8,6 +8,7 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.DialectSemantics;
 
 [Trait("Category", "SqlGate")]
+[Trait("Category", "Security")]
 public sealed class DatabricksIntegerDivisionTests
 {
     private static readonly TableIdentity Items = new("dbo", "Items");

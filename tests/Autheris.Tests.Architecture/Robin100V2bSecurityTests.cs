@@ -8,6 +8,7 @@ namespace Autheris.Tests.Architecture;
 /// Robin-100 rework v2, work package V2b: binding conditions SEC-R100-12, -13, -14 and -17 checked on the test sources.
 /// The scanners fail closed (a missing file or method is a failure, never a vacuous pass).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Robin100V2bSecurityTests
 {
     private static string RobinDir => Path.Combine(ParityIsolationArchitectureTests.FindRepoRoot(), "tests", "Autheris.Tests.Parity", "Robin");

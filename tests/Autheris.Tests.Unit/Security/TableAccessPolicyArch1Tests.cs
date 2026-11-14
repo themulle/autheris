@@ -35,6 +35,7 @@ using Xunit;
 /// access through one <see cref="TableAccessPolicy"/>. Before, OLAP had no consent cache, WebSQL and procedures read consents without the decision cache, and each path merged Casbin
 /// restrictions differently.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class TableAccessPolicyArch1Tests
 {
     private const string Tenant = "tenant_a";

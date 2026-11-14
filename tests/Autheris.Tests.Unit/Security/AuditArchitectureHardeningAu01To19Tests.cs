@@ -28,6 +28,7 @@ namespace Autheris.Tests.Unit.Security;
 /// Comprehensive verification tests for Findings AU-01 through AU-19 in accordance with
 /// docs/plans/plan-audit-architektur-haertung.md.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class AuditArchitectureHardeningAu01To19Tests : IDisposable
 {
     private readonly string _testDir;

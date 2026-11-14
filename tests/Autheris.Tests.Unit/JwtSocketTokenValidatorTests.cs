@@ -23,6 +23,7 @@ using Microsoft.IdentityModel.Tokens;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class JwtSocketTokenValidatorTests
 {
     private readonly SymmetricSecurityKey _signingKey = new(Encoding.UTF8.GetBytes("a-very-secret-test-key-of-at-least-256-bits-length!"));
@@ -258,5 +259,36 @@ public sealed class JwtSocketTokenValidatorTests
 
         isValid.ShouldBeFalse();
         principal.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Websocket_entra_token_enforces_client_allowlist()
+    {
+        var auth = new AuthenticationOptions
+        {
+            EntraId = new EntraIdAuthOptions
+            {
+                Enabled = true,
+                TenantId = "tid-1",
+                ClientId = "api-client",
+                AllowedClientIds = ["entra-allowed-client"]
+            }
+        };
+        var (validator, _) = CreateValidator(authentication: auth);
+        const string entraIssuer = "https://login.microsoftonline.com/tid-1/v2.0";
+
+        var (unlistedAzp, _) = await validator.ValidateTokenAsync(
+            GenerateToken("user-1", issuer: entraIssuer, extra: [new Claim("azp", "unlisted-client"), new Claim("scp", "access_as_user")]));
+        unlistedAzp.ShouldBeFalse();
+
+        var (unlistedAppIdOnly, _) = await validator.ValidateTokenAsync(
+            GenerateToken("user-1", issuer: entraIssuer, extra: [new Claim("appid", "unlisted-v1-client"), new Claim("scp", "access_as_user")]));
+        unlistedAppIdOnly.ShouldBeFalse();
+
+        var (allowedAzp, allowedPrincipal) = await validator.ValidateTokenAsync(
+            GenerateToken("user-1", issuer: entraIssuer, extra: [new Claim("azp", "entra-allowed-client"), new Claim("scp", "access_as_user")]));
+        allowedAzp.ShouldBeTrue();
+        allowedPrincipal.ShouldNotBeNull();
     }
 }

@@ -20,6 +20,7 @@ using Xunit;
 /// MCP-2: session store and HitL approvals never block on the cluster state (no sync-over-async, nothing awaited inside a
 /// lock). MCP-3: the cross-node SSE subscription of a session is released when the session ends.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class McpClusterStateMcp23Tests
 {
     private static readonly TimeSpan Fast = TimeSpan.FromSeconds(2);

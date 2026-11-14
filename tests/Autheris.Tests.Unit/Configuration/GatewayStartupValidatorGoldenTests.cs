@@ -16,6 +16,7 @@ using static Autheris.Tests.Unit.Configuration.StartupValidatorGoldenSupport;
 /// on the unchanged validator; a refactoring must never change them (ARCH-MNT-14-SC-01).
 /// </summary>
 [Collection(GoldenConsoleCollection.Name)]
+[Trait("Category", "Security")]
 public sealed class GatewayStartupValidatorGoldenTests : IDisposable
 {
     private readonly string _fixtureDir = CreateFixtureDirectory();

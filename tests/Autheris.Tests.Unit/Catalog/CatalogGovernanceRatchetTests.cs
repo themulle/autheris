@@ -10,6 +10,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Catalog;
 
 /// <summary>Issue #94 (SEC-94-11): the ratchet carries an incoming key definition only when it asks to replace it.</summary>
+[Trait("Category", "Security")]
 public sealed class CatalogGovernanceRatchetTests
 {
     private static TableMetadata Meta(IReadOnlyList<string> pk, IReadOnlyList<TableIndexDefinition> indexes, bool replace) => new()

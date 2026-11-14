@@ -39,6 +39,7 @@ using Xunit;
 /// GAP05 instance-specific ITSM secrets, GAP08 SqlConnector HMAC pseudonymization).
 /// GAP01/GAP02 (endpoint metadata) are covered in Autheris.Tests.Integration/IntegrationGapAEndpointMetadataTests.cs.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class IntegrationGapATests
 {
     private static readonly Func<string, string?> NoEnvironmentVariables = _ => null;

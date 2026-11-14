@@ -27,6 +27,7 @@ using Shouldly;
 using Xunit;
 using static Autheris.Tests.Unit.VirtualFilters.Federation.FederatedVfPipelineHarness;
 
+[Trait("Category", "Security")]
 public sealed class WebSqlDynamicKeySetSecurityTests
 {
     private static TableMetadata CreateSqlTable(

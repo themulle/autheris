@@ -19,6 +19,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class ProfileAssignmentApprovalOwnerTests
 {
     private const string Tenant = "tenant-approval";

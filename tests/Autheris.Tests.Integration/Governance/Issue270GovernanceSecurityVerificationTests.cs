@@ -29,6 +29,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
 {
     private readonly PostgreSqlGovernanceRepository _repository;

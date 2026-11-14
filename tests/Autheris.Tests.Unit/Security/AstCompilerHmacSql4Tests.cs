@@ -24,6 +24,7 @@ using Xunit.Abstractions;
 /// SQL-4: with the AST compiler (the only path since X1) every query on an HMAC-masked column failed, because the gateway's
 /// pre-rendered mask expression (dialect SQL with bound key parameters) was parsed again as Trino SQL.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
 {
     private const string Tenant = "tenant_a";

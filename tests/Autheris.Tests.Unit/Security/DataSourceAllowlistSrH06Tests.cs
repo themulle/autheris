@@ -33,6 +33,7 @@ using Xunit;
 /// SR-H-06 / SEC-HIGH-13: <c>WebSql.TenantDataSourceAllowlist</c> and <c>WebSql.AllowedDataSources</c> apply to the
 /// cross-source router, HTTP-declarative tables and OLAP staging, not only to the single-catalog path.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class DataSourceAllowlistSrH06Tests
 {
     private const string TenantA = "tenant_a";

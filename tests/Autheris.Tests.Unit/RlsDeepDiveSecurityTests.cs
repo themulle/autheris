@@ -17,6 +17,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit;
 
+[Trait("Category", "Security")]
 public sealed class RlsDeepDiveSecurityTests
 {
     private readonly TableIdentifier _testTable = new("crm", "dbo", "customers");

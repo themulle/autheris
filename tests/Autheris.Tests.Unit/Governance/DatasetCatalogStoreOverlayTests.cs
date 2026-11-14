@@ -6,6 +6,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Governance;
 
 /// <summary>Issue #111 review: the per-row overlay does not allocate for tables without tags and sorts once.</summary>
+[Trait("Category", "Security")]
 public sealed class DatasetCatalogStoreOverlayTests
 {
     [Fact]

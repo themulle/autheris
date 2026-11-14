@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Http;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public class ClaimsNormalizationAndRoleEvaluatorTests
 {
     private readonly IGatewayRoleEvaluator _evaluator = new GatewayRoleEvaluator();

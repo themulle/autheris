@@ -9,6 +9,7 @@ using Autheris.Domain.Identity;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class ClaimsNormalizerTests : IDisposable
 {
     public void Dispose()

@@ -13,6 +13,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class TenantRegistryWiringTests
 {
     private sealed class Monitor(GatewayOptions options) : IOptionsMonitor<GatewayOptions>

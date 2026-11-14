@@ -30,6 +30,7 @@ using static Autheris.Tests.Unit.Databricks.DatabricksTestSupport;
 /// OAuth 2.0 On-Behalf-Of (OBO) token exchange, Unity Catalog delegation, fail-closed enforcement (SEC-OBO238-01),
 /// zero token leakage (SEC-OBO238-02), user cache isolation (SEC-OBO238-03), and query tagging (SEC-OBO238-05).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class DatabricksOboSecurityTests
 {
     private static string CreateMockJwt(string subject, DateTimeOffset expiresAt)

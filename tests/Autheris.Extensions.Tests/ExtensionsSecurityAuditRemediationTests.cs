@@ -21,6 +21,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class ExtensionsSecurityAuditRemediationTests
 {
     [Fact]

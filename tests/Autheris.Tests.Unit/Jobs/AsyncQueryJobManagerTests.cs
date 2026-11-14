@@ -23,6 +23,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class AsyncQueryJobManagerTests : IDisposable
 {
     private readonly string _testScratchDir;

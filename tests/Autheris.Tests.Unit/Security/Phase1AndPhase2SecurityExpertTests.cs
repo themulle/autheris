@@ -35,6 +35,7 @@ using Xunit;
 /// Security Expert Test Suite verifying Phase 1 (Unified Security Context) and Phase 2 (Governed Data Pipeline Kernel)
 /// as well as the repeated security review remediations (RR-L1 through RR-L7).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class Phase1AndPhase2SecurityExpertTests
 {
     // =========================================================================

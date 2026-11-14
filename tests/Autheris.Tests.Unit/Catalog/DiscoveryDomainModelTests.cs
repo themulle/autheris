@@ -4,6 +4,7 @@ using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class DiscoveryDomainModelTests
 {
     [Fact]

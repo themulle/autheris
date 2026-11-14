@@ -27,6 +27,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Governance;
 
+[Trait("Category", "Security")]
 public sealed class Issues236And237GovernanceHotfixTests
 {
     // =========================================================================

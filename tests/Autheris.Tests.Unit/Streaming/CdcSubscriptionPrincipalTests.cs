@@ -12,6 +12,7 @@ using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class CdcSubscriptionPrincipalTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 14, 12, 0, 0, TimeSpan.Zero);

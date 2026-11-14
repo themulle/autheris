@@ -14,6 +14,7 @@ using Xunit;
 /// <summary>
 /// Core-side regression tests for security review 2026-10-02: H-20 (dbt -> SQL endpoint files) and M-32 (catalog merge ratchet).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class SqlEndpointDbtSyncAndCatalogMergeSecurityTests : IDisposable
 {
     private readonly string _root;

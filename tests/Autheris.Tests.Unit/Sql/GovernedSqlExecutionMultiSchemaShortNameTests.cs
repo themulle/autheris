@@ -21,6 +21,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
 {
     private const string Tenant = "tenant_multi";

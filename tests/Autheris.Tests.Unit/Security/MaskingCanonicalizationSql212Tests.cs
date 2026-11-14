@@ -12,6 +12,7 @@ using Xunit;
 /// SQL2-12: the GraphQL tree path (JSON values from the database) and the REST paths (ADO.NET values) canonicalize a
 /// value identically before masking, so HMAC pseudonyms match across APIs.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class MaskingCanonicalizationSql212Tests
 {
     [Theory]

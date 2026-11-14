@@ -33,6 +33,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class WebSqlCrossSourceGuardTests
 {
     private const string Tenant = "tenant_test";

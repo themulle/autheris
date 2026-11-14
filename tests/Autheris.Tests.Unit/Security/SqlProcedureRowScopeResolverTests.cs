@@ -25,6 +25,7 @@ namespace Autheris.Tests.Unit.Security;
 /// specific SQL (SQL Server, PostgreSQL, SQLite). SQLite runs for real; the other dialects are checked on the SQL text
 /// (PostgreSQL also by a Testcontainers contract test).
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class SqlProcedureRowScopeResolverTests : IDisposable
 {
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-rowscope-{Guid.NewGuid():N}.db");

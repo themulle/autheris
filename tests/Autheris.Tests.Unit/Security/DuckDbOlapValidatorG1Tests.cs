@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Security;
 
+[Trait("Category", "Security")]
 public sealed class DuckDbOlapValidatorG1Tests
 {
     private static DuckDbOlapEngine CreateEngine() => new(

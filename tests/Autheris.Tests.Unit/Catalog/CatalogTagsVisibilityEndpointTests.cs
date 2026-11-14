@@ -20,6 +20,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Issue #111 WP-4 (A-8, C-4): REST admin routes for dataset tags and visibility; all logic lives in the service.</summary>
+[Trait("Category", "Security")]
 public sealed class CatalogTagsVisibilityEndpointTests
 {
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");

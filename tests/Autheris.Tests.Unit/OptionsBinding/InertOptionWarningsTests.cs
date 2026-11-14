@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.OptionsBinding;
 
+[Trait("Category", "Security")]
 public sealed class InertOptionWarningsTests
 {
     [Fact]

@@ -15,6 +15,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review 2026-10-05 (recheck 3): E-4, E-8.</summary>
+[Trait("Category", "Security")]
 public sealed class SecurityReviewRecheck3Tests
 {
     // ---------- E-4: REGEX masking must not return clear text when the pattern does not match ----------

@@ -22,6 +22,7 @@ using Shouldly;
 using StackExchange.Redis;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class QueryAnalysisBucketSecurityTests
 {
     private static ClientQuotaPolicy CreateStandardPolicy() =>

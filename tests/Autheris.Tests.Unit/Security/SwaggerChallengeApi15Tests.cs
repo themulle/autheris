@@ -18,6 +18,7 @@ using Xunit;
 /// API-15: outside Development an anonymous Swagger request is challenged (WWW-Authenticate), not answered with a bare
 /// 401 that browsers cannot turn into a Kerberos/Negotiate login.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed class SwaggerChallengeApi15Tests
 {
     private static IWebHostEnvironment Env(string name)

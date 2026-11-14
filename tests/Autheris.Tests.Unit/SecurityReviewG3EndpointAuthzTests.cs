@@ -20,6 +20,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Security review G3: HTTP endpoint authorization fixes.</summary>
+[Trait("Category", "Security")]
 public class SecurityReviewG3EndpointAuthzTests
 {
     private static DefaultHttpContext Ctx(string? tenant, string[] roles, IDataOwnershipRepository? repo = null)

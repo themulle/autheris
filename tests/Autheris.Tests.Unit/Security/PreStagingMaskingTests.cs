@@ -23,6 +23,7 @@ using Shouldly;
 using TrinoSqlEngine.Analysis;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class PreStagingMaskingTests
 {
     private const string Tenant = "tenant_test";

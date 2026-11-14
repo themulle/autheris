@@ -23,6 +23,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Trait("Category", "Security")]
 public sealed class DatasourceSecretNamespaceTests
 {
     private const string OperatorSecretValue = "SuperSecretOperatorHmacKey1234567890!";
