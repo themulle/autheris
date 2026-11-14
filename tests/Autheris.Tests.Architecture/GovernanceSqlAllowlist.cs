@@ -11,6 +11,8 @@ internal static class GovernanceSqlAllowlist
         [("GovernanceRepository.Consent.cs", "BuildLockRowsQuery")] = "joins constant fragments with the dialect lock clause constant",
         [("GovernanceRepository.ConsentPage.cs", "GetConsentPageAsync")] = "constant prefix/suffix around a where built from constant predicates and parameters",
         [("GovernanceRepository.ConsentGrants.cs", "ActiveRoleConsents")] = "appends optional tenant predicate to constant SELECT query",
+        [("GovernanceRepository.CatalogBatch.cs", "LoadChunkColumnsAsync")] = "constant prefix plus BindIdInClause placeholders (bounded batch chunk)",
+        [("GovernanceRepository.CatalogBatch.cs", "SelectChunkTablesAsync")] = "constant prefix/suffix plus BindTableTupleOrClause placeholders (bounded batch chunk)",
         [("GovernanceRepository.ConsentSql.cs", "GetRequestsByRequesterSidAsync")] = "constant sql plus constant ORDER BY",
         [("GovernanceRepository.ConsentSql.cs", "HydrateConsentsBatchAsync")] = "constant prefix plus BindIdInClause placeholders (bounded batch)",
         [("GovernanceRepository.ConsentSql.cs", "LoadDescriptionsBatchAsync")] = "constant prefix plus BindIdInClause placeholders (bounded batch)",

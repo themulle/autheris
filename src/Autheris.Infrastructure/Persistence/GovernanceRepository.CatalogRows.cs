@@ -659,83 +659,33 @@ public partial class GovernanceRepository
         return (columnsByTable, maskingRulesByTable, corruptedTableIds);
     }
 
-    internal static async Task<(Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> ExistingColsByName, Dictionary<string, MaskingRule> ExistingMaskingRules, Dictionary<string, Guid> ColIdByName)> LoadExistingColumnsAndMaskingRulesAsync(
-        DbConnection conn,
-        DbTransaction tx,
-        Guid tableId,
-        CancellationToken ct)
-    {
-        var existingColsByName = new Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)>(StringComparer.OrdinalIgnoreCase);
-        var existingMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
-        var colIdByName = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = conn.GetType().Name.StartsWith("Npgsql", StringComparison.OrdinalIgnoreCase)
-            ? CatalogSql.SelectExistingColumnsSqlPg
-            : CatalogSql.SelectExistingColumnsSqlSs;
-        cmd.AddBound("@tableId", tableId.ToString());
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            if (Guid.TryParse(reader.GetString(0), out var existingId))
-            {
-                var colName = reader.GetString(1);
-                var colDataType = reader.GetString(2);
-                var colSens = reader.GetInt32(3) == 1;
-                var colDesc = reader.IsDBNull(4) ? null : reader.GetString(4);
-                var colLongDesc = reader.IsDBNull(5) ? null : reader.GetString(5);
-                var colDocSource = reader.IsDBNull(6) ? null : reader.GetString(6);
-                var colCollation = reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null;
-                var colLengthSemantics = reader.FieldCount > 13 && !reader.IsDBNull(13) ? reader.GetString(13) : null;
-                existingColsByName[colName] = (existingId, colDataType, colSens, colDesc, colLongDesc, colDocSource, colCollation, colLengthSemantics);
-                colIdByName[colName] = existingId;
-
-                if (!reader.IsDBNull(7) && Guid.TryParse(reader.GetString(7), out var maskId))
-                {
-                    existingMaskingRules[colName] = new MaskingRule
-                    {
-                        Id = maskId,
-                        TableColumnId = existingId,
-                        RuleType = reader.GetString(8),
-                        PatternOrFormat = reader.IsDBNull(9) ? null : reader.GetString(9),
-                        Replacement = reader.IsDBNull(10) ? null : reader.GetString(10),
-                        HmacKeyId = reader.IsDBNull(11) ? null : reader.GetString(11)
-                    };
-                }
-            }
-        }
-
-        return (existingColsByName, existingMaskingRules, colIdByName);
-    }
-
     /// <summary>The description texts and their documentation source that an upsert writes for a table.</summary>
     internal readonly record struct TableDocumentation(string? Description, string? LongDescription, string? Source);
 
     /// <summary>
-    /// Reads the row of <c>SelectTableForUpdateSql</c> (columns 1 to 8) and returns whether the table changed structurally and which
+    /// Compares an existing stored <see cref="Table"/> against an incoming table and returns whether it changed structurally and which
     /// documentation texts the upsert writes (<see cref="ShouldOverwriteDocumentation"/>).
     /// </summary>
-    internal static (bool StructuralChange, TableDocumentation Docs) ReadExistingTableForUpsert(DbDataReader reader, Table incoming, IReadOnlyList<string>? precedence)
+    internal static (bool StructuralChange, TableDocumentation Docs) ComputeTableUpsertState(
+        Table existing,
+        Table incoming,
+        IReadOnlyList<string>? precedence)
     {
         var structuralChange =
-            !string.Equals(reader.GetString(1), incoming.SourceType, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(reader.GetString(2), incoming.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
-            (reader.GetInt32(3) == 1) != incoming.RequiresFourEyes ||
-            (reader.GetInt32(4) == 1) != incoming.IsActive ||
-            (reader.IsDBNull(5) ? 0 : reader.GetInt32(5)) != (int)incoming.DataSourceType;
-        var existingDesc = reader.IsDBNull(6) ? null : reader.GetString(6);
-        var existingLongDesc = reader.IsDBNull(7) ? null : reader.GetString(7);
-        var existingSource = reader.IsDBNull(8) ? null : reader.GetString(8);
+            !string.Equals(existing.SourceType, incoming.SourceType, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(existing.Sensitivity, incoming.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
+            existing.RequiresFourEyes != incoming.RequiresFourEyes ||
+            existing.IsActive != incoming.IsActive ||
+            existing.DataSourceType != incoming.DataSourceType;
 
         var canOverwriteDesc = !string.IsNullOrWhiteSpace(incoming.Description) &&
-                               (string.IsNullOrWhiteSpace(existingDesc) || ShouldOverwriteDocumentation(precedence, existingSource, incoming.DocumentationSource));
+                               (string.IsNullOrWhiteSpace(existing.Description) || ShouldOverwriteDocumentation(precedence, existing.DocumentationSource, incoming.DocumentationSource));
         var canOverwriteLongDesc = !string.IsNullOrWhiteSpace(incoming.LongDescription) &&
-                                   (string.IsNullOrWhiteSpace(existingLongDesc) || ShouldOverwriteDocumentation(precedence, existingSource, incoming.DocumentationSource));
+                                   (string.IsNullOrWhiteSpace(existing.LongDescription) || ShouldOverwriteDocumentation(precedence, existing.DocumentationSource, incoming.DocumentationSource));
         return (structuralChange, new TableDocumentation(
-            canOverwriteDesc ? incoming.Description : existingDesc,
-            canOverwriteLongDesc ? incoming.LongDescription : existingLongDesc,
-            canOverwriteDesc || canOverwriteLongDesc ? incoming.DocumentationSource ?? existingSource : existingSource));
+            canOverwriteDesc ? incoming.Description : existing.Description,
+            canOverwriteLongDesc ? incoming.LongDescription : existing.LongDescription,
+            canOverwriteDesc || canOverwriteLongDesc ? incoming.DocumentationSource ?? existing.DocumentationSource : existing.DocumentationSource));
     }
 
     private static readonly string[] DefaultDocumentationSourcePrecedence = ["Manual", "DataCatalog", "dbt", "OpenApi", "Database", "Default"];
