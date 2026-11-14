@@ -186,43 +186,4 @@ INSERT INTO invoices VALUES (10, 1), (11, 2), (12, 3);";
             new ConsentRowFilter { ColumnName = "k", ValueJson = "[1,2]" }, DatabaseDialect.Sqlite).Parameters.Count.ShouldBe(2);
     }
 
-    [Fact]
-    public void Casbin_CorrelatedFilter_BuildsATypedPredicate_WithPerRuleParameterNames()
-    {
-        using var service = new CasbinEnforcementService();
-        var filter = Correlated("{\"c.country\": \"CH\"}");
-
-        var first = service.BuildCorrelatedRowFilterPredicate(filter, DatabaseDialect.PostgreSql, 0);
-        var second = service.BuildCorrelatedRowFilterPredicate(Correlated("{\"c.country\": \"DE\"}"), DatabaseDialect.PostgreSql, 1);
-
-        first.Parameters.Keys.ShouldNotBe(second.Parameters.Keys);
-        Should.NotThrow(() => first.And(second));
-    }
-
-    [Fact]
-    public void Casbin_UnknownTargetDialect_Throws()
-    {
-        using var service = new CasbinEnforcementService();
-        var filter = Correlated("{\"c.country\": \"CH\"}");
-
-        Should.Throw<SecurityException>(() => service.BuildCorrelatedRowFilterPredicate(filter, null, 0));
-        Should.Throw<SecurityException>(() => service.BuildCorrelatedRowFilterPredicate(filter, (DatabaseDialect)99, 0));
-    }
-
-    [Fact]
-    public async System.Threading.Tasks.Task Casbin_StringPath_WithoutTargetDialect_FailsClosed()
-    {
-        using var service = new CasbinEnforcementService();
-        var tenant = new TenantId("t1");
-        var table = new TableIdentifier("erp", "main", "invoices");
-        service.AddPolicies(tenant, [new CasbinRuleInput("S-1-5-21-U", table.ToString(), "read", CorrelatedRowFilter: Correlated("{\"c.country\": \"CH\"}"))]);
-
-        var context = new SecurityEvaluationContext(
-            UserSid: new Sid("S-1-5-21-U"), GroupSids: [], Tenant: tenant, TargetTable: table, RequestedColumns: ["id"],
-            ClientIp: System.Net.IPAddress.Loopback, Timestamp: DateTimeOffset.UtcNow, PurposeId: null,
-            Attributes: new Dictionary<string, object?> { ["action"] = "read" }, TargetDialect: null);
-
-        // Fail closed: the evaluation throws; it never renders SQL Server text for an unknown source dialect.
-        await Should.ThrowAsync<SecurityException>(async () => await service.EvaluatePolicyAsync(context));
-    }
 }

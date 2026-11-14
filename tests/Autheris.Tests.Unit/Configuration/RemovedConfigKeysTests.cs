@@ -67,6 +67,9 @@ public sealed class RemovedConfigKeysTests
     [InlineData("Gateway:Extensibility:JustificationHeader", "X-Access-Justification")]
     [InlineData("Gateway:AccessProfiles:MaxBreakGlassDurationHours", "72")]
     [InlineData("Gateway:IndividualGrants:BreakGlassMaxHours", "72")]
+    [InlineData("Gateway:Casbin:Enabled", "true")]
+    [InlineData("Gateway:Casbin:PolicyPath", "/policies/policy.csv")]
+    [InlineData("Gateway:Casbin:DecisionCache:Enabled", "true")]
     public void Every_removed_key_fails_startup(string key, string value)
     {
         var configuration = Config(key, value);
@@ -147,6 +150,25 @@ public sealed class RemovedConfigKeysTests
             UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
 
         ex.Message.ShouldContain("Gateway:Itsm");
+    }
+
+    [Theory]
+    [InlineData("Gateway:Casbin:Enabled", "true")]
+    [InlineData("Gateway:Casbin:Enabled", "false")]
+    [InlineData("Gateway:Casbin:Enabled", "")]
+    [InlineData("Gateway:Casbin:PolicyPath", "")]
+    [InlineData("Gateway:Casbin:ModelPath", "/policies/model.conf")]
+    [InlineData("Gateway:Casbin:WatchPolicyFile", "false")]
+    [InlineData("Gateway:Casbin:EnforceInQueryPipeline", "false")]
+    [InlineData("Gateway:Casbin:DecisionCache:ShareAcrossUsers", "false")]
+    [InlineData("Gateway:Casbin", "")]
+    public void Casbin_keys_fail_startup(string key, string value)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(key, value)));
+
+        ex.Message.ShouldContain("Gateway:Casbin");
+        ex.Message.ShouldContain("grant records (consents), column rules and virtual filters");
     }
 
     [Theory]

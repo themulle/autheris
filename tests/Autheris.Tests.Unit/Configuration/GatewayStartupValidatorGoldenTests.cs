@@ -73,18 +73,6 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             // 3 Egress
             Prod("Egress_TooBroadNetwork", ("Egress:TrustedInternalNetworks:0", "10.0.0.0/4")),
 
-            // 4 CasbinModel
-            Prod("CasbinModel_FileNotFound", ("Casbin:ModelPath", "{tmp}/missing.conf")),
-            Prod("CasbinModel_FileEmpty", ("Casbin:ModelPath", "{tmp}/model-empty.conf")),
-            Prod("CasbinModel_ContractViolation", ("Casbin:ModelPath", "{tmp}/model-invalid.conf")),
-
-            // 5 CasbinPolicy
-            Prod("CasbinPolicy_PathNotConfigured", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "")),
-            Prod("CasbinPolicy_FileNotFound", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "{tmp}/missing.csv")),
-            Prod("CasbinPolicy_FileEmpty", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "{tmp}/policy-empty.csv")),
-            Prod("CasbinPolicy_NoRules", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "{tmp}/policy-norules.csv")),
-            Prod("CasbinPolicy_InvalidFile", ("Casbin:Enabled", "true"), ("Casbin:PolicyPath", "{tmp}/policy-invalid.csv")),
-
             // 6 ReverseProxy
             Prod("ReverseProxy_InvalidNetwork", ("ReverseProxy:Enabled", "true"), ("ReverseProxy:KnownNetworks:0", "not-a-network")),
             Prod("ReverseProxy_WildcardNetwork", ("ReverseProxy:Enabled", "true"), ("ReverseProxy:KnownNetworks:0", "0.0.0.0/0")),
