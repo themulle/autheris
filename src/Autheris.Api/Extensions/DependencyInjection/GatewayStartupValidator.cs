@@ -13,6 +13,7 @@ using Autheris.Application.Policy.Lint;
 using Autheris.Application.Security;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Dialects;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -735,6 +736,28 @@ public static class GatewayStartupValidator
     /// </summary>
     public static void ValidateDataSourceMappings(GatewayOptions options, ILogger? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(options);
+
+        foreach (var key in options.WebSql.DataSourceMappings.Keys.Order(StringComparer.Ordinal))
+        {
+            if (SqlDataSourceResolver.ResolveConnectionKey(options, key) is null)
+            {
+                SqlDataSourceResolver.TryGetMapping(options.WebSql, key, out var target);
+                throw new ValidationException(
+                    $"Gateway:WebSql:DataSourceMappings:{key} ('{target}') must name an existing key of DataSources:Connections that is not itself a mapping key (one hop only).");
+            }
+        }
+
+        foreach (var database in options.Dbt.DatabaseMappings.Keys)
+        {
+            if (options.WebSql.AllowedDataSources.Contains(database, StringComparer.OrdinalIgnoreCase) &&
+                !SqlDataSourceResolver.TryGetMapping(options.WebSql, database, out _))
+            {
+                logger?.LogWarning(
+                    "Gateway:Dbt:DatabaseMappings maps database '{Database}' to a connection and Gateway:WebSql:AllowedDataSources lists it, but Gateway:WebSql:DataSourceMappings has no entry for it; WebSQL cannot reach the tables of that database. Add Gateway:WebSql:DataSourceMappings:{Database}.",
+                    database, database);
+            }
+        }
     }
 
     private static HashSet<string> WebSqlReachableDataSources(GatewayOptions options)
