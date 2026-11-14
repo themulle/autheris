@@ -20,15 +20,14 @@ using Microsoft.Extensions.Logging;
 
 public partial class GovernanceRepository
 {
-    private bool IsPostgreSql => _dialect is PostgreSqlGovernanceDialect;
+    internal bool IsPostgreSql => _dialect is PostgreSqlGovernanceDialect;
 
     internal KeyDefinitionDialect KeyDialect => IsPostgreSql ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
 
     private string SelectTableColumnsSql => IsPostgreSql ? CatalogSql.SelectTableColumnsSqlPg : CatalogSql.SelectTableColumnsSqlSs;
     private string SelectActiveBatchTableColumnsSql => IsPostgreSql ? CatalogSql.SelectActiveBatchTableColumnsSqlPg : CatalogSql.SelectActiveBatchTableColumnsSqlSs;
-    private string SelectTableForUpdateSql => IsPostgreSql ? CatalogSql.SelectTableForUpdateSqlPg : CatalogSql.SelectTableForUpdateSqlSs;
-    private string UpsertTableSql => IsPostgreSql ? CatalogSql.UpsertTableSqlPg : CatalogSql.UpsertTableSqlSs;
-    private string InsertColumnSql => IsPostgreSql ? CatalogSql.InsertColumnSqlPg : CatalogSql.InsertColumnSqlSs;
+    internal string UpsertTableSql => IsPostgreSql ? CatalogSql.UpsertTableSqlPg : CatalogSql.UpsertTableSqlSs;
+    internal string InsertColumnSql => IsPostgreSql ? CatalogSql.InsertColumnSqlPg : CatalogSql.InsertColumnSqlSs;
     private string RelationsForParentTableSql => IsPostgreSql ? CatalogSql.RelationsForParentTableSqlPg : CatalogSql.RelationsForParentTableSqlSs;
     private string AllRelationsSql => IsPostgreSql ? CatalogSql.AllRelationsSqlPg : CatalogSql.AllRelationsSqlSs;
     private string InsertRelationSql => IsPostgreSql ? CatalogSql.InsertRelationSqlPg : CatalogSql.InsertRelationSqlSs;
@@ -36,7 +35,7 @@ public partial class GovernanceRepository
     private string CatalogVersionSql => IsPostgreSql ? CatalogSql.CatalogVersionSqlPg : CatalogSql.CatalogVersionSqlSs;
     private string BumpCatalogVersionSql => IsPostgreSql ? CatalogSql.BumpCatalogVersionSqlPg : CatalogSql.BumpCatalogVersionSqlSs;
 
-    private static class CatalogSql
+    internal static class CatalogSql
     {
         public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal
 FROM TABLES
@@ -52,6 +51,40 @@ WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema
        min_group_size, non_personal
 FROM TABLES
 WHERE is_active = 1";
+
+        public const string SelectTablesWherePrefix = @"SELECT id, source_type, source_name, schema_name, table_name,
+       display_name, sensitivity, requires_four_eyes, is_active,
+       data_source_type, http_endpoint_json, plugin_name,
+       description, long_description, doc_source,
+       required_filter_columns_json, texts_json,
+       min_group_size, non_personal
+FROM TABLES
+WHERE ";
+
+        public const string SelectTablesWithUpdLockWherePrefix = @"SELECT id, source_type, source_name, schema_name, table_name,
+       display_name, sensitivity, requires_four_eyes, is_active,
+       data_source_type, http_endpoint_json, plugin_name,
+       description, long_description, doc_source,
+       required_filter_columns_json, texts_json,
+       min_group_size, non_personal
+FROM TABLES WITH (UPDLOCK, ROWLOCK)
+WHERE ";
+
+        public const string SelectColumnsByTableIdsPrefixPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
+       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+       c.description, c.long_description, c.meta_json, c.doc_source,
+       c.display_name, c.texts_json, c.""collation"", c.length_semantics
+FROM TABLE_COLUMNS c
+LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+WHERE c.table_id IN (";
+
+        public const string SelectColumnsByTableIdsPrefixSs = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
+       m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
+       c.description, c.long_description, c.meta_json, c.doc_source,
+       c.display_name, c.texts_json, c.[collation], c.length_semantics
+FROM TABLE_COLUMNS c
+LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+WHERE c.table_id IN (";
 
         public const string SelectTableColumnsSqlPg = @"SELECT c.id, c.table_id, c.column_name, c.data_type, c.is_sensitive,
        m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
@@ -90,27 +123,6 @@ LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
 INNER JOIN TABLES t ON c.table_id = t.id
 WHERE t.is_active = 1
 ORDER BY c.table_id, c.ordinal, c.column_name";
-
-        public const string SelectExistingColumnsSqlPg = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
-                                   m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
-                                   c.""collation"", c.length_semantics
-                            FROM TABLE_COLUMNS c
-                            LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-                            WHERE c.table_id = @tableId";
-
-        public const string SelectExistingColumnsSqlSs = @"SELECT c.id, c.column_name, c.data_type, c.is_sensitive, c.description, c.long_description, c.doc_source,
-                                   m.id, m.rule_type, m.pattern_or_format, m.replacement, m.hmac_key_id,
-                                   c.[collation], c.length_semantics
-                            FROM TABLE_COLUMNS c
-                            LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
-                            WHERE c.table_id = @tableId";
-
-        public const string SelectTableForUpdateSqlPg = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES
-WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
-FOR UPDATE";
-
-        public const string SelectTableForUpdateSqlSs = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES WITH (UPDLOCK, ROWLOCK)
-WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
         public const string UpsertTableSqlPg = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal)
 VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal)

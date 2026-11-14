@@ -140,6 +140,12 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
 
     internal IGovernanceSqlDialect Dialect => _dialect;
 
+    internal ILogger? CatalogLogger => _logger;
+
+    internal GatewayOptions? OptionsSnapshot => _options;
+
+    internal CatalogKeyDefinitionStore.KeyTableProbe KeyTableProbe => _keyTables;
+
     internal Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> MetadataCache => _metadataCache;
 
     internal string? MigrationConnectionString => _options?.GovernanceDb?.MigrationConnectionString;
@@ -347,7 +353,7 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         }
     }
 
-    private void InvalidateTableMetadata(string tableKey)
+    internal void InvalidateTableMetadata(string tableKey)
     {
         _metadataCache.TryRemove(tableKey, out _);
         _metadataInvalidator?.Invoke(tableKey);
@@ -425,7 +431,7 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         return 0;
     }
 
-    private async Task InvalidateTableEpochAsync(TableIdentifier table, CancellationToken ct)
+    internal async Task InvalidateTableEpochAsync(TableIdentifier table, CancellationToken ct)
     {
         InvalidateTableMetadata(table.ToString().ToLowerInvariant());
         if (_epochValidationService != null)

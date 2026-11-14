@@ -22,6 +22,29 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
             Autheris.Application.Catalog.CatalogUpsertKind.Updated,
             Autheris.Application.Catalog.CatalogWriteClassification.Restrictive);
     }
+
+    /// <summary>
+    /// Validates and upserts a batch of table metadata entries using parameter-budget chunking, deterministic lock ordering,
+    /// per-chunk transactions, persisted-state change classification, and transient conflict retries.
+    /// </summary>
+    async Task<IReadOnlyList<Autheris.Application.Catalog.CatalogTableUpsertResult>> UpsertTableMetadataBatchAsync(
+        IReadOnlyList<TableMetadata> batch,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        if (batch.Count == 0)
+        {
+            return Array.Empty<Autheris.Application.Catalog.CatalogTableUpsertResult>();
+        }
+
+        var results = new Autheris.Application.Catalog.CatalogTableUpsertResult[batch.Count];
+        for (var i = 0; i < batch.Count; i++)
+        {
+            results[i] = await UpsertTableMetadataWithResultAsync(batch[i], ct).ConfigureAwait(false);
+        }
+
+        return results;
+    }
     Task<Autheris.Application.Catalog.CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
         => Task.FromResult(new Autheris.Application.Catalog.CatalogVersion(1, 1));
 
