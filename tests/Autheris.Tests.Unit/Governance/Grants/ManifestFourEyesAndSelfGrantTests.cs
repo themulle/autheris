@@ -19,7 +19,7 @@ namespace Autheris.Tests.Unit.Governance.Grants;
 public sealed class ManifestFourEyesAndSelfGrantTests
 {
     private static ClaimsPrincipal Caller(params Claim[] extra) => new(new ClaimsIdentity(
-        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN"), .. extra], "test"));
+        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GovernanceAdmin"), .. extra], "test"));
 
     private static ITableMetadataRepository Tables(string sensitivity = "NORMAL")
     {

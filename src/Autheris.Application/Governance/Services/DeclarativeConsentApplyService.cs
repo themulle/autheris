@@ -10,7 +10,9 @@ using System.Threading.Tasks;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Security;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -23,13 +25,17 @@ public sealed class DeclarativeConsentApplyService(
     IAuditLogRepository auditLogRepository,
     IGrantPolicy? grantPolicy = null,
     IDatasetCatalogAdminService? datasetCatalog = null,
-    IOptions<GovernanceTextOptions>? textOptions = null) : IDeclarativeConsentApplyService
+    IOptions<GovernanceTextOptions>? textOptions = null,
+    IGatewayRoleEvaluator? roleEvaluator = null) : IDeclarativeConsentApplyService
 {
+    private static readonly GatewayRole[] RequiredApplyRoles = [GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin];
+
     // the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
     // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
     private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
 
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? new GrantPolicy();
+    private readonly IGatewayRoleEvaluator _roleEvaluator = roleEvaluator ?? new GatewayRoleEvaluator();
 
     private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
 
@@ -43,24 +49,7 @@ public sealed class DeclarativeConsentApplyService(
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(manifest);
 
-        if (caller.Identity?.IsAuthenticated != true)
-        {
-            throw new System.Security.SecurityException("Caller must be authenticated to apply declarative consent manifests.");
-        }
-
-        var isPrivileged = caller.IsInRole("GOVERNANCE_ADMIN") ||
-                           caller.IsInRole("CLUSTER_ADMIN") ||
-                           caller.IsInRole("DATA_GOVERNANCE_REVIEWER") ||
-                           caller.HasClaim(c => c.Type == "scope" && c.Value.Contains("governance:admin"));
-        if (!isPrivileged)
-        {
-            throw new System.Security.SecurityException("Caller lacks required governance permissions to apply declarative consent manifests.");
-        }
-
-        // NL-SC-10: the actor is always the supplied authenticated SID; a principal without one is inconsistent and never gets a stand-in.
-        var actorSid = caller.GetUserSid()
-            ?? throw new System.Security.SecurityException("Caller must carry a user SID to apply declarative consent manifests.");
-        var tenantId = caller.GetTenantId();
+        AuthorizeCaller(caller, manifest, out var actorSid, out var tenantId);
         var now = DateTimeOffset.UtcNow;
 
         // SR-M-10: the self-grant check compares against every identifier form of the actor and the groups and roles it holds.
@@ -489,7 +478,84 @@ public sealed class DeclarativeConsentApplyService(
 
         return true;
     }
+
+    private void AuthorizeCaller(ClaimsPrincipal caller, DeclarativeConsentManifest manifest, out Sid actorSid, out TenantId tenantId)
+    {
+        if (caller.Identity?.IsAuthenticated != true)
+        {
+            throw new ConsentApplyForbiddenException();
+        }
+
+        if (!_roleEvaluator.HasAnyRole(caller, RequiredApplyRoles))
+        {
+            throw new ConsentApplyForbiddenException();
+        }
+
+        var isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(caller);
+        try
+        {
+            tenantId = caller.GetTenantId();
+        }
+        catch (TenantUnresolvedException) when (isCanonicalClusterAdmin)
+        {
+            tenantId = TenantId.Platform;
+        }
+        catch (GatewaySecurityException)
+        {
+            throw new ConsentApplyForbiddenException();
+        }
+
+        RejectForeignManifestTenant(manifest, tenantId);
+
+        actorSid = caller.GetUserSid()
+            ?? throw new System.Security.SecurityException("Caller must carry a user SID to apply declarative consent manifests.");
+    }
+
+    private static void RejectForeignManifestTenant(DeclarativeConsentManifest manifest, TenantId callerTenant)
+    {
+        if (!MatchesCallerTenant(manifest.TenantId, callerTenant))
+        {
+            throw new ConsentApplyForbiddenException();
+        }
+
+        if (manifest.Policies is not null)
+        {
+            foreach (var policy in manifest.Policies)
+            {
+                if (!MatchesCallerTenant(policy.TenantId, callerTenant))
+                {
+                    throw new ConsentApplyForbiddenException();
+                }
+            }
+        }
+
+        if (manifest.Datasets is not null)
+        {
+            foreach (var dataset in manifest.Datasets)
+            {
+                if (!MatchesCallerTenant(dataset.TenantId, callerTenant))
+                {
+                    throw new ConsentApplyForbiddenException();
+                }
+            }
+        }
+    }
+
+    private static bool MatchesCallerTenant(string? declaredTenant, TenantId callerTenant)
+    {
+        if (string.IsNullOrWhiteSpace(declaredTenant))
+        {
+            return true;
+        }
+
+        return TenantId.TryParse(declaredTenant.Trim(), out var parsedTenant)
+            && string.Equals(parsedTenant.Value, callerTenant.Value, StringComparison.OrdinalIgnoreCase);
+    }
 }
+
+/// <summary>Raised when a caller is not authorized to apply a declarative consent manifest for the resolved tenant.</summary>
+public sealed class ConsentApplyForbiddenException()
+    : Exception("You do not have permission to apply declarative consent manifests.");
 
 /// <summary>Issue #111: a dataset entry of the manifest was rejected by the admin service; the whole manifest is refused with a stable code.</summary>
 public sealed class DeclarativeDatasetCatalogException(DatasetCatalogOutcome outcome) : Exception("A dataset catalog entry of the manifest was rejected.")
