@@ -1,1 +1,0 @@
-SELECT 'hello\nworld' FROM orders

@@ -1,1 +1,0 @@
-SELECT id, name FROM lwetem_prod.md.crane LIMIT 5

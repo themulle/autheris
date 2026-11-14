@@ -1,0 +1,1 @@
+SELECT id, name FROM dbo.employees WHERE id = 1

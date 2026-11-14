@@ -1,0 +1,1 @@
+select * from test_ß_ä_ı

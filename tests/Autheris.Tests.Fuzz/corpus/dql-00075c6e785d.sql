@@ -1,1 +1,0 @@
-SELECT department, sum(bonus) FROM sales GROUP BY department HAVING bonus > 1000

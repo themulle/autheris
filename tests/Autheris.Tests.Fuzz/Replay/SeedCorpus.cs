@@ -86,6 +86,11 @@ public static class SeedCorpus
     public static void Export(string dqlPath, string outDir)
     {
         Directory.CreateDirectory(outDir);
+        foreach (var existing in Directory.GetFiles(outDir, "*.sql"))
+        {
+            File.Delete(existing);
+        }
+
         foreach (var (name, content) in Build(File.ReadAllText(dqlPath)))
         {
             File.WriteAllText(Path.Combine(outDir, name), content, new UTF8Encoding(false));

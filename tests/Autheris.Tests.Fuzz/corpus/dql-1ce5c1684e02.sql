@@ -1,1 +1,0 @@
-SELECT /* standard comment */ 1 FROM orders

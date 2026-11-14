@@ -1,0 +1,1 @@
+SELECT id, email, name FROM sales.dbo.customers

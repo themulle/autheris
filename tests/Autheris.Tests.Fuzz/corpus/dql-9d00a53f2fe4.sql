@@ -1,0 +1,1 @@
+SELECT id, amount FROM sales.dbo.orders

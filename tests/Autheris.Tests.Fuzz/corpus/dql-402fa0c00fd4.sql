@@ -1,1 +1,0 @@
-SELECT /* /* double */ */ 1 FROM orders
