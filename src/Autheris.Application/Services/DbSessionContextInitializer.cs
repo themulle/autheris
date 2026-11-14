@@ -31,16 +31,38 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
         string? userSid = null,
         string? purpose = null,
         bool requireTransaction = true,
+        CancellationToken ct = default) =>
+        InitializeSessionAsync(connection, provider, tenantId, AccessMode.Default, userSid, purpose, requireTransaction, ct);
+
+    public Task<DbTransaction?> InitializeSessionAsync(
+        DbConnection connection,
+        string? provider,
+        TenantId tenantId,
+        AccessMode accessMode,
+        string? userSid = null,
+        string? purpose = null,
+        bool requireTransaction = true,
         CancellationToken ct = default)
     {
         var dialect = ResolveDialect(provider);
-        return InitializeSessionAsync(connection, dialect, tenantId, userSid, purpose, requireTransaction, ct);
+        return InitializeSessionAsync(connection, dialect, tenantId, accessMode, userSid, purpose, requireTransaction, ct);
     }
+
+    public Task<DbTransaction?> InitializeSessionAsync(
+        DbConnection connection,
+        DatabaseDialect dialect,
+        TenantId tenantId,
+        string? userSid = null,
+        string? purpose = null,
+        bool requireTransaction = true,
+        CancellationToken ct = default) =>
+        InitializeSessionAsync(connection, dialect, tenantId, AccessMode.Default, userSid, purpose, requireTransaction, ct);
 
     public async Task<DbTransaction?> InitializeSessionAsync(
         DbConnection connection,
         DatabaseDialect dialect,
         TenantId tenantId,
+        AccessMode accessMode,
         string? userSid = null,
         string? purpose = null,
         bool requireTransaction = true,
@@ -50,28 +72,26 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
 
         if (dialect == DatabaseDialect.PostgreSql)
         {
-            if (requireTransaction)
+            if (requireTransaction || accessMode == AccessMode.ReadOnly)
             {
                 var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
                 try
                 {
+                    if (accessMode == AccessMode.ReadOnly)
+                    {
+                        // SEC-OI-505-5 / -6: Transaction-local READ ONLY mode only (never SET SESSION CHARACTERISTICS
+                        // or default_transaction_read_only, which would leak across pooled connections). Must execute
+                        // first in the transaction before SELECT set_config(...). Defence in depth alongside AST
+                        // validation and database privilege isolation; functions opening a new connection are not stopped.
+                        await ExecuteReadOnlyTransactionAsync(connection, tx, ct).ConfigureAwait(false);
+                    }
+
                     await ExecutePostgreSqlInitAsync(connection, tx, isLocal: true, tenantId, userSid, purpose, ct).ConfigureAwait(false);
                     return tx;
                 }
                 catch
                 {
-                    try
-                    {
-                        await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        // suppress rollback failure to ensure original exception is preserved
-                    }
-                    finally
-                    {
-                        await tx.DisposeAsync().ConfigureAwait(false);
-                    }
+                    await RollbackAndDisposeQuietlyAsync(tx).ConfigureAwait(false);
                     throw;
                 }
             }
@@ -84,12 +104,33 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
 
         if (dialect == DatabaseDialect.SqlServer)
         {
+            // SEC-OI-505-5: SQL Server relies on read-only login / privilege isolation (no SET TRANSACTION READ ONLY).
             await ExecuteSqlServerInitAsync(connection, tx: null, tenantId, userSid, purpose, ct).ConfigureAwait(false);
             return null;
         }
 
         if (dialect == DatabaseDialect.Oracle)
         {
+            if (accessMode == AccessMode.ReadOnly)
+            {
+                var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    // SEC-OI-505-5 / -6: Oracle requires SET TRANSACTION READ ONLY as the first SQL statement in the
+                    // transaction; callers must ROLLBACK in finally before returning the connection to the pool.
+                    // Defence in depth alongside AST validation and database privilege isolation; autonomous
+                    // transactions (PRAGMA AUTONOMOUS_TRANSACTION) are not stopped here.
+                    await ExecuteReadOnlyTransactionAsync(connection, tx, ct).ConfigureAwait(false);
+                    await ExecuteOracleInitAsync(connection, tx, ct).ConfigureAwait(false);
+                    return tx;
+                }
+                catch
+                {
+                    await RollbackAndDisposeQuietlyAsync(tx).ConfigureAwait(false);
+                    throw;
+                }
+            }
+
             await ExecuteOracleInitAsync(connection, tx: null, ct).ConfigureAwait(false);
             return null;
         }
@@ -204,6 +245,30 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
         AddParameter(cmd, "@sid", userSid ?? string.Empty);
         AddParameter(cmd, "@purpose", purpose ?? string.Empty);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static async Task ExecuteReadOnlyTransactionAsync(DbConnection connection, DbTransaction tx, CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SET TRANSACTION READ ONLY";
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static async Task RollbackAndDisposeQuietlyAsync(DbTransaction tx)
+    {
+        try
+        {
+            await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Suppress rollback failure so the original exception is preserved.
+        }
+        finally
+        {
+            await tx.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     private static void AddParameter(DbCommand cmd, string name, object? value)

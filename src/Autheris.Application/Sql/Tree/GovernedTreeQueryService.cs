@@ -790,12 +790,14 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     {
         await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
         DbTransaction? tx = null;
+        bool txCompleted = false;
         try
         {
             tx = await _sessionInitializer.InitializeSessionAsync(
                 connection,
                 dialect,
                 tenant,
+                AccessMode.ReadOnly,
                 userSid: userSid,
                 purpose: purpose,
                 requireTransaction: true,
@@ -830,15 +832,11 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                     : "[]";
             }
 
-            if (tx != null)
-            {
-                await tx.CommitAsync(ct).ConfigureAwait(false);
-            }
             return json;
         }
         catch (Exception)
         {
-            if (tx != null)
+            if (tx != null && !txCompleted)
             {
                 try
                 {
@@ -848,6 +846,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                 {
                     _logger?.LogWarning(rbEx, "Failed to rollback transaction after error in GovernedTreeQueryService");
                 }
+
+                txCompleted = true;
             }
             throw;
         }
@@ -855,6 +855,20 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         {
             if (tx != null)
             {
+                if (!txCompleted)
+                {
+                    try
+                    {
+                        await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception rbEx)
+                    {
+                        _logger?.LogWarning(rbEx, "Failed to rollback read-only transaction in GovernedTreeQueryService");
+                    }
+
+                    txCompleted = true;
+                }
+
                 await tx.DisposeAsync().ConfigureAwait(false);
             }
         }
