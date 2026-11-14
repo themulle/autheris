@@ -16,11 +16,14 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Health;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using NSubstitute;
 using Shouldly;
 using StackExchange.Redis;
 using Xunit;
@@ -130,32 +133,40 @@ public sealed class ReadinessProbeTests
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) => _handler(targetMethod, args);
     }
 
-    private static async Task<(WebApplication App, HttpClient Client)> StartEndpointHostAsync(
-        string environment,
-        GatewayOptions gatewayOptions,
-        FakeDrainController drain,
-        IGatewayHealthCheckService health,
-        FakeExecutorGate gate,
-        FakeWarmupState warmup,
-        FakeTimeProvider? timeProvider = null)
+    private static IHostEnvironment CreateEnvironment(string environmentName)
     {
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environment });
-        builder.Logging.ClearProviders();
-        builder.Services.AddSingleton<ITrafficDrainController>(drain);
-        builder.Services.AddSingleton(health);
-        builder.Services.AddSingleton<IGraphQlExecutorGate>(gate);
-        builder.Services.AddSingleton<IStartupWarmupState>(warmup);
-        if (timeProvider is not null)
-        {
-            builder.Services.AddSingleton<TimeProvider>(timeProvider);
-        }
-        builder.Services.AddSingleton<ReadinessProbe>();
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns(environmentName);
+        return env;
+    }
 
-        var app = builder.Build();
-        app.Urls.Add("http://127.0.0.1:0");
-        app.MapHealthEndpoints(gatewayOptions, app.Environment);
-        await app.StartAsync();
-        return (app, new HttpClient { BaseAddress = new Uri(app.Urls.First()) });
+    private static async Task<(int StatusCode, string Body)> ExecuteReadyAsync(
+        IHostEnvironment environment,
+        GatewayOptions gatewayOptions,
+        ITrafficDrainController drain,
+        ReadinessProbe? probe,
+        IGraphQlExecutorGate? gate,
+        IStartupWarmupState? warmup,
+        IDictionary<string, string>? headers = null)
+    {
+        var result = await HealthEndpoints.HandleReadyAsync(drain, probe, gate, warmup, gatewayOptions, environment, CancellationToken.None);
+        var context = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
+        };
+        if (headers is not null)
+        {
+            foreach (var (k, v) in headers)
+            {
+                context.Request.Headers[k] = v;
+            }
+        }
+        var bodyStream = new MemoryStream();
+        context.Response.Body = bodyStream;
+        await result.ExecuteAsync(context);
+        bodyStream.Seek(0, SeekOrigin.Begin);
+        var body = new StreamReader(bodyStream).ReadToEnd();
+        return (context.Response.StatusCode, body);
     }
 
     [Fact]
@@ -328,16 +339,11 @@ public sealed class ReadinessProbeTests
         var gate = new FakeExecutorGate(ExecutorGateState.Ready);
         var warmup = new FakeWarmupState(WarmupPhase.Ready);
 
-        var (app, client) = await StartEndpointHostAsync("Production", new GatewayOptions(), drain, health, gate, warmup);
-        await using (app)
-        using (client)
-        {
-            var response = await client.GetAsync("/health/ready");
+        var (statusCode, body) = await ExecuteReadyAsync(CreateEnvironment("Production"), new GatewayOptions(), drain, new ReadinessProbe(health, NullLogger<ReadinessProbe>.Instance), gate, warmup);
 
-            response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
-            (await response.Content.ReadAsStringAsync()).ShouldBeEmpty();
-            health.Calls.ShouldBe(0);
-        }
+        statusCode.ShouldBe((int)HttpStatusCode.ServiceUnavailable);
+        body.ShouldBeEmpty();
+        health.Calls.ShouldBe(0);
     }
 
     [Fact]
@@ -419,42 +425,19 @@ public sealed class ReadinessProbeTests
         };
 
         var sharedProbe = new ReadinessProbe(health, NullLogger<ReadinessProbe>.Instance, time);
-
-        var devBuilder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Development" });
-        devBuilder.Logging.ClearProviders();
-        devBuilder.Services.AddSingleton<ITrafficDrainController>(new FakeDrainController());
-        devBuilder.Services.AddSingleton<IGraphQlExecutorGate>(new FakeExecutorGate(ExecutorGateState.Ready));
-        devBuilder.Services.AddSingleton<IStartupWarmupState>(new FakeWarmupState(WarmupPhase.Ready));
-        devBuilder.Services.AddSingleton(sharedProbe);
-        await using var devApp = devBuilder.Build();
-        devApp.Urls.Add("http://127.0.0.1:0");
-        devApp.MapHealthEndpoints(options, devApp.Environment);
-        await devApp.StartAsync();
-        using var devClient = new HttpClient { BaseAddress = new Uri(devApp.Urls.First()) };
-
-        var prodBuilder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Production" });
-        prodBuilder.Logging.ClearProviders();
-        prodBuilder.Services.AddSingleton<ITrafficDrainController>(new FakeDrainController());
-        prodBuilder.Services.AddSingleton<IGraphQlExecutorGate>(new FakeExecutorGate(ExecutorGateState.Ready));
-        prodBuilder.Services.AddSingleton<IStartupWarmupState>(new FakeWarmupState(WarmupPhase.Ready));
-        prodBuilder.Services.AddSingleton(sharedProbe);
-        await using var prodApp = prodBuilder.Build();
-        prodApp.Urls.Add("http://127.0.0.1:0");
-        prodApp.MapHealthEndpoints(options, prodApp.Environment);
-        await prodApp.StartAsync();
-        using var prodClient = new HttpClient { BaseAddress = new Uri(prodApp.Urls.First()) };
+        var drain = new FakeDrainController();
+        var gate = new FakeExecutorGate(ExecutorGateState.Ready);
+        var warmup = new FakeWarmupState(WarmupPhase.Ready);
 
         // Development call populates the cached dependency report and returns dev details.
-        var devResp = await devClient.GetAsync("/health/ready");
-        devResp.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
-        var devJson = await devResp.Content.ReadAsStringAsync();
+        var (devStatus, devJson) = await ExecuteReadyAsync(CreateEnvironment("Development"), options, drain, sharedProbe, gate, warmup);
+        devStatus.ShouldBe((int)HttpStatusCode.ServiceUnavailable);
         devJson.ShouldContain("securityMode");
         devJson.ShouldContain("components");
 
         // Production call hits the cached dependency report (Calls == 1) and never leaks dev fields.
-        var prodResp = await prodClient.GetAsync("/health/ready");
-        prodResp.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
-        var prodJson = await prodResp.Content.ReadAsStringAsync();
+        var (prodStatus, prodJson) = await ExecuteReadyAsync(CreateEnvironment("Production"), options, drain, sharedProbe, gate, warmup);
+        prodStatus.ShouldBe((int)HttpStatusCode.ServiceUnavailable);
         using var doc = JsonDocument.Parse(prodJson);
         var props = doc.RootElement.EnumerateObject().Select(p => p.Name).Order().ToArray();
         props.ShouldBe(["status", "timestamp"]);
@@ -469,27 +452,29 @@ public sealed class ReadinessProbeTests
         var drain = new FakeDrainController();
         var gate = new FakeExecutorGate(ExecutorGateState.Pending);
         var warmup = new FakeWarmupState(WarmupPhase.Warming);
+        var probe = new ReadinessProbe(health, NullLogger<ReadinessProbe>.Instance, time);
+        var env = CreateEnvironment("Production");
+        var options = new GatewayOptions();
 
-        var (app, client) = await StartEndpointHostAsync("Production", new GatewayOptions(), drain, health, gate, warmup, time);
-        await using (app)
-        using (client)
-        {
-            (await client.GetAsync("/health/ready")).StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
-            health.Calls.ShouldBe(1);
+        var (s1, _) = await ExecuteReadyAsync(env, options, drain, probe, gate, warmup);
+        s1.ShouldBe((int)HttpStatusCode.ServiceUnavailable);
+        health.Calls.ShouldBe(1);
 
-            gate.State = ExecutorGateState.Ready;
-            (await client.GetAsync("/health/ready")).StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
-            health.Calls.ShouldBe(1);
+        gate.State = ExecutorGateState.Ready;
+        var (s2, _) = await ExecuteReadyAsync(env, options, drain, probe, gate, warmup);
+        s2.ShouldBe((int)HttpStatusCode.ServiceUnavailable);
+        health.Calls.ShouldBe(1);
 
-            warmup.Phase = WarmupPhase.Ready;
-            (await client.GetAsync("/health/ready")).StatusCode.ShouldBe(HttpStatusCode.OK);
-            health.Calls.ShouldBe(1);
+        warmup.Phase = WarmupPhase.Ready;
+        var (s3, _) = await ExecuteReadyAsync(env, options, drain, probe, gate, warmup);
+        s3.ShouldBe((int)HttpStatusCode.OK);
+        health.Calls.ShouldBe(1);
 
-            // Draining flips immediately to 503 even while healthy report is cached.
-            drain.IsDraining = true;
-            (await client.GetAsync("/health/ready")).StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
-            health.Calls.ShouldBe(1);
-        }
+        // Draining flips immediately to 503 even while healthy report is cached.
+        drain.IsDraining = true;
+        var (s4, _) = await ExecuteReadyAsync(env, options, drain, probe, gate, warmup);
+        s4.ShouldBe((int)HttpStatusCode.ServiceUnavailable);
+        health.Calls.ShouldBe(1);
     }
 
     [Fact]
@@ -500,23 +485,15 @@ public sealed class ReadinessProbeTests
         var drain = new FakeDrainController();
         var gate = new FakeExecutorGate(ExecutorGateState.Ready);
         var warmup = new FakeWarmupState(WarmupPhase.Ready);
+        var probe = new ReadinessProbe(health, NullLogger<ReadinessProbe>.Instance, time);
+        var env = CreateEnvironment("Production");
+        var options = new GatewayOptions();
 
-        var (app, client) = await StartEndpointHostAsync("Production", new GatewayOptions(), drain, health, gate, warmup, time);
-        await using (app)
-        using (client)
-        {
-            using var req1 = new HttpRequestMessage(HttpMethod.Get, "/health/ready");
-            req1.Headers.Host = "tenant-a.example.com";
-            req1.Headers.Add("X-Tenant-Id", "tenant-a");
+        var (s1, _) = await ExecuteReadyAsync(env, options, drain, probe, gate, warmup, new Dictionary<string, string> { ["Host"] = "tenant-a.example.com", ["X-Tenant-Id"] = "tenant-a" });
+        var (s2, _) = await ExecuteReadyAsync(env, options, drain, probe, gate, warmup, new Dictionary<string, string> { ["Host"] = "tenant-b.example.com", ["X-Tenant-Id"] = "tenant-b" });
 
-            using var req2 = new HttpRequestMessage(HttpMethod.Get, "/health/ready");
-            req2.Headers.Host = "tenant-b.example.com";
-            req2.Headers.Add("X-Tenant-Id", "tenant-b");
-
-            (await client.SendAsync(req1)).StatusCode.ShouldBe(HttpStatusCode.OK);
-            (await client.SendAsync(req2)).StatusCode.ShouldBe(HttpStatusCode.OK);
-
-            health.Calls.ShouldBe(1);
-        }
+        s1.ShouldBe((int)HttpStatusCode.OK);
+        s2.ShouldBe((int)HttpStatusCode.OK);
+        health.Calls.ShouldBe(1);
     }
 }
