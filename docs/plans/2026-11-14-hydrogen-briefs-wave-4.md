@@ -1,10 +1,14 @@
-# Phase 4 Hydrogen Developer Briefs — Wave 4 (Plus Wave 5 Queue Summary)
+# Phase 4 Hydrogen Developer Briefs — Wave 4
 
 - **Date:** 2026-11-14
-- **Baseline:** `origin/main` @ `2b2876bd` (sequenced immediately after Wave 3 `docs/plans/2026-11-14-hydrogen-briefs-wave-3.md`).
+- **Baseline:** `origin/main` @ `2b2876bd` (sequenced immediately after Wave 3 `docs/plans/2026-11-14-hydrogen-briefs-wave-3.md`; followed by Wave 5 `docs/plans/2026-11-14-hydrogen-briefs-wave-5.md`).
 - **Global Constraints for All Hydrogen Workers:**
   1. **English Only:** All identifiers, comments, error messages, logs, and commit messages MUST be in English.
-  2. **Filtered Local Unit Tests Only:** Run `dotnet build -c Release -warnaserror` (one project or solution when build lock is free) and `dotnet test ... --no-build --filter "<Filter>"`. NEVER run the full unfiltered test suite or Testcontainers integration suite locally.
+  2. **Constrained Local Build & Filtered Test Execution Only:**
+     - Always set `export MSBUILDCOPYTASKPARALLELISM=1 NUGET_PACKAGES=/work/nuget`.
+     - Build only the target test/source `.csproj` with `-m:1 -nodeReuse:false` (NEVER run `dotnet build Autheris.sln`).
+     - Run `dotnet test` ONLY with `--no-build -m:1 -nodeReuse:false --blame-hang --blame-hang-timeout 120s` and a tight `--filter "<Filter>"` on both `Autheris.Tests.Unit` (`-p:AutherisIncludeTestAuth=true`) and `Autheris.Tests.Architecture`.
+     - Compile-check `Autheris.Tests.Integration` with `dotnet build tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj -c Release --no-dependencies -m:1 -nodeReuse:false` (NEVER execute integration tests or unfiltered test suites locally).
   3. **Zero `file`+`://` Links in Markdown:** Never write literal `file`+`://` URI strings in any `.md` file (`DocsIntegrityTests.No_absolute_file_links`).
   4. **Clean `bin/obj` After Push:** Run `find src tests -maxdepth 2 \( -name bin -o -name obj \) -exec rm -rf {} +` after pushing your branch to keep `/work` disk usage low.
 
@@ -14,9 +18,9 @@
 
 | Slot | Work Package | Branch / Worktree | DDL Step | Shared-File Serialization Rules |
 | :--- | :--- | :--- | :--- | :--- |
-| **W4-1** | **`WP-SIMPL-47 PR 1`** (Consent API Schema & Domain + `CONSENTS.grant_source`) | `feat/simpl-47-pr1-schema-domain` (`/work/wt/simpl-47-pr1-schema-domain`) | **`0014_consent_api`** *(Single DDL slot in Wave 4; starts after Wave 3 `0013_catalog_discovery` merges)* | Touches `Migrations/Steps/{postgresql,sqlserver}/0014_consent_api*`, `GovernanceTable.cs`, `ConsentModels.cs`, `GovernanceModels.cs`, `GovernanceRepository.Consent*.cs`. Disjoint from W4-2, W4-3, W4-4. Unblocks `WP-OI-CAT-4 (#671)` and `WP-SIMPL-47 PR 2`. |
+| **W4-1** | **`WP-SIMPL-47 PR 1`** (Consent API Schema & Domain + `CONSENTS.grant_source`) | `feat/simpl-47-pr1-schema-domain` (`/work/wt/simpl-47-pr1-schema-domain`) | **`0014_consent_api`** *(Single DDL slot in Wave 4; starts after Wave 3 `0013_catalog_discovery` merges)* | Touches `Migrations/Steps/{postgresql,sqlserver}/0014_consent_api*`, `GovernanceTable.cs`, `ConsentModels.cs`, `GovernanceModels.cs`, `GovernanceRepository.Consent*.cs`. Disjoint from W4-2, W4-3, W4-4. Unblocks Wave 5 `WP-OI-CAT-4 (#671)` and `WP-SIMPL-47 PR 2`. |
 | **W4-2** | **`WP-SIMPL-41 PR 3`** (Authorized Discovery Core, Channels, Audit & Rate Limits) | `feat/simpl-41-pr3-discovery-core` (`/work/wt/simpl-41-pr3-discovery-core`) | None *(Requires Wave 3 `WP-SIMPL-41 PR 2` merged on `main`)* | Touches `src/Autheris.Application/Catalog/Discovery/**`, `CatalogDiscoveryService.cs`, `McpDatasetCatalog.cs`, `Query.Catalog.cs`, `CatalogApiEndpoints.cs`, `CatalogSearchEngine.cs`. Disjoint from W4-1, W4-3, W4-4. Unblocks `#681` and `#682-B`. |
-| **W4-3** | **`WP-OI-SQL-479-A`** (`#479` Dialect Semantics PR A: Oracle `MOD`/`TRUNC`, Databricks `DIV`, `IntegralOperandClassifier`) | `feat/oi-sql-479a-div-mod` (`/work/wt/oi-sql-479a-div-mod`) | None *(Starts after Wave 3 `WP-OI-SQL-486` merges on `TrinoSqlEngine`)* | Touches `src/TrinoSqlEngine/**` (`Expressions.cs`, `SqlDialectGeneratorBase.Expressions.cs`, `OracleDialectGenerator.cs`, `DatabricksDialectGenerator.cs`, `GovernedSqlCompiler.cs`, `CompileCacheKey.cs`). Disjoint from W4-1, W4-2, W4-4. |
+| **W4-3** | **`WP-OI-SQL-479-A`** (`#479` Dialect Semantics PR A: Oracle `MOD`/`TRUNC`, Databricks `DIV`, `IntegralOperandClassifier`) | `feat/oi-sql-479a-div-mod` (`/work/wt/oi-sql-479a-div-mod`) | None *(Starts after Wave 3 `WP-OI-SQL-486` merges on `TrinoSqlEngine`)* | Touches `src/TrinoSqlEngine/**` (`Ast/Nodes/Expressions.cs`, `Ast/Visitors/AstSecurityVisitor.Expressions.cs`, `Ast/Generators/SqlDialectGeneratorBase.Expressions.cs`, `Ast/Generators/OracleDialectGenerator.cs`, `Ast/Generators/DatabricksDialectGenerator.cs`, `GovernedSqlCompiler.cs`, `Ast/Emit/CompiledSqlTemplate.cs`). Note: `SqliteDialectGenerator.cs` is NOT touched (`Q-SQL-2`: SQLite removal is handled by `WP-SIMPL-31`, which must not run in parallel with `#479` PRs). Disjoint from W4-1, W4-2, W4-4. |
 | **W4-4** | **`WP-OI-SCALE-2 (#673)`** (Batch Table Metadata Upsert `UpsertTableMetadataBatchAsync` + Ingestion Callers) | `feat/oi-scale-673-batch-upsert` (`/work/wt/oi-scale-673-batch-upsert`) | None *(Zero DDL — runs in parallel with W4-1!)* | Touches `IGovernanceRepository.cs`, `GovernanceRepository.Catalog.cs`, `GovernanceRepository.CatalogSql.cs`, `DbtMetadataIngestionService.cs`, `OpenMetadataSyncService.cs`, `DataCatalogSyncService.cs`. Disjoint from W4-1, W4-2, W4-3. |
 
 ---
@@ -74,11 +78,14 @@
   - `Consents_GrantSource_DefaultsTo_ConsentRequest_NeverDeclarative` (`[Trait("Category","Security")]`, `SEC-OI-671-1`)
   - `ConsentRequest_And_Consent_NewColumns_RoundTrip`.
 
-### Filtered Local Verification Commands
+### Constrained Local Verification Commands
 ```bash
-dotnet build Autheris.sln -c Release -warnaserror
-dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release --no-build --filter "FullyQualifiedName~GrantRecordCanonicalizer|FullyQualifiedName~ConsentApiMigrationStep0014|FullyQualifiedName~StepSqlLint|FullyQualifiedName~MigrationShape"
-dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-build
+export MSBUILDCOPYTASKPARALLELISM=1 NUGET_PACKAGES=/work/nuget
+dotnet build tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release -p:AutherisIncludeTestAuth=true -m:1 -nodeReuse:false
+dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release --no-build -p:AutherisIncludeTestAuth=true -m:1 -nodeReuse:false --blame-hang --blame-hang-timeout 120s --filter "FullyQualifiedName~GrantRecordCanonicalizer|FullyQualifiedName~ConsentApiMigrationStep0014|FullyQualifiedName~StepSqlLint|FullyQualifiedName~MigrationShape"
+dotnet build tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-dependencies -m:1 -nodeReuse:false
+dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-build -m:1 -nodeReuse:false --blame-hang --blame-hang-timeout 120s --filter "FullyQualifiedName~ProgramRatchetTests|FullyQualifiedName~SourceSizeRatchetArchitectureTests|FullyQualifiedName~CleanArchitectureTests|FullyQualifiedName~DocsIntegrityTests"
+dotnet build tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj -c Release --no-dependencies -m:1 -nodeReuse:false
 ```
 
 ---
@@ -105,7 +112,7 @@ dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj
      - `Clear` -> `DiscoveryColumnState.Clear`
      - `Mask` -> `DiscoveryColumnState.Masked` (`ClearInSomeRows = false`)
      - `RowDependent` -> `DiscoveryColumnState.Masked` with `ClearInSomeRows = true` (OD-41)
-     - `Deny` -> `DiscoveryColumnState.NoAccess` (column is listed as `NoAccess`, NOT omitted unless ` column.DiscoveryHidden == true`).
+     - `Deny` -> `DiscoveryColumnState.NoAccess` (column is listed as `NoAccess`, NOT omitted unless `column.DiscoveryHidden == true`).
      - When decision is not allowed: check pending request (`DiscoveryAccessState.Requested`) or recently expired grant within 90 days (`DiscoveryAccessState.Expired`, via `IConsentRepository.GetRecentlyExpiredTableIdsAsync`), else `DiscoveryAccessState.None` (all columns `NoAccess`).
    - `DiscoveryCallerGate.cs` & `CatalogDiscoveryOptionsValidator.cs`: enforce authenticated non-anonymous caller (`!= ANONYMOUS_MCP_CLIENT`), resolved tenant, optional `RequiredRoles` / `RequiredScopes` / `TenantOverrides`, hard caps (`MaxSampleRows <= 50`, `MaxArtifactBytes <= 1048576`), rate limiting via `IRateLimiterService`.
    - `DiscoveryService.cs`: orchestrates repository load (with `DatasetCatalogStore` overlay), `DiscoveryTenantScope`, hidden-column stripping (columns, stats, samples), batch owner lookup (`GetDataOwnersForTableAsync`, active only, `(DisplayName, Email)`), single `IAccessDecisionPoint.DecideManyAsync` call per page, `IDiscoveryArtifactStore.GetAsync`, per-scope memoization, `CATALOG_READ` audit with `queryHash`, and fail-closed error handling.
@@ -125,11 +132,14 @@ dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj
 - `tests/Autheris.Tests.Unit/Catalog/Discovery/DiscoverySecurityTests.cs` (mandatory names from spec Section 6.12a)
 - `tests/Autheris.Tests.Architecture/DiscoveryArchitectureTests.cs`: `Discovery_DoesNotReference_ConsentResolution_GranteeMatcher_Or_GrantStoreForAllow` & `DiscoveryNamespace_DoesNotReference_DataSourceExecution` (`SEC-DISC-02`, `SEC-DISC-06`).
 
-### Filtered Local Verification Commands
+### Constrained Local Verification Commands
 ```bash
-dotnet build Autheris.sln -c Release -warnaserror
-dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release --no-build --filter "FullyQualifiedName~Discovery"
-dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-build --filter "FullyQualifiedName~Discovery"
+export MSBUILDCOPYTASKPARALLELISM=1 NUGET_PACKAGES=/work/nuget
+dotnet build tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release -p:AutherisIncludeTestAuth=true -m:1 -nodeReuse:false
+dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release --no-build -p:AutherisIncludeTestAuth=true -m:1 -nodeReuse:false --blame-hang --blame-hang-timeout 120s --filter "FullyQualifiedName~Discovery"
+dotnet build tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-dependencies -m:1 -nodeReuse:false
+dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-build -m:1 -nodeReuse:false --blame-hang --blame-hang-timeout 120s --filter "FullyQualifiedName~Discovery|FullyQualifiedName~ProgramRatchetTests|FullyQualifiedName~SourceSizeRatchetArchitectureTests|FullyQualifiedName~CleanArchitectureTests|FullyQualifiedName~DocsIntegrityTests"
+dotnet build tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj -c Release --no-dependencies -m:1 -nodeReuse:false
 ```
 
 ---
@@ -139,15 +149,16 @@ dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj
 - **Worktree:** `/work/wt/oi-sql-479a-div-mod`
 - **Branch:** `feat/oi-sql-479a-div-mod` (branch from `origin/main` after Wave 3 `WP-OI-SQL-486` merges)
 - **Plan & Security References:**
-  - `docs/plans/2026-11-13-plan-issues-sql-odata-engine.md` (`WP-OI-SQL-479` PR A: Oracle `%` and integer `/`, Databricks integer `/`)
-  - `docs/plans/2026-11-13-sec-issues-group-5.md` (`SEC-OI-479-1..2`) & `docs/plans/2026-11-14-owner-decisions-sec-groups-1-9.md` (`Q-SEC5-2`)
+  - `docs/plans/2026-11-13-plan-issues-sql-engine-dialects.md` (`WP-OI-SQL-479` PR A: Oracle `%` and integer `/`, Databricks integer `/`)
+  - `docs/plans/2026-11-13-sec-issues-group-5.md` (`SEC-OI-479-1..2`) & `docs/plans/2026-11-14-owner-decisions-sec-groups-1-9.md` (`Q-SQL-2`, `Q-SEC5-2`)
+  - **Sequencing Rule (`Q-SQL-2`):** Do NOT touch `SqliteDialectGenerator.cs` (`WP-SIMPL-31` removes SQLite in Step 3 and must not run in parallel with any `#479` PR touching `src/TrinoSqlEngine/**`).
 
 ### Mandatory Security Conditions (`SEC-OI-479-1..2` & `Q-SEC5-2`)
 - **`SEC-OI-479-1` & `Q-SEC5-2` (Zero AST Duplication & Emitted SQL Length Cap):**
   - Every dialect rewrite of `/` or `%` (`MOD(a, b)`, `TRUNC(a / b)`, `a DIV b`) MUST emit each operand (`Left` and `Right`) **at most once** (no operand duplication that could cause quadratic blowup on nested arithmetic).
   - In `GovernedSqlCompiler.CompileCore` (`src/TrinoSqlEngine/GovernedSqlCompiler.cs:253-262`), in addition to `PolicyExpansionFactor`, enforce an absolute emitted SQL length ceiling of `4 * _engine.MaxQueryLength` (`SqlLimitKind.EmittedSqlLength` or `PolicyExpansionFactor`) so dialect function wrapping on deeply nested expressions never produces unbounded SQL text.
 - **`SEC-OI-479-2` (Template Cache Key & Dependency Fingerprint Binding):**
-  - Because `BinaryExpression.IsIntegralDivision` depends on the resolved catalog column types of `Left` and `Right`, `TypedPolicyContext.Fingerprint(entry)` / `CompileCacheKey` MUST include column data types (verify and pin with a test that changing a column's catalog type from `INTEGER` to `DECIMAL`/`DOUBLE` invalidates the cached template and switches emission between `TRUNC(a / b)` / `a DIV b` and `a / b`).
+  - `CompileCacheKey`, `CompiledSqlTemplate`, and `CompiledSqlTemplateCache` live in `src/TrinoSqlEngine/Ast/Emit/CompiledSqlTemplate.cs` (`:16-140`). Because `BinaryExpression.IsIntegralDivision` depends on the resolved catalog column types of `Left` and `Right`, verify `TypedPolicyContext.Fingerprint(entry)` (`GovernedSqlCompiler.cs:367-423`) and `CompileCacheKey` (`Ast/Emit/CompiledSqlTemplate.cs:16-24`) include column data types, and pin with a security test that changing a column's catalog type from `INTEGER` to `DECIMAL`/`DOUBLE` invalidates the cached template and switches emission between `TRUNC(a / b)` / `a DIV b` and `a / b`.
 
 ### Exact Changes to Make
 1. **AST Node (`src/TrinoSqlEngine/Ast/Nodes/Expressions.cs:97-100`):**
@@ -159,8 +170,8 @@ dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj
          Expression Right,
          bool IsIntegralDivision = false) : Expression;
      ```
-2. **Integral Operand Classifier (`src/TrinoSqlEngine/Ast/Visitors/IntegralOperandClassifier.cs`, new, wired in `GovernedSqlCompiler.cs:213`):**
-   - Create an AST visitor `IntegralOperandClassifier` that runs on the user/annotated AST (alongside `LiteralColumnTypeAnnotator` in `GovernedSqlCompiler.cs:213`) and sets `IsIntegralDivision = true` on `BinaryExpression` where `Operator == BinaryOperator.Divide` and **both** `Left` and `Right` are provably integral:
+2. **Integral Operand Classification (`src/TrinoSqlEngine/Ast/Visitors/AstSecurityVisitor.Expressions.cs` or new `src/TrinoSqlEngine/Ast/Visitors/IntegralOperandClassifier.cs`, wired in `src/TrinoSqlEngine/GovernedSqlCompiler.cs:213`):**
+   - Classify `BinaryExpression` nodes where `Operator == BinaryOperator.Divide` and set `IsIntegralDivision = true` when **both** `Left` and `Right` are provably integral:
      - `LiteralExpression { Type: LiteralType.Integer }`
      - `ColumnReference` resolving in `TypedPolicyContext.Catalog` to an integral SQL type (`TINYINT`, `SMALLINT`, `INT`, `INTEGER`, `BIGINT`, `INT2`, `INT4`, `INT8`, or `NUMBER(p, 0)` / `DECIMAL(p, 0)` with scale `0`)
      - `CastExpression` whose target type is one of the integral types above
@@ -168,7 +179,7 @@ dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj
      - `ParenthesizedExpression` whose inner expression is integral
      - `BinaryExpression` with `Operator` in `{ Add, Subtract, Multiply, Modulo }` (or `Divide` with `IsIntegralDivision == true`) where both operands are integral.
    - Any unknown column type, parameter without integral annotation, floating-point, or decimal with scale > 0 classifies as `false` (emits standard float/decimal `/`).
-3. **Oracle Dialect Emission (`src/TrinoSqlEngine/Ast/Generators/OracleDialectGenerator.cs` & `SqlDialectGeneratorBase.Expressions.cs:255-282`):**
+3. **Oracle Dialect Emission (`src/TrinoSqlEngine/Ast/Generators/OracleDialectGenerator.cs` & `src/TrinoSqlEngine/Ast/Generators/SqlDialectGeneratorBase.Expressions.cs:413-466`):**
    - Override `FormatBinaryExpression` in `OracleDialectGenerator`:
      - When `b.Operator == BinaryOperator.Modulo`: emit `MOD(` + `GenerateExpression(b.Left)` + `, ` + `GenerateExpression(b.Right)` + `)` (Oracle has no `%` operator; `ORA-00911`).
      - When `b.Operator == BinaryOperator.Divide && b.IsIntegralDivision`: emit `TRUNC(` + `FormatStandardBinary(b)` + `)` so Oracle `NUMBER` division truncates toward zero like Trino integer division.
@@ -191,10 +202,13 @@ dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj
   - `Databricks_CatalogColumnTypeChange_IntToDouble_InvalidatesCacheAndSwitchesFromDivToSlash` (`[Trait("Category","Security")]`, `SEC-OI-479-2`)
   - `DeepNestedDivision_ExceedingFourTimesMaxQueryLength_ThrowsSqlLimitExceeded` (`[Trait("Category","Security")]`, `SEC-OI-479-1`).
 
-### Filtered Local Verification Commands
+### Constrained Local Verification Commands
 ```bash
-dotnet build src/TrinoSqlEngine/TrinoSqlEngine.csproj -c Release -warnaserror
-dotnet test tests/TrinoSqlEngine.Tests/TrinoSqlEngine.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~OracleModulo|FullyQualifiedName~DatabricksIntegerDivision"
+export MSBUILDCOPYTASKPARALLELISM=1 NUGET_PACKAGES=/work/nuget
+dotnet build tests/TrinoSqlEngine.Tests/TrinoSqlEngine.Tests.csproj -c Release -m:1 -nodeReuse:false
+dotnet test tests/TrinoSqlEngine.Tests/TrinoSqlEngine.Tests.csproj -c Release --no-build -m:1 -nodeReuse:false --blame-hang --blame-hang-timeout 120s --filter "FullyQualifiedName~OracleModulo|FullyQualifiedName~DatabricksIntegerDivision"
+dotnet build tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-dependencies -m:1 -nodeReuse:false
+dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-build -m:1 -nodeReuse:false --blame-hang --blame-hang-timeout 120s --filter "FullyQualifiedName~ProgramRatchetTests|FullyQualifiedName~SourceSizeRatchetArchitectureTests|FullyQualifiedName~CleanArchitectureTests|FullyQualifiedName~DocsIntegrityTests"
 ```
 
 ---
@@ -242,22 +256,24 @@ dotnet test tests/TrinoSqlEngine.Tests/TrinoSqlEngine.Tests.csproj -c Release --
   - `BatchUpsert_MixedWithOneRestrictiveItem_InsideWriteScope_FlushesImmediately` (`[Trait("Category","Security")]`, `SEC-OI-673-3`)
   - `SingleTableUpsert_DelegatesToOneElementBatch_PreservesExactSemantics`.
 
-### Filtered Local Verification Commands
+### Constrained Local Verification Commands
 ```bash
-dotnet build Autheris.sln -c Release -warnaserror
-dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release --no-build --filter "FullyQualifiedName~BatchUpsert|FullyQualifiedName~CatalogWriteScope"
+export MSBUILDCOPYTASKPARALLELISM=1 NUGET_PACKAGES=/work/nuget
+dotnet build tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release -p:AutherisIncludeTestAuth=true -m:1 -nodeReuse:false
+dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj -c Release --no-build -p:AutherisIncludeTestAuth=true -m:1 -nodeReuse:false --blame-hang --blame-hang-timeout 120s --filter "FullyQualifiedName~BatchUpsert|FullyQualifiedName~CatalogWriteScope"
+dotnet build tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-dependencies -m:1 -nodeReuse:false
+dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj -c Release --no-build -m:1 -nodeReuse:false --blame-hang --blame-hang-timeout 120s --filter "FullyQualifiedName~ProgramRatchetTests|FullyQualifiedName~SourceSizeRatchetArchitectureTests|FullyQualifiedName~CleanArchitectureTests|FullyQualifiedName~DocsIntegrityTests"
+dotnet build tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj -c Release --no-dependencies -m:1 -nodeReuse:false
 ```
 
 ---
 
-## Wave 5 Queue Summary (Next Ready Packages After Wave 4)
+## Wave 5 Queue Summary (Full Self-Contained Briefs in `docs/plans/2026-11-14-hydrogen-briefs-wave-5.md`)
 
-| Priority | Work Package | Prerequisite from Wave 3 / Wave 4 | DDL Slot | Summary |
+| Slot | Work Package | Prerequisite from Wave 3 / Wave 4 | DDL Slot | Summary |
 | :--- | :--- | :--- | :--- | :--- |
-| **W5-1 (DDL)** | **`WP-OI-SCALE-4 PR 2 (#675)`** (`CATALOG_WRITE_LOG` + cursor delta loader) | Wave 3 `WP-OI-SCALE-4 PR 1` + Wave 4 `0014` | **`0015_catalog_write_log`** | Adds `CATALOG_WRITE_LOG` table (`GovernanceTable.CatalogWriteLog`), appends changed table IDs in `GovernanceRepository.Catalog.cs`, and loads only changed tables in `CatalogSnapshotProvider` (`SEC-OI-675-2..4`, `MaxDeltaBatchSize = 500`, fallback to full reload on gap/overflow). |
-| **W5-2** | **`WP-OI-CAT-4 (#671)`** (Declarative consent prune scoped to `DECLARATIVE`) | Wave 4 Brief 1 (`WP-SIMPL-47 PR 1` `CONSENTS.grant_source`) | None | Updates `DeclarativeConsentApplyService` so `prune` only revokes consents with `GrantSource == ConsentGrantSource.Declarative` (`SEC-OI-671-1..2`). |
-| **W5-3** | **`WP-OI-WEB-681 (#681)` & `WP-OI-WEB-682-B (#682-B)`** (Discovery column descriptions, PII flags & `requestAccess` link) | Wave 4 Brief 2 (`WP-SIMPL-41 PR 3`) | None | Verifies/wires column descriptions, PII flags, masking state, and consent request links across REST/GraphQL/MCP discovery (`SEC-OI-681-1`, `SEC-OI-682-1..3`). |
-| **W5-4** | **`WP-OI-SQL-478-B (#478 OData)`** & **`WP-OI-SQL-479-B / D / C`** | Wave 2 `#478-A` & Wave 4 `#479-A` | None | Iterative OData `$filter` binary chain parser (`#478-B`), dialect capability matrix (`#479-B`), `CompileLimits` (`#479-D`), and DuckDB/Snowflake/BigQuery generators (`#479-C`). |
-| **W5-5** | **`WP-SIMPL-45 PR 5`** (Governed Write Execution Wiring Across REST/OData/GraphQL/MCP) | Wave 3 `WP-SIMPL-45 PR 4` | None | Completes governed DML write execution wiring and end-to-end security tests (`SEC-SIMPL-45-01..10`). |
-| **W5-6** | **`WP-OI-SRCH-625 / 626 / 628a-d`** & **`WP-OI-SCALE-6 (#677)`** | PR `#734` (`#624`) & Wave 4 Brief 2 (`WP-SIMPL-41 PR 3`) | None | Search synonyms (`#625`), compound token splitting (`#626`), semantic vector search (`#628a-d`, table vector strictly excludes column names/descriptions per `SEC-OI-628-5..6`), and caller-filtered paged catalog queries (`#677`, `SEC-OI-677-1..3`). |
-| **W5-7** | **`WP-SIMPL-47 PR 2`** (`IGrantWriter` & Signed Hash-Chained `GRANT_RECORDS`) | Wave 4 Brief 1 (`WP-SIMPL-47 PR 1`) | None | Routes all `CONSENTS` writes through `IGrantWriter` with ECDSA P-256 signatures and per-tenant hash chain (`SEC-SIMPL-47-03`, `SEC-SIMPL-47-09`). |
+| **W5-1 (DDL)** | **`WP-OI-SCALE-4 PR 2 (#675)`** (`POLICY_EPOCHS.change_version` + `GetTablesChangedSinceAsync` + `CatalogSnapshot.WithDelta`) | Wave 3 `WP-OI-SCALE-4 PR 1` + Wave 4 `0014` + Wave 4 `#673` | **`0015_policy_epochs_change_version`** | Adds `change_version BIGINT` to `POLICY_EPOCHS` (backfilled to current version, never 0/NULL, indexed, `SEC-OI-675-6`), updates all catalog-mutating writers to set `change_version` in the same transaction (`SEC-OI-675-1`), implements `GetTablesChangedSinceAsync` reading high watermark first (`SEC-OI-675-2`), and wires `CatalogSnapshot.WithDelta` (< 20% threshold, `SEC-OI-675-3..4`). |
+| **W5-2** | **`WP-OI-CAT-4 (#671)`** (Declarative consent prune scoped to `DECLARATIVE`) | Wave 4 Brief 1 (`WP-SIMPL-47 PR 1` `CONSENTS.grant_source`) | None | Adds `prune=true|false|force` & `dryRun=true|false` to `DeclarativeConsentApplyService` (`POST /api/v1/governance/consents/apply`), revoking only caller-tenant `DECLARATIVE` consents for manifest grantees on unlisted tables (`SEC-OI-671-1..6`). |
+| **W5-3** | **`WP-OI-SQL-479-B`** (`date_add('quarter', ...)`, Oracle month-end `ADD_MONTHS`, `Concat` arithmetic parenthesization) | Wave 4 Brief 3 (`WP-OI-SQL-479-A`) | None | Translates `DateUnit.Quarter` as `months * 3`, clamps Oracle `ADD_MONTHS` month-end day for simple operands (`SEC-OI-479-1`), and parenthesizes arithmetic children of `||` (`Concat`, `SEC-OI-479-4`). |
+| **W5-4** | **`WP-SIMPL-45 PR 5`** (Governed Write Execution: Intent/Outcome Audit, Idempotency, Write Budgets, `WriteConnection` & Required-Privileges Report) | Wave 3 `WP-SIMPL-45 PR 4` | None | Adds `beforeCommit` hook on `ICheckedDmlExecutor`, `WEBSQL_DML_INTENT` / `WEBSQL_DML_EXECUTED` audit (`SEC-SIMPL-129`), mandatory `Idempotency-Key` (`SEC-SIMPL-128`), `IWriteBudgetStore` (`SEC-SIMPL-130`), `WriteConnection` (`SEC-SIMPL-131`), and `GET /api/v1/admin/datasources/{name}/required-write-privileges`. |
+| **W5-5** | **`WP-OI-SCALE-5 (#676 PR 1–3)`** & **`WP-OI-SCALE-6 (#677 PR 1)`** (Incremental Search Index & Stale-Only / Paged Catalog Reads) | Wave 4 `#673` (disjoint from W5-1 if `#676` runs in parallel and `#677` runs after W5-1) | None | `#676`: SHA-256 scrubbed-text embedding cache + BM25/vector delta segments & tombstones (`SEC-OI-676-1..5`). `#677`: stale-only `GetAllTablesAsync` reading epochs before data + unfiltered internal `GetTablesAsync`/`QueryTablesAsync` with post-visibility caller paging (`SEC-OI-677-1..6`). |
