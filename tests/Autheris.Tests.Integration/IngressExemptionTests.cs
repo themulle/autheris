@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Autheris.Api.Endpoints;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
@@ -14,18 +15,23 @@ using Xunit;
 using Autheris.Tests.Integration.Governance;
 
 [Trait("Category", "Security")]
-public sealed class IngressExemptionTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class IngressExemptionTests : IClassFixture<IngressExemptionTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public IngressExemptionTests(WebApplicationFactory<Program> factory)
+    public IngressExemptionTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("IngressExemptionTests"));
-        });
+        }
     }
 
     [Fact]

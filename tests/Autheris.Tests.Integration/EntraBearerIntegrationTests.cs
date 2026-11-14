@@ -11,14 +11,16 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 [Trait("Category", "Security")]
-public sealed class EntraBearerIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class EntraBearerIntegrationTests : IClassFixture<EntraBearerIntegrationTests.HostFixture>
 {
     private static readonly SymmetricSecurityKey TestKey = new(Encoding.UTF8.GetBytes("a-very-secret-test-key-of-at-least-256-bits-length!"));
     private const string TenantId = "11111111-1111-1111-1111-111111111111";
@@ -27,22 +29,35 @@ public sealed class EntraBearerIntegrationTests : IClassFixture<WebApplicationFa
 
     private readonly WebApplicationFactory<Program> _factory;
 
-    public EntraBearerIntegrationTests(WebApplicationFactory<Program> factory)
+    public EntraBearerIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("EntraBearerIntegrationTests"));
+            base.ConfigureWebHost(builder);
+        }
 
-            builder.ConfigureServices(services =>
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
-                {
-                    options.TokenValidationParameters.IssuerSigningKey = TestKey;
-                });
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("EntraBearerIntegrationTests"),
             });
-        });
+        }
+
+        protected override void ConfigureHostServices(IServiceCollection services)
+        {
+            services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
+            {
+                options.TokenValidationParameters.IssuerSigningKey = TestKey;
+            });
+        }
     }
 
     private static string CreateSignedToken(IEnumerable<Claim> claims)

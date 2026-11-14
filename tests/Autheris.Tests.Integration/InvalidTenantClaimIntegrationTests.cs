@@ -2,6 +2,7 @@ namespace Autheris.Tests.Integration;
 
 using System.Net;
 using System.Threading.Tasks;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Shouldly;
@@ -12,18 +13,23 @@ using Autheris.Tests.Integration.Governance;
 /// API-7: an invalid tenant claim is a 403, not a 500 from the authentication pipeline, and the raw claim value is not
 /// echoed in the response.
 /// </summary>
-public sealed class InvalidTenantClaimIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class InvalidTenantClaimIntegrationTests : IClassFixture<InvalidTenantClaimIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public InvalidTenantClaimIntegrationTests(WebApplicationFactory<Program> factory)
+    public InvalidTenantClaimIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("InvalidTenantClaimIntegrationTests"));
-        });
+        }
     }
 
     [Fact]

@@ -27,22 +27,22 @@ using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>Shared host set-up of the PLAN-SEC-115 integration tests (SQLite governance store, test auth, MCP on).</summary>
 internal static class ReadPathHost
 {
-    public static WebApplicationFactory<Program> With(WebApplicationFactory<Program> factory, params (string Key, string Value)[] settings) =>
-        factory.WithWebHostBuilder(b =>
-        {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("ReadPathHost"));
-            b.UseSetting("Gateway:Mcp:Enabled", "true");
-            b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-            foreach (var (key, value) in settings) b.UseSetting(key, value);
-        });
+    public static void Configure(IWebHostBuilder b, params (string Key, string Value)[] settings)
+    {
+        b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+        b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
+        b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+        b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("ReadPathHost"));
+        b.UseSetting("Gateway:Mcp:Enabled", "true");
+        b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+        foreach (var (key, value) in settings) b.UseSetting(key, value);
+    }
 
     public static HttpClient Authenticated(WebApplicationFactory<Program> factory)
     {
@@ -79,7 +79,7 @@ internal static class ReadPathHost
 }
 
 /// <summary>PLAN-SEC-115 WP-4 with <c>Gateway:RestApi:DataEndpoint:Enabled=false</c>: the REST data family is not mapped (router 404).</summary>
-public sealed class ReadPathRestSwitchOffIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ReadPathRestSwitchOffIntegrationTests : IClassFixture<ReadPathRestSwitchOffIntegrationTests.HostFixture>
 {
     private static readonly string[] ClosedRequests =
     [
@@ -93,10 +93,15 @@ public sealed class ReadPathRestSwitchOffIntegrationTests : IClassFixture<WebApp
 
     private readonly WebApplicationFactory<Program> _factory;
 
-    public ReadPathRestSwitchOffIntegrationTests(WebApplicationFactory<Program> factory)
+    public ReadPathRestSwitchOffIntegrationTests(HostFixture factory)
     {
-        _factory = ReadPathHost.With(factory, ("Gateway:RestApi:DataEndpoint:Enabled", "false"))
-            ;
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+            ReadPathHost.Configure(builder, ("Gateway:RestApi:DataEndpoint:Enabled", "false"));
     }
 
     private static string MaskRequestIds(string body) =>
@@ -192,22 +197,35 @@ public sealed class ReadPathRestSwitchOffIntegrationTests : IClassFixture<WebApp
         switches.RestDataEndpointEnabled.ShouldBeFalse();
 
         var config = (IConfigurationRoot)_factory.Services.GetRequiredService<IConfiguration>();
-        config["Gateway:RestApi:DataEndpoint:Enabled"] = "true";
+        try
+        {
+            config["Gateway:RestApi:DataEndpoint:Enabled"] = "true";
 
-        _factory.Services.GetRequiredService<IReadPathSwitches>().RestDataEndpointEnabled.ShouldBeFalse();
-        (await ReadPathHost.Authenticated(_factory).GetAsync("/api/v1/data/d/s/t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
-        ReferenceEquals(switches, _factory.Services.GetRequiredService<IReadPathSwitches>()).ShouldBeTrue();
+            _factory.Services.GetRequiredService<IReadPathSwitches>().RestDataEndpointEnabled.ShouldBeFalse();
+            (await ReadPathHost.Authenticated(_factory).GetAsync("/api/v1/data/d/s/t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+            ReferenceEquals(switches, _factory.Services.GetRequiredService<IReadPathSwitches>()).ShouldBeTrue();
+        }
+        finally
+        {
+            config["Gateway:RestApi:DataEndpoint:Enabled"] = "false";
+        }
     }
 }
 
 /// <summary>PLAN-SEC-115 WP-4 with defaults: nothing changes (AC 4).</summary>
-public sealed class ReadPathRestSwitchDefaultIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ReadPathRestSwitchDefaultIntegrationTests : IClassFixture<ReadPathRestSwitchDefaultIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public ReadPathRestSwitchDefaultIntegrationTests(WebApplicationFactory<Program> factory)
+    public ReadPathRestSwitchDefaultIntegrationTests(HostFixture factory)
     {
-        _factory = ReadPathHost.With(factory);
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+            ReadPathHost.Configure(builder);
     }
 
     [Fact]
@@ -247,21 +265,27 @@ public sealed class ReadPathRestSwitchDefaultIntegrationTests : IClassFixture<We
 }
 
 /// <summary>PLAN-SEC-115 test 23 and ST-115-10/11 over the real SDK transport: Query and Api groups off, REST data off.</summary>
-public sealed class ReadPathMcpSwitchIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ReadPathMcpSwitchIntegrationTests : IClassFixture<ReadPathMcpSwitchIntegrationTests.HostFixture>
 {
     private static readonly string[] QueryTools = ["query_sql", "query_graphql", "sample_rows", "query_dataset", "query_metrics", "simulate_query"];
     private static readonly string[] ApiTools = ["invoke_api", "describe_api"];
 
     private readonly WebApplicationFactory<Program> _factory;
 
-    public ReadPathMcpSwitchIntegrationTests(WebApplicationFactory<Program> factory)
+    public ReadPathMcpSwitchIntegrationTests(HostFixture factory)
     {
-        _factory = ReadPathHost.With(
-            factory,
-            ("Gateway:RestApi:DataEndpoint:Enabled", "false"),
-            ("Gateway:Mcp:Tools:Query", "false"),
-            ("Gateway:Mcp:Tools:Api", "false"),
-            ("Gateway:Mcp:DisabledTools:0", "list_metrics"));
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+            ReadPathHost.Configure(
+                builder,
+                ("Gateway:RestApi:DataEndpoint:Enabled", "false"),
+                ("Gateway:Mcp:Tools:Query", "false"),
+                ("Gateway:Mcp:Tools:Api", "false"),
+                ("Gateway:Mcp:DisabledTools:0", "list_metrics"));
     }
 
     [Fact]
@@ -350,13 +374,19 @@ public sealed class ReadPathMcpSwitchIntegrationTests : IClassFixture<WebApplica
 }
 
 /// <summary>Documentation resources with only Query and REST off (Api on): no disabled path or tool name in any rendered text.</summary>
-public sealed class ReadPathMcpDocumentationLeakIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ReadPathMcpDocumentationLeakIntegrationTests : IClassFixture<ReadPathMcpDocumentationLeakIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public ReadPathMcpDocumentationLeakIntegrationTests(WebApplicationFactory<Program> factory)
+    public ReadPathMcpDocumentationLeakIntegrationTests(HostFixture factory)
     {
-        _factory = ReadPathHost.With(factory, ("Gateway:RestApi:DataEndpoint:Enabled", "false"), ("Gateway:Mcp:Tools:Query", "false"));
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+            ReadPathHost.Configure(builder, ("Gateway:RestApi:DataEndpoint:Enabled", "false"), ("Gateway:Mcp:Tools:Query", "false"));
     }
 
     [Fact]
@@ -389,37 +419,46 @@ public sealed class ReadPathMcpDocumentationLeakIntegrationTests : IClassFixture
 }
 
 /// <summary>ST-115-20: an async job cannot read through a closed WebSQL switch (the SQL gate is the rewriter, not the endpoint).</summary>
-public sealed class ReadPathAsyncJobWebSqlOffIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class ReadPathAsyncJobWebSqlOffIntegrationTests : IClassFixture<ReadPathAsyncJobWebSqlOffIntegrationTests.HostFixture>
 {
-    private readonly string _workDir = Path.Combine(Path.GetTempPath(), "autheris-rps-" + Guid.NewGuid().ToString("N"));
     private readonly WebApplicationFactory<Program> _factory;
 
-    public ReadPathAsyncJobWebSqlOffIntegrationTests(WebApplicationFactory<Program> factory)
+    public ReadPathAsyncJobWebSqlOffIntegrationTests(HostFixture factory)
     {
-        Directory.CreateDirectory(_workDir);
-        var dbPath = Path.Combine(_workDir, "data.db");
-        using (var conn = new SqliteConnection($"Data Source={dbPath}"))
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        private readonly string _workDir = Path.Combine(Path.GetTempPath(), "autheris-rps-" + Guid.NewGuid().ToString("N"));
+        private readonly string _dbPath;
+
+        public HostFixture()
         {
+            Directory.CreateDirectory(_workDir);
+            _dbPath = Path.Combine(_workDir, "data.db");
+            using var conn = new SqliteConnection($"Data Source={_dbPath}");
             conn.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "CREATE TABLE rps_orders (id INTEGER, tenant_id TEXT, name TEXT); INSERT INTO rps_orders VALUES (1,'acme','visible-row');";
             cmd.ExecuteNonQuery();
         }
 
-        _factory = ReadPathHost.With(
-            factory,
-            ("Gateway:Insecure:danger_bypass_consent_checks", "true"),
-            ("Gateway:DataSources:Connections:default:Provider", "Sqlite"),
-            ("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}"),
-            ("Gateway:WebSql:Enabled", "false"),
-            ("Gateway:WebSql:DefaultDataSourceName", "default"));
-    }
+        protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+            ReadPathHost.Configure(
+                builder,
+                ("Gateway:Insecure:danger_bypass_consent_checks", "true"),
+                ("Gateway:DataSources:Connections:default:Provider", "Sqlite"),
+                ("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}"),
+                ("Gateway:WebSql:Enabled", "false"),
+                ("Gateway:WebSql:DefaultDataSourceName", "default"));
 
-    public void Dispose()
-    {
-        _factory.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        }
     }
 
     [Fact]

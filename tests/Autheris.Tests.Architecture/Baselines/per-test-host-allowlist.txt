@@ -1,28 +1,4 @@
-# Issue #520 (WP-OI-CI-3b): Shrink-only allow-list of integration test files that still use
+# Issue #520 (WP-OI-CI-3c): Shrink-only allow-list of integration test files that still use
 # IClassFixture<WebApplicationFactory<Program>> or call WithWebHostBuilder in a test class constructor.
 # New integration test classes must use a shared IntegrationHost / HostFixture instead.
-tests/Autheris.Tests.Integration/AuditEndpointCoverageTests.cs
-tests/Autheris.Tests.Integration/DbtSyncEndpointCallerTests.cs
-tests/Autheris.Tests.Integration/DelegatedAuditRouteIntegrationTests.cs
-tests/Autheris.Tests.Integration/DocIngestionEndpointsIntegrationTests.cs
-tests/Autheris.Tests.Integration/EntraBearerIntegrationTests.cs
-tests/Autheris.Tests.Integration/EnvoyJsonModeRemovedIntegrationTests.cs
-tests/Autheris.Tests.Integration/EventAndWebhookIntegrationTests.cs
-tests/Autheris.Tests.Integration/FinOpsEndToEndSqliteTests.cs
-tests/Autheris.Tests.Integration/FourEyesAndDelegationIntegrationTests.cs
-tests/Autheris.Tests.Integration/GovernanceAdvancedMoatsIntegrationTests.cs
-tests/Autheris.Tests.Integration/GraphQlSchemaDownloadIntegrationTests.cs
-tests/Autheris.Tests.Integration/HttpDataSourceIntegrationTests.cs
-tests/Autheris.Tests.Integration/IngressExemptionTests.cs
-tests/Autheris.Tests.Integration/IngressTransportCoverageTests.cs
-tests/Autheris.Tests.Integration/InsecureGettingStartedIntegrationTests.cs
-tests/Autheris.Tests.Integration/InvalidTenantClaimIntegrationTests.cs
-tests/Autheris.Tests.Integration/LakehouseIntegrationTests.cs
-tests/Autheris.Tests.Integration/LakehouseModuleAbsentSecurityTests.cs
-tests/Autheris.Tests.Integration/M2mIdentityIntegrationTests.cs
-tests/Autheris.Tests.Integration/McpDatasetToolsEndToEndTests.cs
-tests/Autheris.Tests.Integration/McpDatasetToolsIntegrationTests.cs
-tests/Autheris.Tests.Integration/ReadPathSwitchIntegrationTests.cs
-tests/Autheris.Tests.Integration/ScimEndpointAuthorizationTests.cs
-tests/Autheris.Tests.Integration/Security/ReleaseSurfaceTests.cs
-tests/Autheris.Tests.Integration/SyntheticSamplesRouteAuthorizationTests.cs
+# Ceiling is now 0 — all integration test classes have been migrated.

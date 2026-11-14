@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
+using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -19,19 +20,24 @@ using Autheris.Tests.Integration.Governance;
 /// MCP-01: the GET synthetic-samples route returns predefined sample rows of a table, so it is a GovernanceAdmin route like the PUT.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class SyntheticSamplesRouteAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class SyntheticSamplesRouteAuthorizationTests : IClassFixture<SyntheticSamplesRouteAuthorizationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public SyntheticSamplesRouteAuthorizationTests(WebApplicationFactory<Program> factory)
+    public SyntheticSamplesRouteAuthorizationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("SyntheticSamplesRouteAuthorizationTests"));
-        });
+        }
     }
 
     [Theory]
