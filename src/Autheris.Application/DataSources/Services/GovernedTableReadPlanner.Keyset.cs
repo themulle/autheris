@@ -119,7 +119,7 @@ public sealed partial class GovernedTableReadPlanner
             // MISC-04: the row filter text counts only through whole identifiers (shared rule); the typed client filter keeps its own check.
             bool IsSatisfied(string req) =>
                 (request.Filter != null && IsColumnConstrained(request.Filter, req)) ||
-                RequiredFilterColumnRule.IsColumnSatisfied(req, metadata, decision, clientFilterColumns: null, tenantColumnCounts: false);
+                RequiredFilterColumnRule.IsColumnSatisfied(req, metadata, decision, clientConstrainedColumns: null, tenantColumnCounts: false);
 
             if (metadata.RequiredFilterColumnGroups.Length > 0)
             {
@@ -432,20 +432,30 @@ public sealed partial class GovernedTableReadPlanner
         }
     }
 
-    private static bool IsColumnConstrained(TypedFilterNode node, string columnName)
+    private static bool IsColumnConstrained(TypedFilterNode? node, string columnName)
     {
-        if (node == null) return false;
+        if (node == null || node.Not != null)
+        {
+            return false;
+        }
 
         if (!string.IsNullOrWhiteSpace(node.Field))
         {
-            // VF-06: a tautology ({op: notin, value: []} renders "1 = 1") constrains nothing.
-            if (string.Equals(node.Op?.Trim(), "notin", StringComparison.OrdinalIgnoreCase) &&
-                node.Value is { ValueKind: JsonValueKind.Array } list && list.GetArrayLength() == 0)
+            if (!string.Equals(node.Field, columnName, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
 
-            return string.Equals(node.Field, columnName, StringComparison.OrdinalIgnoreCase);
+            var op = (node.Op ?? "eq").Trim().ToLowerInvariant();
+            return op switch
+            {
+                "eq" or "=" or "gt" or ">" or "gte" or "ge" or ">=" or "lt" or "<" or "lte" or "le" or "<=" =>
+                    IsNonNullJsonScalar(node.Value),
+                "in" => node.Value is { ValueKind: JsonValueKind.Array } list &&
+                        list.GetArrayLength() > 0 &&
+                        list.EnumerateArray().Any(IsNonNullJsonScalar),
+                _ => false
+            };
         }
 
         if (node.And is { Count: > 0 })
@@ -460,6 +470,12 @@ public sealed partial class GovernedTableReadPlanner
 
         return false;
     }
+
+    private static bool IsNonNullJsonScalar(JsonElement? element) =>
+        element.HasValue && IsNonNullJsonScalar(element.Value);
+
+    private static bool IsNonNullJsonScalar(JsonElement element) =>
+        element.ValueKind is JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False;
 
     private static object? ExtractJsonPrimitive(JsonElement? elementNullable, TableColumn column)
     {

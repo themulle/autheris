@@ -116,7 +116,10 @@ public sealed class GovernedTableReadPlannerRequiredFilterTests
     {
         var meta = Metadata(["region"]);
         var decision = Decision();
-        var filter = TableFilterClause.FromTrinoText("\"region\" = 'EU'", ["region"]);
+        var filter = TableFilterClause.FromTrinoText("\"region\" = 'EU'", ["region"]) with
+        {
+            ConstrainedColumns = ["region"]
+        };
         var intent = new TableReadIntent(Customers, ["id"], filter, null, 10, 0, "Rest");
 
         var planned = _planner.Plan(intent, meta, decision);

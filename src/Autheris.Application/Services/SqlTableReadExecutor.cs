@@ -358,6 +358,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
                 new Dictionary<string, object?> { [marker] = value },
                 new[] { name })
             {
+                ConstrainedColumns = new[] { name },
                 TrinoSqlFactory = resolve => $"{DataApiFilterTranslator.QuoteIdentifier(resolve(name))} = {marker}"
             });
         }
@@ -390,11 +391,19 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             }
         }
 
+        IReadOnlyList<string>? constrainedColumns = clauses.Any(c => c.ConstrainedColumns is not null)
+            ? clauses.Where(c => c.ConstrainedColumns is not null)
+                .SelectMany(c => c.ConstrainedColumns!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : null;
+
         return new TableFilterClause(
             string.Join(" AND ", clauses.Select(c => "(" + c.SqlPredicate + ")")),
             parameters,
             clauses.SelectMany(c => c.ReferencedColumns).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
         {
+            ConstrainedColumns = constrainedColumns,
             TrinoSqlFactory = resolve => string.Join(" AND ", clauses.Select(c => "(" + c.GetTrinoPredicate(resolve) + ")")),
             PushdownPredicates = clauses.SelectMany(c => c.PushdownPredicates ?? Array.Empty<PushdownPredicateInfo>()).ToList()
         };

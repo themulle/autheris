@@ -482,6 +482,9 @@ public sealed class FederatedSameTableNameTests
     [InlineData("a.region <> 'x'")]
     [InlineData("NOT (a.region = 'x')")]
     [InlineData("lower(a.region) = 'x'")]
+    [InlineData("a.region LIKE '%'")]
+    [InlineData("a.region IS NULL")]
+    [InlineData("a.region = NULL")]
     [InlineData("b.region = 'North'")]
     [InlineData("a.qty = 1")]
     public void FederatedRequiredFilter_WeakOrUnrelatedPredicate_DoesNotSatisfy_REQUIRED_FILTER_COLUMN_MISSING(string where) =>

@@ -568,44 +568,8 @@ public static partial class TreeSqlCompiler
         }
     }
 
-    private static bool ComparisonRestrictsRows(TreeComparison comp)
-    {
-        switch (comp.Operator)
-        {
-            case TreeFilterOperator.IsNull:
-                return comp.Value is true;   // isNull:false does not restrict rows
-            case TreeFilterOperator.Eq or TreeFilterOperator.Gt or TreeFilterOperator.Gte or TreeFilterOperator.Lt or TreeFilterOperator.Lte:
-                return comp.Value is not null;
-            case TreeFilterOperator.Contains or TreeFilterOperator.StartsWith or TreeFilterOperator.EndsWith:
-                return comp.Value is string { Length: > 0 };
-            case TreeFilterOperator.In:
-                return comp.Value is not string && comp.Value is IEnumerable list && list.Cast<object?>().Any(static item => item is not null);
-            default:
-                return false;
-        }
-    }
-
-    private static bool IsColumnConstrained(TreeFilter? filter, string column)
-    {
-        if (filter == null) return false;
-
-        return filter switch
-        {
-            // SQLA-02: only a comparison that really restricts rows counts; any value shape that is not recognised is "not constrained".
-            TreeComparison comp =>
-                string.Equals(comp.Column, column, StringComparison.OrdinalIgnoreCase) && ComparisonRestrictsRows(comp),
-
-            TreeAndFilter andFilter =>
-                andFilter.Items.Any(item => IsColumnConstrained(item, column)),
-
-            TreeOrFilter orFilter =>
-                orFilter.Items.Count > 0 && orFilter.Items.All(item => IsColumnConstrained(item, column)),
-
-            TreeNotFilter => false,
-
-            _ => false
-        };
-    }
+    private static bool IsColumnConstrained(TreeFilter? filter, string column) =>
+        TreeFilterClauseBuilder.ExtractConstrainedColumns(filter).Contains(column);
 
     private static string Echo(string? name) =>
         name != null && SafeNameRegex().IsMatch(name.Trim()) ? name.Trim() : "(invalid name)";

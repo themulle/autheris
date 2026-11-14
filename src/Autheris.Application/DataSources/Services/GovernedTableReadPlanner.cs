@@ -539,7 +539,7 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
 
         // MISC-04: whole-identifier rule shared with every other read path (no substring matching on the row filter text).
         bool IsSatisfied(string reqCol) =>
-            RequiredFilterColumnRule.IsColumnSatisfied(reqCol, metadata, decision, filter?.ReferencedColumns, tenantColumnCounts: !isAggregate);
+            RequiredFilterColumnRule.IsColumnSatisfied(reqCol, metadata, decision, filter?.ConstrainedColumns, tenantColumnCounts: !isAggregate);
 
         if (metadata.RequiredFilterColumnGroups.Length > 0)
         {

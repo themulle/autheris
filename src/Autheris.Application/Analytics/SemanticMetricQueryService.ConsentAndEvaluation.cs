@@ -235,6 +235,8 @@ public sealed partial class SemanticMetricQueryService
         var trinoParts = new List<Func<Func<string, string>, string>>();
         var sqlParts = new List<string>();
         var referencedCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string>? constrainedCols = null;
+        var knownColumns = metadata.Columns.Select(c => c.ColumnName).ToList();
         var parameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
         if (requestWhere != null && !string.IsNullOrWhiteSpace(requestWhere.SqlPredicate))
@@ -252,6 +254,18 @@ public sealed partial class SemanticMetricQueryService
             foreach (var c in requestWhere.ReferencedColumns)
             {
                 referencedCols.Add(c);
+            }
+
+            if (requestWhere.ConstrainedColumns is not null)
+            {
+                constrainedCols ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                constrainedCols.UnionWith(requestWhere.ConstrainedColumns);
+            }
+            else if (requestWhere.ReferencedColumns.Count == 0 && requestWhere.Parameters.Count == 0)
+            {
+                // Free-text request clauses without column sets rely on AST extraction from the Trino predicate, keeping any populated ReferencedColumns without ConstrainedColumns fail-closed.
+                constrainedCols ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                constrainedCols.UnionWith(TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.ExtractSingleTableConstrainedColumns(requestWhere.SqlPredicate, knownColumns));
             }
 
             // the column set of the combined clause is a union. A free-text request clause has an empty set, so its
@@ -286,6 +300,8 @@ public sealed partial class SemanticMetricQueryService
                     {
                         referencedCols.Add(col);
                     }
+                    constrainedCols ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    constrainedCols.UnionWith(TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.ExtractSingleTableConstrainedColumns(cleaned, knownColumns));
                 }
             }
         }
@@ -299,7 +315,9 @@ public sealed partial class SemanticMetricQueryService
         bool requestContributed = requestWhere != null && !string.IsNullOrWhiteSpace(requestWhere.SqlPredicate);
         if (sqlParts.Count == 1 && requestContributed)
         {
-            return requestWhere;
+            return requestWhere!.ConstrainedColumns is null && constrainedCols is not null
+                ? requestWhere with { ConstrainedColumns = constrainedCols.ToList() }
+                : requestWhere;
         }
 
         string combinedSql = sqlParts.Count == 1
@@ -308,6 +326,7 @@ public sealed partial class SemanticMetricQueryService
 
         return new TableFilterClause(combinedSql, parameters, referencedCols.ToList())
         {
+            ConstrainedColumns = constrainedCols?.ToList(),
             TrinoSqlFactory = resolve => trinoParts.Count == 1
                 ? trinoParts[0](resolve)
                 : string.Join(" AND ", trinoParts.Select(p => $"({p(resolve)})"))
