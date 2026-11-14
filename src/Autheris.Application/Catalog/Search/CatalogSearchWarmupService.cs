@@ -248,7 +248,6 @@ public sealed class CatalogSearchWarmupService : BackgroundService
             var versionTuple = targetVersion.HasValue
                 ? (targetVersion.Value.StructureVersion, targetVersion.Value.ContentVersion)
                 : ((long, long)?)null;
-            RecordOutcome(successUtc, attemptUtc, lastErrorCode: null, versionTuple);
             _logger.LogInformation("Katalog-Suchindex Neuaufbau erfolgreich beendet ({Count} Tabellen).", tables.Count);
 
             if (_versionProvider != null && targetVersion.HasValue)
@@ -267,6 +266,8 @@ public sealed class CatalogSearchWarmupService : BackgroundService
                     _logger.LogDebug(ex, "Fehler beim Nachprüfen der Katalog-Version nach dem Index-Neuaufbau.");
                 }
             }
+
+            RecordOutcome(successUtc, attemptUtc, lastErrorCode: null, versionTuple);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
