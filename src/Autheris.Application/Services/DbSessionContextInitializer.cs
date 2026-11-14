@@ -79,7 +79,7 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
                 {
                     if (accessMode == AccessMode.ReadOnly)
                     {
-                        // SEC-OI-505-5 / -6: Transaction-local READ ONLY mode only (never SET SESSION CHARACTERISTICS
+                        // Transaction-local READ ONLY mode only (never SET SESSION CHARACTERISTICS
                         // or default_transaction_read_only, which would leak across pooled connections). Must execute
                         // first in the transaction before SELECT set_config(...). Defence in depth alongside AST
                         // validation and database privilege isolation; functions opening a new connection are not stopped.
@@ -104,7 +104,7 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
 
         if (dialect == DatabaseDialect.SqlServer)
         {
-            // SEC-OI-505-5: SQL Server relies on read-only login / privilege isolation (no SET TRANSACTION READ ONLY).
+            // SQL Server relies on read-only login / privilege isolation (no SET TRANSACTION READ ONLY).
             await ExecuteSqlServerInitAsync(connection, tx: null, tenantId, userSid, purpose, ct).ConfigureAwait(false);
             return null;
         }
@@ -116,7 +116,7 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
                 var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
                 try
                 {
-                    // SEC-OI-505-5 / -6: Oracle requires SET TRANSACTION READ ONLY as the first SQL statement in the
+                    // Oracle requires SET TRANSACTION READ ONLY as the first SQL statement in the
                     // transaction; callers must ROLLBACK in finally before returning the connection to the pool.
                     // Defence in depth alongside AST validation and database privilege isolation; autonomous
                     // transactions (PRAGMA AUTONOMOUS_TRANSACTION) are not stopped here.

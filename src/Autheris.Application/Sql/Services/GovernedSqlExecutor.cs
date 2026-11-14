@@ -572,7 +572,7 @@ public sealed partial class GovernedSqlExecutor
             {
                 var sessionSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
                                  ?? user.FindFirst("sub")?.Value;
-                // SEC-OI-505-5: Request a database-side read-only transaction explicitly only on user reads
+                // Request a database-side read-only transaction explicitly only on user reads
                 // (never on DML writes). DML keeps the default read-write session initialization.
                 tx = dmlContext.IsDml
                     ? await _sessionInitializer.InitializeSessionAsync(
@@ -714,7 +714,7 @@ public sealed partial class GovernedSqlExecutor
             {
                 if (tx != null)
                 {
-                    // SEC-OI-505-5: User reads always roll back before tx/connection disposal so Oracle/PostgreSQL
+                    // User reads always roll back before tx/connection disposal so Oracle/PostgreSQL
                     // pooled connections never retain an active SET TRANSACTION READ ONLY transaction.
                     if (!dmlContext.IsDml && !txCompleted)
                     {

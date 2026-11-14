@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
 
-/// <summary>Requested database access mode for session initialization (SEC-OI-505-5).</summary>
+/// <summary>Requested database access mode for session initialization ().</summary>
 public enum AccessMode
 {
     /// <summary>Default caller-managed / read-write transaction mode.</summary>
