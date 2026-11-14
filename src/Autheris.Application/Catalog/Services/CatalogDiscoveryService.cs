@@ -335,6 +335,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var hits = await _searchEngine.SearchAsync(
                 new CatalogSearchQuery(q, domain, Limit: 25, Mode: CatalogSearchMode.Hybrid),
                 tableId => permittedById.ContainsKey(tableId),
+                tableId => IsColumnRestricted(tableId, permittedById, allById),
                 ct).ConfigureAwait(false);
 
             // Result hygiene: rebuilt from the caller's filtered metadata; hits that exist only because of a hidden column are dropped.
@@ -402,7 +403,11 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             var allById = all.ToDictionary(t => t.Identifier);
             var terms = QueryTerms(query.QueryText);
             var singleIdentifier = IsSingleIdentifierQuery(query.QueryText, terms);
-            var rawHits = await _searchEngine.SearchAsync(query, tableId => permittedById.ContainsKey(tableId), ct).ConfigureAwait(false);
+            var rawHits = await _searchEngine.SearchAsync(
+                query,
+                tableId => permittedById.ContainsKey(tableId),
+                tableId => IsColumnRestricted(tableId, permittedById, allById),
+                ct).ConfigureAwait(false);
             var tableHits = rawHits
                 .Select(h => ShapeHit(h, permittedById, allById, terms, singleIdentifier))
                 .Where(h => h != null)
@@ -580,6 +585,21 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             IsActive: table.Table.IsActive,
             DisplayName: resolved?.Title ?? table.Table.DisplayName,
             Language: language);
+    }
+
+    /// <summary>True when the caller cannot see every column of the table (or the unfiltered row is unknown: fail closed).</summary>
+    private static bool IsColumnRestricted(
+        TableIdentifier id,
+        IReadOnlyDictionary<TableIdentifier, TableMetadata> permitted,
+        IReadOnlyDictionary<TableIdentifier, TableMetadata> all)
+    {
+        if (!permitted.TryGetValue(id, out var visible) || !all.TryGetValue(id, out var full))
+        {
+            return true;
+        }
+
+        return full.Columns.Count != visible.Columns.Count ||
+               full.Columns.Any(c => !visible.Columns.Any(v => string.Equals(v.ColumnName, c.ColumnName, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static IReadOnlyList<string> QueryTerms(string? query) =>

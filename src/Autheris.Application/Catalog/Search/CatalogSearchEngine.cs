@@ -59,7 +59,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
         ArgumentNullException.ThrowIfNull(tables);
         _logger.LogInformation("Starte Index-Neuaufbau für {Count} Katalog-Tabellen...", tables.Count);
 
-        var bm25Docs = new List<(TableIdentifier, string)>(tables.Count);
+        var bm25Docs = new List<Bm25Document>(tables.Count);
+        var vectorTexts = new List<string>(tables.Count);
         var metadataMap = new Dictionary<TableIdentifier, TableMetadata>(tables.Count);
         var fkGraph = new Dictionary<TableIdentifier, List<TableRelationship>>();
 
@@ -69,50 +70,58 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             ct.ThrowIfCancellationRequested();
             metadataMap[t.Identifier] = t;
 
-            var docBuilder = new StringBuilder(1024);
+            var fields = new StringBuilder[CatalogSearchFieldWeights.FieldCount];
+            for (int i = 0; i < fields.Length; i++) fields[i] = new StringBuilder(64);
+            var combined = new StringBuilder(1024);
 
-            // Technical names
-            docBuilder.Append($"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName} ");
-
-            // Default language texts (scrubbed)
-            if (!string.IsNullOrWhiteSpace(t.Table.DisplayName))
-                docBuilder.Append($"{SecretScrubber.Redact(t.Table.DisplayName)} ");
-            if (!string.IsNullOrWhiteSpace(t.Table.Description))
-                docBuilder.Append($"{SecretScrubber.Redact(t.Table.Description)} ");
-            if (!string.IsNullOrWhiteSpace(t.Table.LongDescription))
-                docBuilder.Append($"{SecretScrubber.Redact(t.Table.LongDescription)} ");
-
-            // All table translation texts (scrubbed)
-            foreach (var (_, entry) in t.Table.Texts.Entries)
+            void Add(Bm25Field field, string? text, bool scrub = true)
             {
-                if (!string.IsNullOrWhiteSpace(entry.DisplayName))
-                    docBuilder.Append($"{SecretScrubber.Redact(entry.DisplayName)} ");
-                if (!string.IsNullOrWhiteSpace(entry.Description))
-                    docBuilder.Append($"{SecretScrubber.Redact(entry.Description)} ");
-                if (!string.IsNullOrWhiteSpace(entry.LongDescription))
-                    docBuilder.Append($"{SecretScrubber.Redact(entry.LongDescription)} ");
+                if (string.IsNullOrWhiteSpace(text)) return;
+                var value = scrub ? SecretScrubber.Redact(text) : text;
+                fields[(int)field].Append(value).Append(' ');
+                combined.Append(value).Append(' ');
             }
 
-            // Columns: technical name, types, default texts & translations (scrubbed)
+            // Technical names
+            Add(Bm25Field.TechnicalName, $"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName}", scrub: false);
+
+            // Default language texts (scrubbed)
+            Add(Bm25Field.DisplayName, t.Table.DisplayName);
+            Add(Bm25Field.ShortDescription, t.Table.Description);
+            Add(Bm25Field.LongDescription, t.Table.LongDescription);
+
+            // All table translation texts (scrubbed), each in the field of its source text
+            foreach (var (_, entry) in t.Table.Texts.Entries)
+            {
+                Add(Bm25Field.DisplayName, entry.DisplayName);
+                Add(Bm25Field.ShortDescription, entry.Description);
+                Add(Bm25Field.LongDescription, entry.LongDescription);
+            }
+
+            // Columns: technical name, types and display names are names; descriptions are descriptions (scrubbed)
             foreach (var c in t.Columns)
             {
-                docBuilder.Append($"{c.ColumnName} {c.DataType} ");
-                if (!string.IsNullOrWhiteSpace(c.DisplayName))
-                    docBuilder.Append($"{SecretScrubber.Redact(c.DisplayName)} ");
-                if (!string.IsNullOrWhiteSpace(c.Description))
-                    docBuilder.Append($"{SecretScrubber.Redact(c.Description)} ");
+                Add(Bm25Field.ColumnNames, $"{c.ColumnName} {c.DataType}", scrub: false);
+                Add(Bm25Field.ColumnNames, c.DisplayName);
+                Add(Bm25Field.ColumnDescriptions, c.Description);
 
                 foreach (var (_, colEntry) in c.Texts.Entries)
                 {
-                    if (!string.IsNullOrWhiteSpace(colEntry.DisplayName))
-                        docBuilder.Append($"{SecretScrubber.Redact(colEntry.DisplayName)} ");
-                    if (!string.IsNullOrWhiteSpace(colEntry.Description))
-                        docBuilder.Append($"{SecretScrubber.Redact(colEntry.Description)} ");
+                    Add(Bm25Field.ColumnNames, colEntry.DisplayName);
+                    Add(Bm25Field.ColumnDescriptions, colEntry.Description);
                 }
             }
 
-            var docContent = docBuilder.ToString();
-            bm25Docs.Add((t.Identifier, docContent));
+            bm25Docs.Add(new Bm25Document(
+                t.Identifier,
+                TechnicalName: fields[(int)Bm25Field.TechnicalName].ToString(),
+                DisplayName: fields[(int)Bm25Field.DisplayName].ToString(),
+                TagsAndOwner: fields[(int)Bm25Field.TagsAndOwner].ToString(),
+                ShortDescription: fields[(int)Bm25Field.ShortDescription].ToString(),
+                LongDescription: fields[(int)Bm25Field.LongDescription].ToString(),
+                ColumnNames: fields[(int)Bm25Field.ColumnNames].ToString(),
+                ColumnDescriptions: fields[(int)Bm25Field.ColumnDescriptions].ToString()));
+            vectorTexts.Add(combined.ToString());
 
             var declaredKey = t.PrimaryKeyColumns;
 
@@ -173,11 +182,11 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
         var vectorDocs = new List<(TableIdentifier, ReadOnlyMemory<float>)>(tables.Count);
         if (vectorAvailable)
         {
-            var texts = bm25Docs.Select(x => x.Item2).ToList();
+            var texts = vectorTexts;
             var vectors = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync(texts, ct).ConfigureAwait(false);
             for (int i = 0; i < bm25Docs.Count; i++)
             {
-                vectorDocs.Add((bm25Docs[i].Item1, vectors[i]));
+                vectorDocs.Add((bm25Docs[i].TableId, vectors[i]));
             }
         }
 
@@ -195,8 +204,9 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
 
     public IReadOnlyList<CatalogSearchHit> Search(
         CatalogSearchQuery query,
-        Func<TableIdentifier, bool> isVisiblePredicate) =>
-        SearchCore(query, isVisiblePredicate, precomputedQueryVector: null);
+        Func<TableIdentifier, bool> isVisiblePredicate,
+        Func<TableIdentifier, bool>? isColumnRestricted = null) =>
+        SearchCore(query, isVisiblePredicate, precomputedQueryVector: null, isColumnRestricted);
 
     /// <summary>
     /// Asynchronous variant of <see cref="Search"/>: the query embedding is computed without blocking a thread and honours
@@ -205,6 +215,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
     public async Task<IReadOnlyList<CatalogSearchHit>> SearchAsync(
         CatalogSearchQuery query,
         Func<TableIdentifier, bool> isVisiblePredicate,
+        Func<TableIdentifier, bool>? isColumnRestricted = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
@@ -218,7 +229,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             queryVector = await GetOrComputeQueryEmbeddingAsync(query.QueryText, ct).ConfigureAwait(false);
         }
 
-        return SearchCore(query, isVisiblePredicate, queryVector);
+        return SearchCore(query, isVisiblePredicate, queryVector, isColumnRestricted);
     }
 
     /// <summary>
@@ -243,7 +254,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
     private IReadOnlyList<CatalogSearchHit> SearchCore(
         CatalogSearchQuery query,
         Func<TableIdentifier, bool> isVisiblePredicate,
-        ReadOnlyMemory<float>? precomputedQueryVector)
+        ReadOnlyMemory<float>? precomputedQueryVector,
+        Func<TableIdentifier, bool>? isColumnRestricted = null)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(isVisiblePredicate);
@@ -283,7 +295,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
 
         // 1. BM25 Ausführung mit Pre-Filtering
         var bm25Hits = (effectiveMode == "keyword" || effectiveMode == "hybrid")
-            ? snapshot.Bm25Index.Search(query.QueryText, topK, isAllowed: isAllowed)
+            ? snapshot.Bm25Index.Search(query.QueryText, topK, isAllowed: isAllowed, isColumnRestricted: isColumnRestricted)
             : [];
 
         // 2. Vektor Ausführung mit Pre-Filtering

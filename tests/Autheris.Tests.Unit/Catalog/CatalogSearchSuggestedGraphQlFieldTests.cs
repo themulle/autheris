@@ -81,7 +81,7 @@ public sealed class CatalogSearchSuggestedGraphQlFieldTests
     [InlineData(false)]
     public async Task SuggestedGraphQlField_EqualsSchemaRootField_OrNullWithoutRootField(bool indexReady)
     {
-        _engine.SearchAsync(Arg.Any<CatalogSearchQuery>(), Arg.Any<Func<TableIdentifier, bool>>(), Arg.Any<CancellationToken>())
+        _engine.SearchAsync(Arg.Any<CatalogSearchQuery>(), Arg.Any<Func<TableIdentifier, bool>>(), Arg.Any<Func<TableIdentifier, bool>?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<CatalogSearchHit>>([EngineHit(Gps), EngineHit(GpsFiles)]));
 
         var hits = await Service(indexReady).SearchCatalogDetailedAsync(new CatalogSearchQuery("gps_position", null, 10, CatalogSearchMode.Hybrid), Context());

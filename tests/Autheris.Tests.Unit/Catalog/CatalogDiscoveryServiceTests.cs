@@ -170,6 +170,7 @@ public sealed class CatalogDiscoveryServiceTests
         _searchEngine.SearchAsync(
             Arg.Is<CatalogSearchQuery>(q => q.QueryText == "cust" && q.DomainFilter == "crm"),
             Arg.Any<Func<TableIdentifier, bool>>(),
+            Arg.Any<Func<TableIdentifier, bool>?>(),
             Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<CatalogSearchHit>>([hit]));
 
@@ -232,7 +233,7 @@ public sealed class CatalogDiscoveryServiceTests
             SuggestedGraphQlField: "sales_orders");
 
         var query = new CatalogSearchQuery("orders", "sales", 10, CatalogSearchMode.Hybrid);
-        _searchEngine.SearchAsync(query, Arg.Any<Func<TableIdentifier, bool>>(), Arg.Any<CancellationToken>())
+        _searchEngine.SearchAsync(query, Arg.Any<Func<TableIdentifier, bool>>(), Arg.Any<Func<TableIdentifier, bool>?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<CatalogSearchHit>>([hit]));
 
         // Act

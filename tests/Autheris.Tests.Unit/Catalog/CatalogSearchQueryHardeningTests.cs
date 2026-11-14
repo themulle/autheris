@@ -144,7 +144,7 @@ public sealed class CatalogSearchQueryHardeningTests
         await cts.CancelAsync();
 
         var ex = await Record.ExceptionAsync(() =>
-            engine.SearchAsync(new CatalogSearchQuery("customer orders", Mode: CatalogSearchMode.Hybrid), _ => true, cts.Token));
+            engine.SearchAsync(new CatalogSearchQuery("customer orders", Mode: CatalogSearchMode.Hybrid), _ => true, ct: cts.Token));
         ex.ShouldBeAssignableTo<OperationCanceledException>();
     }
 

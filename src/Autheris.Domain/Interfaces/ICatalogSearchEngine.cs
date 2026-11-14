@@ -30,6 +30,11 @@ public interface ILocalEmbeddingGenerator
 /// <summary>
 /// In-Memory Hybrid Search Engine für den Datensatz- und Tabellenkatalog.
 /// </summary>
+/// <remarks>
+/// <c>isColumnRestricted</c> (both search members): marks tables of which the caller cannot see every column. For those tables only the
+/// table-level fields (names, display names, descriptions) contribute to the ranking, so hidden column text cannot influence the order
+/// of hits. When omitted, every table is scored with all fields (full column visibility).
+/// </remarks>
 public interface ICatalogSearchEngine
 {
     /// <summary>Prüft, ob der Suchindex aufgewärmt und abfragebereit ist.</summary>
@@ -47,7 +52,8 @@ public interface ICatalogSearchEngine
     /// <summary>Führt eine hochoptimierte, sperrenfreie Suche unter Berücksichtigung der Governance aus.</summary>
     IReadOnlyList<CatalogSearchHit> Search(
         CatalogSearchQuery query, 
-        Func<TableIdentifier, bool> isVisiblePredicate);
+        Func<TableIdentifier, bool> isVisiblePredicate,
+        Func<TableIdentifier, bool>? isColumnRestricted = null);
 
     /// <summary>
     /// Asynchronous variant of <see cref="Search"/> (MCP-07): the query embedding is computed without blocking a thread and honours
@@ -57,5 +63,6 @@ public interface ICatalogSearchEngine
     Task<IReadOnlyList<CatalogSearchHit>> SearchAsync(
         CatalogSearchQuery query,
         Func<TableIdentifier, bool> isVisiblePredicate,
+        Func<TableIdentifier, bool>? isColumnRestricted = null,
         CancellationToken ct = default);
 }
