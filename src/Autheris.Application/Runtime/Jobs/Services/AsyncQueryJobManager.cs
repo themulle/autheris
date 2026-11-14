@@ -297,7 +297,10 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
                       ?? throw new Autheris.Domain.Exceptions.GatewaySecurityException("Async jobs require an authenticated principal with a resolvable user identity.", "ASYNC_JOB_OWNER_UNRESOLVABLE");
 
         var jobId = Guid.NewGuid().ToString("D");
-        var format = string.IsNullOrWhiteSpace(request.Format) ? "json" : request.Format.Trim().ToLowerInvariant();
+        if (!AsyncQueryJobFormat.TryNormalize(request.Format, out var format))
+        {
+            throw new AsyncJobInvalidFormatException();
+        }
 
         var descriptor = new AsyncJobDescriptor(
             JobId: jobId,

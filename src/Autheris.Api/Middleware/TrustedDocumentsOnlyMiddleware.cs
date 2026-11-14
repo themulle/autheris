@@ -1,6 +1,7 @@
 namespace Autheris.Api.Middleware;
 
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
@@ -23,16 +24,25 @@ using RequestDelegate = HotChocolate.Execution.RequestDelegate;
 /// </summary>
 public sealed class TrustedDocumentStore
 {
+    private static readonly TrustedDocumentNormalizedHashCache SharedHashCache = new();
+
     private readonly HashSet<string> _hashes = new(StringComparer.Ordinal);
+    private readonly TrustedDocumentNormalizedHashCache _hashCache;
 
     public TrustedDocumentStore(IEnumerable<string> documents)
+        : this(documents, SharedHashCache)
+    {
+    }
+
+    internal TrustedDocumentStore(IEnumerable<string> documents, TrustedDocumentNormalizedHashCache hashCache)
     {
         ArgumentNullException.ThrowIfNull(documents);
+        _hashCache = hashCache ?? throw new ArgumentNullException(nameof(hashCache));
         foreach (var document in documents)
         {
             if (!string.IsNullOrWhiteSpace(document))
             {
-                _hashes.Add(ComputeHash(document));
+                _hashes.Add(ComputeHashCore(document, _hashCache));
             }
         }
     }
@@ -71,27 +81,60 @@ public sealed class TrustedDocumentStore
     public static string ComputeHash(string documentText)
     {
         ArgumentNullException.ThrowIfNull(documentText);
-        return ComputeHash(Utf8GraphQLParser.Parse(documentText));
+        return ComputeHashCore(documentText, SharedHashCache);
     }
 
-    public static string ComputeHash(DocumentNode document)
-    {
-        ArgumentNullException.ThrowIfNull(document);
-        var normalized = document.ToString();
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)));
-    }
+    public static string ComputeHash(ReadOnlySpan<byte> utf8Document) =>
+        SharedHashCache.GetOrComputeNormalizedHash(utf8Document);
+
+    public static string ComputeHash(DocumentNode document) =>
+        TrustedDocumentNormalizedHashCache.ComputeNormalizedHash(document);
 
     public bool IsTrusted(DocumentNode document) => _hashes.Contains(ComputeHash(document));
 
-    public bool IsTrusted(string documentText)
+    public bool IsTrusted(ReadOnlySpan<byte> utf8Document)
     {
         try
         {
-            return _hashes.Contains(ComputeHash(documentText));
+            return _hashes.Contains(_hashCache.GetOrComputeNormalizedHash(utf8Document));
         }
         catch (SyntaxException)
         {
             return false;
+        }
+    }
+
+    public bool IsTrusted(string documentText)
+    {
+        ArgumentNullException.ThrowIfNull(documentText);
+        try
+        {
+            return _hashes.Contains(ComputeHashCore(documentText, _hashCache));
+        }
+        catch (SyntaxException)
+        {
+            return false;
+        }
+    }
+
+    private static string ComputeHashCore(string documentText, TrustedDocumentNormalizedHashCache hashCache)
+    {
+        int maxBytes = Encoding.UTF8.GetMaxByteCount(documentText.Length);
+        byte[]? rented = null;
+        Span<byte> buffer = maxBytes <= 1_024
+            ? stackalloc byte[1_024]
+            : (rented = ArrayPool<byte>.Shared.Rent(maxBytes));
+        try
+        {
+            int written = Encoding.UTF8.GetBytes(documentText, buffer);
+            return hashCache.GetOrComputeNormalizedHash(buffer[..written]);
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
         }
     }
 }
@@ -151,29 +194,59 @@ public sealed class TrustedDocumentsOnlyMiddleware
             doc = nodeProvider.Document;
         }
 
-        string? rawText = null;
-        if (doc == null && context.Request.Document is not null)
+        if (doc is not null)
         {
-            rawText = context.Request.Document.ToString();
+            var store = context.RequestServices.GetService<TrustedDocumentStore>();
+            if (store is null || !store.IsTrusted(doc))
+            {
+                Reject(context);
+                return;
+            }
+
+            await _next(context).ConfigureAwait(false);
+            return;
         }
 
-        if (doc == null && string.IsNullOrWhiteSpace(rawText))
+        if (context.Request.Document is null)
         {
             // No document supplied (id-only request). Without a document store the parser stage fails closed.
             await _next(context).ConfigureAwait(false);
             return;
         }
 
-        var store = context.RequestServices.GetService<TrustedDocumentStore>();
-        bool trusted = store != null && (doc != null ? store.IsTrusted(doc) : store.IsTrusted(rawText!));
+        var rawBytes = context.Request.Document.AsSpan();
+        if (IsUtf8WhiteSpace(rawBytes))
+        {
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
 
-        if (!trusted)
+        var globalStore = context.RequestServices.GetService<TrustedDocumentStore>();
+        if (globalStore is null || !globalStore.IsTrusted(rawBytes))
         {
             Reject(context);
             return;
         }
 
         await _next(context).ConfigureAwait(false);
+    }
+
+    private static bool IsUtf8WhiteSpace(ReadOnlySpan<byte> bytes)
+    {
+        foreach (byte b in bytes)
+        {
+            if (b >= 0x80)
+            {
+                return string.IsNullOrWhiteSpace(Encoding.UTF8.GetString(bytes));
+            }
+
+            if (b is not ((byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n' or (byte)'\f' or (byte)'\v'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>The single rejection result of both paths: identical message, code and shape.</summary>

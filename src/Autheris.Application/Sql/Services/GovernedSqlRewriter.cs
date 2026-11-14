@@ -67,6 +67,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly TypedPolicySources? _typedPolicies;
     private readonly Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? _timeZoneState;   // null = conversion unavailable (fail closed)
     private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _accessDecisionPoint;
+    private const int MaxStage1CachedStatementChars = 8_192;
     private readonly Autheris.Application.State.Caching.BoundedCache<string, SqlQueryMetadata> _stage1Analyses = new(4_096);
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder =>
@@ -193,11 +194,19 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             // 12 (Stage 1): the analysis is a pure function of the statement text, so a successful result is shared between
             // requests. Only the policy checks below depend on the caller and they run every time. The key is a SHA-256 of the text
             // (a collision would hand one statement's analysis to another); failures and cancellations are never cached.
-            var analysisKey = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawSql)));
-            if (!_stage1Analyses.TryGet(analysisKey, out metadata!))
+            bool cacheable = rawSql.Length <= MaxStage1CachedStatementChars;
+            if (cacheable)
+            {
+                var analysisKey = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawSql)));
+                if (!_stage1Analyses.TryGet(analysisKey, out metadata!))
+                {
+                    metadata = _sqlEngine.Analyze(rawSql.AsMemory(), AnalysisTokenOptions, ct);
+                    _stage1Analyses.Set(analysisKey, metadata);
+                }
+            }
+            else
             {
                 metadata = _sqlEngine.Analyze(rawSql.AsMemory(), AnalysisTokenOptions, ct);
-                _stage1Analyses.Set(analysisKey, metadata);
             }
         }
         catch (WebSqlPolicyException)

@@ -37,58 +37,9 @@ public static class AsyncJobEndpoints
                 return await next(context).ConfigureAwait(false);
             });
 
-        group.MapPost("/query", async (
-            AsyncQueryJobRequest request,
-            IAsyncQueryJobManager jobManager,
-            HttpContext httpContext,
-            CancellationToken ct) =>
-        {
-            var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
-            AsyncJobDescriptor job;
-            try
-            {
-                job = await jobManager.SubmitJobAsync(
-                    request, httpContext.User, tenantId,
-                    httpContext.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Current
-                        ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None,
-                    ct).ConfigureAwait(false);
-            }
-            catch (ClusterStateUnavailableException)
-            {
-                return StateUnavailable(httpContext);
-            }
-            catch (AsyncJobQueueStoppedException)
-            {
-                httpContext.Response.Headers.RetryAfter = "5";
-                return Results.Problem(
-                    statusCode: StatusCodes.Status503ServiceUnavailable,
-                    title: "The async job queue is not accepting jobs.",
-                    detail: "The gateway is shutting down. Retry later.");
-            }
-            catch (AsyncJobQueueLimitExceededException)
-            {
-                httpContext.Response.Headers.RetryAfter = "30";
-                return Results.Problem(
-                    statusCode: StatusCodes.Status429TooManyRequests,
-                    title: "Too many queued async jobs.",
-                    detail: "The tenant has reached the maximum number of queued or running async jobs. Retry later.");
-            }
-
-            MarkDomainAudited(httpContext);
-
-            var response = new AsyncJobStatusResponse(
-                JobId: job.JobId,
-                State: job.State,
-                CreatedAt: job.CreatedAt,
-                StartedAt: null,
-                CompletedAt: null,
-                RowsProduced: null,
-                BytesProduced: null,
-                ErrorMessage: null,
-                ResultDownloadUrl: $"/api/v1/jobs/{job.JobId}/result");
-
-            return Results.Accepted($"/api/v1/jobs/{job.JobId}/status", response);
-        }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobSubmitted);
+        group.MapPost("/query", SubmitJobHandler)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobSubmitted);
 
         group.MapGet("/{jobId}/status", async (
             string jobId,
@@ -132,55 +83,9 @@ public static class AsyncJobEndpoints
             return Results.Ok(response);
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AsyncJobStatusRead);
 
-        group.MapGet("/{jobId}/result", async (
-            string jobId,
-            IAsyncQueryJobManager jobManager,
-            HttpContext httpContext,
-            CancellationToken ct) =>
-        {
-            var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
-            var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
-
-            Stream? stream = null;
-            AsyncJobDescriptor? job;
-            try
-            {
-                stream = await jobManager.GetJobResultStreamAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
-                if (stream == null)
-                {
-                    return Results.NotFound();
-                }
-
-                job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
-            }
-            catch (ClusterStateUnavailableException)
-            {
-                if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
-                return StateUnavailable(httpContext);
-            }
-            catch (AsyncJobResultUnavailableException ex)
-            {
-                if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
-                httpContext.Response.Headers.RetryAfter = "5";
-                return Results.Problem(
-                    statusCode: StatusCodes.Status503ServiceUnavailable,
-                    title: "The job result is not available on this node.",
-                    detail: "The job result is stored on another gateway node and the scratch directory is not shared. Retry later or contact the operator.",
-                    extensions: new Dictionary<string, object?> { ["code"] = ex.ErrorCode });
-            }
-            catch
-            {
-                if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
-                throw;
-            }
-
-            MarkDomainAudited(httpContext);
-            var format = job?.Format ?? "json";
-            var contentType = format.Equals("csv", StringComparison.OrdinalIgnoreCase) ? "text/csv" : "application/json";
-            var fileName = $"query-result-{jobId}.{format}";
-
-            return Results.File(stream!, contentType, fileDownloadName: fileName);
-        }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobDownloaded);
+        group.MapGet("/{jobId}/result", DownloadJobResultHandler)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobDownloaded);
 
         group.MapDelete("/{jobId}", async (
             string jobId,
@@ -247,6 +152,133 @@ public static class AsyncJobEndpoints
         var gatewayOptions = sp.GetService<IOptions<GatewayOptions>>();
         return gatewayOptions?.Value.AsyncJobs.Enabled ?? true;
     }
+
+    internal static async Task<IResult> SubmitJobHandler(
+        AsyncQueryJobRequest request,
+        IAsyncQueryJobManager jobManager,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        if (!AsyncQueryJobFormat.TryNormalize(request.Format, out _))
+        {
+            return InvalidFormatProblem();
+        }
+
+        var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
+        AsyncJobDescriptor job;
+        try
+        {
+            job = await jobManager.SubmitJobAsync(
+                request, httpContext.User, tenantId,
+                httpContext.RequestServices?.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Current
+                    ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None,
+                ct).ConfigureAwait(false);
+        }
+        catch (AsyncJobInvalidFormatException)
+        {
+            return InvalidFormatProblem();
+        }
+        catch (ClusterStateUnavailableException)
+        {
+            return StateUnavailable(httpContext);
+        }
+        catch (AsyncJobQueueStoppedException)
+        {
+            httpContext.Response.Headers.RetryAfter = "5";
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "The async job queue is not accepting jobs.",
+                detail: "The gateway is shutting down. Retry later.");
+        }
+        catch (AsyncJobQueueLimitExceededException)
+        {
+            httpContext.Response.Headers.RetryAfter = "30";
+            return Results.Problem(
+                statusCode: StatusCodes.Status429TooManyRequests,
+                title: "Too many queued async jobs.",
+                detail: "The tenant has reached the maximum number of queued or running async jobs. Retry later.");
+        }
+
+        MarkDomainAudited(httpContext);
+
+        var response = new AsyncJobStatusResponse(
+            JobId: job.JobId,
+            State: job.State,
+            CreatedAt: job.CreatedAt,
+            StartedAt: null,
+            CompletedAt: null,
+            RowsProduced: null,
+            BytesProduced: null,
+            ErrorMessage: null,
+            ResultDownloadUrl: $"/api/v1/jobs/{job.JobId}/result");
+
+        return Results.Accepted($"/api/v1/jobs/{job.JobId}/status", response);
+    }
+
+    internal static async Task<IResult> DownloadJobResultHandler(
+        string jobId,
+        IAsyncQueryJobManager jobManager,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
+        var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
+
+        Stream? stream = null;
+        AsyncJobDescriptor? job;
+        try
+        {
+            stream = await jobManager.GetJobResultStreamAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            if (stream == null)
+            {
+                return Results.NotFound();
+            }
+
+            job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+        }
+        catch (ClusterStateUnavailableException)
+        {
+            if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
+            return StateUnavailable(httpContext);
+        }
+        catch (AsyncJobResultUnavailableException ex)
+        {
+            if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
+            httpContext.Response.Headers.RetryAfter = "5";
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "The job result is not available on this node.",
+                detail: "The job result is stored on another gateway node and the scratch directory is not shared. Retry later or contact the operator.",
+                extensions: new Dictionary<string, object?> { ["code"] = ex.ErrorCode });
+        }
+        catch
+        {
+            if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
+        if (!AsyncQueryJobFormat.TryResolveDownloadMetadata(job?.Format, out var contentType, out var fileExtension))
+        {
+            if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Unsupported stored job result format.",
+                detail: "The stored async job format is not supported.",
+                extensions: new Dictionary<string, object?> { ["code"] = AsyncQueryJobFormat.InvalidFormatCode });
+        }
+
+        MarkDomainAudited(httpContext);
+        var fileName = $"query-result-{jobId}{fileExtension}";
+
+        return Results.File(stream!, contentType, fileDownloadName: fileName);
+    }
+
+    private static IResult InvalidFormatProblem() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status400BadRequest,
+            title: "Invalid query result format.",
+            detail: "Supported formats are 'json' and 'csv'.",
+            extensions: new Dictionary<string, object?> { ["code"] = AsyncQueryJobFormat.InvalidFormatCode });
 
     private static IResult StateUnavailable(HttpContext httpContext)
     {

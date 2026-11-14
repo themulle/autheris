@@ -16,18 +16,37 @@ using BitFaster.Caching.Lru;
 public sealed class BoundedCache<TKey, TValue>
     where TKey : notnull
 {
+    private static readonly TimeSpan DefaultFactoryTimeout = TimeSpan.FromSeconds(30);
+
     private sealed record Entry(TValue Value, long CreatedTimestamp);
 
+    private sealed class InFlightEntry
+    {
+        public TaskCompletionSource<TValue> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public InFlightEntry()
+        {
+            _ = Completion.Task.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+        }
+    }
+
     private readonly ConcurrentLru<TKey, Entry> _lru;
-    private readonly ConcurrentDictionary<TKey, Lazy<Task<TValue>>> _inFlight = new();
+    private readonly ConcurrentDictionary<TKey, InFlightEntry> _inFlight;
     private readonly TimeSpan? _ttl;
     private readonly TimeProvider _time;
+    private readonly TimeSpan _factoryTimeout;
 
     /// <param name="capacity">Maximum number of entries (at least 3).</param>
     /// <param name="ttl">Absolute lifetime of an entry; <c>null</c> for none.</param>
     /// <param name="time">Clock for the TTL (default: system).</param>
     /// <param name="comparer">Key comparer (default: the key type's default).</param>
-    public BoundedCache(int capacity, TimeSpan? ttl = null, TimeProvider? time = null, System.Collections.Generic.IEqualityComparer<TKey>? comparer = null)
+    /// <param name="factoryTimeout">Timeout applied to a shared <see cref="GetOrAddAsync"/> factory run (default: 30s).</param>
+    public BoundedCache(
+        int capacity,
+        TimeSpan? ttl = null,
+        TimeProvider? time = null,
+        System.Collections.Generic.IEqualityComparer<TKey>? comparer = null,
+        TimeSpan? factoryTimeout = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 3);
         if (ttl is { } t)
@@ -35,9 +54,17 @@ public sealed class BoundedCache<TKey, TValue>
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(t, TimeSpan.Zero);
         }
 
+        if (factoryTimeout is { } ft)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(ft, TimeSpan.Zero);
+        }
+
         _ttl = ttl;
         _time = time ?? TimeProvider.System;
-        _lru = new ConcurrentLru<TKey, Entry>(1, capacity, comparer ?? System.Collections.Generic.EqualityComparer<TKey>.Default);
+        _factoryTimeout = factoryTimeout ?? DefaultFactoryTimeout;
+        var keyComparer = comparer ?? System.Collections.Generic.EqualityComparer<TKey>.Default;
+        _lru = new ConcurrentLru<TKey, Entry>(1, capacity, keyComparer);
+        _inFlight = new ConcurrentDictionary<TKey, InFlightEntry>(keyComparer);
     }
 
     /// <summary>Current number of entries (never above the capacity, apart from transient in-flight inserts).</summary>
@@ -69,8 +96,14 @@ public sealed class BoundedCache<TKey, TValue>
 
     public bool TryRemove(TKey key, out TValue? value)
     {
+        if (_lru.TryRemove(key, out var entry))
+        {
+            value = entry.Value;
+            return true;
+        }
+
         value = default;
-        return _lru.TryRemove(key);
+        return false;
     }
 
     public TValue this[TKey key]
@@ -95,28 +128,70 @@ public sealed class BoundedCache<TKey, TValue>
         return created;
     }
 
-    public async Task<TValue> GetOrAddAsync(TKey key, Func<TKey, Task<TValue>> factory)
+    public Task<TValue> GetOrAddAsync(TKey key, Func<TKey, Task<TValue>> factory, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(factory);
+        return GetOrAddAsync(key, (k, _) => factory(k), ct);
+    }
+
+    public async Task<TValue> GetOrAddAsync(TKey key, Func<TKey, CancellationToken, Task<TValue>> factory, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
         if (TryGet(key, out var existing))
         {
             return existing;
         }
 
-        var lazy = _inFlight.GetOrAdd(key, k => new Lazy<Task<TValue>>(() => RunAsync(k, factory)));
-        try
+        ct.ThrowIfCancellationRequested();
+        var created = new InFlightEntry();
+        var flight = _inFlight.GetOrAdd(key, created);
+        if (ReferenceEquals(flight, created))
         {
-            return await lazy.Value.ConfigureAwait(false);
+            var cts = new CancellationTokenSource(_factoryTimeout, _time);
+            _ = Task.Run(() => RunFlightAsync(key, created, factory, cts), CancellationToken.None);
         }
-        finally
-        {
-            _inFlight.TryRemove(new System.Collections.Generic.KeyValuePair<TKey, Lazy<Task<TValue>>>(key, lazy));
-        }
+
+        return await flight.Completion.Task.WaitAsync(ct).ConfigureAwait(false);
     }
 
-    private async Task<TValue> RunAsync(TKey key, Func<TKey, Task<TValue>> factory)
+    private async Task RunFlightAsync(
+        TKey key,
+        InFlightEntry flight,
+        Func<TKey, CancellationToken, Task<TValue>> factory,
+        CancellationTokenSource cts)
     {
-        var value = await factory(key).ConfigureAwait(false);
-        Set(key, value);
-        return value;
+        try
+        {
+            using (cts)
+            {
+                if (TryGet(key, out var raced))
+                {
+                    _inFlight.TryRemove(System.Collections.Generic.KeyValuePair.Create(key, flight));
+                    flight.Completion.TrySetResult(raced);
+                    return;
+                }
+
+                TValue value;
+                try
+                {
+                    var factoryTask = factory(key, cts.Token);
+                    _ = factoryTask.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                    value = await factoryTask.WaitAsync(cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cts.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"BoundedCache factory exceeded its timeout ({_factoryTimeout}).");
+                }
+
+                Set(key, value);
+                _inFlight.TryRemove(System.Collections.Generic.KeyValuePair.Create(key, flight));
+                flight.Completion.TrySetResult(value);
+            }
+        }
+        catch (Exception ex)
+        {
+            _inFlight.TryRemove(System.Collections.Generic.KeyValuePair.Create(key, flight));
+            flight.Completion.TrySetException(ex);
+        }
     }
 }

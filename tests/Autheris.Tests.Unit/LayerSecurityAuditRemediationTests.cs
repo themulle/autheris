@@ -153,7 +153,7 @@ public sealed class LayerSecurityAuditRemediationTests
     }
 
     [Fact]
-    public void Application_SubgraphResultMasker_MasksAliasesAndNumbers()
+    public async Task Application_SubgraphResultMasker_MasksAliasesAndNumbers()
     {
         // CRIT-04 & SEC-APP-04: Masking must work with GraphQL aliases and non-string types
         var maskingProviderMock = Substitute.For<IColumnMaskingProvider>();
@@ -181,7 +181,7 @@ public sealed class LayerSecurityAuditRemediationTests
         };
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim("role", "User")], "BasicAuth"));
-        var masked = masker.MaskResultData(payload, principal, aliasMap) as Dictionary<string, object?>;
+        var masked = await masker.MaskResultDataAsync(payload, principal, aliasMap) as Dictionary<string, object?>;
 
         masked.ShouldNotBeNull();
         masked["customerName"].ShouldBe("Alice");
