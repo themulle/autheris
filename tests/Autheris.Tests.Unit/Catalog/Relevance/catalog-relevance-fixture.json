@@ -1,0 +1,537 @@
+{
+  "description": "Neutral sample catalog for the catalog search relevance set (#624): a fleet, logistics, sales, finance and HR company with German default texts, English translations on most tables, German-only tables, German compounds, a key column described as 'Fahrzeug-ID' in most fleet tables, and one table name in two schemas.",
+  "tables": [
+    {
+      "id": "fleet.master.vehicles",
+      "displayName": "Fahrzeug-Stammdaten",
+      "description": "Ein Datensatz je Fahrzeug mit Kennzeichen, Baujahr, Baureihe und zugeordnetem Fahrer.",
+      "longDescription": "Die Fahrzeug-Stammdaten werden aus dem Flottenmanagement übernommen und täglich aktualisiert. Stillgelegte Fahrzeuge bleiben mit Enddatum erhalten.",
+      "en": { "displayName": "Vehicle master data", "description": "One record per vehicle with licence plate, year of manufacture, model series and assigned driver." },
+      "tags": [ "master-data", "fleet" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "licence_plate", "type": "varchar", "description": "Amtliches Kennzeichen", "en": "Licence plate" },
+        { "name": "model_series_id", "type": "bigint", "description": "Baureihe des Fahrzeugs", "en": "Model series of the vehicle" },
+        { "name": "year_built", "type": "int", "description": "Baujahr", "en": "Year of manufacture" },
+        { "name": "driver_id", "type": "bigint", "description": "Zugeordneter Fahrer", "en": "Assigned driver" },
+        { "name": "decommissioned_at", "type": "timestamp", "description": "Datum der Stilllegung", "en": "Decommissioning date" },
+        { "name": "cost_center", "type": "varchar", "description": "Kostenstelle", "en": "Cost center" }
+      ]
+    },
+    {
+      "id": "fleet.master.model_series",
+      "displayName": "Fahrzeugbaureihen",
+      "description": "Fahrzeugspezifikationen je Baureihe und Fahrzeugtyp: Leistung, Gewicht und Achsen.",
+      "en": { "displayName": "Model series", "description": "Technical specifications per model series and type: power, weight and axles." },
+      "tags": [ "master-data", "fleet" ],
+      "columns": [
+        { "name": "model_series_id", "type": "bigint", "description": "Baureihen-ID", "en": "Model series ID" },
+        { "name": "type_code", "type": "varchar", "description": "Typschlüssel", "en": "Type code" },
+        { "name": "power_kw", "type": "int", "description": "Motorleistung in kW", "en": "Engine power in kW" },
+        { "name": "gross_weight_kg", "type": "int", "description": "Zulässiges Gesamtgewicht in kg", "en": "Permitted gross weight in kg" },
+        { "name": "axle_count", "type": "int", "description": "Anzahl Achsen", "en": "Number of axles" }
+      ]
+    },
+    {
+      "id": "fleet.master.drivers",
+      "displayName": "Fahrer",
+      "description": "Fahrerstamm mit Führerscheinklassen und Einsatzgebiet.",
+      "en": { "displayName": "Drivers", "description": "Driver master with licence classes and operating area." },
+      "tags": [ "master-data", "fleet" ],
+      "columns": [
+        { "name": "driver_id", "type": "bigint", "description": "Fahrer-ID", "en": "Driver ID" },
+        { "name": "licence_classes", "type": "varchar", "description": "Führerscheinklassen", "en": "Licence classes" },
+        { "name": "home_depot", "type": "varchar", "description": "Heimatdepot", "en": "Home depot" },
+        { "name": "valid_until", "type": "date", "description": "Gültigkeit der Fahrerlaubnis", "en": "Licence valid until" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.gps_positions",
+      "displayName": "GPS-Positionen",
+      "description": "Breitengrad und Längengrad je Fahrzeug im Minutentakt.",
+      "en": { "displayName": "GPS positions", "description": "Latitude and longitude per vehicle, every minute." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "recorded_at", "type": "timestamp", "description": "Zeitpunkt der Messung", "en": "Time of measurement" },
+        { "name": "latitude", "type": "double", "description": "Breitengrad (WGS84)", "en": "Latitude (WGS84)" },
+        { "name": "longitude", "type": "double", "description": "Längengrad (WGS84)", "en": "Longitude (WGS84)" },
+        { "name": "heading", "type": "int", "description": "Fahrtrichtung in Grad", "en": "Heading in degrees" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.engine_hours",
+      "displayName": "Motorbetriebsstunden",
+      "description": "Motorbetriebsstunden je Fahrzeug und Tag aus dem Steuergerät.",
+      "en": { "displayName": "Engine hours", "description": "Engine operating hours per vehicle and day from the control unit." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "day", "type": "date", "description": "Kalendertag", "en": "Calendar day" },
+        { "name": "engine_hours_total", "type": "decimal", "description": "Zählerstand der Motorbetriebsstunden", "en": "Engine hour meter reading" },
+        { "name": "engine_hours_day", "type": "decimal", "description": "Motorbetriebsstunden des Tages", "en": "Engine hours of the day" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.fuel_usage",
+      "displayName": "Kraftstoffverbrauch",
+      "description": "Kraftstoffverbrauch je Tankvorgang und Fahrzeug.",
+      "en": { "displayName": "Fuel usage", "description": "Fuel consumption per refuelling and vehicle." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "refuelled_at", "type": "timestamp", "description": "Zeitpunkt des Tankvorgangs", "en": "Time of refuelling" },
+        { "name": "litres", "type": "decimal", "description": "Getankte Menge in Litern", "en": "Refuelled quantity in litres" },
+        { "name": "avg_consumption", "type": "decimal", "description": "Durchschnittsverbrauch in l/100 km", "en": "Average consumption in l/100 km" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.speed_events",
+      "displayName": "Geschwindigkeitsereignisse",
+      "description": "Überschreitungen der zulässigen Höchstgeschwindigkeit.",
+      "en": { "displayName": "Speed events", "description": "Events where the speed limit was exceeded." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "recorded_at", "type": "timestamp", "description": "Zeitpunkt der Messung", "en": "Time of measurement" },
+        { "name": "speed_kmh", "type": "int", "description": "Gemessene Geschwindigkeit in km/h", "en": "Measured speed in km/h" },
+        { "name": "limit_kmh", "type": "int", "description": "Zulässige Geschwindigkeit in km/h", "en": "Speed limit in km/h" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.tire_pressure",
+      "displayName": "Reifendruck",
+      "description": "Reifendruck je Rad und Fahrt.",
+      "en": { "displayName": "Tyre pressure", "description": "Tyre pressure per wheel and trip." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "recorded_at", "type": "timestamp", "description": "Zeitpunkt der Messung", "en": "Time of measurement" },
+        { "name": "wheel_position", "type": "varchar", "description": "Radposition", "en": "Wheel position" },
+        { "name": "pressure_bar", "type": "decimal", "description": "Reifendruck in bar", "en": "Tyre pressure in bar" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.battery_status",
+      "displayName": "Batteriezustand",
+      "description": "Ladezustand und Spannung der Starterbatterie.",
+      "en": { "displayName": "Battery status", "description": "State of charge and voltage of the starter battery." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "recorded_at", "type": "timestamp", "description": "Zeitpunkt der Messung", "en": "Time of measurement" },
+        { "name": "voltage", "type": "decimal", "description": "Spannung in Volt", "en": "Voltage in volts" },
+        { "name": "state_of_charge", "type": "int", "description": "Ladezustand in Prozent", "en": "State of charge in percent" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.engine_temperature",
+      "displayName": "Motortemperatur",
+      "description": "Kühlmittel- und Öltemperatur des Motors.",
+      "en": { "displayName": "Engine temperature", "description": "Coolant and oil temperature of the engine." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "recorded_at", "type": "timestamp", "description": "Zeitpunkt der Messung", "en": "Time of measurement" },
+        { "name": "coolant_temp_c", "type": "decimal", "description": "Kühlmitteltemperatur in °C", "en": "Coolant temperature in °C" },
+        { "name": "oil_temp_c", "type": "decimal", "description": "Öltemperatur in °C", "en": "Oil temperature in °C" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.idle_times",
+      "displayName": "Leerlaufzeiten",
+      "description": "Zeiten mit laufendem Motor im Stillstand.",
+      "en": { "displayName": "Idle times", "description": "Periods with the engine running while standing still." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "started_at", "type": "timestamp", "description": "Beginn des Leerlaufs", "en": "Start of idling" },
+        { "name": "duration_s", "type": "int", "description": "Dauer in Sekunden", "en": "Duration in seconds" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.trips",
+      "displayName": "Einzelfahrt",
+      "description": "Eine Zeile je Fahrt von Zündung an bis Zündung aus.",
+      "en": { "displayName": "Trips", "description": "One row per trip from ignition on to ignition off." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "trip_start", "type": "timestamp", "description": "Zündung an", "en": "Ignition on" },
+        { "name": "trip_end", "type": "timestamp", "description": "Zündung aus", "en": "Ignition off" },
+        { "name": "distance_km", "type": "decimal", "description": "Gefahrene Strecke in km", "en": "Distance driven in km" },
+        { "name": "driver_id", "type": "bigint", "description": "Fahrer während der Fahrt", "en": "Driver during the trip" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.odometer_readings",
+      "displayName": "Kilometerstände",
+      "description": "Täglicher Kilometerstand je Fahrzeug.",
+      "en": { "displayName": "Odometer readings", "description": "Daily odometer reading per vehicle." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "day", "type": "date", "description": "Kalendertag", "en": "Calendar day" },
+        { "name": "odometer_km", "type": "decimal", "description": "Zählerstand in km", "en": "Meter reading in km" }
+      ]
+    },
+    {
+      "id": "fleet.telemetry.error_codes",
+      "displayName": "Fehlercodes",
+      "description": "Fehlercodes aus der Fahrzeugdiagnose (OBD).",
+      "en": { "displayName": "Error codes", "description": "Diagnostic trouble codes from on-board diagnostics (OBD)." },
+      "tags": [ "telemetry" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "recorded_at", "type": "timestamp", "description": "Zeitpunkt der Messung", "en": "Time of measurement" },
+        { "name": "dtc_code", "type": "varchar", "description": "Diagnose-Fehlercode", "en": "Diagnostic trouble code" },
+        { "name": "severity", "type": "varchar", "description": "Schweregrad", "en": "Severity" }
+      ]
+    },
+    {
+      "id": "fleet.service.repair_jobs",
+      "displayName": "Reparatur-Auftrag",
+      "description": "Werkstattleistungen je Fahrzeug mit Arbeitszeit und Material.",
+      "en": { "displayName": "Repair jobs", "description": "Workshop services per vehicle with labour time and material." },
+      "tags": [ "service" ],
+      "columns": [
+        { "name": "job_id", "type": "bigint", "description": "Auftragsnummer", "en": "Job number" },
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "opened_at", "type": "timestamp", "description": "Annahme in der Werkstatt", "en": "Accepted by the workshop" },
+        { "name": "closed_at", "type": "timestamp", "description": "Fertigmeldung", "en": "Completed" },
+        { "name": "labour_hours", "type": "decimal", "description": "Arbeitszeit in Stunden", "en": "Labour time in hours" },
+        { "name": "workshop", "type": "varchar", "description": "Ausführende Werkstatt", "en": "Executing workshop" }
+      ]
+    },
+    {
+      "id": "fleet.service.wartungsplaene",
+      "displayName": "Wartungspläne",
+      "description": "Wartungspläne je Fahrzeugtyp mit Intervallen und Prüfumfang.",
+      "tags": [ "service" ],
+      "columns": [
+        { "name": "plan_id", "type": "bigint", "description": "Plan-ID" },
+        { "name": "typschluessel", "type": "varchar", "description": "Typschlüssel der Baureihe" },
+        { "name": "intervall_stunden", "type": "int", "description": "Wartungsintervall in Betriebsstunden" },
+        { "name": "intervall_km", "type": "int", "description": "Wartungsintervall in Kilometern" },
+        { "name": "pruefumfang", "type": "varchar", "description": "Prüfumfang der Wartung" }
+      ]
+    },
+    {
+      "id": "fleet.service.inspections",
+      "displayName": "Hauptuntersuchungen",
+      "description": "Termine und Ergebnisse der gesetzlichen Hauptuntersuchung.",
+      "en": { "displayName": "Inspections", "description": "Dates and results of statutory technical inspections." },
+      "tags": [ "service" ],
+      "columns": [
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "inspected_at", "type": "date", "description": "Prüfdatum", "en": "Inspection date" },
+        { "name": "result", "type": "varchar", "description": "Prüfergebnis", "en": "Inspection result" },
+        { "name": "next_due", "type": "date", "description": "Nächster Termin", "en": "Next due date" }
+      ]
+    },
+    {
+      "id": "fleet.service.spare_parts_usage",
+      "displayName": "Ersatzteilverbrauch",
+      "description": "Verbaute Ersatzteile je Reparatur.",
+      "en": { "displayName": "Spare part usage", "description": "Spare parts fitted per repair." },
+      "tags": [ "service" ],
+      "columns": [
+        { "name": "job_id", "type": "bigint", "description": "Reparatur-Auftrag", "en": "Repair job" },
+        { "name": "article_id", "type": "bigint", "description": "Artikelnummer des Ersatzteils", "en": "Article number of the spare part" },
+        { "name": "quantity", "type": "int", "description": "Menge", "en": "Quantity" }
+      ]
+    },
+    {
+      "id": "logistics.master.warehouses",
+      "displayName": "Lager-Stammdaten",
+      "description": "Alle Lager mit Adresse, Fläche und Lagerart.",
+      "en": { "displayName": "Warehouses", "description": "All warehouses with address, floor space and type." },
+      "tags": [ "master-data", "logistics" ],
+      "columns": [
+        { "name": "warehouse_id", "type": "bigint", "description": "Eindeutige Lager-ID", "en": "Unique warehouse ID" },
+        { "name": "name", "type": "varchar", "description": "Bezeichnung", "en": "Name" },
+        { "name": "address", "type": "varchar", "description": "Postanschrift", "en": "Postal address" },
+        { "name": "floor_space_m2", "type": "decimal", "description": "Lagerfläche in m²", "en": "Floor space in m²" },
+        { "name": "warehouse_type", "type": "varchar", "description": "Lagerart (Hochregal, Block, Kühl)", "en": "Warehouse type (high-bay, block, cold)" }
+      ]
+    },
+    {
+      "id": "logistics.master.lieferantenstamm",
+      "displayName": "Lieferantenstamm",
+      "description": "Lieferanten mit Anschrift, Zahlungsziel und Bewertung.",
+      "tags": [ "master-data", "logistics" ],
+      "columns": [
+        { "name": "lieferant_nr", "type": "varchar", "description": "Lieferantennummer" },
+        { "name": "name", "type": "varchar", "description": "Name des Lieferanten" },
+        { "name": "anschrift", "type": "varchar", "description": "Postanschrift" },
+        { "name": "zahlungsziel_tage", "type": "int", "description": "Zahlungsziel in Tagen" },
+        { "name": "bewertung", "type": "varchar", "description": "Lieferantenbewertung (A bis D)" }
+      ]
+    },
+    {
+      "id": "logistics.master.articles",
+      "displayName": "Artikelstamm",
+      "description": "Artikel mit Bezeichnung, Mengeneinheit und Hauptlieferant.",
+      "en": { "displayName": "Articles", "description": "Articles with name, unit of measure and main supplier." },
+      "tags": [ "master-data", "logistics" ],
+      "columns": [
+        { "name": "article_id", "type": "bigint", "description": "Artikelnummer", "en": "Article number" },
+        { "name": "article_name", "type": "varchar", "description": "Artikelbezeichnung", "en": "Article name" },
+        { "name": "unit", "type": "varchar", "description": "Mengeneinheit", "en": "Unit of measure" },
+        { "name": "main_supplier_nr", "type": "varchar", "description": "Nummer des Hauptlieferanten", "en": "Number of the main supplier" }
+      ]
+    },
+    {
+      "id": "logistics.inventory.stock_levels",
+      "displayName": "Lagerbestand",
+      "description": "Aktueller Bestand je Artikel und Lager.",
+      "en": { "displayName": "Stock levels", "description": "Current stock per article and warehouse." },
+      "tags": [ "logistics" ],
+      "columns": [
+        { "name": "warehouse_id", "type": "bigint", "description": "Lager-ID", "en": "Warehouse ID" },
+        { "name": "article_id", "type": "bigint", "description": "Artikelnummer", "en": "Article number" },
+        { "name": "quantity", "type": "decimal", "description": "Bestandsmenge", "en": "Quantity on hand" },
+        { "name": "updated_at", "type": "timestamp", "description": "Letzte Änderung", "en": "Last change" }
+      ]
+    },
+    {
+      "id": "logistics.inventory.stock_movements",
+      "displayName": "Lagerbewegungen",
+      "description": "Zu- und Abgänge je Artikel und Lager.",
+      "en": { "displayName": "Stock movements", "description": "Receipts and issues per article and warehouse." },
+      "tags": [ "logistics" ],
+      "columns": [
+        { "name": "movement_id", "type": "bigint", "description": "Bewegungsnummer", "en": "Movement number" },
+        { "name": "warehouse_id", "type": "bigint", "description": "Lager-ID", "en": "Warehouse ID" },
+        { "name": "article_id", "type": "bigint", "description": "Artikelnummer", "en": "Article number" },
+        { "name": "quantity", "type": "decimal", "description": "Menge", "en": "Quantity" },
+        { "name": "moved_at", "type": "timestamp", "description": "Buchungszeitpunkt", "en": "Posting time" },
+        { "name": "movement_type", "type": "varchar", "description": "Bewegungsart", "en": "Movement type" }
+      ]
+    },
+    {
+      "id": "logistics.inventory.picking_lists",
+      "displayName": "Kommissionierlisten",
+      "description": "Kommissionieraufträge je Lager und Schicht.",
+      "en": { "displayName": "Picking lists", "description": "Picking orders per warehouse and shift." },
+      "tags": [ "logistics" ],
+      "columns": [
+        { "name": "picking_list_id", "type": "bigint", "description": "Listennummer", "en": "List number" },
+        { "name": "warehouse_id", "type": "bigint", "description": "Lager-ID", "en": "Warehouse ID" },
+        { "name": "shift", "type": "varchar", "description": "Schicht", "en": "Shift" },
+        { "name": "picker", "type": "varchar", "description": "Kommissionierer", "en": "Picker" },
+        { "name": "created_at", "type": "timestamp", "description": "Erstellt am", "en": "Created at" }
+      ]
+    },
+    {
+      "id": "logistics.inventory.inventory_counts",
+      "displayName": "Inventurzählungen",
+      "description": "Ergebnisse der Stichtagsinventur je Lagerplatz.",
+      "en": { "displayName": "Inventory counts", "description": "Results of the year-end stocktaking per storage bin." },
+      "tags": [ "logistics" ],
+      "columns": [
+        { "name": "warehouse_id", "type": "bigint", "description": "Lager-ID", "en": "Warehouse ID" },
+        { "name": "storage_bin", "type": "varchar", "description": "Lagerplatz", "en": "Storage bin" },
+        { "name": "counted_quantity", "type": "decimal", "description": "Gezählte Menge", "en": "Counted quantity" },
+        { "name": "counted_at", "type": "date", "description": "Zähldatum", "en": "Count date" }
+      ]
+    },
+    {
+      "id": "logistics.transport.deliveries",
+      "displayName": "Lieferungen",
+      "description": "Ausgehende Lieferungen an Kunden mit Liefertermin.",
+      "en": { "displayName": "Deliveries", "description": "Outbound deliveries to customers with delivery date." },
+      "tags": [ "logistics" ],
+      "columns": [
+        { "name": "delivery_id", "type": "bigint", "description": "Liefernummer", "en": "Delivery number" },
+        { "name": "order_id", "type": "bigint", "description": "Bestellnummer", "en": "Order number" },
+        { "name": "customer_id", "type": "bigint", "description": "Kunden-ID", "en": "Customer ID" },
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "planned_date", "type": "date", "description": "Geplanter Liefertermin", "en": "Planned delivery date" }
+      ]
+    },
+    {
+      "id": "logistics.transport.shipment_tracking",
+      "displayName": "Sendungsverfolgung",
+      "description": "Statusmeldungen je Sendung vom Versanddienstleister.",
+      "en": { "displayName": "Shipment tracking", "description": "Status messages per shipment from the carrier." },
+      "tags": [ "logistics" ],
+      "columns": [
+        { "name": "shipment_id", "type": "varchar", "description": "Sendungsnummer", "en": "Shipment number" },
+        { "name": "status", "type": "varchar", "description": "Sendungsstatus", "en": "Shipment status" },
+        { "name": "reported_at", "type": "timestamp", "description": "Meldezeitpunkt", "en": "Reported at" },
+        { "name": "carrier", "type": "varchar", "description": "Versanddienstleister", "en": "Carrier" }
+      ]
+    },
+    {
+      "id": "logistics.transport.loading_lists",
+      "displayName": "Ladelisten",
+      "description": "Ladereihenfolge je Tour und Fahrzeug.",
+      "en": { "displayName": "Loading lists", "description": "Loading sequence per route and vehicle." },
+      "tags": [ "logistics" ],
+      "columns": [
+        { "name": "route_id", "type": "bigint", "description": "Tour-ID", "en": "Route ID" },
+        { "name": "vehicle_id", "type": "bigint", "description": "Eindeutige Fahrzeug-ID", "en": "Unique vehicle ID" },
+        { "name": "stop_sequence", "type": "int", "description": "Reihenfolge der Haltepunkte", "en": "Stop sequence" },
+        { "name": "delivery_id", "type": "bigint", "description": "Liefernummer", "en": "Delivery number" }
+      ]
+    },
+    {
+      "id": "sales.retail.orders",
+      "displayName": "Bestellungen Einzelhandel",
+      "description": "Bestellungen aus dem Onlineshop und den Filialen.",
+      "en": { "displayName": "Retail orders", "description": "Orders from the web shop and the branches." },
+      "tags": [ "sales" ],
+      "columns": [
+        { "name": "order_id", "type": "bigint", "description": "Bestellnummer", "en": "Order number" },
+        { "name": "customer_id", "type": "bigint", "description": "Kunden-ID", "en": "Customer ID" },
+        { "name": "ordered_at", "type": "timestamp", "description": "Bestellzeitpunkt", "en": "Order time" },
+        { "name": "total_amount", "type": "decimal", "description": "Bestellwert brutto", "en": "Gross order value" },
+        { "name": "channel", "type": "varchar", "description": "Vertriebskanal", "en": "Sales channel" }
+      ]
+    },
+    {
+      "id": "sales.wholesale.orders",
+      "displayName": "Bestellungen Großhandel",
+      "description": "Bestellungen von Großhändlern mit Rahmenvertrag.",
+      "en": { "displayName": "Wholesale orders", "description": "Orders from wholesalers with a framework contract." },
+      "tags": [ "sales" ],
+      "columns": [
+        { "name": "order_id", "type": "bigint", "description": "Bestellnummer", "en": "Order number" },
+        { "name": "customer_id", "type": "bigint", "description": "Kunden-ID", "en": "Customer ID" },
+        { "name": "ordered_at", "type": "timestamp", "description": "Bestellzeitpunkt", "en": "Order time" },
+        { "name": "total_amount", "type": "decimal", "description": "Bestellwert netto", "en": "Net order value" },
+        { "name": "contract_id", "type": "bigint", "description": "Rahmenvertrag", "en": "Framework contract" }
+      ]
+    },
+    {
+      "id": "sales.crm.contacts",
+      "displayName": "Ansprechpartner",
+      "description": "Ansprechpartner bei Geschäftskunden mit Rolle und E-Mail.",
+      "en": { "displayName": "Contacts", "description": "Contact persons at business customers with role and e-mail." },
+      "tags": [ "sales" ],
+      "columns": [
+        { "name": "contact_id", "type": "bigint", "description": "Kontakt-ID", "en": "Contact ID" },
+        { "name": "customer_id", "type": "bigint", "description": "Kunden-ID", "en": "Customer ID" },
+        { "name": "role", "type": "varchar", "description": "Rolle beim Geschäftspartner", "en": "Role at the business partner" },
+        { "name": "email", "type": "varchar", "description": "E-Mail-Adresse", "en": "E-mail address" }
+      ]
+    },
+    {
+      "id": "sales.crm.quotes",
+      "displayName": "Angebote",
+      "description": "Angebote an Kunden mit Gültigkeit und Betrag.",
+      "en": { "displayName": "Quotes", "description": "Quotes to customers with validity and amount." },
+      "tags": [ "sales" ],
+      "columns": [
+        { "name": "quote_id", "type": "bigint", "description": "Angebotsnummer", "en": "Quote number" },
+        { "name": "customer_id", "type": "bigint", "description": "Kunden-ID", "en": "Customer ID" },
+        { "name": "valid_until", "type": "date", "description": "Gültig bis", "en": "Valid until" },
+        { "name": "amount", "type": "decimal", "description": "Angebotsbetrag", "en": "Quote amount" }
+      ]
+    },
+    {
+      "id": "sales.crm.campaigns",
+      "displayName": "Kampagnen",
+      "description": "Marketingkampagnen mit Budget und Zeitraum.",
+      "en": { "displayName": "Campaigns", "description": "Marketing campaigns with budget and period." },
+      "tags": [ "sales" ],
+      "columns": [
+        { "name": "campaign_id", "type": "bigint", "description": "Kampagnen-ID", "en": "Campaign ID" },
+        { "name": "name", "type": "varchar", "description": "Bezeichnung", "en": "Name" },
+        { "name": "budget", "type": "decimal", "description": "Budget in Euro", "en": "Budget in euros" },
+        { "name": "starts_at", "type": "date", "description": "Beginn", "en": "Start" },
+        { "name": "ends_at", "type": "date", "description": "Ende", "en": "End" }
+      ]
+    },
+    {
+      "id": "finance.billing.rechnungskoepfe",
+      "displayName": "Rechnungsköpfe",
+      "description": "Kopfdaten je Rechnung: Rechnungsnummer, Rechnungsdatum, Betrag und Fälligkeit.",
+      "tags": [ "finance" ],
+      "columns": [
+        { "name": "rechnung_nr", "type": "varchar", "description": "Rechnungsnummer" },
+        { "name": "rechnungsdatum", "type": "date", "description": "Rechnungsdatum" },
+        { "name": "betrag", "type": "decimal", "description": "Bruttobetrag" },
+        { "name": "faellig_am", "type": "date", "description": "Fälligkeitsdatum" },
+        { "name": "debitor_nr", "type": "varchar", "description": "Debitorennummer" }
+      ]
+    },
+    {
+      "id": "finance.billing.payment_runs",
+      "displayName": "Zahlungsläufe",
+      "description": "Zahlungsläufe zum Ausgleich offener Posten.",
+      "en": { "displayName": "Payment runs", "description": "Payment runs that settle open items." },
+      "tags": [ "finance" ],
+      "columns": [
+        { "name": "run_id", "type": "bigint", "description": "Laufnummer", "en": "Run number" },
+        { "name": "executed_at", "type": "timestamp", "description": "Ausführungszeitpunkt", "en": "Execution time" },
+        { "name": "total_amount", "type": "decimal", "description": "Gesamtbetrag", "en": "Total amount" },
+        { "name": "item_count", "type": "int", "description": "Anzahl Posten", "en": "Number of items" }
+      ]
+    },
+    {
+      "id": "finance.accounts.debitoren",
+      "displayName": "Debitoren",
+      "description": "Debitorenstammdaten mit Zahlungsbedingungen und Kreditlimit.",
+      "tags": [ "finance", "master-data" ],
+      "columns": [
+        { "name": "debitor_nr", "type": "varchar", "description": "Debitorennummer" },
+        { "name": "name", "type": "varchar", "description": "Name" },
+        { "name": "zahlungsbedingung", "type": "varchar", "description": "Zahlungsbedingung" },
+        { "name": "kreditlimit", "type": "decimal", "description": "Kreditlimit in Euro" }
+      ]
+    },
+    {
+      "id": "finance.accounts.kreditoren",
+      "displayName": "Kreditoren",
+      "description": "Kreditorenstammdaten mit Bankverbindung.",
+      "tags": [ "finance", "master-data" ],
+      "columns": [
+        { "name": "kreditor_nr", "type": "varchar", "description": "Kreditorennummer" },
+        { "name": "name", "type": "varchar", "description": "Name" },
+        { "name": "iban", "type": "varchar", "description": "Bankverbindung (IBAN)" }
+      ]
+    },
+    {
+      "id": "hr.core.employees",
+      "displayName": "Mitarbeiterstamm",
+      "description": "Stammdaten aller Mitarbeiterinnen und Mitarbeiter mit Eintrittsdatum und Abteilung.",
+      "en": { "displayName": "Employees", "description": "Master data of all employees with entry date and department." },
+      "tags": [ "hr", "master-data" ],
+      "columns": [
+        { "name": "employee_number", "type": "varchar", "description": "Mitarbeiternummer", "en": "Employee number" },
+        { "name": "full_name", "type": "varchar", "description": "Vor- und Nachname", "en": "Full name" },
+        { "name": "department", "type": "varchar", "description": "Abteilung", "en": "Department" },
+        { "name": "entry_date", "type": "date", "description": "Eintrittsdatum", "en": "Entry date" },
+        { "name": "salary_band", "type": "varchar", "description": "Gehaltsband nach Tarifgruppe", "en": "Salary band by collective pay grade" }
+      ]
+    },
+    {
+      "id": "hr.core.absences",
+      "displayName": "Abwesenheiten",
+      "description": "Urlaub und Krankheitstage je Mitarbeiter.",
+      "en": { "displayName": "Absences", "description": "Holidays and sick days per employee." },
+      "tags": [ "hr" ],
+      "columns": [
+        { "name": "employee_number", "type": "varchar", "description": "Mitarbeiternummer", "en": "Employee number" },
+        { "name": "absence_type", "type": "varchar", "description": "Art der Abwesenheit", "en": "Absence type" },
+        { "name": "from_date", "type": "date", "description": "Von", "en": "From" },
+        { "name": "to_date", "type": "date", "description": "Bis", "en": "To" }
+      ]
+    },
+    {
+      "id": "hr.core.training_records",
+      "displayName": "Schulungsnachweise",
+      "description": "Teilgenommene Schulungen und Zertifikate je Mitarbeiter.",
+      "en": { "displayName": "Training records", "description": "Completed trainings and certificates per employee." },
+      "tags": [ "hr" ],
+      "columns": [
+        { "name": "employee_number", "type": "varchar", "description": "Mitarbeiternummer", "en": "Employee number" },
+        { "name": "course", "type": "varchar", "description": "Schulung", "en": "Course" },
+        { "name": "completed_at", "type": "date", "description": "Abschlussdatum", "en": "Completion date" },
+        { "name": "certificate_valid_until", "type": "date", "description": "Zertifikat gültig bis", "en": "Certificate valid until" }
+      ]
+    }
+  ]
+}
