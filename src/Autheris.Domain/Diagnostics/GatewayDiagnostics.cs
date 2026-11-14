@@ -64,6 +64,9 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> AuditDeadLetterCounter =
         Meter.CreateCounter<long>("autheris_audit_dead_letter_total", description: "Total number of audit events diverted to dead-letter storage");
 
+    public static readonly Counter<long> AuditLostOnShutdownCounter =
+        Meter.CreateCounter<long>("autheris_audit_lost_on_shutdown_total", description: "Audit events lost when persistence and dead-letter fallback both fail");
+
     public static readonly Counter<long> DmlAuditFailedCounter =
         Meter.CreateCounter<long>("autheris_dml_audit_failed_total", description: "Number of committed WebSQL DML statements whose audit record could not be written");
 

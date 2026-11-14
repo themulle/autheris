@@ -731,11 +731,11 @@ internal static class AuditSqlCore
         }
     }
 
-    public static async Task WriteToDeadLetterAsync(
+    public static async Task<bool> WriteToDeadLetterAsync(
         DbConnection conn,
         IGovernanceSqlDialect dialect,
         IReadOnlyList<AuditLogEntry> batch,
-        string errorMessage,
+        string errorReason,
         ILogger? logger,
         CancellationToken ct)
     {
@@ -746,16 +746,59 @@ internal static class AuditSqlCore
                 ? "INSERT INTO dbo.AUDIT_DEAD_LETTER (id, batch_json, error_message, failed_at, tenant_id) VALUES (@id, @batch, @err, @failed, @tenant)"
                 : "INSERT INTO AUDIT_DEAD_LETTER (id, batch_json, error_message, failed_at, tenant_id) VALUES (@id, @batch, @err, @failed, @tenant)";
             cmd.AddBound("@id", Guid.NewGuid().ToString("N"), System.Data.DbType.String);
-            cmd.AddBound("@batch", JsonSerializer.Serialize(batch), System.Data.DbType.String);
-            cmd.AddBound("@err", errorMessage, System.Data.DbType.String);
+            cmd.AddBound("@batch", AuditDeadLetterSerializer.SerializeBatch(batch), System.Data.DbType.String);
+            cmd.AddBound("@err", errorReason, System.Data.DbType.String);
             cmd.AddBound("@failed", TimeProvider.System.GetUtcNow().ToString("O"), System.Data.DbType.String);
             cmd.AddBound("@tenant", batch.FirstOrDefault()?.TenantId.Value ?? TenantId.Platform.Value, System.Data.DbType.String);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            return true;
         }
         catch (Exception dlEx)
         {
-            logger?.LogCritical(dlEx, "Failed to write audit batch to AUDIT_DEAD_LETTER table!");
+            LogDeadLetterFailure(dlEx, batch.Count, logger);
+            return false;
         }
+    }
+
+    public static async Task<int> ReplayDeadLettersAsync(
+        DbConnection conn,
+        IGovernanceSqlDialect dialect,
+        int maxBatches,
+        Func<IReadOnlyList<AuditLogEntry>, CancellationToken, Task> recordBatchAsync,
+        CancellationToken ct)
+    {
+        var results = new List<(string Id, IReadOnlyList<AuditLogEntry> Batch)>();
+        await using (var selectCmd = conn.CreateCommand())
+        {
+            selectCmd.CommandText = dialect is SqlServerGovernanceDialect
+                ? "SELECT TOP (@lim) id, batch_json FROM dbo.AUDIT_DEAD_LETTER ORDER BY failed_at ASC, id ASC"
+                : "SELECT id, batch_json FROM AUDIT_DEAD_LETTER ORDER BY failed_at ASC, id ASC LIMIT @lim";
+            selectCmd.AddBound("@lim", maxBatches, System.Data.DbType.Int32);
+            await using var reader = await selectCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                results.Add((reader.GetString(0), AuditDeadLetterSerializer.DeserializeBatch(reader.GetString(1))));
+            }
+        }
+
+        int replayed = 0;
+        foreach (var (id, batch) in results)
+        {
+            if (batch.Count > 0)
+            {
+                await recordBatchAsync(AuditDeadLetterSerializer.PrepareReplayBatch(batch), ct).ConfigureAwait(false);
+            }
+
+            await using var deleteCmd = conn.CreateCommand();
+            deleteCmd.CommandText = dialect is SqlServerGovernanceDialect
+                ? "DELETE FROM dbo.AUDIT_DEAD_LETTER WHERE id = @id"
+                : "DELETE FROM AUDIT_DEAD_LETTER WHERE id = @id";
+            deleteCmd.AddBound("@id", id, System.Data.DbType.String);
+            await deleteCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            replayed++;
+        }
+
+        return replayed;
     }
 
     public static async Task<int> ExecutePurgeBatchAsync(
@@ -887,6 +930,11 @@ internal static class AuditSqlCore
     public static void LogDisposalDrainError(Exception ex, ILogger? logger)
     {
         logger?.LogError(ex, "Error while draining audit channel during disposal.");
+    }
+
+    public static void LogDeadLetterFailure(Exception ex, int count, ILogger? logger)
+    {
+        logger?.LogCritical(ex, "Failed to persist or dead-letter {Count} audit entries; entries lost.", count);
     }
 }
 

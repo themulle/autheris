@@ -449,6 +449,8 @@ public partial class GovernanceRepository : IAuditLogRepository, IAuditChainExpo
         await FlushBatchAsync().ConfigureAwait(false);
     }
 
+    private const int ShutdownFlushTimeoutSeconds = 5;
+
     private async Task ProcessAuditChannelAsync()
     {
         var batch = new List<AuditLogEntry>(250);
@@ -460,90 +462,89 @@ public partial class GovernanceRepository : IAuditLogRepository, IAuditChainExpo
             {
                 batch.Clear();
                 var deadline = TimeProvider.System.GetUtcNow().AddMilliseconds(10);
-
                 while (batch.Count < 250 && (TimeProvider.System.GetUtcNow() < deadline || batch.Count == 0))
                 {
                     if (reader.TryRead(out var entry)) batch.Add(entry);
                     else break;
                 }
 
-                if (batch.Count > 0)
+                await PersistOrDeadLetterAsync(batch, "BatchFlushFailure").ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { }
+
+        await PersistOrDeadLetterAsync(batch, "ShutdownDrain").ConfigureAwait(false);
+        while (reader.TryRead(out var entry))
+        {
+            batch.Add(entry);
+            if (batch.Count >= 250) await PersistOrDeadLetterAsync(batch, "ShutdownDrain").ConfigureAwait(false);
+        }
+        await PersistOrDeadLetterAsync(batch, "ShutdownDrain").ConfigureAwait(false);
+    }
+
+    private async Task TryWriteLockedAsync(List<AuditLogEntry> batch, CancellationToken ct)
+    {
+        await _auditLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await RecordAuditEventsBatchInternalAsync(batch, ct).ConfigureAwait(false);
+            if (_isAuditPipelineFaulted) { _isAuditPipelineFaulted = false; AuditSqlCore.LogPipelineRecovered(_logger); }
+        }
+        finally { _auditLock.Release(); }
+    }
+
+    private async Task PersistOrDeadLetterAsync(List<AuditLogEntry> batch, string reason)
+    {
+        if (batch.Count == 0) return;
+
+        Exception? lastException = null;
+        bool persisted = false;
+        bool attemptShutdownFlush = _auditCts.IsCancellationRequested;
+
+        if (!attemptShutdownFlush)
+        {
+            const int maxRetries = 3;
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try { await TryWriteLockedAsync(batch, _auditCts.Token).ConfigureAwait(false); persisted = true; break; }
+                catch (OperationCanceledException oce) { lastException ??= oce; attemptShutdownFlush = true; break; }
+                catch (Exception ex)
                 {
-                    const int maxRetries = 3;
-                    for (int attempt = 1; attempt <= maxRetries; attempt++)
+                    lastException = ex;
+                    AuditSqlCore.LogBatchFlushError(ex, batch.Count, attempt, maxRetries, _logger);
+                    if (attempt < maxRetries)
                     {
-                        await _auditLock.WaitAsync(_auditCts.Token).ConfigureAwait(false);
-                        try
-                        {
-                            await RecordAuditEventsBatchInternalAsync(batch, _auditCts.Token).ConfigureAwait(false);
-                            if (_isAuditPipelineFaulted)
-                            {
-                                _isAuditPipelineFaulted = false;
-                                AuditSqlCore.LogPipelineRecovered(_logger);
-                            }
-                            break;
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            break;
-                        }
-                        catch (Exception ex)
-                        {
-                            AuditSqlCore.LogBatchFlushError(ex, batch.Count, attempt, maxRetries, _logger);
-                            if (attempt < maxRetries)
-                            {
-                                await Task.Delay(50 * attempt, _auditCts.Token).ConfigureAwait(false);
-                            }
-                            else
-                            {
-                                _isAuditPipelineFaulted = true;
-                                AuditSqlCore.LogFatalBatchFailure(ex, batch.Count, _logger);
-                                await using var conn = await OpenConnectionAsync(_auditCts.Token).ConfigureAwait(false);
-                                await AuditSqlCore.WriteToDeadLetterAsync(conn, _dialect, batch, ex.Message, _logger, _auditCts.Token).ConfigureAwait(false);
-                                Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
-                            }
-                        }
-                        finally
-                        {
-                            _auditLock.Release();
-                        }
+                        try { await Task.Delay(50 * attempt, _auditCts.Token).ConfigureAwait(false); }
+                        catch (OperationCanceledException oce) { lastException ??= oce; attemptShutdownFlush = true; break; }
                     }
                 }
             }
         }
-        catch (OperationCanceledException)
+
+        if (!persisted && attemptShutdownFlush)
         {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(ShutdownFlushTimeoutSeconds));
+            try { await TryWriteLockedAsync(batch, timeoutCts.Token).ConfigureAwait(false); persisted = true; }
+            catch (Exception ex) { lastException = ex; AuditSqlCore.LogShutdownDrainError(ex, batch.Count, _logger); }
+        }
+
+        if (!persisted)
+        {
+            _isAuditPipelineFaulted = true;
+            await AuditDeadLetterSerializer.TryDeadLetterBatchAsync(
+                OpenConnectionAsync, _dialect, batch, lastException ?? new OperationCanceledException(reason),
+                reason, ShutdownFlushTimeoutSeconds, _logger).ConfigureAwait(false);
         }
 
         batch.Clear();
-        async Task DrainBatchAsync()
-        {
-            if (batch.Count == 0) return;
-            await _auditLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
-            try
-            {
-                await RecordAuditEventsBatchInternalAsync(batch, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                AuditSqlCore.LogShutdownDrainError(ex, batch.Count, _logger);
-                await using var conn = await OpenConnectionAsync(CancellationToken.None).ConfigureAwait(false);
-                await AuditSqlCore.WriteToDeadLetterAsync(conn, _dialect, batch, ex.Message, _logger, CancellationToken.None).ConfigureAwait(false);
-                Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
-            }
-            finally
-            {
-                _auditLock.Release();
-            }
-            batch.Clear();
-        }
+    }
 
-        while (reader.TryRead(out var entry))
-        {
-            batch.Add(entry);
-            if (batch.Count >= 250) await DrainBatchAsync().ConfigureAwait(false);
-        }
-        await DrainBatchAsync().ConfigureAwait(false);
+    public async Task<int> ReplayAuditDeadLettersAsync(int maxBatches = 100, CancellationToken ct = default)
+    {
+        ThrowIfNotReady();
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBatches);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await AuditSqlCore.ReplayDeadLettersAsync(conn, _dialect, maxBatches, RecordAuditEventsAsync, ct).ConfigureAwait(false);
     }
 
     public Task RecordAuditEventAsync(AuditLogEntry entry, DbTransaction? existingTx, CancellationToken ct = default)

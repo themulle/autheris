@@ -78,4 +78,84 @@ public sealed class AuditDetailsBuilder
     {
         return JsonSerializer.Serialize(_fields);
     }
+
+    public static string RedactJson(string? detailsJson, Func<string, string>? stringScrubber = null, int maxFieldLength = 1024)
+    {
+        if (string.IsNullOrWhiteSpace(detailsJson))
+        {
+            return "{}";
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(detailsJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return RedactScalarOrArray(doc.RootElement, stringScrubber, maxFieldLength);
+            }
+
+            var sanitized = RedactObject(doc.RootElement, stringScrubber, maxFieldLength);
+            return JsonSerializer.Serialize(sanitized);
+        }
+        catch (JsonException)
+        {
+            var builder = new AuditDetailsBuilder(maxFieldLength);
+            var scrubbed = stringScrubber != null ? stringScrubber(detailsJson) : detailsJson;
+            return builder.WithField("raw", scrubbed).Build();
+        }
+    }
+
+    private static string RedactScalarOrArray(JsonElement element, Func<string, string>? stringScrubber, int maxFieldLength)
+    {
+        var value = RedactElement(element, stringScrubber, maxFieldLength);
+        return JsonSerializer.Serialize(value);
+    }
+
+    private static Dictionary<string, object?> RedactObject(JsonElement obj, Func<string, string>? stringScrubber, int maxFieldLength)
+    {
+        var builder = new AuditDetailsBuilder(maxFieldLength);
+        var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var prop in obj.EnumerateObject())
+        {
+            if (SensitiveKeys.Contains(prop.Name))
+            {
+                result[prop.Name] = "[REDACTED]";
+                continue;
+            }
+
+            result[prop.Name] = RedactElement(prop.Value, stringScrubber, maxFieldLength, builder);
+        }
+
+        return result;
+    }
+
+    private static object? RedactElement(JsonElement element, Func<string, string>? stringScrubber, int maxFieldLength, AuditDetailsBuilder? builder = null)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                return RedactObject(element, stringScrubber, maxFieldLength);
+            case JsonValueKind.Array:
+                var list = new List<object?>();
+                foreach (var item in element.EnumerateArray())
+                {
+                    list.Add(RedactElement(item, stringScrubber, maxFieldLength, builder));
+                }
+                return list;
+            case JsonValueKind.String:
+                var str = element.GetString() ?? string.Empty;
+                if (stringScrubber != null)
+                {
+                    str = stringScrubber(str);
+                }
+                builder ??= new AuditDetailsBuilder(maxFieldLength);
+                return builder.SanitizeAndTruncate(str);
+            case JsonValueKind.Number:
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+                return element.Clone();
+            default:
+                return null;
+        }
+    }
 }
