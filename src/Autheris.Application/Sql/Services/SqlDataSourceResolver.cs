@@ -88,7 +88,7 @@ public sealed class SqlDataSourceResolver
             }
         }
 
-        if (webSqlOptions.DataSourceMappings != null && webSqlOptions.DataSourceMappings.ContainsKey(requested))
+        if (TryGetMapping(webSqlOptions, requested, out _))
         {
             resolved = requested;
             return true;
@@ -96,6 +96,57 @@ public sealed class SqlDataSourceResolver
 
         resolved = string.Empty;
         return false;
+    }
+
+    /// <summary>The <c>DataSources:Connections</c> key a logical data source name resolves to, or null (deny) when there is none.</summary>
+    public string? ResolveConnectionKey(string? logicalName) => ResolveConnectionKey(_options.Value, logicalName);
+
+    /// <summary>
+    /// The one lookup of <c>WebSql:DataSourceMappings</c> (#668). A mapping is one hop to an existing key of <c>DataSources:Connections</c>
+    /// (case-insensitive, returned as spelled there) that is not itself a mapping key. A chain, a cycle, an empty or unknown target, or a name
+    /// without a connection resolves to null, which every caller treats as a denial. An unmapped name is its own connection key.
+    /// </summary>
+    public static string? ResolveConnectionKey(GatewayOptions options, string? logicalName)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (string.IsNullOrWhiteSpace(logicalName) || options.DataSources?.Connections is not { } connections)
+        {
+            return null;
+        }
+
+        string candidate = logicalName;
+        if (TryGetMapping(options.WebSql, logicalName, out var target))
+        {
+            if (string.IsNullOrWhiteSpace(target) || TryGetMapping(options.WebSql, target, out _))
+            {
+                return null;
+            }
+
+            candidate = target;
+        }
+
+        foreach (var key in connections.Keys)
+        {
+            if (string.Equals(key, candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                return key;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Whether <c>WebSql:DataSourceMappings</c> has an entry for <paramref name="name"/>; the entry's raw target (possibly blank) is returned unvalidated.</summary>
+    public static bool TryGetMapping(WebSqlOptions? webSqlOptions, string? name, out string target)
+    {
+        target = string.Empty;
+        if (webSqlOptions?.DataSourceMappings is not { } mappings || string.IsNullOrWhiteSpace(name) || !mappings.TryGetValue(name, out var raw))
+        {
+            return false;
+        }
+
+        target = raw ?? string.Empty;
+        return true;
     }
 
     public DatabaseDialect? ResolveConnectionDialect(string dataSourceName)
@@ -115,24 +166,11 @@ public sealed class SqlDataSourceResolver
         return dialect;
     }
 
-    public DataSourceConnectionOptions? ResolveConnectionOptions(string dataSourceName)
-    {
-        string effectiveName = dataSourceName;
-        if (_options.Value.WebSql?.DataSourceMappings != null &&
-            _options.Value.WebSql.DataSourceMappings.TryGetValue(dataSourceName, out var mapped) &&
-            !string.IsNullOrWhiteSpace(mapped))
-        {
-            effectiveName = mapped;
-        }
+    public DataSourceConnectionOptions? ResolveConnectionOptions(string dataSourceName) =>
+        ResolveConnectionOptions(_options.Value, dataSourceName);
 
-        var connections = _options.Value.DataSources?.Connections;
-        if (connections != null && connections.TryGetValue(effectiveName, out var connOptions))
-        {
-            return connOptions;
-        }
-
-        return null;
-    }
+    public static DataSourceConnectionOptions? ResolveConnectionOptions(GatewayOptions options, string? dataSourceName) =>
+        ResolveConnectionKey(options, dataSourceName) is { } key ? options.DataSources.Connections[key] : null;
 
     public static TableIdentifier ResolveTableIdentifier(TableAccessTarget target, string? dataSourceName)
     {

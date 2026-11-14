@@ -32,6 +32,7 @@ internal static class GatewayStartupChecks
         new("SqlServerWindowsAuth", GatewayStartupChecks.SqlServerWindowsAuth),
         new("Databricks", GatewayStartupChecks.Databricks),
         new("ProcedureDialectAdmission", ProcedureStartupChecks.DialectAdmission),
+        new("DataSourceMappings", GatewayStartupChecks.DataSourceMappings),
         new("DefaultSchemas", GatewayStartupChecks.DefaultSchemas),
         new("TenantCollisions", GatewayStartupChecks.TenantCollisions),
         new("WebhookSubscriptions", GatewayStartupChecks.WebhookSubscriptions),
@@ -75,6 +76,11 @@ internal static class GatewayStartupChecks
     internal static void Databricks(StartupCheckContext context)
     {
         GatewayStartupValidator.ValidateDatabricks(context.Options, context.Environment);
+    }
+
+    internal static void DataSourceMappings(StartupCheckContext context)
+    {
+        GatewayStartupValidator.ValidateDataSourceMappings(context.Options, context.Logger);
     }
 
     internal static void DefaultSchemas(StartupCheckContext context)

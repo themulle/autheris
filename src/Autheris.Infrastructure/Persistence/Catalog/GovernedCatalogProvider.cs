@@ -4,6 +4,7 @@ using System.Data.Common;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -31,7 +32,7 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
     private readonly TimeSpan _ttl;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
-    private readonly ConcurrentDictionary<(string DataSource, string Schema, string Table), CacheItem> _cache = new();
+    private readonly ConcurrentDictionary<(string DataSource, string ConnectionKey, string Schema, string Table), CacheItem> _cache = new();
 
     private readonly record struct CacheItem(TableCatalogEntry Entry, DateTimeOffset ExpiresAt, string Fingerprint);
 
@@ -80,25 +81,36 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
     {
         foreach (var key in _cache.Keys)
         {
-            if (dataSourceName is null || string.Equals(key.DataSource, dataSourceName, StringComparison.OrdinalIgnoreCase))
+            if (dataSourceName is null || string.Equals(key.DataSource, dataSourceName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(key.ConnectionKey, dataSourceName, StringComparison.OrdinalIgnoreCase))
             {
                 _cache.TryRemove(key, out _);
             }
         }
     }
 
-    public async ValueTask<ITableCatalog> GetCatalogAsync(string dataSourceName, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
+    public async ValueTask<ITableCatalog> GetCatalogAsync(GovernedDataSource dataSource, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(dataSourceName);
+        ArgumentNullException.ThrowIfNull(dataSource);
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataSource.LogicalName);
         ArgumentNullException.ThrowIfNull(tables);
+        var dataSourceName = dataSource.LogicalName;
+
+        // #668: the connection key is re-resolved here, so a caller can never admit a table through a key the mapping does not give. A mismatch
+        // or an unresolvable mapping leaves no connection key; every table of the request is then denied in LoadAsync.
+        string? connectionKey = SqlDataSourceResolver.ResolveConnectionKey(_gateway.Value, dataSourceName);
+        if (!string.Equals(connectionKey, dataSource.ConnectionKey, StringComparison.OrdinalIgnoreCase))
+        {
+            connectionKey = null;
+        }
 
         var entries = new List<TableCatalogEntry>(tables.Count);
         foreach (var table in tables)
         {
             ct.ThrowIfCancellationRequested();
-            var key = (dataSourceName.ToLowerInvariant(), table.Schema, table.TableName);
+            var key = (dataSourceName.ToLowerInvariant(), connectionKey?.ToLowerInvariant() ?? string.Empty, table.Schema, table.TableName);
             if (_cache.TryGetValue(key, out var cached) && cached.ExpiresAt > _time.GetUtcNow() &&
-                await FingerprintMatchesAsync(dataSourceName, table, cached.Fingerprint, ct).ConfigureAwait(false))
+                await FingerprintMatchesAsync(connectionKey, table, cached.Fingerprint, ct).ConfigureAwait(false))
             {
                 entries.Add(cached.Entry);
                 continue;
@@ -106,7 +118,7 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
 
             try
             {
-                var (loaded, fingerprint) = await LoadAsync(dataSourceName, table, ct).ConfigureAwait(false);
+                var (loaded, fingerprint) = await LoadAsync(dataSourceName, connectionKey, table, ct).ConfigureAwait(false);
                 if (loaded is null)
                 {
                     _cache.TryRemove(key, out _);
@@ -192,18 +204,18 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
             sqlException is null ? string.Empty : $"; SqlNumber={sqlException.Number}, SqlState={sqlException.State}, SqlClass={sqlException.Class}");
     }
 
-    private DataSourceConnectionOptions? FindConnection(string dataSourceName) =>
-        _gateway.Value.DataSources?.Connections is { } connections && connections.TryGetValue(dataSourceName, out var options) ? options : null;
+    private DataSourceConnectionOptions? FindConnection(string? connectionKey) =>
+        connectionKey is not null && _gateway.Value.DataSources?.Connections is { } connections && connections.TryGetValue(connectionKey, out var options) ? options : null;
 
     // A cache hit is only valid while the governance record still yields the same fingerprint. Any failure to read it is a miss
     // (the reload then fails closed on its own).
-    private async Task<bool> FingerprintMatchesAsync(string dataSourceName, TableIdentifier table, string expected, CancellationToken ct)
+    private async Task<bool> FingerprintMatchesAsync(string? connectionKey, TableIdentifier table, string expected, CancellationToken ct)
     {
         try
         {
             var metadata = await _governance.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
             return metadata is not null &&
-                   FindConnection(dataSourceName) is { } connection &&
+                   FindConnection(connectionKey) is { } connection &&
                    string.Equals(Fingerprint(connection, metadata), expected, StringComparison.Ordinal);
         }
         catch (OperationCanceledException)
@@ -239,9 +251,9 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
             dataSourceName, table.ToQualifiedName(), reason);
 
     private async Task<(TableCatalogEntry? Entry, string Fingerprint)> LoadAsync(
-        string dataSourceName, TableIdentifier table, CancellationToken ct)
+        string dataSourceName, string? connectionKey, TableIdentifier table, CancellationToken ct)
     {
-        var connectionOptions = FindConnection(dataSourceName);
+        var connectionOptions = FindConnection(connectionKey);
         if (connectionOptions is null)
         {
             LogAdmissionDenied(dataSourceName, table, $"The data source '{dataSourceName}' has no configured connection.");
@@ -267,7 +279,7 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider, 
             metadata.Dialect != dialect)
         {
             LogAdmissionDenied(dataSourceName, table,
-                $"The catalog entry (type {metadata.DataSourceType}, source '{metadata.Table.SourceName}', dialect {metadata.Dialect}) does not match the configured connection (dialect {dialect}).");
+                $"The catalog entry (type {metadata.DataSourceType}, source '{metadata.Table.SourceName}', dialect {metadata.Dialect}) does not match data source '{dataSourceName}' (connection '{connectionKey}', dialect {dialect}).");
             return (null, string.Empty);
         }
 

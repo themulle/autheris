@@ -90,7 +90,7 @@ internal sealed class GateTreeSources
 
     private sealed class GateCatalogProvider(ITableCatalog catalog) : IGovernedCatalogProvider
     {
-        public ValueTask<ITableCatalog> GetCatalogAsync(string dataSourceName, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct) =>
+        public ValueTask<ITableCatalog> GetCatalogAsync(Autheris.Application.Sql.Catalog.GovernedDataSource dataSource, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct) =>
             ValueTask.FromResult(catalog);
     }
 
