@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.State.Caching.TableCache;
 using Autheris.Application.State.Caching.TableCache.Engines;
+using Autheris.Application.Streaming.Crypto;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Caching.TableCache;
 using Autheris.Domain.Common;
@@ -27,24 +28,46 @@ public sealed class TableCacheRefreshEnginesTests
         var cacheStore = Substitute.For<ITableCacheStore>();
         var catalog = new TableCacheCatalog();
         var manager = Substitute.For<ITableCacheManager>();
+        var crypto = Substitute.For<ICdcStreamCrypto>();
 
         var table = new TableIdentifier("crm", "public", "customers");
         var streamId = new CdcStreamId(Guid.NewGuid().ToString("N"));
 
         catalog.Upsert(new TableCacheEntryMetadata(
-            table, TableCacheStorageTier.DuckDbDisk, "/path", "view", 1, DateTimeOffset.UtcNow, null, 10, 1000, 100, true, null, ["id", "name"], null, TableCacheOfflinePolicy.FailClosed));
+            table, TableCacheStorageTier.DuckDbDisk, "/path", "view", 1, DateTimeOffset.UtcNow, null, 10, 1000, 100, true, null, ["id", "name"], null, TableCacheOfflinePolicy.FailClosed, ["id"]));
 
-        var events = new List<CdcStreamEventRecord>
-        {
-            new(streamId, 101, 1, CdcStreamEventKind.Change, CdcOperation.Insert, CdcTenantScope.Row, "t1", null, new CdcProtectedBlob("dek1", new byte[16]), DateTimeOffset.UtcNow),
-            new(streamId, 102, 2, CdcStreamEventKind.Change, CdcOperation.Update, CdcTenantScope.Row, "t1", null, new CdcProtectedBlob("dek1", new byte[16]), DateTimeOffset.UtcNow),
-            new(streamId, 103, 3, CdcStreamEventKind.Change, CdcOperation.Delete, CdcTenantScope.Row, "t1", null, new CdcProtectedBlob("dek1", new byte[16]), DateTimeOffset.UtcNow)
-        };
+        var evtInsert = new CdcStreamEventRecord(streamId, 101, 1, CdcStreamEventKind.Change, CdcOperation.Insert, CdcTenantScope.Row, "t1", null, new CdcProtectedBlob("dek1", new byte[16]), DateTimeOffset.UtcNow);
+        var evtUpdate = new CdcStreamEventRecord(streamId, 102, 2, CdcStreamEventKind.Change, CdcOperation.Update, CdcTenantScope.Row, "t1", null, new CdcProtectedBlob("dek1", new byte[16]), DateTimeOffset.UtcNow);
+        var evtDelete = new CdcStreamEventRecord(streamId, 103, 3, CdcStreamEventKind.Change, CdcOperation.Delete, CdcTenantScope.Row, "t1", null, new CdcProtectedBlob("dek1", new byte[16]), DateTimeOffset.UtcNow);
+
+        crypto.UnprotectEventAsync(evtInsert, Arg.Any<CancellationToken>()).Returns(_ =>
+            CdcPayloadCodec.EncodeChange(new CdcChangePayload(
+                new Dictionary<string, object?> { ["id"] = 1 },
+                null,
+                new Dictionary<string, object?> { ["id"] = 1, ["name"] = "Alice" },
+                false,
+                false)));
+        crypto.UnprotectEventAsync(evtUpdate, Arg.Any<CancellationToken>()).Returns(_ =>
+            CdcPayloadCodec.EncodeChange(new CdcChangePayload(
+                new Dictionary<string, object?> { ["id"] = 1 },
+                new Dictionary<string, object?> { ["id"] = 1, ["name"] = "Alice" },
+                new Dictionary<string, object?> { ["name"] = "Alicia" },
+                false,
+                false)));
+        crypto.UnprotectEventAsync(evtDelete, Arg.Any<CancellationToken>()).Returns(_ =>
+            CdcPayloadCodec.EncodeChange(new CdcChangePayload(
+                new Dictionary<string, object?> { ["id"] = 1 },
+                new Dictionary<string, object?> { ["id"] = 1, ["name"] = "Alicia" },
+                null,
+                false,
+                false)));
+
+        var events = new List<CdcStreamEventRecord> { evtInsert, evtUpdate, evtDelete };
 
         streamStore.ReadAsync(streamId, 101, Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new CdcReadResult(100, 103, events));
 
-        var consumer = new CdcTableCacheConsumer(streamStore, cacheStore, catalog, manager);
+        var consumer = new CdcTableCacheConsumer(streamStore, cacheStore, catalog, manager, crypto: crypto);
 
         // Act
         await consumer.ProcessStreamBatchAsync(streamId, table);

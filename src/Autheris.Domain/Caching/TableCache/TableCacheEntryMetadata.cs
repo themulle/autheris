@@ -22,4 +22,5 @@ public sealed record TableCacheEntryMetadata(
     string? LastError,
     IReadOnlyList<string> CachedColumns,
     string? FilterPredicate,
-    TableCacheOfflinePolicy OfflinePolicy);
+    TableCacheOfflinePolicy OfflinePolicy,
+    IReadOnlyList<string>? PrimaryKeyColumns = null);
