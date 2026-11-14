@@ -83,19 +83,25 @@ public static class SqlConjunctSplitter
     /// </summary>
     public static void FlattenAnd(Expression expr, List<Expression> collector)
     {
-        while (expr is ParenthesizedExpression p)
+        var stack = new Stack<Expression>();
+        stack.Push(expr);
+        while (stack.Count > 0)
         {
-            expr = p.Expression;
-        }
+            var current = stack.Pop();
+            while (current is ParenthesizedExpression p)
+            {
+                current = p.Expression;
+            }
 
-        if (expr is BinaryExpression { Operator: BinaryOperator.And } b)
-        {
-            FlattenAnd(b.Left, collector);
-            FlattenAnd(b.Right, collector);
-        }
-        else
-        {
-            collector.Add(expr);
+            if (current is BinaryExpression { Operator: BinaryOperator.And } b)
+            {
+                stack.Push(b.Right);
+                stack.Push(b.Left);
+            }
+            else
+            {
+                collector.Add(current);
+            }
         }
     }
 

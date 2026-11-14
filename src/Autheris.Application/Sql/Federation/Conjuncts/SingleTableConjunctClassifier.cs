@@ -102,55 +102,60 @@ public static class SingleTableConjunctClassifier
 
     public static void CollectColumnReferences(SqlNode node, List<ColumnReference> collector)
     {
-        switch (node)
+        var stack = new Stack<SqlNode>();
+        stack.Push(node);
+        while (stack.Count > 0)
         {
-            case ColumnReference col:
-                collector.Add(col);
-                break;
-            case ParenthesizedExpression paren:
-                CollectColumnReferences(paren.Expression, collector);
-                break;
-            case BinaryExpression binary:
-                CollectColumnReferences(binary.Left, collector);
-                CollectColumnReferences(binary.Right, collector);
-                break;
-            case UnaryExpression unary:
-                CollectColumnReferences(unary.Operand, collector);
-                break;
-            case LikeExpression like:
-                CollectColumnReferences(like.Operand, collector);
-                CollectColumnReferences(like.Pattern, collector);
-                if (like.Escape != null) CollectColumnReferences(like.Escape, collector);
-                break;
-            case InListExpression inList:
-                CollectColumnReferences(inList.Operand, collector);
-                foreach (var item in inList.Items) CollectColumnReferences(item, collector);
-                break;
-            case BetweenExpression between:
-                CollectColumnReferences(between.Operand, collector);
-                CollectColumnReferences(between.Lower, collector);
-                CollectColumnReferences(between.Upper, collector);
-                break;
-            case CaseExpression caseExpr:
-                if (caseExpr.Operand != null) CollectColumnReferences(caseExpr.Operand, collector);
-                foreach (var when in caseExpr.WhenClauses)
-                {
-                    CollectColumnReferences(when.Condition, collector);
-                    CollectColumnReferences(when.Result, collector);
-                }
-                if (caseExpr.ElseResult != null) CollectColumnReferences(caseExpr.ElseResult, collector);
-                break;
-            case FunctionCallExpression fn:
-                foreach (var arg in fn.Arguments) CollectColumnReferences(arg, collector);
-                if (fn.Filter != null) CollectColumnReferences(fn.Filter, collector);
-                break;
-            case CastExpression cast:
-                CollectColumnReferences(cast.Operand, collector);
-                break;
-            case IsDistinctFromExpression distinct:
-                CollectColumnReferences(distinct.Left, collector);
-                CollectColumnReferences(distinct.Right, collector);
-                break;
+            switch (stack.Pop())
+            {
+                case ColumnReference col:
+                    collector.Add(col);
+                    break;
+                case ParenthesizedExpression paren:
+                    stack.Push(paren.Expression);
+                    break;
+                case BinaryExpression binary:
+                    stack.Push(binary.Right);
+                    stack.Push(binary.Left);
+                    break;
+                case UnaryExpression unary:
+                    stack.Push(unary.Operand);
+                    break;
+                case LikeExpression like:
+                    if (like.Escape != null) stack.Push(like.Escape);
+                    stack.Push(like.Pattern);
+                    stack.Push(like.Operand);
+                    break;
+                case InListExpression inList:
+                    for (int i = inList.Items.Count - 1; i >= 0; i--) stack.Push(inList.Items[i]);
+                    stack.Push(inList.Operand);
+                    break;
+                case BetweenExpression between:
+                    stack.Push(between.Upper);
+                    stack.Push(between.Lower);
+                    stack.Push(between.Operand);
+                    break;
+                case CaseExpression caseExpr:
+                    if (caseExpr.ElseResult != null) stack.Push(caseExpr.ElseResult);
+                    for (int i = caseExpr.WhenClauses.Count - 1; i >= 0; i--)
+                    {
+                        stack.Push(caseExpr.WhenClauses[i].Result);
+                        stack.Push(caseExpr.WhenClauses[i].Condition);
+                    }
+                    if (caseExpr.Operand != null) stack.Push(caseExpr.Operand);
+                    break;
+                case FunctionCallExpression fn:
+                    if (fn.Filter != null) stack.Push(fn.Filter);
+                    for (int i = fn.Arguments.Count - 1; i >= 0; i--) stack.Push(fn.Arguments[i]);
+                    break;
+                case CastExpression cast:
+                    stack.Push(cast.Operand);
+                    break;
+                case IsDistinctFromExpression distinct:
+                    stack.Push(distinct.Right);
+                    stack.Push(distinct.Left);
+                    break;
+            }
         }
     }
 

@@ -104,9 +104,23 @@ public static class PushabilityEvaluator
             {
                 if (binary.Operator is BinaryOperator.And or BinaryOperator.Or)
                 {
-                    var leftRes = ValidateExpression(binary.Left, metadata, dialect, options, clientParameters, negated);
+                    Expression cur = binary;
+                    var rights = new List<Expression>();
+                    while (cur is BinaryExpression cb && cb.Operator == binary.Operator)
+                    {
+                        rights.Add(cb.Right);
+                        cur = cb.Left;
+                    }
+
+                    var leftRes = ValidateExpression(cur, metadata, dialect, options, clientParameters, negated);
                     if (!leftRes.IsPushable) return leftRes;
-                    return ValidateExpression(binary.Right, metadata, dialect, options, clientParameters, negated);
+                    for (int i = rights.Count - 1; i >= 0; i--)
+                    {
+                        var rightRes = ValidateExpression(rights[i], metadata, dialect, options, clientParameters, negated);
+                        if (!rightRes.IsPushable) return rightRes;
+                    }
+
+                    return PushdownEvaluationResult.Allowed();
                 }
 
                 if (binary.Operator is BinaryOperator.Equal or BinaryOperator.LessThan or

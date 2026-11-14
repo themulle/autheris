@@ -524,19 +524,21 @@ public static class SubtreeGraphPartitioner
     private static List<Expression> ExtractConjuncts(Expression where)
     {
         var list = new List<Expression>();
-        void Flatten(Expression e)
+        var stack = new Stack<Expression>();
+        stack.Push(where);
+        while (stack.Count > 0)
         {
+            var e = stack.Pop();
             if (e is BinaryExpression { Operator: BinaryOperator.And } b)
             {
-                Flatten(b.Left);
-                Flatten(b.Right);
+                stack.Push(b.Right);
+                stack.Push(b.Left);
             }
             else
             {
                 list.Add(e);
             }
         }
-        Flatten(where);
         return list;
     }
 

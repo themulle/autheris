@@ -56,21 +56,27 @@ public sealed partial class SecurityCoverageVerifier
 
         private static void ConjunctNodes(Expression? where, List<SecurityPredicateExpression> into)
         {
-            switch (where)
+            if (where is null) return;
+            var stack = new Stack<Expression>();
+            stack.Push(where);
+            while (stack.Count > 0)
             {
-                case null:
-                    return;
-                case SecurityPredicateExpression sp:
+                var current = stack.Pop();
+                while (current is ParenthesizedExpression p)
+                {
+                    current = p.Expression;
+                }
+
+                if (current is SecurityPredicateExpression sp)
+                {
                     into.Add(sp);
-                    return;
-                case ParenthesizedExpression p:
-                    ConjunctNodes(p.Expression, into);
-                    return;
-                case BinaryExpression { Operator: BinaryOperator.And } b:
+                }
+                else if (current is BinaryExpression { Operator: BinaryOperator.And } b)
+                {
                     ExecutionStackGuard.Ensure();
-                    ConjunctNodes(b.Left, into);
-                    ConjunctNodes(b.Right, into);
-                    return;
+                    stack.Push(b.Right);
+                    stack.Push(b.Left);
+                }
             }
         }
 

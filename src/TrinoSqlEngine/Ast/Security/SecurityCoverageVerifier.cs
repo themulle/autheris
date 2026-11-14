@@ -432,21 +432,31 @@ public sealed partial class SecurityCoverageVerifier
 
         private static void StrictConjuncts(Expression? where)
         {
-            switch (where)
+            if (where is null) return;
+            var stack = new Stack<Expression>();
+            stack.Push(where);
+            while (stack.Count > 0)
             {
-                case null:
-                case SecurityPredicateExpression:
-                    return;
-                case ParenthesizedExpression p:
-                    StrictConjuncts(p.Expression);
-                    return;
-                case BinaryExpression { Operator: BinaryOperator.And } b:
+                var current = stack.Pop();
+                while (current is ParenthesizedExpression p)
+                {
+                    current = p.Expression;
+                }
+
+                if (current is SecurityPredicateExpression)
+                {
+                    continue;
+                }
+
+                if (current is BinaryExpression { Operator: BinaryOperator.And } b)
+                {
                     ExecutionStackGuard.Ensure();
-                    StrictConjuncts(b.Left);
-                    StrictConjuncts(b.Right);
-                    return;
-                default:
-                    throw new SecurityCoverageException("The WHERE of a secured derived table may only contain security predicates.");
+                    stack.Push(b.Right);
+                    stack.Push(b.Left);
+                    continue;
+                }
+
+                throw new SecurityCoverageException("The WHERE of a secured derived table may only contain security predicates.");
             }
         }
 
@@ -486,22 +496,27 @@ public sealed partial class SecurityCoverageVerifier
 
         private static void Conjuncts(Expression? where, List<SecurityPredicateId> into)
         {
-            // Iterative on the left spine would be unnecessary: injected WHERE trees are shallow. Depth is bounded by Enter().
-            switch (where)
+            if (where is null) return;
+            var stack = new Stack<Expression>();
+            stack.Push(where);
+            while (stack.Count > 0)
             {
-                case null:
-                    return;
-                case SecurityPredicateExpression sp:
+                var current = stack.Pop();
+                while (current is ParenthesizedExpression p)
+                {
+                    current = p.Expression;
+                }
+
+                if (current is SecurityPredicateExpression sp)
+                {
                     into.Add(sp.Id);
-                    return;
-                case ParenthesizedExpression p:
-                    Conjuncts(p.Expression, into);
-                    return;
-                case BinaryExpression { Operator: BinaryOperator.And } b:
+                }
+                else if (current is BinaryExpression { Operator: BinaryOperator.And } b)
+                {
                     ExecutionStackGuard.Ensure();
-                    Conjuncts(b.Left, into);
-                    Conjuncts(b.Right, into);
-                    return;
+                    stack.Push(b.Right);
+                    stack.Push(b.Left);
+                }
             }
         }
 
@@ -534,14 +549,31 @@ public sealed partial class SecurityCoverageVerifier
             Convert.ToInt64(l, System.Globalization.CultureInfo.InvariantCulture) == 1 &&
             Convert.ToInt64(r, System.Globalization.CultureInfo.InvariantCulture) is 0 or 1;
 
-        private static bool ContainsSelect(Expression e) => e switch
+        private static bool ContainsSelect(Expression e)
         {
-            ExistsExpression or InSubqueryExpression or ScalarSubqueryExpression or QuantifiedComparisonExpression => true,
-            BinaryExpression b => ContainsSelect(b.Left) || ContainsSelect(b.Right),
-            ParenthesizedExpression p => ContainsSelect(p.Expression),
-            UnaryExpression u => ContainsSelect(u.Operand),
-            _ => false
-        };
+            var stack = new Stack<Expression>();
+            stack.Push(e);
+            while (stack.Count > 0)
+            {
+                switch (stack.Pop())
+                {
+                    case ExistsExpression or InSubqueryExpression or ScalarSubqueryExpression or QuantifiedComparisonExpression:
+                        return true;
+                    case BinaryExpression b:
+                        stack.Push(b.Right);
+                        stack.Push(b.Left);
+                        break;
+                    case ParenthesizedExpression p:
+                        stack.Push(p.Expression);
+                        break;
+                    case UnaryExpression u:
+                        stack.Push(u.Operand);
+                        break;
+                }
+            }
+
+            return false;
+        }
 
         private void Expr(Expression e, ImmutableHashSet<string> cte, bool policyScope)
         {
@@ -590,8 +622,36 @@ public sealed partial class SecurityCoverageVerifier
                     when _insidePredicate > 0 && IsCanonicalConstant(canonical):
                     break; // the canonical tautology and deny-all (1 = 1, 1 = 0)
                 case BinaryExpression b:
-                    Expr(b.Left, cte, policyScope);
-                    Expr(b.Right, cte, policyScope);
+                    if (Builder.SqlAstBuilder.CanUnrollLeftSpine(b.Operator)
+                        && b.Left is BinaryExpression lb
+                        && Builder.SqlAstBuilder.SameChainFamily(b.Operator, lb.Operator))
+                    {
+                        var spine = new List<BinaryExpression>();
+                        Expression cur = b;
+                        while (cur is BinaryExpression cb && Builder.SqlAstBuilder.SameChainFamily(b.Operator, cb.Operator))
+                        {
+                            if (spine.Count > 0)
+                            {
+                                ExecutionStackGuard.Ensure();
+                                if ((++_ticks & 255) == 0) ct.ThrowIfCancellationRequested();
+                            }
+
+                            spine.Add(cb);
+                            cur = cb.Left;
+                        }
+
+                        Expr(cur, cte, policyScope);
+                        for (int i = spine.Count - 1; i >= 0; i--)
+                        {
+                            Expr(spine[i].Right, cte, policyScope);
+                        }
+                    }
+                    else
+                    {
+                        Expr(b.Left, cte, policyScope);
+                        Expr(b.Right, cte, policyScope);
+                    }
+
                     break;
                 case UnaryExpression u:
                     Expr(u.Operand, cte, policyScope);
