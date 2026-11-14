@@ -54,7 +54,8 @@ internal static partial class DbtCatalogTableFactory
 
         if (!IsValidCatalogIdentifier(model.Database) ||
             !IsValidCatalogIdentifier(model.Schema) ||
-            !IsValidCatalogIdentifier(model.Name))
+            !IsValidCatalogIdentifier(model.Name) ||
+            !IsValidCatalogIdentifier(model.PhysicalName))
         {
             reason = DbtSyncSkipReasons.InvalidIdentifier;
             return false;
@@ -75,8 +76,9 @@ internal static partial class DbtCatalogTableFactory
             SourceType = sourceType,
             SourceName = connectionName,
             SchemaName = model.Schema,
-            TableName = model.Name,
+            TableName = model.PhysicalName,
             DisplayName = model.Name,
+            DbtUniqueId = model.UniqueId,
             Description = model.Description,
             Sensitivity = "NORMAL",
             RequiresFourEyes = false,

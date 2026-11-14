@@ -1,0 +1,9 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "tables",
+      "column": { "name": "dbt_unique_id", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true }
+    }
+  ]
+}

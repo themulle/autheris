@@ -403,14 +403,15 @@ public sealed class DbtSyncTableCreationTests
     }
 
     [Fact]
-    public async Task Sync_DuplicateIdentifier_SkipsSecondWithDuplicate()
+    public async Task Sync_DuplicateIdentifier_SkipsBothWithPhysicalNameCollision()
     {
         var repo = Substitute.For<ITableMetadataRepository>(); // always "missing", so the second item reaches the creation branch too
         var service = Build(repo, Options());
         var result = await Sync(service, Manifest(Model(), Model()), dryRun: true);
 
-        result.CreatedTables.Count.ShouldBe(1);
-        result.SkippedItems.Single().Reason.ShouldBe(DbtSyncSkipReasons.Duplicate);
+        result.CreatedTables.ShouldBeEmpty();
+        result.SkippedItems.Count.ShouldBe(2);
+        result.SkippedItems.ShouldAllBe(s => s.Reason == DbtSyncSkipReasons.PhysicalNameCollision);
     }
 
     [Fact]

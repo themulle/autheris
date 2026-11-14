@@ -118,6 +118,7 @@ public static class DbtArtifactStreamingParser
 
                 var uniqueId = nodeProperty.Name;
                 var name = node.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? "" : "";
+                var physicalName = ReadPhysicalName(node, "alias", name);
                 var database = node.TryGetProperty("database", out var dbProp) ? dbProp.GetString() ?? "" : "";
                 var schema = node.TryGetProperty("schema", out var schemaProp) ? schemaProp.GetString() ?? "" : "";
                 var description = node.TryGetProperty("description", out var descProp) ? descProp.GetString() : null;
@@ -301,7 +302,7 @@ public static class DbtArtifactStreamingParser
                     columns,
                     dependsOn,
                     contractEnforced
-                ) { SyntheticSamples = ExtractSyntheticSamplesFromNode(node, columns.Keys) });
+                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(node, columns.Keys) });
             }
         }
 
@@ -314,6 +315,7 @@ public static class DbtArtifactStreamingParser
                 var srcNode = srcProp.Value;
                 var uniqueId = srcProp.Name;
                 var name = srcNode.TryGetProperty("name", out var np) ? np.GetString() ?? "" : "";
+                var physicalName = ReadPhysicalName(srcNode, "identifier", name);
                 var database = srcNode.TryGetProperty("database", out var dbp) ? dbp.GetString() ?? "" : "";
                 var schema = srcNode.TryGetProperty("schema", out var sp) ? sp.GetString() ?? "" : "";
                 var description = srcNode.TryGetProperty("description", out var dp) ? dp.GetString() : null;
@@ -374,7 +376,7 @@ public static class DbtArtifactStreamingParser
                     columns,
                     [],
                     false
-                ) { SyntheticSamples = ExtractSyntheticSamplesFromNode(srcNode, columns.Keys) });
+                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(srcNode, columns.Keys) });
             }
         }
 
@@ -393,6 +395,10 @@ public static class DbtArtifactStreamingParser
 
     private static string ReadConstraintTarget(JsonElement constraint) =>
         constraint.TryGetProperty("to", out var to) && to.ValueKind == JsonValueKind.String ? to.GetString() ?? "" : "";
+
+    /// <summary>Issue #666: the dbt alias (models, seeds) or identifier (sources); absent, null or blank falls back to the name, anything else is validated later.</summary>
+    private static string ReadPhysicalName(JsonElement owner, string property, string name) =>
+        ReadString(owner, property) is { } value && !string.IsNullOrWhiteSpace(value) ? value : name;
 
     private static string? ReadString(JsonElement owner, string property) =>
         owner.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

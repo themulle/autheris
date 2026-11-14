@@ -82,6 +82,7 @@ public sealed class CatalogGovernanceRatchetTests
             LongDescription = "persisted long description",
             Texts = new LocalizedTexts(new Dictionary<string, LocalizedTextEntry> { ["de"] = new("Tabelle", "Beschreibung") }),
             DocumentationSource = "Admin",
+            DbtUniqueId = "model.analytics.t",
             Sensitivity = "HIGH",
             RequiresFourEyes = true,
             IsActive = true,

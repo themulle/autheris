@@ -38,7 +38,7 @@ public partial class GovernanceRepository
 
     private static class CatalogSql
     {
-        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal
+        public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id
 FROM TABLES
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
@@ -49,7 +49,7 @@ WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema
        data_source_type, http_endpoint_json, plugin_name,
        description, long_description, doc_source,
        required_filter_columns_json, texts_json,
-       min_group_size, non_personal
+       min_group_size, non_personal, dbt_unique_id
 FROM TABLES
 WHERE is_active = 1";
 
@@ -112,8 +112,8 @@ FOR UPDATE";
         public const string SelectTableForUpdateSqlSs = @"SELECT id, source_type, sensitivity, requires_four_eyes, is_active, data_source_type, description, long_description, doc_source FROM TABLES WITH (UPDLOCK, ROWLOCK)
 WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
-        public const string UpsertTableSqlPg = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal)
-VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal)
+        public const string UpsertTableSqlPg = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id)
+VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId)
 ON CONFLICT (id) DO UPDATE SET
     source_type = EXCLUDED.source_type,
     source_name = EXCLUDED.source_name,
@@ -132,7 +132,8 @@ ON CONFLICT (id) DO UPDATE SET
     required_filter_columns_json = EXCLUDED.required_filter_columns_json,
     texts_json = EXCLUDED.texts_json,
     min_group_size = EXCLUDED.min_group_size,
-    non_personal = EXCLUDED.non_personal";
+    non_personal = EXCLUDED.non_personal,
+    dbt_unique_id = COALESCE(EXCLUDED.dbt_unique_id, TABLES.dbt_unique_id)";
 
         public const string UpsertTableSqlSs = @"MERGE dbo.TABLES WITH (HOLDLOCK) AS t
 USING (SELECT @id AS id) AS s
@@ -155,9 +156,10 @@ WHEN MATCHED THEN UPDATE SET
     required_filter_columns_json = @requiredFilterColumnsJson,
     texts_json = @textsJson,
     min_group_size = @minGroupSize,
-    non_personal = @nonPersonal
-WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal)
-    VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal);";
+    non_personal = @nonPersonal,
+    dbt_unique_id = COALESCE(@dbtUniqueId, t.dbt_unique_id)
+WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id)
+    VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId);";
 
         public const string InsertColumnSqlPg = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json, display_name, texts_json, ""collation"", length_semantics, ordinal)
 VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson, @displayName, @textsJson, @collation, @lengthSemantics,

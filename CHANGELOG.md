@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - None yet.
 
 ### Fixed
+- dbt sync registers sources under their `identifier` and models and seeds under their `alias` (falling back to `name`), so catalog entries, relations and generated SQL endpoints point to the physical table; new entries show the dbt name as display name. A catalog entry records the dbt node that owns it (governance step 0012); a node whose physical name is taken by an entry of another origin, and all nodes of one manifest that map to the same table, are skipped with `PHYSICAL_NAME_COLLISION` (before, the second of two such nodes was skipped as `DUPLICATE`). Entries registered under the logical name are left unchanged and reported with the warning `PHYSICAL_NAME_CHANGED` (#666).
 - Catalog search hits (MCP and `GET /api/v1/catalog/search`) suggest the real GraphQL root field of the table (`domain_schema_table`, sanitized) from the catalog GraphQL schema, or none when the table has no root field, instead of a non-existent `domain_table` (#682).
 
 ### Security
