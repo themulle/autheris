@@ -364,11 +364,15 @@ public partial class GovernanceRepository
 
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        CatalogWriteScope? writeScope = null;
+        var deferVersionToScope = false;
+        long scopeStructureDelta = 0, scopeContentDelta = 0;
         try
         {
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
             var tableExisted = false;
             var structuralChange = false;
+            var tableLevelChange = false;
             var docs = new TableDocumentation(metadata.Table.Description, metadata.Table.LongDescription, metadata.Table.DocumentationSource);
 
             await using (var cmd = conn.CreateCommand())
@@ -385,11 +389,22 @@ public partial class GovernanceRepository
                     tableId = Guid.Parse(reader.GetString(0));
                     tableExisted = true;
                     (structuralChange, docs) = ReadExistingTableForUpsert(reader, metadata.Table, _options?.Catalog?.DocumentationSourcePrecedence);
+                    tableLevelChange = structuralChange;
                 }
                 else
                 {
                     structuralChange = true;
                 }
+            }
+
+            writeScope = CatalogWriteScopeContext.TryGetActive(this);
+            // A write is restrictive (never deferred) when it can reduce access or when its effect is unknown: any change of
+            // the table row itself, of masking rules, of the key definition, of privacy settings or required filters, and any
+            // change or removal of an existing column. New tables, new columns and description changes are additive.
+            var restrictiveWrite = tableLevelChange || metadata.ReplaceKeyDefinition;
+            if (writeScope is not null && tableExisted && !restrictiveWrite)
+            {
+                restrictiveWrite = await TablePrivacyOrFilterChangedAsync(conn, tx, tableId, metadata, ct).ConfigureAwait(false);
             }
 
             var httpEndpointJson = metadata.Table.HttpEndpoint != null
@@ -432,6 +447,12 @@ public partial class GovernanceRepository
             if (HasMaskingRulesChanged(existingMaskingRules, metadata.ColumnMaskingRules))
             {
                 structuralChange = true;
+                restrictiveWrite = true;
+            }
+
+            if (ExistingColumnsChangedOrRemoved(existingColsByName, metadata))
+            {
+                restrictiveWrite = true;
             }
 
             if (await UpsertColumnsAndMaskingRulesAsync(conn, tx, InsertColumnSql, tableId, metadata, existingColsByName, colIdByName, ct, (existing, incoming) => ShouldOverwriteDocumentation(_options?.Catalog?.DocumentationSourcePrecedence, existing, incoming)).ConfigureAwait(false))
@@ -446,16 +467,38 @@ public partial class GovernanceRepository
             }
 
             await IncrementTableEpochInternalAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);
-            var structureDelta = structuralChange ? 1L : 0L;
-            var contentDelta = structuralChange ? 0L : 1L;
-            var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, structureDelta, contentDelta, ct).ConfigureAwait(false);
+            scopeStructureDelta = structuralChange ? 1L : 0L;
+            scopeContentDelta = structuralChange ? 0L : 1L;
+            deferVersionToScope = writeScope is not null && !restrictiveWrite;
+            Autheris.Application.Catalog.CatalogVersion? newVersion = null;
+            if (!deferVersionToScope)
+            {
+                newVersion = await BumpCatalogVersionInternalAsync(conn, tx, scopeStructureDelta, scopeContentDelta, ct).ConfigureAwait(false);
+            }
+
             await tx.CommitAsync(ct).ConfigureAwait(false);
-            await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+            if (newVersion.HasValue)
+            {
+                await PublishCatalogChangedEventAsync(newVersion.Value, ct).ConfigureAwait(false);
+            }
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
             throw;
+        }
+
+        // INV-1: the per-table epoch was committed above; only the catalog version bump and event are coalesced by a scope.
+        if (writeScope is not null)
+        {
+            if (deferVersionToScope)
+            {
+                await writeScope.RecordAdditiveWriteAsync(scopeStructureDelta, scopeContentDelta, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await writeScope.FlushPendingAsync(ct).ConfigureAwait(false);
+            }
         }
 
         await InvalidateTableEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
@@ -496,6 +539,7 @@ public partial class GovernanceRepository
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+                await FlushScopePendingAsync(ct).ConfigureAwait(false);
             }
             catch
             {
@@ -529,6 +573,7 @@ public partial class GovernanceRepository
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+                await FlushScopePendingAsync(ct).ConfigureAwait(false);
             }
             catch
             {
@@ -601,6 +646,7 @@ public partial class GovernanceRepository
                 if (change.Changed && newVersion.HasValue)
                 {
                     await PublishCatalogChangedEventAsync(newVersion.Value, ct).ConfigureAwait(false);
+                    await FlushScopePendingAsync(ct).ConfigureAwait(false);
                 }
             }
             catch
@@ -697,9 +743,24 @@ public partial class GovernanceRepository
         var keysChanged = await ReplaceRelationKeysAsync(conn, tx, storedId, created, parentKeys, childKeys, ct).ConfigureAwait(false);
 
         ct.ThrowIfCancellationRequested();
-        var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+        var relationScope = CatalogWriteScopeContext.TryGetActive(this);
+        Autheris.Application.Catalog.CatalogVersion? relationVersion = null;
+        if (relationScope is null)
+        {
+            relationVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+        }
+
         await tx.CommitAsync(ct).ConfigureAwait(false);
-        await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+        if (relationVersion.HasValue)
+        {
+            await PublishCatalogChangedEventAsync(relationVersion.Value, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            // A relation add is additive: its version bump and event are coalesced by the active write scope.
+            await relationScope!.RecordAdditiveWriteAsync(1, 0, ct).ConfigureAwait(false);
+        }
+
         return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
     }
 
@@ -745,6 +806,7 @@ public partial class GovernanceRepository
             var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
             await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+            await FlushScopePendingAsync(ct).ConfigureAwait(false);
             return delegation;
         }
         catch
@@ -766,6 +828,7 @@ public partial class GovernanceRepository
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+                await FlushScopePendingAsync(ct).ConfigureAwait(false);
                 return true;
             }
 
@@ -789,6 +852,84 @@ public partial class GovernanceRepository
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         return await GetAllRelationsAsync(conn, AllRelationsSql, _logger, ct).ConfigureAwait(false);
+    }
+
+    private Task FlushScopePendingAsync(CancellationToken ct) =>
+        CatalogWriteScopeContext.TryGetActive(this)?.FlushPendingAsync(ct) ?? Task.CompletedTask;
+
+    /// <summary>
+    /// Flushes one catalog version bump and its <c>catalog:changed</c> event in its own short transaction. Used by catalog
+    /// write scopes (chunk and end-of-scope flush) and by the snapshot poll to repair a failed flush.
+    /// </summary>
+    public async Task FlushCatalogVersionAsync(long structureDelta, long contentDelta, CancellationToken ct = default)
+    {
+        Autheris.Application.Catalog.CatalogVersion version;
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                version = await BumpCatalogVersionInternalAsync(conn, tx, structureDelta, contentDelta, ct).ConfigureAwait(false);
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        await PublishCatalogChangedEventAsync(version, ct).ConfigureAwait(false);
+    }
+
+    private static bool ExistingColumnsChangedOrRemoved(
+        Dictionary<string, (Guid Id, string DataType, bool IsSensitive, string? Description, string? LongDescription, string? DocSource, string? Collation, string? LengthSemantics)> existingColsByName,
+        TableMetadata metadata)
+    {
+        var incoming = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var col in metadata.Columns)
+        {
+            incoming.Add(col.ColumnName);
+            if (existingColsByName.TryGetValue(col.ColumnName, out var existing) &&
+                (!string.Equals(existing.DataType, col.DataType, StringComparison.OrdinalIgnoreCase) ||
+                 existing.IsSensitive != col.IsSensitive ||
+                 !string.Equals(existing.Collation, col.Collation, StringComparison.Ordinal) ||
+                 !string.Equals(existing.LengthSemantics, col.LengthSemantics, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return metadata.ReplaceColumns && existingColsByName.Keys.Any(name => !incoming.Contains(name));
+    }
+
+    private const string SelectTablePrivacyAndFilterSql = "SELECT min_group_size, non_personal, required_filter_columns_json FROM TABLES WHERE id = @id";
+
+    /// <summary>
+    /// True when the upsert changes privacy settings or required filters of an existing table; any such change is restrictive
+    /// (never deferred by a write scope). Only evaluated while a scope is active.
+    /// </summary>
+    private static async Task<bool> TablePrivacyOrFilterChangedAsync(
+        DbConnection conn, DbTransaction tx, Guid tableId, TableMetadata metadata, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = SelectTablePrivacyAndFilterSql;
+        cmd.AddBound("@id", tableId.ToString());
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        int? existingMinGroup = reader.IsDBNull(0) ? null : Convert.ToInt32(reader.GetValue(0), System.Globalization.CultureInfo.InvariantCulture);
+        var existingNonPersonal = !reader.IsDBNull(1) && Convert.ToBoolean(reader.GetValue(1), System.Globalization.CultureInfo.InvariantCulture);
+        var existingFilter = reader.IsDBNull(2) ? null : reader.GetString(2);
+        var incomingFilter = metadata.RequiredFilterColumns.IsDefaultOrEmpty ? null : JsonSerializer.Serialize(metadata.RequiredFilterColumns);
+
+        return existingMinGroup != metadata.Table.MinGroupSize ||
+               existingNonPersonal != metadata.Table.NonPersonal ||
+               !string.Equals(string.IsNullOrEmpty(existingFilter) ? null : existingFilter, incomingFilter, StringComparison.Ordinal);
     }
 
     private async Task<Autheris.Application.Catalog.CatalogVersion> BumpCatalogVersionInternalAsync(

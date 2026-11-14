@@ -23,6 +23,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
     private readonly ICatalogVersionProvider? _catalogVersionProvider;
     private readonly IOptions<CatalogSearchOptions>? _catalogSearchOptions;
     private readonly TimeProvider _timeProvider;
+    private readonly ICatalogDirtyFlag? _catalogDirtyFlag;
 
     public GatewayHealthCheckService(
         IOptions<GatewayOptions> options,
@@ -34,8 +35,10 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         ICatalogSearchEngine? catalogSearchEngine = null,
         ICatalogVersionProvider? catalogVersionProvider = null,
         IOptions<CatalogSearchOptions>? catalogSearchOptions = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ICatalogDirtyFlag? catalogDirtyFlag = null)
     {
+        _catalogDirtyFlag = catalogDirtyFlag;
         _auditChainMonitor = auditChainMonitor;
         _options = options;
         _logger = logger;
@@ -191,6 +194,14 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         {
             var searchDesc = await EvaluateCatalogSearchHealthAsync(ct).ConfigureAwait(false);
             components.Add(new HealthCheckComponentResult("CatalogSearchIndex", true, searchDesc));
+        }
+
+        // 5. Catalog version sync: a failed catalog write scope flush leaves committed writes without a version bump until the
+        // snapshot poll repairs it. The component stays healthy (degraded only) and never carries exception text.
+        if (_catalogDirtyFlag is { IsDirty: true })
+        {
+            components.Add(new HealthCheckComponentResult(
+                "CatalogVersionSync", true, "degraded: catalog version bump pending repair (see gateway logs)."));
         }
 
         return new GatewayHealthReport(overallHealthy, components);

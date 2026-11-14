@@ -2,7 +2,7 @@ using Autheris.Domain.Audit;
 
 namespace Autheris.Application.Common.Interfaces;
 
-public interface ITableMetadataRepository
+public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalogVersionFlusher
 {
     Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);

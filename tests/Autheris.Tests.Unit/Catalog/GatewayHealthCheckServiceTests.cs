@@ -139,6 +139,28 @@ public sealed class GatewayHealthCheckServiceTests
         comp.Description.ShouldNotContain("password");
     }
 
+    [Fact]
+    public async Task CatalogVersionSync_DirtyFlag_ReportsDegradedWithoutExceptionText()
+    {
+        var dirty = new CatalogDirtyFlag();
+        var service = new GatewayHealthCheckService(
+            Options.Create(new GatewayOptions()),
+            NullLogger<GatewayHealthCheckService>.Instance,
+            catalogDirtyFlag: dirty);
+
+        (await service.CheckHealthAsync()).Components.ShouldNotContain(c => c.Name == "CatalogVersionSync");
+
+        dirty.MarkDirty();
+        var report = await service.CheckHealthAsync();
+
+        var comp = report.Components.Single(c => c.Name == "CatalogVersionSync");
+        comp.IsHealthy.ShouldBeTrue();
+        report.IsHealthy.ShouldBeTrue();
+        comp.Description.ShouldNotBeNull();
+        comp.Description!.ShouldStartWith("degraded: ");
+        comp.Description.ShouldNotContain("Exception");
+    }
+
     private sealed class FixedVersionProvider(CatalogVersion version) : ICatalogVersionProvider
     {
         public ValueTask<CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default) => new(version);

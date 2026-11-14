@@ -43,6 +43,14 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetRequiredService<IGovernanceRepository>(),
                 sp.GetService<IEventBus>()));
         services.TryAddSingleton<ICatalogSnapshotProvider, CatalogSnapshotProvider>();
+        services.TryAddSingleton<ICatalogDirtyFlag, CatalogDirtyFlag>();
+        services.TryAddSingleton<ICatalogVersionFlusher>(sp => sp.GetRequiredService<ITableMetadataRepository>());
+        services.TryAddSingleton<ICatalogWriteScopeFactory>(sp =>
+            new CatalogWriteScopeFactory(
+                sp.GetRequiredService<ITableMetadataRepository>(),
+                sp.GetRequiredService<ICatalogDirtyFlag>(),
+                sp.GetService<ILogger<CatalogWriteScopeFactory>>(),
+                sp.GetService<TimeProvider>()));
         services.AddHostedService<CatalogSnapshotBackgroundService>();
 
         // Visibility Cache (INC-138-3)

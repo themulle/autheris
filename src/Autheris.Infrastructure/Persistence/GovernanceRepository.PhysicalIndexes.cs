@@ -28,6 +28,7 @@ public partial class GovernanceRepository : IPhysicalIndexRepository
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+                await FlushScopePendingAsync(ct).ConfigureAwait(false);
             }
             catch
             {
