@@ -7,11 +7,11 @@
 | Issue | WP | Verdict | Developer-ready |
 |---|---|---|:---:|
 | #674 | WP-OI-SCALE-3 | APPROVED WITH CONDITIONS (false "unchanged" drops a restrictive change) | yes |
-| #672 | WP-OI-SCALE-1 | CHANGES REQUIRED (deferral also delays hidden/deactivate/mask changes; lost bump on flush failure) | after amendment below |
+| #672 | WP-OI-SCALE-1 | APPROVED WITH CONDITIONS (plan revised 2026-11-14 per Q-SEC7-1; PR 1+2 merged on `main`) | merged (`19b050e8`, `f0e9f484`) |
 | #673 | WP-OI-SCALE-2 | APPROVED WITH CONDITIONS | yes, after #674 and #672 |
 | #675 | WP-OI-SCALE-4 | APPROVED WITH CONDITIONS (delta trusts every writer to bump the epoch) | yes |
 | #676 | WP-OI-SCALE-5 | APPROVED WITH CONDITIONS | yes, after #675 |
-| #677 | WP-OI-SCALE-6 | CHANGES REQUIRED (plan assumes tenant-scoped catalog reads that do not exist; paging after visibility) | after amendment below |
+| #677 | WP-OI-SCALE-6 | APPROVED WITH CONDITIONS (plan revised 2026-11-14 per Q-SEC7-3 and SEC-OI-677-1/2) | yes |
 | #678 | WP-OI-SCALE-7 | APPROVED WITH CONDITIONS | yes (freeze-exception per Q-SCALE-1) |
 
 Order change: none; SEC-OI-675-1 adds an architecture test that must exist before the delta path is switched on.
