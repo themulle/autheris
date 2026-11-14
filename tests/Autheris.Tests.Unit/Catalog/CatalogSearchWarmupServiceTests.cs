@@ -97,16 +97,17 @@ public sealed class CatalogSearchWarmupServiceTests
             timeProvider: fakeTime);
 
         _versionProvider.GetCatalogVersionAsync(Arg.Any<CancellationToken>())
-            .Returns(
-                new ValueTask<CatalogVersion>(new CatalogVersion(1, 1)),
-                new ValueTask<CatalogVersion>(new CatalogVersion(2, 2)));
+            .Returns(new ValueTask<CatalogVersion>(new CatalogVersion(1, 1)));
 
         await service.StartAsync(CancellationToken.None);
-        await WaitHelper.WaitUntil(() => _searchEngine.ReceivedCalls().Any(), TimeSpan.FromSeconds(5));
+        await WaitHelper.WaitUntil(() => service.GetStatus().LastSuccessUtc.HasValue, TimeSpan.FromSeconds(5));
 
         // Publish catalog:changed via captured handler and advance past minimum rebuild interval
+        _versionProvider.GetCatalogVersionAsync(Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<CatalogVersion>(new CatalogVersion(2, 2)));
         eventHandler.ShouldNotBeNull();
         await eventHandler(new object());
+        await WaitHelper.WaitUntil(() => service.IsWaitingForCooldown, TimeSpan.FromSeconds(5));
         fakeTime.Advance(CatalogSearchWarmupService.MinimumRebuildInterval);
         await WaitHelper.WaitUntil(() => _searchEngine.ReceivedCalls().Count() >= 2, TimeSpan.FromSeconds(5));
 
@@ -206,6 +207,7 @@ public sealed class CatalogSearchWarmupServiceTests
         allowFirstRebuildToFinish.TrySetResult();
 
         await WaitHelper.WaitUntil(() => engine.Status.LastSuccessUtc.HasValue, TimeSpan.FromSeconds(5));
+        await WaitHelper.WaitUntil(() => service.IsWaitingForCooldown, TimeSpan.FromSeconds(5));
         time.Advance(CatalogSearchWarmupService.MinimumRebuildInterval);
 
         await WaitHelper.WaitUntil(() => engine.RebuildCount >= 2, TimeSpan.FromSeconds(5));
@@ -285,6 +287,7 @@ public sealed class CatalogSearchWarmupServiceTests
             await bus.PublishAsync(ICatalogVersionProvider.CatalogChangedEventChannel, new object());
         }
 
+        await WaitHelper.WaitUntil(() => service.IsWaitingForCooldown, TimeSpan.FromSeconds(5));
         time.Advance(CatalogSearchWarmupService.MinimumRebuildInterval);
         await WaitHelper.WaitUntil(() => engine.RebuildCount == 2, TimeSpan.FromSeconds(5));
 
@@ -515,6 +518,7 @@ public sealed class CatalogSearchWarmupServiceTests
         Func<int, CancellationToken, Task> onRebuild,
         TimeProvider timeProvider) : ICatalogSearchEngine, ICatalogSearchStatusRecorder
     {
+        private int _invocationCount;
         private int _rebuildCount;
         private DateTimeOffset? _lastSuccessUtc;
         private DateTimeOffset? _lastAttemptUtc;
@@ -529,7 +533,7 @@ public sealed class CatalogSearchWarmupServiceTests
 
         public async Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default)
         {
-            var n = Interlocked.Increment(ref _rebuildCount);
+            var n = Interlocked.Increment(ref _invocationCount);
             await onRebuild(n, ct);
             IndexedTableCount = tables.Count;
             _lastSuccessUtc = timeProvider.GetUtcNow();
@@ -561,6 +565,11 @@ public sealed class CatalogSearchWarmupServiceTests
             if (indexedVersion.HasValue)
             {
                 LastIndexedVersion = indexedVersion;
+            }
+
+            if (lastErrorCode != CatalogSearchErrorCodes.VersionReadFailed)
+            {
+                Interlocked.Increment(ref _rebuildCount);
             }
         }
 
