@@ -8,7 +8,7 @@ info:
     to BI tools (Power BI, Microsoft Excel, Tableau), SAP integration layers, and automated REST clients.
     
     ### Key Capabilities:
-    * **Zero-Trust & Pushdown ABAC**: All OData requests are subjected to the same Casbin Attribute-Based
+    * **Zero-Trust & Pushdown ABAC**: All OData requests are subjected to the same Attribute-Based
       Access Control (ABAC) and dynamic row-level security (RLS) filters as GraphQL operations.
     * **Automated Column Masking & Redaction**: PII and sensitive columns (DSGVO / GDPR Art. 9) are
       dynamically hashed, masked, or redacted according to the enterprise metadata catalog.

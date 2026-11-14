@@ -18,7 +18,7 @@ Architecture and design rationale are specified in [ADR-018: Governed Stored Pro
                                                              ▼
                                       +---------------------------------------------+
                                       | 1. HTTP Ingress & Protocol Arbitration      |
-                                      |    - Role validation (@roles / Casbin)      |
+                                      |    - Role validation (@roles)               |
                                       |    - Request parameter binding & validation |
                                       |    - Non-tamperable context injection       |
                                       +---------------------------------------------+
@@ -213,7 +213,7 @@ Stored procedures often project columns using custom aliases (e.g. `SELECT total
 
 Autheris solves this via **Source Column Mapping**:
 - Every output column is linked to its underlying source entity (`source_table: sales.orders`, `source_column: ssn`).
-- Before returning data, Autheris queries the central consent and Casbin ABAC engine for `sales.orders.ssn`.
+- Before returning data, Autheris asks the access decision point (grants, column rules, virtual filters) for `sales.orders.ssn`.
 - If the column is marked **`Mask`**, Autheris applies deterministic zero-allocation format-preserving masking or HMAC-SHA256 pseudonymization.
 - If marked **`Deny`**, the column is automatically stripped from the response payload.
 - Computed columns or aggregates with no source table are stripped unless explicitly marked with `clear: true` or `@result-column <name> clear`.

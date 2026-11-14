@@ -53,7 +53,7 @@ public record TableAccessDecision(
     public IReadOnlyList<DecisionGrantRef> Grants { get; init; } = [];
 
     /// <summary>
-    /// MISC-06: set only by the unified policy decision point after the full pipeline ran (contract, Casbin, hooks, virtual filters,
+    /// MISC-06: set only by the unified policy decision point after the full pipeline ran (contract, hooks, virtual filters,
     /// profiles). A pre-evaluated decision without this marker is never trusted by the aggregation service.
     /// </summary>
     internal bool EvaluatedByPdp { get; init; }

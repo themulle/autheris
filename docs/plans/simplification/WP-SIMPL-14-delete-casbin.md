@@ -1,5 +1,5 @@
 # WP-SIMPL-14 Delete Casbin
-Status: In implementation. PR 1 (data path off Casbin, #738) and PR 2 (dead Iceberg-era decision point, #739) open; PR 3 (engine, options, guard keys and package) stacked on both; PR 4 (cleanup and docs) follows (Phase 2 addendum below).
+Status: In implementation. PR 1 (data path off Casbin, #738) and PR 2 (dead Iceberg-era decision point, #739) open; PR 3 (engine, options, guard keys and package) and PR 4 (cleanup and docs) stacked on them (Phase 2 addendum below).
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-14-delete-casbin) | Issues: #515, #491 (part) | Owner decisions: OD-3, OD-26, OD-30 (ADR-020), D12 | Security conditions: SEC-SIMPL-30, 31, 32, 33 (as amended by ADR-020), 80 (write path owned by WP-SIMPL-45)
 
 > **Changed by OD-30 (2026-11-05, ADR-020 accepted) and the WP-SIMPL-46 ordering rule:** this WP no longer builds a native policy engine, a ReBAC gate or a role-based write check. It runs after [WP-SIMPL-46](WP-SIMPL-46-unified-authorization-model.md) has moved every `IPolicyEnforcementService` consumer (Envoy ext_authz included) to `IAccessDecisionPoint`, and then deletes Casbin and `IPolicyEnforcementService`. The sections below carry the binding text.

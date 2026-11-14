@@ -33,9 +33,8 @@ The dataset description is also available as an MCP resource: the resource templ
 
 - **Visibility** is the same as for the GraphQL `catalog` query and the MCP resources: a table is listed when the caller has an active Allow consent in its tenant and no unconditional Deny; only granted columns are shown, and relations only to datasets the caller can see. `GovernanceAdmin` and `ClusterAdmin` see the whole catalog; anonymous callers see nothing.
 - **No enumeration oracle:** a dataset the caller may not see returns the same `NOT_FOUND` error as one that does not exist.
-- **Same enforcement as the HTTP APIs:** `query_graphql` runs on the gateway's GraphQL executor, `sample_rows` on the governed table path. Consent, ReBAC, Casbin, row filters, Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)), and column masking apply with the caller's identity exactly as for `POST /graphql` and REST. Over the stdio transport there is no HTTP caller, so GraphQL queries are denied.
+- **Same enforcement as the HTTP APIs:** `query_graphql` runs on the gateway's GraphQL executor, `sample_rows` on the governed table path. Consent, row filters, Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)), and column masking apply with the caller's identity exactly as for `POST /graphql` and REST. Over the stdio transport there is no HTTP caller, so GraphQL queries are denied.
 - **Guardrails:** like all MCP tools, the calls pass the prompt-injection guardrail, PII scrubbing, the token budget and the audit log.
-  - Casbin ABAC (when `Casbin:Enabled`) runs on the requested table (`describe_dataset`, `sample_rows`), on every table a GraphQL document reads (root fields and nested relations, fragments expanded), or on `governance.catalog.datasets` (`list_datasets`, pure introspection).
   - A GraphQL document that is not one query on catalog fields is denied before execution (fail-closed).
   - The `dataset` and `query` arguments must occur exactly once (case-insensitive), so the guardrail always checks what is executed.
   - Truncated results return valid, parseable JSON payloads with `truncated: true`.

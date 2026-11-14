@@ -88,22 +88,6 @@ public sealed class CorrelatedKeySetSubstitutionTests
     }
 
     [Fact]
-    public void CasbinSite_HasSourceCasbinAndNoRuleSettingsOrRuleId()
-    {
-        var filter = Correlated(strategy: RowFilterEvaluationStrategy.KeySetCache, duration: 90, maxKeys: 500);
-
-        var predicate = AdvancedRlsFilterGenerator_BuildCasbin(filter);
-
-        var site = CorrelatedKeySetSubstitution.FindSites(predicate).ShouldHaveSingleItem().Site;
-        site.Source.ShouldBe(CorrelatedFilterSource.Casbin);
-        site.RuleSettings.ShouldBeNull();   // D-14: a Casbin site has no rule level
-        site.RuleId.ShouldBeNull();
-    }
-
-    private static PolicyPredicate AdvancedRlsFilterGenerator_BuildCasbin(ConsentRowFilter filter) =>
-        Autheris.Application.Services.RlsFilterGenerator.Instance.BuildCorrelatedPredicate(filter, "__gql_rls_c0_", CorrelatedFilterSource.Casbin);
-
-    [Fact]
     public void TemporalFilter_IsNotStructurallyEligible()
     {
         var predicate = _builder.Build([Correlated(temporal: "invoice_date", validFrom: "valid_from")], Orders);

@@ -33,7 +33,7 @@ Modern frontend web applications demand GraphQL, whereas enterprise BI tools (su
   - `$count`: Total matching row count projection (`?$count=true` returning `@odata.count`, or `/table/$count` scalar endpoint).
   - `$format`: Content negotiation supporting JSON and Apache Parquet.
 - Strict protocol compatibility: Emits mandatory `OData-Version: 4.0` response header ensuring out-of-the-box compatibility with Microsoft Excel, PowerQuery, and Power BI desktop.
-- Zero-Trust Governance: Inherits data-owner consent, Casbin ABAC, column-level masking (HMAC/redaction), and relation-scoped Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)).
+- Zero-Trust Governance: Inherits data-owner consent, column-level masking (HMAC/redaction), and relation-scoped Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)).
 - Dynamic OpenAPI 3.1 specification projection (`/odata/v4/$openapi`) advertising all evaluated query options (`$select`, `$top`, `$skip`, `$filter`, `$orderby`, `$count`, `$format`) with detailed operator descriptions and parameter constraints.
 
 ---

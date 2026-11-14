@@ -77,7 +77,7 @@ public sealed class ConvertTimeZonePolicyTests
             TargetTables = ["erp.main.events"],
             RowFilterPredicate = Predicate
         };
-        var input = new PolicyLintInput([Events()], [profile], [], []);
+        var input = new PolicyLintInput([Events()], [profile], []);
 
         var report = new PolicyPredicateLinter().Lint(input);
 

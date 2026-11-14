@@ -162,7 +162,7 @@ public static class McpDocTools
 
         yield return new McpToolDefinition(
             Name: LookupErrorCode,
-            Description: "Looks up an error code (e.g. 'ERR_CASBIN_DENIED', '403 Forbidden') to retrieve symptom, root cause, resolution steps and referenced runbooks.",
+            Description: "Looks up an error code (e.g. 'ERR_TABLE_NOT_FOUND', '403 Forbidden') to retrieve symptom, root cause, resolution steps and referenced runbooks.",
             InputJsonSchema: """
             {
               "type": "object",

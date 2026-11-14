@@ -83,8 +83,8 @@ Autheris acts as an Enterprise Zero-Trust Data Gateway. It enforces Data-Owner-C
   * *Mitigation:* Two-tier cache invalidation with **Policy Epochs**. Every table policy modification increments an integer epoch in the governance store. Gateway nodes validate the epoch on every query resolution; mismatched epochs trigger local cache eviction. Several replicas require Redis (`Caching.Redis.Enabled`) for cluster-wide invalidation; this is enforced at startup outside Development.
 
 * **Threat 2.4: Code Injection via Dynamic ABAC Rules**
-  * *Attack Vector:* Dynamic Casbin ABAC rule injection via untrusted inputs leading to expression evaluation execution.
-  * *Mitigation:* Dynamic rule tokens are sanitized before evaluation; Casbin evaluators enforce strict token allowlists, preventing arbitrary reflection or process execution.
+  * *Attack Vector:* Rule injection via untrusted inputs leading to expression evaluation execution.
+  * *Mitigation:* No runtime rule language is evaluated: access is decided from grant records, column rules and virtual filters, whose predicates go through the typed policy parser; the former Casbin engine was removed (ADR-020).
 
 * **Threat 2.5: Per-replica budgets, file-level-only lakehouse isolation, anonymous health probe (E-14, E-15, R3-4)**
   * *Mitigation E-14:* The FinOps monthly spend is a cluster-wide counter (atomic `INCRBY` in the shared state store, key per tenant and month, 40-day TTL), so N replicas no longer grant N times the budget. If the shared store is unreachable, spend is accounted locally and added on top of the last shared value (fail-safe towards enforcement, not towards a reset).
@@ -167,7 +167,7 @@ Autheris acts as an Enterprise Zero-Trust Data Gateway. It enforces Data-Owner-C
 * **FinOps budget:** `GET /api/v1/finops/budget/{tenant}` only lets canonical `ClusterAdmin` read other tenants; `GovernanceAdmin` and `BillingAdmin` are limited to the request tenant.
 * **Role name lists:** `GatewayPolicies.HasAnyRole(principal, string[])` matches role names exactly. It no longer maps names to hierarchy levels (an `Analyst` used to satisfy `SchemaPublisherRoles`; `SchemaPublisher`/`PrivacyAdmin` satisfied `SchemaAdminRoles`). The typed `GatewayRole` overload keeps the hierarchy.
 * **Declarative SQL listing:** `GET /api/v1/queries/` returns only name, summary and parameters to ordinary callers; `RawSql`, `DataSource` and `ReferencedTables` are visible to `GovernanceAdmin`/`ClusterAdmin`.
-* **OData errors:** outside Development, missing tables and denied access both answer a generic 403 `ACCESS_DENIED` (no existence oracle, no Casbin text with SID/tenant).
+* **OData errors:** outside Development, missing tables and denied access both answer a generic 403 `ACCESS_DENIED` (no existence oracle, no policy text with SID/tenant).
 * **OpenAPI:** the generated spec is not filtered per tenant, so `$openapi`, `{domain}/openapi.json|yaml`, the index routes and the per-table schema route require `GovernanceAdmin`/`ClusterAdmin`. Tenant-scoped roles (`DataOwner`, `SchemaAdmin`, `CatalogReader`) use the tenant-filtered `$metadata`. The cache keys on the exact domain; domains that are not `[A-Za-z0-9_-]{1,64}` are generated uncached.
 * **Envoy export:** the `EnvoyFilter` now sets `http_service.path_prefix: /api/v1/envoy/check` and the check route is a catch-all over all HTTP methods (the suffix is the original path). Namespace, filter name, host (DNS labels), port (1-65535), path and timeout of the export are validated; invalid values answer 400. Re-apply the exported filter after upgrading.
 

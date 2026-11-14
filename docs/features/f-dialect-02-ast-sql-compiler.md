@@ -350,7 +350,7 @@ The audit key is `GovernanceDb:AuditHmacKeyVaultRef`, otherwise the `Autheris:Au
 
 `DeniedTablesStartupReporter` (background service, registered with `WebSql:Enabled`) lists, after the start, every table that the governed pipeline denies: stored row predicates that the production parser rejects (access profiles of the configured tenants and the default tenant, virtual filters) and tables of a dialect that WebSQL does not admit (`DIALECT_NOT_ADMITTED`). It logs one warning per table with table id, policy id and a stable code, never a predicate or a value. A store that cannot be read is a warning, not a failed start; the request path stays fail closed on its own.
 
-Correlated consent filters (Casbin) are covered by the pre-deploy lint `tools/PolicyPredicateLint`, which reads the whole governance store and must report 0 unparsable production predicates before a deployment.
+Correlated consent filters are covered by the pre-deploy lint `tools/PolicyPredicateLint`, which reads the whole governance store and must report 0 unparsable production predicates before a deployment.
 
 ### 6.4 Other startup rules
 

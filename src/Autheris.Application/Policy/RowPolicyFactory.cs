@@ -87,7 +87,7 @@ public sealed class RowPolicyFactory
     }
 
     /// <summary>
-    /// Parses admin-authored predicate text (canonical Trino syntax, for example a Casbin row filter after claim interpolation) into a typed
+    /// Parses admin-authored predicate text (canonical Trino syntax, for example an access profile row filter) into a typed
     /// predicate: every literal becomes a bound policy parameter, columns must be in <paramref name="columns"/>, functions must be allow-listed.
     /// </summary>
     /// <exception cref="PolicyParseException">The predicate is invalid (the message never echoes the text).</exception>

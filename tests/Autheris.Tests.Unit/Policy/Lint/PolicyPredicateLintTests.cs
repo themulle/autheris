@@ -42,9 +42,8 @@ public sealed class PolicyPredicateLintTests
 
     private static PolicyLintInput Input(
         IEnumerable<AccessProfile>? profiles = null,
-        IEnumerable<CasbinLintRule>? casbin = null,
         string sourceType = "PostgreSQL") =>
-        new([Orders(sourceType)], (profiles ?? []).ToList(), [], (casbin ?? []).ToList());
+        new([Orders(sourceType)], (profiles ?? []).ToList(), []);
 
     private static Task<PolicyLintInput> Load(PolicyLintInput input) => Task.FromResult(input);
 
@@ -121,43 +120,6 @@ public sealed class PolicyPredicateLintTests
         report.Findings.Single().PolicyId.ShouldBe("p-col");
     }
 
-    [Fact]
-    public void Lint_CoversCasbinCorrelatedFilters()
-    {
-        var valid = new ConsentRowFilter
-        {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("erp", "main", "customers"),
-            DependentTableAlias = "c",
-            ForeignKeyColumn = "customer_id",
-            PrimaryKeyColumn = "id",
-            SubqueryFilterPredicateJson = "{\"c.country\": \"CH\"}"
-        };
-        var broken = new ConsentRowFilter
-        {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("erp", "main", "customers"),
-            DependentTableAlias = "c; DROP TABLE x",
-            ForeignKeyColumn = "customer_id",
-            PrimaryKeyColumn = "id",
-            SubqueryFilterPredicateJson = "{\"c.country\": \"CH\"}"
-        };
-        var rules = new[]
-        {
-            new CasbinLintRule("rule-ok", "erp.main.orders", null, valid),
-            new CasbinLintRule("rule-bad", "erp.main.orders", null, broken),
-            new CasbinLintRule("rule-text-bad", "erp.main.orders", "region = 'a' AND [name] = 'x'", null),
-            new CasbinLintRule("rule-text-ok", "erp.main.orders", "region = ${user.region}", null)
-        };
-
-        var report = new PolicyPredicateLinter().Lint(Input(casbin: rules));
-
-        report.Findings.Select(f => f.PolicyId).OrderBy(x => x).ShouldBe(["rule-bad", "rule-text-bad"]);
-        report.Findings.Single(f => f.PolicyId == "rule-bad").Kind.ShouldBe(PolicyLintKind.CasbinCorrelatedRowFilter);
-        report.Findings.Single(f => f.PolicyId == "rule-text-bad").Kind.ShouldBe(PolicyLintKind.CasbinRowFilter);
-        report.Checked.ShouldBe(4);
-    }
-
     [Theory]
     [InlineData("--connection-string")]
     [InlineData("--connection")]
@@ -198,18 +160,8 @@ public sealed class PolicyPredicateLintCallerPlaceholderTests
     public void AccessProfile_WithAPlaceholder_IsAFinding(string predicate)
     {
         var profile = new AccessProfile { ProfileId = "p", Name = "p", TenantId = Autheris.Tests.Common.TestTenants.Default, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate };
-        var report = new PolicyPredicateLinter().Lint(new PolicyLintInput([Orders()], [profile], [], []));
+        var report = new PolicyPredicateLinter().Lint(new PolicyLintInput([Orders()], [profile], []));
         report.Findings.ShouldHaveSingleItem().Code.ShouldBe(PolicyPredicateLinter.CodeCallerPlaceholderNotAllowed);
     }
 
-    [Fact]
-    public void CasbinRlsFilter_WithAPlaceholder_IsAFinding_AndTheFindingCarriesNoText()
-    {
-        var rule = new CasbinLintRule("rule-1", "erp.main.orders", "region = {{caller.dept}}", null);
-        var report = new PolicyPredicateLinter().Lint(new PolicyLintInput([Orders()], [], [], [rule]));
-        var finding = report.Findings.ShouldHaveSingleItem();
-        finding.Code.ShouldBe("CALLER_PLACEHOLDER_NOT_ALLOWED");
-        finding.Kind.ShouldBe(PolicyLintKind.CasbinRowFilter);
-        finding.ToString().ShouldNotContain("dept");
-    }
 }
