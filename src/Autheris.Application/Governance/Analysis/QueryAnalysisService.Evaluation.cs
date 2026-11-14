@@ -71,6 +71,7 @@ public sealed partial class QueryAnalysisService
 
         if (!hasTableGrant && !isOwner && !isAdmin)
         {
+            scopeContext.TableDecisions[table.Identifier] = TableAccessDecision.Denied(table.Identifier, "Missing read grant.");
             outcome.MissingConsents.Add(new RequestableConsentItem(
                 Dataset: canonicalDataset,
                 Column: null,
@@ -102,7 +103,30 @@ public sealed partial class QueryAnalysisService
             outcome,
             ct).ConfigureAwait(false);
 
-        var columnLevels = ResolveTableColumnLevels(table, effectivePrincipal, effectiveSid, activeConsents, scopeContext);
+        var (columnLevels, resolverAllowed) = ResolveTableColumnLevels(table, effectivePrincipal, effectiveSid, activeConsents, scopeContext);
+        var decisionColumns = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+        var hasRestrictedColumn = false;
+        foreach (var catalogCol in table.Columns)
+        {
+            var effectiveLevel = ResolveEffectiveColumnAccess(catalogCol, columnLevels, isOwner, isAdmin);
+            decisionColumns[catalogCol.ColumnName] = effectiveLevel;
+            if (effectiveLevel != ColumnAccessLevel.Clear)
+            {
+                hasRestrictedColumn = true;
+            }
+        }
+
+        if (!isAdmin && !isOwner && !resolverAllowed)
+        {
+            scopeContext.TableDecisions[table.Identifier] = TableAccessDecision.Denied(table.Identifier, "Access resolution denied or failed.");
+        }
+        else
+        {
+            scopeContext.TableDecisions[table.Identifier] = TableAccessDecision.Allowed(
+                table.Identifier,
+                decisionColumns,
+                hasUnconstrainedColumnAllow: !hasRestrictedColumn);
+        }
 
         var columnsToInspect = selectAllColumns
             ? table.Columns.Select(c => c.ColumnName).ToList()
@@ -260,7 +284,10 @@ public sealed partial class QueryAnalysisService
     private sealed record AnalysisScopeContext(IReadOnlySet<string> Scopes, bool TargetImpersonated)
     {
         /// <summary>Levels per table for the principal of this request (queries of one request run sequentially).</summary>
-        public Dictionary<TableIdentifier, IReadOnlyDictionary<string, ColumnAccessLevel>> LevelCache { get; } = new();
+        public Dictionary<TableIdentifier, (IReadOnlyDictionary<string, ColumnAccessLevel> Levels, bool ResolverAllowed)> LevelCache { get; } = new();
+
+        /// <summary>Per-table decisions captured during evaluation so SQL explain subtree partitioning mirrors execution.</summary>
+        public Dictionary<TableIdentifier, TableAccessDecision> TableDecisions { get; } = new();
     }
 
     private static ColumnAccessLevel ResolveEffectiveColumnAccess(
@@ -283,7 +310,7 @@ public sealed partial class QueryAnalysisService
     /// no known token: the prediction is the minimum of the evaluation without scopes and the evaluation with every scope named
     /// by a rule of the table. A resolver failure denies every column.
     /// </summary>
-    private IReadOnlyDictionary<string, ColumnAccessLevel> ResolveTableColumnLevels(
+    private (IReadOnlyDictionary<string, ColumnAccessLevel> Levels, bool ResolverAllowed) ResolveTableColumnLevels(
         TableMetadata table,
         ClaimsPrincipal principal,
         Sid sid,
@@ -296,6 +323,7 @@ public sealed partial class QueryAnalysisService
         }
 
         Dictionary<string, ColumnAccessLevel> levels;
+        var resolverAllowed = false;
         try
         {
             var tenantId = principal.GetTenantId();
@@ -332,6 +360,8 @@ public sealed partial class QueryAnalysisService
                     }
                 }
             }
+
+            resolverAllowed = true;
         }
         catch (Exception ex)
         {
@@ -341,8 +371,8 @@ public sealed partial class QueryAnalysisService
         }
 
         CatalogColumnAccessResolver.ApplyCatalogDenyRules(levels, table);
-        scopeContext.LevelCache[table.Identifier] = levels;
-        return levels;
+        scopeContext.LevelCache[table.Identifier] = (levels, resolverAllowed);
+        return (levels, resolverAllowed);
     }
 
     private static void CheckDeprecatedField(
