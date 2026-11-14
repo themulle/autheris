@@ -58,6 +58,29 @@ public static class OracleConnectionStringPolicy
         }
     }
 
+    /// <summary>Returns null when the Oracle connection string uses TCPS, otherwise a credential-free error message.</summary>
+    public static string? ValidateTcps(string connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return "Oracle connections outside Development must use TCPS.";
+        }
+
+        OracleConnectionStringBuilder builder;
+        try
+        {
+            builder = new OracleConnectionStringBuilder(connectionString);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException)
+        {
+            return "Oracle connections outside Development must use TCPS.";
+        }
+
+        return UsesTcps(builder.DataSource)
+            ? null
+            : "Oracle connections outside Development must use TCPS.";
+    }
+
     /// <summary>True when the connection string carries a literal (non-empty) <c>Password</c>.</summary>
     public static bool HasPlaintextPassword(string connectionString) =>
         ConnectionSecretPolicy.HasPlaintextPassword(Domain.Common.DatabaseDialect.Oracle, connectionString);

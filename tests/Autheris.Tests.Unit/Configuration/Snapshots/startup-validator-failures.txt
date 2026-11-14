@@ -61,7 +61,7 @@ ProductionTransport_AllCors [Production]: ValidationException: Security violatio
 ProductionTransport_McpDeveloperCors [Production]: ValidationException: Security violation: Mcp.EnableDeveloperCors is strictly prohibited outside Development and cannot be bypassed.
 ProductionTransport_HmacReferenceMissing [Production]: ValidationException: NF-SEC-03 violation: Outside Development, HmacSecretKeyVaultRef must be a valid Key Vault secret reference.
 ProductionTransport_OpenMetadataPlainHttp [Production]: ValidationException: Security violation: Outside Development, OpenMetadata.ServerUrl must use HTTPS.
-ProductionTransport_DataSourceWithoutTls [Production]: ValidationException: Sicherheitsverletzung: DataSources:Connections:pg: PostgreSQL connections must use 'SSL Mode=VerifyFull' (or 'VerifyCA') outside Development.
+ProductionTransport_DataSourceWithoutTls [Production]: ValidationException: Sicherheitsverletzung: DataSources:Connections:pg: PostgreSQL connections must use 'SSL Mode=VerifyFull' outside Development.
 ProductionTransport_WildcardOrigin [Production]: ValidationException: Security violation: TrustedOrigins '*' (wildcard CORS) is prohibited outside the Development environment for security reasons (CSRF protection).
 ProductionTransport_PlainHttpOrigin [Production]: ValidationException: Security violation: Outside Development, TrustedOrigins must contain only HTTPS URLs.
 ProductionTransport_ReplicasWithoutRedis [Production]: ValidationException: NF-HA-02 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide cache and epoch invalidation requires Caching.Redis.Enabled = true.
