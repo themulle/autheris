@@ -422,19 +422,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 }
 
                 var targetSourceName = req.Metadata.Table.SourceName ?? req.Metadata.Identifier.Domain;
-                var connections = _gatewayOptions.Value.DataSources?.Connections;
-                DataSourceConnectionOptions? targetConn = null;
-                if (connections != null)
-                {
-                    string effectiveSourceName = targetSourceName;
-                    if (_gatewayOptions.Value.WebSql?.DataSourceMappings != null &&
-                        _gatewayOptions.Value.WebSql.DataSourceMappings.TryGetValue(targetSourceName, out var mapped) &&
-                        !string.IsNullOrWhiteSpace(mapped))
-                    {
-                        effectiveSourceName = mapped;
-                    }
-                    connections.TryGetValue(effectiveSourceName, out targetConn);
-                }
+                var targetConn = Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions.Value, targetSourceName);
 
                 keySetAllowed = drivingSource != null &&
                                 drivingDecision != null &&

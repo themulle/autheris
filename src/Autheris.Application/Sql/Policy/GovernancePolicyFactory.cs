@@ -268,7 +268,7 @@ public sealed class GovernancePolicyFactory(
         // The dependent scan only feeds the epoch keys of a read statement against an opted-in data source; the stage stops before them otherwise.
         bool needDependents = statement.IsRead
             && _options.Value.DataSources?.Connections is { } connections
-            && connections.TryGetValue(input.DataSourceName, out var connection)
+            && connections.TryGetValue(input.ConnectionKey, out var connection)
             && connection.KeySetCacheAllowed;
         var identifiers = new Dictionary<TableIdentity, IReadOnlyList<TableIdentifier>>();
         var metadata = new Dictionary<TableIdentity, TableMetadata?>();
