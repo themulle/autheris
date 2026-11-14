@@ -1,26 +1,37 @@
 namespace Autheris.Tests.Integration;
 
+using System.Collections.Generic;
 using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Shouldly;
 using Xunit;
 
-public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class OpenApiIntegrationTests : IClassFixture<OpenApiIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public OpenApiIntegrationTests(WebApplicationFactory<Program> factory)
+    public OpenApiIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("OpenApiIntegrationTests"));
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("OpenApiIntegrationTests"),
+            });
+        }
     }
 
     [Fact]

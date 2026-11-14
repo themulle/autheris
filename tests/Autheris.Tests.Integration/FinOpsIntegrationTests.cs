@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
@@ -8,9 +9,11 @@ using System.Threading.Tasks;
 using Autheris.Application.FinOps.Interfaces;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -19,25 +22,33 @@ using Autheris.Tests.Integration.Governance;
 /// Der Compute-Preis ist absichtlich extrem hoch (1 ms = 1 EUR), damit ein Request ein Budget sicher sprengt.
 /// Jeder Test nutzt einen eigenen Mandanten, da der Verbrauch im Speicher der Factory liegt.
 /// </summary>
-public sealed class FinOpsIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class FinOpsIntegrationTests : IClassFixture<FinOpsIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public FinOpsIntegrationTests(WebApplicationFactory<Program> factory)
+    public FinOpsIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(b =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("FinOpsIntegrationTests"));
-            b.UseSetting("Gateway:FinOps:Enabled", "true");
-            b.UseSetting("Gateway:FinOps:PricePerComputeSecond", "1000");
-            b.UseSetting("Gateway:FinOps:DefaultMonthlyBudget", "1000000");
-            b.UseSetting("Gateway:FinOps:SoftCapRatio", "0.8");
-            b.UseSetting("Gateway:FinOps:TenantMonthlyBudgets:fin_cap", "0.05");
-            b.UseSetting("Gateway:FinOps:TenantMonthlyBudgets:fin_warn", "100");
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "1000",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("FinOpsIntegrationTests"),
+                ["Gateway:FinOps:Enabled"] = "true",
+                ["Gateway:FinOps:PricePerComputeSecond"] = "1000",
+                ["Gateway:FinOps:DefaultMonthlyBudget"] = "1000000",
+                ["Gateway:FinOps:SoftCapRatio"] = "0.8",
+                ["Gateway:FinOps:TenantMonthlyBudgets:fin_cap"] = "0.05",
+                ["Gateway:FinOps:TenantMonthlyBudgets:fin_warn"] = "100",
+            });
+        }
     }
 
     private HttpClient Client(string tenant, string roles = "Reader")

@@ -14,24 +14,34 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
-public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class DataClassificationWorkflowIntegrationTests : IClassFixture<DataClassificationWorkflowIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public DataClassificationWorkflowIntegrationTests(WebApplicationFactory<Program> factory)
+    public DataClassificationWorkflowIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("DataClassificationWorkflowIntegrationTests"));
-            builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("DataClassificationWorkflowIntegrationTests"),
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "1000",
+            });
+        }
     }
 
     private HttpClient CreateClient(Sid? userSid = null, string[]? roles = null)
@@ -111,7 +121,7 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
     [Fact]
     public async Task ClassifyTable_LowRiskColumns_TriggersZeroTouchAutoApproval()
     {
-        var leanMeshFactory = _factory.WithWebHostBuilder(builder =>
+        using var leanMeshFactory = _factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Classification:Workflow:ActiveProfile", "LEAN_DATA_MESH");
         });
@@ -225,7 +235,7 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<WebAppli
     {
         var testHook = new RecordingGovernanceWorkflowHook();
 
-        var customFactory = _factory.WithWebHostBuilder(builder =>
+        using var customFactory = _factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>
             {

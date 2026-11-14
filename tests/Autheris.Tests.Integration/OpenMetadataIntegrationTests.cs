@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -6,32 +7,46 @@ using Autheris.Application.Catalog.OpenMetadata;
 using Autheris.Extensions.OpenMetadata;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
-public class OpenMetadataIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class OpenMetadataIntegrationTests : IClassFixture<OpenMetadataIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
-    private readonly IOpenMetadataClient _mockOmClient = Substitute.For<IOpenMetadataClient>();
+    private readonly IOpenMetadataClient _mockOmClient;
 
-    public OpenMetadataIntegrationTests(WebApplicationFactory<Program> factory)
+    public OpenMetadataIntegrationTests(HostFixture fixture)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = fixture;
+        _mockOmClient = fixture.MockOmClient;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        public IOpenMetadataClient MockOmClient { get; } = Substitute.For<IOpenMetadataClient>();
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("OpenMetadataIntegrationTests"));
-            builder.UseSetting("Gateway:OpenMetadata:WebhookSecret", "test-webhook-secret-999");
-            builder.ConfigureServices(services =>
+            config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                services.AddSingleton<IOpenMetadataClient>(_mockOmClient);
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("OpenMetadataIntegrationTests"),
+                ["Gateway:OpenMetadata:WebhookSecret"] = "test-webhook-secret-999",
             });
-        });
+        }
+
+        protected override void ConfigureHostServices(IServiceCollection services)
+        {
+            services.AddSingleton<IOpenMetadataClient>(MockOmClient);
+        }
     }
 
     [Fact]

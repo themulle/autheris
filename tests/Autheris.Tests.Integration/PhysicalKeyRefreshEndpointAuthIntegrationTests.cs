@@ -1,31 +1,47 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>Issue #427 (CAT427-SC-04): the refresh physical keys endpoint is admin only.</summary>
 [Trait("Category", "Security")]
-public sealed class PhysicalKeyRefreshEndpointAuthIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class PhysicalKeyRefreshEndpointAuthIntegrationTests : IClassFixture<PhysicalKeyRefreshEndpointAuthIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public PhysicalKeyRefreshEndpointAuthIntegrationTests(WebApplicationFactory<Program> factory)
+    public PhysicalKeyRefreshEndpointAuthIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Development");
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("PhysicalKeyRefreshEndpointAuthIntegrationTests"));
-        });
+            base.ConfigureWebHost(builder);
+        }
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("PhysicalKeyRefreshEndpointAuthIntegrationTests"),
+            });
+        }
     }
 
     private HttpClient CreateClient(string? roles)

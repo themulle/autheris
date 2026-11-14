@@ -4,9 +4,11 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
@@ -18,20 +20,28 @@ namespace Autheris.Tests.Integration;
 /// must carry an explicit AllowAnonymous; protected routes must not.
 /// GAP02: Routes that legitimately accept bodies above the global Kestrel limit (2 MB) carry a RequestSizeLimit.
 /// </summary>
-public class IntegrationGapAEndpointMetadataTests : IClassFixture<WebApplicationFactory<Program>>
+public class IntegrationGapAEndpointMetadataTests : IClassFixture<IntegrationGapAEndpointMetadataTests.HostFixture>
 {
     private const long Mb = 1024 * 1024;
     private readonly WebApplicationFactory<Program> _factory;
 
-    public IntegrationGapAEndpointMetadataTests(WebApplicationFactory<Program> factory)
+    public IntegrationGapAEndpointMetadataTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("IntegrationGapAEndpointMetadataTests"));
-            builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "500");
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("IntegrationGapAEndpointMetadataTests"),
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "500",
+            });
+        }
     }
 
     private List<RouteEndpoint> GetRouteEndpoints()

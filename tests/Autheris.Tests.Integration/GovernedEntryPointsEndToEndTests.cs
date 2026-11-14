@@ -17,9 +17,11 @@ using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -29,56 +31,70 @@ using Autheris.Tests.Integration.Governance;
 /// <c>other-row</c> belongs to another tenant and must never appear in any answer. The per-dialect proof is
 /// <see cref="GovernedDialectEndToEndBase"/>.
 /// </summary>
-public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEntryPointsEndToEndTests.HostFixture>
 {
-    private readonly string _workDir;
     private readonly WebApplicationFactory<Program> _factory;
 
-    public GovernedEntryPointsEndToEndTests(WebApplicationFactory<Program> factory)
+    public GovernedEntryPointsEndToEndTests(HostFixture factory)
     {
-        _workDir = Path.Combine(Path.GetTempPath(), "autheris-x1ep-" + Guid.NewGuid().ToString("N"));
-        var queries = Path.Combine(_workDir, "queries");
-        Directory.CreateDirectory(queries);
-        var dbPath = Path.Combine(_workDir, "data.db");
-        using (var conn = new SqliteConnection($"Data Source={dbPath}"))
-        {
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                CREATE TABLE ep_orders (id INTEGER, tenant_id TEXT, name TEXT);
-                INSERT INTO ep_orders VALUES (1,'acme','acme-row-1'),(2,'acme','acme-row-2'),(3,'other','other-row-3');
-                """;
-            cmd.ExecuteNonQuery();
-        }
-
-        File.WriteAllText(Path.Combine(queries, "ep_orders_list.sql"),
-            "-- @name ep_orders_list\n-- @datasource default\n-- @summary orders\n-- @method GET\n\nSELECT id, name FROM main.ep_orders ORDER BY id");
-
-        _factory = factory.WithWebHostBuilder(b =>
-        {
-            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
-            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("GovernedEntryPointsEndToEndTests"));
-            b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
-            b.UseSetting("Gateway:WebSql:Enabled", "true");
-            b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
-            b.UseSetting("Gateway:SqlEndpoints:Enabled", "true");
-            b.UseSetting("Gateway:SqlEndpoints:Directory", queries);
-            b.UseSetting("Gateway:SqlEndpoints:EnableHotReload", "false");
-            b.UseSetting("Gateway:SqlEndpoints:AutoSyncFromDbt", "false");
-            b.UseSetting("Gateway:Mcp:Enabled", "true");
-            b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-        });
+        _factory = factory;
     }
 
-    public void Dispose()
+    public sealed class HostFixture : IntegrationHost<HostFixture>
     {
-        _factory.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        private readonly string _workDir;
+        private readonly string _queries;
+        private readonly string _dbPath;
+
+        public HostFixture()
+        {
+            _workDir = Path.Combine(Path.GetTempPath(), "autheris-x1ep-" + Guid.NewGuid().ToString("N"));
+            _queries = Path.Combine(_workDir, "queries");
+            Directory.CreateDirectory(_queries);
+            _dbPath = Path.Combine(_workDir, "data.db");
+            using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = """
+                    CREATE TABLE ep_orders (id INTEGER, tenant_id TEXT, name TEXT);
+                    INSERT INTO ep_orders VALUES (1,'acme','acme-row-1'),(2,'acme','acme-row-2'),(3,'other','other-row-3');
+                    """;
+                cmd.ExecuteNonQuery();
+            }
+
+            File.WriteAllText(Path.Combine(_queries, "ep_orders_list.sql"),
+                "-- @name ep_orders_list\n-- @datasource default\n-- @summary orders\n-- @method GET\n\nSELECT id, name FROM main.ep_orders ORDER BY id");
+        }
+
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit"] = "1000",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("GovernedEntryPointsEndToEndTests"),
+                ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
+                ["Gateway:DataSources:Connections:default:Provider"] = "Sqlite",
+                ["Gateway:DataSources:Connections:default:ConnectionString"] = $"Data Source={_dbPath}",
+                ["Gateway:WebSql:Enabled"] = "true",
+                ["Gateway:WebSql:DefaultDataSourceName"] = "default",
+                ["Gateway:SqlEndpoints:Enabled"] = "true",
+                ["Gateway:SqlEndpoints:Directory"] = _queries,
+                ["Gateway:SqlEndpoints:EnableHotReload"] = "false",
+                ["Gateway:SqlEndpoints:AutoSyncFromDbt"] = "false",
+                ["Gateway:Mcp:Enabled"] = "true",
+                ["Gateway:Mcp:EndpointPath"] = "/mcp",
+            });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+        }
     }
 
     private async Task RegisterAsync()

@@ -1,27 +1,38 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>SR-L-02: host filtering and the CSRF origin check run against the allow-list in the real pipeline (Development: loopback only).</summary>
-public sealed class HostFilteringPipelineTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class HostFilteringPipelineTests : IClassFixture<HostFilteringPipelineTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public HostFilteringPipelineTests(WebApplicationFactory<Program> factory)
+    public HostFilteringPipelineTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("HostFilteringPipelineTests"));
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("HostFilteringPipelineTests"),
+            });
+        }
     }
 
     private static HttpRequestMessage GraphQlPost(string host, string? origin)

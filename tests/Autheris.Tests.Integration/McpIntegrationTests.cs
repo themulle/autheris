@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -10,25 +11,35 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
-public class McpIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public McpIntegrationTests(WebApplicationFactory<Program> factory)
+    public McpIntegrationTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Mcp:Enabled", "true");
-            builder.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
-            builder.UseSetting("Gateway:Insecure:danger_bypass_mcp_auth", "true");
-            builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("McpIntegrationTests"));
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Mcp:Enabled"] = "true",
+                ["Gateway:Mcp:EndpointPath"] = "/mcp",
+                ["Gateway:Insecure:danger_bypass_mcp_auth"] = "true",
+                ["Gateway:Insecure:danger_allow_anonymous_access"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("McpIntegrationTests"),
+            });
+        }
     }
 
     [Fact]
