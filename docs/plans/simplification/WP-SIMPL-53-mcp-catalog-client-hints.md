@@ -2,7 +2,7 @@
 
 Parent: [plan](../2026-11-05-plan-project-simplification.md#4-work-packages) | Issues: [#578](https://github.com/themulle/autheris/issues/578), [#579](https://github.com/themulle/autheris/issues/579), [#572](https://github.com/themulle/autheris/issues/572), [#573](https://github.com/themulle/autheris/issues/573) | Related: [WP-SIMPL-41](WP-SIMPL-41-authorized-data-discovery.md), [WP-SIMPL-44](WP-SIMPL-44-no-source-metadata-reads.md), [WP-SIMPL-51](WP-SIMPL-51-websql-client-contract.md)
 
-Status: Draft (Phase 2, 2026-11-08); Phase 3 review done for PR 1 and PR 2 (2026-11-08), PR 3-5 pending.
+Status: Draft (Phase 2, 2026-11-08); Phase 3 review APPROVED WITH CONDITIONS for PR 1-5 (PR 1-2 on 2026-11-08; PR 3-5 on 2026-11-14). PR 1 (`ddb53afb`), PR 2 (`554ace53`), PR 3 (`9b3e8852`), and PR 5 (`ba5dd11d`) merged on `main`; PR 4 (`#573` GraphQL aggregation pricing & `indexHints`) ready for Phase 4.
 
 ## 1. Goal and outcome
 Query clients (mostly LLM agents) get only what the operator allows and only hints that are true: `Mcp:MaxResultRows` caps every row-reading MCP tool (#578), catalog hints name only enabled tools and routes (#579), datasets carry a coarse size class from ingested metadata (#572), and aggregations and WebSQL statements without a usable index are priced like unindexed root lists and say so (#573).
@@ -47,9 +47,9 @@ Row cap is data minimisation towards model providers: a client value can only lo
 ## 9. Estimate
 PR 1 1.5 pd, PR 2 1.5 pd, PR 3 1.5 pd, PR 4 1.5 pd, PR 5 1 pd: about 7 pd.
 
-## Phase 3 binding conditions (PR 1, PR 2)
+## Phase 3 binding conditions (PR 1–PR 5)
 
-Verdict: APPROVED WITH CONDITIONS (PR 1 #578, PR 2 #579). PR 3-5 not yet reviewed. Current-state references in section 3 were spot-checked and hold (`McpOptions.MaxResultRows` unread, `IReadPathSwitches`, `DisabledTools` validator).
+Verdict: APPROVED WITH CONDITIONS across all five PRs (PR 1 #578 and PR 2 #579 reviewed 2026-11-08; PR 3 #572, PR 4 #573 GraphQL, and PR 5 #573 WebSQL reviewed 2026-11-14 against `origin/main` @ `2d6715a0`). PR 1 (`ddb53afb`), PR 2 (`554ace53`), PR 3 (`9b3e8852`), and PR 5 (`ba5dd11d`) are already landed on `main` and verified against these conditions; PR 4 (#573 GraphQL aggregation pricing and `extensions.autheris.indexHints`) is ready for Phase 4 implementation.
 
 ### PR 1: row cap
 - SEC-53-01 The cap is the minimum of the option value and the client value; a client value can never raise it. Applies to all five tools, including `query_sql` (cap applied after any client `LIMIT`, by trimming or by wrapping/limiting in the executor, never by trusting statement text) and `query_graphql`.
@@ -84,3 +84,46 @@ Verdict: APPROVED WITH CONDITIONS (PR 1 #578, PR 2 #579). PR 3-5 not yet reviewe
 ### Owner questions (defaults)
 - Q1 `query_sql` cap by trimming rows in the MCP executor (default) vs rewriting SQL; trimming is safer and engine-independent.
 - Q2 Invalid client limit rejects with a validation error (default) vs silent clamp.
+
+### PR 3: dataset size class (#572, verified on `main` @ `9b3e8852`)
+- SEC-53-14 Coarse buckets only (`tiny`, `small`, `medium`, `large`, `huge`, `unknown`): exact row counts (`EstimatedRowCount`, `ExpectedRows`) MUST NEVER be serialized in `McpDatasetSize` or any MCP/REST catalog response (`Q24`). Negative or unpopulated row counts resolve to `SizeClass = "unknown"`, `Source = "UNKNOWN"`, `AsOf = null`.
+- SEC-53-15 Ingested metadata only (WP-44 / OD-25): `DatasetSizeClassifier` reads only in-memory `TableMetadata` populated from catalog/dbt ingestion (`EstimatedRowCount`, `ExpectedRows`, `UpdatedAt`) and MUST NEVER open a data-source connection or issue `SELECT COUNT(*)` / `ANALYZE` against any target database.
+- SEC-53-16 Authorized discovery only (WP-41): size class metadata is emitted only after caller dataset visibility filtering; invisible or denied datasets return `404`/omitted and never leak size class or `AsOf` timestamps.
+
+### PR 4: GraphQL aggregation pricing and `extensions.autheris.indexHints` (#573)
+- SEC-53-17 Fail-closed index usability on GraphQL `T_aggregate` fields:
+  - In `QueryCostAnalyzerRule` (`QueryCostAnalyzerRule.cs:418-422` and `QueryCostAnalyzerRule.Aggregation.cs:96-131`), when `tableMeta != null` (resolved via `_tableMetadataLookup` or `CatalogGraphQlTypeModule.CurrentLookup` from `field.Name.Value[..^"_aggregate".Length]` or `field.Name.Value`, excluding `queryMetrics`) and `_costOptions?.UnindexedRootListSurchargeMultiplier > 1.0`, the analyzer MUST evaluate whether the aggregation has a usable declared index.
+  - `groupByAsOrder` is extracted from `groupBy` (enum/string items -> `(ColumnName, "ASC")`) and `timeBuckets` (`column` field -> `(ColumnName, "ASC")`). Any GraphQL variable reference (`VariableNode`) that cannot be resolved from `variableValues` or any unparseable `groupBy`/`timeBuckets` entry MUST map to `(IndexUsabilityEvaluator.UnresolvedVariableMarker, "ASC")` so `IndexUsabilityEvaluator.HasUsableIndex` fails closed (`false`).
+  - `filterColumns` is extracted from `where` via `IndexUsabilityEvaluator.ExtractFilterColumns(whereArg.Value, variableValues)` (which already maps unresolved variables to `UnresolvedVariableMarker`).
+  - Unlike bounded paged root lists (`first: N` without `where`/`orderBy`), an ungrouped and unfiltered `T_aggregate` scans the full table: if BOTH `groupByAsOrder` and `filterColumns` are empty/null, `hasUsableIndex` MUST be `false` (unindexed full-table aggregation scan). When at least one of `groupByAsOrder` or `filterColumns` is non-empty, `hasUsableIndex` is `IndexUsabilityEvaluator.HasUsableIndex(tableMeta, visibleColumns, groupByAsOrder, filterColumns)`.
+- SEC-53-18 Saturating surcharge arithmetic & middleware wiring:
+  - When `!hasUsableIndex` on a `T_aggregate` field with `tableMeta != null` and `_costOptions?.UnindexedRootListSurchargeMultiplier > 1.0`, multiply the field's aggregate cost using the exact saturating ceiling formula used for root lists (`QueryCostAnalyzerRule.cs:646`): `(int)Math.Min(int.MaxValue, Math.Ceiling(cost * _costOptions.UnindexedRootListSurchargeMultiplier))`, preventing integer overflow wrap.
+  - When `tableMeta == null` (e.g., schema-less unit tests calling `CalculateCost` without `tableMetadataLookup`), `AggregateFieldCost` preserves its existing base + `groupBy` + `aggregates` weight calculation unchanged.
+  - `CostAndQuotaMiddleware.cs` (`lines 106-114` and `227-235`) MUST pass `CatalogGraphQlTypeModule.CurrentLookup` as `tableMetadataLookup` into `QueryCostAnalyzerRule.CalculateCost(...)` so pre-execution budget rejection enforces both root-list and `T_aggregate` unindexed surcharges before resolvers execute.
+- SEC-53-19 Denied-column suppression in `extensions.autheris.indexHints` (zero schema oracle):
+  - For every surcharged root list field and root `T_aggregate` field (`!hasUsableIndex` with `tableMeta != null` and `_costOptions?.UnindexedRootListSurchargeMultiplier > 1.0`), build a `GraphQlIndexHint(string Root, string Reason, IReadOnlyList<string> HelpfulIndexColumns)` where `Root` is the response root key (`field.Alias?.Value ?? field.Name.Value`) and `Reason` is `"NO_USABLE_INDEX"`.
+  - Candidate `HelpfulIndexColumns` are the distinct referenced column names (preserving first-seen order, case-insensitive deduplication) from `filterColumns` (`where`) followed by `orderBy` / `groupByAsOrder`.
+  - **All-or-nothing column visibility rule (D-53c / §4 step 4):** If `UnresolvedVariableMarker` is present among the candidate columns, OR if `visibleColumns` is non-null and ANY candidate column is NOT in `visibleColumns` (i.e. the column is `Deny`/invisible to the caller or does not exist on the visible table projection), `HelpfulIndexColumns` MUST be `Array.Empty<string>()` (`[]`). Even when `visibleColumns == null`, every candidate column MUST exist in `tableMeta.Columns` (using canonical `TableMetadata.Columns` name) or else `HelpfulIndexColumns` is `Array.Empty<string>()`. This prevents callers from probing hidden/denied column names via `where`/`orderBy`/`groupBy` hints.
+- SEC-53-20 No filter literal values, SQL fragments, or hidden table metadata in `indexHints`:
+  - `GraphQlIndexHint` contains ONLY `root`, `reason` (`"NO_USABLE_INDEX"`), and `helpfulIndexColumns` (canonical column identifiers). Filter literal values, variable values, index names, and internal table identifiers MUST NEVER be included.
+- SEC-53-21 Hidden/unauthorized root fields excluded:
+  - `indexHints` are emitted only for tables present in `tableMetadataLookup` for the request. When no root list or `T_aggregate` field is surcharged (or when `indexHints` is empty), `extensions.autheris` is not added. When non-empty, attach `extensions["autheris"] = new Dictionary<string, object?> { ["indexHints"] = indexHints }` (merging into any existing `extensions["autheris"]` dictionary without clobbering sibling keys).
+- SEC-53-22 Synthetic `queryMetrics` field excluded:
+  - The built-in `queryMetrics` root field has no physical catalog table index and MUST NOT be surcharged as an unindexed table or emit an `indexHints` entry.
+
+### PR 5: WebSQL index hints (#573, verified on `main` @ `ba5dd11d`)
+- SEC-53-23 `SqlStatementCostEstimator` and `WebSqlIndexHint` (`Domain/Model/WebSqlIndexHint.cs`) MUST NEVER echo raw SQL statement text, predicate literal values, or bound parameter values (`Hint_never_contains_statement_text`).
+- SEC-53-24 In `SqlStatementCostEstimator.TryBuildTableScanIndexHint`, if ANY candidate column from `WHERE` or `GROUP BY` is present in `getDeniedColumns(tableName)` (case-insensitive), `HelpfulIndexColumns` MUST be cleared to `Array.Empty<string>()` (`[]`).
+
+### Mandatory tests for PR 3–PR 5 (`[Trait("Category","Security")]`)
+- `DatasetSizeClassTests.Exact_count_never_serialized` (`SEC-53-14`)
+- `DatasetSizeClassTests.Invisible_dataset_has_no_size` (`SEC-53-16`)
+- `DatasetSizeClassTests.No_source_query_issued` (`SEC-53-15`)
+- `AggregationIndexPricingTests.Aggregation_without_usable_index_gets_surcharge` (`SEC-53-17`, `SEC-53-18`)
+- `AggregationIndexPricingTests.Aggregation_with_leading_key_filter_not_surcharged` (`SEC-53-17`)
+- `AggregationIndexPricingTests.Aggregation_with_unresolved_variable_in_where_or_groupBy_fails_closed_with_surcharge` (`SEC-53-17`)
+- `AggregationIndexPricingTests.Index_hint_omits_columns_when_any_is_denied` (`SEC-53-19`)
+- `AggregationIndexPricingTests.Hint_absent_when_index_usable` (`SEC-53-21`)
+- `AggregationIndexPricingTests.Hint_never_contains_filter_literal_values` (`SEC-53-20`)
+- `WebSqlIndexHintTests.Hint_never_contains_statement_text` (`SEC-53-23`)
+- `WebSqlIndexHintTests.Hint_omits_columns_when_any_is_denied` (`SEC-53-24`)
