@@ -30,6 +30,7 @@ using Xunit;
 /// forms resolve the alias. If the <c>EXISTS</c> form failed too, it would be a pre-existing dialect generator defect, not a key-set special case.
 /// </summary>
 [Collection(OracleCollection.Name)]
+[Trait("Category", "Oracle")]
 public sealed class RowFilterKeySetOracleTests
 {
     private static readonly TableIdentity Orders = new(AstCompilerOracleFixture.AppUser, "ORDERS");

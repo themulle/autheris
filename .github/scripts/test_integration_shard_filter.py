@@ -82,6 +82,58 @@ class IntegrationShardFilterTests(unittest.TestCase):
         isf.assign(names_under, weights_20, 4, warn_stream=buf_under)
         self.assertEqual("", buf_under.getvalue())
 
+    def test_security_always_selected(self):
+        # SEC-OI-522-2: BASE_FILTER keeps all non-Spark/Parity Security tests in PR shards, even when tagged Oracle or Stress.
+        for cats in (
+            {"Security"},
+            {"Security", "Oracle"},
+            {"Security", "Stress"},
+            {"Security", "Oracle", "Stress"},
+            {"Security", "DatabricksContract"},
+        ):
+            self.assertTrue(isf.matches_category_filter(isf.BASE_FILTER, cats), f"Expected BASE_FILTER to select {cats}")
+
+        # Non-security Oracle, Stress, Spark, and Parity tests are excluded from the PR shard filter.
+        for excluded_cats in ({"Oracle"}, {"Stress"}, {"Oracle", "Stress"}, {"Spark"}, {"Parity"}):
+            self.assertFalse(isf.matches_category_filter(isf.BASE_FILTER, excluded_cats), f"Expected BASE_FILTER to exclude {excluded_cats}")
+
+        # Across 6 shards, every Security-tagged test method is selected by at least one PR job (shard filter or Spark job).
+        weights = json.loads((isf.project / "ci-shard-weights.json").read_text(encoding="utf-8"))
+        discovered = isf.classes()
+        shards = isf.assign(discovered, weights, 6)
+        shard_filters = [isf.shard_filter(shards, i) for i in range(6)]
+        for cls in ("Federation.FederationSecurityTests", "OracleGatewayPathTests", "QueryDefenseStressTests"):
+            fqn = f"{isf.NAMESPACE}{cls}.SampleSecurityTest"
+            for extra in ((), ("Oracle",), ("Stress",)):
+                cats = {"Security", *extra}
+                matched = [i for i, f in enumerate(shard_filters) if isf.matches_shard_filter(f, fqn, cats)]
+                self.assertEqual(1, len(matched), f"{fqn} with {cats} matched shards {matched}")
+
+    def test_unknown_changes_output_runs_jobs(self):
+        # SEC-OI-522-3: ci-changes.py fails closed on unknown/empty/error inputs, and ci.yml uses != 'false' for oracle-smoke and spark-integration-tests.
+        ci_spec = importlib.util.spec_from_file_location(
+            "ci_changes",
+            pathlib.Path(__file__).with_name("ci-changes.py"),
+        )
+        ci_mod = importlib.util.module_from_spec(ci_spec)
+        ci_spec.loader.exec_module(ci_mod)
+
+        for event in ("push", "schedule", "workflow_dispatch", "unknown", ""):
+            self.assertEqual({"dotnet": True, "oracle": True, "spark": True}, ci_mod.decide_all(event, "", ""))
+
+        self.assertEqual(
+            {"dotnet": True, "oracle": True, "spark": True},
+            ci_mod.decide_all("pull_request", "a" * 40, "b" * 40, diff=lambda *a: None),
+        )
+        self.assertEqual(
+            {"dotnet": True, "oracle": True, "spark": True},
+            ci_mod.decide_all("pull_request", "a" * 40, "b" * 40, diff=lambda *a: []),
+        )
+
+        ci_yml = (isf.root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("if: ${{ !cancelled() && needs.changes.outputs.oracle != 'false' }}", ci_yml)
+        self.assertIn("if: ${{ !cancelled() && needs.changes.outputs.spark != 'false' }}", ci_yml)
+
 
 if __name__ == "__main__":
     unittest.main()

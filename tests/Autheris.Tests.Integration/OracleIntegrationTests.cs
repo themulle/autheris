@@ -17,6 +17,7 @@ namespace Autheris.Tests.Integration;
 /// under names that no other Oracle test uses, because the Oracle container is shared.
 /// </summary>
 [Collection(OracleCollection.Name)]
+[Trait("Category", "Oracle")]
 public class OracleIntegrationTests : IDisposable
 {
     private readonly Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> _host;

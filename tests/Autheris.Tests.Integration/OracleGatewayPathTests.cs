@@ -35,6 +35,7 @@ using Xunit;
 /// (<c>Admission_OracleOnlyWithF5Evidence</c> pins the test names).
 /// </summary>
 [Collection(OracleCollection.Name)]
+[Trait("Category", "Oracle")]
 public sealed class OracleGatewayPathTests : IDisposable
 {
     private const string Source = OracleGatewayHost.Source;

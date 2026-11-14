@@ -18,7 +18,7 @@ import sys
 NAMESPACE = "Autheris.Tests.Integration."
 FALLBACK_WEIGHT = 10.0
 UNWEIGHTED_WARN_THRESHOLD = 0.10
-BASE_FILTER = "Category!=Spark&Category!=Parity"
+BASE_FILTER = "Category!=Spark&Category!=Parity&((Category!=Oracle&Category!=Stress)|Category=Security)"
 
 root = pathlib.Path(__file__).resolve().parents[2]
 project = root / "tests" / "Autheris.Tests.Integration"
@@ -104,15 +104,65 @@ def shard_filter(shards: list[list[str]], index: int, base_filter: str = BASE_FI
     return f"{base_filter}&{excluded}" if excluded else base_filter
 
 
-def matches_shard_filter(filter_expr: str, fqn: str) -> bool:
-    """Evaluate a shard filter expression against a test method FullyQualifiedName."""
-    pos_tokens = re.findall(r"FullyQualifiedName~([A-Za-z0-9_.]+\.)", filter_expr)
-    neg_tokens = re.findall(r"FullyQualifiedName!~([A-Za-z0-9_.]+\.)", filter_expr)
-    if pos_tokens:
-        return any(token in fqn for token in pos_tokens)
-    if neg_tokens:
-        return all(token not in fqn for token in neg_tokens)
-    return True
+def _tokenize_filter(expr: str) -> list[str]:
+    return [t for t in re.findall(r"\(|\)|&|\||[^()&|\s]+", expr) if t]
+
+
+def _eval_tokens(tokens: list[str], pos: int, fqn: str, cats: set[str]) -> tuple[bool, int]:
+    """Recursive-descent evaluator for `dotnet test --filter` expressions (`|`, `&`, `(...)`)."""
+    lhs, pos = _eval_and(tokens, pos, fqn, cats)
+    while pos < len(tokens) and tokens[pos] == "|":
+        rhs, pos = _eval_and(tokens, pos + 1, fqn, cats)
+        lhs = lhs or rhs
+    return lhs, pos
+
+
+def _eval_and(tokens: list[str], pos: int, fqn: str, cats: set[str]) -> tuple[bool, int]:
+    lhs, pos = _eval_atom(tokens, pos, fqn, cats)
+    while pos < len(tokens) and tokens[pos] == "&":
+        rhs, pos = _eval_atom(tokens, pos + 1, fqn, cats)
+        lhs = lhs and rhs
+    return lhs, pos
+
+
+def _eval_atom(tokens: list[str], pos: int, fqn: str, cats: set[str]) -> tuple[bool, int]:
+    if pos >= len(tokens):
+        raise ValueError("unexpected end of filter expression")
+    tok = tokens[pos]
+    if tok == "(":
+        val, pos = _eval_tokens(tokens, pos + 1, fqn, cats)
+        if pos >= len(tokens) or tokens[pos] != ")":
+            raise ValueError("unclosed '(' in filter expression")
+        return val, pos + 1
+    if tok.startswith("Category!="):
+        return (tok[len("Category!="):] not in cats), pos + 1
+    if tok.startswith("Category="):
+        return (tok[len("Category="):] in cats), pos + 1
+    if tok.startswith("FullyQualifiedName!~"):
+        needle = tok[len("FullyQualifiedName!~"):]
+        return ((needle not in fqn) if fqn else True), pos + 1
+    if tok.startswith("FullyQualifiedName~"):
+        needle = tok[len("FullyQualifiedName~"):]
+        return ((needle in fqn) if fqn else True), pos + 1
+    raise ValueError(f"unsupported filter predicate: {tok}")
+
+
+def matches_category_filter(filter_expr: str, categories=()) -> bool:
+    """Evaluate a filter expression against a set of Category traits."""
+    tokens = _tokenize_filter(filter_expr)
+    val, pos = _eval_tokens(tokens, 0, "", set(categories))
+    if pos != len(tokens):
+        raise ValueError(f"trailing tokens at {pos}: {tokens[pos:]}")
+    return val
+
+
+def matches_shard_filter(filter_expr: str, fqn: str, categories=()) -> bool:
+    """Evaluate a shard filter expression against a test method FullyQualifiedName and Category traits."""
+    tokens = _tokenize_filter(filter_expr)
+    val, pos = _eval_tokens(tokens, 0, fqn, set(categories))
+    if pos != len(tokens):
+        raise ValueError(f"trailing tokens at {pos}: {tokens[pos:]}")
+    return val
 
 
 def main() -> None:
