@@ -563,126 +563,176 @@ public sealed partial class GovernedSqlExecutor
             }
         }
 
-        DbTransaction? tx = null;
-        bool txCompleted = false;
         try
         {
             await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
-
-            var sessionSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
-                             ?? user.FindFirst("sub")?.Value;
-            tx = await _sessionInitializer.InitializeSessionAsync(
-                connection,
-                connectionDialect,
-                tenantId,
-                userSid: sessionSid,
-                purpose: null,
-                requireTransaction: true,
-                ct: ct).ConfigureAwait(false);
-
-            // SQLA-05: a per-request timeout (declarative endpoint header) can only tighten the global WebSQL timeout.
-            int commandTimeout = Math.Max(1, _options.Value.WebSql.ExecutionTimeoutSeconds);
-            if (request.TimeoutSeconds is > 0)
+            DbTransaction? tx = null;
+            bool txCompleted = false;
+            try
             {
-                commandTimeout = Math.Min(commandTimeout, request.TimeoutSeconds.Value);
-            }
-
-            if (dmlContext.IsDml)
-            {
-                // the session initializer gives no transaction on SQL Server, Oracle and SQLite, so one is begun here. From the
-                // call on, the checked executor is the single owner of the completion (commit or rollback); this method only disposes it.
-                tx ??= await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-                txCompleted = true;
-
-                var limits = new CheckedDmlLimits(commandTimeout, _options.Value.WebSql.MaxAffectedRows);
-                int affectedRows;
-                try
-                {
-                    var checkedTx = tx;
-                    affectedRows = await _executionGuard.RunAsync(
+                var sessionSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
+                                 ?? user.FindFirst("sub")?.Value;
+                // SEC-OI-505-5: Request a database-side read-only transaction explicitly only on user reads
+                // (never on DML writes). DML keeps the default read-write session initialization.
+                tx = dmlContext.IsDml
+                    ? await _sessionInitializer.InitializeSessionAsync(
                         connection,
-                        TimeSpan.FromSeconds(commandTimeout),
-                        () => CompiledSqlBinders.CheckedExecutorFor(binderDialect).ExecuteInTransactionAsync(checkedTx, compiled, clientValues, limits, ct),
-                        ct).ConfigureAwait(false);
-                    deliveredOrAffectedRows = affectedRows;
-                }
-                catch (Exception dmlEx)
+                        connectionDialect,
+                        tenantId,
+                        userSid: sessionSid,
+                        purpose: null,
+                        requireTransaction: true,
+                        ct: ct).ConfigureAwait(false)
+                    : await _sessionInitializer.InitializeSessionAsync(
+                        connection,
+                        connectionDialect,
+                        tenantId,
+                        AccessMode.ReadOnly,
+                        userSid: sessionSid,
+                        purpose: null,
+                        requireTransaction: true,
+                        ct: ct).ConfigureAwait(false);
+
+                // SQLA-05: a per-request timeout (declarative endpoint header) can only tighten the global WebSQL timeout.
+                int commandTimeout = Math.Max(1, _options.Value.WebSql.ExecutionTimeoutSeconds);
+                if (request.TimeoutSeconds is > 0)
                 {
-                    bool rejected = dmlEx is DmlAffectedRowsLimitException or DmlCheckOptionViolationException;
+                    commandTimeout = Math.Min(commandTimeout, request.TimeoutSeconds.Value);
+                }
+
+                if (dmlContext.IsDml)
+                {
+                    // the session initializer gives no transaction on SQL Server, Oracle and SQLite, so one is begun here. From the
+                    // call on, the checked executor is the single owner of the completion (commit or rollback); this method only disposes it.
+                    tx ??= await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+                    txCompleted = true;
+
+                    var limits = new CheckedDmlLimits(commandTimeout, _options.Value.WebSql.MaxAffectedRows);
+                    int affectedRows;
                     try
                     {
-                        await RecordDmlAuditAsync(
-                            tenantId, user, dsName, dmlContext,
-                            rejected ? AuditEventTypes.WebSqlDmlRejected : AuditEventTypes.WebSqlDmlFailed, "DENY", compiled,
-                            affectedRows: null, reason: rejected ? ErrorCodeOf(dmlEx) : dmlEx.GetType().Name, synthetic: false).ConfigureAwait(false);
+                        var checkedTx = tx;
+                        affectedRows = await _executionGuard.RunAsync(
+                            connection,
+                            TimeSpan.FromSeconds(commandTimeout),
+                            () => CompiledSqlBinders.CheckedExecutorFor(binderDialect).ExecuteInTransactionAsync(checkedTx, compiled, clientValues, limits, ct),
+                            ct).ConfigureAwait(false);
+                        deliveredOrAffectedRows = affectedRows;
                     }
-                    catch (Exception auditEx)
+                    catch (Exception dmlEx)
                     {
-                        // The statement's own failure is what the caller must see, not a failure of its audit (the intent record exists).
-                        GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
-                        _logger?.LogCritical(auditEx, "WebSQL DML failure audit could not be written on data source {DataSource}.", dsName);
+                        bool rejected = dmlEx is DmlAffectedRowsLimitException or DmlCheckOptionViolationException;
+                        try
+                        {
+                            await RecordDmlAuditAsync(
+                                tenantId, user, dsName, dmlContext,
+                                rejected ? AuditEventTypes.WebSqlDmlRejected : AuditEventTypes.WebSqlDmlFailed, "DENY", compiled,
+                                affectedRows: null, reason: rejected ? ErrorCodeOf(dmlEx) : dmlEx.GetType().Name, synthetic: false).ConfigureAwait(false);
+                        }
+                        catch (Exception auditEx)
+                        {
+                            // The statement's own failure is what the caller must see, not a failure of its audit (the intent record exists).
+                            GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
+                            _logger?.LogCritical(auditEx, "WebSQL DML failure audit could not be written on data source {DataSource}.", dsName);
+                        }
+
+                        throw;
                     }
 
-                    throw;
+                    await RecordCommittedDmlAuditAsync(tenantId, user, dsName, dmlContext, compiled, affectedRows).ConfigureAwait(false);
+
+                    using var emptyTable = new DataTable();
+                    using var emptyReader = emptyTable.CreateDataReader();
+                    await rowWriter(emptyReader, new GovernedResultInfo(Array.Empty<SqlResultColumn>(), ImmutableArray<bool>.Empty), ct).ConfigureAwait(false);
+                    return compiled.Sql;
                 }
 
-                await RecordCommittedDmlAuditAsync(tenantId, user, dsName, dmlContext, compiled, affectedRows).ConfigureAwait(false);
+                await using var command = connection.CreateCommand();
+                if (tx != null)
+                {
+                    command.Transaction = tx;
+                }
 
-                using var emptyTable = new DataTable();
-                using var emptyReader = emptyTable.CreateDataReader();
-                await rowWriter(emptyReader, new GovernedResultInfo(Array.Empty<SqlResultColumn>(), ImmutableArray<bool>.Empty), ct).ConfigureAwait(false);
+                command.CommandTimeout = commandTimeout;
+                binder.Bind(command, compiled, clientValues);
+
+                // the execution and the streaming of the rows run under the provider guard (SQLite interrupts at the timeout).
+                bool isTruncated = false;
+                await _executionGuard.RunAsync(
+                    connection,
+                    TimeSpan.FromSeconds(commandTimeout),
+                    async () =>
+                    {
+                        await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
+                        {
+                            var columns = SqlResultColumns.Describe(reader);
+                            var maskArray = compiled.OutputColumnMasks;
+                            if (maskArray.IsDefault || (reader.FieldCount > 0 && maskArray.Length != reader.FieldCount))
+                            {
+                                throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, compiled.Dialect);
+                            }
+                            var info = new GovernedResultInfo(columns, reader.FieldCount == 0 ? ImmutableArray<bool>.Empty : maskArray);
+                            if (rewrite.DeliveredRowLimit > 0)
+                            {
+                                var limitedReader = new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit);
+                                await rowWriter(limitedReader, info, ct).ConfigureAwait(false);
+                                deliveredOrAffectedRows = limitedReader.DeliveredRows;
+                                isTruncated = limitedReader.HasMoreRows;
+                            }
+                            else
+                            {
+                                await rowWriter(reader, info, ct).ConfigureAwait(false);
+                            }
+                        }
+
+                        return true;
+                    },
+                    ct).ConfigureAwait(false);
+
+                NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated);
                 return compiled.Sql;
             }
-
-            await using var command = connection.CreateCommand();
-            if (tx != null)
+            catch
             {
-                command.Transaction = tx;
-            }
-
-            command.CommandTimeout = commandTimeout;
-            binder.Bind(command, compiled, clientValues);
-
-            // the execution and the streaming of the rows run under the provider guard (SQLite interrupts at the timeout).
-            bool isTruncated = false;
-            await _executionGuard.RunAsync(
-                connection,
-                TimeSpan.FromSeconds(commandTimeout),
-                async () =>
+                if (tx != null && !txCompleted)
                 {
-                    await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
+                    try
                     {
-                        var columns = SqlResultColumns.Describe(reader);
-                        var maskArray = compiled.OutputColumnMasks;
-                        if (maskArray.IsDefault || (reader.FieldCount > 0 && maskArray.Length != reader.FieldCount))
-                        {
-                            throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, compiled.Dialect);
-                        }
-                        var info = new GovernedResultInfo(columns, reader.FieldCount == 0 ? ImmutableArray<bool>.Empty : maskArray);
-                        if (rewrite.DeliveredRowLimit > 0)
-                        {
-                            var limitedReader = new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit);
-                            await rowWriter(limitedReader, info, ct).ConfigureAwait(false);
-                            deliveredOrAffectedRows = limitedReader.DeliveredRows;
-                            isTruncated = limitedReader.HasMoreRows;
-                        }
-                        else
-                        {
-                            await rowWriter(reader, info, ct).ConfigureAwait(false);
-                        }
+                        await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception rbEx)
+                    {
+                        _logger?.LogWarning(rbEx, "Failed to rollback WebSQL transaction.");
                     }
 
-                    return true;
-                },
-                ct).ConfigureAwait(false);
+                    txCompleted = true;
+                }
 
-            if (tx != null)
-            {
-                await tx.CommitAsync(ct).ConfigureAwait(false);
-                txCompleted = true;
+                throw;
             }
-            NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated);
-            return compiled.Sql;
+            finally
+            {
+                if (tx != null)
+                {
+                    // SEC-OI-505-5: User reads always roll back before tx/connection disposal so Oracle/PostgreSQL
+                    // pooled connections never retain an active SET TRANSACTION READ ONLY transaction.
+                    if (!dmlContext.IsDml && !txCompleted)
+                    {
+                        try
+                        {
+                            await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                        }
+                        catch (Exception rbEx)
+                        {
+                            _logger?.LogWarning(rbEx, "Failed to rollback read-only WebSQL transaction.");
+                        }
+
+                        txCompleted = true;
+                    }
+
+                    await tx.DisposeAsync().ConfigureAwait(false);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -722,18 +772,6 @@ public sealed partial class GovernedSqlExecutor
                 }, CancellationToken.None).ConfigureAwait(false);
             }
 
-            if (tx != null && !txCompleted)
-            {
-                try
-                {
-                    await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception rbEx)
-                {
-                    _logger?.LogWarning(rbEx, "Failed to rollback WebSQL transaction.");
-                }
-            }
-
             if (sanitized is not null)
             {
                 throw sanitized;
@@ -743,10 +781,6 @@ public sealed partial class GovernedSqlExecutor
         }
         finally
         {
-            if (tx != null)
-            {
-                await tx.DisposeAsync().ConfigureAwait(false);
-            }
             if (leases != null)
             {
                 foreach (var lease in leases)
