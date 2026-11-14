@@ -1,0 +1,122 @@
+# Runtime GET/HEAD RouteEndpoint allowlist for read-only token surface (SEC-OI-489-4).
+# Format: <ROUTE_PATTERN>|<METHODS>|no side effect: <rationale>
+# Every non-exempt entry MUST state "no side effect". A side-effecting GET/HEAD endpoint is a defect to fix, never an entry.
+/.well-known/oauth-authorization-server|GET|no side effect: static RFC 8414 discovery 404 stub
+/.well-known/openid-configuration|GET|no side effect: static OIDC discovery 404 stub
+/api/admin/trusted-documents/{appId}|GET|no side effect: reads app-scoped trusted document allowlist
+/api/auth/login|GET|no side effect: returns authenticated principal claims snapshot
+/api/auth/session|GET|no side effect: returns effective request session identity
+/api/catalog/datasets/{id}/catalog-settings|GET|no side effect: reads dataset catalog settings
+/api/catalog/datasets/{id}/synthetic-samples|GET|no side effect: reads dataset synthetic sample rows
+/api/dev/info|GET|no side effect: reads Development diagnostic configuration summary
+/api/dev/personas|GET|no side effect: lists Development login personas without signing in
+/api/extensions/dbt/exposures|GET|no side effect: lists dbt exposures metadata
+/api/extensions/dbt/health|GET|no side effect: reads dbt extension health status
+/api/extensions/dbt/metrics|GET|no side effect: lists dbt metrics metadata
+/api/extensions/dbt/proposals|GET|no side effect: lists dbt governance proposals
+/api/governance/classification/config-hash|GET|no side effect: reads classification config hash
+/api/governance/classification/proposals/pending|GET|no side effect: lists pending classification proposals
+/api/governance/classification/proposals/{proposalId:guid}|GET|no side effect: reads single classification proposal
+/api/governance/eu-ai-act/article-10-certificate|GET|no side effect: generates read-only Article 10 compliance export
+/api/governance/gdpr/export-pdf|GET|no side effect: generates read-only GDPR compliance PDF export
+/api/governance/hitl/pending|GET|no side effect: lists pending human-in-the-loop reviews
+/api/governance/plans/{planId}|GET|no side effect: reads governance execution plan status
+/api/governance/principals|GET|no side effect: lists governance principals
+/api/governance/sunsetting/rules|GET|no side effect: lists dataset sunsetting rules
+/api/governance/system/health|GET|no side effect: reads system governance health
+/api/governance/system/metrics|GET|no side effect: reads system governance metrics
+/api/governance/system/resource-groups|GET|no side effect: lists governance resource groups
+/api/sql/statements/{statementId}|GET|no side effect: reads WebSQL statement status and results
+/api/v1/admin/authz/migration-report|GET|no side effect: reads authorization migration report
+/api/v1/analytics/metrics|GET|no side effect: reads gateway analytics metrics
+/api/v1/authz/objects/{objectName}/grants|GET|no side effect: reads effective object grants
+/api/v1/catalog/datasets/{*datasetId}|GET|no side effect: reads catalog dataset metadata
+/api/v1/catalog/datasets/{dataset}/sample-rows|GET|no side effect: reads governed sample rows for dataset
+/api/v1/catalog/datasets/{id}/catalog-settings|GET|no side effect: reads dataset catalog settings
+/api/v1/catalog/datasets/{id}/row-filter-strategy|GET|no side effect: reads dataset row filter strategy
+/api/v1/catalog/datasets/{id}/synthetic-samples|GET|no side effect: reads dataset synthetic sample rows
+/api/v1/catalog/datasets|GET|no side effect: lists catalog datasets
+/api/v1/catalog/datasources|GET|no side effect: lists catalog datasources
+/api/v1/catalog/domains|GET|no side effect: lists catalog domains
+/api/v1/catalog/search|GET|no side effect: searches catalog metadata
+/api/v1/cdc/streams|GET|no side effect: lists CDC streams
+/api/v1/cdc/subscriptions|GET|no side effect: lists CDC webhook subscriptions
+/api/v1/data/{datasetId}|GET|no side effect: executes governed read query on dataset
+/api/v1/data/{domain}/{schema}/{table}/change-token|GET|no side effect: computes governed change-detection token
+/api/v1/data/{domain}/{schema}/{table}/{id}|GET|no side effect: reads single governed row by id
+/api/v1/data/{domain}/{schema}/{table}|GET|no side effect: executes governed read query on table
+/api/v1/docs/apps/{appId}/manifest|GET|no side effect: reads app documentation manifest
+/api/v1/docs/apps|GET|no side effect: lists documented apps
+/api/v1/docs/errors/{errorCode}|GET|no side effect: reads error code documentation
+/api/v1/docs/procedures/{*identifier}|GET|no side effect: reads stored procedure documentation
+/api/v1/docs/search|GET|no side effect: searches ingested documentation
+/api/v1/docs/topics|GET|no side effect: lists documentation topics
+/api/v1/envoy/check/{**originalPath}|DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT|no side effect: evaluates Envoy ext_authz authorization check
+/api/v1/envoy/export/envoyfilter.yaml|GET|no side effect: exports EnvoyFilter YAML configuration template
+/api/v1/envoy/export/wasmplugin.yaml|GET|no side effect: exports Envoy WasmPlugin YAML configuration template
+/api/v1/finops/budget/{tenantId}|GET|no side effect: reads tenant FinOps budget
+/api/v1/finops/focus|GET|no side effect: reads FinOps FOCUS cost export
+/api/v1/governance/audit|GET|no side effect: queries governance audit log entries
+/api/v1/governance/caller-attributes/service-sets|GET|no side effect: lists caller attribute service sets
+/api/v1/governance/caller-attributes/|GET|no side effect: lists caller attribute definitions
+/api/v1/governance/config-sync/status|GET|no side effect: reads virtual filter config sync status
+/api/v1/governance/contracts|GET|no side effect: lists data contracts
+/api/v1/governance/effective-filters|GET|no side effect: reads effective row filters
+/api/v1/governance/grants|GET|no side effect: lists governance grants
+/api/v1/governance/row-filters/{id}/evaluation|GET|no side effect: previews row filter evaluation
+/api/v1/governance/virtual-filters/sync/status|GET|no side effect: reads virtual filter sync status
+/api/v1/governance/virtual-filters|GET|no side effect: lists virtual filters
+/api/v1/jobs/{jobId}/result|GET|no side effect: streams completed async query job result
+/api/v1/jobs/{jobId}/status|GET|no side effect: reads async query job status
+/api/v1/openapi/index|GET|no side effect: serves OpenAPI index JSON
+/api/v1/procedures/openapi.json|GET|no side effect: serves stored procedure endpoints OpenAPI spec
+/api/v1/procedures/{name}|GET|no side effect: executes read-only governed stored procedure
+/api/v1/procedures/|GET|no side effect: lists configured stored procedure endpoints
+/api/v1/profiles/{id}|GET|no side effect: reads governance profile by id
+/api/v1/profiles|GET|no side effect: lists governance profiles
+/api/v1/queries/openapi.json|GET|no side effect: serves declarative SQL queries OpenAPI spec
+/api/v1/queries/{name}|GET|no side effect: executes read-only declarative SQL query
+/api/v1/queries/|GET|no side effect: lists declarative SQL query endpoints
+/api/v1/sql/openapi.json|GET|no side effect: serves WebSQL OpenAPI spec
+/api/v1/sql/statements/{statementId}|GET|no side effect: reads WebSQL statement status and results
+/api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaignId}/items|GET|no side effect: lists recertification campaign items
+/api/v1/tenants/{tenantId}/governance/recert/campaigns|GET|no side effect: lists recertification campaigns
+/api/v1/tenants/{tenantId}/governance/rights/{realmId}/|GET|no side effect: lists functional rights in realm
+/api/v1/tenants/{tenantId}/lifecycle/locks/{realmId}/{userKey}|GET|no side effect: reads subject lifecycle lock status
+/docs|GET|no side effect: serves API documentation page
+/graphql/{**slug}|ANY|no side effect: GraphQL HTTP GET only executes queries (mutations rejected)
+/health/live|GET|no side effect: liveness probe
+/health/ready|GET|no side effect: readiness probe
+/metrics|ANY|no side effect: Prometheus metrics scrape endpoint
+/modules/lakehouse/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}|GET|no side effect: reads Iceberg table metadata
+/modules/lakehouse/iceberg/v1/{prefix}/namespaces/{namespace}/tables|GET|no side effect: lists Iceberg namespace tables
+/modules/lakehouse/iceberg/v1/{prefix}/namespaces|GET|no side effect: lists Iceberg catalog namespaces
+/odata/$metadata|GET|no side effect: serves OData v4 EDMX metadata document
+/odata/v4/$metadata|GET|no side effect: serves OData v4 EDMX metadata document
+/odata/v4/$openapi/index|GET|no side effect: serves OData OpenAPI index
+/odata/v4/$openapi/schemas/{domain}/{schema}/{tableName}|GET|no side effect: serves OData table OpenAPI schema
+/odata/v4/$openapi|GET|no side effect: serves OData OpenAPI spec
+/odata/v4/$swagger|GET|no side effect: serves OData Swagger spec
+/odata/v4/{domain}/openapi.json|GET|no side effect: serves domain OData OpenAPI JSON
+/odata/v4/{domain}/openapi.yaml|GET|no side effect: serves domain OData OpenAPI YAML
+/odata/v4/{domain}/{schema}/{tableName}/$count|GET|no side effect: counts governed rows via OData v4
+/odata/v4/{domain}/{schema}/{tableName}|GET|no side effect: queries governed table rows via OData v4
+/odata/v4/{entitySetName}|GET|no side effect: queries governed entity set via OData v4
+/odata/v4|GET|no side effect: serves OData v4 service document
+/odata/{domain}/{schema}/{tableName}/$count|GET|no side effect: counts governed rows via OData
+/odata/{domain}/{schema}/{tableName}|GET|no side effect: queries governed table rows via OData
+/odata/{entitySetName}|GET|no side effect: queries governed entity set via OData
+/odata|GET|no side effect: serves OData service document
+/scim/v2/{realmId}/Groups/{id}|GET|no side effect: reads SCIM group resource
+/scim/v2/{realmId}/Groups/|GET|no side effect: lists SCIM group resources
+/scim/v2/{realmId}/ResourceTypes|GET|no side effect: serves SCIM ResourceTypes discovery metadata
+/scim/v2/{realmId}/Schemas|GET|no side effect: serves SCIM Schemas discovery metadata
+/scim/v2/{realmId}/ServiceProviderConfig|GET|no side effect: serves SCIM ServiceProviderConfig metadata
+/scim/v2/{realmId}/Users/{id}|GET|no side effect: reads SCIM user resource
+/scim/v2/{realmId}/Users/|GET|no side effect: lists SCIM user resources
+/swagger|GET|no side effect: serves Swagger redirect/page
+/ui/bcp/{**slug}|ANY|no side effect: serves embedded Banana Cake Pop static UI assets
+/ui/swagger/assets/{file}|GET|no side effect: serves Swagger UI static assets
+/ui/swagger|GET|no side effect: serves Swagger UI page
+/v1/statement/executing/{statementId}/{token:long:min(0)}|GET|no side effect: polls executing Trino protocol statement page
+/v1/statement/queued/{statementId}/{token:long:min(0)}|GET|no side effect: polls queued Trino protocol statement page

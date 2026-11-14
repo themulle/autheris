@@ -119,7 +119,9 @@ public sealed class UsageAggregator : IUsageAggregator
             _options.IncludedGroupSidPrefixes,
             _options.MaxGroupsPerUser);
         var billingGroup = UsageAttribution.ResolveBillingGroup(identity.Tenant, filteredGroups, _options.BillingGroups);
-        var app = CallerLabelNormalizer.NormalizeApplication(caller?.Application);
+        var app = caller is { IsClientAsserted: true }
+            ? CallerLabelNormalizer.UnknownSentinel
+            : CallerLabelNormalizer.NormalizeApplication(caller?.Application);
         var clientId = CallerLabelNormalizer.NormalizeClientId(caller?.ClientId);
         var now = _timeProvider.GetUtcNow();
         var dayUtc = DateOnly.FromDateTime(now.UtcDateTime);

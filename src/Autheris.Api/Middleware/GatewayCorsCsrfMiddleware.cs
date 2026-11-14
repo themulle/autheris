@@ -111,38 +111,45 @@ public sealed class GatewayCorsCsrfMiddleware
                 bool isOriginTrusted = _gatewayOptions.IsAllCorsAllowed;
                 if (!isOriginTrusted && Uri.TryCreate(originHeader, UriKind.Absolute, out var originUri))
                 {
-                    // The Origin must be on the host allow-list and use the scheme of the request (after trusted forwarded-headers processing).
-                    if (_hostAllowList.IsAllowed(originUri.Authority) &&
-                        string.Equals(originUri.Scheme, context.Request.Scheme, StringComparison.OrdinalIgnoreCase))
+                    bool isHttpOriginAllowed = _env.IsDevelopment() ||
+                        (string.Equals(context.Request.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+                         _gatewayOptions.IsInsecureTransportAllowed);
+
+                    if (!string.Equals(originUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) || isHttpOriginAllowed)
                     {
-                        isOriginTrusted = true;
-                    }
-                    else
-                    {
-                        foreach (var trusted in _gatewayOptions.GraphQL.TrustedOrigins)
+                        // The Origin must be on the host allow-list and use the scheme of the request (after trusted forwarded-headers processing).
+                        if (_hostAllowList.IsAllowed(originUri.Authority) &&
+                            string.Equals(originUri.Scheme, context.Request.Scheme, StringComparison.OrdinalIgnoreCase))
                         {
-                            if (string.Equals(trusted, "*", StringComparison.OrdinalIgnoreCase))
+                            isOriginTrusted = true;
+                        }
+                        else
+                        {
+                            foreach (var trusted in _gatewayOptions.GraphQL.TrustedOrigins)
                             {
-                                if (_env.IsDevelopment())
+                                if (string.Equals(trusted, "*", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    if (_env.IsDevelopment())
+                                    {
+                                        isOriginTrusted = true;
+                                        break;
+                                    }
+                                    continue;
+                                }
+                                if (Uri.TryCreate(trusted, UriKind.Absolute, out var trustedUri))
+                                {
+                                    if (string.Equals(trustedUri.Authority, originUri.Authority, StringComparison.OrdinalIgnoreCase) &&
+                                        string.Equals(trustedUri.Scheme, originUri.Scheme, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        isOriginTrusted = true;
+                                        break;
+                                    }
+                                }
+                                else if (string.Equals(trusted, originHeader, StringComparison.OrdinalIgnoreCase))
                                 {
                                     isOriginTrusted = true;
                                     break;
                                 }
-                                continue;
-                            }
-                            if (Uri.TryCreate(trusted, UriKind.Absolute, out var trustedUri))
-                            {
-                                if (string.Equals(trustedUri.Authority, originUri.Authority, StringComparison.OrdinalIgnoreCase) &&
-                                    string.Equals(trustedUri.Scheme, originUri.Scheme, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    isOriginTrusted = true;
-                                    break;
-                                }
-                            }
-                            else if (string.Equals(trusted, originHeader, StringComparison.OrdinalIgnoreCase))
-                            {
-                                isOriginTrusted = true;
-                                break;
                             }
                         }
                     }

@@ -146,7 +146,9 @@ public sealed record CallingApplicationUsage(
     IReadOnlyList<string> Versions,
     IReadOnlyList<string> QueryNames,
     int DistinctActors = 0,
-    IReadOnlyList<string>? ActorSids = null
+    IReadOnlyList<string>? ActorSids = null,
+    string? ClientId = null,
+    bool IsClientAsserted = false
 );
 
 public sealed record ConsumerAppDailySummary(
@@ -162,6 +164,16 @@ public sealed record ConsumerAppDailySummary(
     IReadOnlyList<string>? ActorSids = null
 )
 {
+    /// <summary>
+    /// Token-derived OAuth client identifier (azp/appid/client_id), when present.
+    /// </summary>
+    public string? ClientId { get; init; }
+
+    /// <summary>
+    /// True when the application label is client-asserted from request headers rather than token-derived.
+    /// </summary>
+    public bool? IsClientAsserted { get; init; }
+
     /// <summary>
     /// MISC-17: HMAC-pseudonymised actor identifiers of this (day, application) cell, for internal k-anonymity decisions only
     /// (the union of folded cells must count true distinct actors). Never serialized.
