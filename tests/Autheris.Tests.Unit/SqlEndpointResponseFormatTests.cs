@@ -45,7 +45,7 @@ public sealed class SqlEndpointResponseFormatTests
             new Dictionary<string, object?> { ["id"] = 2, ["name"] = "Bob" }
         };
         var result = new GovernedSqlResult("SELECT 1", ["id", "name"], rows, 2, 5, Truncated: true);
-        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<SqlEndpointInvocation>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
 
         var options = Options.Create(new GatewayOptions());
@@ -75,7 +75,7 @@ public sealed class SqlEndpointResponseFormatTests
             new Dictionary<string, object?> { ["id"] = 1, ["name"] = "Alice" }
         };
         var result = new GovernedSqlResult("SELECT 1", ["id", "name"], rows, 1, 5, Truncated: false);
-        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<SqlEndpointInvocation>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
 
         var options = Options.Create(new GatewayOptions());
@@ -106,7 +106,7 @@ public sealed class SqlEndpointResponseFormatTests
         context.RequestServices = sp;
 
         var execution = Substitute.For<ISqlEndpointExecutionService>();
-        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<SqlEndpointInvocation>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException<GovernedSqlResult>(new System.Security.SecurityException("Secret table hr.salaries is denied")));
 
         var options = Options.Create(new GatewayOptions());
@@ -135,7 +135,7 @@ public sealed class SqlEndpointResponseFormatTests
         context.RequestServices = sp;
 
         var execution = Substitute.For<ISqlEndpointExecutionService>();
-        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<SqlEndpointInvocation>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromException<GovernedSqlResult>(new ArgumentException("Invalid internal parameter @secretParam")));
 
         var options = Options.Create(new GatewayOptions());

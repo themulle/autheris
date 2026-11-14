@@ -86,7 +86,8 @@ public sealed record GovernedSqlQueryRequest(
     SqlPageWindow? Page = null,
     string? NextToken = null,
     Action<GovernedSqlPageOutcome>? OnPageOutcome = null,
-    Action<IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>>? OnIndexHints = null)
+    Action<IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>>? OnIndexHints = null,
+    bool ReadOnlyRequired = false)
 {
     /// <summary>
     /// Issue #280: parameters whose names the gateway generated for a planned read (internal; never from client input). The setter is

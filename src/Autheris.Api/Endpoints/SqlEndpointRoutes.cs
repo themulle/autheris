@@ -13,8 +13,10 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Serialization;
 using Autheris.Application.Common.Serialization;
+using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Endpoints.Interfaces;
+using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
@@ -86,8 +88,23 @@ public static class SqlEndpointRoutes
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Invalid endpoint name. Must contain only alphanumeric characters, underscores, or hyphens and not exceed 128 characters.", context);
         }
 
-        var endpointLoader = loader ?? context.RequestServices?.GetService<Autheris.Application.Sql.Endpoints.Services.SqlEndpointLoader>();
+        var endpointLoader = loader ?? context.RequestServices?.GetService<SqlEndpointLoader>();
+        var logger = context.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger("Autheris.Api.SqlEndpoints");
         Autheris.Domain.Model.SqlEndpointDefinition definition;
+
+        if (!string.IsNullOrWhiteSpace(request.HttpMethod))
+        {
+            var preNormalizedMethod = request.HttpMethod.Trim().ToUpperInvariant();
+            if (preNormalizedMethod is not ("GET" or "POST"))
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Unsupported HTTP method. Only GET and POST are permitted.", context);
+            }
+        }
+
+        if (request.TimeoutSeconds is <= 0)
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "TimeoutSeconds must be a positive number of seconds.", context);
+        }
 
         if (endpointLoader != null)
         {
@@ -101,20 +118,48 @@ public static class SqlEndpointRoutes
                 contentToParse = $"-- @datasource {request.DataSource}\n" + contentToParse;
             }
 
-            definition = endpointLoader.ParseSqlContent(contentToParse, trimmedName);
+            try
+            {
+                definition = endpointLoader.ParseSqlContent(contentToParse, trimmedName, request.HttpMethod);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, ex.Message, context);
+            }
+            catch (Exception ex) when (ex is FormatException or SecurityException or Antlr4.Runtime.RecognitionException or Antlr4.Runtime.Misc.ParseCanceledException)
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The SQL endpoint definition is invalid.", context);
+            }
+
             if (!string.Equals(definition.Name, trimmedName, StringComparison.OrdinalIgnoreCase))
             {
                 definition = definition with { Name = trimmedName };
             }
+
+            if (request.TimeoutSeconds.HasValue)
+            {
+                definition = definition with { TimeoutSeconds = request.TimeoutSeconds };
+            }
         }
         else
         {
+            var statementClass = SqlStatementClassifier.ClassifyEndpointSql(request.Sql, logger);
+            string resolvedMethod;
+            try
+            {
+                resolvedMethod = SqlEndpointLoader.NormalizeAndValidateMethod(request.HttpMethod, statementClass);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, ex.Message, context);
+            }
+
             definition = new Autheris.Domain.Model.SqlEndpointDefinition(
                 trimmedName,
                 request.Summary ?? string.Empty,
                 request.Sql,
                 request.DataSource,
-                HttpMethod: request.HttpMethod ?? "GET",
+                HttpMethod: resolvedMethod,
                 TimeoutSeconds: request.TimeoutSeconds);
         }
 
@@ -358,11 +403,21 @@ public static class SqlEndpointRoutes
 
         try
         {
+            Autheris.Domain.Model.SqlEndpointDefinition? precheckDefinition = null;
+            bool precheckResolved = httpContext.RequestServices?.GetService<ISqlEndpointRegistry>()?.TryGet(name, out precheckDefinition) == true;
+            if (precheckResolved && precheckDefinition != null &&
+                (!string.Equals(precheckDefinition.HttpMethod?.Trim(), "GET", StringComparison.OrdinalIgnoreCase) ||
+                 SqlStatementClassifier.ClassifyEndpoint(precheckDefinition, logger) != RequestStatementClass.Read))
+            {
+                await WriteMethodNotAllowedAsync(httpContext, ct).ConfigureAwait(false);
+                return;
+            }
+
             var rawInputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            // 128 FR-128-4: a repeated key becomes a list only for a key that names a LIST-declared parameter; a repeated key of a
+            // repeated key becomes a list only for a key that names a LIST-declared parameter; a repeated key of a
             // scalar parameter is refused (no value in the error); every other key (format, paging, undeclared) stays the joined text as before.
-            Autheris.Domain.Model.SqlEndpointDefinition? endpointDefinition = null;
-            var definitionResolved = false;
+            Autheris.Domain.Model.SqlEndpointDefinition? endpointDefinition = precheckDefinition;
+            var definitionResolved = precheckResolved;
             foreach (var (k, v) in httpContext.Request.Query)
             {
                 if (v.Count > 1 && !definitionResolved)
@@ -400,6 +455,7 @@ public static class SqlEndpointRoutes
                 rawInputs,
                 httpContext.User,
                 tenantId,
+                SqlEndpointInvocation.Get,
                 ct).ConfigureAwait(false);
 
             await WriteResultAsync(httpContext, name, result, parquet, ct).ConfigureAwait(false);
@@ -407,6 +463,10 @@ public static class SqlEndpointRoutes
         catch (KeyNotFoundException)
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status404NotFound, ApiErrorCodes.ResourceNotFound, "The SQL endpoint was not found.", ct).ConfigureAwait(false);
+        }
+        catch (WebSqlPolicyException policyEx) when (policyEx.Code == TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.MethodNotAllowed)
+        {
+            await WriteMethodNotAllowedAsync(httpContext, ct).ConfigureAwait(false);
         }
         catch (TrinoSqlEngine.Ast.Emit.ClientListException listEx)
         {
@@ -454,6 +514,25 @@ public static class SqlEndpointRoutes
 
         try
         {
+            var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
+            if (httpContext.RequestServices?.GetService<ISqlEndpointRegistry>()?.TryGet(name, out var postDefinition) == true &&
+                postDefinition != null)
+            {
+                var statementClass = SqlStatementClassifier.ClassifyEndpoint(postDefinition, logger);
+                if (statementClass == RequestStatementClass.Write &&
+                    await DmlRequestGuard.RefuseClassifiedDmlRequestAsync(
+                        httpContext,
+                        statementClass,
+                        gatewayOptions.Value.IsWebSqlDmlAllowed,
+                        tenantId,
+                        logger,
+                        ct,
+                        keyPrefix: "sqlep-dml:").ConfigureAwait(false))
+                {
+                    return;
+                }
+            }
+
             Dictionary<string, object?>? rawInputs = null;
             if (httpContext.Request.ContentLength > 0)
             {
@@ -465,12 +544,12 @@ public static class SqlEndpointRoutes
                 }
             }
 
-            var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
             var result = await executionService.ExecuteEndpointAsync(
                 name,
                 rawInputs,
                 httpContext.User,
                 tenantId,
+                SqlEndpointInvocation.Post,
                 ct).ConfigureAwait(false);
 
             await WriteResultAsync(httpContext, name, result, parquet, ct).ConfigureAwait(false);
@@ -498,6 +577,17 @@ public static class SqlEndpointRoutes
             logger.LogError(ex, "Unexpected error executing SQL endpoint '{EndpointName}'.", name);
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "An internal error occurred during query execution.", ct).ConfigureAwait(false);
         }
+    }
+
+    private static Task WriteMethodNotAllowedAsync(HttpContext httpContext, CancellationToken ct)
+    {
+        httpContext.Response.Headers.Allow = "POST";
+        return ApiProblems.WriteAsync(
+            httpContext,
+            StatusCodes.Status405MethodNotAllowed,
+            TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.MethodNotAllowed,
+            "This SQL endpoint cannot be executed via HTTP GET.",
+            ct);
     }
 
     /// <summary>128 C-15: a list error answers 400 with its stable code and the fixed message of that code (no count, no name, no value), in every environment.</summary>

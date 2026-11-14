@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Sql.Endpoints.Interfaces;
 using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -48,7 +49,7 @@ public sealed class SqlEndpointTimeoutTests
             .Returns(new GovernedSqlResult("q", [], [], 0, 0));
         var service = new SqlEndpointExecutionService(registry, governed, Options.Create(new GatewayOptions()));
 
-        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?>(), new ClaimsPrincipal(new ClaimsIdentity("Test")), new TenantId("tenant_1"));
+        await service.ExecuteEndpointAsync("q", new Dictionary<string, object?>(), new ClaimsPrincipal(new ClaimsIdentity("Test")), new TenantId("tenant_1"), SqlEndpointInvocation.Get);
 
         captured!.TimeoutSeconds.ShouldBe(5);
     }
