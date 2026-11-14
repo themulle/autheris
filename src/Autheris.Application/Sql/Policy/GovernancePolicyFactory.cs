@@ -36,6 +36,9 @@ public sealed record GovernedPolicyInput(
     /// <summary>Catalog metadata of the tables, so that catalog-sensitive columns without an explicit level are checked for a typed mask.</summary>
     public IReadOnlyDictionary<TableIdentity, TableMetadata>? Metadata { get; init; }
 
+    /// <summary>The <c>DataSources:Connections</c> key the data source resolves to (#668); the name itself when it is not mapped.</summary>
+    public string ConnectionKey { get; init; } = DataSourceName;
+
     /// <summary>
     /// Issue #107 (D-WPC-1): statement context of the key-set stage. <c>null</c> (any other caller) means the stage is not invoked and the
     /// assembly is byte-identical to the one without the feature (AC-8).
@@ -116,7 +119,7 @@ public sealed class GovernancePolicyFactory(
             }
         }
 
-        var catalog = await _catalogs.GetCatalogAsync(input.DataSourceName, requested, ct).ConfigureAwait(false);
+        var catalog = await _catalogs.GetCatalogAsync(new GovernedDataSource(input.DataSourceName, input.ConnectionKey), requested, ct).ConfigureAwait(false);
 
         // M-A1: a table that only a policy subquery reads is governed like a primary table: it must be active and satisfy
         // DataSources:RequireTenantColumn. The policy that needs a table that violates this denies its own table (below).
@@ -265,7 +268,7 @@ public sealed class GovernancePolicyFactory(
         // The dependent scan only feeds the epoch keys of a read statement against an opted-in data source; the stage stops before them otherwise.
         bool needDependents = statement.IsRead
             && _options.Value.DataSources?.Connections is { } connections
-            && connections.TryGetValue(input.DataSourceName, out var connection)
+            && connections.TryGetValue(input.ConnectionKey, out var connection)
             && connection.KeySetCacheAllowed;
         var identifiers = new Dictionary<TableIdentity, IReadOnlyList<TableIdentifier>>();
         var metadata = new Dictionary<TableIdentity, TableMetadata?>();

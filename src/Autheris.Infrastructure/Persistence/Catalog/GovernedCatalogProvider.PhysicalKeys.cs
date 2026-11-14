@@ -1,6 +1,7 @@
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Catalog;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
@@ -32,7 +33,7 @@ public sealed partial class GovernedCatalogProvider
             return PhysicalKeySnapshot.Unsupported;
         }
 
-        var connectionOptions = FindConnection(metadata.Table.SourceName);
+        var connectionOptions = FindConnection(SqlDataSourceResolver.ResolveConnectionKey(_gateway.Value, metadata.Table.SourceName));
         if (connectionOptions is null ||
             !DataSourceProvider.TryResolveDialect(connectionOptions.Provider, out var dialect) ||
             metadata.Dialect != dialect ||
