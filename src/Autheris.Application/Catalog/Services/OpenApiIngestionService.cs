@@ -260,6 +260,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
 
         if (schemasFound)
         {
+            var pendingUpserts = new List<TableMetadata>();
             foreach (var schemaProp in schemasObj.EnumerateObject())
             {
                 ct.ThrowIfCancellationRequested();
@@ -399,10 +400,15 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
 
                 if (!dryRun)
                 {
-                    await _metadataRepository.UpsertTableMetadataAsync(tableMetadata, ct).ConfigureAwait(false);
+                    pendingUpserts.Add(tableMetadata);
                 }
 
                 ingestedTableNames.Add(tableName);
+            }
+
+            if (!dryRun && pendingUpserts.Count > 0)
+            {
+                await _metadataRepository.UpsertBatchWithFallbackAsync(pendingUpserts, ct).ConfigureAwait(false);
             }
         }
         else

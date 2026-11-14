@@ -12,7 +12,7 @@ public sealed partial class MultiTableCatalogWritersUseWriteScopeTests
 {
     private const string BaselineFile = "multi-table-catalog-writers.txt";
 
-    [GeneratedRegex(@"\b(UpsertTableMetadataAsync|CreateRelationAsync)\s*\(")]
+    [GeneratedRegex(@"\b(UpsertTableMetadataAsync|UpsertTableMetadataBatchAsync|UpsertBatchWithFallbackAsync|CreateRelationAsync)\s*\(")]
     private static partial Regex CatalogWriteCall();
 
     [GeneratedRegex(@"\b(foreach|while)\s*\(|\bfor\s*\(")]

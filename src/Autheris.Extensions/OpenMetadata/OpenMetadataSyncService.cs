@@ -9,7 +9,6 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-
 using Autheris.Application.State;
 
 namespace Autheris.Extensions.OpenMetadata;
@@ -128,6 +127,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
 
             var tableMetadataMap = new Dictionary<TableIdentifier, TableMetadata>();
             var tableTenantMap = new Dictionary<TableIdentifier, TenantId>();
+            var pendingUpserts = new List<(string FullyQualifiedName, TableMetadata Metadata)>();
 
             foreach (var (omTable, resolved) in candidates)
             {
@@ -154,10 +154,9 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
 
                     if (!dryRun)
                     {
-                        // SEC M-32: merge with persisted state – sync may only tighten governance flags.
                         var merged = Autheris.Application.Catalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existing);
                         tableMetadataMap[tableId] = merged;
-                        await _metadataRepo.UpsertTableMetadataAsync(merged, ct);
+                        pendingUpserts.Add((omTable.FullyQualifiedName, merged));
                     }
                 }
                 catch (Autheris.Domain.Exceptions.TableMetadataUnavailableException)
@@ -175,6 +174,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
                 }
             }
 
+            await FlushBatchUpsertsAsync(pendingUpserts, warnings, ct).ConfigureAwait(false);
             // 2. Consents (SEC E-05 / EX-02: fail-safe – a failure while reading OM principals or the persisted sync
             // consents neither creates nor revokes anything in this run and is reported as Success=false).
             bool success = true;
