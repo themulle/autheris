@@ -17,6 +17,11 @@ public interface ICatalogSnapshotProvider
     ValueTask<CatalogSnapshot> GetSnapshotAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Gets whether the snapshot provider is degraded after consecutive refresh failures.
+    /// </summary>
+    bool IsDegraded => false;
+
+    /// <summary>
     /// Forces a refresh check against the governance repository catalog version.
     /// </summary>
     Task RefreshAsync(CancellationToken ct = default);
