@@ -68,7 +68,7 @@ public partial class GovernanceRepository
                 await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 if (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    tableEntity = ReadTableEntity(reader, _logger);
+                    tableEntity = CatalogRowHydrator.ReadTableEntity(reader, _logger);
                     tableId = tableEntity.Id;
                 }
             }
@@ -93,7 +93,7 @@ public partial class GovernanceRepository
             {
                 cmd.CommandText = SelectTableColumnsSql;
                 cmd.AddBound("@tableId", tableId.Value.ToString());
-                (columns, maskingRules) = await LoadTableColumnsAsync(cmd, _logger, ct).ConfigureAwait(false);
+                (columns, maskingRules) = await CatalogRowHydrator.LoadTableColumnsAsync(cmd, _logger, ct).ConfigureAwait(false);
             }
 
             IReadOnlyList<string> pkColumns;
@@ -536,7 +536,7 @@ public partial class GovernanceRepository
     public async Task<TableIdentifier?> GetActiveTableIdentifierAsync(TableIdentifier table, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetActiveTableIdentifierAsync(conn, CatalogSql.ActiveTableIdentifierSql, table, ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetActiveTableIdentifierAsync(conn, CatalogSql.ActiveTableIdentifierSql, table, ct).ConfigureAwait(false);
     }
 
     public async Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(Guid tableId, CancellationToken ct = default)
@@ -548,7 +548,7 @@ public partial class GovernanceRepository
     public async Task<long> GetTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetTableEpochAsync(conn, CatalogSql.TableEpochSql, table, ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetTableEpochAsync(conn, CatalogSql.TableEpochSql, table, ct).ConfigureAwait(false);
     }
 
     public async Task<long> IncrementTableEpochAsync(TableIdentifier table, CancellationToken ct = default)

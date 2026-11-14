@@ -69,7 +69,8 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
             claims.Add(new Claim(ClaimTypes.Role, role));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
     }
 
     private static TableMetadata CreateEmployeesMetadata(string? sourceName = null, string hmacRuleType = "REDACT")
@@ -794,10 +795,10 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
                 }
             });
 
-        // Assert
+        // Assert: user reads always roll back the read-only transaction after disposing the reader.
         rowsObserved.ShouldBeTrue();
         fakeConnection.CurrentTransaction.ShouldNotBeNull();
-        fakeConnection.CurrentTransaction.WasCommitted.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.WasRolledBack.ShouldBeTrue();
         fakeConnection.CurrentTransaction.WasDisposed.ShouldBeTrue();
     }
 

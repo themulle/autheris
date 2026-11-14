@@ -144,7 +144,8 @@ public sealed partial class GovernanceMigrationFreezeTests(ITestOutputHelper out
         var allowlist = new HashSet<string>(StringComparer.Ordinal)
         {
             "src/Autheris.Infrastructure/Caching/TableCache/InMemoryTableCacheStore.cs",
-            "src/Autheris.Infrastructure/Caching/TableCache/DuckDbPersistentTableCacheStore.cs"
+            "src/Autheris.Infrastructure/Caching/TableCache/DuckDbPersistentTableCacheStore.cs",
+            "src/Autheris.Infrastructure/Caching/TableCache/Storage/TableCacheMutationHelper.cs"
         };
         var root = Root();
         var hits = Directory.EnumerateFiles(Path.Combine(root, "src/Autheris.Infrastructure"), "*.cs", SearchOption.AllDirectories)

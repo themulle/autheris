@@ -11,6 +11,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -97,5 +99,36 @@ public sealed class LocalOnnxEmbeddingGeneratorTests
         hits.Count.ShouldBe(1);
         hits[0].EffectiveMode.ShouldBe("keyword");
         hits[0].VectorScore.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void TokenizerPath_WithTraversal_FailsValidationAndLogsError()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            var bytes = "dummy-onnx-model-payload"u8.ToArray();
+            File.WriteAllBytes(tempFile, bytes);
+            var sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            var logger = new CapturingLogger<LocalOnnxEmbeddingGenerator>();
+
+            var generator = new LocalOnnxEmbeddingGenerator(
+                tempFile,
+                sha256,
+                dimensions: 384,
+                logger: logger,
+                tokenizerPath: "../escape/tokenizer.json");
+
+            generator.IsValidConfiguration.ShouldBeFalse();
+            generator.IsAvailable.ShouldBeFalse();
+            logger.Entries.ShouldContain(e =>
+                e.Level == LogLevel.Error
+                && e.Message.Contains("tokenizer", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
     }
 }

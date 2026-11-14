@@ -105,7 +105,7 @@ internal static class CatalogBatchUpsertHelper
             {
                 var incoming = chunk[i];
                 var existed = !wasCreated[i];
-                var docs = new GovernanceRepository.TableDocumentation(
+                var docs = new CatalogRowHydrator.TableDocumentation(
                     incoming.Table.Description,
                     incoming.Table.LongDescription,
                     incoming.Table.DocumentationSource);
@@ -117,7 +117,7 @@ internal static class CatalogBatchUpsertHelper
                 if (existed)
                 {
                     var existingTable = existingTables[NormalizedIdentifierKey.From(incoming.Identifier)];
-                    (structuralChanges[i], docs) = GovernanceRepository.ComputeTableUpsertState(existingTable, incoming.Table, precedence);
+                    (structuralChanges[i], docs) = CatalogRowHydrator.ComputeTableUpsertState(existingTable, incoming.Table, precedence);
 
                     var cols = before.ColumnsByTable.TryGetValue(tableIds[i], out var loadedCols) ? loadedCols : new List<TableColumn>();
                     var masks = before.MasksByTable.TryGetValue(tableIds[i], out var loadedMasks)
@@ -148,14 +148,14 @@ internal static class CatalogBatchUpsertHelper
                     await DatasetCatalogStore.InsertDefaultAsync(conn, tx, repo.KeyDialect, tableIds[i], DatasetVisibility.Summary, ct).ConfigureAwait(false);
                 }
 
-                if (GovernanceRepository.HasMaskingRulesChanged(existingMaskingRules, incoming.ColumnMaskingRules))
+                if (CatalogRowHydrator.HasMaskingRulesChanged(existingMaskingRules, incoming.ColumnMaskingRules))
                 {
                     structuralChanges[i] = true;
                 }
 
-                if (await GovernanceRepository.UpsertColumnsAndMaskingRulesAsync(
+                if (await CatalogRowHydrator.UpsertColumnsAndMaskingRulesAsync(
                         conn, tx, repo.InsertColumnSql, tableIds[i], incoming, existingColsByName, colIdByName, ct,
-                        (existing, inc) => GovernanceRepository.ShouldOverwriteDocumentation(precedence, existing, inc)).ConfigureAwait(false))
+                        (existing, inc) => CatalogRowHydrator.ShouldOverwriteDocumentation(precedence, existing, inc)).ConfigureAwait(false))
                 {
                     structuralChanges[i] = true;
                 }
@@ -457,7 +457,7 @@ internal static class CatalogBatchUpsertHelper
         DbTransaction tx,
         Guid tableId,
         TableMetadata metadata,
-        GovernanceRepository.TableDocumentation docs,
+        CatalogRowHydrator.TableDocumentation docs,
         CancellationToken ct)
     {
         var httpEndpointJson = metadata.Table.HttpEndpoint != null
@@ -516,7 +516,7 @@ internal static class CatalogBatchUpsertHelper
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var entity = GovernanceRepository.ReadTableEntity(reader, repo.CatalogLogger);
+            var entity = CatalogRowHydrator.ReadTableEntity(reader, repo.CatalogLogger);
             result[NormalizedIdentifierKey.From(entity)] = entity;
         }
 
