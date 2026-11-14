@@ -26,10 +26,10 @@ public sealed class BulkStreamOptions
     public bool? Enabled { get; init; }
 
     /// <summary>
-    /// HMAC key of the keyset cursors issued by the bulk stream endpoints (the same value must be configured on every node).
-    /// Outside Development it is required (at least 32 bytes) while the endpoints are enabled, otherwise the start fails
-    /// (<c>BulkStreamSigningKeyOptionsValidator</c>). In Development an unset key falls back to a random per-process key,
-    /// so cursors are only valid on this instance until restart.
+    /// HMAC key of the keyset cursors shared by the bulk stream endpoints and GraphQL connections (the same value must be configured on every node).
+    /// Outside Development a non-placeholder key of at least 32 UTF-8 bytes after trim is always required, otherwise startup fails
+    /// (<c>BulkStreamSigningKeyOptionsValidator</c>). In Development an unset key logs a warning and uses a per-instance ephemeral key,
+    /// so cursors are only valid on that instance until restart.
     /// </summary>
     public string? SigningKey { get; init; }
 }

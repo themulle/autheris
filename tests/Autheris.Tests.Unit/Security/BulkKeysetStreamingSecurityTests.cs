@@ -207,7 +207,7 @@ public sealed class BulkKeysetStreamingSecurityTests
     [InlineData("eyJpZCI6IDEwMCwgImV4dHJhIjogInRhbXBlcmVkIn0=")] // {"id": 100, "extra": "tampered"}
     public void T_SEC_DATA178_05_CursorTampering_InvalidKeysOrTypes_RejectedWith400(string tamperedCursor)
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder("bulk-stream-security-tests-key-0123456789");
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
 
         var context = KeysetCursorContextFactory.ForBulkStream("tenant-1", metadata, metadata.PrimaryKeyColumns, "user-readonly", new BulkTableStreamRequest());
@@ -222,7 +222,8 @@ public sealed class BulkKeysetStreamingSecurityTests
     [Trait("Category", "Security")]
     public void T_SEC_DATA178_06_CursorSeek_CannotBypassTenantRLSPolicy()
     {
-        var planner = new GovernedTableReadPlanner();
+        var encoder = new KeysetCursorEncoder("bulk-stream-security-tests-key-0123456789");
+        var planner = new GovernedTableReadPlanner(encoder);
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         // Active RLS policy enforces tenant partition
         var decision = TableAccessDecision.Allowed(
@@ -231,7 +232,6 @@ public sealed class BulkKeysetStreamingSecurityTests
             rowFilterSql: "\"tenant_id\" = 'tenant_A'",
             hasUnconstrainedColumnAllow: true);
 
-        var encoder = new KeysetCursorEncoder();
         var firstPage = new BulkTableStreamRequest();
         var cursorContext = KeysetCursorContextFactory.ForBulkStream("tenant_A", metadata, metadata.PrimaryKeyColumns, "user-readonly", firstPage);
         var cursor = encoder.EncodeCursor(new Dictionary<string, object?> { ["id"] = 999 }, cursorContext);
@@ -310,7 +310,7 @@ public sealed class BulkKeysetStreamingSecurityTests
                 await writer(reader, CancellationToken.None);
             });
 
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder("bulk-stream-security-tests-key-0123456789");
         var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
@@ -377,7 +377,7 @@ public sealed class BulkKeysetStreamingSecurityTests
                 await writer(reader, CancellationToken.None);
             });
 
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder("bulk-stream-security-tests-key-0123456789");
         var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(

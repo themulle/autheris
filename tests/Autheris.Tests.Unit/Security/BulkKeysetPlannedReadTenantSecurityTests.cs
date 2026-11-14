@@ -37,11 +37,11 @@ public sealed class BulkKeysetPlannedReadTenantSecurityTests
     {
         var metadata = Orders();
         var decision = TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder("bulk-keyset-tenant-security-key-0123456789");
         var first = new BulkTableStreamRequest();
         var context = KeysetCursorContextFactory.ForBulkStream(ClientListFixture.TenantA, metadata, metadata.PrimaryKeyColumns, "caller", first);
         var cursor = encoder.EncodeCursor(new Dictionary<string, object?> { ["id"] = afterId }, context);
-        return new GovernedTableReadPlanner().PlanKeysetStream(first with { Cursor = cursor }, metadata, decision, ClientListFixture.TenantA, "caller");
+        return new GovernedTableReadPlanner(encoder).PlanKeysetStream(first with { Cursor = cursor }, metadata, decision, ClientListFixture.TenantA, "caller");
     }
 
     // Companion of T_SEC_DATA178_06 (BulkKeysetStreamingSecurityTests): the planner SQL is only the client part (cursor seek AND-conjoined,

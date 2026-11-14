@@ -53,7 +53,7 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
     {
         // Exactly what TableStreamEndpoints does when it issues nextCursor.
         var context = KeysetCursorContextFactory.ForBulkStream(tenant, metadata, metadata.PrimaryKeyColumns, caller, request);
-        return (encoder ?? new KeysetCursorEncoder()).EncodeCursor(pkValues, context);
+        return (encoder ?? new KeysetCursorEncoder("bulk-stream-signing-key-for-tests-0123456789")).EncodeCursor(pkValues, context);
     }
 
     [Fact]
@@ -134,13 +134,14 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
     [Fact]
     public void PlanKeysetStream_SinglePk_GeneratesExpectedSeekAndOrder()
     {
-        var planner = new GovernedTableReadPlanner();
+        var encoder = new KeysetCursorEncoder("bulk-stream-signing-key-for-tests-0123456789");
+        var planner = new GovernedTableReadPlanner(encoder);
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         var decision = CreateAllowedDecision(metadata.Identifier);
         var request = new BulkTableStreamRequest(
             Select: ["id", "status"],
             Limit: 50);
-        var cursor = IssueCursor(new Dictionary<string, object?> { ["id"] = 100 }, metadata, request);
+        var cursor = IssueCursor(new Dictionary<string, object?> { ["id"] = 100 }, metadata, request, encoder);
 
         var planned = planner.PlanKeysetStream(request with { Cursor = cursor }, metadata, decision, Tenant, Caller);
 
@@ -155,7 +156,8 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
     [Fact]
     public void PlanKeysetStream_CompositePk_GeneratesCompositeMonotonicSeek()
     {
-        var planner = new GovernedTableReadPlanner();
+        var encoder = new KeysetCursorEncoder("bulk-stream-signing-key-for-tests-0123456789");
+        var planner = new GovernedTableReadPlanner(encoder);
         var metadata = CreateTableMetadata(primaryKeys: ["tenant_id", "id"]);
         var decision = CreateAllowedDecision(metadata.Identifier);
         var request = new BulkTableStreamRequest(Limit: 1000);
@@ -163,7 +165,7 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
         {
             ["tenant_id"] = "corp",
             ["id"] = 500
-        }, metadata, request);
+        }, metadata, request, encoder);
 
         var planned = planner.PlanKeysetStream(request with { Cursor = cursor }, metadata, decision, Tenant, Caller);
 
@@ -177,7 +179,8 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
     [Fact]
     public void PlanKeysetStream_WithFilterAst_BindsParametersAndCombinesWithCursor()
     {
-        var planner = new GovernedTableReadPlanner();
+        var encoder = new KeysetCursorEncoder("bulk-stream-signing-key-for-tests-0123456789");
+        var planner = new GovernedTableReadPlanner(encoder);
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         var decision = CreateAllowedDecision(metadata.Identifier);
         using var statusJson = JsonDocument.Parse("\"completed\"");
@@ -193,7 +196,7 @@ public sealed class GovernedTableReadPlannerBulkKeysetStreamTests
         var request = new BulkTableStreamRequest(
             Filter: filter,
             Limit: 100);
-        var cursor = IssueCursor(new Dictionary<string, object?> { ["id"] = 200 }, metadata, request);
+        var cursor = IssueCursor(new Dictionary<string, object?> { ["id"] = 200 }, metadata, request, encoder);
 
         var planned = planner.PlanKeysetStream(request with { Cursor = cursor }, metadata, decision, Tenant, Caller);
 

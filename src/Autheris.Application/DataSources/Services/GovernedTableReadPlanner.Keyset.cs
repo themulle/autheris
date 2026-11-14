@@ -25,16 +25,15 @@ public sealed partial class GovernedTableReadPlanner
         "alter", "create", "truncate", "union", "intersect", "except", "where", "from", "into", "exec", "execute"
     };
 
-    private readonly IKeysetCursorEncoder _cursorEncoder;
+    private readonly IKeysetCursorEncoder? _cursorEncoder;
 
     /// <summary>
     /// Creates the planner. <paramref name="cursorEncoder"/> must be the DI <see cref="IKeysetCursorEncoder"/> (keyed by
-    /// <c>RestApi:BulkStream:SigningKey</c>) — the same instance the streaming endpoint issues cursors with. The fallback
-    /// (a process-local key) exists only for direct construction in tests and in non-streaming planner uses.
+    /// <c>RestApi:BulkStream:SigningKey</c>) when decoding keyset stream cursors.
     /// </summary>
     public GovernedTableReadPlanner(IKeysetCursorEncoder? cursorEncoder = null)
     {
-        _cursorEncoder = cursorEncoder ?? new KeysetCursorEncoder();
+        _cursorEncoder = cursorEncoder;
     }
 
     public PlannedTableRead PlanKeysetStream(
@@ -168,6 +167,11 @@ public sealed partial class GovernedTableReadPlanner
         string? seekSql = null;
         if (!string.IsNullOrWhiteSpace(request.Cursor))
         {
+            if (_cursorEncoder is null)
+            {
+                throw new InvalidOperationException("An IKeysetCursorEncoder must be provided to decode keyset cursors.");
+            }
+
             // The context is built by the same factory the endpoint issues cursors with (tenant, caller, table, key,
             // direction, filter and projection), and verified with the same DI encoder; any mismatch fails closed.
             var cursorContext = KeysetCursorContextFactory.ForBulkStream(tenantId, metadata, pkCols, callerSid, request, streamKey.Directions);

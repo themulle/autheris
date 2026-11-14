@@ -12,6 +12,8 @@ using Xunit;
 
 public sealed class BulkKeysetCursorEncoderTests
 {
+    private const string TestSigningKey = "bulk-keyset-cursor-encoder-test-key-0123456789";
+
     private static readonly KeysetCursorContext Context = new(
         TenantId: "tenant-1",
         DataSource: "sales",
@@ -42,7 +44,7 @@ public sealed class BulkKeysetCursorEncoderTests
     [Fact]
     public void EncodeAndDecodeCursor_NullContext_Throws()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         var pkValues = new Dictionary<string, object?> { ["id"] = 1 };
 
@@ -54,7 +56,7 @@ public sealed class BulkKeysetCursorEncoderTests
     [Fact]
     public void DecodeCursor_ContextFieldDelimiterShift_IsRejected()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         var pkValues = new Dictionary<string, object?> { ["id"] = 1 };
         var issued = Context with { TenantId = "a|b", DataSource = "c" };
@@ -93,7 +95,7 @@ public sealed class BulkKeysetCursorEncoderTests
     [Fact]
     public void EncodeAndDecodeCursor_SinglePk_RoundtripsSuccessfully()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         var pkValues = new Dictionary<string, object?> { ["id"] = 12345 };
 
@@ -108,7 +110,7 @@ public sealed class BulkKeysetCursorEncoderTests
     [Fact]
     public void EncodeAndDecodeCursor_CompositePk_RoundtripsSuccessfully()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var metadata = CreateTableMetadata(primaryKeys: ["tenant_id", "created_at", "id"]);
         var now = DateTimeOffset.UtcNow;
         var pkValues = new Dictionary<string, object?>
@@ -130,7 +132,7 @@ public sealed class BulkKeysetCursorEncoderTests
     [Fact]
     public void DecodeCursor_UniqueIndexFallback_WorksWhenPrimaryKeyEmpty()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var uniqueIndex = new TableIndexDefinition("idx_orders_uuid", ["uuid"], IsUnique: true);
         var metadata = CreateTableMetadata(primaryKeys: Array.Empty<string>(), indexes: [uniqueIndex]);
         var expectedGuid = Guid.NewGuid();
@@ -146,7 +148,7 @@ public sealed class BulkKeysetCursorEncoderTests
     [Fact]
     public void DecodeCursor_EmptyOrMalformedBase64_ThrowsInvalidCursor()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var metadata = CreateTableMetadata();
 
         Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor("", metadata, Context));
@@ -157,7 +159,7 @@ public sealed class BulkKeysetCursorEncoderTests
     [Fact]
     public void DecodeCursor_ExtraneousKeys_ThrowsInvalidCursor()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         var pkValues = new Dictionary<string, object?>
         {
@@ -167,14 +169,15 @@ public sealed class BulkKeysetCursorEncoderTests
 
         var encoded = encoder.EncodeCursor(pkValues, Context);
         var ex = Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(encoded, metadata, Context));
+        ex.Code.ShouldBe(InvalidCursorException.TypedErrorCode);
         ex.Message.ShouldContain("INVALID_CURSOR");
-        ex.Message.ShouldContain("extra_field");
+        ex.Message.ShouldNotContain("extra_field");
     }
 
     [Fact]
     public void DecodeCursor_MissingKeys_ThrowsInvalidCursor()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var metadata = CreateTableMetadata(primaryKeys: ["tenant_id", "id"]);
         var pkValues = new Dictionary<string, object?>
         {
@@ -183,14 +186,15 @@ public sealed class BulkKeysetCursorEncoderTests
 
         var encoded = encoder.EncodeCursor(pkValues, Context);
         var ex = Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(encoded, metadata, Context));
+        ex.Code.ShouldBe(InvalidCursorException.TypedErrorCode);
         ex.Message.ShouldContain("INVALID_CURSOR");
-        ex.Message.ShouldContain("id");
+        ex.Message.ShouldNotContain("'id'");
     }
 
     [Fact]
     public void DecodeCursor_TypeMismatch_ThrowsInvalidCursor()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var metadata = CreateTableMetadata(primaryKeys: ["id"]); // id is integer
         var pkValues = new Dictionary<string, object?>
         {
@@ -199,13 +203,14 @@ public sealed class BulkKeysetCursorEncoderTests
 
         var encoded = encoder.EncodeCursor(pkValues, Context);
         var ex = Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(encoded, metadata, Context));
+        ex.Code.ShouldBe(InvalidCursorException.TypedErrorCode);
         ex.Message.ShouldContain("INVALID_CURSOR");
     }
 
     [Fact]
     public void DecodeCursor_NullValue_ThrowsInvalidCursor()
     {
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder(TestSigningKey);
         var metadata = CreateTableMetadata(primaryKeys: ["id"]);
         var pkValues = new Dictionary<string, object?>
         {
@@ -214,7 +219,7 @@ public sealed class BulkKeysetCursorEncoderTests
 
         var encoded = encoder.EncodeCursor(pkValues, Context);
         var ex = Should.Throw<InvalidCursorException>(() => encoder.DecodeCursor(encoded, metadata, Context));
+        ex.Code.ShouldBe(InvalidCursorException.TypedErrorCode);
         ex.Message.ShouldContain("INVALID_CURSOR");
-        ex.Message.ShouldContain("null");
     }
 }

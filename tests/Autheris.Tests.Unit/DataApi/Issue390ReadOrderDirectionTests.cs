@@ -417,7 +417,8 @@ public sealed class Issue390ReadOrderDirectionTests
         // A NULL key value can never be a cursor position: the cursor of such a row is refused (existing behaviour, direction independent).
         var nullCursor = Issue(encoder, meta, request, new Dictionary<string, object?> { ["grp"] = 1, ["ts"] = null }, [Asc, Desc]);
         var ex = Should.Throw<InvalidCursorException>(() => planner.PlanKeysetStream(request with { Cursor = nullCursor }, meta, AllClear(meta), Tenant, Caller));
-        ex.Message.ShouldContain("cannot be null");
+        ex.Code.ShouldBe(InvalidCursorException.TypedErrorCode);
+        ex.Message.ShouldStartWith("INVALID_CURSOR");
 
         // No NULLS FIRST/LAST clause is ever emitted: NULL placement is engine-defined (PostgreSQL DESC puts NULLs first, SQL Server and SQLite treat NULL as smallest).
         var first = planner.PlanKeysetStream(request, meta, AllClear(meta), Tenant, Caller);

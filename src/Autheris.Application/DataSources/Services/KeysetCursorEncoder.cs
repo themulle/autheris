@@ -2,6 +2,7 @@ namespace Autheris.Application.DataSources.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -9,38 +10,100 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.DataSources.Interfaces;
+using Autheris.Application.Security;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Implementation of deterministic keyset cursor encoder and decoder.
-/// Generates opaque signed base64url JSON tuples of composite primary key values.
-/// Validates cursor integrity via HMAC-SHA256 signature and strong typing to prevent SQL injection or pagination desynchronization.
+/// Implementation of deterministic v2 keyset cursor encoder and decoder.
+/// Generates opaque signed <c>v2|kid|iat|payload.sig</c> tokens over composite primary key values and request binding context.
+/// Verifies HMAC-SHA256 signature in constant time before inspecting fields, rejects non-v2 cursors, unknown key ids,
+/// cursors older than 24 hours, and future-dated timestamps beyond 5 minutes of clock skew, and returns one uniform error.
 /// </summary>
 public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
 {
-    private static readonly byte[] EphemeralProcessFallbackKey = RandomNumberGenerator.GetBytes(32);
+    private const string CursorVersion = "v2";
+    private static readonly byte[] KeyIdDomain = Encoding.UTF8.GetBytes("autheris:keyset-cursor:kid:v2");
+    private static readonly TimeSpan MaxCursorAge = TimeSpan.FromHours(24);
+    private static readonly TimeSpan MaxFutureSkew = TimeSpan.FromMinutes(5);
+
     private readonly byte[] _signingKeyBytes;
+    private readonly byte[] _keyIdBytes;
+    private readonly string _keyId;
+    private readonly TimeProvider _clock;
+    private readonly ILogger<KeysetCursorEncoder>? _logger;
 
-    public KeysetCursorEncoder(IOptions<GatewayOptions>? gatewayOptions = null)
+    [ActivatorUtilitiesConstructor]
+    public KeysetCursorEncoder(
+        IOptions<GatewayOptions> gatewayOptions,
+        IHostEnvironment? environment = null,
+        TimeProvider? clock = null,
+        ILogger<KeysetCursorEncoder>? logger = null)
     {
-        var secret = gatewayOptions?.Value?.RestApi?.BulkStream?.SigningKey;
-        _signingKeyBytes = string.IsNullOrWhiteSpace(secret)
-            ? EphemeralProcessFallbackKey
-            : Encoding.UTF8.GetBytes(secret);
+        ArgumentNullException.ThrowIfNull(gatewayOptions);
+        _clock = clock ?? TimeProvider.System;
+        _logger = logger;
+
+        var rawKey = gatewayOptions.Value?.RestApi?.BulkStream?.SigningKey;
+        if (environment?.IsDevelopment() == true)
+        {
+            if (string.IsNullOrWhiteSpace(rawKey))
+            {
+                _signingKeyBytes = RandomNumberGenerator.GetBytes(SecretKeyRequirements.MinimumKeyBytes);
+                _logger?.LogWarning(
+                    "Gateway:RestApi:BulkStream:SigningKey is not configured; using an instance-local ephemeral key in Development. " +
+                    "Keyset cursors are only valid for this instance until restart.");
+            }
+            else
+            {
+                _signingKeyBytes = Encoding.UTF8.GetBytes(rawKey.Trim());
+            }
+        }
+        else
+        {
+            if (!SecretKeyRequirements.TryValidateCursorSigningKey(rawKey, out var validatedKey, out var errorMessage))
+            {
+                throw new InvalidOperationException(errorMessage);
+            }
+
+            _signingKeyBytes = validatedKey;
+        }
+
+        _keyId = DeriveKeyId(_signingKeyBytes);
+        _keyIdBytes = Encoding.UTF8.GetBytes(_keyId);
     }
 
-    public KeysetCursorEncoder(string signingKey)
+    public KeysetCursorEncoder(string signingKey, TimeProvider? clock = null)
     {
-        _signingKeyBytes = string.IsNullOrWhiteSpace(signingKey)
-            ? EphemeralProcessFallbackKey
-            : Encoding.UTF8.GetBytes(signingKey);
+        if (!SecretKeyRequirements.TryValidateCursorSigningKey(signingKey, out var validatedKey, out var errorMessage))
+        {
+            throw new ArgumentException(errorMessage, nameof(signingKey));
+        }
+
+        _clock = clock ?? TimeProvider.System;
+        _signingKeyBytes = validatedKey;
+        _keyId = DeriveKeyId(_signingKeyBytes);
+        _keyIdBytes = Encoding.UTF8.GetBytes(_keyId);
     }
 
-    public KeysetCursorEncoder(byte[] signingKeyBytes)
+    public KeysetCursorEncoder(byte[] signingKeyBytes, TimeProvider? clock = null)
     {
-        _signingKeyBytes = signingKeyBytes ?? EphemeralProcessFallbackKey;
+        ArgumentNullException.ThrowIfNull(signingKeyBytes);
+        if (signingKeyBytes.Length < SecretKeyRequirements.MinimumKeyBytes)
+        {
+            throw new ArgumentException(
+                $"Cursor signing key must be at least {SecretKeyRequirements.MinimumKeyBytes} bytes long.",
+                nameof(signingKeyBytes));
+        }
+
+        _clock = clock ?? TimeProvider.System;
+        _signingKeyBytes = (byte[])signingKeyBytes.Clone();
+        _keyId = DeriveKeyId(_signingKeyBytes);
+        _keyIdBytes = Encoding.UTF8.GetBytes(_keyId);
     }
 
     public string EncodeCursor(IReadOnlyDictionary<string, object?> pkValues, KeysetCursorContext context)
@@ -66,8 +129,10 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
 
         var bytes = memoryStream.ToArray();
         var payload = Base64UrlEncode(bytes);
-        var sig = ComputeSignature(payload, context);
-        return $"{payload}.{sig}";
+        var issuedAtSeconds = _clock.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
+        var envelope = $"{CursorVersion}|{_keyId}|{issuedAtSeconds}|{payload}";
+        var sig = ComputeSignature(envelope, context);
+        return $"{envelope}.{sig}";
     }
 
     public IReadOnlyDictionary<string, object?> DecodeCursor(string cursorBase64, TableMetadata metadata, KeysetCursorContext context)
@@ -76,34 +141,60 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         ArgumentNullException.ThrowIfNull(context);
         if (string.IsNullOrWhiteSpace(cursorBase64))
         {
-            throw new InvalidCursorException("INVALID_CURSOR: Cursor cannot be empty.");
+            throw FailInvalidCursor("empty");
         }
 
         var dotIndex = cursorBase64.LastIndexOf('.');
         if (dotIndex <= 0 || dotIndex >= cursorBase64.Length - 1)
         {
-            throw new InvalidCursorException("INVALID_CURSOR: Cursor is missing valid cryptographic signature.");
+            throw FailInvalidCursor("missing_signature");
         }
 
-        var payloadBase64 = cursorBase64[..dotIndex];
+        var envelope = cursorBase64[..dotIndex];
         var providedSig = cursorBase64[(dotIndex + 1)..];
 
-        // Fail closed: the signature is verified against the exact supplied context only. There is no unbound
-        // (bare payload) fallback, so a cursor cannot be replayed across tenants, callers, tables or request shapes.
-        var expectedSig = ComputeSignature(payloadBase64, context);
+        // Verify the MAC first in constant time over the exact envelope and bound context before parsing any header or payload field.
+        var expectedSig = ComputeSignature(envelope, context);
         if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expectedSig), Encoding.UTF8.GetBytes(providedSig)))
         {
-            throw new InvalidCursorException("INVALID_CURSOR: Cursor signature verification failed; cursor may have been tampered with or used across different tables/tenants.");
+            throw FailInvalidCursor("mac_mismatch");
         }
 
-        byte[] bytes;
-        try
+        var parts = envelope.Split('|');
+        if (parts.Length != 4)
         {
-            bytes = Base64UrlDecode(payloadBase64);
+            throw FailInvalidCursor("envelope_format");
         }
-        catch (FormatException ex)
+
+        if (!string.Equals(parts[0], CursorVersion, StringComparison.Ordinal))
         {
-            throw new InvalidCursorException("INVALID_CURSOR: Malformed base64 encoding.", ex);
+            throw FailInvalidCursor("unsupported_version");
+        }
+
+        if (!CryptographicOperations.FixedTimeEquals(_keyIdBytes, Encoding.UTF8.GetBytes(parts[1])))
+        {
+            throw FailInvalidCursor("unknown_kid");
+        }
+
+        if (!long.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var iatSeconds))
+        {
+            throw FailInvalidCursor("invalid_iat");
+        }
+
+        var nowSeconds = _clock.GetUtcNow().ToUnixTimeSeconds();
+        if (nowSeconds - iatSeconds > (long)MaxCursorAge.TotalSeconds)
+        {
+            throw FailInvalidCursor("expired");
+        }
+
+        if (iatSeconds - nowSeconds > (long)MaxFutureSkew.TotalSeconds)
+        {
+            throw FailInvalidCursor("future_iat");
+        }
+
+        if (!TryBase64UrlDecode(parts[3], out var bytes))
+        {
+            throw FailInvalidCursor("malformed_base64");
         }
 
         JsonDocument doc;
@@ -111,16 +202,16 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         {
             doc = JsonDocument.Parse(bytes);
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            throw new InvalidCursorException("INVALID_CURSOR: Malformed JSON cursor payload.", ex);
+            throw FailInvalidCursor("malformed_json");
         }
 
         using (doc)
         {
             if (doc.RootElement.ValueKind != JsonValueKind.Object)
             {
-                throw new InvalidCursorException("INVALID_CURSOR: Root must be a JSON object.");
+                throw FailInvalidCursor("non_object_root");
             }
 
             IReadOnlyList<string> pkCols = metadata.PrimaryKeyColumns;
@@ -150,12 +241,12 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             {
                 if (!propMap.TryAdd(prop.Name, prop.Value))
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Duplicate property '{prop.Name}' in cursor.");
+                    throw FailInvalidCursor("duplicate_property");
                 }
 
                 if (!canonicalPkMap.ContainsKey(prop.Name))
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Extraneous property '{prop.Name}' in cursor does not match primary key columns.");
+                    throw FailInvalidCursor("extraneous_property");
                 }
             }
 
@@ -165,7 +256,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
                 {
                     if (!propMap.ContainsKey(expected))
                     {
-                        throw new InvalidCursorException($"INVALID_CURSOR: Missing key column '{expected}' in cursor.");
+                        throw FailInvalidCursor("missing_key_column");
                     }
                 }
             }
@@ -176,7 +267,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
                 var jsonValue = propMap[canonicalName];
                 if (jsonValue.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Primary key value for '{canonicalName}' cannot be null.");
+                    throw FailInvalidCursor("null_key_value");
                 }
 
                 var colMeta = metadata.GetColumn(canonicalName)!;
@@ -240,7 +331,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         }
     }
 
-    private static object ConvertJsonValueToColumnType(JsonElement element, TableColumn column)
+    private object ConvertJsonValueToColumnType(JsonElement element, TableColumn column)
     {
         var dataType = column.DataType?.Trim().ToLowerInvariant() ?? "varchar";
         try
@@ -249,7 +340,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             {
                 if (element.ValueKind != JsonValueKind.Number)
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Column '{column.ColumnName}' requires numeric integer value.");
+                    throw FailInvalidCursor("type_mismatch");
                 }
 
                 if (dataType.Contains("bigint", StringComparison.Ordinal) || dataType.Contains("int8", StringComparison.Ordinal) || dataType.Contains("long", StringComparison.Ordinal))
@@ -269,7 +360,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             {
                 if (element.ValueKind != JsonValueKind.Number)
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Column '{column.ColumnName}' requires numeric decimal value.");
+                    throw FailInvalidCursor("type_mismatch");
                 }
                 return element.GetDecimal();
             }
@@ -278,7 +369,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             {
                 if (element.ValueKind != JsonValueKind.Number)
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Column '{column.ColumnName}' requires floating point value.");
+                    throw FailInvalidCursor("type_mismatch");
                 }
                 return element.GetDouble();
             }
@@ -287,7 +378,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             {
                 if (element.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Column '{column.ColumnName}' requires boolean value.");
+                    throw FailInvalidCursor("type_mismatch");
                 }
                 return element.GetBoolean();
             }
@@ -296,12 +387,12 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             {
                 if (element.ValueKind != JsonValueKind.String)
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Column '{column.ColumnName}' requires string GUID value.");
+                    throw FailInvalidCursor("type_mismatch");
                 }
                 var str = element.GetString();
                 if (string.IsNullOrWhiteSpace(str) || !Guid.TryParse(str, out var guid))
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Invalid GUID format for column '{column.ColumnName}'.");
+                    throw FailInvalidCursor("type_mismatch");
                 }
                 return guid;
             }
@@ -310,12 +401,12 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             {
                 if (element.ValueKind != JsonValueKind.String)
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Column '{column.ColumnName}' requires ISO-8601 date/time string.");
+                    throw FailInvalidCursor("type_mismatch");
                 }
                 var str = element.GetString();
                 if (string.IsNullOrWhiteSpace(str) || !DateTimeOffset.TryParse(str, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dto))
                 {
-                    throw new InvalidCursorException($"INVALID_CURSOR: Invalid timestamp format for column '{column.ColumnName}'.");
+                    throw FailInvalidCursor("type_mismatch");
                 }
                 return dto;
             }
@@ -323,7 +414,7 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             // Default to string
             if (element.ValueKind != JsonValueKind.String)
             {
-                throw new InvalidCursorException($"INVALID_CURSOR: Column '{column.ColumnName}' requires string value.");
+                throw FailInvalidCursor("type_mismatch");
             }
             return element.GetString()!;
         }
@@ -331,10 +422,22 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            throw new InvalidCursorException($"INVALID_CURSOR: Failed to convert value for column '{column.ColumnName}' to type '{column.DataType}'.", ex);
+            throw FailInvalidCursor("value_conversion");
         }
+    }
+
+    private InvalidCursorException FailInvalidCursor(string reasonCode)
+    {
+        _logger?.LogDebug("Rejected keyset cursor ({ReasonCode}).", reasonCode);
+        return new InvalidCursorException(InvalidCursorException.UniformMessage);
+    }
+
+    private static string DeriveKeyId(byte[] signingKeyBytes)
+    {
+        var hash = HMACSHA256.HashData(signingKeyBytes, KeyIdDomain);
+        return Convert.ToHexString(hash.AsSpan(0, 4)).ToLowerInvariant();
     }
 
     private static string Base64UrlEncode(byte[] bytes)
@@ -345,16 +448,28 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
             .Replace('/', '_');
     }
 
-    private static byte[] Base64UrlDecode(string input)
+    private static bool TryBase64UrlDecode(string input, [NotNullWhen(true)] out byte[]? bytes)
     {
         var padded = input.Trim().Replace('-', '+').Replace('_', '/');
         switch (padded.Length % 4)
         {
             case 2: padded += "=="; break;
             case 3: padded += "="; break;
-            case 1: throw new InvalidCursorException("INVALID_CURSOR: Malformed base64 length.");
+            case 1:
+                bytes = null;
+                return false;
         }
-        return Convert.FromBase64String(padded);
+
+        try
+        {
+            bytes = Convert.FromBase64String(padded);
+            return true;
+        }
+        catch (FormatException)
+        {
+            bytes = null;
+            return false;
+        }
     }
 
     /// <summary>
@@ -399,9 +514,9 @@ public sealed class KeysetCursorEncoder : IKeysetCursorEncoder
         sb.Append('|').Append(value.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(value);
     }
 
-    private string ComputeSignature(string payload, KeysetCursorContext context)
+    private string ComputeSignature(string envelope, KeysetCursorContext context)
     {
-        var dataToSign = $"{payload}:{FormatContext(context)}";
+        var dataToSign = $"{envelope.Length.ToString(CultureInfo.InvariantCulture)}:{envelope}|{FormatContext(context)}";
         var hash = HMACSHA256.HashData(_signingKeyBytes, Encoding.UTF8.GetBytes(dataToSign));
         return Base64UrlEncode(hash);
     }
