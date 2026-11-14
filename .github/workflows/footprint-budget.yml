@@ -1,8 +1,6 @@
 name: Footprint & CI Duration Budget
 
 on:
-  schedule:
-    - cron: '30 3 * * *'
   workflow_dispatch:
   workflow_call:
 

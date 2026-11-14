@@ -17,10 +17,6 @@ public sealed class ScheduledWorkflowFailureReportTests
     internal const string ScriptPath = ".github/scripts/report-scheduled-failure.sh";
     private const string RunLine = "run: bash " + ScriptPath;
 
-    /// <summary>footprint-budget.yml is also a reusable workflow called by release.yml, whose caller job grants no issues permission:
-    /// a nested job requesting <c>issues: write</c> would invalidate the release workflow.</summary>
-    private static readonly string[] Exempt = ["footprint-budget.yml"];
-
     private static readonly string[] AllowedExpressionLines = ["GH_TOKEN: ${{ github.token }}", "NEEDS_JSON: ${{ toJSON(needs) }}"];
 
     // ---------- scanners ----------
@@ -48,6 +44,11 @@ public sealed class ScheduledWorkflowFailureReportTests
 
     private static string RunsOn(string jobBlock) =>
         Regex.Match(jobBlock, @"(?m)^    runs-on:\s*(?<value>[^#\r\n]*?)\s*(#.*)?$").Groups["value"].Value;
+
+    internal static string? ReusableWorkflowCall(string jobBlock) =>
+        Regex.Match(jobBlock, @"(?m)^    uses:\s*\./\.github/workflows/(?<name>[A-Za-z0-9._-]+\.yml)\s*(#.*)?$") is { Success: true } m
+            ? m.Groups["name"].Value
+            : null;
 
     internal static IReadOnlyList<string> ReportJobViolations(string workflow)
     {
@@ -87,8 +88,11 @@ public sealed class ScheduledWorkflowFailureReportTests
             bad.Add("continue-on-error is not allowed");
         }
 
-        var runners = jobs.Where(j => j.Key != ReportJob).Select(j => RunsOn(j.Value)).ToHashSet(StringComparer.Ordinal);
-        if (!runners.Contains(RunsOn(block)))
+        var runners = jobs.Where(j => j.Key != ReportJob)
+            .Select(j => ReusableWorkflowCall(j.Value) is not null ? "ubuntu-latest" : RunsOn(j.Value))
+            .Where(r => r.Length > 0)
+            .ToHashSet(StringComparer.Ordinal);
+        if (string.IsNullOrEmpty(RunsOn(block)) || !runners.Contains(RunsOn(block)))
         {
             bad.Add("runs-on must be a runner the other jobs of the workflow use");
         }
@@ -166,20 +170,28 @@ public sealed class ScheduledWorkflowFailureReportTests
         var workflows = ParityIsolationArchitectureTests.ReadWorkflows(ParityIsolationArchitectureTests.FindRepoRoot());
         var scheduled = workflows.Where(w => IsScheduled(w.Value)).ToDictionary(w => w.Key, w => w.Value);
         scheduled.ShouldNotBeEmpty("no scheduled workflow found: vacuous guard");
+        scheduled.ShouldContainKey("footprint-budget-nightly.yml");
+        scheduled.ShouldNotContainKey("footprint-budget.yml");
+        ParityIsolationArchitectureTests.TriggerKeys(workflows["footprint-budget.yml"]).ShouldContain("workflow_call");
 
-        foreach (var name in Exempt)
+        foreach (var (name, text) in scheduled)
         {
-            scheduled.ShouldContainKey(name, $"stale exemption: {name} is no longer scheduled");
-            ParityIsolationArchitectureTests.TriggerKeys(scheduled[name]).ShouldContain("workflow_call", $"stale exemption: {name} is no longer a reusable workflow");
-            SimulationIsolationArchitectureTests.Jobs(scheduled[name]).ShouldNotContainKey(ReportJob);
+            foreach (var job in SimulationIsolationArchitectureTests.Jobs(text).Where(j => j.Key != ReportJob))
+            {
+                if (ReusableWorkflowCall(job.Value) is { } reusable)
+                {
+                    workflows.ShouldContainKey(reusable, $"{name}/{job.Key} calls missing reusable workflow {reusable}");
+                    ParityIsolationArchitectureTests.TriggerKeys(workflows[reusable]).ShouldContain("workflow_call", $"{reusable} must be a reusable workflow");
+                }
+            }
         }
 
-        scheduled.Where(w => !Exempt.Contains(w.Key)).SelectMany(w => ReportJobViolations(w.Value).Select(v => $"{w.Key}: {v}")).ShouldBeEmpty();
+        scheduled.SelectMany(w => ReportJobViolations(w.Value).Select(v => $"{w.Key}: {v}")).ShouldBeEmpty();
 
         // SEC-CI-1: approval-gated jobs never finish without a reviewer, so report-failure must not wait for them. The exemption is pinned
         // to the one known job (the G9 Databricks job fails by design until a live Databricks test exists and would need its own alert);
         // it expires when the environment binding is removed, because the job then has to be in needs again.
-        scheduled.Where(w => !Exempt.Contains(w.Key)).SelectMany(w => ApprovalGatedJobs(w.Value).Select(j => $"{w.Key}/{j}"))
+        scheduled.SelectMany(w => ApprovalGatedJobs(w.Value).Select(j => $"{w.Key}/{j}"))
             .ShouldBe(["sql-compiler-gate-nightly.yml/sql-compiler-gate-databricks-g9"]);
         workflows.Where(w => !scheduled.ContainsKey(w.Key) && SimulationIsolationArchitectureTests.Jobs(w.Value).ContainsKey(ReportJob)).Select(w => w.Key)
             .ShouldBeEmpty("only scheduled workflows carry a report-failure job");
@@ -265,6 +277,18 @@ public sealed class ScheduledWorkflowFailureReportTests
         {
             ReportJobViolations(sample).ShouldNotBeEmpty(sample);
         }
+
+        const string GoodReusableWrapper =
+            "on:\n  schedule:\n    - cron: '30 3 * * *'\njobs:\n  footprint-budget:\n    uses: ./.github/workflows/footprint-budget.yml\n"
+            + "  report-failure:\n    name: Report scheduled failure\n    needs: [footprint-budget]\n"
+            + "    if: failure() && github.event_name == 'schedule' && github.event.repository.fork == false\n"
+            + "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      issues: write\n    steps:\n"
+            + "      - name: Checkout repository\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+            + "        with:\n          persist-credentials: false\n          sparse-checkout: .github/scripts\n"
+            + "      - name: Open or update the failure issue\n        env:\n          GH_TOKEN: ${{ github.token }}\n"
+            + "          NEEDS_JSON: ${{ toJSON(needs) }}\n        run: bash .github/scripts/report-scheduled-failure.sh\n";
+        ReportJobViolations(GoodReusableWrapper).ShouldBeEmpty();
+        ReportJobViolations(GoodReusableWrapper.Replace("uses: ./.github/workflows/footprint-budget.yml", "uses: org/repo/.github/workflows/footprint-budget.yml@main", StringComparison.Ordinal)).ShouldNotBeEmpty();
 
         ReportJobViolations("on:\n  schedule:\n    - cron: '0 2 * * *'\njobs:\n  a:\n    runs-on: x\n").ShouldBe([$"{ReportJob} job missing"]);
     }
