@@ -21,11 +21,12 @@ using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
 namespace Autheris.Tests.Integration;
 
-public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicationFactory<Program>>
+public abstract class RestDatasetHttpTableTestBase
 {
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -71,50 +72,61 @@ public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicatio
         }
     }
 
-    protected RestDatasetHttpTableTestBase(WebApplicationFactory<Program> factory, bool crossSourceEnabled, bool restTransportAllowed = true)
+    protected RestDatasetHttpTableTestBase(WebApplicationFactory<Program> factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public abstract class HostFixtureBase(bool crossSourceEnabled, bool restTransportAllowed = true) : IntegrationHost<HostFixtureBase>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            // The seeded table is owned by the shared test default tenant; claim-less test principals are assigned it.
-            builder.UseSetting("Gateway:Tenancy:DefaultTenantId", Autheris.Tests.Common.TestTenants.Default.Value);
-            builder.UseSetting("Gateway:WebSql:CrossSource:Enabled", crossSourceEnabled ? "true" : "false");
+            var settings = new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                // The seeded table is owned by the shared test default tenant; claim-less test principals are assigned it.
+                ["Gateway:Tenancy:DefaultTenantId"] = Autheris.Tests.Common.TestTenants.Default.Value,
+                ["Gateway:WebSql:CrossSource:Enabled"] = crossSourceEnabled ? "true" : "false",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("IntegrationTestBillingPlugin"),
+            };
             if (crossSourceEnabled && restTransportAllowed)
             {
                 // REST federation is an explicit opt-in: "Rest" is not part of the default AllowedTransports.
-                builder.UseSetting("Gateway:WebSql:CrossSource:AllowedTransports:0", "Rest");
+                settings["Gateway:WebSql:CrossSource:AllowedTransports:0"] = "Rest";
             }
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("IntegrationTestBillingPlugin"));
-            builder.ConfigureServices(services =>
+
+            config.AddInMemoryCollection(settings);
+        }
+
+        protected override void ConfigureHostServices(IServiceCollection services)
+        {
+            // Register a mock HttpClientFactory that serves declarative REST responses
+            var mockHandler = new DelegatingMockHandler(req =>
             {
-                // Register a mock HttpClientFactory that serves declarative REST responses
-                var mockHandler = new DelegatingMockHandler(req =>
+                if (req.RequestUri != null && req.RequestUri.AbsolutePath.Contains("/api/v1/customers"))
                 {
-                    if (req.RequestUri != null && req.RequestUri.AbsolutePath.Contains("/api/v1/customers"))
+                    var json = """
+                    [
+                        { "id": 101, "name": "Alpha Corp", "region": "EU", "email": "alpha@example.com" },
+                        { "id": 102, "name": "Beta LLC", "region": "US", "email": "beta@example.com" },
+                        { "id": 103, "name": "Gamma GmbH", "region": "EU", "email": "gamma@example.com" }
+                    ]
+                    """;
+                    return new HttpResponseMessage(HttpStatusCode.OK)
                     {
-                        var json = """
-                        [
-                            { "id": 101, "name": "Alpha Corp", "region": "EU", "email": "alpha@example.com" },
-                            { "id": 102, "name": "Beta LLC", "region": "US", "email": "beta@example.com" },
-                            { "id": 103, "name": "Gamma GmbH", "region": "EU", "email": "gamma@example.com" }
-                        ]
-                        """;
-                        return new HttpResponseMessage(HttpStatusCode.OK)
-                        {
-                            Content = new StringContent(json, Encoding.UTF8, "application/json")
-                        };
-                    }
+                        Content = new StringContent(json, Encoding.UTF8, "application/json")
+                    };
+                }
 
-                    return new HttpResponseMessage(HttpStatusCode.NotFound);
-                });
-
-                var httpClient = new HttpClient(mockHandler);
-                var clientFactory = Substitute.For<IHttpClientFactory>();
-                clientFactory.CreateClient(Arg.Any<string>()).Returns(httpClient);
-                services.AddSingleton(clientFactory);
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
             });
-        });
+
+            var httpClient = new HttpClient(mockHandler);
+            var clientFactory = Substitute.For<IHttpClientFactory>();
+            clientFactory.CreateClient(Arg.Any<string>()).Returns(httpClient);
+            services.AddSingleton(clientFactory);
+        }
     }
 
     protected HttpClient CreateClient(Sid? userSid = null, string? roles = null)
@@ -192,12 +204,14 @@ public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicatio
     }
 }
 
-public sealed class RestDatasetHttpTableIntegrationTests : RestDatasetHttpTableTestBase
+public sealed class RestDatasetHttpTableIntegrationTests : RestDatasetHttpTableTestBase, IClassFixture<RestDatasetHttpTableIntegrationTests.HostFixture>
 {
-    public RestDatasetHttpTableIntegrationTests(WebApplicationFactory<Program> factory)
-        : base(factory, crossSourceEnabled: true)
+    public RestDatasetHttpTableIntegrationTests(HostFixture factory)
+        : base(factory)
     {
     }
+
+    public sealed class HostFixture() : HostFixtureBase(crossSourceEnabled: true);
 
     [Fact]
     public async Task RestDataset_OnProtectedHttpTable_WithoutConsent_Returns403_Not500()
@@ -285,12 +299,14 @@ public sealed class RestDatasetHttpTableIntegrationTests : RestDatasetHttpTableT
 /// Cross-source federation is disabled by default (fail-closed). A consented REST read of an HTTP table must then be a
 /// clean 403 policy denial, never a 500.
 /// </summary>
-public sealed class RestDatasetHttpTableCrossSourceDisabledIntegrationTests : RestDatasetHttpTableTestBase
+public sealed class RestDatasetHttpTableCrossSourceDisabledIntegrationTests : RestDatasetHttpTableTestBase, IClassFixture<RestDatasetHttpTableCrossSourceDisabledIntegrationTests.HostFixture>
 {
-    public RestDatasetHttpTableCrossSourceDisabledIntegrationTests(WebApplicationFactory<Program> factory)
-        : base(factory, crossSourceEnabled: false)
+    public RestDatasetHttpTableCrossSourceDisabledIntegrationTests(HostFixture factory)
+        : base(factory)
     {
     }
+
+    public sealed class HostFixture() : HostFixtureBase(crossSourceEnabled: false);
 
     [Fact]
     public async Task RestDataset_OnHttpTable_WithConsent_WhenCrossSourceDisabled_Returns403_Not500()
@@ -327,12 +343,14 @@ public sealed class RestDatasetHttpTableCrossSourceDisabledIntegrationTests : Re
 /// Cross-source federation is enabled but REST is not listed in CrossSource.AllowedTransports: REST federation is an explicit
 /// opt-in, so the read is a generic 403 that discloses neither the federation policy nor the table.
 /// </summary>
-public sealed class RestDatasetHttpTableRestNotOptedInIntegrationTests : RestDatasetHttpTableTestBase
+public sealed class RestDatasetHttpTableRestNotOptedInIntegrationTests : RestDatasetHttpTableTestBase, IClassFixture<RestDatasetHttpTableRestNotOptedInIntegrationTests.HostFixture>
 {
-    public RestDatasetHttpTableRestNotOptedInIntegrationTests(WebApplicationFactory<Program> factory)
-        : base(factory, crossSourceEnabled: true, restTransportAllowed: false)
+    public RestDatasetHttpTableRestNotOptedInIntegrationTests(HostFixture factory)
+        : base(factory)
     {
     }
+
+    public sealed class HostFixture() : HostFixtureBase(crossSourceEnabled: true, restTransportAllowed: false);
 
     [Fact]
     public async Task RestDataset_OnHttpTable_WhenRestNotInAllowedTransports_Returns403WithGenericBody()

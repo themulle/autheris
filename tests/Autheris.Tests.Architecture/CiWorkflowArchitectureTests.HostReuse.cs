@@ -17,7 +17,7 @@ public sealed partial class CiWorkflowArchitectureTests
     {
         var allowlist = RepositoryScan.ReadBaseline("per-test-host-allowlist.txt")
             .ToHashSet(StringComparer.Ordinal);
-        allowlist.Count.ShouldBeLessThanOrEqualTo(45, "per-test-host-allowlist.txt is shrink-only and must not exceed 45 entries.");
+        allowlist.Count.ShouldBeLessThanOrEqualTo(25, "per-test-host-allowlist.txt is shrink-only and must not exceed 25 entries.");
 
         string[] migratedSix =
         [

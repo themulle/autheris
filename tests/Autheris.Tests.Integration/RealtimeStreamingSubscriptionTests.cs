@@ -13,23 +13,33 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
+using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 
-public class RealtimeStreamingSubscriptionTests : IClassFixture<WebApplicationFactory<Program>>
+public class RealtimeStreamingSubscriptionTests : IClassFixture<RealtimeStreamingSubscriptionTests.HostFixture>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public RealtimeStreamingSubscriptionTests(WebApplicationFactory<Program> factory)
+    public RealtimeStreamingSubscriptionTests(HostFixture factory)
     {
-        _factory = factory.WithWebHostBuilder(builder =>
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost<HostFixture>
+    {
+        protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
-            builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
-            builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("RealtimeStreamingSubscriptionTests"));
-        });
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("RealtimeStreamingSubscriptionTests"),
+            });
+        }
     }
 
     [Fact]
