@@ -19,16 +19,14 @@ internal static class GatewayAuthSchemeSelector
         string basicSessionCookieName,
         bool isDevAuthAllowed)
     {
-
-        var authHeader = context.Request.Headers.Authorization.ToString();
-
-        // 1. Explicit Authorization headers have top priority (prevents ForwardAuth Header-Preemption DoS)
-        // the opaque SCIM secret is not a JWT; route it to the Scim scheme so valid provisioning calls are authenticated
-        // before the unauthenticated-bearer IP budget and do not produce JwtBearer failures.
-        if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && GatewayAuthSchemes.IsScimPath(context.Request.Path))
+        // SCIM provisioning endpoints accept only the dedicated SCIM opaque-secret scheme in every Authentication:Mode
+        // (never JwtBearer, ForwardAuth, Basic, or Negotiate), and never trigger user pre-auth IP rate limiting.
+        if (GatewayAuthSchemes.IsScimPath(context.Request.Path))
         {
             return GatewayAuthSchemes.Scim;
         }
+
+        var authHeader = context.Request.Headers.Authorization.ToString();
 
         // The mode comes from configuration only. Direct never selects ForwardAuth; Upstream ignores the Authorization
         // header for user identity; Both refuses a request that carries a credential and identity headers (never mixed).

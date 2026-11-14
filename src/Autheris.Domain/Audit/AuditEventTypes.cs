@@ -159,7 +159,13 @@ public static class AuditEventTypes
     // Issue #447: a data source refused the ingress transport of the request (fail-closed gate)
     public const string TransportNotAllowed = "TRANSPORT_NOT_ALLOWED";
 
-    // SCIM identity correlation ambiguity
+    // SCIM 2.0 Provisioning & Identity Correlation (Tier A — Required Audit)
+    public const string ScimUserProvisioned = "SCIM_USER_PROVISIONED";
+    public const string ScimUserUpdated = "SCIM_USER_UPDATED";
+    public const string ScimUserDeprovisioned = "SCIM_USER_DEPROVISIONED";
+    public const string ScimGroupProvisioned = "SCIM_GROUP_PROVISIONED";
+    public const string ScimGroupDeleted = "SCIM_GROUP_DELETED";
+    public const string ScimGroupMembershipChanged = "SCIM_GROUP_MEMBERSHIP_CHANGED";
     public const string IdentityCorrelationAmbiguous = "IDENTITY_CORRELATION_AMBIGUOUS";
 }
 

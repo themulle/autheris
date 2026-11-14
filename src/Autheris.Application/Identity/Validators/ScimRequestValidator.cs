@@ -8,9 +8,12 @@ using System.Text.Json;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 
+public sealed class ScimTooManyException(string message) : ValidationException(message);
+
 public static class ScimRequestValidator
 {
-    public const int MaxGroupMembersPerRequest = 1000;
+    public const int MaxMembersOrOperationsPerRequest = 1000;
+    public const int MaxGroupMembersPerRequest = MaxMembersOrOperationsPerRequest;
 
     public static void ValidateUserCreate(ScimUser user)
     {
@@ -89,11 +92,27 @@ public static class ScimRequestValidator
             throw new ValidationException("SCIM PATCH requires Operations.");
         }
 
+        if (patch.Operations.Count > MaxMembersOrOperationsPerRequest)
+        {
+            throw new ScimTooManyException($"SCIM PATCH operations count cannot exceed {MaxMembersOrOperationsPerRequest}.");
+        }
+
+        var totalMemberEntries = 0;
+
         foreach (var op in patch.Operations)
         {
             if (string.IsNullOrWhiteSpace(op.Op))
             {
                 throw new ValidationException("SCIM PATCH operation requires 'op'.");
+            }
+
+            if (isGroup)
+            {
+                totalMemberEntries += CountPatchMemberEntries(op.Value);
+                if (totalMemberEntries > MaxMembersOrOperationsPerRequest)
+                {
+                    throw new ScimTooManyException($"SCIM PATCH member entries cannot exceed {MaxMembersOrOperationsPerRequest}.");
+                }
             }
 
             var path = op.Path?.Trim() ?? string.Empty;
@@ -111,6 +130,19 @@ public static class ScimRequestValidator
             }
         }
     }
+
+    private static int CountPatchMemberEntries(object? value) => value switch
+    {
+        JsonElement arr when arr.ValueKind == JsonValueKind.Array => arr.GetArrayLength(),
+        JsonElement obj when obj.ValueKind == JsonValueKind.Object
+            && obj.TryGetProperty("members", out var members)
+            && members.ValueKind == JsonValueKind.Array => members.GetArrayLength(),
+        IReadOnlyCollection<ScimGroupMember> col => col.Count,
+        IEnumerable<ScimGroupMember> enumerable => enumerable.Count(),
+        JsonElement obj when obj.ValueKind == JsonValueKind.Object => 1,
+        ScimGroupMember => 1,
+        _ => 0
+    };
 
     public static string? NormalizeUpn(string? upn) =>
         upn is null ? null : upn.Trim().ToLowerInvariant();
@@ -236,9 +268,9 @@ public static class ScimRequestValidator
             return;
         }
 
-        if (members.Count > MaxGroupMembersPerRequest)
+        if (members.Count > MaxMembersOrOperationsPerRequest)
         {
-            throw new ValidationException($"SCIM Group members count cannot exceed {MaxGroupMembersPerRequest}.");
+            throw new ScimTooManyException($"SCIM Group members count cannot exceed {MaxMembersOrOperationsPerRequest}.");
         }
 
         foreach (var member in members)

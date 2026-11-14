@@ -191,13 +191,12 @@ public sealed class ScimAllowedIpRangesTests
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Production");
 
-        new IdentityRealmsScimOptionsValidator(env, logger).Validate(null, Options()).Succeeded.ShouldBeTrue();
-        logger.ReceivedCalls().Count(c => c.GetMethodInfo().Name == "Log" && (LogLevel)c.GetArguments()[0]! == LogLevel.Warning).ShouldBe(1);
+        new IdentityRealmsScimOptionsValidator(env, logger).Validate(null, Options()).Failed.ShouldBeTrue();
 
         var devEnv = Substitute.For<IHostEnvironment>();
         devEnv.EnvironmentName.Returns("Development");
         var devLogger = Substitute.For<ILogger<IdentityRealmsScimOptionsValidator>>();
-        new IdentityRealmsScimOptionsValidator(devEnv, devLogger).Validate(null, Options());
+        new IdentityRealmsScimOptionsValidator(devEnv, devLogger).Validate(null, Options()).Succeeded.ShouldBeTrue();
         devLogger.ReceivedCalls().Count(c => c.GetMethodInfo().Name == "Log").ShouldBe(0);
     }
 }

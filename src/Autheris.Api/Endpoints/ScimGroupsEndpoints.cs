@@ -5,6 +5,7 @@ using System.Threading;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Identity.Services;
+using Autheris.Application.Identity.Validators;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
@@ -17,7 +18,9 @@ public static class ScimGroupsEndpoints
     public static IEndpointRouteBuilder MapScimGroupsEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/scim/v2/{realmId}/Groups")
-            .RequireAuthorization(GatewayPolicies.Scim);
+            .RequireAuthorization(GatewayPolicies.Scim)
+            .WithRequestBodyLimit(ScimEndpointGuard.MaxRequestBodyBytes)
+            .ApplyScimGuard();
 
         group.MapGet("", async (
             string realmId,
@@ -64,6 +67,10 @@ public static class ScimGroupsEndpoints
                 var created = await scimService.CreateGroupAsync(tenantId, realmId, groupModel, ct).ConfigureAwait(false);
                 return Results.Created($"/scim/v2/{realmId}/Groups/{created.GroupId}", created);
             }
+            catch (ScimTooManyException ex)
+            {
+                return ScimErrorResult.TooMany(ex.Message);
+            }
             catch (ValidationException)
             {
                 return ScimErrorResult.InvalidValue();
@@ -72,7 +79,7 @@ public static class ScimGroupsEndpoints
             {
                 return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
             }
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.ScimGroupProvisioned);
 
         group.MapPut("/{id}", async (
             string realmId,
@@ -88,6 +95,10 @@ public static class ScimGroupsEndpoints
                 var updated = await scimService.UpdateGroupAsync(tenantId, realmId, id, groupModel, ct).ConfigureAwait(false);
                 return updated != null ? Results.Ok(updated) : Results.NotFound();
             }
+            catch (ScimTooManyException ex)
+            {
+                return ScimErrorResult.TooMany(ex.Message);
+            }
             catch (ValidationException)
             {
                 return ScimErrorResult.InvalidValue();
@@ -96,7 +107,11 @@ public static class ScimGroupsEndpoints
             {
                 return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
             }
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+            catch (MassMembershipChangeQuarantineException)
+            {
+                return ScimErrorResult.MassRevocationQuarantined();
+            }
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.ScimGroupMembershipChanged);
 
         group.MapPatch("/{id}", async (
             string realmId,
@@ -112,6 +127,10 @@ public static class ScimGroupsEndpoints
                 var patched = await scimService.PatchGroupAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
                 return patched != null ? Results.Ok(patched) : Results.NotFound();
             }
+            catch (ScimTooManyException ex)
+            {
+                return ScimErrorResult.TooMany(ex.Message);
+            }
             catch (ValidationException)
             {
                 return ScimErrorResult.InvalidValue();
@@ -120,7 +139,11 @@ public static class ScimGroupsEndpoints
             {
                 return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
             }
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+            catch (MassMembershipChangeQuarantineException)
+            {
+                return ScimErrorResult.MassRevocationQuarantined();
+            }
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.ScimGroupMembershipChanged);
 
         group.MapDelete("/{id}", async (
             string realmId,
@@ -132,7 +155,7 @@ public static class ScimGroupsEndpoints
             var tenantId = httpContext.User.GetTenantId();
             var deleted = await scimService.DeleteGroupAsync(tenantId, realmId, id, ct).ConfigureAwait(false);
             return deleted ? Results.NoContent() : Results.NotFound();
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.ScimGroupDeleted);
 
         return app;
     }

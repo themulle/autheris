@@ -1,37 +1,20 @@
 namespace Autheris.Api.Endpoints;
 
 using Autheris.Api.Extensions;
-using Autheris.Application.Identity.Services;
+using Autheris.Api.Security;
 using Autheris.Domain.Audit;
-using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
 
 public static class ScimDiscoveryEndpoints
 {
     public static IEndpointRouteBuilder MapScimDiscoveryEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/scim/v2/{realmId}");
-        group.AddEndpointFilter(async (ctx, next) =>
-        {
-            if (ctx.HttpContext.User.Identity?.IsAuthenticated == true
-                && ctx.HttpContext.Request.RouteValues.TryGetValue("realmId", out var r)
-                && r is string realmId
-                && !string.IsNullOrWhiteSpace(realmId)
-                && ctx.HttpContext.RequestServices.GetService<IScimSyncStateTracker>() is { } tracker)
-            {
-                await tracker.RecordAuthenticatedContactAsync(
-                    ctx.HttpContext.User.GetTenantId(),
-                    realmId,
-                    isWrite: false,
-                    ctx.HttpContext.RequestAborted).ConfigureAwait(false);
-            }
-
-            return await next(ctx).ConfigureAwait(false);
-        });
+        var group = app.MapGroup("/scim/v2/{realmId}")
+            .RequireAuthorization(GatewayPolicies.Scim)
+            .ApplyScimGuard();
 
         group.MapGet("/ServiceProviderConfig", (string realmId) =>
         {

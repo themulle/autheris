@@ -14,7 +14,10 @@ public sealed class IdentityRealmsScimOptionsValidatorTests
     public void ScimOptionsValidator_DuplicateSecretAcrossRealms_Fails()
     {
         const string sharedSecret = "LongEnoughSecret12345678901234567890";
-        var options = new IdentityRealmsOptions();
+        var options = new IdentityRealmsOptions
+        {
+            Scim = new ScimOptions { AllowedIpRanges = ["10.0.0.0/8"] }
+        };
         options.Realms["realm-a"] = new IdentityRealmConfigOptions
         {
             Provisioning = RealmProvisioningMode.Scim,
@@ -35,7 +38,10 @@ public sealed class IdentityRealmsScimOptionsValidatorTests
     [Fact]
     public void ScimOptionsValidator_ScimRealmWithoutSecret_Fails()
     {
-        var options = new IdentityRealmsOptions();
+        var options = new IdentityRealmsOptions
+        {
+            Scim = new ScimOptions { AllowedIpRanges = ["10.0.0.0/8"] }
+        };
         options.Realms["scim-realm"] = new IdentityRealmConfigOptions
         {
             Provisioning = RealmProvisioningMode.Scim,
@@ -51,7 +57,10 @@ public sealed class IdentityRealmsScimOptionsValidatorTests
     [Fact]
     public void ScimOptionsValidator_ShortSecret_Fails()
     {
-        var options = new IdentityRealmsOptions();
+        var options = new IdentityRealmsOptions
+        {
+            Scim = new ScimOptions { AllowedIpRanges = ["10.0.0.0/8"] }
+        };
         options.Realms["scim-realm"] = new IdentityRealmConfigOptions
         {
             Provisioning = RealmProvisioningMode.Scim,
@@ -67,7 +76,10 @@ public sealed class IdentityRealmsScimOptionsValidatorTests
     [Fact]
     public void ScimOptionsValidator_ValidSecrets_Succeeds()
     {
-        var options = new IdentityRealmsOptions();
+        var options = new IdentityRealmsOptions
+        {
+            Scim = new ScimOptions { AllowedIpRanges = ["10.0.0.0/8"] }
+        };
         options.Realms["realm-a"] = new IdentityRealmConfigOptions
         {
             Provisioning = RealmProvisioningMode.Scim,

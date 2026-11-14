@@ -5,6 +5,7 @@ using System.Threading;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Identity.Services;
+using Autheris.Application.Identity.Validators;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
@@ -17,7 +18,9 @@ public static class ScimUsersEndpoints
     public static IEndpointRouteBuilder MapScimUsersEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/scim/v2/{realmId}/Users")
-            .RequireAuthorization(GatewayPolicies.Scim);
+            .RequireAuthorization(GatewayPolicies.Scim)
+            .WithRequestBodyLimit(ScimEndpointGuard.MaxRequestBodyBytes)
+            .ApplyScimGuard();
 
         group.MapGet("", async (
             string realmId,
@@ -64,6 +67,10 @@ public static class ScimUsersEndpoints
                 var created = await scimService.CreateUserAsync(tenantId, realmId, user, ct).ConfigureAwait(false);
                 return Results.Created($"/scim/v2/{realmId}/Users/{created.UserKey}", created);
             }
+            catch (ScimTooManyException ex)
+            {
+                return ScimErrorResult.TooMany(ex.Message);
+            }
             catch (ValidationException)
             {
                 return ScimErrorResult.InvalidValue();
@@ -72,7 +79,7 @@ public static class ScimUsersEndpoints
             {
                 return ScimErrorResult.UniquenessConflict(conflict.AttributeName);
             }
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.ScimUserProvisioned);
 
         group.MapPut("/{id}", async (
             string realmId,
@@ -88,6 +95,10 @@ public static class ScimUsersEndpoints
                 var updated = await scimService.UpdateUserAsync(tenantId, realmId, id, user, ct).ConfigureAwait(false);
                 return updated != null ? Results.Ok(updated) : Results.NotFound();
             }
+            catch (ScimTooManyException ex)
+            {
+                return ScimErrorResult.TooMany(ex.Message);
+            }
             catch (ValidationException)
             {
                 return ScimErrorResult.InvalidValue();
@@ -100,7 +111,7 @@ public static class ScimUsersEndpoints
             {
                 return ScimMassChangeResult.TooManyRequests(blocked);
             }
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.ScimUserUpdated);
 
         group.MapPatch("/{id}", async (
             string realmId,
@@ -116,6 +127,10 @@ public static class ScimUsersEndpoints
                 var patched = await scimService.PatchUserAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
                 return patched != null ? Results.Ok(patched) : Results.NotFound();
             }
+            catch (ScimTooManyException ex)
+            {
+                return ScimErrorResult.TooMany(ex.Message);
+            }
             catch (ValidationException)
             {
                 return ScimErrorResult.InvalidValue();
@@ -128,7 +143,7 @@ public static class ScimUsersEndpoints
             {
                 return ScimMassChangeResult.TooManyRequests(blocked);
             }
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.ScimUserUpdated);
 
         group.MapDelete("/{id}", async (
             string realmId,
@@ -147,7 +162,7 @@ public static class ScimUsersEndpoints
             {
                 return ScimMassChangeResult.TooManyRequests(blocked);
             }
-        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.ScimUserDeprovisioned);
 
         return app;
     }
