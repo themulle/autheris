@@ -87,6 +87,13 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
             Identifier = _table, Table = table, Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
         })).Table.Id;
         await GrantGovernanceAdminAsync(Admin.Value);
+        var ownerId = Guid.NewGuid().ToString();
+        await ScalarAsync(
+            "INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active) VALUES (@id, @sid, @acc, @name, @email, 1)",
+            ("@id", ownerId), ("@sid", Admin.Value), ("@acc", "test\\admin"), ("@name", "Admin"), ("@email", "admin@test.local"));
+        await ScalarAsync(
+            "INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role) VALUES (@id, @tid, @oid, 'PRIMARY')",
+            ("@id", Guid.NewGuid().ToString()), ("@tid", _tableId.ToString()), ("@oid", ownerId));
     }
 
     public Task DisposeAsync() => DisposeRepositoryAsync();
@@ -103,12 +110,16 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
     private async Task<List<AuditLogEntry>> AuditAsync(string eventType) =>
         (await Repo.GetAuditLogEntriesAsync(2000)).Where(e => e.EventType == eventType && e.TargetTable == _table.ToString()).ToList();
 
-    private Task InvokeAsync(string entry, Guid id, Sid actor) => entry switch
+    private Task InvokeAsync(string entry, Guid id, Sid actor)
     {
-        "RevokeConsentAsync" => Repo.RevokeConsentAsync(id, actor, "r"),
-        "ReplaceConsentsAsync" => Repo.ReplaceConsentsAsync([id], [], actor, "r"),
-        _ => Repo.RevokeSystemConsentAsync(id, SyncMarker, actor, "r")
-    };
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        return entry switch
+        {
+            "RevokeConsentAsync" => Repo.RevokeConsentAsync(id, actor, "r", none),
+            "ReplaceConsentsAsync" => Repo.ReplaceConsentsAsync([id], [], actor, "r", none),
+            _ => Repo.RevokeSystemConsentAsync(id, SyncMarker, actor, "r")
+        };
+    }
 
     [Trait("Category", "Security")]
     [Theory]
@@ -158,8 +169,9 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
 
         var before = (await Repo.GetAuditLogEntriesAsync(2000)).Count(e => e.EventType == AuditEventTypes.ConsentTenantIntegrityRefused);
 
-        await Should.ThrowAsync<KeyNotFoundException>(() => Repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "r"));
-        await Should.ThrowAsync<KeyNotFoundException>(() => Repo.ReplaceConsentsAsync([Guid.NewGuid()], [], Admin, "r"));
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        await Should.ThrowAsync<KeyNotFoundException>(() => Repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "r", none));
+        await Should.ThrowAsync<KeyNotFoundException>(() => Repo.ReplaceConsentsAsync([Guid.NewGuid()], [], Admin, "r", none));
 
         (await Repo.GetAuditLogEntriesAsync(2000)).Count(e => e.EventType == AuditEventTypes.ConsentTenantIntegrityRefused).ShouldBe(before);
     }
@@ -202,9 +214,9 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
 
         var consent = await CreateConsentAsync();
         var epochBefore = await Repo.GetTableEpochAsync(_table);
-        await ScalarAsync("DELETE FROM ROLE_MEMBERS WHERE member_sid = @s", ("@s", Admin.Value));
+        await ScalarAsync("DELETE FROM TABLE_OWNERS WHERE table_id = @tid", ("@tid", _tableId.ToString()));
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => InvokeAsync(entry, consent.Id, Admin));
+        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => InvokeAsync(entry, consent.Id, Admin));
 
         (await IsRevokedAsync(consent.Id)).ShouldBeFalse();
         (await Repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
@@ -236,9 +248,9 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
             await Task.Yield();
         }
 
-        await holder.ExecuteAndCommitAsync("DELETE FROM ROLE_MEMBERS WHERE member_sid = @s", ("@s", Admin.Value));
+        await holder.ExecuteAndCommitAsync("DELETE FROM TABLE_OWNERS WHERE table_id = @tid", ("@tid", _tableId.ToString()));
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => revoke);
+        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => revoke);
         (await IsRevokedAsync(consent.Id)).ShouldBeFalse();
         (await Repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
         (await AuditAsync("CONSENT_REVOKED")).ShouldBeEmpty();
@@ -282,7 +294,7 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
         var consent = await CreateConsentAsync();
         var epochBefore = await Repo.GetTableEpochAsync(_table);
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => InvokeAsync(entry, consent.Id, new Sid("S-1-5-21-MALLORY")));
+        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => InvokeAsync(entry, consent.Id, new Sid("S-1-5-21-MALLORY")));
 
         (await IsRevokedAsync(consent.Id)).ShouldBeFalse();
         (await Repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);

@@ -13,6 +13,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Autheris.Infrastructure.Persistence.Dialects;
 using Microsoft.Extensions.Logging;
 
@@ -83,15 +84,17 @@ public partial class GovernanceRepository
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default) =>
-        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, null, ct);
+        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, null, ct);
 
     public async Task ReplaceConsentsAsync(
         IReadOnlyList<Guid> revokeConsentIds,
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries,
         IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
         CancellationToken ct = default)
@@ -99,6 +102,12 @@ public partial class GovernanceRepository
         ArgumentNullException.ThrowIfNull(revokeConsentIds);
         ArgumentNullException.ThrowIfNull(create);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        if (revokeConsentIds.Count > 0 && string.IsNullOrWhiteSpace(actor.Value))
+        {
+            throw new ArgumentException("Actor SID is required.", nameof(actor));
+        }
+
+        var effectiveAuthority = authority ?? ConsentRevocationAuthority.FromPrincipal(null);
 
         foreach (var c in create)
         {
@@ -124,7 +133,7 @@ public partial class GovernanceRepository
         {
             foreach (var id in revokeConsentIds.Distinct())
             {
-                var revoked = await RevokeConsentInTransactionAsync(conn, tx, id, actor, reason, ct).ConfigureAwait(false);
+                var revoked = await RevokeConsentInTransactionAsync(conn, tx, id, actor, reason, effectiveAuthority, ct).ConfigureAwait(false);
                 if (revoked != null)
                 {
                     tables[revoked.Value.ToString().ToLowerInvariant()] = revoked.Value;
@@ -165,6 +174,12 @@ public partial class GovernanceRepository
             await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             await RecordTenantRefusalAuditAsync(conn, actor, refusal, ct).ConfigureAwait(false);
             throw;
+        }
+        catch (RevocationDenialCaptureException denial)
+        {
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
+            await RecordRevocationDenialAuditAsync(conn, actor, denial, ct).ConfigureAwait(false);
+            throw new ConsentRevocationForbiddenException();
         }
         catch
         {
@@ -209,14 +224,26 @@ public partial class GovernanceRepository
         }
     }
 
-    public async Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
+    public async Task RevokeConsentAsync(
+        Guid consentId,
+        Sid revokedBySid,
+        string reason,
+        ConsentRevocationAuthority authority,
+        CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(revokedBySid.Value))
+        {
+            throw new ArgumentException("Actor SID is required.", nameof(revokedBySid));
+        }
+
+        var effectiveAuthority = authority ?? ConsentRevocationAuthority.FromPrincipal(null);
+
         TableIdentifier? revoked;
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
-            revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, ct).ConfigureAwait(false);
+            revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, effectiveAuthority, ct).ConfigureAwait(false);
             if (revoked is { } table)
             {
                 await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
@@ -229,6 +256,12 @@ public partial class GovernanceRepository
             await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             await RecordTenantRefusalAuditAsync(conn, revokedBySid, refusal, ct).ConfigureAwait(false);
             throw;
+        }
+        catch (RevocationDenialCaptureException denial)
+        {
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
+            await RecordRevocationDenialAuditAsync(conn, revokedBySid, denial, ct).ConfigureAwait(false);
+            throw new ConsentRevocationForbiddenException();
         }
         catch
         {
@@ -258,9 +291,52 @@ public partial class GovernanceRepository
         }
     }
 
-    private async Task<TableIdentifier?> RevokeConsentInTransactionAsync(
-        DbConnection conn, DbTransaction tx, Guid consentId, Sid actor, string reason, CancellationToken ct)
+    private sealed class RevocationDenialCaptureException(Guid consentId, TenantId tenantId, TableIdentifier table)
+        : Exception(ConsentRevocationForbiddenException.FixedMessage)
     {
+        public Guid ConsentId { get; } = consentId;
+        public TenantId TenantId { get; } = tenantId;
+        public TableIdentifier Table { get; } = table;
+    }
+
+    private async Task RecordRevocationDenialAuditAsync(DbConnection conn, Sid actor, RevocationDenialCaptureException denial, CancellationToken ct)
+    {
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = denial.TenantId,
+                EventType = AuditEventTypes.ConsentDenied,
+                ActorSid = actor,
+                TargetTable = denial.Table.ToString(),
+                Decision = "DENY",
+                TraceId = Guid.NewGuid().ToString("N"),
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    ConsentId = denial.ConsentId,
+                    Operation = "REVOKE"
+                })
+            }, tx, ct).ConfigureAwait(false);
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task<TableIdentifier?> RevokeConsentInTransactionAsync(
+        DbConnection conn, DbTransaction tx, Guid consentId, Sid actor, string reason, ConsentRevocationAuthority authority, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(actor.Value))
+        {
+            throw new ArgumentException("Actor SID is required.", nameof(actor));
+        }
+
+        var effectiveAuthority = authority ?? ConsentRevocationAuthority.FromPrincipal(null);
+
         var target = await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, RevokeTargetSql, consentId, actor, ct).ConfigureAwait(false);
         if (target is not { } found)
         {
@@ -268,9 +344,17 @@ public partial class GovernanceRepository
         }
 
         TableIdentifier? tableId = found.Table;
-        if (!found.IsGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, null, ct).ConfigureAwait(false))
+        if (!effectiveAuthority.TryCheckTenantAccess(found.TenantRaw, out var isAdminForTenant, out var denialTenant))
         {
-            throw new UnauthorizedAccessException($"User '{actor}' is neither a data owner nor a delegated approver for '{tableId.Value}', nor the beneficiary.");
+            throw new KeyNotFoundException($"Consent with ID '{consentId}' does not exist.");
+        }
+
+        var isAuthorized = isAdminForTenant
+                           || found.IsGranteeSelf
+                           || await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, null, ct).ConfigureAwait(false);
+        if (!isAuthorized)
+        {
+            throw new RevocationDenialCaptureException(consentId, denialTenant, tableId.Value);
         }
 
         if (found.AlreadyRevoked)
@@ -342,20 +426,7 @@ public partial class GovernanceRepository
         delCmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
 
         var delegateCount = Convert.ToInt64(await ExecuteScalarAsync(delCmd, "ConsentGrants.CheckDelegates", ct).ConfigureAwait(false));
-        if (delegateCount > 0) return true;
-
-        await using var roleCmd = conn.CreateCommand();
-        roleCmd.Transaction = tx;
-        roleCmd.CommandText = @"SELECT COUNT(*)
-                                FROM ROLES r
-                                JOIN ROLE_MEMBERS rm ON r.id = rm.role_id
-                                WHERE (r.role_name = 'GovernanceAdmin' OR r.role_name = 'ClusterAdmin')
-                                  AND (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(rm.member_sid) = LOWER(@itsmAccount)))";
-        roleCmd.AddBound("@apprSid", approverSid.Value);
-        roleCmd.AddBound("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value, DbType.String);
-
-        var roleAdminCount = Convert.ToInt64(await ExecuteScalarAsync(roleCmd, "ConsentGrants.CheckRoleAdmin", ct).ConfigureAwait(false));
-        return roleAdminCount > 0;
+        return delegateCount > 0;
     }
 }
 
@@ -427,7 +498,9 @@ internal static class ConsentGrantSqlCore
 
         var table = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
         var rawTenant = reader.IsDBNull(3) ? null : reader.GetString(3);
-        var isGranteeSelf = string.Equals(reader.GetString(4), "User", StringComparison.OrdinalIgnoreCase) &&
+        var granteeType = reader.GetString(4);
+        var isGranteeSelf = (string.Equals(granteeType, "User", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(granteeType, "ServicePrincipal", StringComparison.OrdinalIgnoreCase)) &&
                             string.Equals(reader.IsDBNull(5) ? null : reader.GetString(5), actor.Value, StringComparison.OrdinalIgnoreCase);
         var isRevoked = reader.GetInt32(6) == 1;
 

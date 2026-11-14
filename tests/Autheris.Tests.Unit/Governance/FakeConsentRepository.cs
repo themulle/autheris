@@ -25,8 +25,8 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
     public Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default) =>
         throw new NotImplementedException();
 
-    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) =>
-        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, null, ct);
+    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) =>
+        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, null, ct);
 
     // The fake keeps descriptions on the stored instances, so the opt-in load only counts the call.
     public Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default)
@@ -38,7 +38,7 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
     public Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default) =>
         throw new NotImplementedException();
 
-    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries, IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates, CancellationToken ct)
+    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries, IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates, CancellationToken ct)
     {
         ReplaceCalls++;
         LastCreateCount = create.Count;
@@ -107,7 +107,7 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
     public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) =>
         Task.FromResult(_consents.FirstOrDefault(c => c.Id == consentId));
 
-    public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
+    public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, CancellationToken ct = default)
     {
         DirectRevokeCalls++;
         var i = _consents.FindIndex(c => c.Id == consentId);

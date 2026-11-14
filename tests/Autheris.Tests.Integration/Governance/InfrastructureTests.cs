@@ -445,7 +445,7 @@ public class InfrastructureTests : IDisposable
         var epochBefore = await _repository.GetTableEpochAsync(table);
         epochBefore.ShouldBe(1L);
 
-        await _repository.RevokeConsentAsync(consent.Id, userSid, "Testing epoch increment");
+        await _repository.RevokeConsentAsync(consent.Id, userSid, "Testing epoch increment", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
 
         var epochAfter = await _repository.GetTableEpochAsync(table);
         epochAfter.ShouldBe(2L);

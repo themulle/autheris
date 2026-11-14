@@ -88,7 +88,7 @@ internal sealed class FixedConsentRepository(IReadOnlyList<Consent> consents) : 
     public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) =>
         Task.FromResult(consents.FirstOrDefault(c => c.Id == consentId));
 
-    public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default) =>
+    public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, CancellationToken ct = default) =>
         Task.CompletedTask;
 
     public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) =>
@@ -106,7 +106,7 @@ internal sealed class FixedConsentRepository(IReadOnlyList<Consent> consents) : 
     public Task<ConsentPage> GetConsentPageAsync(ConsentPageQuery query, CancellationToken ct = default) =>
         Task.FromResult(new ConsentPage(Array.Empty<Consent>(), null));
 
-    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) =>
+    public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) =>
         Task.CompletedTask;
 }
 

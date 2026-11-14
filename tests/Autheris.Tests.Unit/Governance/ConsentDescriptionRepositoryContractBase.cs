@@ -146,7 +146,7 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         var (table, tableId) = await SeedTableAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
 
-        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null), null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
 
         var loaded = (await Repo.GetConsentByIdAsync(consent.Id))!;
         (await DescriptionOfAsync(consent.Id)).ShouldBe("after");
@@ -154,7 +154,7 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         loaded.ValidTo.ShouldBe(consent.ValidTo);
         loaded.Effect.ShouldBe(consent.Effect);
 
-        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, null)], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null), null, [new ConsentDescriptionUpdate(consent.Id, Tenant, null)], CancellationToken.None);
         (await DescriptionOfAsync(consent.Id)).ShouldBeNull();
     }
 
@@ -166,9 +166,9 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         if (!Available) return;
         var (table, tableId) = await SeedTableAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
-        await Repo.RevokeConsentAsync(consent.Id, Alice, "revoked in between");
+        await Repo.RevokeConsentAsync(consent.Id, Alice, "revoked in between", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
 
-        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null), null, [new ConsentDescriptionUpdate(consent.Id, Tenant, "after")], CancellationToken.None);
 
         var loaded = (await Repo.GetConsentByIdAsync(consent.Id))!;
         loaded.IsRevoked.ShouldBeTrue();
@@ -183,7 +183,7 @@ public abstract class ConsentDescriptionRepositoryContractBase : IAsyncLifetime
         var (table, tableId) = await SeedTableAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(tableId, table, GranteeType.User, "before"));
 
-        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", null, [new ConsentDescriptionUpdate(consent.Id, new TenantId("tenant-other"), "after")], CancellationToken.None);
+        await Desc.ReplaceConsentsAsync([], [], Admin, "desc", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null), null, [new ConsentDescriptionUpdate(consent.Id, new TenantId("tenant-other"), "after")], CancellationToken.None);
 
         (await DescriptionOfAsync(consent.Id)).ShouldBe("before");
     }

@@ -72,7 +72,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         await using var repo = NewRepository();
 
         await Should.ThrowAsync<KeyNotFoundException>(() =>
-            repo.RevokeConsentAsync(Guid.NewGuid(), new Sid("S-1-5-21-ADMIN"), "test"));
+            repo.RevokeConsentAsync(Guid.NewGuid(), new Sid("S-1-5-21-ADMIN"), "test", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
     }
 
     [Fact]
@@ -206,10 +206,11 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         var (table, tableId) = await CreateRevokeTableAsync(repo);
         var consent = await repo.CreateConsentAsync(UserConsent(table, tableId, "S-1-5-21-ALICE", "tenant-a"));
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope"));
-        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope"));
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
+            repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "nope", none));
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
+            repo.ReplaceConsentsAsync([consent.Id], [], new Sid("S-1-5-21-MALLORY"), "nope", none));
 
         (await repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeFalse();
     }
@@ -227,7 +228,7 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         var mine = await repo.CreateConsentAsync(UserConsent(table, tableId, alice.Value, "tenant-a"));
         var foreign = await repo.CreateConsentAsync(UserConsent(table, tableId, alice.Value, "tenant-b"));
 
-        await repo.ReplaceConsentsAsync([mine.Id], [], alice, "self revoke of tenant-a only");
+        await repo.ReplaceConsentsAsync([mine.Id], [], alice, "self revoke of tenant-a only", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
 
         (await repo.GetConsentByIdAsync(mine.Id))!.IsRevoked.ShouldBeTrue();
         (await repo.GetConsentByIdAsync(foreign.Id))!.IsRevoked.ShouldBeFalse();

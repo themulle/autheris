@@ -146,6 +146,7 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
                 l[0].Effect == ConsentEffect.Allow),
             Arg.Any<Sid>(),
             Arg.Any<string>(),
+            Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(),
             Arg.Is<IReadOnlyList<AuditLogEntry>?>(a => a != null && a.Count == 1 && a[0].EventType == "GITOPS_CONSENT_APPLY"),
             Arg.Any<CancellationToken>());
 

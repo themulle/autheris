@@ -218,7 +218,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         f.Created.ShouldBeEmpty(); // the still granted consent is refreshed, not duplicated
         await f.ConsentRepo.Received(1).GetActiveConsentsByConsentRequestIdAsync(
             OpenMetadataSyncService.OpenMetadataSyncConsentMarker, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
-        await f.ConsentRepo.DidNotReceive().RevokeConsentAsync(Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await f.ConsentRepo.DidNotReceive().RevokeConsentAsync(Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

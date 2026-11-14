@@ -10,6 +10,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -49,6 +50,7 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default)
     {
@@ -57,7 +59,7 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
             await ValidateAsync(consent, ct).ConfigureAwait(false);
         }
 
-        await _inner.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, ct).ConfigureAwait(false);
+        await _inner.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, ct).ConfigureAwait(false);
     }
 
     // the description seam is additive and shares the same validation of the create list.
@@ -66,6 +68,7 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
 
     public async Task ReplaceConsentsAsync(
         IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason,
+        ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries, IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates, CancellationToken ct)
     {
         foreach (var consent in create)
@@ -73,7 +76,7 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
             await ValidateAsync(consent, ct).ConfigureAwait(false);
         }
 
-        await InnerDescriptions.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
+        await InnerDescriptions.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
     }
 
     public Task<bool> UpdateConsentDescriptionWithAuditAsync(Guid consentId, TenantId tenant, string? description, AuditLogEntry audit, CancellationToken ct = default) =>
@@ -102,8 +105,8 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
 
     public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) => _inner.GetConsentByIdAsync(consentId, ct);
 
-    public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default) =>
-        _inner.RevokeConsentAsync(consentId, revokedBySid, reason, ct);
+    public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, ConsentRevocationAuthority authority, CancellationToken ct = default) =>
+        _inner.RevokeConsentAsync(consentId, revokedBySid, reason, authority, ct);
 
     public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) =>
         _inner.GetExpiringConsentsAsync(threshold, maxResults, ct);

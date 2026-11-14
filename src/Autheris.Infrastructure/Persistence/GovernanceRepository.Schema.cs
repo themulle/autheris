@@ -385,39 +385,6 @@ public partial class GovernanceRepository
                 cmd.ExecuteNonQuery();
             }
 
-            var adminRoleId = Guid.NewGuid().ToString();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO ROLES (id, role_name, description)
-                                    VALUES (@id, 'GovernanceAdmin', 'Platform governance administrators')
-                                    ON CONFLICT (role_name) DO NOTHING;";
-                cmd.AddBound("@id", adminRoleId);
-                cmd.ExecuteNonQuery();
-            }
-
-            using (var idCmd = conn.CreateCommand())
-            {
-                idCmd.Transaction = trans;
-                idCmd.CommandText = "SELECT id FROM ROLES WHERE role_name = 'GovernanceAdmin' LIMIT 1";
-                var actualRoleId = idCmd.ExecuteScalar()?.ToString();
-                if (!string.IsNullOrEmpty(actualRoleId))
-                {
-                    adminRoleId = actualRoleId;
-                }
-            }
-
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                                    VALUES (@id, @rid, 'User', 'S-1-5-21-GOVERNANCEADMIN')
-                                    ON CONFLICT DO NOTHING;";
-                cmd.AddBound("@id", Guid.NewGuid().ToString());
-                cmd.AddBound("@rid", adminRoleId);
-                cmd.ExecuteNonQuery();
-            }
-
             trans.Commit();
         }
         catch (Exception)
@@ -589,36 +556,6 @@ public partial class GovernanceRepository
                         }
                     }
                 }
-            }
-
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO ROLES (id, role_name, description)
-                                    SELECT @id, 'GovernanceAdmin', 'Platform governance administrators'
-                                    WHERE NOT EXISTS (SELECT 1 FROM ROLES WHERE role_name = 'GovernanceAdmin');";
-                cmd.AddBound("@id", Guid.NewGuid().ToString());
-                cmd.ExecuteNonQuery();
-            }
-
-            string? adminRoleId;
-            using (var idCmd = conn.CreateCommand())
-            {
-                idCmd.Transaction = trans;
-                idCmd.CommandText = "SELECT TOP (1) id FROM ROLES WHERE role_name = 'GovernanceAdmin'";
-                adminRoleId = idCmd.ExecuteScalar()?.ToString();
-            }
-
-            if (!string.IsNullOrEmpty(adminRoleId))
-            {
-                using var cmd = conn.CreateCommand();
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                                    SELECT @id, @rid, 'User', 'S-1-5-21-GOVERNANCEADMIN'
-                                    WHERE NOT EXISTS (SELECT 1 FROM ROLE_MEMBERS WHERE role_id = @rid AND member_sid = 'S-1-5-21-GOVERNANCEADMIN');";
-                cmd.AddBound("@id", Guid.NewGuid().ToString());
-                cmd.AddBound("@rid", adminRoleId);
-                cmd.ExecuteNonQuery();
             }
 
             trans.Commit();
