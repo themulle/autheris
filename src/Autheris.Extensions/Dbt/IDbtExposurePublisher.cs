@@ -9,5 +9,4 @@ using Autheris.Domain.Model;
 public interface IDbtExposurePublisher
 {
     Task<string> GenerateExposuresYamlAsync(CancellationToken ct = default);
-    Task ExportExposuresFileAsync(string outputFilePath, CancellationToken ct = default);
 }

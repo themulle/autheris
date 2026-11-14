@@ -261,7 +261,7 @@ public sealed class McpDatasetToolWiringTests
         var registry = new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false));
         var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
-        var session = handler.CreateSession("agent", "tenant-a");
+        var session = handler.CreateSession("agent", "tenant-a", userSid: null);
 
         var response = await handler.HandleMessageAsync(session.SessionId, """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""");
 

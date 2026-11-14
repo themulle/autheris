@@ -103,8 +103,6 @@ src/Autheris.Api/Endpoints/SubjectLifecycleEndpoints.cs|/locks/{realmId}/{userKe
 src/Autheris.Api/Endpoints/SystemEndpoints.cs|/api/governance/system/health
 src/Autheris.Api/Endpoints/SystemEndpoints.cs|/api/governance/system/metrics
 src/Autheris.Api/Endpoints/SystemEndpoints.cs|/api/governance/system/resource-groups
-src/Autheris.Api/Endpoints/TableCacheAdminEndpoints.cs|/stats
-src/Autheris.Api/Endpoints/TableCacheAdminEndpoints.cs|/tables
 src/Autheris.Api/Endpoints/TrinoProtocolEndpoints.cs|/v1/statement/executing/{statementId}/{token:long:min(0)}
 src/Autheris.Api/Endpoints/TrinoProtocolEndpoints.cs|/v1/statement/queued/{statementId}/{token:long:min(0)}
 src/Autheris.Api/Endpoints/TrustedDocumentAdminEndpoints.cs|/{appId}

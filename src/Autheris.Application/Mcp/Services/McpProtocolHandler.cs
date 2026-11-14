@@ -14,8 +14,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// JSON-RPC 2.0 Protocol Handler implementing the Model Context Protocol (MCP) specification (2024-11-05), used by the
-/// standard I/O runner (<see cref="IMcpStdioRunner"/>). The HTTP endpoint runs on the official MCP SDK (Autheris.Api.Mcp.GatewayMcpServer).
+/// JSON-RPC 2.0 Protocol Handler implementing the Model Context Protocol (MCP) specification (2024-11-05).
+/// The HTTP endpoint runs on the official MCP SDK (Autheris.Api.Mcp.GatewayMcpServer).
 /// </summary>
 public sealed class McpProtocolHandler : IMcpProtocolHandler
 {
@@ -45,13 +45,10 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         _options = options?.Value ?? new GatewayOptions();
     }
 
-    public McpSessionContext CreateSession(string servicePrincipalId, string tenantId)
-        => CreateSession(servicePrincipalId, tenantId, null, null, null, null, false, null);
-
     public McpSessionContext CreateSession(
         string servicePrincipalId,
         string tenantId,
-        string? userSid = null,
+        string? userSid,
         IReadOnlyList<string>? roles = null,
         IReadOnlyList<string>? groupSids = null,
         string? clientIp = null,

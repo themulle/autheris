@@ -166,7 +166,7 @@ public sealed class IntegrationGapBTests
         var registry = new McpToolRegistry();
         var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
-        var session = handler.CreateSession("svc-agent", "tenant-alpha");
+        var session = handler.CreateSession("svc-agent", "tenant-alpha", userSid: null);
 
         var response = await handler.HandleMessageAsync(session.SessionId,
             """{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"query_customers","arguments":{}}}""");
@@ -189,7 +189,7 @@ public sealed class IntegrationGapBTests
         var registry = new McpToolRegistry();
         var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
-        var session = handler.CreateSession("svc-agent", "tenant-alpha");
+        var session = handler.CreateSession("svc-agent", "tenant-alpha", userSid: null);
 
         var response = await handler.HandleMessageAsync(session.SessionId,
             """{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"query_customers","arguments":{}}}""");

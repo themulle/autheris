@@ -144,7 +144,7 @@ public sealed class SemanticToolPruningTests
             semanticCompiler: null,
             toolPruner: pruner);
 
-        var session = handler.CreateSession("sp-1", "tenant-1");
+        var session = handler.CreateSession("sp-1", "tenant-1", userSid: null);
 
         var requestJson = """
         {

@@ -210,7 +210,7 @@ public sealed class McpServerTests
         var handler = new McpProtocolHandler(sessionStore, registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
 
         // 1. Session creation
-        var session = handler.CreateSession("svc-ai-claude", "tenant-prod-1");
+        var session = handler.CreateSession("svc-ai-claude", "tenant-prod-1", userSid: null);
         session.SessionId.ShouldNotBeNullOrWhiteSpace();
         session.ServicePrincipalId.ShouldBe("svc-ai-claude");
         session.TenantId.ShouldBe("tenant-prod-1");
@@ -474,7 +474,7 @@ public sealed class McpServerTests
     public async Task McpSessionStore_RegisterAndSendSseEvent_ShouldDispatchEventToActiveStream()
     {
         var store = new McpSessionStore(NullLogger<McpSessionStore>.Instance);
-        var session = store.CreateSession("svc-ai", "tenant-1");
+        var session = store.CreateSession("svc-ai", "tenant-1", userSid: null);
 
         string? receivedEvent = null;
         string? receivedData = null;

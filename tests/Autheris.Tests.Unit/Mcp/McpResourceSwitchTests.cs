@@ -228,7 +228,7 @@ public sealed class McpResourceSwitchTests
         var registry = new McpToolRegistry();
         var guardrail = new AiDataGuardrailService(registry, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, Substitute.For<IAuditLogRepository>(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance, closed);
-        var sid = handler.CreateSession("agent", "t").SessionId;
+        var sid = handler.CreateSession("agent", "t", userSid: null).SessionId;
 
         var list = await handler.HandleMessageAsync(sid, """{"jsonrpc":"2.0","id":1,"method":"resources/list"}""");
         System.Text.Json.JsonDocument.Parse(list).RootElement.GetProperty("result").GetProperty("resources").GetArrayLength().ShouldBe(0);

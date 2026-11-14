@@ -64,24 +64,6 @@ public sealed class DbtExposurePublisher(
         return sb.ToString();
     }
 
-    public async Task ExportExposuresFileAsync(string outputFilePath, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(outputFilePath);
-
-        var fullPath = Path.GetFullPath(outputFilePath);
-        ValidateSafeFilePath(fullPath);
-
-        var yaml = await GenerateExposuresYamlAsync(ct).ConfigureAwait(false);
-        var dir = Path.GetDirectoryName(fullPath);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
-
-        await File.WriteAllTextAsync(fullPath, yaml, Encoding.UTF8, ct).ConfigureAwait(false);
-        _logger.LogInformation("Exported dbt exposures YAML to {Path}", fullPath);
-    }
-
     private static string EscapeYamlString(string value)
     {
         if (string.IsNullOrEmpty(value)) return string.Empty;
@@ -90,21 +72,5 @@ public sealed class DbtExposurePublisher(
             .Replace("\"", "\\\"")
             .Replace("\r", "")
             .Replace("\n", " ");
-    }
-
-    private static void ValidateSafeFilePath(string fullPath)
-    {
-        var normalized = fullPath.Replace('\\', '/').ToLowerInvariant();
-        if (normalized.StartsWith("/etc") ||
-            normalized.StartsWith("/proc") ||
-            normalized.StartsWith("/sys") ||
-            normalized.StartsWith("/dev") ||
-            normalized.StartsWith("/root/.ssh") ||
-            normalized.Contains("/.ssh/") ||
-            normalized.Contains("/appsettings") ||
-            normalized.Contains("windows/system32"))
-        {
-            throw new System.Security.SecurityException($"Access to restricted path '{fullPath}' is strictly forbidden.");
-        }
     }
 }
