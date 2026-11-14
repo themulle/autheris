@@ -188,7 +188,12 @@ public sealed partial class CallerAttributeArchitectureTests
         {
             "src/Autheris.Domain/Security/CallerContext.cs",
             "src/Autheris.Api/Security/SecurityContextFactory.cs",
-            "src/Autheris.Domain/Model/GovernanceModels.cs"
+            "src/Autheris.Domain/Model/GovernanceModels.cs",
+            "src/Autheris.Domain/Model/GovernanceV2Models.cs",
+            "src/Autheris.Application/Usage/UsageAggregator.cs",
+            "src/Autheris.Application/Lineage/ConsumerFolding.cs",
+            "src/Autheris.Application/Lineage/LineageImpactAnalyzerService.cs",
+            "src/Autheris.Infrastructure/Persistence/ConsumerAggregationStore.cs"
         };
 
         var readers = Sources("src")

@@ -368,8 +368,9 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             {
                 // Privileged Tier: Data Owner, Delegate, GovernanceAdmin
                 // Expose personal breakdown (ActorSids), exact query names, no folding
+                var groupedSummaries = ConsumerFolding.GroupByClient(summaries);
                 var privilegedUsages = new List<CallingApplicationUsage>();
-                foreach (var s in summaries)
+                foreach (var s in groupedSummaries)
                 {
                     int actorCount = s.DistinctActors;
                     if (actorCounts.TryGetValue(s.Application, out var count))
@@ -389,7 +390,9 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
                         Versions: s.Versions,
                         QueryNames: s.QueryNames,
                         DistinctActors: actorCount,
-                        ActorSids: matchingSids
+                        ActorSids: matchingSids,
+                        ClientId: s.ClientId,
+                        IsClientAsserted: s.IsClientAsserted ?? false
                     ));
                 }
                 applicationUsages = privilegedUsages;

@@ -16,8 +16,10 @@ type CallingApplicationUsage {
   actorSids: [String!]
   application: String!
   calls: Long!
+  clientId: String
   day: String!
   distinctActors: Int!
+  isClientAsserted: Boolean!
   queryNames: [String!]!
   rejections: RejectionBreakdown!
   rowsMeasuredCalls: Long!
