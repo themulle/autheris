@@ -242,6 +242,8 @@ JOIN TABLES tc ON r.child_table_id = tc.id
 LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
 ORDER BY r.id, k.key_ordinal";
 
+        public const string SelectExistingRelationSql = "SELECT cardinality FROM TABLE_RELATIONS WHERE parent_table_id = @pId AND child_table_id = @cId AND relation_name = @relName";
+
         public const string InsertRelationSqlPg = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, cardinality, allow_cross_data_source)
 VALUES (@id, @pId, @cId, @relName, @card, @allowCross)
 ON CONFLICT (parent_table_id, child_table_id, relation_name) DO UPDATE SET cardinality = EXCLUDED.cardinality

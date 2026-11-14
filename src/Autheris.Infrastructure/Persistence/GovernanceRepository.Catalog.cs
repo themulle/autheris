@@ -351,7 +351,10 @@ public partial class GovernanceRepository
         return result;
     }
 
-    public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
+    public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) =>
+        (await UpsertTableMetadataWithResultAsync(metadata, ct).ConfigureAwait(false)).Metadata;
+
+    public async Task<CatalogTableUpsertResult> UpsertTableMetadataWithResultAsync(TableMetadata metadata, CancellationToken ct = default)
     {
         Autheris.Application.Catalog.Services.CatalogSourceNameValidator.Validate(metadata);
         metadata.ValidateRequiredFilterColumns();
@@ -364,11 +367,14 @@ public partial class GovernanceRepository
 
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        var classification = CatalogWriteClassification.Restrictive;
+        var wasCreated = false;
         try
         {
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
             var tableExisted = false;
             var structuralChange = false;
+            CatalogTablePersistedProjection? storedBefore = null;
             var docs = new TableDocumentation(metadata.Table.Description, metadata.Table.LongDescription, metadata.Table.DocumentationSource);
 
             await using (var cmd = conn.CreateCommand())
@@ -390,6 +396,14 @@ public partial class GovernanceRepository
                 {
                     structuralChange = true;
                 }
+            }
+
+            // SEC-OI-674-1: the state compared against is read from the database inside this transaction (the row is locked), never from the cache.
+            // An unreadable stored state yields no projection, which can only lead to a write (SEC-OI-674-2).
+            wasCreated = !tableExisted;
+            if (tableExisted)
+            {
+                storedBefore = await TryReadPersistedProjectionAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);
             }
 
             var httpEndpointJson = metadata.Table.HttpEndpoint != null
@@ -445,12 +459,30 @@ public partial class GovernanceRepository
                 await CatalogKeyDefinitionStore.ReplaceAsync(conn, tx, KeyDialect, tableId, metadata, colIdByName, ct).ConfigureAwait(false);
             }
 
-            await IncrementTableEpochInternalAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);
-            var structureDelta = structuralChange ? 1L : 0L;
-            var contentDelta = structuralChange ? 0L : 1L;
-            var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, structureDelta, contentDelta, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-            await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+            classification = tableExisted ? CatalogWriteClassification.Restrictive : CatalogWriteClassification.Additive;
+            if (tableExisted && storedBefore is not null)
+            {
+                var storedAfter = await TryReadPersistedProjectionAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);
+                if (storedAfter is not null)
+                {
+                    classification = CatalogTablePersistedProjection.Compare(storedBefore, storedAfter).Classification;
+                }
+            }
+
+            if (classification == CatalogWriteClassification.Unchanged)
+            {
+                // WP-OI-SCALE-3 (#674): the write left every persisted field as it was. Nothing is committed: no epoch, no catalog version, no event.
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await IncrementTableEpochInternalAsync(conn, tx, metadata.Identifier, ct).ConfigureAwait(false);
+                var structureDelta = structuralChange ? 1L : 0L;
+                var contentDelta = structuralChange ? 0L : 1L;
+                var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, structureDelta, contentDelta, ct).ConfigureAwait(false);
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+                await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+            }
         }
         catch
         {
@@ -458,16 +490,88 @@ public partial class GovernanceRepository
             throw;
         }
 
-        await InvalidateTableEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
+        var kind = classification == CatalogWriteClassification.Unchanged
+            ? CatalogUpsertKind.Unchanged
+            : wasCreated ? CatalogUpsertKind.Created : CatalogUpsertKind.Updated;
+        if (kind == CatalogUpsertKind.Unchanged)
+        {
+            // SEC-OI-674-1: the unchanged result is the freshly loaded stored state, never the writer's input or a cached copy.
+            InvalidateTableMetadata(metadata.Identifier.ToString().ToLowerInvariant());
+        }
+        else
+        {
+            await InvalidateTableEpochAsync(metadata.Identifier, ct).ConfigureAwait(false);
+        }
 
         try
         {
-            return await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false) ?? metadata;
+            var stored = await GetTableMetadataAsync(metadata.Identifier, ct).ConfigureAwait(false) ?? metadata;
+            return new CatalogTableUpsertResult(stored, kind, classification);
         }
         catch (TableMetadataUnavailableException)
         {
             // The stored definition is invalid and this write did not replace it: the upsert itself succeeded and stays untouched by it.
-            return metadata;
+            return new CatalogTableUpsertResult(metadata, kind, classification);
+        }
+    }
+
+    /// <summary>
+    /// The persisted projection of one table read through the transaction (table row, columns, masking rules, key definition), or null when the
+    /// state cannot be read or projected exactly (callers then write, SEC-OI-674-2).
+    /// </summary>
+    private async Task<CatalogTablePersistedProjection?> TryReadPersistedProjectionAsync(
+        DbConnection conn, DbTransaction tx, TableIdentifier identifier, CancellationToken ct)
+    {
+        try
+        {
+            Table? tableEntity = null;
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = CatalogSql.SelectTableEntitySql;
+                cmd.AddBound("@domain", identifier.Domain);
+                cmd.AddBound("@schema", identifier.Schema);
+                cmd.AddBound("@table", identifier.TableName);
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    tableEntity = ReadTableEntity(reader, _logger);
+                }
+            }
+
+            if (tableEntity is null)
+            {
+                return null;
+            }
+
+            List<TableColumn> columns;
+            Dictionary<string, MaskingRule> maskingRules;
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = SelectTableColumnsSql;
+                cmd.AddBound("@tableId", tableEntity.Id.ToString());
+                (columns, maskingRules) = await LoadTableColumnsAsync(cmd, _logger, ct).ConfigureAwait(false);
+            }
+
+            var (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                conn, tx, KeyDialect, identifier, tableEntity.Id, columns, ct, _keyTables).ConfigureAwait(false);
+
+            return CatalogTablePersistedProjection.From(new TableMetadata
+            {
+                Identifier = identifier,
+                Table = tableEntity,
+                Columns = columns,
+                ColumnMaskingRules = maskingRules,
+                PrimaryKeyColumns = pkColumns,
+                PrimaryKeyDirections = pkDirections,
+                Indexes = indexes
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogCatalogNotice("The stored table state could not be projected for no-op detection; the write proceeds.");
+            return null;
         }
     }
 
@@ -675,6 +779,21 @@ public partial class GovernanceRepository
         var parentKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "parent", relation.JoinKeysParent, await LoadColumnNamesAsync(conn, tx, parentTableId, ct).ConfigureAwait(false));
         var childKeys = RelationWriteSupport.Canonicalize(relation.RelationName, "child", relation.JoinKeysChild, await LoadColumnNamesAsync(conn, tx, childTableId, ct).ConfigureAwait(false));
 
+        string? existingCardinality = null;
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = CatalogSql.SelectExistingRelationSql;
+            cmd.AddBound("@pId", parentTableId);
+            cmd.AddBound("@cId", childTableId);
+            cmd.AddBound("@relName", relation.RelationName);
+            var existingObj = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            if (existingObj is string s)
+            {
+                existingCardinality = s;
+            }
+        }
+
         string storedId;
         bool created;
         // Natural-key upsert: only discovery-owned columns are in the update list (I-18 keeps allow_cross_data_source out of it).
@@ -697,6 +816,13 @@ public partial class GovernanceRepository
         var keysChanged = await ReplaceRelationKeysAsync(conn, tx, storedId, created, parentKeys, childKeys, ct).ConfigureAwait(false);
 
         ct.ThrowIfCancellationRequested();
+        var cardinalityUnchanged = !created && string.Equals(existingCardinality, relation.Cardinality.ToString(), StringComparison.Ordinal);
+        if (cardinalityUnchanged && !keysChanged)
+        {
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            return new RelationWriteResult(Guid.Parse(storedId), false, false);
+        }
+
         var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
         await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);

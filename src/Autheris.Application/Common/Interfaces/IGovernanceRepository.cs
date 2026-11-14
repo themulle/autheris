@@ -7,6 +7,20 @@ public interface ITableMetadataRepository
     Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
     Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default);
+
+    /// <summary>
+    /// WP-OI-SCALE-3 (#674): like <see cref="UpsertTableMetadataAsync"/> but also reports whether the write created, changed or left the stored table
+    /// unchanged and how the change is classified for the version-bump decision. An implementation that cannot tell reports an update classified
+    /// <see cref="Autheris.Application.Catalog.CatalogWriteClassification.Restrictive"/> (fail closed).
+    /// </summary>
+    async Task<Autheris.Application.Catalog.CatalogTableUpsertResult> UpsertTableMetadataWithResultAsync(TableMetadata metadata, CancellationToken ct = default)
+    {
+        var stored = await UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
+        return new Autheris.Application.Catalog.CatalogTableUpsertResult(
+            stored,
+            Autheris.Application.Catalog.CatalogUpsertKind.Updated,
+            Autheris.Application.Catalog.CatalogWriteClassification.Restrictive);
+    }
     Task<Autheris.Application.Catalog.CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
         => Task.FromResult(new Autheris.Application.Catalog.CatalogVersion(1, 1));
 
