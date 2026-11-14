@@ -49,6 +49,7 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
     private readonly SemanticTenancy _tenancy;
     private readonly IConsentRepository? _consentRepository;
     private readonly IReadOnlyCollection<string> _sharedTables;
+    private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
     private static readonly string?[] SemanticModelTags = ["dbt", "semantic-model"];
 
     public DbtSemanticManifestIngestionService(
@@ -58,8 +59,10 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport = null,
         SemanticManifestValidator? validator = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        IConsentRepository? consentRepository = null)
+        IConsentRepository? consentRepository = null,
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null)
     {
+        _catalogWriteScopes = catalogWriteScopeFactory;
         _tagImport = tagImport;
         _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -392,6 +395,7 @@ public sealed class DbtSemanticManifestIngestionService : IDbtSemanticManifestIn
     {
         if (_tableRepository != null)
         {
+            await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "dbt-semantic-manifest");
             foreach (var model in semanticModels)
             {
                 if (string.IsNullOrWhiteSpace(model.Name))

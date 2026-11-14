@@ -38,3 +38,22 @@ public sealed class CatalogWriteScopeFactory : ICatalogWriteScopeFactory
         return scope;
     }
 }
+
+/// <summary>Helpers for writers that optionally take an <see cref="ICatalogWriteScopeFactory"/> (tests and tools run without one).</summary>
+public static class CatalogWriteScopeFactoryExtensions
+{
+    /// <summary>Begins a write scope, or returns a scope that does nothing when no factory is registered.</summary>
+    public static ICatalogWriteScope BeginOrNoop(this ICatalogWriteScopeFactory? factory, string writer) =>
+        factory?.Begin(writer) ?? NoopCatalogWriteScope.Instance;
+
+    private sealed class NoopCatalogWriteScope : ICatalogWriteScope
+    {
+        public static readonly NoopCatalogWriteScope Instance = new();
+
+        public Guid ScopeId => Guid.Empty;
+
+        public string Writer => string.Empty;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+}

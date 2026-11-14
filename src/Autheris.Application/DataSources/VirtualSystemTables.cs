@@ -152,9 +152,16 @@ public static class VirtualSystemTables
         string.Equals(identifier.Domain, Domain, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(identifier.Schema, Schema, StringComparison.OrdinalIgnoreCase);
 
-    public static async Task RegisterSystemTablesAsync(ITableMetadataRepository repository, CancellationToken ct = default)
+    public static Task RegisterSystemTablesAsync(ITableMetadataRepository repository, CancellationToken ct = default) =>
+        RegisterSystemTablesAsync(repository, null, ct);
+
+    public static async Task RegisterSystemTablesAsync(
+        ITableMetadataRepository repository,
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(repository);
+        await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(catalogWriteScopeFactory, "system-tables");
         foreach (var table in All)
         {
             // The in-code keys are the declared definition of the system tables: they are written (replaced) on every registration.

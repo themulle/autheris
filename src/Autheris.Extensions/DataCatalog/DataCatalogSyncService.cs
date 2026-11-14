@@ -31,6 +31,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
     private readonly IAuditWriter _auditWriter;
     private readonly ILogger<DataCatalogSyncService> _logger;
     private readonly PhysicalIndexSync _physicalIndexSync;
+    private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
 
     public DataCatalogSyncService(
         IDataCatalogClient client,
@@ -40,8 +41,10 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         IPhysicalKeyCatalog physicalKeys,
         IAuditWriter auditWriter,
         ILogger<DataCatalogSyncService> logger,
-        IPhysicalIndexRepository? physicalIndexes = null)
+        IPhysicalIndexRepository? physicalIndexes = null,
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null)
     {
+        _catalogWriteScopes = catalogWriteScopeFactory;
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _epochService = epochService ?? throw new ArgumentNullException(nameof(epochService));
@@ -55,6 +58,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
     public async Task<CatalogSyncResult> SyncCatalogAsync(bool dryRun = false, TenantId? restrictToTenant = null, CancellationToken ct = default)
     {
         var client = _client;
+        await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "data-catalog-sync");
         _logger.LogInformation("Starting data catalog sync from provider {Provider} (DryRun: {DryRun})...", client.ProviderType, dryRun);
 
         var tables = await client.GetTablesAsync(null, ct).ConfigureAwait(false);

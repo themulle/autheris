@@ -23,6 +23,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<OpenMetadataSyncService> _logger;
     private readonly IDistributedClusterStateProvider? _clusterState;
+    private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -46,8 +47,10 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
         IOpenMetadataClient client, ITableMetadataRepository metadataRepo,
         IConsentRepository consentRepo, IPolicyEpochRepository epochRepo,
         IOptions<GatewayOptions> options, ILogger<OpenMetadataSyncService> logger,
-        IDistributedClusterStateProvider? clusterState = null)
+        IDistributedClusterStateProvider? clusterState = null,
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null)
     {
+        _catalogWriteScopes = catalogWriteScopeFactory;
         _client = client;
         _metadataRepo = metadataRepo;
         _consentRepo = consentRepo;
@@ -69,6 +72,7 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
 
         try
         {
+            await using var catalogWriteScope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "openmetadata-sync");
             var omOptions = _options.Value.OpenMetadata;
             var warnings = new List<string>();
             var affectedTables = new HashSet<TableIdentifier>();

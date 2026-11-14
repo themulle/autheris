@@ -1,0 +1,9 @@
+# Production files that call UpsertTableMetadataAsync or CreateRelationAsync and contain a loop but open no catalog write scope.
+# Format: path | reason. Every other such file must open a scope (ICatalogWriteScopeFactory.Begin / BeginOrNoop) so that a
+# multi-table write publishes one catalog version bump and one catalog:changed event per chunk instead of one per table.
+# An entry whose file no longer needs the exemption fails the test (remove it).
+src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs | single-table admin endpoints (immediate version bump is intended)
+src/Autheris.Api/Endpoints/CatalogApiEndpoints.Definition.cs | single-table dataset definition endpoint
+src/Autheris.Application/Common/Interfaces/IGovernanceRepository.cs | interface declaration, no writer
+src/Autheris.Application/Governance/Services/AccessPlanningService.cs | single-table activation change
+src/Autheris.Infrastructure/Persistence/GovernanceRepository.Catalog.cs | the repository implementation that honors the scope
