@@ -292,7 +292,10 @@ public static class GatewayApplicationBuilderExtensions
         {
             app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
         }
-        app.MapAsyncJobEndpoints();
+        if (switches.AsyncJobsEnabled)
+        {
+            app.MapAsyncJobEndpoints();
+        }
         app.Services.GetService<Autheris.Api.Hosting.ModuleLoadResult>()?.MapEndpoints(app);
 
         LoadSqlEndpoints(app.Services, gatewayOptions);

@@ -16,6 +16,7 @@ using System.Threading.Tasks;
 using Apache.Arrow.Ipc;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Application.DataSources;
 using Autheris.Application.DataSources.Interfaces;
@@ -160,23 +161,25 @@ public static class TableStreamEndpoints
             metadata = null;
         }
 
-        // Non-existent or hidden tables return 404 anti-enumeration parity
-        if (metadata == null || (!metadata.Table.IsActive && !httpContext.User.IsInRole("admin")))
+        var rawCallerId = EndpointSecurity.GetCallerIdentity(httpContext);
+        if (string.IsNullOrWhiteSpace(rawCallerId))
         {
             await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
-        if (metadata.Table.Visibility == DatasetVisibility.Hidden && !httpContext.User.IsInRole("admin"))
+        var tenant = EndpointSecurity.GetRequestTenant(httpContext);
+        var userSid = new Sid(rawCallerId);
+        var callerSid = userSid.Value;
+
+        // Non-existent, inactive, or hidden tables return 404 anti-enumeration parity
+        if (metadata == null || !await IsTableVisibleForStreamAsync(httpContext, tableId, metadata, tenant, userSid, ct).ConfigureAwait(false))
         {
             await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
         // 4. Governance Authorization Stage (PDP)
-        var tenant = EndpointSecurity.GetRequestTenant(httpContext);
-        var userSid = new Sid(EndpointSecurity.GetCallerIdentity(httpContext) ?? "anonymous");
-        var callerSid = userSid.Value;
         var usageRecorder = httpContext.RequestServices?.GetService<IConsumerUsageRecorder>();
         var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
 
@@ -717,5 +720,58 @@ public static class TableStreamEndpoints
                 writer.WriteStringValue(val.ToString());
                 break;
         }
+    }
+
+    private static async Task<bool> IsTableVisibleForStreamAsync(
+        HttpContext httpContext,
+        TableIdentifier tableId,
+        TableMetadata metadata,
+        TenantId tenant,
+        Sid userSid,
+        CancellationToken ct)
+    {
+        if (!metadata.Table.IsActive)
+        {
+            return false;
+        }
+
+        var visibility = httpContext.RequestServices?.GetService<ICatalogVisibilityService>();
+        if (visibility is not null && VirtualSystemTables.Get(tableId) is null)
+        {
+            var caller = new CatalogCaller(httpContext.User, tenant, CatalogChannel.Rest);
+            if (await visibility.FindVisibleAsync(caller, tableId, ct).ConfigureAwait(false) is not null)
+            {
+                return true;
+            }
+
+            if (metadata.Table.Visibility != DatasetVisibility.Hidden)
+            {
+                return false;
+            }
+        }
+        else if (metadata.Table.Visibility != DatasetVisibility.Hidden)
+        {
+            return true;
+        }
+
+        if (EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User))
+        {
+            return true;
+        }
+
+        var ownership = httpContext.RequestServices?.GetService<IDataOwnershipRepository>();
+        if (ownership is not null)
+        {
+            try
+            {
+                return await ownership.IsAuthorizedApproverForTableAsync(tableId, userSid, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 }
