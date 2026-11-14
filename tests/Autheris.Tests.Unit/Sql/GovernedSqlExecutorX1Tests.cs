@@ -113,7 +113,7 @@ public sealed class GovernedSqlExecutorX1Tests
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
-            consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+            consentRepository: consents,
             connectionFactory: connectionFactory,
             sqlEngine: withWritePermit ? new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()) : new TrinoSqlEngine.FastSqlEngine());
         return service;
@@ -165,7 +165,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var log = new CapturingLogger<GovernedSqlExecutor>();
         var opts = Options.Create(gateway);
         var executor = new GovernedSqlExecutor(
-            new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine())), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(auditRepo), guard ?? PassThroughExecutionGuard.Instance, factory, environment: environment, logger: log, sessionInitializer: session, secretProvider: secrets);
+            new GovernedSqlRewriter(opts, sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine())), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(auditRepo), guard ?? PassThroughExecutionGuard.Instance, factory, environment: environment, logger: log, sessionInitializer: session, secretProvider: secrets);
         return new Harness { Executor = executor, Factory = factory, Connection = connection, Audit = audit, Log = log };
     }
 
@@ -401,7 +401,7 @@ public sealed class GovernedSqlExecutorX1Tests
                 .Returns(Task.FromResult<DbTransaction?>(null));
             var opts = Options.Create(gateway);
             var executor = new GovernedSqlExecutor(
-                new GovernedSqlRewriter(opts, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine())), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
+                new GovernedSqlRewriter(opts, sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine())), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
                 factory, null, NullLogger.Instance, null, session);
             await Should.ThrowAsync<TimeoutException>(() => executor.ExecuteRewrittenAsync(
                 new GovernedSqlQueryRequest(Sql), Writer(), new TenantId(Tenant), Rewrite(compiled), new DmlAuditContext(),
@@ -654,7 +654,7 @@ public sealed class GovernedSqlExecutorX1Tests
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = webSqlEnabled, DefaultDataSourceName = DataSource } }), auditLog, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
-            environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+            environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consents,
             sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
     }
 

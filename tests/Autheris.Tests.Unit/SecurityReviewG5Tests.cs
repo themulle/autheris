@@ -325,7 +325,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
 
     private static readonly TableIdentifier OrdersId = new("tenant-1", "raw", "orders");
 
-    private static (IcebergRestCatalogFederationService svc, IPolicyEnforcementService policy) IcebergService(bool tableActive, bool abacAllowed)
+    private static IcebergRestCatalogFederationService IcebergService(bool tableActive)
     {
         var meta = new TableMetadata
         {
@@ -347,23 +347,16 @@ public sealed class SecurityReviewG5Tests : IDisposable
                 ValidTo = DateTimeOffset.UtcNow.AddDays(1),
                 ColumnRules = Array.Empty<ConsentColumnRule>()
             }]));
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(abacAllowed
-                ? TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
-                : TableAccessDecision.Denied(OrdersId, "abac")));
         var options = Options.Create(new GatewayOptions());
         var adp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
-            policy,
             new Autheris.Application.Services.ConsentResolutionService(),
             consentRepo);
         var svc = new IcebergRestCatalogFederationService(
             Substitute.For<IIcebergMetadataReader>(), metaRepo, options,
             NullLogger<IcebergRestCatalogFederationService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance,
             adp, consentRepo: consentRepo);
-        return (svc, policy);
+        return svc;
     }
 
     private static ClaimsPrincipal Analyst() => new(new ClaimsIdentity(
@@ -372,24 +365,15 @@ public sealed class SecurityReviewG5Tests : IDisposable
     [Fact]
     public async Task Iceberg_InactiveTable_IsNotServed()
     {
-        var (svc, _) = IcebergService(tableActive: false, abacAllowed: true);
+        var svc = IcebergService(tableActive: false);
 
         await Should.ThrowAsync<System.Security.SecurityException>(() => svc.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
     }
 
     [Fact]
-    public async Task Iceberg_CasbinDeny_BlocksRawAccess()
+    public async Task Iceberg_ServesFullyConsentedTable()
     {
-        var (svc, policy) = IcebergService(tableActive: true, abacAllowed: false);
-
-        await Should.ThrowAsync<SecurityException>(() => svc.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
-        await policy.Received().EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Iceberg_CasbinAllow_StillServesFullyConsentedTable()
-    {
-        var (svc, _) = IcebergService(tableActive: true, abacAllowed: true);
+        var svc = IcebergService(tableActive: true);
 
         var response = await svc.LoadTableAsync("tenant-1", "raw", "orders", Analyst());
 

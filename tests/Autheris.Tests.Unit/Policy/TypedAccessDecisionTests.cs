@@ -18,7 +18,6 @@ public sealed class TypedAccessDecisionTests
 {
     private static readonly TableIdentifier Orders = new("d", "main", "orders");
     private static readonly PolicyPredicateRenderer Renderer = new();
-    private static readonly TableMetadata Meta = new() { Identifier = Orders };
 
     private static IRowPolicy Policy(string column, string prefix, string value, TargetSqlDialect dialect = TargetSqlDialect.PostgreSql)
     {
@@ -33,39 +32,6 @@ public sealed class TypedAccessDecisionTests
     {
         var decision = TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         return policy is null ? decision : decision.WithAdditionalRowPolicy(policy);
-    }
-
-    [Fact]
-    public void Restrict_TypedAnd_ConflictDenies()
-    {
-        var consent = Allowed(Policy("region", "p_", "EU"));
-        var abac = Allowed(Policy("region", "p_", "US"));
-
-        var result = TableAccessPolicy.Restrict(consent, abac, Meta);
-
-        result.IsAllowed.ShouldBeFalse();
-    }
-
-    [Fact]
-    public void Restrict_TypedAnd_MergesBothPoliciesIntoOne()
-    {
-        var consent = Allowed(Policy("region", "c_", "EU"));
-        var abac = Allowed(Policy("status", "a_", "OPEN"));
-
-        var result = TableAccessPolicy.Restrict(consent, abac, Meta);
-
-        result.IsAllowed.ShouldBeTrue();
-        result.RowPolicy.ShouldNotBeNull();
-        var text = result.RowPolicy!.Project();
-        text.Sql.ShouldContain("region");
-        text.Sql.ShouldContain("status");
-        text.Sql.ShouldNotContain("EU");
-        text.Sql.ShouldNotContain("OPEN");
-        text.Parameters.Values.ShouldBe(["EU", "OPEN"], ignoreOrder: true);
-        result.CombinedRowFilterSql.ShouldBe(text.Sql);
-        result.RowFilterParameters.ShouldNotBeNull();
-        result.RowFilterParameters!.Values.ShouldBe(["EU", "OPEN"], ignoreOrder: true);
-        result.RequireTypedRowPolicy().IsAllowed.ShouldBeTrue();
     }
 
     [Fact]

@@ -95,7 +95,6 @@ public sealed class ProcedureTransportGateTests
             return new GovernedProcedureExecutionService(
                 registry, Invoker, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), audit, tables, consents, resolution,
                 Substitute.For<IColumnMaskingProvider>(),
-                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
                 rowScope: RowScope,
                 concurrencyGate: PermissiveGate(),
                 transportGate: gate);

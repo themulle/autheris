@@ -77,7 +77,7 @@ public sealed class GovernedSqlRejectionAuditTests
             auditLogRepository: auditRepo,
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
-            consentRepository: consents, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+            consentRepository: consents,
             auditWriter: writer);
         return (service, audit);
     }

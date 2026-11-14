@@ -165,7 +165,6 @@ public sealed class WebSqlPagingTests
             typedPolicies: GovernedTestSupport.TypedPolicies(Options.Create(options)),
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consents,
-            policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             auditDigester: digester,
             auditWriter: auditWriter,
             environment: env,

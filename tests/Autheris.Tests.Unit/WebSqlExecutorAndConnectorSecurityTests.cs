@@ -163,16 +163,6 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     private static TableAccessDecision UnconstrainedAllow(TableIdentifier table, string? rowFilter = null) =>
         TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilter, hasUnconstrainedColumnAllow: true);
 
-    private static IPolicyEnforcementService CreateCasbin(TableAccessDecision? fixedDecision = null)
-    {
-        var casbin = Substitute.For<IPolicyEnforcementService>();
-        casbin.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        casbin.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(ci => new ValueTask<TableAccessDecision>(
-                fixedDecision ?? UnconstrainedAllow(ci.Arg<SecurityEvaluationContext>().TargetTable)));
-        return casbin;
-    }
-
     private static IKeyVaultSecretProvider CreateSecretProvider()
     {
         var provider = Substitute.For<IKeyVaultSecretProvider>();
@@ -210,7 +200,6 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         ITableMetadataRepository? repository = null,
         IConsentResolutionService? consentResolution = null,
         IConsentRepository? consentRepository = null,
-        IPolicyEnforcementService? casbin = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IAuditLogRepository? auditLog = null,
         bool withConsentServices = true,
@@ -226,7 +215,6 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         var gatewayOptions = Options.Create(options ?? CreateOptions());
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             gatewayOptions, executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: casbin ?? global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
             consentResolution: withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null,
             tableRepository: repo,
             policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secretProvider),
@@ -302,10 +290,10 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     }
 
     [Fact]
-    public async Task C03_ConsentDeny_IsEnforced_EvenWhenCasbinAllows()
+    public async Task C03_ConsentDeny_IsEnforced()
     {
         var consent = CreateConsentResolution(t => TableAccessDecision.Denied(t, "no consent"));
-        var service = CreateService(consentResolution: consent, casbin: CreateCasbin());
+        var service = CreateService(consentResolution: consent);
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
             service.RewriteSqlAsync("SELECT id FROM employees", CreateUser(), new TenantId(Tenant)));
@@ -351,9 +339,9 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     }
 
     [Fact]
-    public async Task C03_CasbinUnconstrained_DoesNotUnmaskSensitiveCatalogColumn()
+    public async Task C03_UnconstrainedConsent_DoesNotUnmaskSensitiveCatalogColumn()
     {
-        var service = CreateService(casbin: CreateCasbin());
+        var service = CreateService();
 
         var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
 
@@ -371,26 +359,11 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
             ["region"] = ColumnAccessLevel.Clear,
             ["tenant_id"] = ColumnAccessLevel.Clear
         }));
-        var service = CreateService(consentResolution: consent, casbin: CreateCasbin());
+        var service = CreateService(consentResolution: consent);
 
         var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
 
         compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task C03_CasbinColumnDeny_RestrictsConsentClear()
-    {
-        var table = new TableIdentifier("default", "public", "employees");
-        var casbinDecision = TableAccessDecision.Allowed(
-            table,
-            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["name"] = ColumnAccessLevel.Deny },
-            hasUnconstrainedColumnAllow: true);
-        var service = CreateService(casbin: CreateCasbin(casbinDecision));
-
-        var secured = await service.RewriteSqlAsync("SELECT id, name FROM employees", CreateUser(), new TenantId(Tenant));
-
-        secured.ShouldContain("NULL AS");
     }
 
     [Fact]
@@ -809,7 +782,6 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
 
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
             consentRepository: CreateConsentRepository(),
             tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
@@ -877,7 +849,6 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
 
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
-            policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
             consentRepository: CreateConsentRepository(),
             tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),

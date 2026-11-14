@@ -17,8 +17,8 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Plugins.Auth;
 
 /// <summary>
-/// One caller and one catalog table. <paramref name="Claims"/> feed the Casbin attributes and the purpose;
-/// <paramref name="ClientIp"/> overrides the request IP resolver (unknown IPs are <see cref="IPAddress.None"/>).
+/// One caller and one catalog table. <paramref name="Claims"/> feed the contract and restricted-scope checks;
+/// <paramref name="ClientIp"/> and <paramref name="ExtraAttributes"/> are handed to the authorization plugin hooks.
 /// <paramref name="Principal"/>(F-1) is used only to resolve caller attributes: it is never logged, hashed or put into a cache key.
 /// </summary>
 public sealed record TableAccessQuery(
@@ -69,8 +69,7 @@ public sealed record TableAccessQuery(
 /// the same order:
 /// <list type="number">
 /// <item>consents: bypass switch, else decision cache (epoch compare-and-set) or the consent repository, tenant-filtered;</item>
-/// <item>Casbin ABAC only when consent allowed and the switch is off; a deny wins, its restriction is merged by
-/// <see cref="Restrict"/>.</item>
+/// <item>virtual filters, access profiles and the authorization plugin hooks, which can only restrict the consent decision.</item>
 /// </list>
 /// Callers keep what is specific to them (catalog lookup, tenant selection, audit, SQL validation of the merged filter).
 /// </summary>
@@ -79,8 +78,6 @@ public sealed partial class TableAccessPolicy
     private readonly IConsentRepository _consentRepository;
     private readonly IConsentResolutionService _resolutionService;
     private readonly IConsentCacheService _cacheService;
-    private readonly IPolicyEnforcementService _policyEnforcementService;
-    private readonly IClientIpResolver? _clientIpResolver;
     private readonly GatewayOptions _options;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly RowPolicyFactory? _rowPolicyFactory;
@@ -102,8 +99,6 @@ public sealed partial class TableAccessPolicy
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
         IConsentCacheService cacheService,
-        IPolicyEnforcementService policyEnforcementService,
-        IClientIpResolver? clientIpResolver,
         GatewayOptions options,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters,
         ISchemaContractManager? contractManager = null,
@@ -127,9 +122,6 @@ public sealed partial class TableAccessPolicy
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
         _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
-        ArgumentNullException.ThrowIfNull(policyEnforcementService);
-        _policyEnforcementService = policyEnforcementService;
-        _clientIpResolver = clientIpResolver;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _contractManager = contractManager;
         _accessProfileRepository = accessProfileRepository;
@@ -156,7 +148,7 @@ public sealed partial class TableAccessPolicy
     }
 
     /// <summary>
-    /// WP-X0l: the typed masks come from the final column levels (after the Casbin restriction), with the catalog rules of the same
+    /// The typed masks come from the final column levels, with the catalog rules of the same
     /// table. A mask that cannot be expressed as a typed spec leaves the decision string-only, which the compiler path denies
     /// (<see cref="TableAccessDecision.RequireTypedColumnMasks"/>); the string consumers are not affected.
     /// </summary>
@@ -347,17 +339,6 @@ public sealed partial class TableAccessPolicy
         if (!decision.IsAllowed)
         {
             return decision;
-        }
-
-        if (!consentBypassed && _policyEnforcementService.HasPolicies(query.Tenant))
-        {
-            var policyDecision = await _policyEnforcementService.EvaluatePolicyAsync(BuildEvaluationContext(query), ct).ConfigureAwait(false);
-            if (!policyDecision.IsAllowed)
-            {
-                return TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{query.UserSid.Value}' in tenant '{query.Tenant.Value}'.");
-            }
-
-            decision = Restrict(decision, policyDecision, query.Metadata);
         }
 
         // Extension Point 2: Custom Authorization Hooks

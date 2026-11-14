@@ -68,7 +68,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
 
         _rewriter = new GovernedSqlRewriter(
             options,
-            rewrite.PolicyEnforcement,
             rewrite.ConsentResolution,
             rewrite.TableRepository,
             rewrite.ClientIpResolver,

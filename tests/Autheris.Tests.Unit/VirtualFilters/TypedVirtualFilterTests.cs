@@ -348,8 +348,6 @@ public sealed class TypedVirtualFilterTests
             Substitute.For<IConsentRepository>(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>(),
-            Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IClientIpResolver>(),
             new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = true } },
             resolver,
             rowPolicyFactory: factory);

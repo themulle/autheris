@@ -49,7 +49,6 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly ITotpSecretStore? _totpSecretStore;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly IPolicyEpochRepository? _policyEpochRepo;
-    private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IDataOwnershipRepository? _dataOwnershipRepo;
     private readonly ILogger<AccessPlanningService> _logger;
     private readonly IGatewayEventBus? _eventBus;
@@ -137,7 +136,6 @@ public class AccessPlanningService : IAccessPlanningService
         ITotpSecretStore? totpSecretStore = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IPolicyEpochRepository? policyEpochRepository = null,
-        IPolicyEnforcementService? policyEnforcementService = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IOptions<GatewayOptions>? options = null,
         ILogger<AccessPlanningService>? logger = null,
@@ -159,7 +157,6 @@ public class AccessPlanningService : IAccessPlanningService
         _totpSecretStore = totpSecretStore;
         _secretProvider = secretProvider;
         _policyEpochRepo = policyEpochRepository;
-        _policyEnforcement = policyEnforcementService;
         _dataOwnershipRepo = dataOwnershipRepository;
         _logger = logger ?? NullLogger<AccessPlanningService>.Instance;
         _eventBus = eventBus;
@@ -367,11 +364,6 @@ public class AccessPlanningService : IAccessPlanningService
         if (_policyEpochRepo != null)
         {
             await _policyEpochRepo.IncrementTableEpochAsync(tableId, ct).ConfigureAwait(false);
-        }
-
-        if (_policyEnforcement != null)
-        {
-            await _policyEnforcement.ReloadPoliciesAsync(new TenantId(effectiveTenantId), ct).ConfigureAwait(false);
         }
 
         if (_eventBus != null)

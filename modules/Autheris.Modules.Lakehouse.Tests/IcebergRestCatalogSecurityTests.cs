@@ -60,13 +60,11 @@ public sealed class IcebergRestCatalogSecurityTests
         IAuditLogRepository? auditRepository = null,
         IConsentResolutionService? consentService = null,
         IConsentRepository? consentRepo = null,
-        IPolicyEnforcementService? policyEnforcementService = null,
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
     {
         var opt = options ?? _options;
         var adp = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             opt,
-            policyEnforcementService ?? Substitute.For<IPolicyEnforcementService>(),
             consentService,
             consentRepo);
 
@@ -390,91 +388,5 @@ public sealed class IcebergRestCatalogSecurityTests
                 e.TargetTable == "tenant-1.raw.orders" &&
                 e.TenantId.Value == "tenant-1"),
             Arg.Any<CancellationToken>());
-    }
-
-    // Casbin subject attributes: same fail-closed claim handling as the query path (TableAccessPolicy.BuildClaimAttributes).
-    private async Task<SecurityEvaluationContext> CaptureCasbinContextAsync(params Claim[] extraClaims)
-    {
-        _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(Orders("id", "name")));
-        var consentRepo = Substitute.For<IConsentRepository>();
-        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([AllowFor("analyst@corp.com")]));
-
-        SecurityEvaluationContext? captured = null;
-        var policy = Substitute.For<IPolicyEnforcementService>();
-        policy.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                captured = call.Arg<SecurityEvaluationContext>();
-                return new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
-            });
-
-        var service = CreateService(
-            consentService: new ConsentResolutionService(),
-            consentRepo: consentRepo,
-            policyEnforcementService: policy);
-
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(
-            new[]
-            {
-                new Claim(ClaimTypes.Name, "analyst@corp.com"),
-                new Claim(ClaimTypes.PrimarySid, "analyst@corp.com")
-            }.Concat(extraClaims),
-            "Bearer"));
-
-        await service.LoadTableAsync("tenant-1", "raw", "orders", principal);
-
-        captured.ShouldNotBeNull();
-        return captured;
-    }
-
-    [Fact]
-    public async Task LoadTable_CasbinContext_MultiValuedClaim_BecomesAmbiguousAttribute_NotLastValue()
-    {
-        var context = await CaptureCasbinContextAsync(new Claim("department", "hr"), new Claim("department", "finance"));
-
-        context.Attributes.ShouldNotBeNull();
-        context.Attributes["department"].ShouldBeOfType<Autheris.Application.Governance.CasbinEnforcementService.AmbiguousAttributeValue>();
-    }
-
-    [Fact]
-    public async Task LoadTable_CasbinContext_RepeatedIdenticalClaim_StaysSingleValued()
-    {
-        var context = await CaptureCasbinContextAsync(new Claim("department", "hr"), new Claim("department", "hr"));
-
-        context.Attributes.ShouldNotBeNull();
-        context.Attributes["department"].ShouldBe("hr");
-    }
-
-    [Fact]
-    public async Task LoadTable_CasbinContext_EmptyClaimValue_IsTreatedAsMissing()
-    {
-        var context = await CaptureCasbinContextAsync(new Claim("department", ""), new Claim("region", "  "));
-
-        context.Attributes.ShouldNotBeNull();
-        context.Attributes.ContainsKey("department").ShouldBeFalse();
-        context.Attributes.ContainsKey("region").ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task LoadTable_CasbinContext_ActionClaimsAreIgnored()
-    {
-        var context = await CaptureCasbinContextAsync(new Claim("action", "write"), new Claim("gql.action", "delete"));
-
-        context.Attributes.ShouldNotBeNull();
-        context.Attributes.TryGetValue("action", out var action).ShouldBeFalse(action?.ToString());
-        context.Attributes.ContainsKey("gql.action").ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task LoadTable_CasbinContext_PurposeClaims_FollowQueryPathResolution()
-    {
-        (await CaptureCasbinContextAsync(new Claim("purpose", "audit"))).PurposeId.ShouldBe("audit");
-        (await CaptureCasbinContextAsync(new Claim("purpose_id", "billing"))).PurposeId.ShouldBe("billing");
-        (await CaptureCasbinContextAsync(new Claim("purpose", ""), new Claim("purpose_id", "billing"))).PurposeId.ShouldBe("billing");
-        (await CaptureCasbinContextAsync(new Claim("purpose", "audit"), new Claim("purpose", "marketing"))).PurposeId.ShouldBeNull();
-        (await CaptureCasbinContextAsync(new Claim("purpose", "audit"), new Claim("purpose", "audit"))).PurposeId.ShouldBe("audit");
     }
 }

@@ -71,8 +71,6 @@ public sealed class PdpGroupsUnresolvedTests
             Autheris.Tests.Unit.Security.NullFake.Create<IConsentRepository>(),
             Autheris.Tests.Unit.Security.NullFake.Create<IConsentResolutionService>(),
             Autheris.Tests.Unit.Security.NullFake.Create<IConsentCacheService>(),
-            Autheris.Tests.Unit.Security.NullFake.Create<IPolicyEnforcementService>(),
-            null,
             new GatewayOptions(),
             new Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver());
         var table = new TableIdentifier("d", "main", "orders");

@@ -135,8 +135,6 @@ public sealed class NarrowingTests
             consentRepo,
             new ConsentResolutionService(),
             NullConsentCacheService.Instance,
-            NullPolicyEnforcementService.Instance,
-            clientIpResolver: null,
             opts,
             NullMandatoryRowFilterResolver.Instance,
             authPluginHost: host);
@@ -206,8 +204,6 @@ public sealed class PluginEnrichmentTests
             consentRepo,
             new ConsentResolutionService(),
             NullConsentCacheService.Instance,
-            NullPolicyEnforcementService.Instance,
-            clientIpResolver: null,
             opts,
             NullMandatoryRowFilterResolver.Instance);
 

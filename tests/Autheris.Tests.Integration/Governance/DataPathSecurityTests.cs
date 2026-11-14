@@ -57,7 +57,7 @@ public class DataPathSecurityTests : IDisposable
             _cacheService,
             _maskingProvider,
             gatewayOptions,
-            dataSourceExecutors: [sqlExecutor], policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+            dataSourceExecutors: [sqlExecutor],
             transportGate: AllowTransportGate.Instance);
         _query = new Query();
         _visibility = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(

@@ -81,9 +81,7 @@ public sealed class CallerAttributeSecurityTests : IDisposable
         var repo = Substitute.For<IConsentRepository>();
         repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([consent]));
-        var policy = new TableAccessPolicy(repo, new ConsentResolutionService(), Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
+        var policy = new TableAccessPolicy(repo, new ConsentResolutionService(), Autheris.Application.Policy.Services.NullConsentCacheService.Instance, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: new RowPolicyFactory(new PolicyPredicateRenderer()), callerAttributes: resolver);
         var principal = withPrincipal ? CallerAttributeTestSupport.Principal(CallerAttributeTestSupport.Bearer, [("oid", Oid)]) : null;
         return await policy.DecideAsync(new TableAccessQuery(new Sid(Oid), Tenant, new HashSet<Sid> { AnalystGroup }, new HashSet<string>(), Meta(), Principal: principal), CancellationToken.None);

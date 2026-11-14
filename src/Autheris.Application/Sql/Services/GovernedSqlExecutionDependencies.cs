@@ -12,7 +12,6 @@ using TrinoSqlEngine;
 
 /// <summary>Optional collaborators of the governed rewrite pipeline (forwarded to <c>GovernedSqlRewriter</c>).</summary>
 public sealed record GovernedSqlRewriteDependencies(
-    IPolicyEnforcementService? PolicyEnforcement = null,
     IConsentResolutionService? ConsentResolution = null,
     ITableMetadataRepository? TableRepository = null,
     IClientIpResolver? ClientIpResolver = null,

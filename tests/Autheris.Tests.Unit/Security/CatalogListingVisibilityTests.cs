@@ -83,7 +83,6 @@ public sealed class CatalogListingVisibilityTests
         var metaRepo = Tables();
         var adp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
-            Substitute.For<IPolicyEnforcementService>(),
             new ConsentResolutionService(),
             consents);
         return new(

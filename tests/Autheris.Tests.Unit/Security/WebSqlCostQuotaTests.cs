@@ -90,7 +90,7 @@ public sealed class WebSqlCostQuotaTests
         var connFactory = Substitute.For<ISqlConnectionFactory>();
         var auditWriter = Substitute.For<IAuditWriter>();
         var execGuard = Substitute.For<IProviderExecutionGuard>();
-        var rewriter = new GovernedSqlRewriter(Options.Create(options), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+        var rewriter = new GovernedSqlRewriter(Options.Create(options));
 
         var executor = new GovernedSqlExecutor(
             rewriter,

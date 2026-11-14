@@ -45,7 +45,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IProcedureRegistry _registry; private readonly IProcedureInvoker _invoker;
     private readonly IOptions<GatewayOptions> _options; private readonly ITableMetadataRepository? _tableRepository;
     private readonly IConsentRepository? _consentRepository; private readonly IConsentResolutionService? _consentResolution;
-    private readonly IColumnMaskingProvider? _masking; private readonly IPolicyEnforcementService? _policyEnforcement;
+    private readonly IColumnMaskingProvider? _masking;
     private readonly IAuditLogRepository _audit; private readonly Autheris.Application.Audit.IAuditWriter _auditWriter;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IProcedureRowScopeResolver? _rowScope;
@@ -70,7 +70,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IConsentRepository? consentRepository = null,
         IConsentResolutionService? consentResolution = null,
         IColumnMaskingProvider? masking = null,
-        IPolicyEnforcementService? policyEnforcement = null,
         IClientIpResolver? clientIpResolver = null,
         ILogger<GovernedProcedureExecutionService>? logger = null,
         IProcedureRowScopeResolver? rowScope = null,
@@ -88,7 +87,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     {
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
-            policyEnforcement,
             consentResolution,
             consentRepository,
             consentCache,
@@ -110,7 +108,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _auditWriter = auditWriter ?? new Autheris.Application.Audit.AuditWriter(_audit, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Audit.AuditWriter>.Instance);
         _tableRepository = tableRepository; _consentRepository = consentRepository;
         _consentResolution = consentResolution; _masking = masking;
-        _policyEnforcement = policyEnforcement; _clientIpResolver = clientIpResolver;
+        _clientIpResolver = clientIpResolver;
         _logger = logger; _rowScope = rowScope;
         _consentCache = consentCache;
         _accessProfileRepository = accessProfileRepository;
@@ -653,9 +651,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return null;
         }
 
-        // Architecture 1: the shared access decision (consents with the decision cache, Casbin as
-        // an additional restriction). Row filters (consent or Casbin) cannot be pushed into a procedure: they deny the
-        // call unless the result table's filter is enforced by the row scope after the call.
+        // Architecture 1: the shared access decision of the decision point. Row filters cannot be pushed into a procedure:
+        // they deny the call unless the result table's filter is enforced by the row scope after the call.
         var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: ResolveClientIp(user));
         var req = new Autheris.Application.Policy.Pdp.AccessRequest(
             secContext,
@@ -669,16 +666,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return null;
         }
 
-        // computed BEFORE the ABAC rewrite below, which makes a sensitivity mask indistinguishable from an
-        // explicit one. null (not computable) lifts nothing.
+        // null (not computable) lifts nothing.
         var sensitivityOnlyMasked = ComputeSensitivityOnlyMask(decision, meta);
-
-        if (!consentBypassed && _policyEnforcement != null && _policyEnforcement.HasPolicies(tenantId))
-        {
-            // With ABAC active every catalog column carries an explicit level; columns outside the catalog are denied.
-            var explicitLevels = meta.Columns.ToDictionary(c => c.ColumnName, c => decision.GetEffectiveColumnAccess(c.ColumnName, meta), StringComparer.OrdinalIgnoreCase);
-            decision = decision with { ColumnAccess = explicitLevels, HasUnconstrainedColumnAllow = false };
-        }
 
         return (decision, meta, sensitivityOnlyMasked);
     }

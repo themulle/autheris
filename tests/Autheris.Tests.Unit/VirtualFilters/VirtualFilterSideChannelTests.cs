@@ -98,7 +98,6 @@ public sealed class VirtualFilterSideChannelTests
         var options = Options.Create(new GatewayOptions());
         var adp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
-            Substitute.For<IPolicyEnforcementService>(),
             AllowAll(),
             consents,
             mandatoryFilters: new FixedOutcome(Outcome(outcome)));

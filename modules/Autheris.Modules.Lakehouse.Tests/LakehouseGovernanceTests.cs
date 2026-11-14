@@ -627,19 +627,6 @@ private sealed class StubDeltaMetadataReader(DeltaSnapshot snapshot) : IDeltaMet
             => Task.CompletedTask;
     }
 
-    private sealed class AllowingPolicyEnforcementService : IPolicyEnforcementService
-    {
-        public ValueTask<TableAccessDecision> EvaluatePolicyAsync(SecurityEvaluationContext context, CancellationToken ct = default)
-        {
-            var cols = context.RequestedColumns.ToDictionary(c => c, _ => ColumnAccessLevel.Clear, StringComparer.OrdinalIgnoreCase);
-            return ValueTask.FromResult(TableAccessDecision.Allowed(context.TargetTable, cols, hasUnconstrainedColumnAllow: true));
-        }
-
-        public bool HasPolicies(TenantId tenant) => false;
-
-        public Task ReloadPoliciesAsync(TenantId tenant, CancellationToken ct = default) => Task.CompletedTask;
-    }
-
     private sealed class AllowingTransportGate : IDataSourceTransportGate
     {
         public DataSourceTransportFlags Ingress => DataSourceTransportFlags.GraphQL;
@@ -740,7 +727,6 @@ private sealed class StubDeltaMetadataReader(DeltaSnapshot snapshot) : IDeltaMet
             maskingProvider: new RedactingMaskingProvider(),
             options: Options.Create(new GatewayOptions()),
             dataSourceExecutors: [deltaExecutor],
-            policyEnforcementService: new AllowingPolicyEnforcementService(),
             transportGate: new AllowingTransportGate());
 
     private static DeltaSnapshot CreateDeltaSnapshot(

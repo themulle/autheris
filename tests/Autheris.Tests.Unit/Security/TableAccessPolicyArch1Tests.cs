@@ -96,7 +96,7 @@ public sealed class TableAccessPolicyArch1Tests
     public async Task CrossDomainResolver_UsesTheConsentDecisionCache()
     {
         var resolver = new DefaultCrossDomainAccessResolver(
-            NoConsents(), ResolvesTo(allowed: false), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, consentCache: CacheWith(AllowAll()));
+            NoConsents(), ResolvesTo(allowed: false), consentCache: CacheWith(AllowAll()));
 
         var decision = await resolver.ResolveAccessAsync(User(), Table, Meta(), new TenantId(Tenant));
 
@@ -157,7 +157,7 @@ public sealed class TableAccessPolicyArch1Tests
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: NoConsents(),
-            consentCache: CacheWith(AllowAll()), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            consentCache: CacheWith(AllowAll()));
 
         var sql = await service.RewriteSqlAsync("SELECT id FROM orders", User(), new TenantId(Tenant));
 
@@ -168,75 +168,15 @@ public sealed class TableAccessPolicyArch1Tests
 
     private static TableAccessPolicy Policy(
         IConsentResolutionService resolution,
-        IPolicyEnforcementService? casbin = null,
         GatewayOptions? options = null,
         IConsentCacheService? cache = null) =>
         new(NoConsents(), resolution,
             cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            casbin ?? global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            clientIpResolver: null,
             options ?? new GatewayOptions(),
             Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
 
     private static TableAccessQuery Query(params Claim[] claims) =>
         TableAccessQuery.ForPrincipal(User(claims), new Sid("S-1-5-21-USER"), new TenantId(Tenant), Meta());
-
-    [Fact]
-    public async Task Policy_CasbinReceivesPurposeAttributesAndDialect()
-    {
-        SecurityEvaluationContext? seen = null;
-        var casbin = Substitute.For<IPolicyEnforcementService>();
-        casbin.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        casbin.EvaluatePolicyAsync(Arg.Do<SecurityEvaluationContext>(c => seen = c), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(AllowAll()));
-
-        await Policy(ResolvesTo(true), casbin).DecideAsync(Query(new Claim("purpose_id", "audit"), new Claim("department", "fin")), default);
-
-        seen.ShouldNotBeNull();
-        seen.PurposeId.ShouldBe("audit");
-        seen.Department.ShouldBe("fin");
-        seen.TargetDialect.ShouldBe(DatabaseDialect.PostgreSql);
-        seen.ClientIp.ShouldBe(IPAddress.None);
-    }
-
-    [Fact]
-    public async Task Policy_CasbinRestriction_LowersColumnsAndAndsFilters()
-    {
-        var casbin = Substitute.For<IPolicyEnforcementService>();
-        casbin.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        casbin.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(
-                Table, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Mask }, "[id] > 0")));
-
-        var consent = Substitute.For<IConsentResolutionService>();
-        consent.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(TableAccessDecision.Allowed(Table, new Dictionary<string, ColumnAccessLevel>(), "[tenant_id] = 'a'", hasUnconstrainedColumnAllow: true));
-
-        var decision = await Policy(consent, casbin).DecideAsync(Query(), default);
-
-        decision.GetColumnAccess("id").ShouldBe(ColumnAccessLevel.Mask);
-        decision.GetColumnAccess("tenant_id").ShouldBe(ColumnAccessLevel.Deny);
-        decision.CombinedRowFilterSql.ShouldBe("([tenant_id] = 'a') AND ([id] > 0)");
-    }
-
-    [Fact]
-    public async Task Policy_ConsentDenied_DoesNotEvaluateCasbin()
-    {
-        var casbin = Substitute.For<IPolicyEnforcementService>();
-        casbin.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-
-        (await Policy(ResolvesTo(false), casbin).DecideAsync(Query(), default)).IsAllowed.ShouldBeFalse();
-        await casbin.DidNotReceive().EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public void Restrict_ConflictingRowFilterParameters_Denies()
-    {
-        var consent = TableAccessDecision.Allowed(Table, new Dictionary<string, ColumnAccessLevel>(), "[a] = @p", true, new Dictionary<string, object?> { ["p"] = 1 });
-        var casbin = TableAccessDecision.Allowed(Table, new Dictionary<string, ColumnAccessLevel>(), "[b] = @p", true, new Dictionary<string, object?> { ["p"] = 2 });
-
-        TableAccessPolicy.Restrict(consent, casbin, Meta()).IsAllowed.ShouldBeFalse();
-    }
 
     [Fact]
     public async Task Policy_InactiveTable_IsDeniedDirectly()

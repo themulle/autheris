@@ -180,11 +180,10 @@ public sealed class RestDatasetPolicySpliceTests
 
     private sealed class Recorded
     {
-        public List<SecurityEvaluationContext> Contexts { get; } = [];
         public List<(Sid User, IReadOnlySet<Sid> Groups, IReadOnlySet<string> Roles, TableIdentifier Table, IReadOnlyList<Consent> Consents)> Resolutions { get; } = [];
     }
 
-    private static (IConsentRepository Repo, IConsentResolutionService Resolution, IPolicyEnforcementService Casbin, Recorded Rec) Recorders(params Consent[] consents)
+    private static (IConsentRepository Repo, IConsentResolutionService Resolution, Recorded Rec) Recorders(params Consent[] consents)
     {
         var rec = new Recorded();
         var repo = Substitute.For<IConsentRepository>();
@@ -200,15 +199,7 @@ public sealed class RestDatasetPolicySpliceTests
                 return real.ResolveAccess(ci.ArgAt<Sid>(0), ci.ArgAt<IReadOnlySet<Sid>>(1), ci.ArgAt<IReadOnlySet<string>>(2), ci.ArgAt<TableIdentifier>(3), ci.ArgAt<IReadOnlyList<Consent>>(4), ci.ArgAt<DatabaseDialect>(5), ci.ArgAt<IReadOnlySet<Sid>?>(6));
             });
 
-        var casbin = Substitute.For<IPolicyEnforcementService>();
-        casbin.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        casbin.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(ci =>
-            {
-                rec.Contexts.Add(ci.Arg<SecurityEvaluationContext>());
-                return new ValueTask<TableAccessDecision>(TableAccessDecision.Allowed(Customers, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
-            });
-        return (repo, resolution, casbin, rec);
+        return (repo, resolution, rec);
     }
 
     private static GatewayOptions Options_() => new()
@@ -220,7 +211,7 @@ public sealed class RestDatasetPolicySpliceTests
     public async Task RestDataset_DecisionInputsEqualRewriterInputs()
     {
         var consents = new[] { AllowConsent(purpose: "marketing", RegionEu()) };
-        var (repo, resolution, casbin, rec) = Recorders(consents);
+        var (repo, resolution, rec) = Recorders(consents);
         var options = Options_();
         var user = Alice();
         var meta = CustomersMeta();
@@ -228,13 +219,11 @@ public sealed class RestDatasetPolicySpliceTests
         // REST side: the unified PDP as GovernedDataQueryService calls it.
         var pdp = new UnifiedPolicyDecisionPoint(
             repo, resolution, Substitute.For<IConsentCacheService>(), Options.Create(options),
-            NullLogger<UnifiedPolicyDecisionPoint>.Instance, casbin);
+            NullLogger<UnifiedPolicyDecisionPoint>.Instance);
         var restDecision = await pdp.EvaluateAccessAsync(
             Customers, meta, SecurityPrincipalContext.FromPrincipal(user, new TenantId(TenantValue)), ["id", "name"], CancellationToken.None);
         var restResolution = rec.Resolutions.Single();
-        var restContext = rec.Contexts.Single();
         rec.Resolutions.Clear();
-        rec.Contexts.Clear();
 
         // WebSQL side: the rewriter that applies the policy to the SQL the REST service builds.
         var tableRepo = Substitute.For<ITableMetadataRepository>();
@@ -242,12 +231,11 @@ public sealed class RestDatasetPolicySpliceTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
-            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, policyEnforcement: casbin, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
         await service.RewriteSqlAsync("SELECT \"id\", \"name\" FROM default.dbo.customers LIMIT 11", user, new TenantId(TenantValue));
         var rewriterResolution = rec.Resolutions.Single();
-        var rewriterContext = rec.Contexts.Single();
 
         restResolution.User.ShouldBe(rewriterResolution.User);
         restResolution.Table.ShouldBe(rewriterResolution.Table);
@@ -255,14 +243,6 @@ public sealed class RestDatasetPolicySpliceTests
         restResolution.Roles.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ShouldBe(rewriterResolution.Roles.OrderBy(r => r, StringComparer.OrdinalIgnoreCase));
         restResolution.Consents.ShouldBe(rewriterResolution.Consents);
 
-        restContext.UserSid.ShouldBe(rewriterContext.UserSid);
-        restContext.Tenant.ShouldBe(rewriterContext.Tenant);
-        restContext.TargetTable.ShouldBe(rewriterContext.TargetTable);
-        restContext.PurposeId.ShouldBe("marketing");
-        restContext.PurposeId.ShouldBe(rewriterContext.PurposeId);
-        restContext.ClientIp.ShouldBe(rewriterContext.ClientIp);
-        restContext.Attributes!.Where(a => a.Key is not ("gql.action" or "action")).OrderBy(a => a.Key).ShouldBe(
-            rewriterContext.Attributes!.Where(a => a.Key is not ("gql.action" or "action")).OrderBy(a => a.Key));
         restDecision.CombinedRowFilterSql.ShouldNotBeNullOrWhiteSpace();
     }
 
@@ -273,7 +253,7 @@ public sealed class RestDatasetPolicySpliceTests
     {
         // The SQL the REST service emits, run through the real rewriter with a consent row filter, carries the policy
         // predicate exactly once: the rewriter's own injection, no second copy from the splice.
-        var (repo, resolution, casbin, _) = Recorders(AllowConsent(null, RegionEu()));
+        var (repo, resolution, _) = Recorders(AllowConsent(null, RegionEu()));
         var meta = CustomersMeta();
         var consentDecision = new ConsentResolutionService().ResolveAccess(
             new Sid("S-1-5-21-REST-ALICE"), new HashSet<Sid>(), new HashSet<string>(), Customers, [AllowConsent(null, RegionEu())], DatabaseDialect.SqlServer);
@@ -289,7 +269,7 @@ public sealed class RestDatasetPolicySpliceTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
-            Options.Create(Options_()), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            Options.Create(Options_()), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
 
@@ -437,7 +417,7 @@ public sealed class RestDatasetPolicySpliceTests
             new DatasetQueryRequest(Customers, SelectColumns: ["id"], Limit: 10), new RequestContext(Alice(), new TenantId(TenantValue)));
         var emitted = fx.Captured.ShouldHaveSingleItem().Sql;
 
-        var (repo, resolution, _, _) = Recorders(AllowConsent());
+        var (repo, resolution, _) = Recorders(AllowConsent());
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
@@ -448,7 +428,7 @@ public sealed class RestDatasetPolicySpliceTests
             DataSources = new SqlDataSourceOptions { RequireTenantColumn = true }
         };
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
-            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
         var rewritten = await service.CompileAsync(emitted, Alice(), new TenantId(TenantValue));

@@ -192,7 +192,7 @@ public class PerformanceAndAllocationsTests
             resolutionService,
             cacheService,
             maskingProvider,
-            gatewayOptions, policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            gatewayOptions);
 
         executionService.ShouldNotBeNull();
     }

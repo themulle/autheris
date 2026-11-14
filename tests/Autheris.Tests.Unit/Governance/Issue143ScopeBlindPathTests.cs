@@ -95,7 +95,6 @@ public sealed class Issue143ScopeBlindPathTests
         var options = Options.Create(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = "default-tenant" } });
         var adp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
-            Substitute.For<IPolicyEnforcementService>(),
             recording,
             repo,
             restrictedScopes: RestrictedScopePolicy.Default);
@@ -313,7 +312,7 @@ public sealed class Issue143ScopeBlindPathTests
 
     private static TableAccessPolicy Policy(
         IReadOnlyList<Consent> consents, InMemoryAccessProfileRepository? profiles = null, IConsentCacheService? cache = null,
-        IPolicyEnforcementService? abac = null, IRestrictedScopePolicy? restricted = null)
+        IRestrictedScopePolicy? restricted = null)
     {
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetActiveConsentsForSubjectsAsync(default!, default, default, default, default)
@@ -322,8 +321,6 @@ public sealed class Issue143ScopeBlindPathTests
             consentRepo,
             new ConsentResolutionService(null, restricted),
             cache ?? Substitute.For<IConsentCacheService>(),
-            abac ?? Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IClientIpResolver>(),
             new GatewayOptions(),
             NullMandatoryRowFilterResolver.Instance,
             contractManager: null,
@@ -422,22 +419,4 @@ public sealed class Issue143ScopeBlindPathTests
         (await GradeAsync(policy, WithScopes(Restricted).Claims)).ShouldBe(ColumnAccessLevel.Mask);
     }
 
-    [Fact]
-    public async Task T_GOV143_17_ProfileUnmasked_And_AbacMerge_RestrictedStillMasked()
-    {
-        var abac = Substitute.For<IPolicyEnforcementService>();
-        abac.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        abac.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(ci => TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: "id > 0", hasUnconstrainedColumnAllow: true));
-        var profiles = await UnmaskedProfileAsync();
-
-        var withAbac = Policy([Allow()], profiles, abac: abac);
-        var restricted = await withAbac.DecideAsync(Query(WithScopes(Restricted).Claims), CancellationToken.None);
-        restricted.IsAllowed.ShouldBeTrue();
-        restricted.CombinedRowFilterSql.ShouldNotBeNull().ShouldContain("id > 0");
-        restricted.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Mask);
-
-        var other = await withAbac.DecideAsync(Query(WithScopes(ScopeA).Claims), CancellationToken.None);
-        other.GetEffectiveColumnAccess("grade", Meta).ShouldBe(ColumnAccessLevel.Clear);
-    }
 }

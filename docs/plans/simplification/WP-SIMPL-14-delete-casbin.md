@@ -1,5 +1,5 @@
 # WP-SIMPL-14 Delete Casbin
-Status: Ready for implementation
+Status: In implementation. PR 1 (data path off Casbin, steps 1-3 and 6) open; PR 2 (dead Iceberg-era decision point), PR 3 (engine, interface and package) and PR 4 (configuration surface, guard keys, cleanup, docs) follow in that order (Phase 2 addendum below).
 Parent: [plan](../2026-11-05-plan-project-simplification.md#wp-simpl-14-delete-casbin) | Issues: #515, #491 (part) | Owner decisions: OD-3, OD-26, OD-30 (ADR-020), D12 | Security conditions: SEC-SIMPL-30, 31, 32, 33 (as amended by ADR-020), 80 (write path owned by WP-SIMPL-45)
 
 > **Changed by OD-30 (2026-11-05, ADR-020 accepted) and the WP-SIMPL-46 ordering rule:** this WP no longer builds a native policy engine, a ReBAC gate or a role-based write check. It runs after [WP-SIMPL-46](WP-SIMPL-46-unified-authorization-model.md) has moved every `IPolicyEnforcementService` consumer (Envoy ext_authz included) to `IAccessDecisionPoint`, and then deletes Casbin and `IPolicyEnforcementService`. The sections below carry the binding text.
@@ -101,3 +101,31 @@ Remove the `Casbin.NET` package, every `Casbin*` type and the `IPolicyEnforcemen
 - D-14a: withdrawn (OD-30). Casbin is deleted without a native replacement; the access decision point of WP-SIMPL-46 is the only data-access decision source.
 - D-14b: superseded by WP-SIMPL-45. Write authorization is the write-grant path invoked by the decision point; this WP keeps only the four interim `DmlSecurityTests`.
 - D-14c: `AiDataGuardrailService` pre-checks are moved to the decision point by WP-SIMPL-46 step 5 (PR 3); this WP only verifies the gate (step 2).
+
+## Addendum (Phase 2 and 3, 2026-11-14)
+Phase agents could not be launched in this delivery run (the agent launcher was unavailable), so the delivery lead wrote this addendum and the binding conditions below; Phase 5 review findings are recorded per PR.
+
+### Gate assessment (section 2), default taken: proceed
+On `7a4df959` every precondition PR is merged (WP-SIMPL-46 PR 1-5, WP-SIMPL-45 PR 1-3, WP-SIMPL-43 PR 4), but `git grep -l IPolicyEnforcementService -- src` returned 16 files instead of the three the WP-SIMPL-46 section 7 grep expects. Every data path already decides through `Policy.Pdp.IAccessDecisionPoint` (Envoy ext_authz and `AiDataGuardrailService` included); the remaining references were (a) the additive Casbin restriction step inside `TableAccessPolicy` (constructed only by the decision point), (b) an additive Casbin step after the decision in `GovernedProcedureExecutionService`, (c) `AccessPlanningService.ReloadPoliciesAsync` (row 17, deleted here), (d) constructor pass-through in the transports and `UnifiedPolicyDecisionPoint` (now a thin adapter onto the decision point), (e) a dead `Policy.AccessDecisionPoint` (Iceberg-era, registered but resolved by nobody) and (f) the `ModuleSecurityGuards` protected-type entry. None is a sole decision source, so removing them only drops a restriction that the always-on decision point replaces (SEC-SIMPL-32). Deleting `UnifiedPolicyDecisionPoint` itself stays WP-SIMPL-46 scope.
+
+### PR slicing (owner rule: about 400 net src lines per PR)
+| PR | Scope | Est. net src |
+|---|---|---|
+| 1 | Data path off Casbin: Casbin step and merge partial `TableAccessPolicy.Rls.cs` deleted, procedure step, `AccessPlanningService` reload, constructor arguments of every consumer and the DI line; Casbin data-path tests deleted or re-pointed | about -250 |
+| 2 | Dead `Policy.AccessDecisionPoint` and `Policy.IAccessDecisionPoint` with registration and tests; allowlist entries in the caller-attribute and transport-gate architecture tests | about -380 |
+| 3 | Engine: `CasbinEnforcementService` (4 partials), `CasbinModelContract`, `CasbinDecisionCache`, `PolicyEpochGuard`/`CompiledSubRuleCache` if only the engine uses them, `IPolicyEnforcementService` and its registration, `ModuleSecurityGuards` entry, Casbin lint rules, correlated-filter `Casbin` source, startup checks `CasbinModel`/`CasbinPolicy`, `Casbin.NET` package and lock files, `tools/casbin-policy-lint` rewrite, engine tests; `PackageBoundaryArchitectureTests.No_casbin_package` and `DeletedFeaturesArchitectureTests` entry | about -2,900 (one class across four partial files plus its exclusive helpers; it cannot be split without building throw-away intermediate states, so this PR exceeds the limit) |
+| 4 | Configuration surface: `CasbinOptions`, `CasbinDecisionCacheOptions` and validator, `GatewayOptions.Casbin`, `GatewaySections.Casbin*`, schema rows, `GatewayCoreOptionsValidator` Casbin rules; `UnknownGatewayKeyGuard` entry `Gateway:Casbin` (every child key, any value); `RemovedConfigKeysTests` rows and `.Casbin_keys_fail_startup`; options inventory and DI snapshots lowered; remaining comment mentions, dbt `casbin_roles` proposal, metric descriptions; migration-guide row and docs | about -300 |
+
+Each PR updates this status line and the master plan row, appends its removed security tests to `docs/plans/2026-11-05-test-coverage-map.csv` (the `CasbinSecurityTestMap`) and lowers only the ratchet baselines its deletion requires.
+
+### Lint workflow (default taken)
+`.github/workflows/policy-lint.yml` runs `tools/casbin-policy-lint` on every push to main; the tool references `Autheris.Application` and the Casbin package. Workflow files are not edited here. PR 3 rewrites the tool without the package and the project reference into a gate that fails when the repository contains a Casbin model (`.conf` with a `[request_definition]` section) or a Casbin policy file, so the workflow stays green and keeps a meaning. Owner follow-up: rename or delete the workflow and the tool.
+
+### Phase 3 binding conditions (SEC-SIMPL-14-A1..A6)
+- A1: every data path keeps exactly one decision source, `IAccessDecisionPoint`; no PR adds an allow path or a fallback that grants when a component is missing (default deny unchanged). Verified by the unchanged `AuthorizationArchitectureTests`, `DmlSecurityTests` and `AiDataGuardrailDecisionPointTests`.
+- A2: a Casbin restriction is removed, not replaced: no Casbin rule is ported into a native evaluator, no ReBAC gate, no role-based write check (section 10).
+- A3: every removed security test is mapped in the coverage map with the reason "Casbin rule semantics dropped (OD-30)" or the covering decision-point test; `TestCoverageMapTests.No_security_test_lost_without_mapping` stays green.
+- A4 (PR 4): every `Gateway:Casbin` key fails startup with any value, including `false` and empty, with the section 5 message.
+- A5 (PR 3): `Casbin.NET` is absent from every project and lock file; the lint gate fails closed on a Casbin model or policy file.
+- A6: no WP-, SEC- or OD- ids are added to comments in `src/Autheris.Api` or `src/Autheris.Application`.
+

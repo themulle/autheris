@@ -261,3 +261,22 @@ Autheris.Tests.Unit.Security.RebacTupleExpiryTests.WAVE3_TIME_SC_02_Evaluator_Ca
 Autheris.Tests.Unit.Security.RebacTupleExpiryTests.WAVE3_TIME_SC_02_RebacTuple_ExpiredAtBoundary_IsDenied,feature deleted (WP-SIMPL-46),Security
 Autheris.Tests.Unit.Security.RebacTupleTenantValidationTests.Rebac_Tuple_Invalid_Tenant_Is_Rejected,feature deleted (WP-SIMPL-46),Security
 Autheris.Tests.Unit.Security.RebacTupleTenantValidationTests.Rebac_Tuple_Invalid_Tenant_Rejected_Before_Mutation,feature deleted (WP-SIMPL-46),Security
+Autheris.Tests.Unit.Policy.TableAccessPolicyDenialKindTests.CasbinDeny_DenialKindPolicy,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Policy.TableAccessPolicyDenialKindTests.SupplementalConsent_CuresConsentMissing_ButNotCasbinDeny,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.AllowRule_ReferencingAmbiguousAttribute_DoesNotMatch,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.BuildClaimAttributes_ActionClaims_AreStillIgnored,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.BuildClaimAttributes_ClaimTypesDifferingOnlyInCase_AreAmbiguous,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.BuildClaimAttributes_DistinctValues_AreAmbiguous_NotLastWins,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.BuildClaimAttributes_EmptyPurpose_FallsBackToPurposeId,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.BuildClaimAttributes_EmptyValue_IsMissing,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.BuildClaimAttributes_EmptyValueNextToRealValue_KeepsRealValue,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.BuildClaimAttributes_RepeatedSameValue_StaysSingleValue,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.BuildClaimAttributes_SeveralPurposes_GiveNoPurpose,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.DenyRule_ReferencingAmbiguousAttribute_Matches,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.DenyRule_ReferencingAmbiguousFallbackAttribute_Matches,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.DenyRule_ReferencingAmbiguousPurpose_Matches,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.RowFilter_EmptyAttributeValue_IsTreatedAsMissing,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.RowFilter_ReferencingAmbiguousAttribute_IsRejected,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.RowFilter_ReferencingAmbiguousDepartment_IsRejected,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.RowFilter_SingleValue_IsStillSubstituted,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security
+Autheris.Tests.Unit.Security.CasbinAmbiguousAttributeTests.UnrelatedAmbiguousAttribute_DoesNotAffectOtherRules,feature deleted (WP-SIMPL-14; Casbin rule semantics dropped by OD-30),Security

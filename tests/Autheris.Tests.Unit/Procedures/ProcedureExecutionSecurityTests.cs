@@ -129,7 +129,6 @@ public partial class ProcedureExecutionSecurityTests
 
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Microsoft.Extensions.Options.Options.Create(Options), Audit, Tables, Consents, Resolution, Masking,
-                policyEnforcement: PolicyEnforcement,
                 logger: Logger,
                 concurrencyGate: UseGate ? Gate : null,
                 denialAuditLimiter: Limiter);
@@ -353,8 +352,7 @@ public partial class ProcedureExecutionSecurityTests
         var audit = e.Audit;
         audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e.AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         var svc = new GovernedProcedureExecutionService(
-            e.Registry, e.Invoker, Microsoft.Extensions.Options.Options.Create(e.Options), audit, e.Tables, e.Consents, e.Resolution, e.Masking,
-            policyEnforcement: e.PolicyEnforcement, rowScope: rowScope, concurrencyGate: e.Gate);
+            e.Registry, e.Invoker, Microsoft.Extensions.Options.Options.Create(e.Options), audit, e.Tables, e.Consents, e.Resolution, e.Masking, rowScope: rowScope, concurrencyGate: e.Gate);
 
         // the key column "order_id" is not in the result columns -> unusable key after visibility -> 503
         e.Invoker.ExecuteReadAsync(default!, default!, default!, default, default).ReturnsForAnyArgs(new RawProcedureResult(["salary"], [new object?[] { 1m }], false));
@@ -531,8 +529,7 @@ public partial class ProcedureExecutionSecurityTests
             case "audit-throws":
                 e.Audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new IOException("audit down")));
                 var svc = new GovernedProcedureExecutionService(
-                    e.Registry, e.Invoker, Microsoft.Extensions.Options.Options.Create(e.Options), e.Audit, e.Tables, e.Consents, e.Resolution, e.Masking,
-                    policyEnforcement: e.PolicyEnforcement, concurrencyGate: e.Gate);
+                    e.Registry, e.Invoker, Microsoft.Extensions.Options.Options.Create(e.Options), e.Audit, e.Tables, e.Consents, e.Resolution, e.Masking, concurrencyGate: e.Gate);
                 await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() => svc.ExecuteAsync("get_orders", Valid(), User(), Tenant));
                 break;
             default:

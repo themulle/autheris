@@ -72,8 +72,6 @@ public sealed class AccessProfileRowPolicyTests
             Substitute.For<IConsentRepository>(),
             resolution,
             Substitute.For<IConsentCacheService>(),
-            Substitute.For<IPolicyEnforcementService>(),
-            Substitute.For<IClientIpResolver>(),
             new GatewayOptions(),
             NullMandatoryRowFilterResolver.Instance,
             accessProfileRepository: repo,

@@ -90,8 +90,6 @@ public sealed class AccessProfileRuntimeResolutionTests
             consentRepo,
             resolutionService,
             cacheService,
-            policyEnforcementService,
-            clientIpResolver,
             options,
             mandatoryFilters,
             contractManager: null,

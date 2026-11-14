@@ -50,7 +50,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly IFederatedStagingService _stagingService;
     private readonly IDuckDbOlapEngine _duckDbEngine;
     private readonly ISqlEngine _sqlEngine;
-    private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IConsentResolutionService? _consentResolution;
     private readonly IConsentRepository? _consentRepository;
     private readonly IConsentCacheService? _consentCache;
@@ -75,7 +74,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         IFederatedStagingService stagingService,
         IDuckDbOlapEngine duckDbEngine,
         ISqlEngine? sqlEngine = null,
-        IPolicyEnforcementService? policyEnforcement = null,
         IConsentResolutionService? consentResolution = null,
         IConsentRepository? consentRepository = null,
         IConsentCacheService? consentCache = null,
@@ -94,7 +92,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     {
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
-            policyEnforcement,
             consentResolution,
             consentRepository,
             consentCache,
@@ -117,7 +114,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         _stagingService = stagingService ?? throw new ArgumentNullException(nameof(stagingService));
         _duckDbEngine = duckDbEngine ?? throw new ArgumentNullException(nameof(duckDbEngine));
         _sqlEngine = sqlEngine ?? FastSqlEngine.Default;
-        _policyEnforcement = policyEnforcement;
         _consentResolution = consentResolution;
         _consentRepository = consentRepository;
         _consentCache = consentCache;

@@ -205,7 +205,7 @@ public class ProcedureEndpointTests
         {
             Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
-                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance);
+                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, Masking, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance);
         }
     }
 
@@ -280,7 +280,7 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
-    public async Task ResolveResultAccess_WhenHasPoliciesAndUnconstrainedAllow_MasksSensitiveCatalogColumns()
+    public async Task ResolveResultAccess_UnconstrainedAllow_MasksSensitiveCatalogColumns()
     {
         var f = new Fixture();
         var def = TestProcedureYaml.Definition(ValidHeader, "x", false, 60);
@@ -305,20 +305,14 @@ public class ProcedureEndpointTests
         f.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
-        var policyEnforcement = Substitute.For<IPolicyEnforcementService>();
-        policyEnforcement.HasPolicies(Arg.Any<TenantId>()).Returns(true);
-        policyEnforcement.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
-            .Returns(callInfo => ValueTask.FromResult(TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
-
         var svc = new GovernedProcedureExecutionService(
-            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking,
-            policyEnforcement: policyEnforcement);
+            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking);
 
         var result = await svc.EvaluateTableAsync("default", "sales.orders", User(), new Sid("S-1-5-21-1001"), Tenant, consentBypassed: false, allowRowFilter: false, CancellationToken.None);
 
         result.ShouldNotBeNull();
-        result.Value.Decision.ColumnAccess["order_id"].ShouldBe(ColumnAccessLevel.Clear);
-        result.Value.Decision.ColumnAccess["salary"].ShouldBe(ColumnAccessLevel.Mask);
+        result.Value.Decision.GetEffectiveColumnAccess("order_id", meta).ShouldBe(ColumnAccessLevel.Clear);
+        result.Value.Decision.GetEffectiveColumnAccess("salary", meta).ShouldBe(ColumnAccessLevel.Mask);
     }
 
     [Fact]
@@ -448,7 +442,7 @@ public class ProcedureEndpointTests
         var f = Active();
         f.Audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new IOException("audit down")));
         var svc = new GovernedProcedureExecutionService(
-            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance);
+            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance);
 
         var ex = await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() =>
             svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
@@ -461,7 +455,7 @@ public class ProcedureEndpointTests
         var f = Active();
         Should.Throw<ArgumentNullException>(() =>
             new GovernedProcedureExecutionService(
-                f.Registry, f.Invoker, Options.Create(new GatewayOptions()), audit: null!, f.Tables, f.Consents, f.Resolution, f.Masking, policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance));
+                f.Registry, f.Invoker, Options.Create(new GatewayOptions()), audit: null!, f.Tables, f.Consents, f.Resolution, f.Masking, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance));
     }
 
     [Fact]

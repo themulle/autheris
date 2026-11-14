@@ -69,8 +69,7 @@ public sealed class ProcedureVirtualFilterTests
             Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
                 Registry, Invoker, Options.Create(options ?? new GatewayOptions()), Audit, Tables,
-                withConsents ? Consents : null, withConsents ? Resolution : null, masking: null,
-                policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance, rowScope: RowScope, mandatoryFilters: resolver);
+                withConsents ? Consents : null, withConsents ? Resolution : null, masking: null, concurrencyGate: global::Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance, rowScope: RowScope, mandatoryFilters: resolver);
         }
     }
 

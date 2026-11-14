@@ -71,9 +71,7 @@ public sealed class GovernancePolicyEndToEndTests
         repo.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(consents));
         var accessPolicy = new TableAccessPolicy(repo, new ConsentResolutionService(),
-            Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: new RowPolicyFactory(new PolicyPredicateRenderer()),
             maskPolicyFactory: new ColumnMaskPolicyFactory(new SqlDataMaskingProvider(Options.Create(new GatewayOptions()))));
         var decision = await accessPolicy.DecideAsync(

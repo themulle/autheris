@@ -59,8 +59,7 @@ public sealed class TypedConsentRowPolicyTests
     private static TableAccessPolicy Policy(IConsentRepository repo, RowPolicyFactory? factory, IConsentCacheService? cache = null) =>
         new(repo, new ConsentResolutionService(),
             cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            clientIpResolver: null, new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
+            new GatewayOptions(), NullMandatoryRowFilterResolver.Instance,
             rowPolicyFactory: factory);
 
     private static RowPolicyFactory Factory() => new(new PolicyPredicateRenderer());
@@ -179,9 +178,7 @@ public sealed class TypedConsentRowPolicyTests
         vf.ResolveAsync(Arg.Any<MandatoryFilterQuery>(), Arg.Any<CancellationToken>()).Returns(
             new MandatoryFilterOutcome(false, null, vfPolicy.Project().Sql, ["vf"]) { TypedPredicate = ((PolicyPredicateRowPolicy)vfPolicy).Predicate });
         var policy = new TableAccessPolicy(Repo(Consent(ConsentEffect.Allow, Region("EU"))), new ConsentResolutionService(),
-            Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
-            global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
-            null, new GatewayOptions(), vf, rowPolicyFactory: Factory());
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance, new GatewayOptions(), vf, rowPolicyFactory: Factory());
 
         var decision = await Decide(policy);
 

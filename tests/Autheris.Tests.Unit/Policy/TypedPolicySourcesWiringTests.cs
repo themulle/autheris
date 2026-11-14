@@ -91,7 +91,7 @@ public sealed class TypedPolicySourcesWiringTests
     {
         var pdp = new UnifiedPolicyDecisionPoint(Consents(), new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance, Options.Create(new GatewayOptions()),
-            NullLogger<UnifiedPolicyDecisionPoint>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, typedPolicies: Sources());
+            NullLogger<UnifiedPolicyDecisionPoint>.Instance, typedPolicies: Sources());
         var context = new SecurityPrincipalContext
         {
             UserSid = UserSid,
@@ -108,7 +108,7 @@ public sealed class TypedPolicySourcesWiringTests
     [Fact]
     public async Task CrossDomainResolver_ProducesATypedDecision()
     {
-        var resolver = new DefaultCrossDomainAccessResolver(Consents(), new ConsentResolutionService(), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, typedPolicies: Sources());
+        var resolver = new DefaultCrossDomainAccessResolver(Consents(), new ConsentResolutionService(), typedPolicies: Sources());
 
         AssertTyped(await resolver.ResolveAccessAsync(User(), Orders, Meta(), Tenant));
     }
@@ -121,7 +121,7 @@ public sealed class TypedPolicySourcesWiringTests
         var service = new GovernedProcedureExecutionService(
             new InMemoryProcedureRegistry(), Substitute.For<IProcedureInvoker>(), Options.Create(new GatewayOptions()),
             Substitute.For<IAuditLogRepository>(), tables, Consents(), new ConsentResolutionService(), Substitute.For<IColumnMaskingProvider>(),
-            typedPolicies: Sources(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            typedPolicies: Sources());
 
         var result = await service.EvaluateTableAsync("sales", "main.orders", User(), UserSid, Tenant, consentBypassed: false, allowRowFilter: true, CancellationToken.None);
 
@@ -133,7 +133,7 @@ public sealed class TypedPolicySourcesWiringTests
     public async Task WebSqlRewriter_ProducesATypedDecision()
     {
         var rewriter = new GovernedSqlRewriter(Options.Create(new GatewayOptions()), consentResolution: new ConsentResolutionService(),
-            consentRepository: Consents(), typedPolicies: Sources(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            consentRepository: Consents(), typedPolicies: Sources());
 
         AssertTyped(await Decide(rewriter.AccessDecisionPoint));
     }
@@ -144,7 +144,7 @@ public sealed class TypedPolicySourcesWiringTests
         var service = new FederatedDuckDbExecutionService(
             Options.Create(new GatewayOptions()), Substitute.For<IAuditLogRepository>(), Substitute.For<ICrossSourceQueryRouter>(),
             Substitute.For<ICrossSourcePlanner>(), Substitute.For<IFederatedStagingService>(), Substitute.For<IDuckDbOlapEngine>(),
-            consentResolution: new ConsentResolutionService(), consentRepository: Consents(), typedPolicies: Sources(), policyEnforcement: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            consentResolution: new ConsentResolutionService(), consentRepository: Consents(), typedPolicies: Sources());
 
         AssertTyped(await Decide(service.AccessDecisionPoint));
     }
@@ -155,7 +155,7 @@ public sealed class TypedPolicySourcesWiringTests
         var service = new GatewayExecutionService(
             Substitute.For<ITableMetadataRepository>(), Consents(), Substitute.For<IAuditLogRepository>(), new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance, Substitute.For<IColumnMaskingProvider>(),
-            typedPolicies: Sources(), policyEnforcementService: global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance);
+            typedPolicies: Sources());
 
         AssertTyped(await Decide(service.AccessDecisionPoint));
     }
@@ -195,7 +195,7 @@ public sealed class TypedPolicySourcesWiringTests
     {
         var pdp = new UnifiedPolicyDecisionPoint(Consents(), new ConsentResolutionService(),
             Autheris.Application.Policy.Services.NullConsentCacheService.Instance, Options.Create(new GatewayOptions()),
-            NullLogger<UnifiedPolicyDecisionPoint>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance, typedPolicies: Sources(),
+            NullLogger<UnifiedPolicyDecisionPoint>.Instance, typedPolicies: Sources(),
             accessProfileRepository: await StrictProfileAsync());
         var context = new SecurityPrincipalContext
         {
@@ -218,7 +218,7 @@ public sealed class TypedPolicySourcesWiringTests
     [Fact]
     public async Task CrossDomainResolver_AppliesTheAccessProfile()
     {
-        var resolver = new DefaultCrossDomainAccessResolver(Consents(), new ConsentResolutionService(), global::Autheris.Tests.Unit.TestDoubles.NullPolicyEnforcementService.Instance,
+        var resolver = new DefaultCrossDomainAccessResolver(Consents(), new ConsentResolutionService(),
             typedPolicies: Sources(), accessProfileRepository: await StrictProfileAsync());
         var meta = MetaWithSensitiveColumn();
 
