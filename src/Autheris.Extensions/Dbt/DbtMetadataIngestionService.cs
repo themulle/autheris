@@ -310,6 +310,11 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             try
             {
                 tid = m.ToTableIdentifier();
+                // the unique id is stored on the catalog entry (bounded column); an unusable one skips the node like an invalid name.
+                if (!DbtIdentifierSanitizer.IsValidIdentifier(m.UniqueId))
+                {
+                    throw new ArgumentException("Unusable dbt unique id.");
+                }
             }
             catch (ArgumentException)
             {
@@ -338,6 +343,16 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 rejectedSet.Add(m.UniqueId);
                 rejectedSet.Add(idStr);
                 warnings.Add($"Table '{idStr}': tenant '{tid.Domain}' is not the caller's tenant; only a ClusterAdmin may import into another tenant.");
+            }
+        }
+
+        // Issue #666: nodes of one artifact that map to the same catalog identity (case-insensitive) are all rejected, whatever their order.
+        foreach (var group in models.GroupBy(m => m.ToTableIdentifier()).Where(g => g.Skip(1).Any()).ToList())
+        {
+            foreach (var colliding in group)
+            {
+                RejectCollision(creation, colliding, warnings);
+                models.Remove(colliding);
             }
         }
 
@@ -412,6 +427,42 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
             var tableId = model.ToTableIdentifier();
             var ownerTeam = model.Meta.GetValueOrDefault("owner");
+
+            // Issue #282: the read also runs in dry run (read only) so that a missing entry can be reported as "would create".
+            // Issue #666: it runs before any write so that a node never touches an entry of another origin.
+            TableMetadata? existingMeta;
+            var metadataUnavailable = false;
+            try
+            {
+                existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+            }
+            catch (TableMetadataUnavailableException)
+            {
+                // no documentation sync (and never an upsert as a new table) for a table whose metadata is unavailable.
+                if (!dryRun)
+                {
+                    warnings.Add($"Table '{tableId}': skipped documentation sync, its stored metadata is unavailable (invalid key or index definition).");
+                }
+
+                existingMeta = null;
+                metadataUnavailable = true;
+            }
+
+            if (existingMeta != null && !OwnsEntry(existingMeta.Table, model))
+            {
+                RejectCollision(creation, model, warnings);
+                continue;
+            }
+
+            if (existingMeta == null && !metadataUnavailable && _gatewayOptions?.Value is { } gatewayValue)
+            {
+                existingMeta = await TryRegisterMissingTableAsync(model, tableId, gatewayValue, dryRun, creation, warnings, ct).ConfigureAwait(false);
+            }
+
+            if (existingMeta != null)
+            {
+                await WarnIfPhysicalNameChangedAsync(model, warnings, ct).ConfigureAwait(false);
+            }
 
             // Deduplication: get existing pending proposals for this table
             var existingPending = dryRun
@@ -572,31 +623,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             ));
 
             // 3. Omnichannel Documentation Sync (F-DOC-01): Synchronize dbt model and column descriptions
-            // Issue #282: the read also runs in dry run (read only) so that a missing entry can be reported as "would create".
+            // (existing entry read above)
             {
-                TableMetadata? existingMeta;
-                var metadataUnavailable = false;
-                try
-                {
-                    existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-                }
-                catch (TableMetadataUnavailableException)
-                {
-                    // no documentation sync (and never an upsert as a new table) for a table whose metadata is unavailable.
-                    if (!dryRun)
-                    {
-                        warnings.Add($"Table '{tableId}': skipped documentation sync, its stored metadata is unavailable (invalid key or index definition).");
-                    }
-
-                    existingMeta = null;
-                    metadataUnavailable = true;
-                }
-
-                if (existingMeta == null && !metadataUnavailable && _gatewayOptions?.Value is { } gatewayValue)
-                {
-                    existingMeta = await TryRegisterMissingTableAsync(model, tableId, gatewayValue, dryRun, creation, warnings, ct).ConfigureAwait(false);
-                }
-
                 if (existingMeta != null)
                 {
                     // EXT-05: Ratchet governance properties rather than overwrite
@@ -644,7 +672,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         SourceName = existingMeta.Table.SourceName,
                         SchemaName = existingMeta.Table.SchemaName,
                         TableName = existingMeta.Table.TableName,
-                        DisplayName = existingMeta.Table.DisplayName,
+                        DisplayName = string.IsNullOrWhiteSpace(existingMeta.Table.DisplayName) && IsAliased(model) ? model.Name : existingMeta.Table.DisplayName,
+                        DbtUniqueId = model.UniqueId,
                         Description = model.Description ?? existingMeta.Table.Description,
                         LongDescription = model.Meta.GetValueOrDefault("long_description") ?? existingMeta.Table.LongDescription,
                         Sensitivity = existingMeta.Table.Sensitivity,
@@ -753,7 +782,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         schema: model.Schema,
                         columns: model.Columns.Keys,
                         summary: model.Description ?? $"dbt model {model.Name}",
-                        dataSource: model.Database);
+                        dataSource: model.Database,
+                        table: model.PhysicalName);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -805,7 +835,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         var importedRelations = 0;
         if (_relationRepository != null && allowedRelationships.Count > 0)
         {
-            importedRelations = await ImportRelationsAsync(models, allowedRelationships, dryRun, warnings, ct).ConfigureAwait(false);
+            importedRelations = await ImportRelationsAsync(models.Where(m => !creation.RejectedIds.Contains(m.UniqueId)).ToList(), allowedRelationships, dryRun, warnings, ct).ConfigureAwait(false);
         }
 
         // Apply lineage updates
@@ -844,7 +874,59 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         public List<string> Created { get; } = [];
         public List<DbtSyncSkippedItem> Skipped { get; } = [];
         public HashSet<string> Seen { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> RejectedIds { get; } = new(StringComparer.Ordinal);
         public int SkippedTotal { get; set; }
+    }
+
+    private static bool IsAliased(DbtModelDefinition model) =>
+        !string.Equals(model.PhysicalName, model.Name, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Issue #666: an entry is updated by the node whose unique id it records; an entry without a recorded id only by a node
+    /// without alias or identifier (the identity the sync used before), which then records its id. Anything else is another origin.
+    /// </summary>
+    private static bool OwnsEntry(Table entry, DbtModelDefinition model) =>
+        entry.DbtUniqueId is { } owner
+            ? string.Equals(owner, model.UniqueId, StringComparison.Ordinal)
+            : !IsAliased(model);
+
+    private void RejectCollision(CatalogCreationRun run, DbtModelDefinition model, List<string> warnings)
+    {
+        var id = DbtIdentifierSanitizer.ForLog(model.UniqueId);
+        var kind = string.Equals(model.Materialization, "source", StringComparison.OrdinalIgnoreCase) ? "source" : "model";
+        run.RejectedIds.Add(model.UniqueId);
+        run.SkippedTotal++;
+        if (run.Skipped.Count < MaxSkippedItemsReported)
+        {
+            run.Skipped.Add(new DbtSyncSkippedItem(id, kind, DbtSyncSkipReasons.PhysicalNameCollision));
+        }
+
+        warnings.Add($"{DbtSyncSkipReasons.PhysicalNameCollision}: dbt {kind} '{id}' was not imported, its physical table name is already taken.");
+        _logger.LogWarning("dbt sync skipped {Kind} '{Name}': {Reason}", kind, id, DbtSyncSkipReasons.PhysicalNameCollision);
+    }
+
+    /// <summary>Issue #666: an entry registered under the logical name stays as it is; the sync now registers the physical name.</summary>
+    private async Task WarnIfPhysicalNameChangedAsync(DbtModelDefinition model, List<string> warnings, CancellationToken ct)
+    {
+        if (!IsAliased(model) || !TableIdentifier.TryCreate(model.Database, model.Schema, model.Name, out var logical))
+        {
+            return;
+        }
+
+        TableMetadata? old;
+        try
+        {
+            old = await _metadataRepository.GetTableMetadataAsync(logical, ct).ConfigureAwait(false);
+        }
+        catch (TableMetadataUnavailableException)
+        {
+            return;
+        }
+
+        if (old != null && (old.Table.DbtUniqueId is null || string.Equals(old.Table.DbtUniqueId, model.UniqueId, StringComparison.Ordinal)))
+        {
+            warnings.Add($"PHYSICAL_NAME_CHANGED: dbt node '{DbtIdentifierSanitizer.ForLog(model.Name)}' now registers '{DbtIdentifierSanitizer.ForLog(model.PhysicalName)}'; the entry for the logical name is left unchanged.");
+        }
     }
 
     /// <summary>
@@ -911,7 +993,13 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             var current = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
             if (current != null)
             {
-                return current;
+                if (OwnsEntry(current.Table, model))
+                {
+                    return current;
+                }
+
+                RejectCollision(run, model, warnings);
+                return null;
             }
 
             var persisted = await _metadataRepository.UpsertTableMetadataAsync(built, ct).ConfigureAwait(false);

@@ -85,7 +85,8 @@ WHERE rm.member_sid = @sid";
             DocumentationSource = reader.IsDBNull(o + 14) ? null : reader.GetString(o + 14),
             RequiredFilterColumns = reqFilters,
             MinGroupSize = minGroupSize,
-            NonPersonal = nonPersonal
+            NonPersonal = nonPersonal,
+            DbtUniqueId = reader.FieldCount > o + 19 && !reader.IsDBNull(o + 19) ? reader.GetString(o + 19) : null
         };
     }
 
