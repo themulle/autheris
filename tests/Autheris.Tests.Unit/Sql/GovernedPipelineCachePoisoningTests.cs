@@ -228,7 +228,7 @@ public sealed class GovernedPipelineCachePoisoningTests
 
     private sealed class StubCatalogProvider(TableMetadata table) : IGovernedCatalogProvider
     {
-        public ValueTask<ITableCatalog> GetCatalogAsync(string dataSourceName, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct) =>
+        public ValueTask<ITableCatalog> GetCatalogAsync(GovernedDataSource dataSource, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct) =>
             ValueTask.FromResult<ITableCatalog>(new InMemoryTableCatalog(
                 [new TableCatalogEntry(new TableIdentity("public", "orders"), table.Columns.Select(c => new CatalogColumn(c.ColumnName, c.DataType)).ToImmutableArray(), "tenant_id", 1)], "public"));
     }
