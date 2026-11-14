@@ -345,6 +345,9 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             {
                 d.Name(table.TypeName);
                 d.Description($"Entity type for {table.Metadata.Identifier}.");
+                var entityLogicalSource = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table.Metadata);
+                d.Extend().OnBeforeCreate(definition =>
+                    definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(entityLogicalSource)));
 
                 foreach (var col in table.Columns)
                 {
