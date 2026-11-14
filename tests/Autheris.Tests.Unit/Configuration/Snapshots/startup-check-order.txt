@@ -3,6 +3,7 @@ OracleRuntime
 SqlServerWindowsAuth
 Databricks
 ProcedureDialectAdmission
+DataSourceMappings
 DefaultSchemas
 TenantCollisions
 WebhookSubscriptions

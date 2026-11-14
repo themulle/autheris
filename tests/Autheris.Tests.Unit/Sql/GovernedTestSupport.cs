@@ -48,7 +48,7 @@ internal static class GovernedTestSupport
     /// <summary>Test catalog: the governance columns with their governance data types, the governance tenant column.</summary>
     private sealed class MetadataCatalogProvider(ITableMetadataRepository? repository) : IGovernedCatalogProvider
     {
-        public async ValueTask<ITableCatalog> GetCatalogAsync(string dataSourceName, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
+        public async ValueTask<ITableCatalog> GetCatalogAsync(GovernedDataSource dataSource, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
         {
             var entries = new List<TableCatalogEntry>();
             if (repository is not null)

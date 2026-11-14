@@ -81,7 +81,7 @@ public sealed class GovernancePolicyEndToEndTests
             new CatalogColumn("id", "INTEGER"), new CatalogColumn("tenant_id", "TEXT"), new CatalogColumn("region", "TEXT"),
             new CatalogColumn("email", "TEXT"), new CatalogColumn("ssn", "TEXT")), "tenant_id", 1)], "main");
         var provider = Substitute.For<IGovernedCatalogProvider>();
-        provider.GetCatalogAsync(Arg.Any<string>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
+        provider.GetCatalogAsync(Arg.Any<GovernedDataSource>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ITableCatalog>(catalog));
 
         var policy = await new GovernancePolicyFactory(provider, Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(), Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions())).CreateAsync(

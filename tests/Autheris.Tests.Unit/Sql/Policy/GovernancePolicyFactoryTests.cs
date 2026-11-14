@@ -41,7 +41,7 @@ public sealed class GovernancePolicyFactoryTests
         ITableCatalog catalog, out IGovernedCatalogProvider provider, GatewayOptions? options = null, Func<TableIdentifier, TableMetadata?>? metadata = null)
     {
         provider = Substitute.For<IGovernedCatalogProvider>();
-        provider.GetCatalogAsync(Arg.Any<string>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
+        provider.GetCatalogAsync(Arg.Any<GovernedDataSource>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ITableCatalog>(catalog));
         var tables = Substitute.For<ITableMetadataRepository>();
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())

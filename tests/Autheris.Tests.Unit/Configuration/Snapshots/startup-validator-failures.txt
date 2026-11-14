@@ -6,6 +6,7 @@ OracleRuntime_PlaintextPassword [Production]: ValidationException: Security viol
 SqlServerWindowsAuth_InvalidConnectionString [Production]: ValidationException: SQL Server data source 'sql' has an invalid connection string: Format of the initialization string does not conform to specification starting at index 0.
 Databricks_MissingSection [Production]: ValidationException: Databricks data source 'dbx' requires a DataSources:Connections:dbx:Databricks section.
 ProcedureDialectAdmission_MissingConnection [Development]: ValidationException: Stored procedure endpoints support SQL Server and PostgreSQL only (data source 'absent').
+DataSourceMappings_ChainedMapping [Development]: ValidationException: Gateway:WebSql:DataSourceMappings:a ('b') must name an existing key of DataSources:Connections that is not itself a mapping key (one hop only).
 DefaultSchemas_InvalidSchema [Production]: ValidationException: Security violation: DataSources:Connections:pg:DefaultSchema must match ^[A-Za-z_][A-Za-z0-9_$#]{0,127}$.
 TenantCollisions_StrictMode [Production]: ValidationException: Security violation (B-1): tenant ids that differ only in case are configured (ACME / Acme). Strict mode refuses the start; rename one of them.
 WebhookSubscriptions_MissingId [Production]: ValidationException: Gateway:Webhooks:Subscriptions:0:Id is required (a stable, unique id of at most 128 characters).
