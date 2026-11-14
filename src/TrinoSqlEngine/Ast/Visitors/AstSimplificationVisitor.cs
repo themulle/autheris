@@ -54,13 +54,31 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
 
     public override SqlNode VisitBinaryExpression(BinaryExpression node)
     {
+        if (node.Operator is BinaryOperator.And or BinaryOperator.Or)
+        {
+            var operands = CollectSameOperatorOperands(node, node.Operator);
+            for (int i = 0; i < operands.Count; i++)
+            {
+                operands[i] = (Expression)Visit(operands[i]);
+            }
+
+            return node.Operator == BinaryOperator.And
+                ? SimplifyAndOperands(operands)
+                : SimplifyOrOperands(operands);
+        }
+
+        if (Builder.SqlAstBuilder.CanUnrollLeftSpine(node.Operator)
+            && node.Left is BinaryExpression lb
+            && Builder.SqlAstBuilder.SameChainFamily(node.Operator, lb.Operator))
+        {
+            return base.VisitBinaryExpression(node);
+        }
+
         var left = (Expression)Visit(node.Left);
         var right = (Expression)Visit(node.Right);
 
         return node.Operator switch
         {
-            BinaryOperator.And => SimplifyAnd(left, right),
-            BinaryOperator.Or => SimplifyOr(left, right),
             BinaryOperator.Equal or BinaryOperator.NotEqual or
             BinaryOperator.LessThan or BinaryOperator.LessThanOrEqual or
             BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual
@@ -89,11 +107,35 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
         return (Expression)Visit(expr);
     }
 
-    private Expression SimplifyAnd(Expression left, Expression right)
+    private static List<Expression> CollectSameOperatorOperands(Expression root, BinaryOperator op)
     {
-        var operands = new List<Expression>();
-        FlattenAnd(left, operands);
-        FlattenAnd(right, operands);
+        var result = new List<Expression>();
+        var stack = new Stack<Expression>();
+        stack.Push(root);
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            if (current is BinaryExpression b && b.Operator == op)
+            {
+                stack.Push(b.Right);
+                stack.Push(b.Left);
+            }
+            else
+            {
+                result.Add(current);
+            }
+        }
+
+        return result;
+    }
+
+    private Expression SimplifyAndOperands(List<Expression> rawOperands)
+    {
+        var operands = new List<Expression>(rawOperands.Count);
+        foreach (var raw in rawOperands)
+        {
+            FlattenAnd(raw, operands);
+        }
 
         // Deduplicate identical operands
         var uniqueOperands = new List<Expression>();
@@ -138,11 +180,13 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
         return result;
     }
 
-    private Expression SimplifyOr(Expression left, Expression right)
+    private Expression SimplifyOrOperands(List<Expression> rawOperands)
     {
-        var operands = new List<Expression>();
-        FlattenOr(left, operands);
-        FlattenOr(right, operands);
+        var operands = new List<Expression>(rawOperands.Count);
+        foreach (var raw in rawOperands)
+        {
+            FlattenOr(raw, operands);
+        }
 
         var uniqueOperands = new List<Expression>();
         foreach (var op in operands)
@@ -289,27 +333,39 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
 
     private static void FlattenAnd(Expression expr, List<Expression> collector)
     {
-        if (expr is BinaryExpression { Operator: BinaryOperator.And } b)
+        var stack = new Stack<Expression>();
+        stack.Push(expr);
+        while (stack.Count > 0)
         {
-            FlattenAnd(b.Left, collector);
-            FlattenAnd(b.Right, collector);
-        }
-        else
-        {
-            collector.Add(expr);
+            var current = stack.Pop();
+            if (current is BinaryExpression { Operator: BinaryOperator.And } b)
+            {
+                stack.Push(b.Right);
+                stack.Push(b.Left);
+            }
+            else
+            {
+                collector.Add(current);
+            }
         }
     }
 
     private static void FlattenOr(Expression expr, List<Expression> collector)
     {
-        if (expr is BinaryExpression { Operator: BinaryOperator.Or } b)
+        var stack = new Stack<Expression>();
+        stack.Push(expr);
+        while (stack.Count > 0)
         {
-            FlattenOr(b.Left, collector);
-            FlattenOr(b.Right, collector);
-        }
-        else
-        {
-            collector.Add(expr);
+            var current = stack.Pop();
+            if (current is BinaryExpression { Operator: BinaryOperator.Or } b)
+            {
+                stack.Push(b.Right);
+                stack.Push(b.Left);
+            }
+            else
+            {
+                collector.Add(current);
+            }
         }
     }
 
@@ -368,38 +424,59 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
     private static bool StructuralEquals(Expression a, Expression b)
     {
         if (ReferenceEquals(a, b)) return true;
-        if (a.GetType() != b.GetType()) return false;
 
-        return (a, b) switch
+        var stack = new Stack<(Expression Left, Expression Right)>();
+        stack.Push((a, b));
+        while (stack.Count > 0)
         {
-            (ParenthesizedExpression p1, ParenthesizedExpression p2) =>
-                StructuralEquals(p1.Expression, p2.Expression),
+            var (curA, curB) = stack.Pop();
+            if (ReferenceEquals(curA, curB)) continue;
+            if (curA.GetType() != curB.GetType()) return false;
 
-            (ColumnReference c1, ColumnReference c2) =>
-                SameColumnName(c1.Name, c2.Name),
+            switch (curA, curB)
+            {
+                case (ParenthesizedExpression p1, ParenthesizedExpression p2):
+                    stack.Push((p1.Expression, p2.Expression));
+                    break;
 
-            (ParameterReference p1, ParameterReference p2) =>
-                string.Equals(p1.Name, p2.Name, StringComparison.OrdinalIgnoreCase)
-                && p1.ListIndex == p2.ListIndex && p1.ListCount == p2.ListCount,
+                case (ColumnReference c1, ColumnReference c2):
+                    if (!SameColumnName(c1.Name, c2.Name)) return false;
+                    break;
 
-            (LiteralExpression l1, LiteralExpression l2) =>
-                l1.Type == l2.Type && Equals(l1.Value?.ToString(), l2.Value?.ToString()),
+                case (ParameterReference p1, ParameterReference p2):
+                    if (!string.Equals(p1.Name, p2.Name, StringComparison.OrdinalIgnoreCase)
+                        || p1.ListIndex != p2.ListIndex || p1.ListCount != p2.ListCount)
+                        return false;
+                    break;
 
-            (BinaryExpression b1, BinaryExpression b2) =>
-                b1.Operator == b2.Operator &&
-                StructuralEquals(b1.Left, b2.Left) &&
-                StructuralEquals(b1.Right, b2.Right),
+                case (LiteralExpression l1, LiteralExpression l2):
+                    if (l1.Type != l2.Type || !Equals(l1.Value?.ToString(), l2.Value?.ToString()))
+                        return false;
+                    break;
 
-            (UnaryExpression u1, UnaryExpression u2) =>
-                u1.Operator == u2.Operator && StructuralEquals(u1.Operand, u2.Operand),
+                case (BinaryExpression b1, BinaryExpression b2):
+                    if (b1.Operator != b2.Operator) return false;
+                    stack.Push((b1.Right, b2.Right));
+                    stack.Push((b1.Left, b2.Left));
+                    break;
 
-            (BetweenExpression bt1, BetweenExpression bt2) =>
-                bt1.IsNotBetween == bt2.IsNotBetween &&
-                StructuralEquals(bt1.Operand, bt2.Operand) &&
-                StructuralEquals(bt1.Lower, bt2.Lower) &&
-                StructuralEquals(bt1.Upper, bt2.Upper),
+                case (UnaryExpression u1, UnaryExpression u2):
+                    if (u1.Operator != u2.Operator) return false;
+                    stack.Push((u1.Operand, u2.Operand));
+                    break;
 
-            _ => false
-        };
+                case (BetweenExpression bt1, BetweenExpression bt2):
+                    if (bt1.IsNotBetween != bt2.IsNotBetween) return false;
+                    stack.Push((bt1.Upper, bt2.Upper));
+                    stack.Push((bt1.Lower, bt2.Lower));
+                    stack.Push((bt1.Operand, bt2.Operand));
+                    break;
+
+                default:
+                    return false;
+            }
+        }
+
+        return true;
     }
 }

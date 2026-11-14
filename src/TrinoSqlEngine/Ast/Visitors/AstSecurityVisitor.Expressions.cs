@@ -19,35 +19,98 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     public override SqlNode VisitScalarSubqueryExpression(ScalarSubqueryExpression node) =>
         WithScope(SecurityScope.ScalarSubquery, () => base.VisitScalarSubqueryExpression(node));
 
-    private static bool ContainsColumnReference(Expression? expr)
+    private static bool ContainsColumnReference(Expression? root)
     {
-        if (expr == null) return false;
+        if (root == null) return false;
 
-        return expr switch
+        var stack = new Stack<Expression>();
+        stack.Push(root);
+        while (stack.Count > 0)
         {
-            ColumnReference => true,
-            BinaryExpression b => ContainsColumnReference(b.Left) || ContainsColumnReference(b.Right),
-            UnaryExpression u => ContainsColumnReference(u.Operand),
-            LikeExpression l => ContainsColumnReference(l.Operand) || ContainsColumnReference(l.Pattern) || (l.Escape != null && ContainsColumnReference(l.Escape)),
-            InListExpression inList => ContainsColumnReference(inList.Operand) || inList.Items.Any(ContainsColumnReference),
-            InSubqueryExpression inSq => ContainsColumnReference(inSq.Operand) || ContainsColumnReferenceInQuery(inSq.Subquery),
-            ExistsExpression ex => ContainsColumnReferenceInQuery(ex.Subquery),
-            ScalarSubqueryExpression sc => ContainsColumnReferenceInQuery(sc.Subquery),
-            BetweenExpression between => ContainsColumnReference(between.Operand) || ContainsColumnReference(between.Lower) || ContainsColumnReference(between.Upper),
-            CaseExpression caseExpr => (caseExpr.Operand != null && ContainsColumnReference(caseExpr.Operand)) ||
-                                       caseExpr.WhenClauses.Any(w => ContainsColumnReference(w.Condition) || ContainsColumnReference(w.Result)) ||
-                                       (caseExpr.ElseResult != null && ContainsColumnReference(caseExpr.ElseResult)),
-            FunctionCallExpression func => func.Arguments.Any(ContainsColumnReference),
-            SubstringExpression sub => ContainsColumnReference(sub.Source) || ContainsColumnReference(sub.Start) || (sub.Length != null && ContainsColumnReference(sub.Length)),
-            TrimExpression trim => ContainsColumnReference(trim.Source) || (trim.Characters != null && ContainsColumnReference(trim.Characters)),
-            PositionExpression pos => ContainsColumnReference(pos.Needle) || ContainsColumnReference(pos.Haystack),
-            CastExpression cast => ContainsColumnReference(cast.Operand),
-            DateFunctionExpression dateFunc => ContainsColumnReference(dateFunc.Source),
-            ExtractExpression extract => ContainsColumnReference(extract.Source),
-            IsDistinctFromExpression distinct => ContainsColumnReference(distinct.Left) || ContainsColumnReference(distinct.Right),
-            QuantifiedComparisonExpression quant => ContainsColumnReference(quant.Left) || ContainsColumnReferenceInQuery(quant.Subquery),
-            _ => false
-        };
+            switch (stack.Pop())
+            {
+                case ColumnReference:
+                    return true;
+                case ParenthesizedExpression p:
+                    stack.Push(p.Expression);
+                    break;
+                case BinaryExpression b:
+                    stack.Push(b.Right);
+                    stack.Push(b.Left);
+                    break;
+                case UnaryExpression u:
+                    stack.Push(u.Operand);
+                    break;
+                case LikeExpression l:
+                    if (l.Escape != null) stack.Push(l.Escape);
+                    stack.Push(l.Pattern);
+                    stack.Push(l.Operand);
+                    break;
+                case InListExpression inList:
+                    foreach (var item in inList.Items) stack.Push(item);
+                    stack.Push(inList.Operand);
+                    break;
+                case InSubqueryExpression inSq:
+                    if (ContainsColumnReferenceInQuery(inSq.Subquery)) return true;
+                    stack.Push(inSq.Operand);
+                    break;
+                case ExistsExpression ex:
+                    if (ContainsColumnReferenceInQuery(ex.Subquery)) return true;
+                    break;
+                case ScalarSubqueryExpression sc:
+                    if (ContainsColumnReferenceInQuery(sc.Subquery)) return true;
+                    break;
+                case BetweenExpression between:
+                    stack.Push(between.Upper);
+                    stack.Push(between.Lower);
+                    stack.Push(between.Operand);
+                    break;
+                case CaseExpression caseExpr:
+                    if (caseExpr.ElseResult != null) stack.Push(caseExpr.ElseResult);
+                    foreach (var w in caseExpr.WhenClauses)
+                    {
+                        stack.Push(w.Result);
+                        stack.Push(w.Condition);
+                    }
+                    if (caseExpr.Operand != null) stack.Push(caseExpr.Operand);
+                    break;
+                case FunctionCallExpression func:
+                    foreach (var arg in func.Arguments) stack.Push(arg);
+                    break;
+                case SubstringExpression sub:
+                    if (sub.Length != null) stack.Push(sub.Length);
+                    stack.Push(sub.Start);
+                    stack.Push(sub.Source);
+                    break;
+                case TrimExpression trim:
+                    if (trim.Characters != null) stack.Push(trim.Characters);
+                    stack.Push(trim.Source);
+                    break;
+                case PositionExpression pos:
+                    stack.Push(pos.Haystack);
+                    stack.Push(pos.Needle);
+                    break;
+                case CastExpression cast:
+                    stack.Push(cast.Operand);
+                    break;
+                case DateFunctionExpression dateFunc:
+                    stack.Push(dateFunc.Source);
+                    break;
+                case ExtractExpression extract:
+                    stack.Push(extract.Source);
+                    break;
+                case IsDistinctFromExpression distinct:
+                    stack.Push(distinct.Right);
+                    stack.Push(distinct.Left);
+                    break;
+                case QuantifiedComparisonExpression quant:
+                    if (ContainsColumnReferenceInQuery(quant.Subquery)) return true;
+                    stack.Push(quant.Left);
+                    break;
+            }
+        }
+
+        return false;
     }
 
     private static bool ContainsColumnReferenceInQuery(SelectStatement subquery)
@@ -100,9 +163,41 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             case UnaryExpression { Operator: UnaryOperator.Not } not:
                 return IsTriviallyTrue(not.Operand);
             case BinaryExpression { Operator: BinaryOperator.And } and:
-                return IsTriviallyFalse(and.Left) || IsTriviallyFalse(and.Right);
+            {
+                Expression cur = and;
+                var rights = new List<Expression>();
+                while (cur is BinaryExpression { Operator: BinaryOperator.And } a)
+                {
+                    rights.Add(a.Right);
+                    cur = a.Left;
+                }
+
+                if (IsTriviallyFalse(cur)) return true;
+                for (int i = rights.Count - 1; i >= 0; i--)
+                {
+                    if (IsTriviallyFalse(rights[i])) return true;
+                }
+
+                return false;
+            }
             case BinaryExpression { Operator: BinaryOperator.Or } or:
-                return IsTriviallyFalse(or.Left) && IsTriviallyFalse(or.Right);
+            {
+                Expression cur = or;
+                var rights = new List<Expression>();
+                while (cur is BinaryExpression { Operator: BinaryOperator.Or } o)
+                {
+                    rights.Add(o.Right);
+                    cur = o.Left;
+                }
+
+                if (!IsTriviallyFalse(cur)) return false;
+                for (int i = rights.Count - 1; i >= 0; i--)
+                {
+                    if (!IsTriviallyFalse(rights[i])) return false;
+                }
+
+                return true;
+            }
             case BinaryExpression { Left: LiteralExpression l, Right: LiteralExpression r } cmp
                 when TryCompareNumericLiterals(l, r, out int c):
                 return cmp.Operator switch
@@ -131,9 +226,47 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             case LiteralExpression lit when lit.Type == LiteralType.Boolean:
                 return true.Equals(lit.Value);
             case BinaryExpression b when b.Operator == BinaryOperator.Or:
-                return IsTriviallyTrue(b.Left) || IsTriviallyTrue(b.Right) || IsNullComplement(b.Left, b.Right);
+            {
+                if (b.Left is not BinaryExpression { Operator: BinaryOperator.Or })
+                {
+                    return IsTriviallyTrue(b.Left) || IsTriviallyTrue(b.Right) || IsNullComplement(b.Left, b.Right);
+                }
+
+                Expression cur = b;
+                var rights = new List<Expression>();
+                while (cur is BinaryExpression { Operator: BinaryOperator.Or } o)
+                {
+                    rights.Add(o.Right);
+                    cur = o.Left;
+                }
+
+                if (IsTriviallyTrue(cur)) return true;
+                for (int i = rights.Count - 1; i >= 0; i--)
+                {
+                    if (IsTriviallyTrue(rights[i])) return true;
+                    if (i == rights.Count - 1 && IsNullComplement(cur, rights[i])) return true;
+                }
+
+                return false;
+            }
             case BinaryExpression b when b.Operator == BinaryOperator.And:
-                return IsTriviallyTrue(b.Left) && IsTriviallyTrue(b.Right);
+            {
+                Expression cur = b;
+                var rights = new List<Expression>();
+                while (cur is BinaryExpression { Operator: BinaryOperator.And } a)
+                {
+                    rights.Add(a.Right);
+                    cur = a.Left;
+                }
+
+                if (!IsTriviallyTrue(cur)) return false;
+                for (int i = rights.Count - 1; i >= 0; i--)
+                {
+                    if (!IsTriviallyTrue(rights[i])) return false;
+                }
+
+                return true;
+            }
             case BinaryExpression b when b.Operator == BinaryOperator.Equal:
                 if (b.Left is LiteralExpression el1 && b.Right is LiteralExpression el2)
                 {

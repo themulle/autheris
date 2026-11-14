@@ -213,10 +213,42 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         switch (expr)
         {
             case BinaryExpression b when b.Operator == BinaryOperator.And:
-                return IsColumnConstrained(b.Left, target, scope, col) || IsColumnConstrained(b.Right, target, scope, col);
+            {
+                Expression cur = b;
+                var rights = new List<Expression>();
+                while (cur is BinaryExpression { Operator: BinaryOperator.And } a)
+                {
+                    rights.Add(a.Right);
+                    cur = a.Left;
+                }
+
+                if (IsColumnConstrained(cur, target, scope, col)) return true;
+                for (int i = rights.Count - 1; i >= 0; i--)
+                {
+                    if (IsColumnConstrained(rights[i], target, scope, col)) return true;
+                }
+
+                return false;
+            }
 
             case BinaryExpression b when b.Operator == BinaryOperator.Or:
-                return IsColumnConstrained(b.Left, target, scope, col) && IsColumnConstrained(b.Right, target, scope, col);
+            {
+                Expression cur = b;
+                var rights = new List<Expression>();
+                while (cur is BinaryExpression { Operator: BinaryOperator.Or } o)
+                {
+                    rights.Add(o.Right);
+                    cur = o.Left;
+                }
+
+                if (!IsColumnConstrained(cur, target, scope, col)) return false;
+                for (int i = rights.Count - 1; i >= 0; i--)
+                {
+                    if (!IsColumnConstrained(rights[i], target, scope, col)) return false;
+                }
+
+                return true;
+            }
 
             case BinaryExpression b when b.Operator is BinaryOperator.Equal
                                       or BinaryOperator.LessThan

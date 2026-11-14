@@ -254,6 +254,75 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void FormatBinaryExpression(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
     {
+        if (b.Left is not BinaryExpression)
+        {
+            if (TryAppendCanonicalConstant(ref builder, b, context))
+            {
+                return;
+            }
+
+            bool parensLeft = NeedsParentheses(b.Left, b.Operator, isLeft: true);
+            bool parensRight = NeedsParentheses(b.Right, b.Operator, isLeft: false);
+
+            if (parensLeft) builder.Append('(');
+            GenerateExpression(b.Left, ref builder, context);
+            if (parensLeft) builder.Append(')');
+
+            builder.Append(' ');
+            builder.Append(GetBinaryOperatorString(b.Operator));
+            builder.Append(' ');
+
+            if (parensRight) builder.Append('(');
+            GenerateExpression(b.Right, ref builder, context);
+            if (parensRight) builder.Append(')');
+            return;
+        }
+
+        var frames = new List<(BinaryExpression Node, bool ParensLeft, bool ParensRight)>();
+        Expression cur = b;
+        while (cur is BinaryExpression cb)
+        {
+            if (frames.Count > 0)
+            {
+                ExecutionStackGuard.Ensure();
+                context.Tick();
+            }
+
+            if (TryAppendCanonicalConstant(ref builder, cb, context))
+            {
+                cur = null!;
+                break;
+            }
+
+            bool parensLeft = NeedsParentheses(cb.Left, cb.Operator, isLeft: true);
+            bool parensRight = NeedsParentheses(cb.Right, cb.Operator, isLeft: false);
+            if (parensLeft) builder.Append('(');
+            frames.Add((cb, parensLeft, parensRight));
+            cur = cb.Left;
+        }
+
+        if (cur is not null)
+        {
+            GenerateExpression(cur, ref builder, context);
+        }
+
+        for (int i = frames.Count - 1; i >= 0; i--)
+        {
+            var (node, parensLeft, parensRight) = frames[i];
+            if (parensLeft) builder.Append(')');
+
+            builder.Append(' ');
+            builder.Append(GetBinaryOperatorString(node.Operator));
+            builder.Append(' ');
+
+            if (parensRight) builder.Append('(');
+            GenerateExpression(node.Right, ref builder, context);
+            if (parensRight) builder.Append(')');
+        }
+    }
+
+    private bool TryAppendCanonicalConstant(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
+    {
         // The canonical tautology and deny-all (1 = 1, 1 = 0) are the only constants emitted as text (plan 3.4).
         if (context.IsBound && BindLiterals && b.Operator == BinaryOperator.Equal &&
             b.Left is LiteralExpression { Type: LiteralType.Integer, Value: not null } left &&
@@ -262,23 +331,10 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             Convert.ToInt64(right.Value, CultureInfo.InvariantCulture) is 0 or 1)
         {
             AppendStructural(ref builder, context, Convert.ToInt64(right.Value, CultureInfo.InvariantCulture) == 1 ? "1 = 1" : "1 = 0");
-            return;
+            return true;
         }
 
-        bool parensLeft = NeedsParentheses(b.Left, b.Operator, isLeft: true);
-        bool parensRight = NeedsParentheses(b.Right, b.Operator, isLeft: false);
-
-        if (parensLeft) builder.Append('(');
-        GenerateExpression(b.Left, ref builder, context);
-        if (parensLeft) builder.Append(')');
-
-        builder.Append(' ');
-        builder.Append(GetBinaryOperatorString(b.Operator));
-        builder.Append(' ');
-
-        if (parensRight) builder.Append('(');
-        GenerateExpression(b.Right, ref builder, context);
-        if (parensRight) builder.Append(')');
+        return false;
     }
 
     private static readonly Regex SafeParamIdentifierRegex = new(

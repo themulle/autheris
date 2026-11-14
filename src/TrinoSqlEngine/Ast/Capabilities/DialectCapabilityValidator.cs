@@ -116,13 +116,25 @@ public static class DialectCapabilityValidator
         public int Value { get; set; }
     }
 
-    private static void DeepestExpression(object? node, int depth, DepthHolder seen)
+    private static void DeepestExpression(object? root, int initialDepth, DepthHolder seen)
     {
-        if (node is null or string) return;
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (node is Expression) depth++;
-        if (depth > seen.Value) seen.Value = depth;
-        AstReflection.Children(node, (depth, seen), static (child, state) => DeepestExpression(child, state.depth, state.seen));
+        if (root is null or string) return;
+        var stack = new Stack<(object Node, int Depth)>();
+        stack.Push((root, initialDepth));
+        while (stack.Count > 0)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            var (node, depth) = stack.Pop();
+            if (node is Expression) depth++;
+            if (depth > seen.Value) seen.Value = depth;
+            AstReflection.Children(node, (depth, stack), static (child, state) =>
+            {
+                if (child is not string)
+                {
+                    state.stack.Push((child, state.depth));
+                }
+            });
+        }
     }
 
     private static void ValidateSingleClauseMerge(MergeStatement merge)
