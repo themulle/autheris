@@ -252,6 +252,30 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
     }
 
+    protected virtual bool RequiresCustomBinaryFormat(BinaryExpression b) => false;
+
+    protected void FormatStandardBinary(
+        ref ValueStringBuilder builder,
+        BinaryExpression b,
+        SqlEmitterContext context,
+        string? operatorOverride = null)
+    {
+        bool parensLeft = NeedsParentheses(b.Left, b.Operator, isLeft: true);
+        bool parensRight = NeedsParentheses(b.Right, b.Operator, isLeft: false);
+
+        if (parensLeft) builder.Append('(');
+        GenerateExpression(b.Left, ref builder, context);
+        if (parensLeft) builder.Append(')');
+
+        builder.Append(' ');
+        builder.Append(operatorOverride ?? GetBinaryOperatorString(b.Operator));
+        builder.Append(' ');
+
+        if (parensRight) builder.Append('(');
+        GenerateExpression(b.Right, ref builder, context);
+        if (parensRight) builder.Append(')');
+    }
+
     protected virtual void FormatBinaryExpression(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
     {
         if (b.Left is not BinaryExpression)
@@ -261,26 +285,13 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 return;
             }
 
-            bool parensLeft = NeedsParentheses(b.Left, b.Operator, isLeft: true);
-            bool parensRight = NeedsParentheses(b.Right, b.Operator, isLeft: false);
-
-            if (parensLeft) builder.Append('(');
-            GenerateExpression(b.Left, ref builder, context);
-            if (parensLeft) builder.Append(')');
-
-            builder.Append(' ');
-            builder.Append(GetBinaryOperatorString(b.Operator));
-            builder.Append(' ');
-
-            if (parensRight) builder.Append('(');
-            GenerateExpression(b.Right, ref builder, context);
-            if (parensRight) builder.Append(')');
+            FormatStandardBinary(ref builder, b, context);
             return;
         }
 
         var frames = new List<(BinaryExpression Node, bool ParensLeft, bool ParensRight)>();
         Expression cur = b;
-        while (cur is BinaryExpression cb)
+        while (cur is BinaryExpression cb && !RequiresCustomBinaryFormat(cb))
         {
             if (frames.Count > 0)
             {

@@ -222,6 +222,20 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
         base.GenerateExpression(expression, ref builder, context);
     }
 
+    protected override bool RequiresCustomBinaryFormat(BinaryExpression b) =>
+        b.Operator == BinaryOperator.Divide && b.IsIntegralDivision;
+
+    protected override void FormatBinaryExpression(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
+    {
+        if (b.Operator == BinaryOperator.Divide && b.IsIntegralDivision)
+        {
+            FormatStandardBinary(ref builder, b, context, "DIV");
+            return;
+        }
+
+        base.FormatBinaryExpression(ref builder, b, context);
+    }
+
     // ---- typed column masks ----
 
     private static readonly Regex NativeTypeRegex = new(

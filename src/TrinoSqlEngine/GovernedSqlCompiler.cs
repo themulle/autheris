@@ -211,6 +211,7 @@ internal sealed class GovernedSqlCompiler
         // 6. typed security injection; user literals first learn the catalog type of the column they are compared with (16 item 2)
         Pass("inject");
         var typedLiterals = (SqlStatement)new LiteralColumnTypeAnnotator(policy.Catalog) { CancellationToken = token }.Visit(simplified);
+        typedLiterals = (SqlStatement)new IntegralOperandClassifier(policy.Catalog) { CancellationToken = token }.Visit(typedLiterals);
         var visitor = new AstSecurityVisitor(BuildOptions(request, typed), typed)
         {
             CancellationToken = token
@@ -258,6 +259,13 @@ internal sealed class GovernedSqlCompiler
         if (emitted > limit)
         {
             throw new SqlLimitExceededException(SqlLimitKind.PolicyExpansionFactor, request.TargetDialect, compiled.Sql.Length, limit);
+        }
+
+        // Enforce an absolute emitted length ceiling proportional to the engine query cap so dialect function wrappers cannot amplify unboundedly.
+        long hardCap = 4L * _engine.MaxQueryLength;
+        if (compiled.Sql.Length > hardCap)
+        {
+            throw new SqlLimitExceededException(SqlLimitKind.EmittedSqlLength, request.TargetDialect, compiled.Sql.Length, hardCap);
         }
 
         CheckBudget(request, clock, token);
