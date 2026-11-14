@@ -363,13 +363,9 @@ query GetGdprDisclosure {
 
 ---
 
-## 10. Casbin removal gate
+## 10. Authorization model
 
-Casbin is not part of Autheris (ADR-020): data access is granted only by grant records (consents), column rules and virtual filters. The CI gate `tools/casbin-policy-lint` fails when the repository contains a Casbin model (`.conf` with a `[request_definition]` section) or a Casbin policy file:
-
-```bash
-dotnet run --project tools/casbin-policy-lint/casbin-policy-lint.csproj -- .
-```
+Casbin is not part of Autheris (ADR-020): data access is granted only by grant records (consents), column rules and virtual filters. All legacy Casbin models and policies have been removed from the repository.
 
 ---
 
