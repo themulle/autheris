@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using Autheris.Application.Analytics;
 using Autheris.Application.DataSources.Services;
 using Autheris.Application.Common.Interfaces;
@@ -47,9 +48,43 @@ public static class TreeFilterClauseBuilder
             identity.Parameters,
             referenced.Distinct(StringComparer.OrdinalIgnoreCase).ToList())
         {
+            ConstrainedColumns = ExtractConstrainedColumns(normalized).ToList(),
             TrinoSqlFactory = resolve => TreeFilterRenderer.Render(normalized, new BuilderTarget(resolve, alwaysEmitLikeEscape: true))
         };
     }
+
+    internal static HashSet<string> ExtractConstrainedColumns(TreeFilter? filter)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        switch (filter)
+        {
+            case TreeComparison comp when ComparisonRestrictsRows(comp):
+                result.Add(comp.Column);
+                break;
+            case TreeAndFilter and:
+                foreach (var item in and.Items)
+                    result.UnionWith(ExtractConstrainedColumns(item));
+                break;
+            case TreeOrFilter { Items.Count: > 0 } or:
+                var common = ExtractConstrainedColumns(or.Items[0]);
+                for (int i = 1; i < or.Items.Count && common.Count > 0; i++)
+                    common.IntersectWith(ExtractConstrainedColumns(or.Items[i]));
+                result.UnionWith(common);
+                break;
+        }
+        return result;
+    }
+
+    private static bool ComparisonRestrictsRows(TreeComparison comp) =>
+        !comp.BindNullOperand && comp.Operator switch
+        {
+            TreeFilterOperator.Eq or TreeFilterOperator.Gt or TreeFilterOperator.Gte
+                or TreeFilterOperator.Lt or TreeFilterOperator.Lte => comp.Value is not null,
+            TreeFilterOperator.In => comp.Value is not string
+                && comp.Value is System.Collections.IEnumerable list
+                && list.Cast<object?>().Any(static item => item is not null),
+            _ => false
+        };
 
     private static TreeFilter Normalize(TreeFilter filter, Func<string, ColumnRef?> resolve, List<string> referenced, int depth, ref int leaves)
     {

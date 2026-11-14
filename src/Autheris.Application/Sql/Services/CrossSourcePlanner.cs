@@ -139,7 +139,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
             var t = tables[i];
             var dec = tableDecisions[i];
-            if (!RequiredFiltersSatisfied(t, dec, clientFilterColumns: null))
+            if (!RequiredFiltersSatisfied(t, dec, clientConstrainedColumns: null))
             {
                 // PARITY-GAP-017: a pushed column predicate satisfies the rule too; a single staged table is judged again once its pushdown
                 // filter exists (below), every other table (subtree member) is rejected right after the partition. Never skipped.
@@ -538,13 +538,13 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
     private static TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException RequiredFilterMissing() => new();
 
-    /// <summary>MISC-04: every required filter column is satisfied by the decision or by <paramref name="clientFilterColumns"/> (shared whole-identifier rule).</summary>
-    private static bool RequiredFiltersSatisfied(ResolvedSourceTable t, TableAccessDecision dec, IEnumerable<string>? clientFilterColumns)
+    /// <summary>MISC-04: every required filter column is satisfied by the decision or by <paramref name="clientConstrainedColumns"/>.</summary>
+    private static bool RequiredFiltersSatisfied(ResolvedSourceTable t, TableAccessDecision dec, IEnumerable<string>? clientConstrainedColumns)
     {
         foreach (var reqCol in t.Metadata.RequiredFilterColumns)
         {
             if (!Autheris.Application.DataSources.Services.RequiredFilterColumnRule.IsColumnSatisfied(
-                    reqCol, t.Metadata, dec, clientFilterColumns, tenantColumnCounts: true))
+                    reqCol, t.Metadata, dec, clientConstrainedColumns, tenantColumnCounts: true))
             {
                 return false;
             }

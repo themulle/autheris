@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Sql;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using Autheris.Application.Sql.Errors;
@@ -257,6 +258,65 @@ public sealed class AstSecurityVisitorRequiredFilterTests
         Assert.Equal(400, mapping.Status);
         Assert.Equal("REQUIRED_FILTER_COLUMN_MISSING", mapping.Code);
         Assert.Equal("A required filter column was not constrained by the query or an active row policy.", mapping.Title);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("SELECT id FROM orders WHERE region LIKE '%'")]
+    [InlineData("SELECT id FROM orders WHERE region IS NULL")]
+    [InlineData("SELECT id FROM orders WHERE region = NULL")]
+    [InlineData("SELECT id FROM orders WHERE region = CAST(NULL AS varchar)")]
+    [InlineData("SELECT id FROM orders WHERE region BETWEEN NULL AND 'Z'")]
+    [InlineData("SELECT id FROM orders WHERE region BETWEEN 'A' AND NULL")]
+    [InlineData("SELECT id FROM orders WHERE region IN (NULL)")]
+    [InlineData("SELECT id FROM orders WHERE lower(region) = 'eu'")]
+    [InlineData("SELECT id FROM orders WHERE region = status")]
+    public void WeakOrNullComparisons_DoNotSatisfy_RequiredFilter(string sql)
+    {
+        var catalog = CreateCatalog("region");
+        var request = CreateRequest(catalog);
+        var engine = new FastSqlEngine();
+
+        Assert.Throws<RequiredFilterColumnMissingException>(() =>
+            engine.Compile(sql.AsMemory(), request, default));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Dml_UpdateAndDelete_RequireConstrainingFilterOnRequiredColumn()
+    {
+        var catalog = CreateCatalog("region");
+        var baseUpdateReq = CreateRequest(catalog);
+        var updateReq = baseUpdateReq with
+        {
+            Policy = baseUpdateReq.Policy with
+            {
+                Write = new DmlWritePermit(
+                    DmlWriteOperation.Update,
+                    new HashSet<string>(["status"], StringComparer.OrdinalIgnoreCase),
+                    FrozenSet<string>.Empty)
+            }
+        };
+        var baseDeleteReq = CreateRequest(catalog);
+        var deleteReq = baseDeleteReq with
+        {
+            Policy = baseDeleteReq.Policy with
+            {
+                Write = new DmlWritePermit(
+                    DmlWriteOperation.Delete,
+                    new HashSet<string>(["status"], StringComparer.OrdinalIgnoreCase),
+                    FrozenSet<string>.Empty)
+            }
+        };
+        var engine = new FastSqlEngine();
+
+        Assert.Throws<RequiredFilterColumnMissingException>(() =>
+            engine.Compile("UPDATE dbo.orders SET status = 'shipped' WHERE region LIKE '%'".AsMemory(), updateReq, default));
+        Assert.Throws<RequiredFilterColumnMissingException>(() =>
+            engine.Compile("DELETE FROM dbo.orders WHERE region IS NULL".AsMemory(), deleteReq, default));
+
+        Assert.NotNull(engine.Compile("UPDATE dbo.orders SET status = 'shipped' WHERE region = 'EU'".AsMemory(), updateReq, default));
+        Assert.NotNull(engine.Compile("DELETE FROM dbo.orders WHERE region = 'EU'".AsMemory(), deleteReq, default));
     }
 
     private sealed class LocalDictPolicyProvider : IPolicyPredicateProvider

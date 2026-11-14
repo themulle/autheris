@@ -65,6 +65,7 @@ public static class ODataFilterParser
             Parameters: paramCtx.Parameters,
             ReferencedColumns: distinctCols)
         {
+            ConstrainedColumns = CollectConstrainedColumns(ast).ToList(),
             DialectSqlFactory = SqlBuilder,
             TrinoSqlFactory = TrinoBuilder
         };
@@ -922,6 +923,47 @@ public static class ODataFilterParser
             }
         }
     }
+
+    private static HashSet<string> CollectConstrainedColumns(AstNode node)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        switch (node)
+        {
+            case GroupingNode g:
+                return CollectConstrainedColumns(g.Inner);
+            case BinaryOpNode b when b.Op.Equals("and", StringComparison.OrdinalIgnoreCase):
+                result.UnionWith(CollectConstrainedColumns(b.Left));
+                result.UnionWith(CollectConstrainedColumns(b.Right));
+                break;
+            case BinaryOpNode b when b.Op.Equals("or", StringComparison.OrdinalIgnoreCase):
+                result.UnionWith(CollectConstrainedColumns(b.Left));
+                result.IntersectWith(CollectConstrainedColumns(b.Right));
+                break;
+            case BinaryOpNode b when IsStrictComparison(b.Op):
+                if (UnwrapColumnName(b.Left) is { } lCol && IsNonNullLiteral(b.Right)) result.Add(lCol);
+                else if (UnwrapColumnName(b.Right) is { } rCol && IsNonNullLiteral(b.Left)) result.Add(rCol);
+                break;
+            case ChainNode c when c.Op.Equals("and", StringComparison.OrdinalIgnoreCase):
+                foreach (var op in c.Operands) result.UnionWith(CollectConstrainedColumns(op));
+                break;
+            case ChainNode c when c.Op.Equals("or", StringComparison.OrdinalIgnoreCase) && c.Operands.Count > 0:
+                result.UnionWith(CollectConstrainedColumns(c.Operands[0]));
+                for (int i = 1; i < c.Operands.Count && result.Count > 0; i++) result.IntersectWith(CollectConstrainedColumns(c.Operands[i]));
+                break;
+        }
+        return result;
+    }
+
+    private static bool IsStrictComparison(string op) =>
+        op.Equals("eq", StringComparison.OrdinalIgnoreCase) || op.Equals("gt", StringComparison.OrdinalIgnoreCase)
+        || op.Equals("ge", StringComparison.OrdinalIgnoreCase) || op.Equals("lt", StringComparison.OrdinalIgnoreCase)
+        || op.Equals("le", StringComparison.OrdinalIgnoreCase);
+
+    private static string? UnwrapColumnName(AstNode node) =>
+        node is GroupingNode g ? UnwrapColumnName(g.Inner) : node is ColumnNode col ? col.Name : null;
+
+    private static bool IsNonNullLiteral(AstNode node) =>
+        node is GroupingNode g ? IsNonNullLiteral(g.Inner) : node is LiteralNode { Value: not null };
 
     #endregion
 }

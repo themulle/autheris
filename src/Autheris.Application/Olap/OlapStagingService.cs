@@ -663,7 +663,7 @@ public sealed class OlapStagingService(
         // counts; only the tenant column, the typed row policy and whole identifiers of the decision's row filter do.
         try
         {
-            Autheris.Application.DataSources.Services.RequiredFilterColumnRule.Enforce(meta, decision, clientFilterColumns: null, tenantColumnCounts: true);
+            Autheris.Application.DataSources.Services.RequiredFilterColumnRule.Enforce(meta, decision, clientConstrainedColumns: null, tenantColumnCounts: true);
         }
         catch (TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException ex)
         {

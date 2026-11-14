@@ -102,6 +102,7 @@ public static class KeySetClauseBuilder
             combinedParams,
             combinedCols)
         {
+            ConstrainedColumns = existing.ConstrainedColumns,
             TrinoSqlFactory = CombinedTrinoSql,
             PushdownPredicates = combinedPreds
         };

@@ -53,6 +53,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         RejectMaskedReads(masked, targetNames, node.Where);
         RejectUnsupportedSubquery(node.Where);
         EnsureFilteredDml(node.Where, "DELETE");
+        EnsureDmlRequiredFiltersSatisfied(node.TargetTable, entry, node.Where);
         var where = node.Where != null ? (Expression)WithScope(SecurityScope.DmlSource, () => Visit(node.Where)) : null;
         var combined = AndInjected(where, BuildTargetPredicates(entry, SecurityScope.DmlTarget, null));
         return new DeleteStatement(new NamedTableSource(entry.Identity.ToQualifiedName(), null), combined);
@@ -79,6 +80,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         RejectMaskedReads(masked, targetNames, node.Where);
         RejectUnsupportedSubquery(node.Where);
         EnsureFilteredDml(node.Where, "UPDATE");
+        EnsureDmlRequiredFiltersSatisfied(node.TargetTable, entry, node.Where);
         var where = node.Where != null ? (Expression)WithScope(SecurityScope.DmlSource, () => Visit(node.Where)) : null;
         var combined = AndInjected(where, BuildTargetPredicates(entry, SecurityScope.DmlTarget, null));
         return new UpdateStatement(new NamedTableSource(entry.Identity.ToQualifiedName(), null), assignments, combined);

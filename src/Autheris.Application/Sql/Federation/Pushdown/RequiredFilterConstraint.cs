@@ -13,9 +13,10 @@ using TrinoSqlEngine.Ast.Visitors;
 /// <summary>
 ///  review (SEC): which columns of a federated table a set of pushed conjuncts really constrain. Mirrors the single-source rule
 /// (<c>AstSecurityVisitor.RequiredFilters.IsColumnConstrained</c>) exactly: a top-level conjunct <c>column op value</c> (=, &lt;, &lt;=, &gt;,
-/// &gt;=), BETWEEN, IN (list), LIKE and IS NULL with no column reference on the other side; OR only when every branch constrains the column;
-/// never <c>&lt;&gt;</c>, NOT, <c>col = col</c>, IS NOT NULL or a subquery; a column reference that more than one table of the query could
-/// satisfy (unqualified, or a qualifier shared by two tables) is unconstrained. Merely mentioning a column in a pushed predicate never counts.
+/// &gt;=), BETWEEN, or non-empty IN (list) with non-null non-column operands; OR only when every branch constrains the column;
+/// never <c>&lt;&gt;</c>, NOT, <c>LIKE</c>, <c>IS NULL</c>, <c>col = NULL</c>, <c>col = col</c>, IS NOT NULL or a subquery; a column reference
+/// that more than one table of the query could satisfy (unqualified, or a qualifier shared by two tables) is unconstrained.
+/// Merely mentioning a column in a pushed predicate never counts.
 /// </summary>
 public static class RequiredFilterConstraint
 {
@@ -94,19 +95,18 @@ public static class RequiredFilterConstraint
 
             case BinaryExpression b when b.Operator is BinaryOperator.Equal or BinaryOperator.LessThan or BinaryOperator.LessThanOrEqual
                                       or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual:
-                return (Match(b.Left) && !ReadsColumns(b.Right)) || (Match(b.Right) && !ReadsColumns(b.Left));
+                return (Match(b.Left) && !ReadsColumns(b.Right) && !AstSecurityVisitor.IsNullLiteral(b.Right)) ||
+                       (Match(b.Right) && !ReadsColumns(b.Left) && !AstSecurityVisitor.IsNullLiteral(b.Left));
 
             case BetweenExpression bt when !bt.IsNotBetween:
-                return Match(bt.Operand) && !ReadsColumns(bt.Lower) && !ReadsColumns(bt.Upper);
+                return Match(bt.Operand) &&
+                       !ReadsColumns(bt.Lower) && !AstSecurityVisitor.IsNullLiteral(bt.Lower) &&
+                       !ReadsColumns(bt.Upper) && !AstSecurityVisitor.IsNullLiteral(bt.Upper);
 
             case InListExpression inList when !inList.IsNotIn && inList.Items.Count > 0:
-                return Match(inList.Operand) && !inList.Items.Any(ReadsColumns);
-
-            case LikeExpression lk when !lk.IsNotLike:
-                return Match(lk.Operand) && !ReadsColumns(lk.Pattern) && (lk.Escape == null || !ReadsColumns(lk.Escape));
-
-            case UnaryExpression u when u.Operator == UnaryOperator.IsNull:
-                return Match(u.Operand);
+                return Match(inList.Operand) &&
+                       !inList.Items.Any(ReadsColumns) &&
+                       inList.Items.Any(static item => !AstSecurityVisitor.IsNullLiteral(item));
 
             default:
                 return false;

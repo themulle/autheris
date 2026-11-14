@@ -66,14 +66,20 @@ public sealed class Issues236And237GovernanceHotfixTests
         var decision = TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
 
         // Group 1 satisfied ("customer_id")
-        var filter1 = TableFilterClause.FromTrinoText("customer_id = 'corp'", ["customer_id"]);
+        var filter1 = TableFilterClause.FromTrinoText("customer_id = 'corp'", ["customer_id"]) with
+        {
+            ConstrainedColumns = ["customer_id"]
+        };
         var intent1 = new TableReadIntent(metadata.Identifier, ["id"], filter1, null, 10, 0, "Rest");
         var plan1 = planner.Plan(intent1, metadata, decision);
         plan1.ShouldNotBeNull();
         plan1.Sql.ShouldContain("FROM");
 
         // Group 2 satisfied ("region" AND "event_date")
-        var filter2 = TableFilterClause.FromTrinoText("region = 'us-east' AND event_date = '2026-10-19'", ["region", "event_date"]);
+        var filter2 = TableFilterClause.FromTrinoText("region = 'us-east' AND event_date = '2026-10-19'", ["region", "event_date"]) with
+        {
+            ConstrainedColumns = ["region", "event_date"]
+        };
         var intent2 = new TableReadIntent(metadata.Identifier, ["id"], filter2, null, 10, 0, "Rest");
         var plan2 = planner.Plan(intent2, metadata, decision);
         plan2.ShouldNotBeNull();
@@ -88,7 +94,10 @@ public sealed class Issues236And237GovernanceHotfixTests
         var decision = TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
 
         // Only "region" provided, but "event_date" is missing
-        var filter = TableFilterClause.FromTrinoText("region = 'us-east'", ["region"]);
+        var filter = TableFilterClause.FromTrinoText("region = 'us-east'", ["region"]) with
+        {
+            ConstrainedColumns = ["region"]
+        };
         var intent = new TableReadIntent(metadata.Identifier, ["id"], filter, null, 10, 0, "Rest");
 
         Should.Throw<RequiredFilterColumnMissingException>(() => planner.Plan(intent, metadata, decision));
@@ -105,7 +114,10 @@ public sealed class Issues236And237GovernanceHotfixTests
         var planner = new GovernedTableReadPlanner();
         var decision = TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
 
-        var filter = TableFilterClause.FromTrinoText("customer_id = 'corp'", ["customer_id"]);
+        var filter = TableFilterClause.FromTrinoText("customer_id = 'corp'", ["customer_id"]) with
+        {
+            ConstrainedColumns = ["customer_id"]
+        };
         var intent = new TableAggregateIntent(
             metadata.Identifier,
             GroupBy: ["region"],
