@@ -29,7 +29,6 @@ Beim Hochfahren des Hosts (`Program.cs`) führt `GatewayServiceCollectionExtensi
 | **NF-SEC-04** | Außerhalb von Development: BasicAuth Benutzer müssen zwingend das gesalzene PBKDF2-Format (`$pbkdf2$...`) verwenden | Klartext- und ungesalzene SHA-256-Passwörter sind in Staging/Produktion verboten und werden zur Laufzeit mit `401 Unauthorized` abgewiesen. |
 | **R-DEP-2** | Outside Development: Secret keys (`DataMasking.HmacSecretKeyVaultRef`, `GovernanceDb.AuditHmacKeyVaultRef`, `Authentication.ForwardAuth.SharedSecret`) must be at least 32 bytes in UTF-8 representation | Cryptographic keys shorter than 32 UTF-8 bytes are rejected fail-closed during startup validation. |
 | **R-API-1** | Outside Development: all `DANGER:` bypass flags strictly prohibited; ITSM webhooks are verified with per-instance secrets only | Any `DANGER:` flag causes an immediate `ValidationException` process startup crash outside `Development`. |
-| **F-6 / POL-1** | When `Casbin:Enabled = true`: `Casbin:ModelPath` and `Casbin:PolicyPath` are mandatory and must satisfy `CasbinModelContract` | Missing configuration or failure of mandatory probes (M1–M8) or wildcard safety probes (W2–W6) causes immediate startup failure. |
 
 > [!IMPORTANT]
 > **Secret Key Format and Requirements (R-DEP-2 & Arch 6)**:
@@ -866,7 +865,7 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 
 Der Server arbeitet zustandslos: Jede Anfrage wird mit der Identität ihrer eigenen HTTP-Anfrage ausgeführt, es gibt keine MCP-Sitzungen und keinen alten SSE-Transport (`/mcp/sse`, `/mcp/message`) mehr. Sind Entra ID oder AD FS aktiviert, veröffentlicht das Gateway unter `/.well-known/oauth-protected-resource<EndpointPath>` die OAuth-Metadaten (RFC 9728) mit diesen Ausstellern als Autorisierungsserver; 401-Antworten des MCP-Endpunkts verweisen per `WWW-Authenticate: Bearer resource_metadata=…` darauf. MCP-Clients finden so ohne weitere Konfiguration heraus, wo sie ein Token bekommen.
 
-Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `sample_rows` ([F-AI-11](features/f-ai-11-mcp-dataset-tools.md)) sind immer registriert und brauchen keinen Eintrag in `AllowedOperations`. Agenten fragen Daten bevorzugt mit `query_graphql` ab. Ist `Casbin:Enabled` gesetzt, prüft Casbin die MCP-Tools zusätzlich: `list_datasets` auf dem Objekt `governance.catalog.datasets`, `describe_dataset` und `sample_rows` auf der angefragten Tabelle, `query_graphql` auf jeder Tabelle der Abfrage. Ohne aktives Casbin entfällt diese Prüfung; Consent, Zeilenfilter und Maskierung gelten in jedem Fall.
+Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `sample_rows` ([F-AI-11](features/f-ai-11-mcp-dataset-tools.md)) sind immer registriert und brauchen keinen Eintrag in `AllowedOperations`. Agenten fragen Daten bevorzugt mit `query_graphql` ab. Jedes MCP-Tool wird vom Access Decision Point entschieden; Consent, Zeilenfilter und Maskierung gelten in jedem Fall.
 
 ```json
 "Mcp": {
@@ -934,71 +933,6 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 | `WebSql:CrossSource:AllowNonEquiJoins` | `bool` | `true \| false` | `false` | Permits cross joins and non-equi joins in cross-source statements (SQL federation and OLAP). |
 
 `WebSql:CrossSource:MaxMemory` and `WebSql:CrossSource:MaxTempDirectorySize` were removed; they never had an effect. Use `DuckDbOlap:MaxMemory` and `DuckDbOlap:MaxTempDirectorySize`. A start-up warning is logged when the old keys are still present. Non-positive limits, an unparsable `DuckDbOlap:MaxMemory` or `MaxTempDirectorySize`, `MaxConcurrentQueries` or `MaxConcurrentQueriesPerTenant` below 1, and `MaxThreads` outside `1 .. 8` abort the start.
-
-### 2.18 `Casbin` (ABAC/RBAC Policy Engine & Model-Contract)
-
-Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-Security-Regeln (ABAC/RBAC). Richtlinien und Modell können als Dateien hinterlegt oder mit dem integrierten Standardmodell betrieben werden.
-
-| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
-| :--- | :--- | :--- | :--- | :--- |
-| `Casbin:Enabled` | `bool` | `true \| false` | `false` | Aktiviert das Casbin-Enforcement im Gateway. Standard ist `false`. |
-| `Casbin:ModelPath` | `string?` | Dateipfad | `null` | Pfad zur Casbin-Modell-Datei (`.conf`). **Mandatory whenever `Casbin:Enabled = true`**. Wird gegen den Model Contract validiert, sobald gesetzt (auch wenn `Enabled = false`). |
-| `Casbin:PolicyPath` | `string?` | Dateipfad | `null` | Pfad zur globalen Casbin-Policy-Datei (`.csv`). Mandatory when `Casbin:Enabled = true`; must exist, not be empty, and contain at least one valid `p` rule. |
-| `Casbin:WatchPolicyFile` | `bool` | `true \| false` | `true` | Überwacht die Policy-Datei auf Änderungen zur Laufzeit (Hot Reload). |
-
-```json
-"Casbin": {
-  "Enabled": true,
-  "ModelPath": "config/casbin-model.conf",
-  "PolicyPath": "config/casbin-policy.csv",
-  "WatchPolicyFile": true
-}
-```
-
-#### `Casbin:DecisionCache` (Decision Cache & Policy Epoch)
-
-| Key | Type | Range | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `Capacity` | `int` | `100 .. 1000000` | `100000` | Maximum cached decisions per node (sharded LRU). |
-| `ShareAcrossUsers` | `bool` | `true \| false` | `true` | Users matching exactly the same rules share one decision when no candidate rule reads a user-specific input; never for delegated sources. `false` is the kill switch (every decision keyed by user; restart required). |
-| `TtlSeconds` | `int` | `1 .. 3600` | `60` | Maximum age of a cached decision. |
-| `EpochCheckSeconds` | `int` | `1 .. TtlSeconds` | `5` | Interval of cluster policy epoch reads per tenant. |
-| `UnavailableBackoffMilliseconds` | `int` | `100 .. 10000` | `1000` | Cache bypass after a failed epoch read. |
-
-Details: see [Operations Runbook](operations-runbook.md).
-
-#### Startup Validation & Model Contract (Probes M1–M8, W1–W6)
-
-To prevent security vulnerabilities from model misconfigurations (such as syntax errors, parentheses/operator precedence bugs like `g(r.sub, p.sub) && r.tenant == p.tenant || p.tenant == "*"` bypassing subject and object checks, or missing `sub_rule` evaluation), the gateway validates Casbin models **by behavior on an isolated throw-away enforcer** rather than superficial text matching (`CasbinModelContract.Verify`):
-
-1. **Mandatory Probes (M1–M8)**:
-   - **M1: Basic allow and arity of r and p** – Validates that a standard allow rule authorizes matching `(sub, tenant, obj, act)` requests and confirms that `r` and `p` parameter arity align.
-   - **M2: Tenant separation** – Ensures a rule defined for `TenantA` never grants access to `TenantB`.
-   - **M3: Subject check** – Ensures a rule defined for `UserA` never grants access to `UserB`.
-   - **M4: Object check** – Ensures a rule defined for `Obj` never grants access to `OtherObj`.
-   - **M5: Deny overrides allow (policy_effect: deny wins)** – Validates that `policy_effect` enforces deny-overrides-allow when matching allow and deny rules coincide.
-   - **M6: `sub_rule` evaluation (`eval(p.sub_rule)`)** – Validates dynamic evaluation of ABAC expressions (e.g. `eval(p.sub_rule)` evaluating to false rejects access).
-   - **M7: Role resolution via `g(r.sub, p.sub)`** – Confirms RBAC role inheritance resolves permissions granted to roles via grouping rules `g`.
-   - **M8: Role does not grant access to unauthorized users** – Verifies that role-based permissions do not leak to non-member users.
-
-2. **Wildcard Tenant Probes (W1 capability, W2–W6 safety when W1 is true)**:
-   - **W1: Wildcard tenant capability** – Tests whether a rule with tenant `*` matches a specific tenant request. If true, `SupportsWildcardTenant` is set to `true`. If false, wildcard tenant rules are disallowed.
-   - **W2: `*` does not bypass subject check** – Verifies that a wildcard tenant rule does not authorize unauthorized subjects (guards against operator precedence / parentheses bugs).
-   - **W3: `*` does not bypass object check** – Verifies that a wildcard tenant rule does not authorize access to unauthorized objects.
-   - **W4: Tenant-specific deny overrides `*` allow** – Ensures that a tenant-specific deny rule overrides a global `*` allow rule.
-   - **W5: Global `*` deny overrides tenant-specific allow** – Confirms that a global `*` deny rule overrides a tenant-specific allow rule (deny wins across files).
-   - **W6: Request with tenant `*` does not match tenant-specific rules** – Ensures that an incoming request specifying tenant `*` cannot match tenant-specific policy rules.
-
-If any mandatory probe (M1–M8) or, when W1 is supported, any wildcard safety probe (W2–W6) fails, process startup immediately aborts fail-fast with a `ValidationException` (wrapping `CasbinModelValidationException`).
-
-#### Policy Semantics & Tenant Policy Invariants
-
-- **Global Wildcard (`*`) Scope**: Rules defined with tenant `*` in the global policy file apply across all tenants.
-- **Cross-File Deny Precedence**: Deny decisions take precedence file-wide and across files. If any rule (global wildcard or tenant-specific) produces a deny effect, the access is rejected regardless of allows in other files.
-- **Tenant Policy File Requirement (F-1)**: Each tenant policy file must contain at least one valid `p` rule. Files containing only comments, whitespace, or grouping-only rules without `p` rules are rejected fail-closed.
-- **Empty Tenant Policy File Rejection (E-6)**: An empty tenant policy file is rejected whenever global `*` rules are active. The gateway preserves the last-known-good policy set to prevent fail-open wildcard inheritance.
-
----
 
 ### 2.19 `WebSql` (Governed SQL & Trino REST Protocol)
 

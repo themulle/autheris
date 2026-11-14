@@ -1,10 +1,9 @@
 namespace Autheris.Application.Sql.Policy.RowFilterKeySets;
 
-/// <summary>Origin of a correlated filter site: a consent row filter (rule-level settings) or a Casbin rule (object and global settings only).</summary>
+/// <summary>Origin of a correlated filter site: a consent row filter (rule-level settings).</summary>
 public enum CorrelatedFilterSource
 {
-    Consent,
-    Casbin
+    Consent
 }
 
 /// <summary>

@@ -41,7 +41,7 @@ Virtual filters define reusable filter predicates independently of target tables
 ┌────────────────────────────────────────────────────────────────────────┐
 │ TableAccessPolicy.DecideAsync                                          │
 │ 1. Resolve Data-Owner Consents (Allow/Deny, Column Masking)            │
-│ 2. Evaluate Casbin ABAC & ReBAC Relations                              │
+│ 2. Evaluate grants, deny consents and access profiles                  │
 │ 3. Resolve Virtual Filters via MandatoryRowFilterResolver:             │
 │    - Identify active AccessProfiles for caller (User, Groups, Roles)   │
 │    - Match target against profile Scope and FilterBinding patterns     │

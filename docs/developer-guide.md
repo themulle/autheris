@@ -13,7 +13,7 @@ This guide helps engineers run the gateway locally with zero external dependenci
 7. [Adding New Queries and Dynamic Tables](#7-adding-new-queries-and-dynamic-tables)
 8. [Testing Data Catalog Synchronization](#8-testing-data-catalog-synchronization)
 9. [Testing Lineage & GDPR Disclosure Queries](#9-testing-lineage--gdpr-disclosure-queries)
-10. [Validating Casbin Governance Policies](#10-validating-casbin-governance-policies)
+10. [Casbin removal gate](#10-casbin-removal-gate)
 11. [Testing In-Memory OLAP & Arrow Export](#11-testing-in-memory-olap--arrow-export-f-data-03--f-data-04)
 
 ---
@@ -363,13 +363,12 @@ query GetGdprDisclosure {
 
 ---
 
-## 10. Validating Casbin Governance Policies
+## 10. Casbin removal gate
 
-Autheris includes a dedicated CLI linter tool for validating Casbin RBAC/ABAC models and policies:
+Casbin is not part of Autheris (ADR-020): data access is granted only by grant records (consents), column rules and virtual filters. The CI gate `tools/casbin-policy-lint` fails when the repository contains a Casbin model (`.conf` with a `[request_definition]` section) or a Casbin policy file:
 
 ```bash
-# Run the Casbin policy linter
-dotnet run --project tools/casbin-policy-lint/casbin-policy-lint.csproj
+dotnet run --project tools/casbin-policy-lint/casbin-policy-lint.csproj -- .
 ```
 
 ---

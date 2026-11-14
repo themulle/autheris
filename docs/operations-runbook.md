@@ -278,27 +278,6 @@ Reference: F-DATA-07, section 6.
 - **Node loss and rolling restarts.** Jobs are not resumed. Queued jobs of a stopping pod end `Cancelled` (`autheris_asyncjobs_discarded`); jobs of a crashed pod are reported `Failed` with `job owner node lost` once `MaxTimeoutSeconds + 60 s` have passed since submission. Clients resubmit. Leftover result files are removed by the startup sweeper and the purge loop.
 - **Watch:** `autheris_asyncjobs_running`, `autheris_asyncjobs_pending` (sustained growth means too few slots), `autheris_asyncjobs_cluster_write_failures`, `autheris_asyncjobs_tombstone_check_failures` and `autheris_asyncjobs_subscribe_failures` (remote cancels then take effect only at the owner's next state change).
 
-### 4.ah Casbin policy file distribution and the policy epoch (WP-ARC-A-14)
-
-Reference: F-SEC-06.
-
-- **Every replica must load the same policy file.** Distribute `Gateway:Casbin:PolicyPath` (and tenant policy files) identically to all pods, for example as one ConfigMap or a shared read-only volume, and keep `WatchPolicyFile` enabled. After a change on any node, every replica re-reads its *own* file, so a replica with an outdated file keeps enforcing the outdated policy.
-- **Do not rely on programmatic rule changes in multi-replica deployments.** Rules added at runtime through `AddPolicy` and related APIs exist only on the node that received them; the other replicas only discard their cached decisions. Persist rule changes in the policy file.
-- **Staleness.** After a change, other replicas stop serving cached decisions of the old policy within `min(TtlSeconds, EpochCheckSeconds + reload time)` (defaults 60 s and 5 s). Lower `Gateway:Casbin:DecisionCache:EpochCheckSeconds` for a tighter bound.
-- **Propagation failures.** `autheris_policy_epoch_propagation_failed_total` increasing: the changing node could not increment `policy:epoch:{tenant}` or `policy:epoch:*`; other replicas converge only after `TtlSeconds`. Check the cluster state store (`autheris_cluster_state_failure_total{operation="increment"}`).
-- **Cluster state outage.** The decision cache is bypassed on affected tenants (warning `Casbin policy epoch could not be read; decision cache bypassed.`). Decisions stay correct; expect higher policy evaluation latency until the store is back.
-- **Reload failures.** A missing or invalid policy file during a cluster-triggered reload keeps the last-known-good policy set and is retried at the next epoch check; check the gateway log for `Casbin policy reload after a cluster epoch change failed` or `policy file ... is missing`.
-
-### 4.ai Decision cache kill switch (shape-shared decisions)
-
-By default, users that match exactly the same Casbin rules share one cached decision when no candidate rule reads a user-specific input (decision cache shape sharing). If a shared decision is suspected to be wrong for a user (for example after adding a rule whose `sub_rule` uses an unusual construct):
-
-1. Set `Gateway:Casbin:DecisionCache:ShareAcrossUsers=false` (environment variable `Gateway__Casbin__DecisionCache__ShareAcrossUsers=false`) and roll the replicas. Every decision is keyed by user again; nothing else changes.
-2. Expect a lower hit ratio and more `sub_rule` evaluations per request until the cache warms up per user. Keep `Capacity` at the default `100000` or raise it.
-3. Re-enable sharing after the rule set was corrected. Decisions for delegated sources are never shared, regardless of the switch.
-
-A full decision cache flush is a policy publish or a restart; there is no flush endpoint.
-
 ### 4.aj Audit group commit
 
 Required audit writes (administrative changes, security events, denials and allow records written through `IAuditWriter.RecordRequiredAsync`) are coalesced by `AuditGroupCommitSink` into batches of up to 64 entries (5 ms coalescing window, 4,096 pending entries before back-pressure), each written in one transaction with one chain-tail read and one anchor ([F-AUDIT-01, section 10](features/f-audit-01-hardened-cryptographic-audit.md)).
@@ -494,13 +473,12 @@ For high-throughput environments, configure ASP.NET Core Kestrel limits in `apps
 
 ### 9.4 Sizing for 5,000 Named Users
 
-Reference workload: 5,000 named users (plus about 50 service principals), 10% concurrently active, 1 request per 10 seconds per active user (about 50 rps steady), a peak factor of 10 plus about 100 rps of agents, ETL and MCP, giving a **design peak of about 600 rps cluster-wide** with about 2.5 tables per request; 20 to 50 group SIDs per token; 2,000 to 10,000 governed tables; 500 to 5,000 Casbin lines.
+Reference workload: 5,000 named users (plus about 50 service principals), 10% concurrently active, 1 request per 10 seconds per active user (about 50 rps steady), a peak factor of 10 plus about 100 rps of agents, ETL and MCP, giving a **design peak of about 600 rps cluster-wide** with about 2.5 tables per request; 20 to 50 group SIDs per token; 2,000 to 10,000 governed tables.
 
 | Resource | Recommendation |
 | :--- | :--- |
 | Gateway replicas | **3 × 4 vCPU / 8 GB** (2 would carry the load; 3 for HA). Expected hot-path CPU about 1.5 to 3 cores cluster-wide. |
 | Gateway memory | About 1.5 to 2.5 GB steady per replica with the bounded caches. Keep `Caching:L1MemoryCache:SizeLimitMb` at 512; leave headroom for buffered exports. |
-| Casbin decision cache | `Capacity` 100,000 (default) and `ShareAcrossUsers=true`. With mostly group-based rules the working set is per rule shape, not per user. |
 | Governance database | PostgreSQL (or SQL Server) with the consent indexes of the baseline ([F-GOV-12](features/f-gov-12-multi-engine-governance-storage.md)). Default pool of 100 connections per replica; verify `replicas × pool ≤ max_connections − headroom`. Audit load is about 5 to 10 batch commits per second at peak instead of one round trip per row. |
 | Redis | Standalone or Redis Cluster (epoch reads are single-key and Cluster-safe). About 2,000 ops/s at peak; the 150 ms staleness budget saves one round trip per request for non-sensitive tables. Enable AOF persistence (F-OPS-02). |
 | Basic-auth clients | Set `Authentication:BasicAuth:MarkerKeyRef` so BI tools pay the password hash once per cluster, not once per replica. |
@@ -513,7 +491,6 @@ Bounded in-process caches (BitFaster `ConcurrentLru`, eviction only produces a r
 | :--- | :--- |
 | Mandatory row filter memo (virtual filters) | 50,000 entries; object patterns 10,000 |
 | Repository table metadata (all engines) | 20,000 tables |
-| Casbin candidate rules per (tenant, table, action) | 20,000 |
 | Policy shape analysis | 20,000 rules |
 | Compiled `sub_rule` delegates | 20,000 expressions |
 | Governed SQL stage-1 analyses | 4,096 statements |

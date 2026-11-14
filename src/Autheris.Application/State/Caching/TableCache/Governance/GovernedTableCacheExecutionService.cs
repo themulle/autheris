@@ -37,7 +37,7 @@ public sealed record TableCacheCallerContext(
 
 /// <summary>
 /// Enforces Zero-Trust governance on all table cache query operations.
-/// Strictly executes Casbin ABAC, Consents, Mandatory Tenant Isolation, RLS Filter Pushdown,
+/// Strictly executes Consents, Mandatory Tenant Isolation, RLS Filter Pushdown,
 /// Dynamic Column Masking, and WORM Audit Logging.
 /// Conforms to 09, and 13.
 /// </summary>
@@ -95,7 +95,7 @@ public sealed class GovernedTableCacheExecutionService
             : null;
 
         // -------------------------------------------------------------------
-        // Zero-Trust Governance Precedence (Casbin ABAC)
+        // Zero-Trust Governance Precedence
         // -------------------------------------------------------------------
         if (caller.Roles != null && caller.Roles.Contains("DENY_ALL"))
         {

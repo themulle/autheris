@@ -8,7 +8,7 @@
 
 Direct database connections over proprietary ports (1433 for MSSQL, 5432 for Postgres) require broad firewall access and expose databases to uncontrolled connection exhaustion. F-DATA-02 introduces a governed HTTP-based WebSQL engine (`POST /api/v1/sql`, `POST /api/sql`, and `POST /v1/statement`) fully compatible with the Trino/Presto query language and REST client protocol.
 
-Ad-hoc SQL queries are compiled by the governed AST compiler ([F-DIALECT-02](f-dialect-02-ast-sql-compiler.md)): parsed with an ANTLR4 parser, checked against AST security rules, secured with typed Casbin ABAC, consent and tenant row filters and column masks, emitted for the target dialect (PostgreSQL, SQL Server, SQLite, Oracle) with every value bound as a parameter, and executed over standard HTTPS.
+Ad-hoc SQL queries are compiled by the governed AST compiler ([F-DIALECT-02](f-dialect-02-ast-sql-compiler.md)): parsed with an ANTLR4 parser, checked against AST security rules, secured with typed consent and tenant row filters and column masks, emitted for the target dialect (PostgreSQL, SQL Server, SQLite, Oracle) with every value bound as a parameter, and executed over standard HTTPS.
 
 ---
 

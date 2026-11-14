@@ -90,7 +90,7 @@ public sealed class WebSqlOptions
 
     /// <summary>
     /// SEC M-20: Roles that are authorized to execute DML via WebSQL (in addition to AllowDml).
-    /// Consent and Casbin only evaluate read access, so DML is rejected unless the caller holds one of these roles.
+    /// Consents only evaluate read access, so DML is rejected unless the caller holds one of these roles.
     /// </summary>
     public List<string> DmlWriterRoles { get; init; } = [];
 

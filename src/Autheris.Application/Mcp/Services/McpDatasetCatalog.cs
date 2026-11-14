@@ -23,7 +23,7 @@ using Autheris.Application.Catalog.Interfaces;
 /// <summary>
 /// MCP dataset tools (list_datasets, describe_dataset, sample_rows). Visibility follows the GraphQL catalog
 /// (<see cref="McpCatalogVisibility"/>); rows are read only through <see cref="IGatewayExecutionService"/>, so consent,
-/// Casbin, row filters and masking apply exactly as for REST and GraphQL.
+/// Grants, row filters and masking apply exactly as for REST and GraphQL.
 /// </summary>
 public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 {

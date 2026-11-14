@@ -516,7 +516,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             return CreateErrorResponse(id, -32004, $"Resource '{uri}' not found.");
         }
 
-        // Same guardrail as the HTTP server (GatewayMcpServer.ReadGuardedSemanticResourceAsync): Casbin ABAC on the semantic catalog,
+        // Same guardrail as the HTTP server (GatewayMcpServer.ReadGuardedSemanticResourceAsync): the access decision point on the semantic catalog,
         // PII scrubbing, token budget and the MCP_TOOL_EXECUTION audit. The resource list is consent-filtered for the caller; a URI
         // outside it, a denied read and a failed guardrail all answer alike (no existence oracle).
         ISemanticMcpCompiler compiler = _semanticCompiler;
