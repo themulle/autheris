@@ -3,13 +3,18 @@ namespace Autheris.GraphQL.Interceptors;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Common.Quota;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.State.Caching.Interfaces;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.GraphQL.Catalog;
 using HotChocolate.Execution;
 using HotChocolate.Language;
 using Microsoft.AspNetCore.Http;
@@ -84,25 +89,223 @@ public sealed class CostAndQuotaMiddleware
     internal static int EffectiveGatewayMaxCost(GatewayOptions gatewayOptions) =>
         ResolveMaxAdmissionCeiling(gatewayOptions);
 
+    internal static void AttachIndexHintsToResult(
+        OperationResult opResult,
+        IReadOnlyList<GraphQlIndexHint>? indexHints)
+    {
+        if (indexHints is null || indexHints.Count == 0)
+        {
+            return;
+        }
+
+        if (opResult.Errors is not null && opResult.Errors.Count > 0)
+        {
+            return;
+        }
+
+        var extensions = opResult.Extensions ?? HotChocolate.Collections.Immutable.ImmutableOrderedDictionary<string, object?>.Empty;
+        Dictionary<string, object?> autherisExt;
+        if (extensions.TryGetValue("autheris", out var existing) &&
+            existing is IReadOnlyDictionary<string, object?> roDict)
+        {
+            autherisExt = new Dictionary<string, object?>(roDict.Count + 1, StringComparer.Ordinal);
+            foreach (var kvp in roDict)
+            {
+                autherisExt[kvp.Key] = kvp.Value;
+            }
+        }
+        else if (existing is IDictionary<string, object?> dict)
+        {
+            autherisExt = new Dictionary<string, object?>(dict.Count + 1, StringComparer.Ordinal);
+            foreach (var kvp in dict)
+            {
+                autherisExt[kvp.Key] = kvp.Value;
+            }
+        }
+        else
+        {
+            autherisExt = new Dictionary<string, object?>(1, StringComparer.Ordinal);
+        }
+
+        autherisExt["indexHints"] = indexHints;
+        opResult.Extensions = extensions.SetItem("autheris", autherisExt);
+    }
+
+    private static readonly IReadOnlySet<string> EmptyVisibleColumns =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    private static async ValueTask<Func<string, IReadOnlySet<string>?>?> ResolveVisibleColumnsLookupAsync(
+        IServiceProvider? services,
+        ClaimsPrincipal? principal,
+        DocumentNode doc,
+        Func<string, TableMetadata?>? metadataLookup,
+        CancellationToken cancellationToken)
+    {
+        if (services is null || metadataLookup is null)
+        {
+            return null;
+        }
+
+        var pdp = services.GetService<IAccessDecisionPoint>();
+        if (pdp is null)
+        {
+            return null;
+        }
+
+        if (principal?.Identity?.IsAuthenticated != true)
+        {
+            return _ => EmptyVisibleColumns;
+        }
+
+        var rootFieldNames = CollectRootFieldNames(doc);
+        if (rootFieldNames.Count == 0)
+        {
+            return _ => EmptyVisibleColumns;
+        }
+
+        var resolvedByQualifiedName = new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase);
+        var byTableKey = new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rootName in rootFieldNames)
+        {
+            var meta = metadataLookup(rootName);
+            string? baseName = null;
+            if (meta is null)
+            {
+                if (rootName.EndsWith("_aggregate", StringComparison.OrdinalIgnoreCase))
+                {
+                    baseName = rootName[..^10];
+                    meta = metadataLookup(baseName);
+                }
+                else if (rootName.EndsWith("Connection", StringComparison.Ordinal))
+                {
+                    baseName = rootName[..^10];
+                    meta = metadataLookup(baseName);
+                }
+            }
+
+            if (meta is null)
+            {
+                continue;
+            }
+
+            var qualifiedName = meta.Identifier.ToQualifiedName();
+            if (!resolvedByQualifiedName.TryGetValue(qualifiedName, out var visibleCols))
+            {
+                try
+                {
+                    var decision = await GraphQlDataSecurityMiddleware
+                        .DecideAccessAsync(pdp, principal, meta, requestedFields: null, cancellationToken)
+                        .ConfigureAwait(false);
+                    var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (decision.IsAllowed)
+                    {
+                        foreach (var col in meta.Columns)
+                        {
+                            if (decision.GetEffectiveColumnAccess(col.ColumnName, meta) != ColumnAccessLevel.Deny)
+                            {
+                                allowed.Add(col.ColumnName);
+                            }
+                        }
+                    }
+                    visibleCols = allowed;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    visibleCols = EmptyVisibleColumns;
+                }
+
+                resolvedByQualifiedName[qualifiedName] = visibleCols;
+            }
+
+            byTableKey[rootName] = visibleCols;
+            if (baseName is not null)
+            {
+                byTableKey[baseName] = visibleCols;
+            }
+            byTableKey[meta.Table.TableName] = visibleCols;
+            byTableKey[qualifiedName] = visibleCols;
+        }
+
+        return key => byTableKey.TryGetValue(key, out var cols) ? cols : EmptyVisibleColumns;
+    }
+
+    private static List<string> CollectRootFieldNames(DocumentNode doc)
+    {
+        var names = new List<string>();
+        var fragments = new Dictionary<string, FragmentDefinitionNode>(StringComparer.Ordinal);
+        foreach (var def in doc.Definitions)
+        {
+            if (def is FragmentDefinitionNode frag)
+            {
+                fragments[frag.Name.Value] = frag;
+            }
+        }
+
+        var visitedFragments = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var op in doc.Definitions.OfType<OperationDefinitionNode>())
+        {
+            if (op.SelectionSet is not null)
+            {
+                CollectSelectionFieldNames(op.SelectionSet, fragments, visitedFragments, names);
+            }
+        }
+
+        return names;
+    }
+
+    private static void CollectSelectionFieldNames(
+        SelectionSetNode selectionSet,
+        IReadOnlyDictionary<string, FragmentDefinitionNode> fragments,
+        HashSet<string> visitedFragments,
+        List<string> names)
+    {
+        foreach (var sel in selectionSet.Selections)
+        {
+            switch (sel)
+            {
+                case FieldNode field:
+                    names.Add(field.Name.Value);
+                    break;
+                case InlineFragmentNode inlineFrag when inlineFrag.SelectionSet is not null:
+                    CollectSelectionFieldNames(inlineFrag.SelectionSet, fragments, visitedFragments, names);
+                    break;
+                case FragmentSpreadNode spread when visitedFragments.Add(spread.Name.Value) &&
+                    fragments.TryGetValue(spread.Name.Value, out var frag):
+                    CollectSelectionFieldNames(frag.SelectionSet, fragments, visitedFragments, names);
+                    break;
+            }
+        }
+    }
+
     /// <summary>
     /// The gateway-wide complexity limit on the runtime variable values, for the paths that skip the tier and quota gate (rate limiting
     /// disabled, no HTTP context). Returns true when it rejected the request.
     /// </summary>
-    private static bool RejectIfOverGatewayComplexity(RequestContext context, DocumentNode doc, GatewayOptions? gatewayOptions, HttpContext? httpContext)
+    private static async ValueTask<(bool Rejected, List<GraphQlIndexHint>? IndexHints)> RejectIfOverGatewayComplexityAsync(
+        RequestContext context,
+        DocumentNode doc,
+        GatewayOptions? gatewayOptions,
+        HttpContext? httpContext)
     {
         if (gatewayOptions is null)
         {
-            return false;
+            return (false, null);
         }
 
         var maxCost = EffectiveGatewayMaxCost(gatewayOptions);
-        if (maxCost <= 0)
-        {
-            return false;
-        }
-
-        var relationRegistry = context.RequestServices.GetService<Autheris.GraphQL.Catalog.ICatalogRelationRegistry>();
-        var analyticsOptions = context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value;
+        var services = httpContext?.RequestServices ?? context.RequestServices;
+        var tableMetadataLookup = CatalogGraphQlTypeModule.CurrentLookup;
+        var visibleColumnsLookup = await ResolveVisibleColumnsLookupAsync(
+                services,
+                httpContext?.User,
+                doc,
+                tableMetadataLookup,
+                context.RequestAborted)
+            .ConfigureAwait(false);
+        var relationRegistry = services.GetService<Autheris.GraphQL.Catalog.ICatalogRelationRegistry>();
+        var analyticsOptions = services.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value;
+        var indexHints = new List<GraphQlIndexHint>();
         int cost = QueryCostAnalyzerRule.CalculateCost(
             doc,
             context.Schema,
@@ -111,23 +314,26 @@ public sealed class CostAndQuotaMiddleware
             costOptions: gatewayOptions.QueryCost,
             aggregation: analyticsOptions?.Aggregation,
             maxExecutionDepth: QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions.GraphQL),
-            relationRegistry: relationRegistry);
-        if (cost <= maxCost)
+            relationRegistry: relationRegistry,
+            tableMetadataLookup: tableMetadataLookup,
+            visibleColumnsLookup: visibleColumnsLookup,
+            indexHintsOut: indexHints);
+        if (maxCost > 0 && cost > maxCost)
         {
-            return false;
+            context.Result = OperationResult.FromError(
+                ErrorBuilder.New()
+                    .SetMessage("The query exceeds the allowed complexity.")
+                    .SetCode("QUERY_COST_QUOTA_EXCEEDED")
+                    .Build());
+            if (httpContext is not null)
+            {
+                HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status400BadRequest);
+            }
+
+            return (true, null);
         }
 
-        context.Result = OperationResult.FromError(
-            ErrorBuilder.New()
-                .SetMessage("The query exceeds the allowed complexity.")
-                .SetCode("QUERY_COST_QUOTA_EXCEEDED")
-                .Build());
-        if (httpContext is not null)
-        {
-            HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status400BadRequest);
-        }
-
-        return true;
+        return (false, indexHints);
     }
 
     public async ValueTask InvokeAsync(RequestContext context)
@@ -171,13 +377,28 @@ public sealed class CostAndQuotaMiddleware
 
         if (httpContext == null || doc == null || context.Schema == null)
         {
-            if (doc != null && context.Schema != null
-                && RejectIfOverGatewayComplexity(context, doc, context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value, httpContext))
+            List<GraphQlIndexHint>? unthrottledHints = null;
+            if (doc != null && context.Schema != null)
             {
-                return;
+                var (rejected, hints) = await RejectIfOverGatewayComplexityAsync(
+                        context,
+                        doc,
+                        context.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value,
+                        httpContext)
+                    .ConfigureAwait(false);
+                if (rejected)
+                {
+                    return;
+                }
+
+                unthrottledHints = hints;
             }
 
             await _next(context).ConfigureAwait(false);
+            if (!context.RequestAborted.IsCancellationRequested && context.Result is OperationResult unthrottledOp)
+            {
+                AttachIndexHintsToResult(unthrottledOp, unthrottledHints);
+            }
             return;
         }
 
@@ -186,12 +407,18 @@ public sealed class CostAndQuotaMiddleware
         if (gatewayOptions?.IsRateLimitingDisabled == true)
         {
             // the validation pass prices a variable page size without its value, so the runtime pass must still bound it here.
-            if (RejectIfOverGatewayComplexity(context, doc, gatewayOptions, httpContext))
+            var (rejected, hints) = await RejectIfOverGatewayComplexityAsync(context, doc, gatewayOptions, httpContext)
+                .ConfigureAwait(false);
+            if (rejected)
             {
                 return;
             }
 
             await _next(context).ConfigureAwait(false);
+            if (!context.RequestAborted.IsCancellationRequested && context.Result is OperationResult disabledOp)
+            {
+                AttachIndexHintsToResult(disabledOp, hints);
+            }
             return;
         }
 
@@ -224,6 +451,15 @@ public sealed class CostAndQuotaMiddleware
         int maxResponseRows = gatewayOptions?.GraphQL?.MaxResponseRows ?? 1000;
         int maxExecutionDepth = QueryCostAnalyzerRule.ResolveMaxExecutionDepth(gatewayOptions?.GraphQL);
         var relationRegistry = services?.GetService<Autheris.GraphQL.Catalog.ICatalogRelationRegistry>();
+        var tableMetadataLookup = CatalogGraphQlTypeModule.CurrentLookup;
+        var visibleColumnsLookup = await ResolveVisibleColumnsLookupAsync(
+                services,
+                httpContext.User,
+                doc,
+                tableMetadataLookup,
+                context.RequestAborted)
+            .ConfigureAwait(false);
+        var indexHints = new List<GraphQlIndexHint>();
         int calculatedCost = QueryCostAnalyzerRule.CalculateCost(
             doc,
             context.Schema,
@@ -232,7 +468,10 @@ public sealed class CostAndQuotaMiddleware
             costOptions: gatewayOptions?.QueryCost,
             aggregation: services?.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>>()?.Value?.Aggregation,
             maxExecutionDepth: maxExecutionDepth,
-            relationRegistry: relationRegistry);
+            relationRegistry: relationRegistry,
+            tableMetadataLookup: tableMetadataLookup,
+            visibleColumnsLookup: visibleColumnsLookup,
+            indexHintsOut: indexHints);
 
         int maxAdmissionCeiling = gatewayOptions is not null ? EffectiveGatewayMaxCost(gatewayOptions) : MaxComplexitySafetyCeiling;
         if (maxAdmissionCeiling <= 0)
@@ -322,6 +561,7 @@ public sealed class CostAndQuotaMiddleware
             else
             {
                 actualCost = ComputeActualCost(context, gatewayOptions?.QueryCost, admission.Policy);
+                AttachIndexHintsToResult(op, indexHints);
             }
         }
         catch

@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Analytics;
+using Autheris.Domain.Model;
+using Autheris.GraphQL.Catalog;
 using HotChocolate.Language;
 using HotChocolate.Types;
 
@@ -93,10 +95,42 @@ public sealed partial class QueryCostAnalyzerRule
                typeName.EndsWith("_aggregate_result", StringComparison.Ordinal);
     }
 
+    private TableMetadata? ResolveTableMetadata(string primaryName, string? fallbackName = null)
+    {
+        var meta = _tableMetadataLookup?.Invoke(primaryName);
+        if (meta is null && !string.IsNullOrEmpty(fallbackName) && !string.Equals(fallbackName, primaryName, StringComparison.Ordinal))
+        {
+            meta = _tableMetadataLookup?.Invoke(fallbackName);
+        }
+
+        if (meta is not null)
+        {
+            return meta;
+        }
+
+        meta = CatalogGraphQlTypeModule.CurrentLookup?.Invoke(primaryName);
+        if (meta is null && !string.IsNullOrEmpty(fallbackName) && !string.Equals(fallbackName, primaryName, StringComparison.Ordinal))
+        {
+            meta = CatalogGraphQlTypeModule.CurrentLookup?.Invoke(fallbackName);
+        }
+
+        return meta;
+    }
+
+    private IReadOnlySet<string>? ResolveVisibleColumns(string fieldKey, TableMetadata tableMeta) =>
+        _visibleColumnsLookup is null
+            ? null
+            : _visibleColumnsLookup.Invoke(fieldKey)
+                ?? _visibleColumnsLookup.Invoke(tableMeta.Table.TableName)
+                ?? _visibleColumnsLookup.Invoke(tableMeta.Identifier.ToQualifiedName());
+
     private int AggregateFieldCost(
         FieldNode field,
         IReadOnlyList<VariableDefinitionNode>? variableDefinitions,
-        IReadOnlyDictionary<string, object?>? variableValues)
+        IReadOnlyDictionary<string, object?>? variableValues,
+        int currentDepth = 1,
+        IObjectTypeDefinition? currentType = null,
+        ISchemaDefinition? schema = null)
     {
         // queryMetrics has no typed groupBy/aggregates list: it keeps the generic cost of a payload field via the base weight only.
         double cost = _aggregateFieldCostWeight;
@@ -127,7 +161,44 @@ public sealed partial class QueryCostAnalyzerRule
             cost += _maxAggregates * AggregationCostCalculator.CountDistinctWeight;
         }
 
-        return (int)Math.Min(int.MaxValue, Math.Ceiling(cost));
+        int totalCost = (int)Math.Min(int.MaxValue, Math.Ceiling(cost));
+        bool isRootField = currentDepth <= 1 || (currentType != null && schema != null && currentType == schema.QueryType);
+
+        if (isRootField &&
+            !string.Equals(field.Name.Value, "queryMetrics", StringComparison.OrdinalIgnoreCase) &&
+            _costOptions is not null &&
+            _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
+        {
+            var baseName = field.Name.Value.EndsWith("_aggregate", StringComparison.OrdinalIgnoreCase)
+                ? field.Name.Value[..^"_aggregate".Length]
+                : field.Name.Value;
+            var tableMeta = ResolveTableMetadata(baseName, field.Name.Value);
+            if (tableMeta is not null)
+            {
+                var visibleSet = ResolveVisibleColumns(baseName, tableMeta);
+                var visibleList = visibleSet?.ToList();
+                var timeBuckets = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "timeBuckets", StringComparison.Ordinal));
+                var whereArg = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "where", StringComparison.Ordinal));
+                var groupByAsOrder = IndexUsabilityEvaluator.ExtractGroupByAsOrder(groupBy?.Value, timeBuckets?.Value, variableValues, variableDefinitions);
+                var filterColumns = IndexUsabilityEvaluator.ExtractFilterColumns(whereArg, variableValues, variableDefinitions);
+
+                bool hasUsableIndex = (groupByAsOrder.Count > 0 || (filterColumns is not null && filterColumns.Count > 0)) &&
+                    IndexUsabilityEvaluator.HasUsableIndex(tableMeta, visibleList, groupByAsOrder, filterColumns);
+
+                if (!hasUsableIndex)
+                {
+                    totalCost = (int)Math.Min((long)int.MaxValue, (long)Math.Ceiling(totalCost * _costOptions.UnindexedRootListSurchargeMultiplier));
+                    if (_indexHints is not null)
+                    {
+                        var rootKey = field.Alias?.Value ?? field.Name.Value;
+                        var helpfulCols = IndexUsabilityEvaluator.BuildHelpfulIndexColumns(tableMeta, visibleSet, filterColumns, groupByAsOrder);
+                        _indexHints.Add(new GraphQlIndexHint(rootKey, GraphQlIndexHint.NoUsableIndexReason, helpfulCols));
+                    }
+                }
+            }
+        }
+
+        return totalCost;
     }
 
     private static bool TryListItems(
