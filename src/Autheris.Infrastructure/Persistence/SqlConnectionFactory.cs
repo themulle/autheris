@@ -118,6 +118,11 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             connectionString = ResolvePassword(dialect, options, connectionString);
         }
 
+        if (_requireOracleTcps && ConnectionTlsPolicy.ValidateDialect(dialect, connectionString) is { } tlsError)
+        {
+            throw new InvalidOperationException(tlsError);
+        }
+
         DbConnection connection = dialect switch
         {
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),

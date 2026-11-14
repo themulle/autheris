@@ -33,7 +33,7 @@ internal static class GovernanceTestDatabase
         Stable.GetOrAdd(key, static k => new Lazy<string>(() => Create("stable_" + System.IO.Path.GetFileNameWithoutExtension(k)))).Value;
 
     /// <summary>
-    /// A connection string for the same cloned database that verifies the server certificate (<c>SSL Mode=VerifyCA</c> with the test CA),
+    /// A connection string for the same cloned database that verifies the server certificate (<c>SSL Mode=VerifyFull</c> with the test CA),
     /// for hosts that run outside Development and therefore must satisfy ConnectionTlsPolicy.
     /// </summary>
     public static string WithVerifiedTls(string connectionString)
@@ -42,7 +42,7 @@ internal static class GovernanceTestDatabase
             ?? throw new InvalidOperationException("Verified TLS needs the Testcontainers PostgreSQL server (AUTHERIS_TEST_POSTGRES is set).");
         return new Npgsql.NpgsqlConnectionStringBuilder(connectionString)
         {
-            SslMode = Npgsql.SslMode.VerifyCA,
+            SslMode = Npgsql.SslMode.VerifyFull,
             RootCertificate = ca
         }.ConnectionString;
     }

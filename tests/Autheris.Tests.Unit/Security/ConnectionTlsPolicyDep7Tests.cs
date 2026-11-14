@@ -20,7 +20,7 @@ public sealed class ConnectionTlsPolicyDep7Tests
     [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=Require", false)]
     [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=Prefer", false)]
     [InlineData("PostgreSql", "Host=db;Database=x", false)]
-    [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=VerifyCA", true)]
+    [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=VerifyCA", false)]
     [InlineData("PostgreSql", "Host=db;Database=x;SSL Mode=VerifyFull", true)]
     [InlineData("SqlServer", "Server=db;Database=x;TrustServerCertificate=True", false)]
     [InlineData("SqlServer", "Server=db;Database=x;Encrypt=False", false)]
