@@ -195,6 +195,15 @@ public sealed partial class CiWorkflowArchitectureTests
         }
     }
 
+    [Fact]
+    public void Integration_tests_run_across_six_balanced_shards()
+    {
+        var job = string.Join('\n', Job("ci.yml", "integration-tests"));
+        job.ShouldContain("name: Integration Tests (shard ${{ matrix.shard }}/6)");
+        job.ShouldContain("shard: [1, 2, 3, 4, 5, 6]");
+        job.ShouldContain("python3 .github/scripts/integration-shard-filter.py \"$((SHARD - 1))\" 6");
+    }
+
     private static List<string> Tuple(string script, string name)
     {
         var match = Regex.Match(script, name + @" = \((?<body>.*?)\n?\)\s*\n", RegexOptions.Singleline);

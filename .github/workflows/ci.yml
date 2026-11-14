@@ -41,7 +41,7 @@ jobs:
         run: python3 .github/scripts/ci-changes.py
 
       - name: Test the classifier
-        run: python3 -m unittest discover -s .github/scripts -p 'test_ci_changes.py'
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 
   build-and-test:
     name: Build & Test All Suites
@@ -139,7 +139,7 @@ jobs:
   # parallel jobs instead. .github/scripts/integration-shard-filter.py balances the test classes by measured wall time; the last
   # shard is the exact complement of the others, so every test runs in exactly one shard.
   integration-tests:
-    name: Integration Tests (shard ${{ matrix.shard }}/4)
+    name: Integration Tests (shard ${{ matrix.shard }}/6)
     needs: changes
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest # Docker is available for Testcontainers
@@ -152,7 +152,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -202,7 +202,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
           DOTNET_CHANGED: ${{ needs.changes.outputs.dotnet }}
         run: |
-          FILTER="$(python3 .github/scripts/integration-shard-filter.py "$((SHARD - 1))" 4)"
+          FILTER="$(python3 .github/scripts/integration-shard-filter.py "$((SHARD - 1))" 6)"
           # Doc-only change: only the Security-trait tests of this shard run (never drop a Security suite).
           if [ "$DOTNET_CHANGED" = "false" ]; then FILTER="($FILTER)&Category=Security"; fi
           dotnet test tests/Autheris.Tests.Integration -c Release --no-build -p:AutherisIncludeTestAuth=true --filter "$FILTER" --logger "trx" --results-directory ${{ runner.temp }}/test-results --blame-hang-timeout 5m --blame-hang-dump-type mini --blame-crash
