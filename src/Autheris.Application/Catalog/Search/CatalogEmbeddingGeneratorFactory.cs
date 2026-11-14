@@ -22,7 +22,8 @@ public static class CatalogEmbeddingGeneratorFactory
                 options.ModelPath,
                 options.ModelSha256,
                 options.EmbeddingDimensions,
-                loggerFactory?.CreateLogger<LocalOnnxEmbeddingGenerator>()),
+                loggerFactory?.CreateLogger<LocalOnnxEmbeddingGenerator>(),
+                options.TokenizerPath),
             CatalogEmbeddingProvider.Ollama => new OllamaEmbeddingGenerator(
                 options.OllamaEndpoint,
                 options.OllamaModelName,

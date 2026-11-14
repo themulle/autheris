@@ -350,7 +350,7 @@ The audit key is `GovernanceDb:AuditHmacKeyVaultRef`, otherwise the `Autheris:Au
 
 `DeniedTablesStartupReporter` (background service, registered with `WebSql:Enabled`) lists, after the start, every table that the governed pipeline denies: stored row predicates that the production parser rejects (access profiles of the configured tenants and the default tenant, virtual filters) and tables of a dialect that WebSQL does not admit (`DIALECT_NOT_ADMITTED`). It logs one warning per table with table id, policy id and a stable code, never a predicate or a value. A store that cannot be read is a warning, not a failed start; the request path stays fail closed on its own.
 
-Correlated consent filters are covered by the pre-deploy lint `tools/PolicyPredicateLint`, which reads the whole governance store and must report 0 unparsable production predicates before a deployment.
+Correlated consent filters and active row/virtual filters are checked at host startup by `PolicyPredicateLinter` (`DeniedTablesStartupReporter`), which logs a warning and fails closed on any unparsable production predicate.
 
 ### 6.4 Other startup rules
 
@@ -466,7 +466,7 @@ Reference for operators and API clients moving from a release with the legacy to
 | Admitted dialects are exactly PostgreSQL, SQL Server, SQLite and Oracle | Databricks sources are not executable through WebSQL; Snowflake is never executable |
 | SQLite statements are interrupted at `WebSql:ExecutionTimeoutSeconds` | Clients that relied on unbounded SQLite statements receive 504 |
 | `RowFilters.SubqueryStrategy` is ignored | Policy subqueries are always correlated |
-| Pre-deploy | Run `tools/PolicyPredicateLint` against the production governance store (0 unparsable predicates) and review the denied-tables startup report |
+| Startup | Review the `DeniedTablesStartupReporter` (`PolicyPredicateLinter`) startup report for any unparsable production predicates or denied tables |
 
 **API behavior**
 

@@ -23,7 +23,7 @@ public partial class GovernanceRepository
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetRelationsForTableAsync(conn, RelationsForParentTableSql, parentTable, _logger, ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetRelationsForTableAsync(conn, RelationsForParentTableSql, parentTable, _logger, ct).ConfigureAwait(false);
     }
 
     public async Task<RelationWriteResult> CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
@@ -74,7 +74,7 @@ public partial class GovernanceRepository
             created = IsPostgreSql ? reader.GetBoolean(1) : string.Equals(reader.GetString(1), "INSERT", StringComparison.OrdinalIgnoreCase);
         }
 
-        var keysChanged = await ReplaceRelationKeysAsync(conn, tx, storedId, created, parentKeys, childKeys, ct).ConfigureAwait(false);
+        var keysChanged = await CatalogRowHydrator.ReplaceRelationKeysAsync(conn, tx, storedId, created, parentKeys, childKeys, ct).ConfigureAwait(false);
 
         ct.ThrowIfCancellationRequested();
         var cardinalityUnchanged = !created && string.Equals(existingCardinality, relation.Cardinality.ToString(), StringComparison.Ordinal);
@@ -107,12 +107,12 @@ public partial class GovernanceRepository
 
     /// <summary>Resolves an active table id from its identifier: zero or several matches throw (no LIMIT 1).</summary>
     private static Task<string> ResolveActiveTableIdAsync(DbConnection conn, DbTransaction tx, string relationName, TableIdentifier table, CancellationToken ct)
-        => ResolveActiveTableIdAsync(conn, tx, CatalogSql.ResolveActiveTableIdSql, relationName, table, ct);
+        => CatalogRowHydrator.ResolveActiveTableIdAsync(conn, tx, CatalogSql.ResolveActiveTableIdSql, relationName, table, ct);
 
     public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetDataOwnersForTableAsync(conn, CatalogSql.DataOwnersForTableSql, table, ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetDataOwnersForTableAsync(conn, CatalogSql.DataOwnersForTableSql, table, ct).ConfigureAwait(false);
     }
 
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
@@ -180,13 +180,13 @@ public partial class GovernanceRepository
     public async Task<Autheris.Application.Catalog.CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetCatalogVersionAsync(conn, CatalogVersionSql, ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetCatalogVersionAsync(conn, CatalogVersionSql, ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<TableRelation>> GetAllRelationsAsync(CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetAllRelationsAsync(conn, AllRelationsSql, _logger, ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetAllRelationsAsync(conn, AllRelationsSql, _logger, ct).ConfigureAwait(false);
     }
 
     private Task FlushScopePendingAsync(CancellationToken ct) =>

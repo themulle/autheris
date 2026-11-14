@@ -11,6 +11,7 @@ public sealed class LocalOnnxEmbeddingGenerator : ICatalogEmbeddingGenerator
 {
     private readonly string? _modelPath;
     private readonly string? _expectedSha256;
+    private readonly string? _tokenizerPath;
     private readonly ILogger<LocalOnnxEmbeddingGenerator>? _logger;
     private readonly bool _isValid;
     private readonly int _dimensions;
@@ -19,17 +20,20 @@ public sealed class LocalOnnxEmbeddingGenerator : ICatalogEmbeddingGenerator
     public string ModelIdentifier => "local-onnx-minilm-l6-v2";
     // ONNX runtime is not linked in this build; report unavailable rather than misrepresenting keyword search as hybrid.
     public bool IsAvailable => false;
+    internal bool IsValidConfiguration => _isValid;
 
     public LocalOnnxEmbeddingGenerator(
         string? modelPath,
         string? expectedSha256,
         int dimensions = 384,
-        ILogger<LocalOnnxEmbeddingGenerator>? logger = null)
+        ILogger<LocalOnnxEmbeddingGenerator>? logger = null,
+        string? tokenizerPath = null)
     {
         _modelPath = modelPath;
         _expectedSha256 = expectedSha256;
         _dimensions = dimensions;
         _logger = logger;
+        _tokenizerPath = tokenizerPath;
         _isValid = ValidateModel();
     }
 
@@ -75,6 +79,12 @@ public sealed class LocalOnnxEmbeddingGenerator : ICatalogEmbeddingGenerator
         if (_modelPath.Contains("..", StringComparison.Ordinal))
         {
             _logger?.LogError("Security violation: path traversal detected in ONNX model path '{Path}'.", _modelPath);
+            return false;
+        }
+
+        if (_tokenizerPath is not null && _tokenizerPath.Contains("..", StringComparison.Ordinal))
+        {
+            _logger?.LogError("Security violation: path traversal detected in ONNX tokenizer path '{Path}'.", _tokenizerPath);
             return false;
         }
 
