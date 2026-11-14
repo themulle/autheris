@@ -86,8 +86,7 @@ public static class DataSourceAllowlistGuard
     public static string MapDataSource(WebSqlOptions webSqlOptions, string? name)
     {
         if (string.IsNullOrWhiteSpace(name)) return string.Empty;
-        return webSqlOptions.DataSourceMappings != null &&
-               webSqlOptions.DataSourceMappings.TryGetValue(name, out var mapped) &&
+        return SqlDataSourceResolver.TryGetMapping(webSqlOptions, name, out var mapped) &&
                !string.IsNullOrWhiteSpace(mapped)
             ? mapped
             : name;

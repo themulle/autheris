@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - None yet.
 
 ### Fixed
+- WebSQL reaches tables of a data source mapped through `WebSql:DataSourceMappings`, for example a dbt database mapped with `Dbt:DatabaseMappings`: the governed catalog now uses the mapped connection for connection, dialect and fingerprint, and admission stays on the requested name. Startup fails for a mapping with an empty or unknown target, a chain, a cycle or a self-mapping, and warns for a dbt-mapped database in `WebSql:AllowedDataSources` without a WebSQL mapping (#668).
 - Catalog search hits (MCP and `GET /api/v1/catalog/search`) suggest the real GraphQL root field of the table (`domain_schema_table`, sanitized) from the catalog GraphQL schema, or none when the table has no root field, instead of a non-existent `domain_table` (#682).
 
 ### Security

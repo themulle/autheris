@@ -369,6 +369,17 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             effectiveDataSourceName = _dataSourceResolver.ResolveAllowedDataSource(null, tenantId);
         }
 
+        // #668: a catalog entry does not record its connection (its source is the logical name), so the connection follows from the logical
+        // name and WebSql:DataSourceMappings. The logical name stays the catalog domain and the allowlist name; dialect, credentials and the
+        // transport profile come from the connection key. A mapping that does not resolve to one connection denies.
+        string connectionKey = _dataSourceResolver.ResolveConnectionKey(effectiveDataSourceName)
+            ?? (SqlDataSourceResolver.TryGetMapping(_options.Value.WebSql, effectiveDataSourceName, out _) ? string.Empty : effectiveDataSourceName);
+        if (connectionKey.Length == 0)
+        {
+            _logger?.LogWarning("WebSQL rejected data source {DataSource}: its mapping does not resolve to a configured connection.", effectiveDataSourceName);
+            throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+        }
+
         // -------------------------------------------------------------
         // Stage 3: Table, Consent, RLS & Masking Resolution
         // -------------------------------------------------------------
@@ -741,6 +752,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             new(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
             {
                 Metadata = decidedTableMetadata,
+                ConnectionKey = connectionKey,
                 KeySetStatement = new RowFilterKeySetStatement(isRead, rawSql.Length, CompileRequestFactory.DefaultMaxExpansionFactor, disabled)
             };
 
