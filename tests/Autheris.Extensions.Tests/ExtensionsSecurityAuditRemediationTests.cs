@@ -65,22 +65,17 @@ public sealed class ExtensionsSecurityAuditRemediationTests
     }
 
     [Fact]
-    public async Task Dbt_ValidateSafeFilePath_RejectsPathTraversalAndRestrictedPaths()
+    public async Task Dbt_ValidateContractsStreamAsync_RejectsNullOrMalformedManifest()
     {
-        // CRIT-06: dbt file validation must reject null bytes, invalid extensions, and restricted paths
         var metaMock = Substitute.For<ITableMetadataRepository>();
         var validator = new DbtContractValidator(metaMock, NullLogger<DbtContractValidator>.Instance);
 
-        // Path with null byte
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("manifest.json\0.txt"));
+        await Should.ThrowAsync<ArgumentNullException>(() => validator.ValidateContractsStreamAsync(null!));
 
-        // Non-json extension
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("/tmp/manifest.yaml"));
-
-        // Restricted system paths
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("/etc/shadow.json"));
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("/var/run/secrets/token.json"));
-        await Should.ThrowAsync<SecurityException>(() => validator.ValidateContractsFileAsync("/proc/self/environ.json"));
+        using var badStream = new System.IO.MemoryStream(Encoding.UTF8.GetBytes("{not-json"));
+        var result = await validator.ValidateContractsStreamAsync(badStream);
+        result.IsCompatible.ShouldBeFalse();
+        result.Warnings.ShouldNotBeEmpty();
     }
 
     [Fact]

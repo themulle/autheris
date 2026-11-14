@@ -13,7 +13,7 @@ public interface IMcpSessionStore
     McpSessionContext CreateSession(
         string servicePrincipalId,
         string tenantId,
-        string? userSid = null,
+        string? userSid,
         System.Collections.Generic.IReadOnlyList<string>? roles = null,
         System.Collections.Generic.IReadOnlyList<string>? groupSids = null,
         string? clientIp = null,

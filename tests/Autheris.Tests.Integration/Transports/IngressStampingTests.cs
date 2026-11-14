@@ -200,24 +200,6 @@ public sealed class IngressStampingTests : IClassFixture<IngressStampingTests.Fi
         (await SendAsync(new HttpMethod(method), path, json)).ShouldBe([DataSourceTransportFlags.Rest]);
     }
 
-    [Fact]
-    public async Task McpStdio_StampsMcpPerRequest()
-    {
-        using var client = Client(); // starts the host
-        await using var scope = _factory.Services.CreateAsyncScope();
-        var runner = scope.ServiceProvider.GetRequiredService<IMcpStdioRunner>();
-        var context = scope.ServiceProvider.GetRequiredService<IIngressTransportContext>();
-        context.Current.ShouldBe(DataSourceTransportFlags.None);
-
-        await runner.RunAsync(
-            new StringReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n"),
-            new StringWriter(),
-            "cli-developer",
-            "tenant-default");
-
-        context.Current.ShouldBe(DataSourceTransportFlags.Mcp);
-    }
-
     [Theory]
     [InlineData(DataSourceTransportFlags.Trino)]
     [InlineData(DataSourceTransportFlags.WebSql)]

@@ -100,8 +100,8 @@ public sealed class McpToolSwitchTests
         string Normalize(string json) => string.Join(",", JsonDocument.Parse(json).RootElement.GetProperty("result").GetProperty("tools").EnumerateArray()
             .OrderBy(t => t.GetProperty("name").GetString(), StringComparer.Ordinal).Select(t => t.GetRawText()));
 
-        var a = await plain.HandleMessageAsync(plain.CreateSession("agent", "t").SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
-        var b = await rig.Handler.HandleMessageAsync(rig.Handler.CreateSession("agent", "t").SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+        var a = await plain.HandleMessageAsync(plain.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+        var b = await rig.Handler.HandleMessageAsync(rig.Handler.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
 
         Normalize(b).ShouldBe(Normalize(a));
     }
@@ -125,7 +125,7 @@ public sealed class McpToolSwitchTests
             rig.Registry.FindTool(m).ShouldBeNull();
         }
 
-        var json = await rig.Handler.HandleMessageAsync(rig.Handler.CreateSession("agent", "t").SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+        var json = await rig.Handler.HandleMessageAsync(rig.Handler.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
         foreach (var m in members) json.ShouldNotContain($"\"name\": \"{m}\"");
 
         // Everything outside the group stays registered.
@@ -204,7 +204,7 @@ public sealed class McpToolSwitchTests
 
         Names(rig.Registry).ShouldNotContain("list_orders");
         Names(rig.Registry).ShouldNotContain("discovered_tool");
-        var json = await rig.Handler.HandleMessageAsync(rig.Handler.CreateSession("agent", "t").SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
+        var json = await rig.Handler.HandleMessageAsync(rig.Handler.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
         json.ShouldNotContain("discovered_tool");
         json.ShouldNotContain("list_orders");
 
@@ -386,7 +386,7 @@ public sealed class McpToolSwitchTests
         var o = how == "List" ? Opts(disabled: [disabledName]) : Opts(Off(Enum.Parse<McpToolGroup>(how)));
         var rig = Rigged(o);
         const string unknown = "never_registered_tool";
-        var sessionId = rig.Handler.CreateSession("agent", "t").SessionId;
+        var sessionId = rig.Handler.CreateSession("agent", "t", userSid: null).SessionId;
 
         // Guardrail result (the object both transports serialise).
         var a = await rig.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(disabledName, "{}"), Session());
@@ -462,7 +462,7 @@ public sealed class McpToolSwitchTests
             .Returns(ci => { seen = ci.ArgAt<IReadOnlyList<McpToolDefinition>>(1); return ValueTask.FromResult(ci.ArgAt<IReadOnlyList<McpToolDefinition>>(1)); });
         var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance, toolPruner: pruner);
 
-        await handler.HandleMessageAsync(handler.CreateSession("agent", "t").SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"prompt":"rows please"}}""");
+        await handler.HandleMessageAsync(handler.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"prompt":"rows please"}}""");
 
         seen.ShouldNotBeNull();
         seen!.Select(t => t.Name).ShouldNotContain("query_sql");

@@ -215,55 +215,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         return string.Equals(id.Domain, caller.Tenant.Value, StringComparison.OrdinalIgnoreCase);
     }
 
-    public async Task<DbtSyncResult> IngestManifestFileAsync(string filePath, DbtGovernanceImportCaller caller, bool dryRun = false, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        ArgumentNullException.ThrowIfNull(caller);
-        ValidateSafeFilePath(filePath);
-        var fullPath = Path.GetFullPath(filePath);
-        ValidateSafeFilePath(fullPath);
-
-        if (!File.Exists(fullPath))
-        {
-            return new DbtSyncResult(false, 0, 0, 0, [], $"Dbt manifest file not found at: {fullPath}");
-        }
-
-        await using var stream = File.OpenRead(fullPath);
-        return await IngestManifestStreamAsync(stream, caller, dryRun, ct).ConfigureAwait(false);
-    }
-
-    private static void ValidateSafeFilePath(string fullPath)
-    {
-        if (fullPath.Contains('\0'))
-        {
-            throw new System.Security.SecurityException("File path must not contain null bytes.");
-        }
-
-        var ext = Path.GetExtension(fullPath);
-        if (!string.Equals(ext, ".json", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new System.Security.SecurityException($"Invalid file extension '{ext}'. Only JSON dbt artifacts (.json) are permitted.");
-        }
-
-        var normalized = fullPath.Replace('\\', '/').ToLowerInvariant();
-        if (normalized.StartsWith("/etc") ||
-            normalized.StartsWith("/proc") ||
-            normalized.StartsWith("/sys") ||
-            normalized.StartsWith("/dev") ||
-            normalized.StartsWith("/var") ||
-            normalized.StartsWith("/run") ||
-            normalized.StartsWith("/root") ||
-            normalized.StartsWith("/bin") ||
-            normalized.StartsWith("/sbin") ||
-            normalized.StartsWith("/usr") ||
-            normalized.Contains("/.ssh") ||
-            normalized.Contains("/appsettings") ||
-            normalized.Contains("windows/system32"))
-        {
-            throw new System.Security.SecurityException($"Access to restricted path '{fullPath}' is strictly forbidden.");
-        }
-    }
-
     public Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, TenantId? tenant = null, CancellationToken ct = default)
     {
         // DT-A-9: a tenant-less sync runs for the configured default tenant; without one it is refused (no legacy fallback).
@@ -1090,23 +1041,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     };
 
     private static string NormalizeMaskingRuleType(string raw) => DbtMaskingRuleAliases.Normalize(raw);
-
-    public async Task<DbtGovernanceSyncResult> IngestGovernanceFileAsync(string filePath, DbtGovernanceImportCaller caller, bool dryRun = false, bool replace = false, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        ArgumentNullException.ThrowIfNull(caller);
-        ValidateSafeFilePath(filePath);
-        var fullPath = Path.GetFullPath(filePath);
-        ValidateSafeFilePath(fullPath);
-
-        if (!File.Exists(fullPath))
-        {
-            return new DbtGovernanceSyncResult(false, 0, 0, 0, 0, 0, [], $"Dbt governance file not found at: {fullPath}");
-        }
-
-        await using var stream = File.OpenRead(fullPath);
-        return await IngestGovernanceStreamAsync(stream, caller, dryRun, replace, ct).ConfigureAwait(false);
-    }
 
     /// <summary>
     /// Direct governance import (R-24). Fail closed: the import may only tighten. Removing or weakening a stored masking rule

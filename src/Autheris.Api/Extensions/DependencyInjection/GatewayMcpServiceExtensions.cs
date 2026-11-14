@@ -58,7 +58,6 @@ public static class GatewayMcpServiceExtensions
         GatewayMcpServer.AddGatewayMcpServer(services, gatewayOptions);
         services.AddScoped<IAiDataGuardrailService, AiDataGuardrailService>();
         services.AddScoped<IMcpProtocolHandler, McpProtocolHandler>();
-        services.AddScoped<IMcpStdioRunner, McpStdioRunner>();
         services.AddHostedService<McpSchemaDiscoveryService>();
         services.AddHostedService<Autheris.Application.Docs.Services.DocStoreStartupSyncService>();
 

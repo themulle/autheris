@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using Autheris.Api.Mcp;
 using Autheris.Extensions;
 using Autheris.Infrastructure.Docs;
 using NetArchTest.Rules;
@@ -36,12 +35,6 @@ public sealed class PackageBoundaryArchitectureTests
 
         referencedAssemblies.ShouldNotContain("Prometheus.NetStandard");
         referencedAssemblies.ShouldNotContain("prometheus-net");
-    }
-
-    [Fact]
-    public void McpStdioRunner_ShouldResideInApiAssembly()
-    {
-        typeof(McpStdioRunner).Assembly.ShouldBe(typeof(Autheris.Api.Extensions.GatewayServiceCollectionExtensions).Assembly);
     }
 
     [Fact]

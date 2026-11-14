@@ -19,22 +19,6 @@ public sealed class DbtContractValidator(
     private readonly ITableMetadataRepository _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
     private readonly ILogger<DbtContractValidator> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-    public async Task<DbtContractValidationResult> ValidateContractsFileAsync(string filePath, CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        ValidateSafeFilePath(filePath);
-        var fullPath = Path.GetFullPath(filePath);
-        ValidateSafeFilePath(fullPath);
-
-        if (!File.Exists(fullPath))
-        {
-            return new DbtContractValidationResult(false, 0, [], [$"File not found at: {fullPath}"]);
-        }
-
-        await using var stream = File.OpenRead(fullPath);
-        return await ValidateContractsStreamAsync(stream, ct).ConfigureAwait(false);
-    }
-
     public async Task<DbtContractValidationResult> ValidateContractsStreamAsync(Stream manifestStream, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(manifestStream);
@@ -141,37 +125,5 @@ public sealed class DbtContractValidator(
             "timestamp" or "timestamptz" or "datetime" or "datetime2" => "timestamp",
             _ => t
         };
-    }
-
-    private static void ValidateSafeFilePath(string fullPath)
-    {
-        if (fullPath.Contains('\0'))
-        {
-            throw new System.Security.SecurityException("File path must not contain null bytes.");
-        }
-
-        var ext = Path.GetExtension(fullPath);
-        if (!string.Equals(ext, ".json", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new System.Security.SecurityException($"Invalid file extension '{ext}'. Only JSON dbt artifacts (.json) are permitted.");
-        }
-
-        var normalized = fullPath.Replace('\\', '/').ToLowerInvariant();
-        if (normalized.StartsWith("/etc") ||
-            normalized.StartsWith("/proc") ||
-            normalized.StartsWith("/sys") ||
-            normalized.StartsWith("/dev") ||
-            normalized.StartsWith("/var") ||
-            normalized.StartsWith("/run") ||
-            normalized.StartsWith("/root") ||
-            normalized.StartsWith("/bin") ||
-            normalized.StartsWith("/sbin") ||
-            normalized.StartsWith("/usr") ||
-            normalized.Contains("/.ssh") ||
-            normalized.Contains("/appsettings") ||
-            normalized.Contains("windows/system32"))
-        {
-            throw new System.Security.SecurityException($"Access to restricted path '{fullPath}' is strictly forbidden.");
-        }
     }
 }

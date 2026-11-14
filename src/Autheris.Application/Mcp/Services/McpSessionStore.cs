@@ -35,13 +35,10 @@ public sealed class McpSessionStore : IMcpSessionStore
     private static readonly TimeSpan DefaultSessionTtl = TimeSpan.FromHours(1);
     private readonly object _createLock = new();
 
-    public McpSessionContext CreateSession(string servicePrincipalId, string tenantId)
-        => CreateSession(servicePrincipalId, tenantId, null, null, null, null);
-
     public McpSessionContext CreateSession(
         string servicePrincipalId,
         string tenantId,
-        string? userSid = null,
+        string? userSid,
         IReadOnlyList<string>? roles = null,
         IReadOnlyList<string>? groupSids = null,
         string? clientIp = null,
