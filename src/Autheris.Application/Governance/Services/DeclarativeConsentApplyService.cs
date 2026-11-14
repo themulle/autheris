@@ -23,8 +23,12 @@ public sealed class DeclarativeConsentApplyService(
     IAuditLogRepository auditLogRepository,
     IGrantPolicy? grantPolicy = null,
     IDatasetCatalogAdminService? datasetCatalog = null,
-    IOptions<GovernanceTextOptions>? textOptions = null) : IDeclarativeConsentApplyService
+    IOptions<GovernanceTextOptions>? textOptions = null,
+    IGatewayRoleEvaluator? roleEvaluator = null) : IDeclarativeConsentApplyService
 {
+    // Same predicate as the endpoint (defense in depth): canonical roles, hierarchy-aware. The evaluator is stateless.
+    private readonly IGatewayRoleEvaluator _roles = roleEvaluator ?? new Autheris.Application.Security.GatewayRoleEvaluator();
+
     // the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
     // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
     private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
@@ -48,13 +52,9 @@ public sealed class DeclarativeConsentApplyService(
             throw new System.Security.SecurityException("Caller must be authenticated to apply declarative consent manifests.");
         }
 
-        var isPrivileged = caller.IsInRole("GOVERNANCE_ADMIN") ||
-                           caller.IsInRole("CLUSTER_ADMIN") ||
-                           caller.IsInRole("DATA_GOVERNANCE_REVIEWER") ||
-                           caller.HasClaim(c => c.Type == "scope" && c.Value.Contains("governance:admin"));
-        if (!isPrivileged)
+        if (!_roles.HasAnyRole(caller, [GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]))
         {
-            throw new System.Security.SecurityException("Caller lacks required governance permissions to apply declarative consent manifests.");
+            throw new ConsentApplyForbiddenException();
         }
 
         // NL-SC-10: the actor is always the supplied authenticated SID; a principal without one is inconsistent and never gets a stand-in.
