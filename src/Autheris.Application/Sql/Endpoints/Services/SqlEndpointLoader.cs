@@ -362,6 +362,8 @@ public sealed class SqlEndpointLoader : IDisposable
 
         string quotedName = QuoteDbtIdentifier(name, nameof(name));
         string quotedSchema = QuoteDbtIdentifier(schema, nameof(schema));
+        // Issue #666: the FROM target is the physical table (alias or identifier); the file keeps the logical name.
+        string quotedTable = string.IsNullOrWhiteSpace(table) ? quotedName : QuoteDbtIdentifier(table, nameof(table));
 
         var quotedColumns = new List<string>();
         if (columns != null)
@@ -374,7 +376,7 @@ public sealed class SqlEndpointLoader : IDisposable
 
         string projection = quotedColumns.Count > 0 ? string.Join(", ", quotedColumns) : "*";
         // No trailing ';': GovernedSqlExecutionService parses RawSql as a single statement (singleStatement: statement EOF).
-        string sql = $"SELECT {projection}\nFROM {quotedSchema}.{quotedName}";
+        string sql = $"SELECT {projection}\nFROM {quotedSchema}.{quotedTable}";
 
         return SyncDbtModelToFile(directoryPath, name, sql, summary, dataSource);
     }

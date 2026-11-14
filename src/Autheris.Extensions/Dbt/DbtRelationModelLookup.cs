@@ -19,6 +19,7 @@ internal sealed class DbtRelationModelLookup
         {
             Add(_byId, m.UniqueId, m);
             Add(_byName, m.Name, m);
+            Add(_byName, m.PhysicalName, m);
             Add(_byName, m.UniqueId, m);
         }
     }

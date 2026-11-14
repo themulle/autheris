@@ -48,7 +48,7 @@ public sealed record DbtModelDefinition(
     /// <summary>Issue #666: the physical table name (dbt alias for models, identifier for sources); defaults to <see cref="Name"/>.</summary>
     public string PhysicalName { get => _physicalName ?? Name; init => _physicalName = value; }
 
-    public TableIdentifier ToTableIdentifier() => new(Database, Schema, Name);
+    public TableIdentifier ToTableIdentifier() => new(Database, Schema, PhysicalName);
 }
 
 public enum DbtProposalStatus
