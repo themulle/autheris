@@ -598,7 +598,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
         // SEC E-05: sync consents are revoked through the marker-bound system revocation.
         await consentRepo.Received(1).RevokeSystemConsentAsync(Arg.Is(staleSyncConsent.Id), Arg.Is(OpenMetadataSyncService.OpenMetadataSyncConsentMarker), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await consentRepo.DidNotReceive().RevokeSystemConsentAsync(Arg.Is(manualConsent.Id), Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await consentRepo.DidNotReceive().RevokeConsentAsync(manualConsent.Id, Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await consentRepo.DidNotReceive().RevokeConsentAsync(manualConsent.Id, Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(), Arg.Any<CancellationToken>());
     }
 
     // ------------------------------------------------------------------ M-32

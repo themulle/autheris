@@ -52,6 +52,13 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         {
             Identifier = _table, Table = table, Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
         })).Table.Id;
+        var ownerId = Guid.NewGuid().ToString();
+        await ExecAsync(
+            "INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active) VALUES (@id, @sid, 'test\\\\admin', 'Admin', 'admin@test.local', 1);",
+            ("@id", ownerId), ("@sid", Admin.Value));
+        await ExecAsync(
+            "INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role) VALUES (@id, @tid, @oid, 'PRIMARY');",
+            ("@id", Guid.NewGuid().ToString()), ("@tid", _tableId.ToString()), ("@oid", ownerId));
     }
 
     private async Task ExecAsync(string sql, params (string Name, object Value)[] parameters)
@@ -94,12 +101,16 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
     private async Task<List<AuditLogEntry>> AuditAsync(string eventType) =>
         (await _repo.GetAuditLogEntriesAsync(500)).Where(e => e.EventType == eventType).ToList();
 
-    private Task InvokeAsync(string entry, Guid consentId, Sid actor) => entry switch
+    private Task InvokeAsync(string entry, Guid consentId, Sid actor)
     {
-        "RevokeConsentAsync" => _repo.RevokeConsentAsync(consentId, actor, "r"),
-        "ReplaceConsentsAsync" => _repo.ReplaceConsentsAsync([consentId], [], actor, "r"),
-        _ => _repo.RevokeSystemConsentAsync(consentId, SyncMarker, actor, "r")
-    };
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        return entry switch
+        {
+            "RevokeConsentAsync" => _repo.RevokeConsentAsync(consentId, actor, "r", none),
+            "ReplaceConsentsAsync" => _repo.ReplaceConsentsAsync([consentId], [], actor, "r", none),
+            _ => _repo.RevokeSystemConsentAsync(consentId, SyncMarker, actor, "r")
+        };
+    }
 
     [Trait("Category", "Security")]
     [Theory]
@@ -150,8 +161,9 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         // DEF-T-07 / DEF-SC-02: no audit amplification for ids that do not exist.
         await EnsureTableAsync();
 
-        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "r"));
-        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.ReplaceConsentsAsync([Guid.NewGuid()], [], Admin, "r"));
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "r", none));
+        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.ReplaceConsentsAsync([Guid.NewGuid()], [], Admin, "r", none));
 
         (await AuditAsync(AuditEventTypes.ConsentTenantIntegrityRefused)).ShouldBeEmpty();
     }
@@ -160,12 +172,12 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
     [Fact]
     public async Task Revoke_Refusal_Audit_For_Unauthorized_Actor_Is_Not_Written()
     {
-        // DEF-SC-02: an unauthorised actor gets UnauthorizedAccessException first, so it cannot make the platform write refusal rows.
+        // DEF-SC-02: an unauthorised actor gets ConsentRevocationForbiddenException first, so it cannot make the platform write refusal rows.
         await EnsureTableAsync();
         var consent = await CreateConsentAsync();
         await PlantTenantAsync(consent.Id, "bad tenant!");
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "r"));
+        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "r", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
 
         (await AuditAsync(AuditEventTypes.ConsentTenantIntegrityRefused)).ShouldBeEmpty();
     }
@@ -184,7 +196,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
                           FOR EACH ROW WHEN (NEW.event_type = 'CONSENT_TENANT_INTEGRITY_REFUSED')
                           EXECUTE FUNCTION fail_refusal_audit_fn();");
 
-        var ex = await Should.ThrowAsync<Exception>(() => _repo.RevokeConsentAsync(consent.Id, Admin, "r"));
+        var ex = await Should.ThrowAsync<Exception>(() => _repo.RevokeConsentAsync(consent.Id, Admin, "r", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
 
         ex.ShouldNotBeOfType<ConsentTenantIntegrityException>();
         (await IsRevokedAsync(consent.Id)).ShouldBeFalse();
@@ -223,9 +235,9 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         await EnsureTableAsync();
         var consent = await CreateConsentAsync();
         var epochBefore = await _repo.GetTableEpochAsync(_table);
-        await ExecAsync("DELETE FROM ROLE_MEMBERS WHERE member_sid = @s", ("@s", Admin.Value));
+        await ExecAsync("DELETE FROM TABLE_OWNERS WHERE table_id = @tid", ("@tid", _tableId.ToString()));
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => InvokeAsync(entry, consent.Id, Admin));
+        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => InvokeAsync(entry, consent.Id, Admin));
 
         (await IsRevokedAsync(consent.Id)).ShouldBeFalse();
         (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
@@ -262,7 +274,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         var consent = await CreateConsentAsync();
         var epochBefore = await _repo.GetTableEpochAsync(_table);
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => InvokeAsync(entry, consent.Id, new Sid("S-1-5-21-MALLORY")));
+        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => InvokeAsync(entry, consent.Id, new Sid("S-1-5-21-MALLORY")));
 
         (await IsRevokedAsync(consent.Id)).ShouldBeFalse();
         (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
@@ -279,7 +291,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         (await _repo.GetTableMetadataAsync(_table))!.Table.Sensitivity.ShouldBe("LOW");
         await ExecAsync("UPDATE TABLES SET sensitivity = 'HIGH' WHERE id = @id", ("@id", _tableId.ToString()));
 
-        await _repo.ReplaceConsentsAsync([consent.Id], [], Admin, "evict");
+        await _repo.ReplaceConsentsAsync([consent.Id], [], Admin, "evict", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
 
         (await _repo.GetTableMetadataAsync(_table))!.Table.Sensitivity.ShouldBe("HIGH");
     }

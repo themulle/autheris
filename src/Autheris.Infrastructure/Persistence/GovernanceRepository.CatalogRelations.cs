@@ -121,12 +121,6 @@ public partial class GovernanceRepository
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct = default) =>
         IsAuthorizedApproverForTableInternalAsync(table, approverSid, itsmApproverAccount, ct);
 
-    public async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await GetTransitiveRolesAsync(conn, subjectSid, ct).ConfigureAwait(false);
-    }
-
     public async Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);

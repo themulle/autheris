@@ -81,7 +81,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
             });
             if (revoke)
             {
-                await Repo.RevokeConsentAsync(c.Id, new Sid(sid!), "test");
+                await Repo.RevokeConsentAsync(c.Id, new Sid(sid!), "test", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
                 revoked.Add(c.Id);
             }
 
@@ -249,7 +249,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         var old = seed.Consents.First(c => c.TenantId == TenantA && c.GranteeSid?.Value == "S-1-5-21-Alice" && c.Effect == ConsentEffect.Allow && c.ValidFrom < seed.Now && c.ValidTo > seed.Now);
         var before = await Repo.GetTableEpochAsync(seed.Table);
 
-        await Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Dave", null, TenantA), NewConsent(seed, GranteeType.User, "S-1-5-21-Erin", null, TenantA)], alice, "apply");
+        await Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Dave", null, TenantA), NewConsent(seed, GranteeType.User, "S-1-5-21-Erin", null, TenantA)], alice, "apply", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeTrue();
         (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Dave"), new Sid("S-1-5-21-Erin")], seed.Table, seed.Now, TenantA)).Count(c => c.GranteeType != GranteeType.Role).ShouldBe(2);
@@ -300,7 +300,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
             GranteeSid = new Sid("S-1-5-21-Frank"), ValidFrom = seed.Now.AddDays(-1), ValidTo = seed.Now.AddDays(3)
         };
 
-        await Should.ThrowAsync<Exception>(() => Repo.ReplaceConsentsAsync([old.Id], [clash], new Sid("S-1-5-21-Alice"), "apply"));
+        await Should.ThrowAsync<Exception>(() => Repo.ReplaceConsentsAsync([old.Id], [clash], new Sid("S-1-5-21-Alice"), "apply", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(before);
@@ -313,11 +313,12 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         if (!Available) return;
         var seed = await SeedAsync();
         var old = seed.Consents.First(c => c.TenantId == TenantA && c.GranteeSid?.Value == "S-1-5-21-Alice" && c.Effect == ConsentEffect.Allow && c.ValidFrom < seed.Now && c.ValidTo > seed.Now);
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", null, TenantA)], new Sid("S-1-5-21-STRANGER"), "x"));
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
+            Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", null, TenantA)], new Sid("S-1-5-21-STRANGER"), "x", none));
         await Should.ThrowAsync<KeyNotFoundException>(() =>
-            Repo.ReplaceConsentsAsync([Guid.NewGuid()], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", null, TenantA)], new Sid("S-1-5-21-Alice"), "x"));
+            Repo.ReplaceConsentsAsync([Guid.NewGuid()], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", null, TenantA)], new Sid("S-1-5-21-Alice"), "x", none));
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Gina")], seed.Table, seed.Now, TenantA)).ShouldNotContain(c => c.GranteeType != GranteeType.Role);
@@ -385,7 +386,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         if (!Available) return;
         var seed = await SeedAsync();
         var consent = await Repo.CreateConsentAsync(NewConsent(seed, GranteeType.User, "S-1-5-21-RRev", null, TenantA, ConsentEffect.Allow, -1, 30));
-        await Repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-RRev"), "no longer needed");
+        await Repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-RRev"), "no longer needed", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
 
         await AssertExtendRejectedAsync(seed, consent.Id, seed.Now.AddDays(60));
     }

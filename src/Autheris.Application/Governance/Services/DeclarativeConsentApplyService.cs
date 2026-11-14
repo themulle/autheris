@@ -397,16 +397,17 @@ public sealed class DeclarativeConsentApplyService(
         // epoch invalidation after the commit cannot lose it.
         if (!dryRun && (createList.Count > 0 || revokeIds.Count > 0 || descriptionUpdates.Count > 0))
         {
+            var authority = ConsentRevocationAuthority.FromPrincipal(caller);
             var supersededReason = $"Superseded by GitOps declarative apply (version: {manifest.Version})";
             if (descriptionUpdates.Count == 0)
             {
-                await consentRepository.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, auditEntries, ct).ConfigureAwait(false);
+                await consentRepository.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, authority, auditEntries, ct).ConfigureAwait(false);
             }
             else
             {
                 var descriptionWriter = consentRepository as IConsentDescriptionRepository
                     ?? throw new InvalidOperationException("The consent repository does not support in-place description updates.");
-                await descriptionWriter.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
+                await descriptionWriter.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, authority, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
             }
         }
 

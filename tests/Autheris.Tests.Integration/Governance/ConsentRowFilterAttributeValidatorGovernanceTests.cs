@@ -42,6 +42,6 @@ public sealed class ConsentRowFilterAttributeValidatorGovernanceTests
         IConsentRepository repo = store;
         await Should.ThrowAsync<InvalidOperationException>(() => repo.CreateConsentAsync(ConsentOf(Attr(source: "STATIC")), default));
         await Should.ThrowAsync<InvalidOperationException>(() => repo.CreateConsentAsync(ConsentOf(Attr(json: "\"x\"")), default));
-        await Should.ThrowAsync<InvalidOperationException>(() => repo.ReplaceConsentsAsync([], [ConsentOf(Attr("LIKE"))], new Sid("S-1"), "r"));
+        await Should.ThrowAsync<InvalidOperationException>(() => repo.ReplaceConsentsAsync([], [ConsentOf(Attr("LIKE"))], new Sid("S-1"), "r", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
     }
 }

@@ -266,7 +266,7 @@ public sealed class DialectSqlGoldenArchitectureTests
     public void ReplaceConsents_Invalidates_Epoch_And_Metadata_Cache_All_Dialects(string dialect)
     {
         // DEF-01 (replaces ARCH-MNT-22-T-09): every dialect invalidates the epoch and evicts the cached table metadata (PG/MSSQL touch _metadataCache directly).
-        var instructions = Instructions(dialect, "ReplaceConsentsAsync", parameterCount: 7).ToList();
+        var instructions = Instructions(dialect, "ReplaceConsentsAsync", parameterCount: 8).ToList();
         // The unified repository's InvalidateTableEpochAsync evicts the cached table metadata first and then invalidates the epoch.
         instructions.Any(i => i.Operand is MethodReference { Name: "InvalidateTableEpochAsync" or "InvalidateEpochAsync" }).ShouldBeTrue();
     }

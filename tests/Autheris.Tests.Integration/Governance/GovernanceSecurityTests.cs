@@ -5,7 +5,9 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Compliance;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Autheris.GraphQL.Types;
 using NSubstitute;
 using Autheris.Infrastructure.Cache;
@@ -429,15 +431,6 @@ public class GovernanceSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task GetTransitiveRoles_ReturnsRoleNamesAsStrings()
-    {
-        var userSid = new Sid("S-1-5-21-TRANSITIVE-USER");
-        var roles = await _repository.GetTransitiveRolesAsync(userSid);
-        roles.ShouldNotBeNull();
-        roles.ShouldBeAssignableTo<IReadOnlySet<string>>();
-    }
-
-    [Fact]
     public async Task IsAuthorizedApprover_WhenDirectOwnerOrDelegatedOrUnauthorized()
     {
         var table = new TableIdentifier("finance", "dbo", "finance_table_1");
@@ -535,10 +528,10 @@ public class GovernanceSecurityTests : IDisposable
             ValidTo = DateTimeOffset.UtcNow.AddDays(30)
         });
 
-        // Calling repo.RevokeConsentAsync directly without authorization must throw UnauthorizedAccessException
-        await Should.ThrowAsync<UnauthorizedAccessException>(async () =>
+        // Calling repo.RevokeConsentAsync directly without authorization must throw ConsentRevocationForbiddenException
+        await Should.ThrowAsync<ConsentRevocationForbiddenException>(async () =>
         {
-            await _repository.RevokeConsentAsync(consent.Id, attackerSid, "Malicious direct revocation");
+            await _repository.RevokeConsentAsync(consent.Id, attackerSid, "Malicious direct revocation", ConsentRevocationAuthority.FromPrincipal(null));
         });
     }
 

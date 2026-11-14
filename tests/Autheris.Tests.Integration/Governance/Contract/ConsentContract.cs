@@ -399,7 +399,8 @@ public abstract class ConsentContract : GovernanceContractBase
         var consent = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, GranteeSid));
 
         Store.SetCaller(new CallerContext("contract-test", "1.0", "revoke"));
-        await Store.Consents.RevokeConsentAsync(consent.Id, Owner1Sid, "Revoked in contract test");
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        await Store.Consents.RevokeConsentAsync(consent.Id, Owner1Sid, "Revoked in contract test", none);
 
         var activeBySubj = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], table.Identifier, now, Store.TenantA);
         activeBySubj.Should().BeEmpty();
@@ -432,10 +433,11 @@ public abstract class ConsentContract : GovernanceContractBase
         var c1 = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, GranteeSid, requestId: syncMarker));
         var c2 = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, new Sid("S-1-5-21-900-55")));
 
+        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
         var unauthorizedSid = new Sid("S-1-5-21-999-999");
         Store.SetCaller(new CallerContext("stranger-app", "1.0", "revoke"));
-        var unauthAct = () => Store.Consents.RevokeConsentAsync(c2.Id, unauthorizedSid, "Unauthorized attempt");
-        await unauthAct.Should().ThrowAsync<UnauthorizedAccessException>();
+        var unauthAct = () => Store.Consents.RevokeConsentAsync(c2.Id, unauthorizedSid, "Unauthorized attempt", none);
+        await unauthAct.Should().ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>();
 
         var wrongMarkerRevoked = await Store.Consents.RevokeSystemConsentAsync(c1.Id, Guid.NewGuid(), new Sid("system:sync"), "Wrong marker");
         wrongMarkerRevoked.Should().BeFalse();
@@ -445,7 +447,7 @@ public abstract class ConsentContract : GovernanceContractBase
 
         var replacement = NewConsent(table.Identifier, Store.TenantA, new Sid("S-1-5-21-900-77"));
         var epochBefore = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
-        await Store.Consents.ReplaceConsentsAsync([c2.Id], [replacement], Owner1Sid, "Declarative replace");
+        await Store.Consents.ReplaceConsentsAsync([c2.Id], [replacement], Owner1Sid, "Declarative replace", none);
         var epochAfter = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
         epochAfter.Should().BeGreaterThan(epochBefore);
 

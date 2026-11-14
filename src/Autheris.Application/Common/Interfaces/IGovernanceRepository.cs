@@ -1,4 +1,5 @@
 using Autheris.Domain.Audit;
+using Autheris.Domain.Security;
 
 namespace Autheris.Application.Common.Interfaces;
 
@@ -120,7 +121,7 @@ public interface IConsentRepository
     Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default);
     Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default);
     Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default);
-    Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default);
+    Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, ConsentRevocationAuthority authority, CancellationToken ct = default);
     /// <summary>
     /// Active (not revoked, not yet expired) consents that expire at or before <paramref name="threshold"/>, soonest first, capped at
     /// <paramref name="maxResults"/> (PERS-04: already expired consents are never returned, on every provider).
@@ -191,6 +192,7 @@ public interface IConsentRepository
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default);
 }
@@ -359,7 +361,6 @@ public interface IDataOwnershipRepository
     Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default);
     Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default);
     Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default);
-    Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default);
 }
 
 public interface ITableRelationRepository
@@ -416,7 +417,7 @@ public interface IConsentDescriptionRepository
     Task LoadDescriptionsAsync(IReadOnlyCollection<Consent> consents, CancellationToken ct = default);
 
     /// <summary>
-    /// Same contract as <see cref="IConsentRepository.ReplaceConsentsAsync(IReadOnlyList{Guid}, IReadOnlyList{Consent}, Sid, string, IReadOnlyList{AuditLogEntry}?, CancellationToken)"/>
+    /// Same contract as <see cref="IConsentRepository.ReplaceConsentsAsync(IReadOnlyList{Guid}, IReadOnlyList{Consent}, Sid, string, ConsentRevocationAuthority, IReadOnlyList{AuditLogEntry}?, CancellationToken)"/>
     /// plus in-place description updates of non-revoked consents in the SAME transaction. A description update changes no other column and bumps no epoch;
     /// a revoked, expired, unknown or foreign-tenant target changes nothing (no error, no resurrection). The attribute-validating decorator implements this
     /// interface too, so the create list is validated on this path as well.
@@ -426,6 +427,7 @@ public interface IConsentDescriptionRepository
         IReadOnlyList<Consent> create,
         Sid actor,
         string reason,
+        ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries,
         IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
         CancellationToken ct);

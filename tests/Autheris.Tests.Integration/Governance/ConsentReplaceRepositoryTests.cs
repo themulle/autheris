@@ -83,7 +83,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
     {
         await EnsureTableAsync();
         var revoked = await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA));
-        await _repo.ReplaceConsentsAsync([revoked.Id], [], Admin, "revoke");
+        await _repo.ReplaceConsentsAsync([revoked.Id], [], Admin, "revoke", AdminAuth());
         var kept = await _repo.CreateConsentAsync(RoleConsent("ANALYST", TenantA));
         var upper = new TableIdentifier(_table.Domain.ToUpperInvariant(), _table.Schema.ToUpperInvariant(), _table.TableName.ToUpperInvariant());
 
@@ -100,7 +100,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         var epochBefore = await _repo.GetTableEpochAsync(_table);
         var replacement = UserConsent("S-1-5-21-Alice");
 
-        await _repo.ReplaceConsentsAsync([old.Id], [replacement, UserConsent("S-1-5-21-Bob")], Admin, "manifest apply");
+        await _repo.ReplaceConsentsAsync([old.Id], [replacement, UserConsent("S-1-5-21-Bob")], Admin, "manifest apply", AdminAuth());
 
         var active = await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Alice"), new Sid("S-1-5-21-Bob")], _table, DateTimeOffset.UtcNow, TenantA);
         active.Select(c => c.Id).ShouldNotContain(old.Id);
@@ -134,6 +134,9 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-MANIFEST-GROUP")], _table, DateTimeOffset.UtcNow, TenantA)).Count(c => c.GranteeType == GranteeType.Group).ShouldBe(1);
     }
 
+    private static Autheris.Domain.Security.ConsentRevocationAuthority AdminAuth() =>
+        Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(ManifestAdmin(Admin.Value, TenantA.Value));
+
     private static System.Security.Claims.ClaimsPrincipal ManifestAdmin(string sid, string tenant) => new(new System.Security.Claims.ClaimsIdentity(
     [
         new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, sid),
@@ -154,7 +157,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(5), CreatedBySid = Admin
         };
 
-        await Should.ThrowAsync<Exception>(() => _repo.ReplaceConsentsAsync([old.Id], [duplicateId], Admin, "manifest apply"));
+        await Should.ThrowAsync<Exception>(() => _repo.ReplaceConsentsAsync([old.Id], [duplicateId], Admin, "manifest apply", AdminAuth()));
 
         (await _repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await _repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
@@ -167,8 +170,8 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
         var old = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
 
-        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], new Sid("S-1-5-21-STRANGER"), "x"));
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
+            _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], new Sid("S-1-5-21-STRANGER"), "x", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
 
         (await _repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Bob")], _table, DateTimeOffset.UtcNow, TenantA)).ShouldBeEmpty();
@@ -180,7 +183,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
 
         await Should.ThrowAsync<KeyNotFoundException>(() =>
-            _repo.ReplaceConsentsAsync([Guid.NewGuid()], [UserConsent("S-1-5-21-Bob")], Admin, "x"));
+            _repo.ReplaceConsentsAsync([Guid.NewGuid()], [UserConsent("S-1-5-21-Bob")], Admin, "x", AdminAuth()));
 
         (await _repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Bob")], _table, DateTimeOffset.UtcNow, TenantA)).ShouldBeEmpty();
     }
@@ -191,7 +194,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
         var old = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
 
-        await _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], Admin, "manifest apply");
+        await _repo.ReplaceConsentsAsync([old.Id], [UserConsent("S-1-5-21-Bob")], Admin, "manifest apply", AdminAuth());
 
         var audit = await _repo.GetAuditLogEntriesAsync(50);
         audit.ShouldContain(e => e.EventType == "CONSENT_REVOKED" && e.ActorSid == Admin);
@@ -261,7 +264,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
     {
         await EnsureTableAsync();
         var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Carol"));
-        await _repo.RevokeConsentAsync(consent.Id, Admin, "no longer needed");
+        await _repo.RevokeConsentAsync(consent.Id, Admin, "no longer needed", AdminAuth());
 
         await AssertRejectedAndUnchangedAsync(consent, DateTimeOffset.UtcNow.AddDays(60));
     }
@@ -408,7 +411,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         var alice = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
         await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob"));
         var role = await _repo.CreateConsentAsync(RoleConsent("Analyst", TenantA));
-        await _repo.RevokeConsentAsync(alice.Id, new Sid("S-1-5-21-Alice"), "self");
+        await _repo.RevokeConsentAsync(alice.Id, new Sid("S-1-5-21-Alice"), "self", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
         var tenant = new Autheris.Application.Governance.Paging.ConsentPageQuery(TenantA, Table: _table);
 
         (await _repo.GetConsentPageAsync(tenant with { GranteeType = GranteeType.Role })).Items.Select(c => c.Id).ShouldBe([role.Id]);

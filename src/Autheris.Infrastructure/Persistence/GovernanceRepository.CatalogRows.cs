@@ -30,11 +30,6 @@ public partial class GovernanceRepository
     internal const string ActiveTableByIdSql = "SELECT source_name, schema_name, table_name FROM TABLES WHERE id = @id AND is_active = 1";
     internal const string ActiveTableColumnNamesSql = "SELECT column_name FROM TABLE_COLUMNS WHERE table_id = @t";
 
-    internal const string TransitiveRolesSql = @"SELECT r.role_name
-FROM ROLES r
-JOIN ROLE_MEMBERS rm ON r.id = rm.role_id
-WHERE rm.member_sid = @sid";
-
     internal static Table ReadTableEntity(DbDataReader reader, ILogger? logger = null, int o = 0)
     {
         var tableId = Guid.Parse(reader.GetString(o));
@@ -545,25 +540,6 @@ WHERE rm.member_sid = @sid";
         }
 
         return ids;
-    }
-
-    internal static async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(
-        DbConnection conn,
-        Sid subjectSid,
-        CancellationToken ct)
-    {
-        var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = TransitiveRolesSql;
-        cmd.AddBound("@sid", subjectSid.Value);
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            roles.Add(reader.GetString(0));
-        }
-
-        return roles;
     }
 
     internal static async Task<CatalogVersion> GetCatalogVersionAsync(

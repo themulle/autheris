@@ -11,6 +11,7 @@ using Autheris.Application.Governance.Validation;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -898,10 +899,7 @@ public sealed partial class Mutation
         }
 
         var principal = httpContextAccessor?.HttpContext?.User;
-        var roles = principal?.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new();
-        bool isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal); // RR-L2-01: single cross-tenant definition
-        bool isPrivilegedAdmin = roles.Contains("GovernanceAdmin") || isCrossTenantAdmin;
-
+        bool isCrossTenantAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal); // RR-L2-01: single cross-tenant definition
         var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
 
         if (consent.TenantId != tenantId && !isCrossTenantAdmin)
@@ -912,25 +910,26 @@ public sealed partial class Mutation
                 .Build());
         }
 
-        bool isGranteeSelf = consent.GranteeType == GranteeType.User &&
-                             consent.GranteeSid.HasValue &&
-                             consent.GranteeSid.Value == revokerSid;
-
-        bool isOwnerOrDelegate = false;
-        if (!isPrivilegedAdmin && !isGranteeSelf)
+        var authority = ConsentRevocationAuthority.FromPrincipal(principal);
+        try
         {
-            isOwnerOrDelegate = await ownershipRepository.IsAuthorizedApproverForTableAsync(consent.TableIdentifier, revokerSid, ct);
+            await consentRepository.RevokeConsentAsync(consentId, revokerSid, reason, authority, ct);
         }
-
-        if (!isPrivilegedAdmin && !isGranteeSelf && !isOwnerOrDelegate)
+        catch (System.Collections.Generic.KeyNotFoundException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("NOT_FOUND")
+                .SetMessage($"Consent '{consentId}' was not found.")
+                .Build());
+        }
+        catch (ConsentRevocationForbiddenException ex)
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage($"User '{revokerSid}' is neither a GovernanceAdmin, data owner or delegated approver for '{consent.TableIdentifier}', nor the beneficiary.")
+                .SetMessage(ex.Message)
                 .Build());
         }
 
-        await consentRepository.RevokeConsentAsync(consentId, revokerSid, reason, ct);
         return true;
     }
 

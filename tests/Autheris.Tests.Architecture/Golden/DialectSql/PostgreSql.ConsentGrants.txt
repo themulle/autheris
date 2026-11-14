@@ -3,8 +3,6 @@
 \n                                  AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)
  AND c.tenant_id = @tenantId
 ' does not exist.
-' is neither a data owner nor a delegated approver for '
-', nor the beneficiary.
 @by
 @d
 @domain
@@ -16,6 +14,7 @@
 @t
 @table
 @tenantId
+Actor SID is required.
 CONSENT_REVOKED
 Consent with ID '
 Consents
@@ -26,10 +25,11 @@ SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,\n      
 SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked\n                                FROM CONSENTS c \n                                JOIN TABLES t ON c.table_id = t.id\n                                WHERE c.id = @id\n                                FOR UPDATE OF c
 SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked\n                                FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)\n                                JOIN TABLES t ON c.table_id = t.id\n                                WHERE c.id = @id
 SELECT valid_to FROM CONSENTS WHERE id = @id AND tenant_id = @t AND is_revoked = 0
+ServicePrincipal
 UPDATE CONSENTS SET description = @d WHERE id = @id AND tenant_id = @t AND is_revoked = 0
 UPDATE CONSENTS SET is_revoked = 1, revoked_by_sid = @by, revoked_at = @now, revoke_reason = @reason\n                                WHERE id = @id AND is_revoked = 0
 User
-User '
+actor
 roleName
 ## method GetActiveRoleConsentsAsync
 roleName
@@ -54,11 +54,11 @@ UPDATE CONSENTS SET description = @d WHERE id = @id AND tenant_id = @t AND is_re
 @t
 ## set_Transaction 2
 ## method RevokeConsentInTransactionAsync
+Actor SID is required.
+actor
 Consent with ID '
 ' does not exist.
-User '
-' is neither a data owner nor a delegated approver for '
-', nor the beneficiary.
+ServicePrincipal
 CONSENT_REVOKED
 REVOKED
 N
