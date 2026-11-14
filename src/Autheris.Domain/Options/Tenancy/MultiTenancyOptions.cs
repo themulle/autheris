@@ -64,6 +64,9 @@ public sealed class AsyncJobOptions
     /// <summary>Configuration section the options are bound from (standalone and through <see cref="GatewayOptions.AsyncJobs"/>).</summary>
     public const string SectionName = "Gateway:AsyncJobs";
 
+    /// <summary>Enables or disables asynchronous query job endpoints, background dequeuing, and MCP async tools.</summary>
+    public bool Enabled { get; init; } = true;
+
     /// <summary>Maximum number of jobs this node executes in parallel.</summary>
     public int MaxConcurrentJobs { get; init; } = 4;
 

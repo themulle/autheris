@@ -24,6 +24,7 @@ internal sealed class AsyncJobScheduler : IDisposable
     private readonly int _maxPerTenant;
     private readonly Func<AsyncJobExecutionItem, CancellationToken, Task> _run;
     private readonly Func<AsyncJobExecutionItem, Task>? _onDiscard;
+    private readonly Func<bool>? _canDequeue;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _global;
     private readonly object _gate = new();
@@ -38,7 +39,8 @@ internal sealed class AsyncJobScheduler : IDisposable
         int maxPerTenant,
         Func<AsyncJobExecutionItem, CancellationToken, Task> run,
         ILogger logger,
-        Func<AsyncJobExecutionItem, Task>? onDiscard = null)
+        Func<AsyncJobExecutionItem, Task>? onDiscard = null,
+        Func<bool>? canDequeue = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrent, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxPerTenant, 1);
@@ -49,6 +51,7 @@ internal sealed class AsyncJobScheduler : IDisposable
         _run = run;
         _logger = logger;
         _onDiscard = onDiscard;
+        _canDequeue = canDequeue;
     }
 
     public void Dispose() => _global.Dispose();
@@ -58,10 +61,17 @@ internal sealed class AsyncJobScheduler : IDisposable
     public async Task RunAsync(ChannelReader<AsyncJobExecutionItem> reader, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(reader);
+        var disabledStop = false;
         try
         {
             while (true)
             {
+                if (_canDequeue is not null && !_canDequeue())
+                {
+                    disabledStop = true;
+                    return;
+                }
+
                 await _global.WaitAsync(ct).ConfigureAwait(false);
                 AsyncJobExecutionItem? item;
                 try
@@ -77,6 +87,10 @@ internal sealed class AsyncJobScheduler : IDisposable
                 if (item is null)
                 {
                     _global.Release();
+                    if (_canDequeue is not null && !_canDequeue())
+                    {
+                        disabledStop = true;
+                    }
                     return;
                 }
 
@@ -89,7 +103,7 @@ internal sealed class AsyncJobScheduler : IDisposable
         }
         finally
         {
-            await DrainAsync(reader, ct.IsCancellationRequested).ConfigureAwait(false);
+            await DrainAsync(disabledStop ? Channel.CreateBounded<AsyncJobExecutionItem>(1).Reader : reader, !disabledStop && ct.IsCancellationRequested).ConfigureAwait(false);
         }
     }
 
@@ -100,6 +114,10 @@ internal sealed class AsyncJobScheduler : IDisposable
         while (true)
         {
             ct.ThrowIfCancellationRequested();
+            if (_canDequeue is not null && !_canDequeue())
+            {
+                return null;
+            }
             Task eligible;
             lock (_gate)
             {

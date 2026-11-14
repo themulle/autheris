@@ -7,21 +7,35 @@ using System.IO;
 using System.Security.Claims;
 using System.Threading;
 using Autheris.Api.Extensions;
+using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Runtime.Jobs.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Application.Runtime.Jobs.Services;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 public static class AsyncJobEndpoints
 {
     public static IEndpointRouteBuilder MapAsyncJobEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/jobs").WithIngressTransport(DataSourceTransportFlags.WebSql);
+        var group = app.MapGroup("/api/v1/jobs")
+            .WithIngressTransport(DataSourceTransportFlags.WebSql)
+            .AddEndpointFilter(async (context, next) =>
+            {
+                if (!IsAsyncJobsEnabled(context.HttpContext))
+                {
+                    return Results.NotFound();
+                }
+
+                return await next(context).ConfigureAwait(false);
+            });
 
         group.MapPost("/query", async (
             AsyncQueryJobRequest request,
@@ -196,6 +210,42 @@ public static class AsyncJobEndpoints
         }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobCancelled);
 
         return app;
+    }
+
+    private static bool IsAsyncJobsEnabled(HttpContext httpContext)
+    {
+        var sp = httpContext.RequestServices;
+        if (sp is null)
+        {
+            return true;
+        }
+
+        var switches = sp.GetService<IReadPathSwitches>();
+        if (switches is not null && !switches.AsyncJobsEnabled)
+        {
+            return false;
+        }
+
+        var jobMonitor = sp.GetService<IOptionsMonitor<AsyncJobOptions>>();
+        if (jobMonitor is not null)
+        {
+            return jobMonitor.CurrentValue.Enabled;
+        }
+
+        var gatewayMonitor = sp.GetService<IOptionsMonitor<GatewayOptions>>();
+        if (gatewayMonitor is not null)
+        {
+            return gatewayMonitor.CurrentValue.AsyncJobs.Enabled;
+        }
+
+        var jobOptions = sp.GetService<IOptions<AsyncJobOptions>>();
+        if (jobOptions is not null)
+        {
+            return jobOptions.Value.Enabled;
+        }
+
+        var gatewayOptions = sp.GetService<IOptions<GatewayOptions>>();
+        return gatewayOptions?.Value.AsyncJobs.Enabled ?? true;
     }
 
     private static IResult StateUnavailable(HttpContext httpContext)

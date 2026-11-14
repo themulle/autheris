@@ -32,6 +32,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     private readonly IOptions<GatewayOptions>? _options;
     private readonly IOptions<AsyncJobOptions>? _jobOptions;
     private readonly IDistributedClusterStateProvider? _clusterState;
+    private readonly IOptionsMonitor<AsyncJobOptions>? _jobOptionsMonitor;
+    private readonly Autheris.Application.Mcp.Interfaces.IReadPathSwitches? _switches;
 
     public AsyncQueryJobBackgroundWorker(
         IAsyncQueryJobManager jobManager,
@@ -42,11 +44,15 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         IOptions<GatewayOptions>? options = null,
         IOptions<AsyncJobOptions>? jobOptions = null,
         IDistributedClusterStateProvider? clusterState = null,
-        IClusterStateTopology? topology = null)
+        IClusterStateTopology? topology = null,
+        IOptionsMonitor<AsyncJobOptions>? jobOptionsMonitor = null,
+        Autheris.Application.Mcp.Interfaces.IReadPathSwitches? switches = null)
     {
         _options = options;
         _jobOptions = jobOptions;
         _clusterState = topology?.IsClusterWide == true ? clusterState : null;
+        _jobOptionsMonitor = jobOptionsMonitor;
+        _switches = switches;
         ArgumentNullException.ThrowIfNull(jobManager);
         ArgumentNullException.ThrowIfNull(queue);
         ArgumentNullException.ThrowIfNull(scopeFactory);
@@ -67,6 +73,12 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!IsAsyncJobsEnabled())
+        {
+            _logger.LogInformation("AsyncQueryJobBackgroundWorker is disabled by configuration; no jobs will be dequeued.");
+            return;
+        }
+
         _logger.LogInformation("AsyncQueryJobBackgroundWorker started.");
 
         // Cancel requests for jobs running here that were issued on another node.
@@ -125,7 +137,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 jobs.MaxConcurrentJobsPerTenant,
                 ProcessJobItemAsync,
                 _logger,
-                DiscardQueuedAsync);
+                DiscardQueuedAsync,
+                IsAsyncJobsEnabled);
             await scheduler.RunAsync(_queue.Reader, stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -140,7 +153,9 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         await purgeTask.ConfigureAwait(false);
     }
 
-    private AsyncJobOptions JobOptions => _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
+    private AsyncJobOptions JobOptions => _jobOptionsMonitor?.CurrentValue ?? _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
+
+    private bool IsAsyncJobsEnabled() => (_switches?.AsyncJobsEnabled ?? true) && JobOptions.Enabled;
 
     /// <summary>A job still queued at shutdown is cancelled: the in-memory queue does not survive the process.</summary>
     private async Task DiscardQueuedAsync(AsyncJobExecutionItem item)
@@ -189,6 +204,11 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         AsyncJobExecutionItem item,
         CancellationToken stoppingToken)
     {
+        if (!IsAsyncJobsEnabled())
+        {
+            return;
+        }
+
         // State writes must still work while the host is stopping: they get their own short deadline.
         using var writeCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var writeCt = writeCts.Token;
