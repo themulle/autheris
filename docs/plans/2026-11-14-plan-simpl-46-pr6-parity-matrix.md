@@ -593,3 +593,198 @@ In `src/Autheris.Api/Endpoints/SqlEndpointRoutes.cs`:
 - [ ] `CrossTransportAuthorizationParityTests` covers all 19 scenarios (`S1`–`S19`) x 15 transports/sources and compiles/passes with `[Trait("Category", "Security")]`.
 - [ ] `GET /api/v1/queries/{name}` rejects any non-`SELECT` statement (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, DDL, unparsable) or `HttpMethod != "GET"` endpoint fail-closed with `405 Method Not Allowed` (`Allow: POST`) before execution for all callers, including write-scoped tokens (`#730`).
 - [ ] Zero `WP-`, `SEC-`, or `OD-` strings added to `src/Autheris.Api` or `src/Autheris.Application`; `DocsIntegrityTests` passes with zero absolute URI links in `docs/`.
+
+---
+
+## 9. Phase 3 result (Security Review, `csharp-security-expert`)
+
+- **Date:** 2026-11-14
+- **Reviewer:** `arch-planner` (adversarial lens: PDP precondition ordering, explain-endpoint leaks, #730 bypasses, parity-matrix gaps)
+- **Baseline:** `main` at `85b0a764`
+- **Rule:** Where §2–§5 conflict with a binding condition below, the condition wins. The Hydrogen briefs in §10 already include every condition.
+
+### 9.1 Verdicts per work package
+
+| Work package | Verdict | Blocking conditions |
+| :--- | :--- | :--- |
+| A. PDP degraded-groups precondition (§2) | **CHANGES REQUIRED** | SEC-46-6-1, SEC-46-6-2, SEC-46-6-3 |
+| B. #733 REST explain parity (§3) | **APPROVED WITH CONDITIONS** | SEC-46-6-4 … SEC-46-6-8 |
+| C. Cross-transport parity matrix (§4) | **APPROVED WITH CONDITIONS** | SEC-46-6-15 … SEC-46-6-18 |
+| D. #730 GET guard for DML SQL endpoints (§5) | **CHANGES REQUIRED** | SEC-46-6-9 … SEC-46-6-14 |
+
+A and D are blocking because the plan code as written would either weaken an existing control (A) or not compile and leave a parser differential (D). B and C need tightening but the design is sound.
+
+### 9.2 Findings
+
+**F-1 (High, A): §2.2 relaxes `SecurityPrincipalContext.FromPrincipal` across all production transports.**
+`FromPrincipal` (`src/Autheris.Domain/Security/SecurityPrincipalContext.cs`) currently calls `GroupResolutionClaims.Read(principal)`, which returns `Degraded` for any principal without the pipeline marker. §2.2 would turn every unmarked principal into `Complete`. `FromPrincipal` is called on production paths in 15 files, among them `GraphQlDataSecurityMiddleware`, `WebSocketAuthInterceptor`, `StreamRlsPolicyEnforcer`, `GatewayExecutionService`, `GovernedSqlRewriter`, `ODataQueryPolicyEnforcer`, `AiDataGuardrailService`, `FederatedDuckDbExecutionService`, `DefaultCrossDomainAccessResolver` and `GovernedProcedureExecutionService`. Any of these that receives a principal that skipped `IdentityPipeline` (WebSocket `connection_init`, stream subscribers, background jobs) would treat unverified token groups as complete. That is the exact bypass that `SEC-AUTH-04` closes. Unit-test ergonomics must not be bought with production behaviour.
+
+**F-2 (Medium, A): precondition order leaks table state before identity is checked.**
+§2.3 evaluates `TABLE_INACTIVE` (with the table name as the reason ref) before `IDENTITY_INCOMPLETE`, `TENANT_UNRESOLVED` and `GROUPS_DEGRADED`. An unauthenticated or degraded caller can then tell inactive tables from other tables through any surface that echoes the deny message.
+
+**F-3 (Low, A): consent-bypass mode changes behaviour silently.**
+Today the bypass path ignores group status. With the new top-of-method checks, bypass mode denies degraded and tenant-less callers. This is the correct fail-closed result, but it must be visible in tests and release notes rather than discovered.
+
+**F-4 (High, B): self-explain projects raw catalog columns and leaks hidden column names.**
+`AccessExplanationService.FindObjectAsync` returns the raw `tables.GetTableMetadataAsync` metadata, and the visibility result `visible` is only checked for null. §3.3 then projects **every** column of `request.Object.Columns`, and §3.2 adds `COLUMN_DENY` reasons that carry the column name. Together they list columns that catalog visibility hides from the same caller (hidden flags, DENY masking rules, column-level visibility). This breaks the existing rule "no existence oracle" and the catalog visibility contract (Q-SEC7-3).
+
+**F-5 (Medium, B): the trace exposes deny-consent IDs and mask-rule details to non-privileged callers.**
+`GRANT_DENY` / `COLUMN_DENY` / `ROW_DENY` reasons carry deny consent and filter IDs. `maskType = rule.RuleType` may carry rule configuration. For a non-privileged self-explain, the caller may learn *that* a deny applies, but not which governance object implements it.
+
+**F-6 (Low, B): `SubjectResolved` is `true` for a degraded self.**
+`AccessExplanationService` line 168 sets `resolved = isSelf || status == Complete`. A degraded caller explaining itself gets `subjectResolved: true` with `groups.status: Degraded`, which is contradictory.
+
+**F-7 (Medium, B): `Principal = user` widens the inputs on REST paths that used to be principal-less.**
+After §3.1, `DuckDbOlapEndpoints`, `GovernanceEndpoints.Catalog` and every other consumer of `HttpContext.Items[SecurityPrincipalContext.ItemKey]` start feeding `principal.GetAllUserSids()` and claims-based caller attributes into the PDP. This is the intended parity, but it must be proven by tests rather than assumed.
+
+**F-8 (High, D): §5 references options that do not exist and duplicates the executor's write gate.**
+`WebSqlOptions.AllowDmlStatements` does not exist; the real switch is `WebSql.AllowDml` (`GatewayOptions.IsWebSqlDmlAllowed`). `GovernedSqlRewriter` (line 257 ff.) already refuses non-`SELECT` statements unless `isDml && IsWebSqlDmlAllowed`, and refuses DML for `IsReadOnly()` or tokens without `TokenAccessScope.WriteScope`. The §5 Layer 1 copy of these checks is redundant at best and drifts at worst.
+
+**F-9 (High, D): parser differential between the guard and the executed SQL.**
+`IsSelectOnlyStatement` classifies `NormalizeForAst(RawSql.Trim())`. `SqlEndpointExecutionService` executes `StripComments(RawSql).Trim().TrimEnd(';').Trim()`, which `GovernedSqlRewriter` parses again. Two classifiers fed two different strings are a classic bypass shape: comment tricks, trailing statements, or dialect constructs that one parse accepts and the other reads differently. The authority must be the statement type that the executor computes for the exact string it executes.
+
+**F-10 (High, D): the real #730 gap is narrower than §5.1 states, and one gap is missing from the plan.**
+- Read-only tokens on `GET` are **already** refused for DML by `GovernedSqlRewriter`. §5.1 point 3, second bullet, overstates the issue.
+- The real gap is a write-scoped token with `WebSql:AllowDml=true` running DML over `GET`. That breaks HTTP safety and opens a CSRF vector for cookie-backed upstream sessions (ForwardAuth): an `<img src>` can trigger the write.
+- **Missing:** `POST /api/v1/queries/{name}` running DML skips `WebSqlEndpoints.RefuseDmlRequestAsync`, so it bypasses the `Idempotency-Key` requirement and the cluster-wide idempotency reservation that `DmlIdempotencyStoreStartupCheck` relies on.
+
+**F-11 (Medium, D): the `Allow` header and registration accept arbitrary stored methods.**
+§5.2 sets `Allow` from `definition.HttpMethod`, a free-form stored string. Registration (`request.HttpMethod ?? "GET"`) and file loading accept any value, so the header can carry anything, and a CR/LF value turns into a 500. The registration default `"GET"` is also wrong for DML.
+
+**F-12 (Low, D): 405 vs 404 reveals that an endpoint exists and is DML.**
+Any authenticated caller can probe names (`GET /{name}` → 404 or 405), while listing (`GET /api/v1/queries/`) requires list-admin. This is accepted as a residual risk because method semantics need the 405, but the response must not echo the endpoint name or SQL.
+
+**F-13 (Medium, C): the parity matrix misses surfaces and lacks an independent oracle.**
+- `AccessTransport` has 16 members. `Streaming` and `Lakehouse` are not in `ParitySurface`, and the declarative SQL endpoints surface (`SqlTransports.SqlEndpoints`, the #730 route itself) is not covered.
+- The degraded-groups case is tested only on PDP and OLAP.
+- S12's expected result is "denied **or** 0 rows", which is not deterministic.
+- The cells are compared against `IAccessDecisionPoint.ExplainAsync`, so a PDP bug makes every surface agree and the matrix passes.
+
+**F-14 (Info): checked and already safe.**
+- `IdentityPipeline` strips inbound `GroupResolutionClaims.MarkerClaimType` / `StatusClaimType` claims (`IdentityPipeline.cs:50-51`), and the marker requires `Issuer == "Autheris:IdentityPipeline"`, so a token cannot forge the marker.
+- `MERGE`, DDL, table-less statements, table functions and multi-statement input are already refused by `GovernedSqlRewriter` / single-statement parsing.
+- PostgreSQL/Oracle reads now run inside `SET TRANSACTION READ ONLY` (SEC-DP-14, `3347e521`), which neutralises volatile-function writes inside a `SELECT` on those engines.
+
+### 9.3 Binding conditions
+
+**A. PDP degraded-groups precondition**
+- **SEC-46-6-1** `SecurityPrincipalContext.FromPrincipal` stays strict and calls `GroupResolutionClaims.Read(principal)` unchanged. Drop §2.2. Unit tests that need a `Complete` principal get a **test-only** helper, `tests/Autheris.Tests.Unit/TestSupport/PipelinePrincipals.cs` (`MarkComplete(ClaimsPrincipal)` adds the marker and the `complete` status claim with `Issuer = IdentityClaimIssuers.Pipeline`). No such helper may exist in `src/`. Add the regression test `FromPrincipal_without_pipeline_marker_is_degraded`.
+- **SEC-46-6-2** Precondition order in `AccessDecisionPoint.DecideAsync`: `IDENTITY_INCOMPLETE` → `TENANT_UNRESOLVED` → `GROUPS_DEGRADED` (status `!= Complete` **or** `IsMarkedDegraded(subject.Principal)`) → `TABLE_INACTIVE` → write-transport check. Every precondition deny has `EvaluatedByPdp = true`. The `TABLE_INACTIVE` reason ref is `null`; the table name appears only in server logs and audit.
+- **SEC-46-6-3** Consent-bypass mode also denies degraded and tenant-less authenticated callers. Pin this with `Consent_bypass_still_denies_degraded_groups` and list it in the PR description as a behaviour change.
+
+**B. #733 REST explain**
+- **SEC-46-6-4** `FindObjectAsync` returns the caller-visible projection (`visible`), not the raw metadata, to `ExplainAsync`. The column projection in §3.3 and every reason that names a column are limited to the columns of that projection. Hidden columns never appear in `columns` or `trace`. Privileged explain of a foreign subject may use the raw metadata. Test: `Self_explain_never_lists_catalog_hidden_columns`.
+- **SEC-46-6-5** For a non-privileged self-explain, the trace keeps reason **codes** and column names, but `Ref` is `null` for `GRANT_DENY`, `COLUMN_DENY`, `ROW_DENY`, `ROW_FILTER` and `GRANT_EXPIRED`. `maskType` is the mask-kind enum name only (`Kind.ToString()`), never rule parameters or expressions. No predicate literal and no row-filter SQL appears in any explain response. Test: `Self_explain_redacts_governance_object_ids` (assert on JSON, not just `ShouldNotContain("EU")`).
+- **SEC-46-6-6** `Grants` and `Reasons` built in `ConsentResolutionService` are surfaced **only** by the explain endpoints and audit. No transport error body, GraphQL `extensions` or OData error may serialise them. Reuse the existing architecture-test style to assert that `DecisionReason` is not referenced from transport error mappers. Allocation cost is gated by the §4.3 benchmark: the cached p95 stays under 5 ms.
+- **SEC-46-6-7** `SubjectResolved` = `subject.GroupResolutionStatus == Complete`, also for self.
+- **SEC-46-6-8** Attaching `Principal = user` / `Claims = user.Claims` in `SecurityContextFactory.BuildContext` is covered by two tests:
+  - `Http_context_security_context_matches_FromPrincipal` (same SIDs, groups, status, caller attributes for one principal through both factories).
+  - `Http_context_without_pipeline_marker_stays_degraded` (keeps `IdentityPipelineTests.Principal_without_pipeline_marker_is_degraded` semantics).
+
+**D. #730 GET guard**
+- **SEC-46-6-9** The executor's own classification is the authority:
+  - Add `bool ReadOnlyRequired` to `GovernedSqlQueryRequest`.
+  - `GovernedSqlRewriter` refuses any `metadata.StatementType != SqlStatementType.Select` when it is set, with a new stable code `GovernedSqlErrorCodes.MethodNotAllowed`. The check runs after parsing the exact executed string and before any DML audit reservation or connection open.
+  - `SqlEndpointExecutionService.ExecuteEndpointAsync` takes a `SqlEndpointInvocation` enum (`Get`, `Post`; no default value, so every caller must choose) and sets `ReadOnlyRequired = invocation == Get`.
+  - Drop the §5.2 Layer 1 duplicate write-scope / `AllowDmlStatements` checks: the rewriter already enforces `IsWebSqlDmlAllowed`, `IsReadOnly()` and `WriteScope`.
+- **SEC-46-6-10** The route pre-check in `HandleGetEndpoint` is defence in depth only. It shares **one** classifier with `WebSqlEndpoints.ClassifyStatement`, moved to Application as `SqlStatementClassifier.Classify(string sql)` returning `RequestStatementClass`, and fed the same normalised string the executor uses (`StripComments(RawSql).Trim().TrimEnd(';').Trim()`). `Unparsable` and `Write` → 405. Cache the class per `SqlEndpointDefinition` (keyed by name and SQL hash) so a GET never parses twice.
+- **SEC-46-6-11** `GET` on an endpoint whose stored method is not `GET`, or whose class is not `Read` → `405`, `Allow: POST` (constant), uniform body `"This SQL endpoint cannot be executed via HTTP GET."`. No endpoint name, no SQL. This applies to every caller, including write-scoped tokens and `ClusterAdmin`.
+- **SEC-46-6-12** `POST /api/v1/queries/{name}` running a `Write`-class endpoint goes through the same request guard as WebSQL:
+  - Extract `RefuseDmlRequestAsync` into a shared `DmlRequestGuard`.
+  - Require `Idempotency-Key` and a canonical caller identity.
+  - Reserve in the cluster-wide store.
+  - Disabled DML still answers through the executor refusal.
+- **SEC-46-6-13** Registration and file loading normalise `HttpMethod` with `Trim().ToUpperInvariant()` and accept only `GET` or `POST`, otherwise `400`.
+  - The default is `POST` for a `Write` class and `GET` for `Read`.
+  - `GET` + `Write`, or any `Unparsable` SQL → `400`.
+  - The loader path (`endpointLoader.ParseSqlContent`) applies the same rule, so the request `HttpMethod` cannot be dropped silently.
+  - Endpoints loaded at startup that break the rule are logged and not registered (fail closed).
+- **SEC-46-6-14** Tests in `SqlEndpointDmlGetGuardTests`:
+  - `Get_on_dml_endpoint_returns_405_for_write_scoped_token`, `Get_on_dml_endpoint_returns_405_for_cluster_admin` and `Get_on_post_method_endpoint_returns_405`.
+  - `Get_405_body_does_not_echo_endpoint_name`.
+  - `Executor_refuses_dml_when_read_only_required_even_if_route_check_skipped`, which calls the service directly.
+  - `Comment_and_trailing_statement_variants_classified_identically_by_guard_and_executor`, covering `/* */`, `--`, trailing `;`, `; DELETE …`, a CTE wrapping DML, and mixed-case verbs.
+  - `Post_dml_without_idempotency_key_returns_400`.
+  - `Register_get_with_dml_returns_400`, `Register_unknown_method_returns_400` and `Register_dml_without_method_defaults_to_post`.
+
+**C. Parity matrix**
+- **SEC-46-6-15** `ParitySurface` covers every `AccessTransport` member except `Internal`. Add `Streaming` (`StreamRlsPolicyEnforcer`), `Lakehouse`, and `SqlEndpointsGet` (`GET /api/v1/queries/{name}`, `SqlTransports.SqlEndpoints`). `Matrix_complete_for_all_transports_and_sources` asserts the set relation against `Enum.GetValues<AccessTransport>()`, not a literal 15, so a new transport fails the test until it is added.
+- **SEC-46-6-16** Add scenarios `S20_DegradedGroups` (`GROUPS_DEGRADED`), `S21_TenantUnresolved` (`TENANT_UNRESOLVED`) and `S22_ForeignTenantObject` (uniform not-found / deny) to **every** surface, not only PDP and OLAP.
+- **SEC-46-6-17** Every scenario has one deterministic expected outcome. S12 is `Allowed = false` with reason code `CALLER_ATTRIBUTE_UNRESOLVED` (or the existing virtual-filter fail-closed code; pick one and pin it). Surfaces with a reduced projection (Envoy allow/deny, Discovery column states) use a declared projection function per surface, never a skipped assertion.
+- **SEC-46-6-18** The oracle is the hard-coded expected value in the scenario table: rows, column states, grant count, reason code. `ExplainAsync` is compared as one more surface, not as the reference.
+
+### 9.4 Residual risks (accepted)
+
+- **F-12:** endpoint-existence and DML-class probing via 405 for authenticated callers. The body is uniform and listing stays admin-only.
+- **SQL Server, SQLite, Databricks:** volatile side effects inside a `SELECT` rely on the read-only login and the `SqlFunctionPolicy` denylist. SEC-DP-14 only covers PostgreSQL and Oracle.
+
+---
+
+## 10. Hydrogen task briefs
+
+Both briefs: worktree from `main`, `NUGET_PACKAGES=/work/nuget`, English only, strict Red-Green-Refactor, **filtered** unit tests locally with `--blame-hang --blame-hang-timeout 120s -m:1 -nodeReuse:false`, integration and benchmark projects compile-only (`--no-dependencies`), full suites in CI. No `WP-`, `SEC-` or `OD-` strings in `src/Autheris.Api` / `src/Autheris.Application`. Report to `@coordinator` with commit, test counts, and any deviation.
+
+### 10.1 PR 6a: PDP precondition + #733 principal attachment and explain
+
+- **Branch / worktree:** `feat/simpl-46-pr6a-pdp-explain` in `/work/wt/simpl-46-pr6a`.
+- **Scope (files):**
+  - `src/Autheris.Application/Policy/Pdp/AccessDecisionPoint.cs`
+  - `src/Autheris.Application/Policy/Pdp/AccessExplanationService.cs`
+  - `src/Autheris.Application/Services/ConsentResolutionService.cs`
+  - `src/Autheris.Api/Security/SecurityContextFactory.cs`
+  - `src/Autheris.Api/Endpoints/AuthorizationExplainEndpoints.cs`
+  - tests listed below
+  - **Do not touch** `SecurityPrincipalContext.FromPrincipal` (SEC-46-6-1).
+- **Steps:**
+  1. **Red:** add `tests/Autheris.Tests.Unit/TestSupport/PipelinePrincipals.cs` (test-only `MarkComplete`).
+     Add failing tests:
+     - `FromPrincipal_without_pipeline_marker_is_degraded`
+     - `Principal_less_degraded_subject_denied_with_GROUPS_DEGRADED`
+     - `Preconditions_evaluated_identity_tenant_groups_before_table_state`
+     - `Consent_bypass_still_denies_degraded_groups`
+  2. **Green:** implement the precondition block in `DecideAsync` in the SEC-46-6-2 order. Every deny gets `EvaluatedByPdp = true` and a `DecisionReason`; `TABLE_INACTIVE` has `Ref = null`.
+  3. Fix existing unit tests that relied on unmarked principals by using `PipelinePrincipals.MarkComplete` or `GroupResolutionStatus = Complete` (`AccessExplanationServiceTests.Ctx`, `CallerLabelTests.Subject`, etc.). Never relax production code.
+  4. Set `Principal = user` and `Claims = user.Claims` in `SecurityContextFactory.BuildContext` (§3.1), with the SEC-46-6-8 tests.
+  5. Populate `Grants` and `Reasons` in `ConsentResolutionService` (§3.2), applying SEC-46-6-5 and SEC-46-6-6.
+  6. `ExplainAsync` column projection (§3.3) over the **visible** projection (SEC-46-6-4); mask kind only.
+     `AccessExplanationService`:
+     - pass `visible` to `ExplainAsync`;
+     - redact refs for non-privileged self-explain;
+     - set `SubjectResolved` from group status (SEC-46-6-7).
+  7. Add the `GrantsListResponse` record (§3.4).
+  8. Extend `AuthModeEndToEndTests.Same_user_same_groups_identical_security_context_across_modes` (§3.5). Assert on parsed JSON that:
+     - no `ref` is present for deny and filter reasons;
+     - hidden columns are absent;
+     - `NoGrant` → 404.
+- **Local filter:** `AccessDecisionPoint|AccessExplanationService|ConsentResolutionService|PdpGroupsUnresolved|SecurityContextFactory|CallerLabel|IdentityPipelineTests|SecurityPrincipalContext`.
+- **Done when:** the filtered unit tests are green, the integration project compiles, and the architecture tests (`AuthorizationArchitectureTests|CleanArchitectureTests|DocsIntegrityTests`) are green.
+
+### 10.2 PR 6b: #730 GET guard + parity matrix tests
+
+- **Branch / worktree:** `feat/simpl-46-pr6b-sqlendpoint-parity` in `/work/wt/simpl-46-pr6b`. It may start in parallel with 6a, but the parity-matrix part (steps 6–8) is rebased onto 6a before merge.
+- **Scope (files):**
+  - `src/Autheris.Application/Sql/Endpoints/**`
+  - `src/Autheris.Application/Sql/Services/GovernedSqlRewriter.cs`
+  - `GovernedSqlQueryRequest`
+  - new `src/Autheris.Application/Sql/SqlStatementClassifier.cs`
+  - new `DmlRequestGuard` (Api)
+  - `src/Autheris.Api/Endpoints/SqlEndpointRoutes.cs`
+  - `src/Autheris.Api/Endpoints/WebSqlEndpoints.DmlGuard.cs` (extraction only, no behaviour change)
+  - tests listed below
+  - Do not touch PDP or explain files (6a).
+- **Steps:**
+  1. **Red:** add `tests/Autheris.Tests.Unit/Security/SqlEndpointDmlGetGuardTests.cs` with all SEC-46-6-14 tests.
+  2. **Green (authority):** add `ReadOnlyRequired` to `GovernedSqlQueryRequest`. `GovernedSqlRewriter` refuses non-`Select` with `GovernedSqlErrorCodes.MethodNotAllowed` when it is set. Add the `SqlEndpointInvocation` parameter (no default) to `ExecuteEndpointAsync` and update all callers (SEC-46-6-9).
+  3. Move `ClassifyStatement` to `SqlStatementClassifier` in Application. `WebSqlEndpoints` calls it, and the existing WebSQL tests stay green. Cache the class per endpoint definition (SEC-46-6-10).
+  4. `HandleGetEndpoint`: defence-in-depth pre-check and map `MethodNotAllowed` → `405` with the constant `Allow: POST` and the uniform body (SEC-46-6-11).
+     `HandlePostEndpoint`: the shared `DmlRequestGuard` (Idempotency-Key and reservation) for `Write`-class endpoints (SEC-46-6-12).
+  5. Registration and loader method normalisation and validation (SEC-46-6-13).
+  6. Add `tests/Autheris.Tests.Integration/Security/CrossTransportAuthorizationParityTests.cs` per §4.1, amended by SEC-46-6-15 … 18:
+     - surfaces derived from `AccessTransport` plus `SqlEndpointsGet`;
+     - S1–S22;
+     - hard-coded expected outcomes;
+     - a projection function per reduced surface.
+  7. Route-table assertion in `RemovedAuthzKeysTests.RebacRoutes_Return404` (§4.2).
+  8. `benchmarks/Autheris.Benchmarks/AccessDecisionPointBenchmark.cs` (§4.3).
+- **Local filter:** `SqlEndpointDmlGetGuard|SqlEndpointsTests|SqlEndpointDynamicRegistration|WebSqlDml|GovernedSqlRewriter|RemovedAuthzKeys|SqlStatementClassifier`.
+- **Done when:** the filtered unit tests are green, the integration and benchmark projects compile (the parity matrix runs in CI), the architecture tests (`ReadOnlyRouteAllowlistTests|ReadOnlyTokenGetRouteTests|CleanArchitectureTests|DocsIntegrityTests`) are green, and the CI parity job is green.
