@@ -30,7 +30,7 @@ public class PureYamlProcedureGovernanceTests
             new(ClaimTypes.NameIdentifier, "user-123")
         };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+        return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(claims, "test")));
     }
 
     [Fact]

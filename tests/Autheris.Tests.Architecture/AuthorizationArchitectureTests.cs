@@ -74,4 +74,26 @@ public sealed class AuthorizationArchitectureTests
 
         hasPdpMethod.ShouldBeTrue("GraphQlDataSecurityMiddleware must expose methods taking IAccessDecisionPoint.");
     }
+
+    [Fact]
+    public void Transport_error_mappers_never_reference_DecisionReason()
+    {
+        var violatingFiles = new List<string>();
+
+        foreach (var file in RepositoryScan.ProductionFiles)
+        {
+            var fileName = System.IO.Path.GetFileName(file.RelativePath);
+            if ((fileName.Contains("Error", StringComparison.Ordinal)
+                    || fileName.Contains("ExceptionHandler", StringComparison.Ordinal)
+                    || fileName.Contains("ExceptionStatusMapper", StringComparison.Ordinal))
+                && (file.Text.Contains("DecisionReason", StringComparison.Ordinal)
+                    || file.Text.Contains("DecisionGrantRef", StringComparison.Ordinal)))
+            {
+                violatingFiles.Add(file.RelativePath);
+            }
+        }
+
+        violatingFiles.ShouldBeEmpty(
+            $"DecisionReason and DecisionGrantRef must be surfaced only by explain and audit, never by transport error mappers: {string.Join(", ", violatingFiles)}");
+    }
 }

@@ -27,13 +27,13 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
     private const string DataSource = "pg_multi";
 
     private static ClaimsPrincipal CreateUser() =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),
                 new Claim("tenant_id", Tenant),
                 new Claim(ClaimTypes.Role, "Admin")
             ],
-            "Test"));
+            "Test")));
 
     private static TableMetadata CreateTable(TableIdentifier id, bool hasTenantColumn) => new()
     {

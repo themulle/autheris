@@ -34,12 +34,12 @@ public sealed class WebSqlTwoPartNameDataSourceTests
     internal static readonly TableIdentifier CraneId = new(DataSource, "md", "crane");
 
     internal static ClaimsPrincipal CreateUser() =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),
                 new Claim("tenant_id", Tenant)
             ],
-            "Test"));
+            "Test")));
 
     private static TableMetadata CreateTable(TableIdentifier id, string? sourceName = null) => new()
     {

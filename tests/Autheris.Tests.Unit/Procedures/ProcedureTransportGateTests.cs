@@ -119,7 +119,7 @@ public sealed class ProcedureTransportGateTests
     }
 
     private static ClaimsPrincipal Caller() =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1001"), DefaultTenantCaller.Claim], "test"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1001"), DefaultTenantCaller.Claim], "test")));
 
     [Theory]
     [Trait("Category", "Security")]

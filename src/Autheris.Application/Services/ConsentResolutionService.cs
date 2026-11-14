@@ -51,10 +51,20 @@ public sealed class ConsentResolutionService : IConsentResolutionService
 
         // Rule 1: Hard Table DENY
         // A deny consent with no column rules is considered a table-level DENY
-        var hasTableDeny = dConsents.Any(c => c.ColumnRules.Count == 0 && c.RowFilters.Count == 0);
-        if (hasTableDeny)
+        var tableDenies = dConsents
+            .Where(c => c.ColumnRules.Count == 0 && c.RowFilters.Count == 0)
+            .OrderBy(c => c.Id)
+            .ToList();
+        if (tableDenies.Count > 0)
         {
-            return TableAccessDecision.Denied(table, "Hard DENY: Active table-level DENY applies to subject.");
+            var denyReasons = tableDenies
+                .Select(c => new DecisionReason(DecisionStep.ExplicitDeny, "GRANT_DENY", MapGrantSourceKind(c).ToString(), c.Id.ToString("D")))
+                .ToList();
+            return TableAccessDecision.Denied(table, "Hard DENY: Active table-level DENY applies to subject.") with
+            {
+                DenialKind = TableAccessDenialKind.ConsentDeny,
+                Reasons = denyReasons
+            };
         }
 
         // Rule 2: Zero Trust - If A is empty, deny access
@@ -74,10 +84,18 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             if (clampedConsent != null)
             {
                 return TableAccessDecision.Denied(table,
-                    $"Zero Trust: No active ALLOW consent granted to subject (consent expired on {clampedConsent.EffectiveValidTo:yyyy-MM-dd} due to maximum duration clamp).");
+                    $"Zero Trust: No active ALLOW consent granted to subject (consent expired on {clampedConsent.EffectiveValidTo:yyyy-MM-dd} due to maximum duration clamp).") with
+                {
+                    DenialKind = TableAccessDenialKind.ConsentMissing,
+                    Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "GRANT_EXPIRED", MapGrantSourceKind(clampedConsent).ToString(), clampedConsent.Id.ToString("D"))]
+                };
             }
 
-            return TableAccessDecision.Denied(table, "Zero Trust: No active ALLOW consent granted to subject.");
+            return TableAccessDecision.Denied(table, "Zero Trust: No active ALLOW consent granted to subject.") with
+            {
+                DenialKind = TableAccessDenialKind.ConsentMissing,
+                Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "NO_GRANT", "Consent", null)]
+            };
         }
 
         // Check for Column Hard-DENYs in D
@@ -164,8 +182,82 @@ public sealed class ConsentResolutionService : IConsentResolutionService
 
         var scopeClearance = ComputeScopeClearance(columnAccess, callerScopes, unconstrainedConsents, rowConstrainedGroups);
 
+        var (grants, reasons) = BuildGrantTrace(aConsents, dConsents, columnAccess, hardDeniedColumns, callerScopes);
+
         return TableAccessDecision.Allowed(table, columnAccess, rowFilterSql, hasUnconstrainedColumnAllow)
-            with { ConsentFilterRecipe = recipe, ScopeClearance = scopeClearance };
+            with
+            {
+                ConsentFilterRecipe = recipe,
+                ScopeClearance = scopeClearance,
+                Grants = grants,
+                Reasons = reasons
+            };
+    }
+
+    private static GrantSourceKind MapGrantSourceKind(Consent consent)
+        => GrantSourceKind.ConsentRequest;
+
+    private static (IReadOnlyList<DecisionGrantRef> Grants, IReadOnlyList<DecisionReason> Reasons) BuildGrantTrace(
+        IReadOnlyList<Consent> aConsents,
+        IReadOnlyList<Consent> dConsents,
+        IReadOnlyDictionary<string, ColumnAccessLevel> columnAccess,
+        HashSet<string> hardDeniedColumns,
+        IReadOnlySet<string>? callerScopes)
+    {
+        var orderedAllows = aConsents.OrderBy(c => c.Id).ToList();
+        var orderedDenies = dConsents.OrderBy(c => c.Id).ToList();
+
+        var grants = orderedAllows
+            .Select(c => new DecisionGrantRef(c.Id.ToString("D"), MapGrantSourceKind(c), c.ValidFrom, c.EffectiveValidTo))
+            .ToList();
+
+        var reasons = new List<DecisionReason>(orderedAllows.Count + columnAccess.Count);
+        foreach (var c in orderedAllows)
+        {
+            reasons.Add(new DecisionReason(DecisionStep.Grant, "GRANT_ALLOW", MapGrantSourceKind(c).ToString(), c.Id.ToString("D")));
+        }
+
+        foreach (var c in orderedDenies.Where(d => d.ColumnRules.Count == 0 && d.RowFilters.Count > 0))
+        {
+            foreach (var rf in c.RowFilters.OrderBy(f => f.Id))
+            {
+                reasons.Add(new DecisionReason(DecisionStep.ExplicitDeny, "ROW_DENY", "RowFilter", rf.Id.ToString("D"), rf.ColumnName));
+            }
+        }
+
+        foreach (var c in orderedAllows)
+        {
+            foreach (var rf in c.RowFilters.OrderBy(f => f.Id))
+            {
+                reasons.Add(new DecisionReason(DecisionStep.Narrowing, "ROW_FILTER", "RowFilter", rf.Id.ToString("D"), rf.ColumnName));
+            }
+        }
+
+        foreach (var col in columnAccess.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        {
+            var level = columnAccess[col];
+            if (level == ColumnAccessLevel.Deny)
+            {
+                var denyConsent = hardDeniedColumns.Contains(col)
+                    ? orderedDenies.FirstOrDefault(d => d.ColumnRules.Any(r =>
+                        RuleAppliesToScopes(r, callerScopes)
+                        && string.Equals(r.ColumnName, col, StringComparison.OrdinalIgnoreCase)
+                        && r.AccessLevel == ColumnAccessLevel.Deny))
+                    : null;
+                reasons.Add(new DecisionReason(
+                    denyConsent != null ? DecisionStep.ExplicitDeny : DecisionStep.Narrowing,
+                    "COLUMN_DENY",
+                    "Consent",
+                    denyConsent?.Id.ToString("D"),
+                    col));
+            }
+            else if (level == ColumnAccessLevel.Mask)
+            {
+                reasons.Add(new DecisionReason(DecisionStep.Narrowing, "COLUMN_MASK", "Consent", null, col));
+            }
+        }
+
+        return (grants, reasons);
     }
 
     /// <summary>

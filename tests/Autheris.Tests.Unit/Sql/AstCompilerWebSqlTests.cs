@@ -30,7 +30,8 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     private const string Tenant = "tenant_a";
 
     private static ClaimsPrincipal User() =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-AST"), new Claim("tenant_id", Tenant)], "Test"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-AST"), new Claim("tenant_id", Tenant)], "Test")));
 
     internal static GovernedSqlExecutionService CreateService(
         string sourceType,

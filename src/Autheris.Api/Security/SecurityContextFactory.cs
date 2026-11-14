@@ -149,7 +149,9 @@ public static class SecurityContextFactory
             IsAuthenticated = true,
             TenantSelectedByHeader = selectedByHeader,
             ClientIp = clientIp,
-            Caller = caller
+            Caller = caller,
+            Claims = user.Claims,
+            Principal = user
         };
     }
 

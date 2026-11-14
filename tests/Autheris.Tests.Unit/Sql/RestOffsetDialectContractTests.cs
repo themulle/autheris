@@ -19,7 +19,8 @@ public sealed class RestOffsetDialectContractTests
     private const string RestStatement = "SELECT id, dept FROM orders ORDER BY id OFFSET 10 ROWS LIMIT 51";
 
     private static ClaimsPrincipal User() =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-AST"), new Claim("tenant_id", Tenant)], "Test"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-AST"), new Claim("tenant_id", Tenant)], "Test")));
 
     [Theory]
     [InlineData("PostgreSQL", "LIMIT", "OFFSET")]

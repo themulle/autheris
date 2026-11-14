@@ -212,7 +212,10 @@ public sealed class GovernedDataPathsG4Tests
     {
         var claims = new List<Claim> { new(ClaimTypes.PrimarySid, "S-1-5-21-1001") };
         claims.AddRange(extra);
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+        return extra.Any(c => c.Type is Autheris.Domain.Identity.GroupResolutionClaims.StatusClaimType or Autheris.Domain.Identity.GroupResolutionClaims.MarkerClaimType)
+            ? principal
+            : Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(principal);
     }
 
     private static ProcFixture NewProc(

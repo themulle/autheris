@@ -53,7 +53,8 @@ public sealed class GovernedSqlRewriterKeySetTests : IDisposable
     private static void FailWith(KeySetPipeline f, Func<int, Exception?> failure) => f.Failure = failure;
 
     private static ClaimsPrincipal User() =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-KS"), new Claim("tenant_id", Tenant)], "Test"));
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-KS"), new Claim("tenant_id", Tenant)], "Test")));
 
     private static Task<Autheris.Application.Sql.Internal.GovernedRewrite> Rewrite(KeySetPipeline f, string sql = ShortSql, CancellationToken ct = default) =>
         f.Rewriter.RewriteCoreAsync(sql, User(), new TenantId(Tenant), dataSourceName: null, dmlContext: null, ct);

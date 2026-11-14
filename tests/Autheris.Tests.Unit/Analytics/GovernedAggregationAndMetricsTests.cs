@@ -68,13 +68,13 @@ public sealed class GovernedAggregationAndMetricsTests
     }
 
     private static ClaimsPrincipal CreatePrincipal(string sid, string tenant = "tenant-a", string role = "Analyst") =>
-        new(new ClaimsIdentity(
+        Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.PrimarySid, sid),
             new Claim(ClaimTypes.Name, sid),
             new Claim(ClaimTypes.Role, role),
             new Claim("tenant_id", tenant)
-        ], "TestAuth"));
+        ], "TestAuth")));
 
     private sealed class InMemoryRowExecutor(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows) : IDataSourceExecutor
     {
