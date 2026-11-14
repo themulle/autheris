@@ -91,6 +91,7 @@ public static class DevConfiguration
             {
                 Fill(G + key, "true");
             }
+            Fill(G + "DuckDbOlap:Enabled", "true");
         }
 
         // Dev personas: only supply default development personas if no BasicAuth users were configured
