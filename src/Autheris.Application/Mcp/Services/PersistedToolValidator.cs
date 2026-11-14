@@ -10,7 +10,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// F-AI-11 / SEC-OI-508-1, SEC-OI-508-2: closed-world, recursive validation of MCP tool arguments against the declared
+/// Closed-world, recursive validation of MCP tool arguments against the declared
 /// <see cref="McpToolDefinition.InputJsonSchema"/>. Tools are code defined, so the schema is the contract: everything it does not
 /// declare is rejected (<c>additionalProperties</c> is <c>false</c> by default at every level). Every failure carries the fixed code
 /// <see cref="InvalidArgumentsCode"/>; the parameter name, the matched rule and the client value are never echoed.

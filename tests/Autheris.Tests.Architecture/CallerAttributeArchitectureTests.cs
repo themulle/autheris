@@ -179,7 +179,7 @@ public sealed partial class CallerAttributeArchitectureTests
 
     /// <summary>
     /// The client-asserted flag marks header labels for audit and usage reading only: no authorization, grant, filter, mask, rate-limit or Envoy
-    /// decision may read it. The only readers are its definition, the factory that sets it and the audit details writer.
+    /// decision may read it. The only readers are its definition, the factory that sets it, the audit sink scrubber, and the audit/usage writers.
     /// </summary>
     [Fact]
     public void Client_asserted_flag_is_read_by_audit_only()
@@ -190,6 +190,7 @@ public sealed partial class CallerAttributeArchitectureTests
             "src/Autheris.Api/Security/SecurityContextFactory.cs",
             "src/Autheris.Domain/Model/GovernanceModels.cs",
             "src/Autheris.Domain/Model/GovernanceV2Models.cs",
+            "src/Autheris.Application/Audit/AuditGroupCommitSink.cs",
             "src/Autheris.Application/Usage/UsageAggregator.cs",
             "src/Autheris.Application/Lineage/ConsumerFolding.cs",
             "src/Autheris.Application/Lineage/LineageImpactAnalyzerService.cs",

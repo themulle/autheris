@@ -351,7 +351,7 @@ public static class GatewayMcpServer
             throw new McpProtocolException($"Prompt '{promptName}' not found.", McpErrorCode.InvalidParams);
         }
 
-        // SEC-OI-508-3: the prompt text never contains an unvalidated string. Invalid input answers a fixed message (no echo).
+        // The prompt text never contains an unvalidated string. Invalid input answers a fixed message (no echo).
         var ds = ValidatedPromptDataset(arguments);
         if (isExplore)
         {
@@ -398,8 +398,8 @@ public static class GatewayMcpServer
     private const int MaxPromptDatasetLength = 256;
 
     /// <summary>
-    /// SEC-OI-508-3: the only accepted prompt argument is <c>dataset</c>; it must be present, at most 256 characters, free of control
-    /// characters and newlines, and a valid <c>domain.schema.table</c> id. Anything else (including the dropped <c>principal</c> argument)
+    /// The only accepted prompt argument is <c>dataset</c>; it must be present, at most 256 characters, free of control
+    /// characters and newlines, and a valid <c>domain.schema.table</c> id. Anything else (including any principal override)
     /// answers InvalidParams with a fixed message.
     /// </summary>
     private static string ValidatedPromptDataset(IReadOnlyDictionary<string, string?>? arguments)

@@ -36,17 +36,17 @@ public sealed record CatalogTableUpsertResult(TableMetadata Metadata, CatalogUps
 public readonly record struct CatalogProjectionDiff(CatalogWriteClassification Classification, int ChangedPathCount);
 
 /// <summary>
-/// WP-OI-SCALE-3 (#674): exactly the fields the catalog upsert persists for one table (table row, columns, masking rules, key definition),
+/// Exactly the fields the catalog upsert persists for one table (table row, columns, masking rules, key definition),
 /// flattened to ordered path/value pairs. Values are compared ordinally and case-sensitively, <c>null</c> differs from the empty string, nothing
-/// is trimmed (SEC-OI-674-2). Built from the stored state read inside the write transaction (SEC-OI-674-1), never from a cache.
-/// <see cref="Compare"/> classifies a change as additive or restrictive for the deferred version bump (SEC-OI-672-2); every change that is not
+/// is trimmed. Built from the stored state read inside the write transaction, never from a cache.
+/// <see cref="Compare"/> classifies a change as additive or restrictive for the deferred version bump; every change that is not
 /// proven additive is restrictive (fail closed).
 /// </summary>
 public sealed class CatalogTablePersistedProjection
 {
     private const char ListSeparator = '\u001f';
 
-    /// <summary>Public properties of the catalog model types that the projection covers (reflection coverage test, SEC-OI-674-3).</summary>
+    /// <summary>Public properties of the catalog model types that the projection covers.</summary>
     public static IReadOnlySet<string> CoveredProperties { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         "Table.SourceType", "Table.SourceName", "Table.SchemaName", "Table.TableName", "Table.DisplayName", "Table.Description",

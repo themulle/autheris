@@ -401,8 +401,8 @@ public partial class GovernanceRepository
                 }
             }
 
-            // SEC-OI-674-1: the state compared against is read from the database inside this transaction (the row is locked), never from the cache.
-            // An unreadable stored state yields no projection, which can only lead to a write (SEC-OI-674-2).
+            // The state compared against is read from the database inside this transaction (the row is locked), never from the cache.
+            // An unreadable stored state yields no projection, which fails closed and performs a full write.
             wasCreated = !tableExisted;
             if (tableExisted)
             {
@@ -474,7 +474,7 @@ public partial class GovernanceRepository
 
             if (classification == CatalogWriteClassification.Unchanged)
             {
-                // WP-OI-SCALE-3 (#674): the write left every persisted field as it was. Nothing is committed: no epoch, no catalog version, no event, no scope work.
+                // The write left every persisted field as it was. Nothing is committed: no epoch, no catalog version, no event, no scope work.
                 await tx.RollbackAsync(ct).ConfigureAwait(false);
             }
             else
@@ -507,7 +507,7 @@ public partial class GovernanceRepository
             : wasCreated ? CatalogUpsertKind.Created : CatalogUpsertKind.Updated;
         if (kind == CatalogUpsertKind.Unchanged)
         {
-            // SEC-OI-674-1: the unchanged result is the freshly loaded stored state, never the writer's input or a cached copy.
+            // The unchanged result is the freshly loaded stored state, never the writer's input or a cached copy.
             InvalidateTableMetadata(metadata.Identifier.ToString().ToLowerInvariant());
         }
         else
@@ -542,7 +542,7 @@ public partial class GovernanceRepository
 
     /// <summary>
     /// The persisted projection of one table read through the transaction (table row, columns, masking rules, key definition), or null when the
-    /// state cannot be read or projected exactly (callers then write, SEC-OI-674-2).
+    /// state cannot be read or projected exactly (callers then write fail-closed).
     /// </summary>
     private async Task<CatalogTablePersistedProjection?> TryReadPersistedProjectionAsync(
         DbConnection conn, DbTransaction tx, TableIdentifier identifier, CancellationToken ct)

@@ -1190,7 +1190,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             return false;
         }
 
-        // TryCreate answers false for control characters and newlines (SEC-OI-508-3) instead of throwing.
+        // TryCreate answers false for control characters and newlines instead of throwing.
         return TableIdentifier.TryCreate(parts[0], parts[1], parts[2], out id);
     }
 

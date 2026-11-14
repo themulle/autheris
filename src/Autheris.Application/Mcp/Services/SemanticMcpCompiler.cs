@@ -318,7 +318,7 @@ public sealed class SemanticMcpCompiler(
             return allTables;
         }
 
-        // SEC-OI-508-5: no caller identity, no tables. Only the explicit (production-blocked) auth bypass above opens the catalog.
+        // Fail closed when caller identity is missing; only the explicit (production-blocked) auth bypass above opens the catalog.
         if (principal is null)
         {
             return Array.Empty<TableMetadata>();

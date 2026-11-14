@@ -80,7 +80,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _querySimulator = querySimulator;
         _provenanceEnricher = provenanceEnricher;
-        // SEC-OI-508-1: the validator is required; a host without it fails at startup instead of running tools unchecked.
+        // The validator is required; a host without it fails at startup instead of running tools unchecked.
         _persistedToolValidator = persistedToolValidator ?? throw new ArgumentNullException(nameof(persistedToolValidator));
         _datasetCatalog = datasetCatalog;
         _toolExecutionHandler = toolExecutionHandler;
@@ -100,7 +100,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
         var principal = BuildPrincipal(sessionContext);
 
-        // SEC-OI-508-1: arguments are validated for every call (empty ones included) against the closed tool schema.
+        // Arguments are validated for every call (empty ones included) against the closed tool schema.
         // Property names are compared ordinally; the validator already rejected duplicates and case variants.
         var variables = new Dictionary<string, object?>(StringComparer.Ordinal);
         var effectiveArguments = string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson;
@@ -393,7 +393,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         var list = await _datasetCatalog.ListDatasetsAsync(principal, search: tableName, domain: null, ct: cancellationToken).ConfigureAwait(false);
 
         var datasets = list?.Datasets ?? Array.Empty<McpDatasetSummary>();
-        // SEC-OI-508-4: only catalog data is reported. The summary carries no owner, so the field is omitted (never a fabricated
+        // Only catalog data is reported. The summary carries no owner, so the field is omitted (never a fabricated
         // address), and tags come from the catalog record or are omitted.
         var assets = datasets.Select(d => new
         {
