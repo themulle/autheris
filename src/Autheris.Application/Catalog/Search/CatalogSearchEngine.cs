@@ -3,6 +3,7 @@ namespace Autheris.Application.Catalog.Search;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -21,11 +22,13 @@ using Microsoft.Extensions.Options;
 /// Hochperformante In-Process Hybrid Search Engine für den Datensatz- und Tabellenkatalog.
 /// Kombiniert Okapi BM25 mit SIMD-beschleunigter Vektorsuche über Reciprocal Rank Fusion (RRF).
 /// </summary>
-public sealed class CatalogSearchEngine : ICatalogSearchEngine
+public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchStatusRecorder
 {
     private readonly ILocalEmbeddingGenerator _embeddingGenerator;
     private readonly IOptions<CatalogSearchOptions> _options;
     private readonly ILogger<CatalogSearchEngine> _logger;
+    private readonly TimeProvider _timeProvider;
+    private readonly object _statusLock = new();
     /// <summary>Fallback when <see cref="CatalogSearchOptions.MaxQueryLength"/> is not a positive value.</summary>
     public const int DefaultMaxQueryLength = 256;
 
@@ -36,10 +39,24 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
     private readonly BoundedCache<string, ReadOnlyMemory<float>> _embeddingCache = new(QueryEmbeddingCacheCapacity, comparer: StringComparer.Ordinal);
 
     private CatalogSearchSnapshot? _currentSnapshot;
+    private DateTimeOffset? _lastSuccessUtc;
+    private DateTimeOffset? _lastAttemptUtc;
+    private string? _lastErrorCode;
+    private (long StructureVersion, long ContentVersion)? _lastIndexedVersion;
 
     public bool IsIndexReady => _currentSnapshot != null;
     public int IndexedTableCount => _currentSnapshot?.MetadataMap.Count ?? 0;
     public DateTimeOffset? LastIndexedAt => _currentSnapshot?.CreatedAt;
+    public (long StructureVersion, long ContentVersion)? LastIndexedVersion
+    {
+        get
+        {
+            lock (_statusLock)
+            {
+                return _lastIndexedVersion;
+            }
+        }
+    }
 
     /// <summary>Number of query embeddings currently cached (never above <see cref="QueryEmbeddingCacheCapacity"/>).</summary>
     public int CachedQueryEmbeddingCount => _embeddingCache.Count;
@@ -47,11 +64,46 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
     public CatalogSearchEngine(
         ILocalEmbeddingGenerator embeddingGenerator,
         IOptions<CatalogSearchOptions> options,
-        ILogger<CatalogSearchEngine> logger)
+        ILogger<CatalogSearchEngine> logger,
+        TimeProvider? timeProvider = null)
     {
         _embeddingGenerator = embeddingGenerator ?? throw new ArgumentNullException(nameof(embeddingGenerator));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    public CatalogSearchIndexStatus GetStatus(DateTimeOffset? utcNow = null)
+    {
+        var now = utcNow ?? _timeProvider.GetUtcNow();
+        lock (_statusLock)
+        {
+            var lastSuccess = _lastSuccessUtc ?? _currentSnapshot?.CreatedAt;
+            var indexAge = lastSuccess.HasValue ? now - lastSuccess.Value : (TimeSpan?)null;
+            return new CatalogSearchIndexStatus(lastSuccess, _lastAttemptUtc, _lastErrorCode, indexAge);
+        }
+    }
+
+    public void RecordRebuildOutcome(
+        DateTimeOffset? lastSuccessUtc,
+        DateTimeOffset lastAttemptUtc,
+        string? lastErrorCode,
+        (long StructureVersion, long ContentVersion)? indexedVersion)
+    {
+        lock (_statusLock)
+        {
+            if (lastSuccessUtc.HasValue)
+            {
+                _lastSuccessUtc = lastSuccessUtc;
+            }
+
+            _lastAttemptUtc = lastAttemptUtc;
+            _lastErrorCode = lastErrorCode;
+            if (indexedVersion.HasValue)
+            {
+                _lastIndexedVersion = indexedVersion;
+            }
+        }
     }
 
     public async Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default)
@@ -174,7 +226,18 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
         if (vectorAvailable)
         {
             var texts = bm25Docs.Select(x => x.Item2).ToList();
-            var vectors = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync(texts, ct).ConfigureAwait(false);
+            IReadOnlyList<ReadOnlyMemory<float>> vectors;
+            try
+            {
+                vectors = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync(texts, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                ex.Data[CatalogSearchErrorCodes.ErrorCodeDataKey] = CatalogSearchErrorCodes.EmbeddingFailed;
+                ExceptionDispatchInfo.Capture(ex).Throw();
+                throw;
+            }
+
             for (int i = 0; i < bm25Docs.Count; i++)
             {
                 vectorDocs.Add((bm25Docs[i].Item1, vectors[i]));
@@ -187,7 +250,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             VectorIndex: new VectorSearchIndex(vectorDocs),
             MetadataMap: metadataMap,
             ForeignKeysGraph: fkGraph,
-            CreatedAt: DateTimeOffset.UtcNow);
+            CreatedAt: _timeProvider.GetUtcNow());
 
         Interlocked.Exchange(ref _currentSnapshot, newSnapshot);
         _logger.LogInformation("Katalog-Suchindex erfolgreich aktualisiert. {Count} Tabellen aktiv.", tables.Count);

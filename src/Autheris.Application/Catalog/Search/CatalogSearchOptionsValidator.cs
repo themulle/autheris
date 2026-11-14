@@ -18,6 +18,11 @@ public sealed partial class CatalogSearchOptionsValidator : IValidateOptions<Cat
             return ValidateOptionsResult.Fail("CatalogSearchOptions cannot be null.");
         }
 
+        if (options.RefreshSeconds < 0 || (options.RefreshSeconds > 0 && options.RefreshSeconds < 5))
+        {
+            return ValidateOptionsResult.Fail("RefreshSeconds must be 0 (disabled) or at least 5 seconds.");
+        }
+
         if (!options.Enabled)
         {
             return ValidateOptionsResult.Success;
