@@ -26,7 +26,6 @@ FederationSigning_KeyTooShort [Production]: InvalidOperationException: Security 
 FederationSigning_KeyMissingAllowedInDevelopment [Development]: OK
 SecuritySwitchReport_WebSqlBypassFlag [Development]: OK
 SecuritySwitchReport_WarnFlagsAndVirtualFilters [Production]: OK
-OperationalInvariants_DmlWithoutRoles [Production]: ValidationException: Configuration error: WebSql.AllowDml=true requires at least one role in WebSql.DmlWriterRoles (SEC M-20: DML is allowed only for explicitly authorized roles).
 OperationalInvariants_QuickstartInProduction [Production]: ValidationException: Security violation: The GettingStarted profile 'Quickstart' may be active ONLY in the Development environment.
 OperationalInvariants_ShutdownTimeout [Production]: ValidationException: NF-HA-01 violation: ShutdownTimeoutSeconds must be at least 10s greater than QueryTimeoutSeconds.
 OperationalInvariants_TerminationGrace [Production]: ValidationException: NF-HA-01 violation: TerminationGracePeriodSeconds must be greater than DrainDelay + ShutdownTimeout + 10s.

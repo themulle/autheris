@@ -71,7 +71,7 @@ public sealed class GovernedSqlExecutorX1Tests
 
     internal static GatewayOptions Gateway(string provider, long maxAffectedRows = 1000, bool storeCompiledSql = false, string? hmacRef = null, int timeoutSeconds = 30, bool allowRecursive = false) => new()
     {
-        WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DmlWriterRoles = ["Writer"], DefaultDataSourceName = DataSource, MaxAffectedRows = maxAffectedRows, ExecutionTimeoutSeconds = timeoutSeconds, AllowRecursiveCte = allowRecursive },
+        WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DefaultDataSourceName = DataSource, MaxAffectedRows = maxAffectedRows, ExecutionTimeoutSeconds = timeoutSeconds, AllowRecursiveCte = allowRecursive },
         Audit = new AuditOptions { StoreCompiledSql = storeCompiledSql },
         DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = hmacRef ?? string.Empty },
         DataSources = new SqlDataSourceOptions

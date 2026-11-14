@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.WriteGrants;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -39,6 +40,7 @@ public sealed class ConsentRequestService : IConsentRequestService
     private readonly IGrantPolicy _grantPolicy;
     private readonly IIdentitySubjectResolver? _subjectResolver;
     private readonly IConsentMaterializationGuard? _materializationGuard;
+    private readonly IRowPolicyDependencyIndex? _policyDependencyIndex;
 
     public ConsentRequestService(
         ITableMetadataRepository metadataRepository,
@@ -47,9 +49,11 @@ public sealed class ConsentRequestService : IConsentRequestService
         IOptions<GatewayOptions>? gatewayOptions = null,
         IGrantPolicy? grantPolicy = null,
         IIdentitySubjectResolver? subjectResolver = null,
-        IConsentMaterializationGuard? materializationGuard = null)
+        IConsentMaterializationGuard? materializationGuard = null,
+        IRowPolicyDependencyIndex? policyDependencyIndex = null)
     {
         _materializationGuard = materializationGuard;
+        _policyDependencyIndex = policyDependencyIndex;
         _grantPolicy = grantPolicy ?? new GrantPolicy();
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
@@ -93,12 +97,21 @@ public sealed class ConsentRequestService : IConsentRequestService
             throw Invalid("The duration (durationDays) must be between 1 and 365 days.");
         }
 
+        if (command.RequestWriteOnly == true && (command.RequestedWriteRules == null || command.RequestedWriteRules.Count == 0))
+        {
+            throw Invalid("A write-only access request requires at least one write rule.");
+        }
+
         var userSid = command.UserSid;
         var isCrossTenantAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
+        var writeRulesFingerprint = command.RequestedWriteRules is { Count: > 0 }
+            ? System.Text.Json.JsonSerializer.Serialize(command.RequestedWriteRules)
+            : string.Empty;
         var requestFingerprint = IdempotencyFingerprint(
             ResolveTenantId(principal, command.ContextTenant, isCrossTenantAdmin).Value,
-            command.Domain, command.Schema, command.TableName, justification.Trim(), durationDays);
+            command.Domain, command.Schema, command.TableName, justification.Trim(), durationDays,
+            writeRulesFingerprint, command.RequestWriteOnly);
         var existing = await TryGetIdempotentAsync(userSid, command.IdempotencyKey, requestFingerprint, ct).ConfigureAwait(false);
         if (existing != null)
         {
@@ -128,6 +141,9 @@ public sealed class ConsentRequestService : IConsentRequestService
             }
         }
 
+        var validatedWriteRules = WriteRuleWorkflowHelper.ValidateRequestedWriteRules(
+            meta, command.RequestedWriteRules, tableId, tenantId, _policyDependencyIndex);
+
         // a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
         var now = DateTimeOffset.UtcNow;
         var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
@@ -148,6 +164,7 @@ public sealed class ConsentRequestService : IConsentRequestService
             ? System.Text.Json.JsonSerializer.Serialize(command.Context)
             : null;
 
+        bool includeReadAccess = validatedWriteRules.Count == 0 || command.RequestWriteOnly == false;
         var request = new ConsentRequest
         {
             TableId = meta.Table.Id,
@@ -160,7 +177,9 @@ public sealed class ConsentRequestService : IConsentRequestService
             Status = "PENDING",
             TenantId = tenantId,
             RequesterIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value),
-            ContextJson = contextJson
+            ContextJson = contextJson,
+            RequestedWriteRules = validatedWriteRules,
+            IncludeReadAccess = includeReadAccess
         };
 
         var created = await _approvalRepository.CreateConsentRequestAsync(request, ct).ConfigureAwait(false);

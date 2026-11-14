@@ -96,6 +96,7 @@ public static class AuditEventTypes
     public const string ConsentApplied = "CONSENT_APPLIED";
     public const string ConsentDescriptionChanged = "CONSENT_DESCRIPTION_CHANGED";
     public const string ConsentRecertificationRequired = "CONSENT_RECERTIFICATION_REQUIRED";
+    public const string WriteGrantChanged = "WRITE_GRANT_CHANGED";
     public const string ProfileInvalidationFailed = "PROFILE_INVALIDATION_FAILED";
 
     // Plan 9: Datasources & Async Jobs

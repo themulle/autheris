@@ -139,7 +139,7 @@ For Databricks, `CheckedExecutorFor(Databricks)` is non-transactional: it refuse
 | DuckDB | yes | yes | yes | yes | yes |
 | Databricks (Delta) | yes | yes, without the INSERT check option | yes, no subquery in the condition | yes, no subquery in the condition | yes |
 
-DML needs `WebSql:AllowDml`, a role from `WebSql:DmlWriterRoles` and the matching bit in `CompileRequest.Statements` (default `ReadOnly`). Not supported on any dialect and rejected at parse time: `RETURNING`/`OUTPUT`, `UPDATE ... FROM`, `DELETE ... USING`, joins in `UPDATE`/`DELETE`, `MERGE ... BY SOURCE` and `BY TARGET`.
+DML needs `WebSql:AllowDml`, explicit approved `WriteRules` on consents/access profiles and the matching bit in `CompileRequest.Statements` (default `ReadOnly`). Not supported on any dialect and rejected at parse time: `RETURNING`/`OUTPUT`, `UPDATE ... FROM`, `DELETE ... USING`, joins in `UPDATE`/`DELETE`, `MERGE ... BY SOURCE` and `BY TARGET`.
 
 ### 3.3 Capability limits (capability table `cap-6`)
 
@@ -363,8 +363,7 @@ Correlated consent filters are covered by the pre-deploy lint `tools/PolicyPredi
 | Key | Default | Effect |
 |---|---|---|
 | `Gateway:WebSql:Enabled` | `false` | Enables WebSQL and the startup checks of section 6 |
-| `Gateway:WebSql:AllowDml` | `false` | Permits DML (with `DmlWriterRoles`) |
-| `Gateway:WebSql:DmlWriterRoles` | empty | Roles allowed to run DML |
+| `Gateway:WebSql:AllowDml` | `false` | Permits DML (with explicit approved `WriteRules`) |
 | `Gateway:WebSql:MaxAffectedRows` | `1000` | Affected-row limit per DML statement, enforced in the transaction; `0` = unlimited (listed as a DANGER bypass when DML is enabled) |
 | `Gateway:WebSql:ExecutionTimeoutSeconds` | `30` | Command timeout; SQLite statements are interrupted at this time (504) |
 | `Gateway:WebSql:AllowRecursiveCte` | `false` | Permits `WITH RECURSIVE` in read statements. Requires `ExecutionTimeoutSeconds` between 1 and 300 (the start fails otherwise) and logs one startup warning that names the temp-space prerequisite below |

@@ -24,17 +24,17 @@ public sealed class TableAccessPolicySecurityTests
 {
 
     [Theory]
-    [InlineData(false, false, false, false)]
-    [InlineData(true, true, false, false)]
-    [InlineData(true, true, true, false)]
-    [InlineData(false, false, true, true)]
-    [InlineData(true, true, true, true)]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
     [Trait("Category", "Security")]
-    public async Task SEC_36_SP3a_02_CanWriteTable_is_false_without_write_decision(bool allowDml, bool writerRole, bool consentBypass, bool clusterAdmin)
+    public async Task SEC_36_SP3a_02_CanWriteTable_is_false_without_write_decision(bool allowDml, bool consentBypass, bool clusterAdmin)
     {
         var options = new GatewayOptions
         {
-            WebSql = new WebSqlOptions { AllowDml = allowDml, DmlWriterRoles = writerRole ? ["Writer"] : [] },
+            WebSql = new WebSqlOptions { AllowDml = allowDml },
             Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = consentBypass }
         };
         var policy = new TableAccessPolicy(

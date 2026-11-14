@@ -107,7 +107,7 @@ public sealed class Consent
 
     public IReadOnlyList<ConsentColumnRule> ColumnRules { get; set; } = Array.Empty<ConsentColumnRule>();
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
-    public IReadOnlyList<WriteRule> WriteRules { get; init; } = [];
+    public IReadOnlyList<WriteRule> WriteRules { get; set; } = [];
     public string? RowFilterCondition { get; init; }
 
     /// <summary>expiry after the read-time clamp of legacy individual grants (never later than<see cref="ValidTo"/>).</summary>

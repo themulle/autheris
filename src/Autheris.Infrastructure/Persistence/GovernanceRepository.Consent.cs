@@ -40,21 +40,21 @@ public partial class GovernanceRepository
         public const string SelectConsentRequestByIdSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        t.source_name, t.schema_name, t.table_name, r.itsm_ticket_id, r.tenant_id,
-                                       r.requester_identifiers_json, r.context_json
+                                       r.requester_identifiers_json, r.context_json, r.requested_write_rules_json
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.id = @id";
 
         public const string SelectRequestsByRequesterBaseSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-                                       t.source_name, t.schema_name, t.table_name, r.context_json
+                                       t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.requester_sid = @reqSid";
 
         public const string SelectPendingRequestsForApproverSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                    r.business_justification, r.status, r.requested_at, r.requested_valid_to,
-                                   t.source_name, t.schema_name, t.table_name, r.context_json
+                                   t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json
                             FROM CONSENT_REQUESTS r
                             JOIN TABLES t ON r.table_id = t.id
                             WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
@@ -321,6 +321,7 @@ public partial class GovernanceRepository
             Description = consent.Description,
             ColumnRules = consent.ColumnRules,
             RowFilters = consent.RowFilters,
+            WriteRules = consent.WriteRules,
             RowFilterCondition = consent.RowFilterCondition
         };
         await ConsentSqlCore.InsertColumnRulesAndRowFiltersAsync(conn, tx, created, ct).ConfigureAwait(false);
@@ -345,6 +346,12 @@ public partial class GovernanceRepository
             })
         };
         await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
+        if (created.WriteRules.Count > 0)
+        {
+            var actorSid = consent.CreatedBySid ?? consent.GranteeSid ?? new Sid(consent.RoleName ?? "UNKNOWN");
+            await RecordAuditEventAsync(ConsentWriteRulesSql.BuildWriteGrantChangedAudit(created, actorSid), tx, ct).ConfigureAwait(false);
+        }
+
         return created;
     }
 
@@ -848,19 +855,20 @@ public partial class GovernanceRepository
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
-            var (activated, _) = await ConsentSqlCore.TryActivateConsentRowsAsync(conn, tx, req, allowPendingAutoApprove, "ALLOW", now, ct).ConfigureAwait(false);
+            var (activated, activatedConsentId) = await ConsentSqlCore.TryActivateConsentRowsAsync(conn, tx, req, allowPendingAutoApprove, "ALLOW", now, ct).ConfigureAwait(false);
             if (!activated)
             {
                 await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
                 return;
             }
 
+            var actorSid = approvedBy ?? req.RequesterSid;
             var auditEntry = new AuditLogEntry
             {
                 Id = Guid.NewGuid(),
                 OccurredAt = now,
                 EventType = "CONSENT_GRANTED",
-                ActorSid = approvedBy ?? req.RequesterSid,
+                ActorSid = actorSid,
                 TargetTable = req.TableIdentifier.ToString(),
                 Decision = "ALLOW",
                 TraceId = Guid.NewGuid().ToString(),
@@ -868,6 +876,19 @@ public partial class GovernanceRepository
                 TenantId = req.TenantId
             };
             await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
+            if (req.RequestedWriteRules.Count > 0)
+            {
+                var writeConsent = new Consent
+                {
+                    Id = activatedConsentId,
+                    TableId = req.TableId,
+                    TableIdentifier = req.TableIdentifier,
+                    TenantId = req.TenantId,
+                    WriteRules = req.RequestedWriteRules
+                };
+                await RecordAuditEventAsync(ConsentWriteRulesSql.BuildWriteGrantChangedAudit(writeConsent, actorSid), tx, ct).ConfigureAwait(false);
+            }
+
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch

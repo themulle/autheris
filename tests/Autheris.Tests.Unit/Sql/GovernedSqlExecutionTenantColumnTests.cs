@@ -83,8 +83,7 @@ public sealed class GovernedSqlExecutionTenantColumnTests
             {
                 Enabled = true,
                 DefaultDataSourceName = DataSource,
-                AllowedDataSources = [DataSource],
-                DmlWriterRoles = ["Admin"]
+                AllowedDataSources = [DataSource]
             },
             DataSources = new SqlDataSourceOptions
             {

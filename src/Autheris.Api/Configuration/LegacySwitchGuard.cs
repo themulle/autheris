@@ -46,7 +46,8 @@ public static class LegacySwitchGuard
             ["Insecure:warn_fallback_default_tenant_for_webhooks"] = "was removed together with the behaviour it enabled (unbound webhooks are always rejected); delete the key.",
             ["Caching:Redis:FailClosedOnRevocationLookupError"] = "was removed together with the behaviour it enabled (a failed token revocation lookup always rejects the token); delete the key.",
             ["OpenSchema"] = "OpenSchema was removed (OD-19). Authenticated users discover the catalog by default; anonymous catalog access is not supported. Remove the key.",
-            ["Catalog:OpenSchema"] = "OpenSchema was removed (OD-19). Authenticated users discover the catalog by default; anonymous catalog access is not supported. Remove the key."
+            ["Catalog:OpenSchema"] = "OpenSchema was removed (OD-19). Authenticated users discover the catalog by default; anonymous catalog access is not supported. Remove the key.",
+            ["WebSql:DmlWriterRoles"] = "was removed (OD-26/OD-30); governed writes use explicit approved WriteRules on consents/access profiles. Delete the key."
         };
 
     /// <summary>Returns one message per removed key that is present (any value).</summary>

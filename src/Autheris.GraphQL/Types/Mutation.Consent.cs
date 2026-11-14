@@ -322,7 +322,7 @@ public sealed partial class Mutation
         [Service] IConsentRequestService consentRequestService,
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken ct = default)
-        => RequestTableAccessAsync(domain, schema, tableName, justification, durationDays, idempotencyKey, null, consentRequestService, httpContextAccessor, ct);
+        => RequestTableAccessAsync(domain, schema, tableName, justification, durationDays, idempotencyKey, null, consentRequestService, httpContextAccessor, null, null, ct);
 
     public async Task<ConsentRequestPayload> RequestTableAccessAsync(
         string domain,
@@ -334,6 +334,8 @@ public sealed partial class Mutation
         AccessRequestContextInput? context = null,
         [Service] IConsentRequestService consentRequestService = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
+        List<ConsentWriteRuleInput>? writeRules = null,
+        bool? requestWriteOnly = null,
         CancellationToken ct = default)
     {
         var userSid = GetAuthenticatedUserSid(httpContextAccessor);
@@ -344,7 +346,8 @@ public sealed partial class Mutation
             var result = await consentRequestService.SubmitAsync(
                 new ConsentRequestSubmission(
                     domain, schema, tableName, justification, durationDays, idempotencyKey,
-                    userSid, principal, GetContextTenantId(httpContextAccessor), context),
+                    userSid, principal, GetContextTenantId(httpContextAccessor), context,
+                    ConsentWriteRuleWorkflow.ToWriteRules(writeRules), requestWriteOnly),
                 ct);
 
             return new ConsentRequestPayload
@@ -399,7 +402,7 @@ public sealed partial class Mutation
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IIdempotencyStore idempotencyStore = default!,
         CancellationToken ct = default)
-        => ApproveConsentRequestAsync(requestId, idempotencyKey, repository, repository, repository, repository, httpContextAccessor, idempotencyStore, null, null, null, ct);
+        => ApproveConsentRequestAsync(requestId, idempotencyKey, repository, repository, repository, repository, httpContextAccessor, idempotencyStore, null, null, null, null, ct);
 
     [GraphQLIgnore]
     public Task<ConsentRequestPayload> ApproveConsentRequestAsync(
@@ -422,6 +425,7 @@ public sealed partial class Mutation
             null,
             null,
             null,
+            null,
             ct);
 
     public async Task<ConsentRequestPayload> ApproveConsentRequestAsync(
@@ -436,6 +440,7 @@ public sealed partial class Mutation
         RowFilterInput? rowFilter = null,
         ColumnMaskingInput? columnMasking = null,
         string? description = null,
+        List<ConsentWriteRuleInput>? writeRules = null,
         CancellationToken ct = default)
     {
         await EnsureDecisionPermittedAsync(httpContextAccessor, ct).ConfigureAwait(false);
@@ -454,7 +459,8 @@ public sealed partial class Mutation
             validatedDescription ?? string.Empty,
             // GQL-06: a retry with the same key but different restrictions must not replay the earlier result.
             rowFilter == null ? string.Empty : System.Text.Json.JsonSerializer.Serialize(rowFilter),
-            columnMasking == null ? string.Empty : System.Text.Json.JsonSerializer.Serialize(columnMasking));
+            columnMasking == null ? string.Empty : System.Text.Json.JsonSerializer.Serialize(columnMasking),
+            ConsentWriteRuleWorkflow.SerializeForFingerprint(writeRules));
         var existing = await TryGetIdempotentAsync(approverSid, "ApproveConsentRequest", idempotencyKey, approveFingerprint, idempotencyStore, ct);
         if (existing != null)
         {
@@ -559,60 +565,8 @@ public sealed partial class Mutation
             }
         }
 
-        if (columnMasking != null && columnMasking.Rules != null && columnMasking.Rules.Count > 0)
-        {
-            if (tableMeta == null)
-            {
-                throw new GraphQLException(ErrorBuilder.New()
-                    .SetCode("BAD_REQUEST")
-                    .SetMessage($"Metadata for table '{req.TableIdentifier}' could not be resolved for column masking validation.")
-                    .Build());
-            }
-            var validCols = tableMeta.Columns.ToDictionary(c => c.ColumnName, c => c, StringComparer.OrdinalIgnoreCase);
-            foreach (var rule in columnMasking.Rules)
-            {
-                if (!validCols.ContainsKey(rule.ColumnName))
-                {
-                    throw new GraphQLException(ErrorBuilder.New()
-                        .SetCode("BAD_REQUEST")
-                        .SetMessage($"Column '{rule.ColumnName}' does not exist on table '{req.TableIdentifier}'.")
-                        .Build());
-                }
-            }
-        }
-
-        var columnRules = new List<ConsentColumnRule>();
-        if (tableMeta != null && tableMeta.Columns.Count > 0)
-        {
-            var baseRules = ConsentColumnSnapshot.FromMetadata(tableMeta);
-            if (columnMasking?.Rules != null && columnMasking.Rules.Count > 0)
-            {
-                var maskMap = columnMasking.Rules.ToDictionary(r => r.ColumnName, r => r, StringComparer.OrdinalIgnoreCase);
-                columnRules.AddRange(baseRules.Select(r =>
-                {
-                    if (maskMap.TryGetValue(r.ColumnName, out var maskRule))
-                    {
-                        var lvl = string.Equals(maskRule.MaskingType, "None", StringComparison.OrdinalIgnoreCase)
-                            ? ColumnAccessLevel.Clear
-                            : ColumnAccessLevel.Mask;
-                        return new ConsentColumnRule
-                        {
-                            Id = r.Id,
-                            ConsentId = r.ConsentId,
-                            TableColumnId = r.TableColumnId,
-                            ColumnName = r.ColumnName,
-                            AccessLevel = lvl,
-                            ApplicableScopes = r.ApplicableScopes
-                        };
-                    }
-                    return r;
-                }));
-            }
-            else
-            {
-                columnRules.AddRange(baseRules);
-            }
-        }
+        var columnRules = ConsentWriteRuleWorkflow.BuildApprovedColumnRules(req, tableMeta, columnMasking);
+        var approvedWriteRules = ConsentWriteRuleWorkflow.ResolveApprovedWriteRules(req, writeRules, tableMeta);
 
         // ADR-008 / D-4: the canonical four-eyes rule (explicit flag OR CONFIDENTIAL/HIGH/RESTRICTED/SECRET sensitivity), identical to
         // ConsentApprovalPolicy.RequiresFourEyesApproval in the repositories, which stay authoritative under the row lock.
@@ -622,7 +576,7 @@ public sealed partial class Mutation
             string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) ||
             req.ApprovalSteps.Any(s => string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase));
         bool isFinalStep = !requiresFourEyes || firstStepRecorded;
-        bool hasRestrictions = builtRowFilters.Count > 0 || (columnMasking?.Rules != null && columnMasking.Rules.Count > 0);
+        bool hasRestrictions = builtRowFilters.Count > 0 || (columnMasking?.Rules != null && columnMasking.Rules.Count > 0) || writeRules != null;
 
         // Security review: restrictions are only applied with the final approval that creates the consent. On the first step of a
         // four-eyes request they would be dropped and the second approver could approve unrestricted, so they are refused (fail closed).
@@ -630,7 +584,7 @@ public sealed partial class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("BAD_REQUEST")
-                .SetMessage($"Consent request '{requestId}' requires four-eyes approval: rowFilter and columnMasking can only be supplied with the second (final) approval, not with the first step.")
+                .SetMessage($"Consent request '{requestId}' requires four-eyes approval: rowFilter, columnMasking and writeRules can only be supplied with the second (final) approval, not with the first step.")
                 .Build());
         }
 
@@ -663,6 +617,7 @@ public sealed partial class Mutation
                 CreatedBySid = approverSid,
                 ColumnRules = columnRules,
                 RowFilters = builtRowFilters,
+                WriteRules = approvedWriteRules,
                 Description = validatedDescription
             };
 
@@ -710,6 +665,7 @@ public sealed partial class Mutation
                     CreatedBySid = approverSid,
                     ColumnRules = columnRules,
                     RowFilters = builtRowFilters,
+                    WriteRules = approvedWriteRules,
                     Description = validatedDescription
                 };
                 try

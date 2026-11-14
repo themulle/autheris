@@ -70,7 +70,7 @@ public sealed class GovernedSqlRejectionAuditTests
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(new GatewayOptions
             {
-                WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DmlWriterRoles = ["Writer"], DefaultDataSourceName = DataSource, DefaultMaxRows = 100, MaxAllowedRows = 500 }
+                WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DefaultDataSourceName = DataSource, DefaultMaxRows = 100, MaxAllowedRows = 500 }
             }), executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
