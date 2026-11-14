@@ -7,11 +7,14 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Identity.Caching;
 using Autheris.Application.Identity.Validators;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
 
 public sealed class ScimService : IScimService
 {
@@ -21,6 +24,7 @@ public sealed class ScimService : IScimService
     private readonly IRoleResolverCache? _roleCache;
     private readonly ScimMassChangeGuard? _massChangeGuard;
     private readonly IScimSyncStateTracker? _syncStateTracker;
+    private readonly IAuditWriter? _auditWriter;
     private readonly TimeProvider _timeProvider;
 
     public ScimService(
@@ -30,7 +34,8 @@ public sealed class ScimService : IScimService
         IRoleResolverCache? roleCache = null,
         ScimMassChangeGuard? massChangeGuard = null,
         TimeProvider? timeProvider = null,
-        IScimSyncStateTracker? syncStateTracker = null)
+        IScimSyncStateTracker? syncStateTracker = null,
+        IAuditWriter? auditWriter = null)
     {
         _massChangeGuard = massChangeGuard;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
@@ -39,6 +44,7 @@ public sealed class ScimService : IScimService
         _roleCache = roleCache;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _syncStateTracker = syncStateTracker;
+        _auditWriter = auditWriter;
     }
 
     public async Task<ScimUser?> GetUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
@@ -70,6 +76,15 @@ public sealed class ScimService : IScimService
             OnPremisesImmutableId: user.ResolvedOnPremisesImmutableId,
             UserPrincipalName: ScimRequestValidator.NormalizeUpn(user.ResolvedUserPrincipalName),
             EntraObjectId: ScimRequestValidator.NormalizeEntraObjectId(user.ResolvedEntraObjectId));
+
+        await RecordRequiredScimAuditAsync(
+            tenantId,
+            realmId,
+            AuditEventTypes.ScimUserProvisioned,
+            "IDENTITY_USERS",
+            now,
+            new { realm_id = realmId, user_key = userKey, active = entity.Active },
+            ct).ConfigureAwait(false);
 
         await _repository.CreateUserAsync(tenantId, realmId, entity, ct).ConfigureAwait(false);
         await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
@@ -106,6 +121,14 @@ public sealed class ScimService : IScimService
         if (existing.Active && !updated.Active)
         {
             await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
+            await RecordRequiredScimAuditAsync(
+                tenantId,
+                realmId,
+                AuditEventTypes.ScimUserDeprovisioned,
+                "IDENTITY_USERS",
+                now,
+                new { realm_id = realmId, user_key = userKey, operation = "deactivate" },
+                ct).ConfigureAwait(false);
             await _deprovisioningService.DeprovisionAndLockSubjectAsync(
                 tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_PUT", ct).ConfigureAwait(false);
             await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
@@ -113,6 +136,14 @@ public sealed class ScimService : IScimService
         }
         else
         {
+            await RecordRequiredScimAuditAsync(
+                tenantId,
+                realmId,
+                AuditEventTypes.ScimUserUpdated,
+                "IDENTITY_USERS",
+                now,
+                new { realm_id = realmId, user_key = userKey, active = updated.Active },
+                ct).ConfigureAwait(false);
             await _repository.UpdateUserAsync(tenantId, realmId, updated, ct).ConfigureAwait(false);
         }
 
@@ -158,6 +189,14 @@ public sealed class ScimService : IScimService
         if (existing.Active && !activeStatus)
         {
             await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
+            await RecordRequiredScimAuditAsync(
+                tenantId,
+                realmId,
+                AuditEventTypes.ScimUserDeprovisioned,
+                "IDENTITY_USERS",
+                now,
+                new { realm_id = realmId, user_key = userKey, operation = "deactivate" },
+                ct).ConfigureAwait(false);
             await _deprovisioningService.DeprovisionAndLockSubjectAsync(
                 tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_PATCH", ct).ConfigureAwait(false);
             await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
@@ -179,6 +218,14 @@ public sealed class ScimService : IScimService
             UpdatedAt = now
         };
 
+        await RecordRequiredScimAuditAsync(
+            tenantId,
+            realmId,
+            AuditEventTypes.ScimUserUpdated,
+            "IDENTITY_USERS",
+            now,
+            new { realm_id = realmId, user_key = userKey, active = updated.Active },
+            ct).ConfigureAwait(false);
         await _repository.UpdateUserAsync(tenantId, realmId, updated, ct).ConfigureAwait(false);
         await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return updated;
@@ -194,6 +241,14 @@ public sealed class ScimService : IScimService
 
         var now = _timeProvider.GetUtcNow();
         await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
+        await RecordRequiredScimAuditAsync(
+            tenantId,
+            realmId,
+            AuditEventTypes.ScimUserDeprovisioned,
+            "IDENTITY_USERS",
+            now,
+            new { realm_id = realmId, user_key = userKey, operation = "delete" },
+            ct).ConfigureAwait(false);
         await _deprovisioningService.DeprovisionAndLockSubjectAsync(
             tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_DELETE", ct).ConfigureAwait(false);
 
@@ -272,6 +327,25 @@ public sealed class ScimService : IScimService
             UpdatedAt: now,
             ObjectSid: group.ResolvedObjectSid);
 
+        await RecordRequiredScimAuditAsync(
+            tenantId,
+            realmId,
+            AuditEventTypes.ScimGroupProvisioned,
+            "IDENTITY_GROUPS",
+            now,
+            new { realm_id = realmId, group_id = groupId, group_sid = entity.ObjectSid },
+            ct).ConfigureAwait(false);
+
+        if (group.Members != null)
+        {
+            foreach (var m in group.Members)
+            {
+                var memberType = ScimRequestValidator.NormalizeMemberType(m.Type);
+                await RecordMembershipChangeAuditAsync(
+                    tenantId, realmId, groupId, entity.ObjectSid, m.Value, memberType, "add", now, ct).ConfigureAwait(false);
+            }
+        }
+
         await _repository.CreateGroupAsync(tenantId, realmId, entity, ct).ConfigureAwait(false);
 
         if (group.Members != null)
@@ -317,7 +391,10 @@ public sealed class ScimService : IScimService
             UpdatedAt: now,
             ObjectSid: group.ResolvedObjectSid);
 
-        await _repository.UpdateGroupAsync(tenantId, realmId, updated, ct).ConfigureAwait(false);
+        List<string> usersToRemove = [];
+        List<string> addedUsers = [];
+        List<string> removedChildren = [];
+        List<string> addedChildren = [];
 
         if (group.Members != null)
         {
@@ -333,32 +410,75 @@ public sealed class ScimService : IScimService
                 .Select(m => m.Value)
                 .ToHashSet(StringComparer.Ordinal);
 
-            var usersToRemove = currentUsers.Except(targetUsers, StringComparer.Ordinal).ToList();
+            usersToRemove = currentUsers.Except(targetUsers, StringComparer.Ordinal).ToList();
+            addedUsers = targetUsers.Except(currentUsers, StringComparer.Ordinal).ToList();
+            removedChildren = currentChildren.Except(targetChildren, StringComparer.Ordinal).ToList();
+            addedChildren = targetChildren.Except(currentChildren, StringComparer.Ordinal).ToList();
+
             if (_membershipValidator != null && usersToRemove.Count > 0)
             {
                 await _membershipValidator.ValidateMembershipChangeAsync(
                     tenantId, realmId, groupId, currentUsers.Count, usersToRemove.Count, ct).ConfigureAwait(false);
             }
+        }
 
+        if (usersToRemove.Count == 0 && addedUsers.Count == 0 && removedChildren.Count == 0 && addedChildren.Count == 0)
+        {
+            await RecordRequiredScimAuditAsync(
+                tenantId,
+                realmId,
+                AuditEventTypes.ScimGroupMembershipChanged,
+                "IDENTITY_GROUPS",
+                now,
+                new { realm_id = realmId, group_id = groupId, group_sid = updated.ObjectSid, operation = "update" },
+                ct).ConfigureAwait(false);
+        }
+        else
+        {
+            foreach (var removedUser in usersToRemove)
+            {
+                await RecordMembershipChangeAuditAsync(
+                    tenantId, realmId, groupId, updated.ObjectSid, removedUser, ScimMemberTypes.User, "remove", now, ct).ConfigureAwait(false);
+            }
+            foreach (var removedChild in removedChildren)
+            {
+                await RecordMembershipChangeAuditAsync(
+                    tenantId, realmId, groupId, updated.ObjectSid, removedChild, ScimMemberTypes.Group, "remove", now, ct).ConfigureAwait(false);
+            }
+            foreach (var addedUser in addedUsers)
+            {
+                await RecordMembershipChangeAuditAsync(
+                    tenantId, realmId, groupId, updated.ObjectSid, addedUser, ScimMemberTypes.User, "add", now, ct).ConfigureAwait(false);
+            }
+            foreach (var addedChild in addedChildren)
+            {
+                await RecordMembershipChangeAuditAsync(
+                    tenantId, realmId, groupId, updated.ObjectSid, addedChild, ScimMemberTypes.Group, "add", now, ct).ConfigureAwait(false);
+            }
+        }
+
+        await _repository.UpdateGroupAsync(tenantId, realmId, updated, ct).ConfigureAwait(false);
+
+        if (group.Members != null)
+        {
             foreach (var removedUser in usersToRemove)
             {
                 await _repository.RemoveGroupMemberAsync(tenantId, realmId, groupId, removedUser, ct).ConfigureAwait(false);
                 _roleCache?.Invalidate(realmId, removedUser);
             }
 
-            foreach (var addedUser in targetUsers.Except(currentUsers, StringComparer.Ordinal))
+            foreach (var addedUser in addedUsers)
             {
                 await _repository.AddGroupMemberAsync(tenantId, realmId, groupId, addedUser, ct).ConfigureAwait(false);
                 _roleCache?.Invalidate(realmId, addedUser);
             }
 
-            var removedChildren = currentChildren.Except(targetChildren, StringComparer.Ordinal).ToList();
             foreach (var removedChild in removedChildren)
             {
                 await _repository.RemoveGroupNestingEdgeAsync(tenantId, realmId, groupId, removedChild, ct).ConfigureAwait(false);
             }
 
-            foreach (var addedChild in targetChildren.Except(currentChildren, StringComparer.Ordinal))
+            foreach (var addedChild in addedChildren)
             {
                 await _repository.AddGroupNestingEdgeAsync(tenantId, realmId, groupId, addedChild, ct).ConfigureAwait(false);
             }
@@ -450,11 +570,11 @@ public sealed class ScimService : IScimService
             }
         }
 
+        ScimGroup? updatedGroup = null;
         if (metadataChanged)
         {
-            var updatedGroup = existing with { DisplayName = newDisplayName, ObjectSid = newObjectSid, UpdatedAt = now };
+            updatedGroup = existing with { DisplayName = newDisplayName, ObjectSid = newObjectSid, UpdatedAt = now };
             ScimRequestValidator.ValidateGroupUpdate(updatedGroup);
-            await _repository.UpdateGroupAsync(tenantId, realmId, updatedGroup, ct).ConfigureAwait(false);
         }
 
         var userRemovals = membersToRemove
@@ -466,6 +586,40 @@ public sealed class ScimService : IScimService
         {
             await _membershipValidator.ValidateMembershipChangeAsync(
                 tenantId, realmId, groupId, currentUserMembers.Count, userRemovals.Count, ct).ConfigureAwait(false);
+        }
+
+        var effectiveGroupSid = updatedGroup?.ObjectSid ?? existing.ObjectSid;
+        var currentUserSet = currentUserMembers.ToHashSet(StringComparer.Ordinal);
+        if (membersToRemove.Count == 0 && membersToAdd.Count == 0 && metadataChanged)
+        {
+            await RecordRequiredScimAuditAsync(
+                tenantId,
+                realmId,
+                AuditEventTypes.ScimGroupMembershipChanged,
+                "IDENTITY_GROUPS",
+                now,
+                new { realm_id = realmId, group_id = groupId, group_sid = effectiveGroupSid, operation = "update" },
+                ct).ConfigureAwait(false);
+        }
+        else
+        {
+            foreach (var (toRemove, explicitType) in membersToRemove)
+            {
+                var memberType = explicitType ?? (currentUserSet.Contains(toRemove) ? ScimMemberTypes.User : ScimMemberTypes.Group);
+                await RecordMembershipChangeAuditAsync(
+                    tenantId, realmId, groupId, effectiveGroupSid, toRemove, memberType, "remove", now, ct).ConfigureAwait(false);
+            }
+
+            foreach (var (toAdd, memberType) in membersToAdd)
+            {
+                await RecordMembershipChangeAuditAsync(
+                    tenantId, realmId, groupId, effectiveGroupSid, toAdd, memberType, "add", now, ct).ConfigureAwait(false);
+            }
+        }
+
+        if (updatedGroup is not null)
+        {
+            await _repository.UpdateGroupAsync(tenantId, realmId, updatedGroup, ct).ConfigureAwait(false);
         }
 
         foreach (var (toRemove, explicitType) in membersToRemove)
@@ -518,6 +672,15 @@ public sealed class ScimService : IScimService
         }
 
         var now = _timeProvider.GetUtcNow();
+        await RecordRequiredScimAuditAsync(
+            tenantId,
+            realmId,
+            AuditEventTypes.ScimGroupDeleted,
+            "IDENTITY_GROUPS",
+            now,
+            new { realm_id = realmId, group_id = groupId, group_sid = existing.ObjectSid },
+            ct).ConfigureAwait(false);
+
         var formerMembers = await _repository.DeleteGroupAsync(tenantId, realmId, groupId, ct).ConfigureAwait(false);
         foreach (var memberKey in formerMembers)
         {
@@ -558,6 +721,61 @@ public sealed class ScimService : IScimService
 
             await _repository.UpsertUserAsync(jitUser, tenantId, realmId, ct).ConfigureAwait(false);
         }
+    }
+
+    private Task RecordMembershipChangeAuditAsync(
+        TenantId tenantId,
+        string realmId,
+        string groupId,
+        string? groupSid,
+        string memberKey,
+        string memberType,
+        string operation,
+        DateTimeOffset occurredAt,
+        CancellationToken ct) =>
+        RecordRequiredScimAuditAsync(
+            tenantId,
+            realmId,
+            AuditEventTypes.ScimGroupMembershipChanged,
+            "IDENTITY_GROUP_MEMBERS",
+            occurredAt,
+            new
+            {
+                realm_id = realmId,
+                group_id = groupId,
+                group_sid = groupSid,
+                member_key = memberKey,
+                member_type = memberType,
+                operation
+            },
+            ct);
+
+    private Task RecordRequiredScimAuditAsync(
+        TenantId tenantId,
+        string realmId,
+        string eventType,
+        string targetTable,
+        DateTimeOffset occurredAt,
+        object details,
+        CancellationToken ct)
+    {
+        if (_auditWriter is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return _auditWriter.RecordRequiredAsync(
+            new AuditLogEntry
+            {
+                TenantId = tenantId,
+                OccurredAt = occurredAt,
+                EventType = eventType,
+                ActorSid = new Sid($"scim-client:{realmId}"),
+                TargetTable = targetTable,
+                Decision = "ALLOW",
+                DetailsJson = JsonSerializer.Serialize(details)
+            },
+            ct);
     }
 
     private static void ValidateNoSelfNesting(string groupId, IReadOnlyList<ScimGroupMember>? members)

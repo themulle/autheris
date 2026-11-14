@@ -58,11 +58,22 @@ public sealed class ScimRealmSecretOptions
 
     /// <summary>Behavior when SCIM sync is older than MaxSyncAgeMinutes: Degrade (default, denies data access) or DropScimGroups (uses token groups only when no SCIM-only group carries a deny).</summary>
     public ScimStaleSyncBehavior StaleSyncBehavior { get; set; } = ScimStaleSyncBehavior.Degrade;
+
+    /// <summary>Optional per-realm rate limit override in requests per minute for inbound SCIM calls (1..60000). When null, Authentication:Realms:Scim:RequestsPerMinute applies.</summary>
+    public int? RequestsPerMinute { get; set; }
 }
 
 public sealed class ScimOptions
 {
+    public const int DefaultRequestsPerMinute = 600;
+    public const int MinRequestsPerMinute = 1;
+    public const int MaxRequestsPerMinute = 60_000;
+
+    /// <summary>CIDR ranges or IP addresses permitted to call SCIM 2.0 endpoints. Mandatory outside Development when any realm uses SCIM provisioning.</summary>
     public List<string> AllowedIpRanges { get; set; } = [];
+
+    /// <summary>Default per-realm rate limit in requests per minute for inbound SCIM calls (1..60000, default 600).</summary>
+    public int RequestsPerMinute { get; set; } = DefaultRequestsPerMinute;
 
     /// <summary>Authentication:Realms:Scim:MassChangeProtection. Throttle on SCIM-originated user deprovisioning (06-FU-02).</summary>
     public ScimMassChangeProtectionOptions MassChangeProtection { get; set; } = new();

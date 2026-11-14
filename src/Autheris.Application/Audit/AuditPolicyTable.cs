@@ -121,6 +121,13 @@ public static class AuditPolicyTable
         [AuditEventTypes.TransportNotAllowed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CallerAttributeSimulationRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DataCatalogSync] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ScimUserProvisioned] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ScimUserUpdated] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ScimUserDeprovisioned] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ScimGroupProvisioned] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ScimGroupDeleted] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ScimGroupMembershipChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.IdentityCorrelationAmbiguous] = AuditFailurePolicy.FailClosed,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

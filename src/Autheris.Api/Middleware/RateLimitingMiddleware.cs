@@ -128,9 +128,11 @@ public sealed class PostAuthSidRateLimitingMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Skip health and metrics endpoints or when rate limiting is explicitly disabled (warn_disable_rate_limiting)
+        // Skip health, metrics, and SCIM endpoints (SCIM uses per-realm ScimEndpointGuard limits),
+        // or when rate limiting is explicitly disabled (warn_disable_rate_limiting).
         if (context.Request.Path.StartsWithSegments("/health") ||
             context.Request.Path.StartsWithSegments("/metrics") ||
+            Autheris.Api.Security.GatewayAuthSchemes.IsScimPath(context.Request.Path) ||
             _gatewayOptions.IsRateLimitingDisabled)
         {
             await _next(context);

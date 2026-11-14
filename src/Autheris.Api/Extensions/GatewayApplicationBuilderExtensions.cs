@@ -111,6 +111,7 @@ public static class GatewayApplicationBuilderExtensions
             return next(context);
         });
         app.UseAuthorization();
+        app.Use(Autheris.Api.Endpoints.ScimEndpointGuard.MiddlewareAsync);
         app.UseMiddleware<PostAuthSidRateLimitingMiddleware>();
         app.UseMiddleware<SecurityContextResolutionMiddleware>();
         app.UseMiddleware<SubjectLockoutMiddleware>();
