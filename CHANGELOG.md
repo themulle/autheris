@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - None yet.
 
 ### Fixed
+- WebSQL logs why a catalog entry cannot be used: no catalog metadata registered, entry inactive, or no declared columns (for example a SQL Server synonym registered without columns). The caller's answer is unchanged (#669).
 - Catalog search hits (MCP and `GET /api/v1/catalog/search`) suggest the real GraphQL root field of the table (`domain_schema_table`, sanitized) from the catalog GraphQL schema, or none when the table has no root field, instead of a non-existent `domain_table` (#682).
 
 ### Security

@@ -64,6 +64,7 @@ Suggested order: #669 test PR and #668 now (bug fixes, independent); #682 A now;
 - Work package: WP-OI-WEB-669, test-only PR (allowed under the freeze), ~0 src.
 - Tests (SQL Server Testcontainers, nightly SQL Server suite plus PR smoke if a SQL Server smoke slot exists): `WebSqlSqlServerSynonymTests.Query_SynonymWithDeclaredColumns_ReturnsRows`; `Query_CrossDatabaseSynonym_ReturnsRows` (base object in a second database on the same server); `Query_SynonymWithoutDeclaredColumns_DeniedWithNoColumnsReason`; S `Query_SynonymColumnNotDeclared_DeniedByCatalog` (an undeclared base column is not reachable through the synonym); S `Query_BaseTableNotRegistered_DirectAccessDenied`.
 - Size: S, ~200 test lines, 0.5 person-days.
+- Delivery: UNDER REVIEW, see [`2026-11-14-plan-issue-669-sqlserver-synonyms.md`](2026-11-14-plan-issue-669-sqlserver-synonyms.md). Deviation: on the WebSQL path the rewriter denied a synonym without declared columns with the generic reason of an unknown table, so the PR also splits that log reason (15 `src/` lines, Phase 3 in the file).
 
 ## #681 list_datasets recomputes the full visible set and all consents per page
 
