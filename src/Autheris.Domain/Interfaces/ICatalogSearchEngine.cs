@@ -28,6 +28,46 @@ public interface ILocalEmbeddingGenerator
 }
 
 /// <summary>
+/// Closed error codes surfaced by catalog search index rebuild and health status reporting.
+/// </summary>
+public static class CatalogSearchErrorCodes
+{
+    public const string RebuildFailed = "REBUILD_FAILED";
+    public const string VersionReadFailed = "VERSION_READ_FAILED";
+    public const string EmbeddingFailed = "EMBEDDING_FAILED";
+    public const string ErrorCodeDataKey = "CatalogSearchErrorCode";
+}
+
+/// <summary>
+/// Point-in-time operational status of the catalog search index.
+/// </summary>
+public sealed record CatalogSearchIndexStatus(
+    DateTimeOffset? LastSuccessUtc,
+    DateTimeOffset? LastAttemptUtc,
+    string? LastErrorCode,
+    TimeSpan? IndexAge);
+
+/// <summary>
+/// Auxiliary reader exposing the catalog version tuple currently reflected by an index instance.
+/// </summary>
+public interface ICatalogSearchStatusReader
+{
+    (long StructureVersion, long ContentVersion)? LastIndexedVersion { get; }
+}
+
+/// <summary>
+/// Auxiliary recorder updated by background warmup orchestration when rebuild attempts finish.
+/// </summary>
+public interface ICatalogSearchStatusRecorder : ICatalogSearchStatusReader
+{
+    void RecordRebuildOutcome(
+        DateTimeOffset? lastSuccessUtc,
+        DateTimeOffset lastAttemptUtc,
+        string? lastErrorCode,
+        (long StructureVersion, long ContentVersion)? indexedVersion);
+}
+
+/// <summary>
 /// In-Memory Hybrid Search Engine für den Datensatz- und Tabellenkatalog.
 /// </summary>
 public interface ICatalogSearchEngine
@@ -40,6 +80,14 @@ public interface ICatalogSearchEngine
 
     /// <summary>Zeitpunkt des letzten erfolgreichen Index-Builds.</summary>
     DateTimeOffset? LastIndexedAt { get; }
+
+    /// <summary>Returns the current rebuild status and computed index age.</summary>
+    CatalogSearchIndexStatus GetStatus(DateTimeOffset? utcNow = null) =>
+        new(
+            LastIndexedAt,
+            LastIndexedAt,
+            null,
+            LastIndexedAt.HasValue && utcNow.HasValue ? utcNow.Value - LastIndexedAt.Value : null);
 
     /// <summary>Erzeugt atomar einen neuen unveränderlichen Such-Snapshot im Speicher.</summary>
     Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default);

@@ -18,6 +18,8 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class CatalogSearchWarmupService : BackgroundService
 {
+    public static readonly TimeSpan MinimumRebuildInterval = TimeSpan.FromSeconds(5);
+
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly ICatalogSearchEngine _searchEngine;
     private readonly IOptions<CatalogSearchOptions> _options;
@@ -28,8 +30,31 @@ public sealed class CatalogSearchWarmupService : BackgroundService
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
     private readonly Channel<bool> _changeSignal = Channel.CreateBounded<bool>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
+    private readonly object _statusLock = new();
     private IDisposable? _eventSubscription;
     private CatalogVersion? _lastIndexedVersion;
+    private DateTimeOffset? _lastRebuildStartedUtc;
+    private DateTimeOffset? _lastSuccessUtc;
+    private DateTimeOffset? _lastAttemptUtc;
+    private string? _lastErrorCode;
+    private int _pendingRebuild;
+    private bool _isWaitingForCooldown;
+
+    public bool HasPendingRebuild => Volatile.Read(ref _pendingRebuild) != 0;
+    public bool IsWaitingForCooldown => Volatile.Read(ref _isWaitingForCooldown);
+
+    public CatalogSearchIndexStatus GetStatus()
+    {
+        var now = _timeProvider.GetUtcNow();
+        lock (_statusLock)
+        {
+            return new CatalogSearchIndexStatus(
+                _lastSuccessUtc,
+                _lastAttemptUtc,
+                _lastErrorCode,
+                _lastSuccessUtc.HasValue ? now - _lastSuccessUtc.Value : null);
+        }
+    }
 
     public CatalogSearchWarmupService(
         ITableMetadataRepository metadataRepository,
@@ -59,6 +84,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
                 ICatalogVersionProvider.CatalogChangedEventChannel,
                 _ =>
                 {
+                    Interlocked.Exchange(ref _pendingRebuild, 1);
                     _changeSignal.Writer.TryWrite(true);
                     return Task.CompletedTask;
                 });
@@ -71,31 +97,51 @@ public sealed class CatalogSearchWarmupService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var refreshSeconds = _options.Value.RefreshSeconds;
-            var pollInterval = refreshSeconds > 0 ? TimeSpan.FromSeconds(refreshSeconds) : Timeout.InfiniteTimeSpan;
-
-            try
+            if (Volatile.Read(ref _pendingRebuild) == 0)
             {
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                if (pollInterval != Timeout.InfiniteTimeSpan)
+                var refreshSeconds = _options.Value.RefreshSeconds;
+                var pollInterval = refreshSeconds > 0 ? TimeSpan.FromSeconds(refreshSeconds) : Timeout.InfiniteTimeSpan;
+
+                try
                 {
-                    timeoutCts.CancelAfter(pollInterval);
+                    CancellationTokenSource? delayCts = null;
+                    CancellationTokenSource? linkedCts = null;
+                    try
+                    {
+                        if (pollInterval != Timeout.InfiniteTimeSpan)
+                        {
+                            delayCts = new CancellationTokenSource(pollInterval, _timeProvider);
+                            linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, delayCts.Token);
+                        }
+                        else
+                        {
+                            linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                        }
+
+                        await _changeSignal.Reader.ReadAsync(linkedCts.Token).ConfigureAwait(false);
+                        await Task.Yield();
+                        while (_changeSignal.Reader.TryRead(out _)) { }
+                    }
+                    finally
+                    {
+                        linkedCts?.Dispose();
+                        delayCts?.Dispose();
+                    }
                 }
-
-                await _changeSignal.Reader.ReadAsync(timeoutCts.Token).ConfigureAwait(false);
-
-                // Drain any additional signals that arrived in quick succession
-                while (_changeSignal.Reader.TryRead(out _)) { }
-
-                // Small debounce delay to coalesce rapid consecutive changes
-                await Task.Delay(50, stoppingToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
-            {
-                // Timeout elapsed -> periodic check
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                {
+                    // Timeout elapsed -> periodic check
+                }
             }
 
             if (stoppingToken.IsCancellationRequested) break;
+
+            await WaitForCooldownAsync(stoppingToken).ConfigureAwait(false);
+            if (stoppingToken.IsCancellationRequested) break;
+
+            // Collapse any burst accumulated before or during cooldown into a single rebuild attempt.
+            while (_changeSignal.Reader.TryRead(out _)) { }
+            Interlocked.Exchange(ref _pendingRebuild, 0);
 
             if (_versionProvider != null)
             {
@@ -117,19 +163,110 @@ public sealed class CatalogSearchWarmupService : BackgroundService
         }
     }
 
+    private async Task WaitForCooldownAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            DateTimeOffset? lastStarted;
+            lock (_statusLock)
+            {
+                lastStarted = _lastRebuildStartedUtc;
+            }
+
+            if (!lastStarted.HasValue)
+            {
+                return;
+            }
+
+            var elapsed = _timeProvider.GetUtcNow() - lastStarted.Value;
+            var remaining = MinimumRebuildInterval - elapsed;
+            if (remaining <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var reg = ct.Register(static (state, token) => ((TaskCompletionSource)state!).TrySetCanceled(token), tcs);
+            using var timer = _timeProvider.CreateTimer(
+                static state => ((TaskCompletionSource)state!).TrySetResult(),
+                tcs,
+                remaining,
+                Timeout.InfiniteTimeSpan);
+            Volatile.Write(ref _isWaitingForCooldown, true);
+            try
+            {
+                if (_timeProvider.GetUtcNow() - lastStarted.Value >= MinimumRebuildInterval)
+                {
+                    return;
+                }
+
+                await tcs.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                Volatile.Write(ref _isWaitingForCooldown, false);
+            }
+        }
+    }
+
     private async Task RebuildSafeAsync(CancellationToken ct)
     {
         await _rebuildLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            var attemptUtc = _timeProvider.GetUtcNow();
+            lock (_statusLock)
+            {
+                _lastRebuildStartedUtc = attemptUtc;
+            }
+
+            CatalogVersion? targetVersion = null;
+            if (_versionProvider != null)
+            {
+                try
+                {
+                    targetVersion = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    RecordOutcome(lastSuccessUtc: null, attemptUtc, CatalogSearchErrorCodes.VersionReadFailed, indexedVersion: null);
+                    _logger.LogWarning(ex, "Fehler beim Lesen der Katalog-Version vor dem Index-Neuaufbau.");
+                    return;
+                }
+            }
+
             _logger.LogInformation("Starte Index-Neuaufbau für den Katalog-Suchindex...");
             var tables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
             await _searchEngine.RebuildIndexAsync(tables, ct).ConfigureAwait(false);
-            if (_versionProvider != null)
-            {
-                _lastIndexedVersion = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
-            }
+
+            _lastIndexedVersion = targetVersion;
+            var successUtc = _timeProvider.GetUtcNow();
+            var versionTuple = targetVersion.HasValue
+                ? (targetVersion.Value.StructureVersion, targetVersion.Value.ContentVersion)
+                : ((long, long)?)null;
+            RecordOutcome(successUtc, attemptUtc, lastErrorCode: null, versionTuple);
             _logger.LogInformation("Katalog-Suchindex Neuaufbau erfolgreich beendet ({Count} Tabellen).", tables.Count);
+
+            if (_versionProvider != null && targetVersion.HasValue)
+            {
+                try
+                {
+                    var postVersion = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+                    if (postVersion != targetVersion.Value)
+                    {
+                        Interlocked.Exchange(ref _pendingRebuild, 1);
+                        _changeSignal.Writer.TryWrite(true);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogDebug(ex, "Fehler beim Nachprüfen der Katalog-Version nach dem Index-Neuaufbau.");
+                }
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -137,11 +274,44 @@ public sealed class CatalogSearchWarmupService : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Kritischer Fehler beim Aufbau des Katalog-Suchindex.");
+            var errorCode = ex.Data[CatalogSearchErrorCodes.ErrorCodeDataKey] as string == CatalogSearchErrorCodes.EmbeddingFailed
+                ? CatalogSearchErrorCodes.EmbeddingFailed
+                : CatalogSearchErrorCodes.RebuildFailed;
+            DateTimeOffset attemptUtc;
+            lock (_statusLock)
+            {
+                attemptUtc = _lastRebuildStartedUtc ?? _timeProvider.GetUtcNow();
+            }
+
+            RecordOutcome(lastSuccessUtc: null, attemptUtc, errorCode, indexedVersion: null);
+            _logger.LogError(ex, "Kritischer Fehler beim Aufbau des Katalog-Suchindex ({ErrorCode}).", errorCode);
         }
         finally
         {
             _rebuildLock.Release();
+        }
+    }
+
+    private void RecordOutcome(
+        DateTimeOffset? lastSuccessUtc,
+        DateTimeOffset lastAttemptUtc,
+        string? lastErrorCode,
+        (long StructureVersion, long ContentVersion)? indexedVersion)
+    {
+        lock (_statusLock)
+        {
+            if (lastSuccessUtc.HasValue)
+            {
+                _lastSuccessUtc = lastSuccessUtc;
+            }
+
+            _lastAttemptUtc = lastAttemptUtc;
+            _lastErrorCode = lastErrorCode;
+        }
+
+        if (_searchEngine is ICatalogSearchStatusRecorder recorder)
+        {
+            recorder.RecordRebuildOutcome(lastSuccessUtc, lastAttemptUtc, lastErrorCode, indexedVersion);
         }
     }
 
