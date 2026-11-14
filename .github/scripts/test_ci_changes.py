@@ -71,7 +71,7 @@ class CiChangesTests(unittest.TestCase):
             try:
                 os.environ.update(CI_EVENT="schedule", CI_BASE="", CI_HEAD="", GITHUB_OUTPUT=out)
                 self.assertEqual(0, ci.main())
-                self.assertEqual("dotnet=true\n", open(out, encoding="utf-8").read())
+                self.assertEqual("dotnet=true\n", pathlib.Path(out).read_text(encoding="utf-8"))
             finally:
                 for k, v in saved.items():
                     if v is None:
