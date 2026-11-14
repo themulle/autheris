@@ -1,8 +1,14 @@
-# Deduplicated Open Backlog & Phase 3 Audit (`main` @ `2b2876bd`)
+# Deduplicated Open Backlog & Phase 3 Audit (`main` @ `6de0553d`)
 
 - **Date:** 2026-11-14
 - **Author:** Solution Architect (`csharp-architect`) & Security Reviewer (`csharp-security-expert`)
-- **Baseline:** `origin/main` @ `2b2876bd` (`WP-SIMPL-46 PR 6b (#730)` merged)
+- **Baseline:** `origin/main` @ `6de0553d` (`WP-SIMPL-53 PR 4 (#573)` merged)
+- **Wave Briefs:**
+  - Wave 3: `docs/plans/2026-11-14-hydrogen-briefs-wave-3.md`
+  - Wave 4: `docs/plans/2026-11-14-hydrogen-briefs-wave-4.md`
+  - Wave 5: `docs/plans/2026-11-14-hydrogen-briefs-wave-5.md`
+  - Wave 6: `docs/plans/2026-11-14-hydrogen-briefs-wave-6.md`
+  - Wave 7 (Final Residual Queue + Open PR Audit): `docs/plans/2026-11-14-hydrogen-briefs-wave-7.md`
 - **Scope:** Complete, deduplicated, file- and git-verified inventory of all Simplification Work Packages (`WP-SIMPL-01` .. `WP-SIMPL-54`), all 9 Open Issues Group Plans (`docs/plans/2026-11-13-plan-issues-*.md` + `docs/plans/2026-11-13-sec-issues-group-1..9.md`), and all 5 CI Issue Plans (`docs/plans/2026-11-13-plan-issue-701..711*.md`).
 
 ---
@@ -10,11 +16,12 @@
 ## 1. Executive Summary & Phase 3 Gate Status
 
 1. **Zero Unreviewed Plans:** Every Simplification Work Package (`WP-SIMPL-01..54`) and every Open Issue Work Package (`Groups 1–9` + `#701..#711`) holds an explicit Phase 3 security verdict (`APPROVED` or `APPROVED WITH CONDITIONS`) or is cancelled per owner decision (`WP-SIMPL-30`).
-   - `docs/plans/simplification/WP-SIMPL-52-governance-data-model.md`: Phase 3 `APPROVED WITH CONDITIONS` (`SEC-52-01..12`, Section 14).
+   - `docs/plans/simplification/WP-SIMPL-52-governance-data-model.md`: Phase 3 `APPROVED WITH CONDITIONS` (`SEC-52-01..12`, Section 15).
    - `docs/plans/simplification/WP-SIMPL-54-golden-queries-from-dbt.md`: Phase 3 `APPROVED WITH CONDITIONS` (`SEC-54-01..07`, Section 10).
    - `docs/plans/2026-11-13-plan-issues-catalog-search.md` (`#628c`) & `docs/plans/2026-11-13-plan-issues-catalog-scale.md` (`#672`, `#677`): All three prior `CHANGES REQUIRED` items were reworked and upgraded to `APPROVED WITH CONDITIONS` in `2026-11-13-sec-issues-group-6.md`, `2026-11-13-sec-issues-group-7.md`, and `2026-11-14-owner-decisions-sec-groups-1-9.md`.
-2. **Verified Deduplication Findings (Already Merged on `main` @ `2b2876bd` — Do NOT Re-Dispatch):**
-   - **`WP-SIMPL-51` (`PR 1..PR 5`, `#527`, `#528`, `#529`, `#533`):** All 5 PRs are **100% merged** on `main` (`#566` `1d6fa34b`, `#570` `e96ee892`, `#581` `edeca24b` squash-merged PRs 3, 4, and 5). Unmerged branches `feat/simpl-51-pr-3`, `feat/simpl-51-pr-4`, and `feat/simpl-51-pr-5` are stale pre-squash branches and can be deleted.
+2. **Verified Deduplication Findings (Already Merged on `main` @ `6de0553d` — Do NOT Re-Dispatch):**
+   - **`WP-SIMPL-51` (`PR 1..PR 5`, `#527`, `#528`, `#529`, `#533`):** All 5 PRs are **100% merged** on `main` (`#566` `1d6fa34b`, `#570` `e96ee892`, `#581` `edeca24b`, `#529` `0bf0b50e`). Unmerged branches `feat/simpl-51-pr-3`, `feat/simpl-51-pr-4`, and `feat/simpl-51-pr-5` are stale pre-squash branches and can be deleted.
+   - **`WP-SIMPL-53` (`PR 1..PR 5`, `#572`, `#573`, `#578`, `#579`):** All 5 PRs are **100% merged** on `main` (`ddb53afb`, `554ace53`, `9b3e8852`, `f45f7104`/`6de0553d`, `ba5dd11d`). Zero remaining code gaps.
    - **`WP-SIMPL-20` (`PR 20a..20e`):** All 5 PRs are **100% merged** on `main` (`#589`, `#600`, `#630`, `#635`, `#638`). Branch `lane-d/simpl-20a` is stale.
    - **`WP-SIMPL-42 PR 1`:** Already merged on `main` (`#598` `6c9e9ac1`). Branch `feat/simpl-42-pr1` points to `46b8bc84` (`WP-SIMPL-41 PR 1` `#633`, also merged).
    - **`WP-SIMPL-30` (`WP-SIMPL-30-auth-extensions-module.md`):** **CANCELLED** per owner decisions `OD-21, OD-24, OD-27` (SCIM, TOTP, Kerberos/NTLM, and Envoy stay in core; zero code changes).
@@ -30,14 +37,16 @@
 
 ---
 
-## 2. Open GitHub PRs Ready to Review / Merge Now
+## 2. Open GitHub PRs — Independent Security & Merge-Readiness Verdicts vs `6de0553d`
 
-| PR | Branch (`SHA`) | Work Package / Issue | Summary |
+*(Full per-file and per-condition audit recorded in `docs/plans/2026-11-14-hydrogen-briefs-wave-7.md` Section 0.)*
+
+| PR | Branch (`SHA`) | Work Package / Issue | Verdict & Audit Notes |
 | :--- | :--- | :--- | :--- |
-| **PR #734** | `origin/pr-734` (`cbcec9de`) | `WP-OI-SRCH-624` (`#624`) | Catalog search relevance benchmark test set (`SEC-OI-624-1`). **READY TO MERGE** (`0` conflicts). |
-| **PR #744** | `origin/pr-744` (`9a279ca9`) | `WP-OI-WEB-669` (`#669`) | SQL Server synonyms regression test + structured diagnostic log (`SEC-OI-669-1`). **READY TO MERGE** (`0` conflicts, test/docs-only). |
-| **PR #747** | `origin/pr-747` (`e3078e14`) | `WP-OI-WEB-668` (`#668`) | WebSQL `Dbt:DatabaseMappings` governed catalog resolution (`SEC-OI-668-1..5`). **DRAFT** (clean `git merge-tree`; verify `SourceSizeRatchetArchitectureTests` on `GovernedSqlRewriter.cs` / `DataSourceAllowlistGuard.cs` when undrafted). |
-| **PR #748** | `origin/pr-748` (`56edc825`) | `WP-OI-CAT-1` (`#666`) | dbt physical table name from `identifier`/`alias` (`SEC-OI-666-1..3`). **DRAFT — CONFLICTS with `main`** on `tests/Autheris.Tests.Architecture/Golden/GovernanceSteps/checksums.{postgresql,sqlserver}.txt` and collides on migration step `0012_dbt_unique_id` (needs renumbering to next free DDL slot after `0015` and checksum regeneration). |
+| **PR #734** | `origin/pr-734` (`cbcec9de`) | `WP-OI-SRCH-624` (`#624`) | **`SAFE TO MERGE AS-IS`** — Clean merge tree (`542eaa75`, `0` conflicts); zero `src/` files touched; `SEC-OI-624-1` (`RestrictedCaller_FixtureHiddenColumnText_NeverProducesHit` `[Trait("Category","Security")]`) verified; all test files `<= 243` lines (`<= 800`). |
+| **PR #744** | `origin/pr-744` (`9a279ca9`) | `WP-OI-WEB-669` (`#669`) | **`SAFE TO MERGE AS-IS`** — Clean merge tree (`16ddb9de`, `0` conflicts); `GovernedSqlRewriter.cs` `+15/-2` (`970` -> `983` lines `<= 1000`); `SEC-OI-669-1` verified (client denial identical across missing/inactive/zero-column tables; server warning log distinguishes reason); `0` plan-ID tokens in `src/`. |
+| **PR #747** | `origin/pr-747` (`e3078e14`) | `WP-OI-WEB-668` (`#668`) | **`SAFE TO MERGE AS-IS`** — Clean merge tree (`be23e658`, `0` conflicts, including clean snapshot merges); `SEC-OI-668-1..5` verified (`SqlDataSourceResolver.ResolveConnectionKey`, one-hop validation, `(DataSource, ConnectionKey, Schema, Table)` cache key, uniform client denial). Combined with `#744`, `GovernedSqlRewriter.cs` is `995` lines (`<= 1000`, leaving `5` lines headroom for `W3-3B`). |
+| **PR #748** | `origin/pr-748` (`56edc825`) | `WP-OI-CAT-1` (`#666`) | **`REQUIRES REBASE & DDL RENUMBERING (`W6-0`)`** — Conflicts on `checksums.{postgresql,sqlserver}.txt`, collides on migration step `0012_dbt_unique_id` (must renumber to `0016_dbt_unique_id` after Wave 5 `0015`), and must add `dbt_unique_id VARCHAR(512) NULL` to `PostgreSqlBaselineSchema.cs` and `SqlServerBaselineSchema.cs`. |
 
 ---
 
@@ -64,7 +73,7 @@
 
 ## 4. Complete Inventory of Simplification Work Packages (`WP-SIMPL-01` .. `WP-SIMPL-54`)
 
-### 4.1 100% Merged on `main` (`2b2876bd`) or Cancelled
+### 4.1 100% Merged on `main` (`6de0553d`) or Cancelled
 - **`WP-SIMPL-01` .. `WP-SIMPL-27`:** All 27 Stage 1/2 packages merged on `main` (`WP-SIMPL-03/04/05` `1d30b757`; `WP-SIMPL-14` policy-lint removal `#722` `02287aa3`; `WP-SIMPL-20` PRs 20a–20e `#589`, `#600`, `#630`, `#635`, `#638`; `WP-SIMPL-26` `#721` `3f8680a2`; `WP-SIMPL-27` `#723` `9f70e3eb`).
 - **`WP-SIMPL-30` (`WP-SIMPL-30-auth-extensions-module.md`):** **CANCELLED** per `OD-21, OD-24, OD-27`.
 - **`WP-SIMPL-33` (`#656` `58547593`), `WP-SIMPL-35` (`#645` `0c893409`):** Merged on `main`.
@@ -72,30 +81,31 @@
 - **`WP-SIMPL-39` (`PR 1` `#564`, `PR 2` `#567`, `PR 3` `#577`, `PR 4` `#583`):** Merged on `main`.
 - **`WP-SIMPL-43` (`PR 1` `#563`, `PR 2` `#572`, `PR 3a` `#576`, `PR 3b` `#590`, `PR 4` `#596`, `PR 5a` `#727`, `PR 5b` `#733`, `PR 5c` `#742`):** Merged on `main`.
 - **`WP-SIMPL-46` (`PR 1` `#571`, `PR 2` `#580`, `PR 3` `#586`, `PR 4` `#593`, `PR 5` `#605`, `PR 6a` `#726`, `PR 6b` `#730` `2b2876bd`):** Merged on `main`.
-- **`WP-SIMPL-51` (`PR 1` `#566` `1d6fa34b`, `PR 2` `#570` `e96ee892`, `PR 3-5` `#581` `edeca24b`):** Merged on `main`.
+- **`WP-SIMPL-51` (`PR 1` `#566` `1d6fa34b`, `PR 2` `#570` `e96ee892`, `PR 3-5` `#581` `edeca24b`, `#529` `0bf0b50e`):** Merged on `main`.
+- **`WP-SIMPL-53` (`PR 1` `ddb53afb`, `PR 2` `554ace53`, `PR 3` `9b3e8852`, `PR 4` `f45f7104`/`6de0553d`, `PR 5` `ba5dd11d`):** Merged on `main`.
 
 ### 4.2 Partially Merged / Remaining Open Simplification Packages
-| WP | Plan File | Merged PRs on `main` | Remaining Open PRs | Phase 3 Status & SEC IDs | Sequencing & Dependencies |
+| WP | Plan File | Merged PRs on `main` | Remaining Open PRs | Phase 3 Status & SEC IDs | Wave Brief Location |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`WP-SIMPL-31`** | `WP-SIMPL-31-full-sqlite-removal-step-3.md` | Steps 1–2 (`WP-SIMPL-08`) | **Full SQLite Removal (Step 3):** remove `SqliteDialectGenerator.cs`, `SqliteGovernanceDialect.cs`, `Microsoft.Data.Sqlite` from `src/`, restrict `DataSourceDialectValidator.AdmittedDialects` to `{trino, postgresql, sqlserver, oracle, databricks}` (`#479` SQLite items depend on this) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-53`, `SEC-SIMPL-55..57`, `SEC-SIMPL-38`, `SEC-SIMPL-17`, `SEC-SIMPL-02`, `SEC-SIMPL-03`, `SEC-SIMPL-50`) | **Must NOT run in parallel with any PR touching `src/TrinoSqlEngine/**`** (`#478-A`, `#486`, `#479-A..D`). Schedule after `#479` dialect PRs or in dedicated `TrinoSqlEngine` slot. |
-| **`WP-SIMPL-32`** | `WP-SIMPL-32-ratchet-tightening-and-dead-code-sweep.md` | PRs 1–4 (`#641`, `#646`, `#661`, `#664`) | **PR 5** (Final ratchet tightening & dead-code sweep after Stage 3 packages merge) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-37`) | **Final Pre-Exit Wave** (after `WP-SIMPL-31`, `36..50`) |
-| **`WP-SIMPL-34`** | `WP-SIMPL-34-readme-feature-docs-migration-guide.md` | Partial doc updates | **README rewrite, `docs/features/` alignment, and `docs/migration/v1-to-v2.md` completion** | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-39`, `SEC-SIMPL-58`) | **Post-Stage 3 Exit** (runs once all Stage 3 surfaces settle) |
-| **`WP-SIMPL-36`** | `WP-SIMPL-36-security-correctness-test-gaps.md` | Sub-packages 1–5 (`#602..#620`), `36g` (`#728`), `36i` (`#737`) | **`36f` (`#441` cursor HMAC)**, **`36h` (`#288/#295/#313/#345`)**, **`36j` (`#338/#339/#344` + `#504` trait sweep)** | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-59..72`) | **Wave 5+** (independent security test batches; `36j` coordinates with `#504`) |
-| **`WP-SIMPL-38`** | `WP-SIMPL-38-parameterized-sql-rendering-for-row-filters.md` | PRs 38a–38d (`#588`, `#595`, `#604`, `#636`) | **PR 38e** (`SqlInlineRenderer` retirement once all callers use parameterized rendering) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-80..85`) | **Wave 5+** |
-| **`WP-SIMPL-40`** | `WP-SIMPL-40-mcp-tool-surface-prune.md` | PRs 40a–40c (`#597`, `#606`, `#634`) | **PR 40d** (MCP doc tools `list_doc_links` / `read_document` alignment with `WP-SIMPL-41 PR 6`) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-92..97`) | **Wave 5+** (with `WP-SIMPL-41 PR 6`) |
-| **`WP-SIMPL-41`** | `WP-SIMPL-41-authorized-data-discovery.md` | PR 1 (`#633`) | **PR 2** (Wave 3 DDL `0013`), **PR 3** (Wave 4 Discovery core + channels), **PR 4** (Artifacts & generator removal), **PR 5** (Request access + tier removal), **PR 6** (Linked docs + `#500` MCP text) | `APPROVED WITH CONDITIONS` (`SEC-DISC-01..16`) | **PR 2 in Wave 3**, **PR 3 in Wave 4**, **PR 4–6 in Wave 5+** |
-| **`WP-SIMPL-42`** | `WP-SIMPL-42-consent-granularity-and-subject-scoping.md` | PR 1 (`#598`) | **PR 2** (`ConsumerApp` k-anonymity/projections), **PR 3a/3b** (`UsageGroupSet` + grant IDs on audit/usage facts) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-98..105`) | **Wave 5+** (PR 3b after `WP-SIMPL-47 PR 2`) |
-| **`WP-SIMPL-44`** | `WP-SIMPL-44-access-decision-diagnostics-and-explain.md` | PR 1 (`#584`), PR 2 (`#592`) | **PR 3** (Remaining diagnostics/explain surface wiring if any gap remains) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-113..119`) | **Wave 5+** |
-| **`WP-SIMPL-45`** | `WP-SIMPL-45-governed-write-access.md` | PR 1 (`#594`), PR 2 (`#601`), PR 3 (`#632`) | **PR 4A (Steps 3 + 13)** (Wave 3 consent write workflow + `DmlWriterRoles` removal), **PR 4B (Steps 5 + 8)** (Wave 3 `AccessDecisionPoint` + `GovernedSqlRewriter` `DmlWritePermit` + `DmlTransports` gate), **PR 5** (Wave 5 governed DML execution: intent/outcome audit, idempotency, write budgets, `WriteConnection`, required-write-privileges report), **PR 6** (Wave 6 Discovery `DiscoveryWriteState` + doc updates) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-120..131`) | **PR 4A & 4B in Wave 3**, **PR 5 in Wave 5**, **PR 6 in Wave 6** |
-| **`WP-SIMPL-47`** | `WP-SIMPL-47-external-catalog-and-consent-api.md` | — | **PR 1** (Wave 4 DDL `0014` + domain models + `grant_source`), **PR 2** (`IGrantWriter` + signed hash-chained `GRANT_RECORDS`), **PR 3** (`IConsentDecisionPipeline` + `GrantValidityPolicy`), **PR 4** (Routing + events + `GrantExpiryHostedService`), **PR 5** (REST `/api/v1/consent`), **PR 6** (External catalog read + OpenAPI), **PR 7** (Profile assignment approval + owner grants + effect preview) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-47-01..12`) | **PR 1 in Wave 4**, **PR 2 in Wave 5/6**, **PR 3–7 in Wave 6+** |
-| **`WP-SIMPL-48`** | `WP-SIMPL-48-pattern-matched-policies.md` | PR 1 (`#587`), PR 2 (`#599`), PR 3 (`#607`), PR 4 (`#639`) | **PR 5** (`PatternCoverageMonitor` + approving-owner rule), **PR 6** (`IGrantEffectPreview`) | `APPROVED WITH CONDITIONS` (`SEC-48-01..10`) | **Wave 5+** (before `WP-SIMPL-47 PR 7`) |
-| **`WP-SIMPL-49`** | `WP-SIMPL-49-abac-subject-attributes.md` | PR 1 (`#585`), PR 2 (`#591`) | **PR 3** (`CallerAttributeService` / external provider), **PR 4** (SCIM/claims mapping & tests) | `APPROVED WITH CONDITIONS` (`SEC-49-01..09`) | **Wave 5+** |
-| **`WP-SIMPL-50`** | `WP-SIMPL-50-federation-engine-scope-reduction.md` | PR 1 (`#631`), PR 2 (`#637`), PR 3 (`#731`) | **PR 4** (Final federation scope gate & cleanup) | `APPROVED WITH CONDITIONS` (`SEC-50-01..08`) | **Wave 5+** |
-| **`WP-SIMPL-52`** | `WP-SIMPL-52-governance-data-model.md` | — | **PR 1a..7** (10 slices: `0016+` DDL, unified `ACCESS_POLICIES` / `ACCESS_PROFILES` / `VIRTUAL_FILTERS` / `CONSENTS` retirement, `#571` in PR 4b) | `APPROVED WITH CONDITIONS` (`SEC-52-01..12`) | **Post-Wave 5** (after `WP-SIMPL-46/47/48` stabilize) |
-| **`WP-SIMPL-53`** | `WP-SIMPL-53-graphql-scaling.md` | PR 1 (`#640`), PR 2 (`#644`), PR 3 (`#741`) | **PR 4 (`#573`)** (In flight in Wave 2 `@dev-health`) | `APPROVED WITH CONDITIONS` (`SEC-53-17..22`) | **Wave 2 (In Flight)** |
+| **`WP-SIMPL-31`** | `WP-SIMPL-31-full-sqlite-removal-step-3.md` | Steps 1–2 (`WP-SIMPL-08`) | **Full SQLite Removal (`31a`, `31b`, `31c`)** (`SqliteDialectGenerator.cs`, `SqliteGovernanceDialect.cs`, `Microsoft.Data.Sqlite` removal, `DataSourceDialectValidator.AdmittedDialects`) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-53`, `SEC-SIMPL-55..57`, `SEC-SIMPL-38`, `SEC-SIMPL-17`, `SEC-SIMPL-02`, `SEC-SIMPL-03`, `SEC-SIMPL-50`) | **Wave 6 (`W6-8A..C`)** in `2026-11-14-hydrogen-briefs-wave-6.md` (serialized after `#479-D`) |
+| **`WP-SIMPL-32`** | `WP-SIMPL-32-ratchet-tightening-and-dead-code-sweep.md` | PRs 1–4 (`#641`, `#646`, `#661`, `#664`) | **PR 5** (Final ratchet tightening & dead-code sweep after Stage 3 packages merge) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-37`) | **Wave 6 (`W6-9`)** in `2026-11-14-hydrogen-briefs-wave-6.md` |
+| **`WP-SIMPL-34`** | `WP-SIMPL-34-readme-feature-docs-migration-guide.md` | Partial doc updates | **README rewrite, `docs/features/` alignment, and `docs/migration/v1-to-v2.md` completion** | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-39`, `SEC-SIMPL-58`) | **Post-Stage 3 Exit** |
+| **`WP-SIMPL-36`** | `WP-SIMPL-36-security-correctness-test-gaps.md` | Sub-packages 1–5 (`#602..#620`), `36g` (`#728`), `36i` (`#737`) | **`36f` (`#441` cursor HMAC)**, **`36h` (`#288/#295/#313/#345`)**, **`36j` (`#338/#339/#344` + `#504` trait sweep)** | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-59..72`) | **Wave 6 (`W6-7F/H/J`)** in `2026-11-14-hydrogen-briefs-wave-6.md` |
+| **`WP-SIMPL-38`** | `WP-SIMPL-38-parameterized-sql-rendering-for-row-filters.md` | PRs 38a–38d (`#588`, `#595`, `#604`, `#636`) | **PR 38e** (`SqlInlineRenderer` retirement once all callers use parameterized rendering) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-80..85`) | **Wave 6 (`W6-10`)** in `2026-11-14-hydrogen-briefs-wave-6.md` |
+| **`WP-SIMPL-40`** | `WP-SIMPL-40-docs-ingestion-clean.md` | PRs 40a–40c (`#597`, `#606`, `#634`) | **PR 40d** (MCP doc tools `list_doc_links` / `read_document` alignment with `WP-SIMPL-41 PR 6`) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-92..97`) | **Wave 6 (`W6-2C`)** in `2026-11-14-hydrogen-briefs-wave-6.md` |
+| **`WP-SIMPL-41`** | `WP-SIMPL-41-authorized-data-discovery.md` | PR 1 (`#633`) | **PR 2** (`0013` DDL, `@dev-health` `00eb4924`), **PR 3** (Discovery core + channels), **PR 4** (Artifacts & generator removal), **PR 5** (Request access + tier removal), **PR 6** (Linked docs + `#500` MCP text) | `APPROVED WITH CONDITIONS` (`SEC-DISC-01..16`) | **PR 2 in Wave 3**, **PR 3 in Wave 4 (`W4-2`)**, **PR 4–6 in Wave 6 (`W6-2A..C`)** |
+| **`WP-SIMPL-42`** | `WP-SIMPL-42-usage-accounting-users-groups.md` | PR 1 (`#598` `6c9e9ac1`) | **PR 2** (`0017_usage_accounting` DDL + `GovernanceRepository.Usage.cs` + `UsageFlushWorker`), **PR 3a** (`UsageMeteringMiddleware` + call-site migration), **PR 3b** (grant linkage `TableAccessDecision.Grants`), **PR 4a** (tariffs), **PR 4b** (report endpoints + CSV + group name resolver), **PR 5** (FinOps deletion), **PR 7** (`DatabricksSourceCostCollector`), **PR 6 (`42-Q`)** (optional quotas) | `APPROVED WITH CONDITIONS` (`SEC-USAGE-01..12`, `SEC-SIMPL-21`, `SEC-SIMPL-30..31`) | **Wave 7 (`W7-42-2` .. `W7-42-7`)** in `2026-11-14-hydrogen-briefs-wave-7.md` |
+| **`WP-SIMPL-44`** | `WP-SIMPL-44-no-source-metadata-reads.md` | PR 1 (`#619` `d37d96f2`), PR 2 (`#645` `a8c248fd`) | **PR 3** (`SqlProcedureRowScopeResolver` key-closure query + delete `StoredProcedureCatalogValidator.cs` & declared-only procedures), **PR 4 (`#459`)** (physical key/index removal + dbt `meta.indexes`) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-140..147`) | **PR 3 in Wave 7 (`W7-44-3`)** (`wave-7.md`); **PR 4 in Wave 3 (`W3-C1/C2`)** (`wave-3.md`) |
+| **`WP-SIMPL-45`** | `WP-SIMPL-45-governed-write-access.md` | PR 1 (`#594`), PR 2 (`#601`), PR 3 (`#632`) | **PR 4A (Steps 3 + 13)** (`@dev-cursor` `6c373c02`), **PR 4B (Steps 5 + 8)** (`AccessDecisionPoint` + `GovernedSqlRewriter` `DmlWritePermit` + `DmlTransports` gate), **PR 5** (governed DML execution), **PR 6** (Discovery `DiscoveryWriteState` + doc updates) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-120..131`) | **PR 4A & 4B in Wave 3 (`W3-3A/3B`)**, **PR 5 in Wave 5 (`W5-4`)**, **PR 6 in Wave 6 (`W6-3`)** |
+| **`WP-SIMPL-47`** | `WP-SIMPL-47-external-catalog-and-consent-api.md` | — | **PR 1** (`0014_consent_api` DDL), **PR 2a/2b** (`IGrantWriter` + signed hash-chained `GRANT_RECORDS`), **PR 3** (`IConsentDecisionPipeline` + `ExternalDecisionGuard` + `GrantValidityPolicy`), **PR 4** (routing + events + `GrantExpiryHostedService`), **PR 5** (REST `/api/v1/consent`), **PR 6** (external catalog read + OpenAPI), **PR 7** (profile assignment approval + owner grants + effect preview) | `APPROVED WITH CONDITIONS` (`SEC-SIMPL-47-01..12`) | **PR 1 in Wave 4 (`W4-1`)**, **PR 2a/2b in Wave 6 (`W6-1A/1B`)**, **PR 3–7 in Wave 7 (`W7-47-3..7`)** (`wave-7.md`) |
+| **`WP-SIMPL-48`** | `WP-SIMPL-48-row-policies-dynamic-coverage.md` | — | **PR 1** (policy parameters, `Live|KeySet`, four-eyes SQL approval), **PR 2** (`0018_consent_row_scopes` DDL + `GrantRowScopeEntry`), **PR 3** (`RowScopeCompiler`), **PR 4** (per-cell column state), **PR 5** (`0019_pattern_grants` DDL + `PatternCoverageMonitor`), **PR 6** (`EffectiveAccessService` + `IGrantEffectPreview`) | `APPROVED WITH CONDITIONS` (`SEC-AZ-15..19`, `SEC-AZ-02,04,06,07,09`) | **Wave 7 (`W7-48-1..6`)** in `2026-11-14-hydrogen-briefs-wave-7.md` |
+| **`WP-SIMPL-49`** | `WP-SIMPL-49-data-products.md` | — | **PR A1..A6** (`0024_data_products` DDL, roles & authority, two-stage DuckDB views, read/write procedures as products, Git sync, discovery/usage/explain/parity `P1..P13`) | `APPROVED WITH CONDITIONS` (`SEC-PROD-01..14`, `SEC-AZ-01..19`) | **Wave 7 (`W7-49-A1..A6`, post-freeze)** in `2026-11-14-hydrogen-briefs-wave-7.md` |
+| **`WP-SIMPL-50`** | `WP-SIMPL-50-review-remediation-v1-7-1.md` | PR A (`#565`), PR B1a (`#592`), PR B1b (`#597`), PR B2 (`#606`), PR B3 (`#629` `10d5b6eb`) | **PR B5 (`B14` `Autheris.ModuleSigner`)**, **PR B6 (`B16` suppressed count default + `C1` DP leftovers deletion)**, **PR C (`C2, C3, C4, C8, C11, C15`)** | `APPROVED WITH CONDITIONS` (`SEC-50-01..15`, `SEC-AZ-04`) | **Wave 7 (`W7-50-B5`, `W7-50-B6`, `W7-50-C`)** in `2026-11-14-hydrogen-briefs-wave-7.md` |
+| **`WP-SIMPL-52`** | `WP-SIMPL-52-governance-data-model.md` | — | **PR 1a, 1b, 2, 3, 4a, 4b (`#571`), 5a, 5b, 6a, 6b** (DDL `0020`–`0023`, classifications, mask functions, `ClassificationAccessResolver`, `#571` hidden catalog text, admin API, drop `is_sensitive` & superseded columns) | `APPROVED WITH CONDITIONS` (`SEC-52-01..10`) | **Wave 7 (`W7-52-1A` .. `W7-52-6B`)** in `2026-11-14-hydrogen-briefs-wave-7.md` |
+| **`WP-SIMPL-54`** | `WP-SIMPL-54-golden-queries-from-dbt.md` | — | **PR 1, PR 2, PR 3 (`#580`)** (`0025_golden_queries` DDL + `IGoldenQueryRepository`, dbt `meta.golden_queries` import & sanitizer, `GoldenQueryService` store read & caller column/visibility filter) | `APPROVED WITH CONDITIONS` (`SEC-54-01..07`) | **Wave 7 (`W7-54-1..3`, post-freeze)** in `2026-11-14-hydrogen-briefs-wave-7.md` |
 
 ### 4.3 Post-Freeze / Stage 3 Exit Modularization Packages
-- **`WP-SIMPL-28`** (`WP-SIMPL-28-catalog-sync-module.md`), **`WP-SIMPL-29`** (`WP-SIMPL-29-webhooks-cdc-module.md`), and **`WP-SIMPL-54`** (`WP-SIMPL-54-golden-queries-from-dbt.md`, `#580`, Phase 3 `APPROVED WITH CONDITIONS` `SEC-54-01..07`): Deferred until Stage 3 feature freeze exit per owner decision Q26.
+- **`WP-SIMPL-28`** (`WP-SIMPL-28-module-dbt-openmetadata.md`), **`WP-SIMPL-29`** (`WP-SIMPL-29-webhooks-cdc-module.md`), **`WP-SIMPL-49`** (`WP-SIMPL-49-data-products.md`, briefed in `wave-7.md` `W7-49-A1..A6`), and **`WP-SIMPL-54`** (`WP-SIMPL-54-golden-queries-from-dbt.md`, `#580`, briefed in `wave-7.md` `W7-54-1..3`): Deferred until Stage 3 feature freeze exit per owner decisions D8 and Q26.
 
 ---
 
