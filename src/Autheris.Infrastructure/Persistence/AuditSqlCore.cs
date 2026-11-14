@@ -69,6 +69,9 @@ internal static class AuditSqlCore
     public static bool FixedTimeEqualsString(string? a, string? b) =>
         CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a ?? string.Empty), Encoding.UTF8.GetBytes(b ?? string.Empty));
 
+    /// <summary>
+    /// Computes the entry hash over the stored redacted <paramref name="detailsJson"/> using the unchanged 12-field canonical layout.
+    /// </summary>
     public static string ComputeAuditEntryHash(
         byte[]? hmacKey,
         long? sequence,
