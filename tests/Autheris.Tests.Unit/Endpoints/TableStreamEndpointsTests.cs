@@ -101,7 +101,7 @@ public sealed class TableStreamEndpointsTests
         var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
         var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
@@ -124,7 +124,7 @@ public sealed class TableStreamEndpointsTests
         var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
         var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
@@ -150,7 +150,7 @@ public sealed class TableStreamEndpointsTests
 
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
         var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
@@ -171,7 +171,7 @@ public sealed class TableStreamEndpointsTests
         var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
         var planner = new GovernedTableReadPlanner();
         var sqlExecution = Substitute.For<IGovernedSqlExecutionService>();
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
         var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
@@ -211,7 +211,7 @@ public sealed class TableStreamEndpointsTests
                 await writer(reader, CancellationToken.None);
             });
 
-        var encoder = new KeysetCursorEncoder();
+        var encoder = new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789");
         var masking = Substitute.For<IColumnMaskingProvider>();
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
@@ -381,7 +381,7 @@ public sealed class TableStreamEndpointsTests
         // The original stream failure surfaces (not an OperationCanceledException from settlement) and the reservation is settled.
         await Should.ThrowAsync<IOException>(() => TableStreamEndpoints.HandleBulkStreamAsync(
             "sales", "dbo", "orders",
-            context, repo, pdp, new GovernedTableReadPlanner(), sqlExecution, new KeysetCursorEncoder(), Substitute.For<IColumnMaskingProvider>(),
+            context, repo, pdp, new GovernedTableReadPlanner(), sqlExecution, new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789"), Substitute.For<IColumnMaskingProvider>(),
             NullLoggerFactory.Instance, aborted.Token));
 
         await rateLimiter.Received(1).SettleCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Is<CancellationToken>(t => !t.CanBeCanceled));
@@ -479,7 +479,7 @@ public sealed class TableStreamEndpointsTests
 
         await TableStreamEndpoints.HandleBulkStreamAsync(
             "sales", "dbo", "orders",
-            context, repo, pdp, new GovernedTableReadPlanner(), sqlExecution, new KeysetCursorEncoder(), Substitute.For<IColumnMaskingProvider>(),
+            context, repo, pdp, new GovernedTableReadPlanner(), sqlExecution, new KeysetCursorEncoder("endpoint-planner-shared-signing-key-0123456789"), Substitute.For<IColumnMaskingProvider>(),
             loggerFactory ?? NullLoggerFactory.Instance, CancellationToken.None);
 
         context.Response.Body.Position = 0;

@@ -87,16 +87,15 @@ public sealed class BulkStreamSigningKeyOptionsValidatorTests
     }
 
     [Fact]
-    public void MissingKey_OutsideDevelopment_PassesWhenBulkStreamIsDisabled()
+    public void MissingKey_OutsideDevelopment_FailsWhenBulkStreamIsDisabled()
     {
-        Run(OptionsWith(bulkEnabled: false), "Production").Succeeded.ShouldBeTrue();
+        Run(OptionsWith(bulkEnabled: false), "Production").Failed.ShouldBeTrue();
     }
 
     [Fact]
-    public void MissingKey_OutsideDevelopment_PassesWhenRestDataEndpointIsDisabled_AndBulkSwitchIsUnset()
+    public void MissingKey_OutsideDevelopment_FailsWhenRestDataEndpointIsDisabled_AndBulkSwitchIsUnset()
     {
-        // The bulk stream switch follows the REST data endpoint switch when it is not set itself.
-        Run(OptionsWith(dataEndpointEnabled: false), "Production").Succeeded.ShouldBeTrue();
+        Run(OptionsWith(dataEndpointEnabled: false), "Production").Failed.ShouldBeTrue();
     }
 
     [Fact]
