@@ -566,7 +566,7 @@ public partial class GovernanceRepository
         }
     }
 
-    private async Task PublishCatalogChangedEventAsync(CatalogVersion version, CancellationToken ct)
+    internal async Task PublishCatalogChangedEventAsync(CatalogVersion version, CancellationToken ct)
     {
         var timestamp = TimeProvider.System.GetUtcNow();
         if (_eventBus is { } eventBus)
@@ -608,7 +608,7 @@ public partial class GovernanceRepository
         return activeTables;
     }
 
-    private async Task<(Dictionary<Guid, List<TableColumn>> ColumnsByTable, Dictionary<Guid, Dictionary<string, MaskingRule>> MaskingRulesByTable, HashSet<Guid> CorruptedTableIds)> LoadBatchTableColumnsAsync(
+    internal async Task<(Dictionary<Guid, List<TableColumn>> ColumnsByTable, Dictionary<Guid, Dictionary<string, MaskingRule>> MaskingRulesByTable, HashSet<Guid> CorruptedTableIds)> LoadBatchTableColumnsAsync(
         DbCommand cmd,
         CancellationToken ct)
     {

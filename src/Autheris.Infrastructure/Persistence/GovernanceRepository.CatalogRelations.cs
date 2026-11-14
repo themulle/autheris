@@ -217,7 +217,7 @@ public partial class GovernanceRepository
         await PublishCatalogChangedEventAsync(version, ct).ConfigureAwait(false);
     }
 
-    private async Task<Autheris.Application.Catalog.CatalogVersion> BumpCatalogVersionInternalAsync(
+    internal async Task<Autheris.Application.Catalog.CatalogVersion> BumpCatalogVersionInternalAsync(
         DbConnection conn,
         DbTransaction tx,
         long structureDelta,

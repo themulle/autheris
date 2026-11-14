@@ -20,14 +20,14 @@ using Microsoft.Extensions.Logging;
 
 public partial class GovernanceRepository
 {
-    private bool IsPostgreSql => _dialect is PostgreSqlGovernanceDialect;
+    internal bool IsPostgreSql => _dialect is PostgreSqlGovernanceDialect;
 
-    private KeyDefinitionDialect KeyDialect => IsPostgreSql ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
+    internal KeyDefinitionDialect KeyDialect => IsPostgreSql ? CatalogKeyDefinitionStore.PostgreSql : CatalogKeyDefinitionStore.SqlServer;
 
     private string SelectTableColumnsSql => IsPostgreSql ? CatalogSql.SelectTableColumnsSqlPg : CatalogSql.SelectTableColumnsSqlSs;
     private string SelectActiveBatchTableColumnsSql => IsPostgreSql ? CatalogSql.SelectActiveBatchTableColumnsSqlPg : CatalogSql.SelectActiveBatchTableColumnsSqlSs;
-    private string UpsertTableSql => IsPostgreSql ? CatalogSql.UpsertTableSqlPg : CatalogSql.UpsertTableSqlSs;
-    private string InsertColumnSql => IsPostgreSql ? CatalogSql.InsertColumnSqlPg : CatalogSql.InsertColumnSqlSs;
+    internal string UpsertTableSql => IsPostgreSql ? CatalogSql.UpsertTableSqlPg : CatalogSql.UpsertTableSqlSs;
+    internal string InsertColumnSql => IsPostgreSql ? CatalogSql.InsertColumnSqlPg : CatalogSql.InsertColumnSqlSs;
     private string RelationsForParentTableSql => IsPostgreSql ? CatalogSql.RelationsForParentTableSqlPg : CatalogSql.RelationsForParentTableSqlSs;
     private string AllRelationsSql => IsPostgreSql ? CatalogSql.AllRelationsSqlPg : CatalogSql.AllRelationsSqlSs;
     private string InsertRelationSql => IsPostgreSql ? CatalogSql.InsertRelationSqlPg : CatalogSql.InsertRelationSqlSs;
@@ -35,7 +35,7 @@ public partial class GovernanceRepository
     private string CatalogVersionSql => IsPostgreSql ? CatalogSql.CatalogVersionSqlPg : CatalogSql.CatalogVersionSqlSs;
     private string BumpCatalogVersionSql => IsPostgreSql ? CatalogSql.BumpCatalogVersionSqlPg : CatalogSql.BumpCatalogVersionSqlSs;
 
-    private static class CatalogSql
+    internal static class CatalogSql
     {
         public const string SelectTableEntitySql = @"SELECT id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal
 FROM TABLES

@@ -547,5 +547,5 @@ public partial class GovernanceRepository
         }
     }
 
-    private void LogCatalogNotice(string message) => _logger?.LogWarning("Catalog notice: {Notice}", message);
+    internal void LogCatalogNotice(string message) => _logger?.LogWarning("Catalog notice: {Notice}", message);
 }
