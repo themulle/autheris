@@ -97,7 +97,6 @@ public sealed class DateFunctionTranslationTests
 
     [Theory]
     [InlineData("date_add('fortnight', 1, ts)")]
-    [InlineData("date_add('quarter', 1, ts)")]
     [InlineData("date_add(unit_col, 1, ts)")]
     [InlineData("date_add('day', 1.5, ts)")]
     [InlineData("date_add('day', n, ts)")]

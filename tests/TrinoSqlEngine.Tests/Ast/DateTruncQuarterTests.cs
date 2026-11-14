@@ -56,12 +56,6 @@ public sealed class DateTruncQuarterTests
     public void DateTrunc_Quarter_Sqlite_ThrowsAstBuild() =>
         Assert.Throws<AstBuildException>(() => Generate("date_trunc('quarter', ts)", TargetSqlDialect.Sqlite));
 
-    [Theory]
-    [InlineData("date_add('quarter', 1, ts)")]
-    [Trait("Category", "Security")]
-    public void SEC_PGP_04_DateAdd_Quarter_StillRejected(string expression) =>
-        Assert.Throws<AstBuildException>(() => Generate(expression, TargetSqlDialect.PostgreSql));
-
     [Fact]
     [Trait("Category", "Security")]
     public void SEC_PGP_04_DateTrunc_Quarter_UnsupportedDialect_Is4xx_NoUnitTextToProvider()

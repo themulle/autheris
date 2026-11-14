@@ -1086,7 +1086,7 @@
       "Group": "operator",
       "Sql": "SELECT a % b AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT \"A\" % \"B\" AS \"R\" FROM \"T\"",
+      "Expected": "SELECT MOD(\"A\", \"B\") AS \"R\" FROM \"T\"",
       "Parameters": []
     },
     {
@@ -3361,7 +3361,7 @@
       "Group": "date-translated",
       "Sql": "SELECT date_add('month', 2, d) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT ADD_MONTHS(\"D\", :p1) AS \"R\" FROM \"T\"",
+      "Expected": "SELECT (ADD_MONTHS(\"D\", :p1) - (EXTRACT(DAY FROM ADD_MONTHS(\"D\", :p1)) - LEAST(EXTRACT(DAY FROM \"D\"), EXTRACT(DAY FROM LAST_DAY(ADD_MONTHS(\"D\", :p1)))))) AS \"R\" FROM \"T\"",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -3393,7 +3393,7 @@
       "Group": "date-translated",
       "Sql": "SELECT date_add('year', -1, d) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT ADD_MONTHS(\"D\", :p1) AS \"R\" FROM \"T\"",
+      "Expected": "SELECT (ADD_MONTHS(\"D\", :p1) - (EXTRACT(DAY FROM ADD_MONTHS(\"D\", :p1)) - LEAST(EXTRACT(DAY FROM \"D\"), EXTRACT(DAY FROM LAST_DAY(ADD_MONTHS(\"D\", :p1)))))) AS \"R\" FROM \"T\"",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -3473,7 +3473,7 @@
       "Group": "date-translated",
       "Sql": "SELECT d - INTERVAL '1' MONTH AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT ADD_MONTHS(\"D\", :p1) AS \"R\" FROM \"T\"",
+      "Expected": "SELECT (ADD_MONTHS(\"D\", :p1) - (EXTRACT(DAY FROM ADD_MONTHS(\"D\", :p1)) - LEAST(EXTRACT(DAY FROM \"D\"), EXTRACT(DAY FROM LAST_DAY(ADD_MONTHS(\"D\", :p1)))))) AS \"R\" FROM \"T\"",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -3537,7 +3537,7 @@
       "Group": "date-translated",
       "Sql": "SELECT d + INTERVAL '2' YEAR AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT ADD_MONTHS(\"D\", :p1) AS \"R\" FROM \"T\"",
+      "Expected": "SELECT (ADD_MONTHS(\"D\", :p1) - (EXTRACT(DAY FROM ADD_MONTHS(\"D\", :p1)) - LEAST(EXTRACT(DAY FROM \"D\"), EXTRACT(DAY FROM LAST_DAY(ADD_MONTHS(\"D\", :p1)))))) AS \"R\" FROM \"T\"",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -6918,7 +6918,7 @@
       "Group": "complex",
       "Sql": "SELECT a * 2 + b / 3 - c % 4 AS e FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT \"A\" * :p1 + \"B\" / :p2 - \"C\" % :p3 AS \"E\" FROM \"T\"",
+      "Expected": "SELECT \"A\" * :p1 + \"B\" / :p2 - MOD(\"C\", :p3) AS \"E\" FROM \"T\"",
       "Parameters": [
         {
           "Marker": ":p1",

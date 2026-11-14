@@ -184,6 +184,10 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             case IntervalLiteralExpression interval:
                 FormatIntervalLiteral(ref builder, interval, context);
                 break;
+            case DateFunctionExpression { Kind: DateFunctionKind.Add, Unit: DateUnit.Quarter } quarter when TargetDialect == TargetSqlDialect.Sqlite:
+                // SQLite has no quarter modifier: three calendar months (the amount is bounded by the AST builder).
+                FormatDateAdd(ref builder, DateUnit.Month, checked(quarter.Amount * 3), quarter.Source, context);
+                break;
             case DateFunctionExpression date when date.Kind == DateFunctionKind.Add:
                 FormatDateAdd(ref builder, date.Unit, date.Amount, date.Source, context);
                 break;
@@ -479,6 +483,15 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     private bool NeedsParentheses(Expression child, BinaryOperator parentOp, bool isLeft)
     {
+        // Concatenation operands that are arithmetic or unary are always parenthesized, in every dialect: the operand keeps its
+        // own evaluation order and type coercion whatever the target ranks '||' (or SQL Server '+') against the arithmetic operators.
+        if (parentOp == BinaryOperator.Concat
+            && (child is UnaryExpression
+                || child is BinaryExpression { Operator: BinaryOperator.Add or BinaryOperator.Subtract or BinaryOperator.Multiply or BinaryOperator.Divide or BinaryOperator.Modulo }))
+        {
+            return true;
+        }
+
         if (child is BinaryExpression childBinary)
         {
             int parentPrec = GetPrecedence(parentOp);

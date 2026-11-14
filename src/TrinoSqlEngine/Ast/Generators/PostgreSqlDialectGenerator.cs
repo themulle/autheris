@@ -81,6 +81,29 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
     /// <summary>Virtual filters (phase 7b): <c>(x + (n) * INTERVAL '1 unit')</c>; on the governed path the amount is bound.</summary>
     protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
     {
+        if (unit == DateUnit.Quarter)
+        {
+            // INTERVAL '1 quarter' does not exist: three calendar months, the amount and the source are each emitted once.
+            builder.Append('(');
+            GenerateExpression(source, ref builder, context);
+            builder.Append(" + MAKE_INTERVAL(months => ");
+            if (context.IsBound)
+            {
+                builder.Append("CAST(");
+                builder.Append(BindInteger(amount, context));
+                builder.Append(" AS int)");
+            }
+            else
+            {
+                builder.Append('(');
+                builder.Append(amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                builder.Append(')');
+            }
+
+            AppendStructural(ref builder, context, " * 3))");
+            return;
+        }
+
         if (context.IsBound)
         {
             builder.Append('(');
