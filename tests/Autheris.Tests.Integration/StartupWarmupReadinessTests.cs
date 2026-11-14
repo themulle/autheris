@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Autheris.Api.Endpoints;
+using Autheris.Api.Endpoints.Health;
 using Autheris.Api.Hosting.Warmup;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
@@ -62,6 +63,7 @@ public sealed class StartupWarmupReadinessTests
         var health = Substitute.For<IGatewayHealthCheckService>();
         health.CheckHealthAsync(Arg.Any<CancellationToken>()).Returns(new GatewayHealthReport(setup.Healthy, []));
         builder.Services.AddSingleton(health);
+        builder.Services.AddSingleton<ReadinessProbe>();
 
         FakeGate? gate = null;
         if (setup.Gate is { } g)

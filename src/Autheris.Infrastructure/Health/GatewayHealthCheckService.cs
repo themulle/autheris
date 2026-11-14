@@ -115,7 +115,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
             {
                 if (_redisMultiplexer != null && _redisMultiplexer.IsConnected)
                 {
-                    var ping = await _redisMultiplexer.GetDatabase().PingAsync().ConfigureAwait(false);
+                    var ping = await _redisMultiplexer.GetDatabase().PingAsync().WaitAsync(ct).ConfigureAwait(false);
                     redisHealthy = true;
                     redisDesc = $"Redis ping successful ({ping.TotalMilliseconds:F1}ms).";
                 }

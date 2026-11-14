@@ -2,6 +2,7 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
 using System.Linq;
+using Autheris.Api.Endpoints.Health;
 using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Application.State.Caching.Services;
 using Autheris.Application.Common.Interfaces;
@@ -94,10 +95,11 @@ public static class GatewayStorageServiceExtensions
         services.AddSingleton<AuditChainIntegrityMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<AuditChainIntegrityMonitor>());
         services.AddHostedService<Autheris.Api.Configuration.Validation.DmlIdempotencyStoreStartupCheck>();
-        // SEC R3-4: anonymous /health/ready must not drive the DB probe per request -> cached, single-flight decorator.
+        // Anonymous /health/ready uses ReadinessProbe (2 s single-flight cache + 5 s shared timeout) over GatewayHealthCheckService.
         services.AddSingleton<GatewayHealthCheckService>();
         services.AddSingleton<IGatewayHealthCheckService>(sp =>
-            new CachedGatewayHealthCheckService(sp.GetRequiredService<GatewayHealthCheckService>()));
+            sp.GetRequiredService<GatewayHealthCheckService>());
+        services.AddSingleton<ReadinessProbe>();
 
         return services;
     }
