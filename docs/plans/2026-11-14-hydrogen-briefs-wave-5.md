@@ -18,12 +18,12 @@
 
 | Slot | Work Package | Branch / Worktree | DDL Step | Shared-File Serialization Rules |
 | :--- | :--- | :--- | :--- | :--- |
-| **W5-1** | **`WP-OI-SCALE-4 PR 2 (#675)`** (`POLICY_EPOCHS.change_version` + `GetTablesChangedSinceAsync` + `CatalogSnapshot.WithDelta`) | `feat/oi-scale-675-pr2-delta` (`/work/wt/oi-scale-675-pr2-delta`) | **`0015_policy_epochs_change_version`** *(Single DDL slot in Wave 5; starts after Wave 3 `#675 PR 1`, Wave 4 `0014_consent_api`, and Wave 4 `#673` merge)* | Touches `Migrations/Steps/{postgresql,sqlserver}/0015_policy_epochs_change_version*`, `PostgreSqlBaselineSchema.cs`, `SqlServerBaselineSchema.cs`, `GovernanceRepository.Catalog*.cs`, `CatalogSnapshotProvider.cs`. Disjoint from W5-2, W5-3, W5-4, W5-5a. |
-| **W5-2** | **`WP-OI-CAT-4 (#671)`** (Declarative Consent Prune Scoped to `DECLARATIVE`) | `feat/oi-cat-671-declarative-prune` (`/work/wt/oi-cat-671-declarative-prune`) | None *(Starts after Wave 4 Brief 1 `WP-SIMPL-47 PR 1` `CONSENTS.grant_source` merges)* | Touches `DeclarativeConsentApplyService.cs`, `GovernanceEndpoints.Catalog.cs`, `GovernanceRepository.Consent*.cs`. Disjoint from W5-1, W5-3, W5-4, W5-5. |
+| **W5-1** | **`WP-OI-SCALE-4 PR 2 (#675)`** (`POLICY_EPOCHS.change_version` + `GetTablesChangedSinceAsync` + `CatalogSnapshot.WithDelta`) | `feat/oi-scale-675-pr2-delta` (`/work/wt/oi-scale-675-pr2-delta`) | **`0015_policy_epochs_change_version`** *(Single DDL slot in Wave 5; starts after Wave 3 `#675 PR 1`, Wave 4 `0014_consent_api`, and Wave 4 `#673` merge)* | Touches `src/Autheris.Infrastructure/Persistence/Migrations/Steps/{postgresql,sqlserver}/0015_policy_epochs_change_version*`, `src/Autheris.Infrastructure/Persistence/Migrations/{PostgreSqlBaselineSchema.cs,SqlServerBaselineSchema.cs}`, `src/Autheris.Infrastructure/Persistence/GovernanceRepository.Catalog*.cs`, `src/Autheris.Application/Catalog/{CatalogSnapshotProvider.cs,CatalogSnapshot.cs}`. Disjoint from W5-2, W5-3, W5-4, W5-5a. |
+| **W5-2** | **`WP-OI-CAT-4 (#671)`** (Declarative Consent Prune Scoped to `DECLARATIVE`) | `feat/oi-cat-671-declarative-prune` (`/work/wt/oi-cat-671-declarative-prune`) | None *(Starts after Wave 4 Brief 1 `WP-SIMPL-47 PR 1` `CONSENTS.grant_source` merges)* | Touches `src/Autheris.Application/Governance/Services/DeclarativeConsentApplyService.cs`, `src/Autheris.Application/Governance/Interfaces/IDeclarativeConsentApplyService.cs`, `src/Autheris.Domain/Model/DeclarativeConsentModels.cs`, `src/Autheris.Api/Endpoints/GovernanceEndpoints.Catalog.cs`, `src/Autheris.Infrastructure/Persistence/GovernanceRepository.Consent*.cs`. Disjoint from W5-1, W5-3, W5-4, W5-5. |
 | **W5-3** | **`WP-OI-SQL-479-B`** (`#479` Dialect Semantics PR B: `date_add('quarter', ...)`, Oracle Month-End `ADD_MONTHS`, `Concat` Parenthesization) | `feat/oi-sql-479b-date-concat` (`/work/wt/oi-sql-479b-date-concat`) | None *(Starts after Wave 4 Brief 3 `WP-OI-SQL-479-A` merges on `TrinoSqlEngine`)* | Touches `src/TrinoSqlEngine/Ast/Generators/{PostgreSqlDialectGenerator.cs,OracleDialectGenerator.cs,SqlDialectGeneratorBase.Functions.cs,SqlDialectGeneratorBase.Expressions.cs}`. Note: do NOT run in parallel with `WP-SIMPL-31`. Disjoint from W5-1, W5-2, W5-4, W5-5. |
-| **W5-4** | **`WP-SIMPL-45 PR 5`** (Governed Write Execution: Intent/Outcome Audit, Idempotency, Write Budgets, `WriteConnection` & Required-Privileges Report) | `feat/simpl-45-pr5-write-exec` (`/work/wt/simpl-45-pr5-write-exec`) | None *(Starts after Wave 3 `WP-SIMPL-45 PR 4` merges)* | Touches `GovernedSqlExecutor.cs`, `CheckedDmlExecutor.cs`, `RestApiOptions.cs`, `WriteBudgetStore.cs`, `AdminEndpoints.cs`. Disjoint from W5-1, W5-2, W5-3, W5-5. |
-| **W5-5a** | **`WP-OI-SCALE-5 (#676 PR 1–3)`** (Incremental BM25 + Vector Search Index & Embedding Cache) | `feat/oi-scale-676-incremental-search` (`/work/wt/oi-scale-676-incremental-search`) | None *(Runs in parallel with W5-1..W5-4; PR 3 wires `GetTablesChangedSinceAsync` once W5-1 lands)* | Touches `src/Autheris.Application/Catalog/Search/{CatalogSearchEngine.cs,CatalogSearchWarmupService.cs,Bm25SearchIndex.cs,InMemoryVectorSearchIndex.cs,CatalogSearchEmbeddingCache.cs}`. |
-| **W5-5b** | **`WP-OI-SCALE-6 (#677 PR 1)`** (Stale-Only `GetAllTablesAsync` & Internal Unfiltered `GetTablesAsync`/`QueryTablesAsync`) | `feat/oi-scale-677-pr1-paged-reads` (`/work/wt/oi-scale-677-pr1-paged-reads`) | None *(Starts after W5-1 `#675 PR 2` merges on `GovernanceRepository.Catalog.cs`)* | Touches `IGovernanceRepository.cs`, `GovernanceRepository.Catalog.cs`, `GovernanceRepository.CatalogSql.cs`, `CatalogDiscoveryService.cs`, `McpDatasetCatalog.cs`. |
+| **W5-4** | **`WP-SIMPL-45 PR 5`** (Governed Write Execution: Intent/Outcome Audit, Idempotency, Write Budgets, `WriteConnection` & Required-Privileges Report) | `feat/simpl-45-pr5-write-exec` (`/work/wt/simpl-45-pr5-write-exec`) | None *(Starts after Wave 3 `WP-SIMPL-45 PR 4A & PR 4B` merge)* | Touches `src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs`, `src/TrinoSqlEngine/Ast/Emit/CheckedDmlExecutor.cs`, `src/Autheris.Domain/Options/Protocols/RestApiOptions.cs`, `src/Autheris.Api/Endpoints/GovernanceEndpoints.Catalog.cs`. Disjoint from W5-1, W5-2, W5-3, W5-5. |
+| **W5-5a** | **`WP-OI-SCALE-5 (#676 PR 1–3)`** (Incremental BM25 + Vector Search Index & Embedding Cache) | `feat/oi-scale-676-incremental-search` (`/work/wt/oi-scale-676-incremental-search`) | None *(Runs in parallel with W5-1..W5-4; PR 3 wires `GetTablesChangedSinceAsync` once W5-1 lands)* | Touches `src/Autheris.Application/Catalog/Search/{CatalogSearchEngine.cs,CatalogSearchWarmupService.cs,Bm25SearchIndex.cs,VectorSearchIndex.cs}`. |
+| **W5-5b** | **`WP-OI-SCALE-6 (#677 PR 1)`** (Stale-Only `GetAllTablesAsync` & Internal Unfiltered `GetTablesAsync`/`QueryTablesAsync`) | `feat/oi-scale-677-pr1-paged-reads` (`/work/wt/oi-scale-677-pr1-paged-reads`) | None *(Starts after W5-1 `#675 PR 2` merges on `GovernanceRepository.Catalog.cs`)* | Touches `src/Autheris.Application/Common/Interfaces/IGovernanceRepository.cs`, `src/Autheris.Infrastructure/Persistence/GovernanceRepository.Catalog.cs`, `src/Autheris.Infrastructure/Persistence/GovernanceRepository.CatalogSql.cs`, `src/Autheris.Application/Catalog/Services/CatalogDiscoveryService.cs`, `src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs`. |
 
 ---
 
@@ -49,7 +49,7 @@
      - Add column `change_version BIGINT NOT NULL DEFAULT 1` to `POLICY_EPOCHS`.
      - Backfill `UPDATE POLICY_EPOCHS SET change_version = COALESCE((SELECT MAX(version) FROM CATALOG_STATE), 1) WHERE change_version <= 1;`.
      - Create index `IX_POLICY_EPOCHS_SCOPE_CHANGE_VERSION ON POLICY_EPOCHS (scope, change_version)`.
-2. **Repository Writer & Reader Wiring (`src/Autheris.Infrastructure/Persistence/GovernanceRepository.Catalog.cs`, `GovernanceRepository.CatalogVisibility.cs`, `GovernanceRepository.CatalogSql.cs`, `IGovernanceRepository.cs`):**
+2. **Repository Writer & Reader Wiring (`src/Autheris.Infrastructure/Persistence/GovernanceRepository.Catalog.cs`, `src/Autheris.Infrastructure/Persistence/GovernanceRepository.CatalogRows.cs`, `src/Autheris.Infrastructure/Persistence/GovernanceRepository.CatalogRelations.cs`, `src/Autheris.Infrastructure/Persistence/GovernanceRepository.CatalogSql.cs`, `src/Autheris.Application/Common/Interfaces/IGovernanceRepository.cs`):**
    - Update `IncrementTableEpochInternalAsync` (and batched table-epoch upsert in `UpsertTableMetadataBatchAsync`, `DeleteTableMetadataAsync`, `SetTableVisibilityAsync`, `AddMaskingRuleAsync`, `RemoveMaskingRuleAsync`, `AssignDataOwnerAsync`, `RevokeDataOwnerAsync`, `UpdateTableKeyDefinitionAsync`) so every table epoch bump also sets `change_version = @changeVersion` (using the new `CATALOG_STATE` version inside the transaction, or when inside an additive `CatalogWriteScope`, updating `change_version` for the scope's recorded tables when `FlushPendingAsync` bumps `CATALOG_STATE`).
    - Add to `ITableMetadataRepository` (`src/Autheris.Application/Common/Interfaces/IGovernanceRepository.cs:9-30`):
      ```csharp
@@ -58,9 +58,9 @@
          CancellationToken ct = default);
      ```
    - Implement `GetTablesChangedSinceAsync` in `GovernanceRepository.Catalog.cs` (`SEC-OI-675-2`).
-3. **Incremental `CatalogSnapshot.WithDelta` (`src/Autheris.Infrastructure/Catalog/CatalogSnapshotProvider.cs:50-240`):**
-   - Add `CatalogSnapshot.WithDelta(IReadOnlyList<TableMetadata> upserted, IReadOnlyCollection<TableIdentifier> removedOrChangedIds, long version)` that clones the immutable maps, removes all `removedOrChangedIds`, inserts active `upserted` tables, and returns a new immutable `CatalogSnapshot` (`SEC-OI-675-3`, `SEC-OI-675-5`).
-   - In `CatalogSnapshotProvider` reload path: when `_currentSnapshot is not null && _lastLoadedVersion > 0 && !_dirtyFlag.IsDirty`, call `GetTablesChangedSinceAsync(_lastLoadedVersion, ct)`. If `changed.Count == 0`, update `_lastLoadedVersion = currentVersion` and return. If `changed.Count <= Math.Max(1, _currentSnapshot.TableCount / 5)` (`<= 20%`), load only those tables, apply `WithDelta`, and swap atomically; otherwise fall back to full `GetAllTablesAsync` (`SEC-OI-675-4`).
+3. **Incremental `CatalogSnapshot.WithDelta` (`src/Autheris.Application/Catalog/CatalogSnapshotProvider.cs` & `src/Autheris.Application/Catalog/CatalogSnapshot.cs`):**
+   - Add `CatalogSnapshot.WithDelta(IReadOnlyList<TableMetadata> upserted, IReadOnlyCollection<TableIdentifier> removedOrChangedIds, long version)` on `src/Autheris.Application/Catalog/CatalogSnapshot.cs` (`153` lines) that clones the immutable maps, removes all `removedOrChangedIds`, inserts active `upserted` tables, and returns a new immutable `CatalogSnapshot` (`SEC-OI-675-3`, `SEC-OI-675-5`).
+   - In `src/Autheris.Application/Catalog/CatalogSnapshotProvider.cs` (`144` lines) reload path: when `_currentSnapshot is not null && _lastLoadedVersion > 0 && !_dirtyFlag.IsDirty`, call `GetTablesChangedSinceAsync(_lastLoadedVersion, ct)`. If `changed.Count == 0`, update `_lastLoadedVersion = currentVersion` and return. If `changed.Count <= Math.Max(1, _currentSnapshot.TableCount / 5)` (`<= 20%`), load only those tables, apply `WithDelta`, and swap atomically; otherwise fall back to full `GetAllTablesAsync` (`SEC-OI-675-4`).
 
 ### Required Unit & Architecture Tests
 - `tests/Autheris.Tests.Unit/Persistence/Migrations/PolicyEpochsChangeVersionMigration0015Tests.cs`:
@@ -109,7 +109,7 @@ dotnet build tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj 
 - **`SEC-OI-671-6` (Transactional Revocation, Audit & Epoch Bump):** Execute upserts and prune revocations in one transaction, record `RevokeReason = "PRUNED_BY_MANIFEST"` (with actor SID and manifest SHA-256 hash) in the audit trail for every pruned consent, and bump `CONSENTS` grant epoch + per-table epochs upon commit.
 
 ### Exact Changes to Make
-1. **Models & Service (`src/Autheris.Application/Catalog/Services/DeclarativeConsentApplyService.cs:20-310`):**
+1. **Models & Service (`src/Autheris.Domain/Model/DeclarativeConsentModels.cs`, `src/Autheris.Application/Governance/Interfaces/IDeclarativeConsentApplyService.cs`, `src/Autheris.Application/Governance/Services/DeclarativeConsentApplyService.cs:20-310`):**
    - Add `public enum DeclarativePruneMode { False = 0, True = 1, Force = 2 }`.
    - Extend `DeclarativeConsentApplyRequest` (or `ApplyAsync` parameters) with `DeclarativePruneMode PruneMode = DeclarativePruneMode.False` and `bool DryRun = false`.
    - Extend `DeclarativeConsentApplyResult` with `int PrunedCount` and `IReadOnlyList<DeclarativePrunedConsentDto> Pruned` (`ConsentId`, `Grantee`, `Domain`, `Schema`, `Table`).
@@ -119,7 +119,7 @@ dotnet build tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj 
      - Identify candidates whose `(Grantee, TableIdentifier)` is not in the manifest's normalized entries.
      - Enforce `SEC-OI-671-3` (authority check per candidate table), `SEC-OI-671-4` (`<= 10_000` cap and `> 50%` threshold requiring `DeclarativePruneMode.Force`).
      - If `!DryRun`, revoke all candidate consents inside the transaction with reason `"PRUNED_BY_MANIFEST"`, write audit records with manifest SHA-256, and bump epochs.
-2. **Endpoint Wiring (`src/Autheris.Api/Endpoints/GovernanceEndpoints.Catalog.cs:406-445`):**
+2. **Endpoint Wiring (`src/Autheris.Api/Endpoints/GovernanceEndpoints.Catalog.cs:40-154`):**
    - Bind query parameters `string? prune = "false"` (`"false"` | `"true"` | `"force"`, rejecting unknown values with `400 BadRequest`) and `bool dryRun = false` on `POST /api/v1/governance/consents/apply`.
 
 ### Required Unit Tests
@@ -194,29 +194,30 @@ dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj
 - **Plan & Security References:**
   - `docs/plans/simplification/WP-SIMPL-45-governed-write-path.md` (Section 5.4, Section 6a `SEC-SIMPL-128..133`, Section 7 PR 5)
 
-### Mandatory Security Conditions (`SEC-SIMPL-128..133`)
+### Mandatory Security Conditions (`SEC-SIMPL-128..131`)
 - **`SEC-SIMPL-128` (Mandatory `Idempotency-Key` on WebSQL DML):** When a WebSQL request executes a DML statement (`INSERT`, `UPDATE`, `DELETE`), an `Idempotency-Key` header (`1..128` ASCII printable characters) MUST be present; missing or malformed `Idempotency-Key` on WebSQL DML is rejected with `400 BadRequest` (`IDEMPOTENCY_KEY_REQUIRED`) before compilation/execution. Replaying the same `(tenant, callerSid, surface, Idempotency-Key)` with a different statement fingerprint returns `409 Conflict` (`IDEMPOTENCY_KEY_PAYLOAD_MISMATCH`).
 - **`SEC-SIMPL-129` (Two-Phase Intent + Pre-Commit Outcome Audit):**
   - Before opening the DB transaction, write and flush `WEBSQL_DML_INTENT` (`correlationId`, `tenant`, `callerSid`, `targetTable`, `operation`, `statementHash`, `consentIds`). If the intent audit write fails, abort before opening the target DB connection.
-  - Extend `ICheckedDmlExecutor.ExecuteInTransactionAsync` (`src/Autheris.Infrastructure/DataSources/CheckedDmlExecutor.cs:36-90`) with an optional `Func<int, CancellationToken, Task>? beforeCommit = null` callback invoked after row-count verification passes and **before** `await transaction.CommitAsync(ct)`.
+  - Extend `ICheckedDmlExecutor.ExecuteInTransactionAsync` (`src/TrinoSqlEngine/Ast/Emit/CheckedDmlExecutor.cs:36-90`) with an optional `Func<int, CancellationToken, Task>? beforeCommit = null` callback invoked after row-count verification passes and **before** `await transaction.CommitAsync(ct)`.
   - Invoke `WEBSQL_DML_EXECUTED` audit inside `beforeCommit`: if the outcome audit write throws, `CheckedDmlExecutor` rolls back the target DB transaction and rethrows (so a committed write never lacks an outcome audit record).
 - **`SEC-SIMPL-130` (Per-Caller & Per-Tenant Write Budgets):** Implement `IWriteBudgetStore` (`InMemoryWriteBudgetStore` + `DistributedCacheWriteBudgetStore`) enforcing `RestApiOptions.WriteStatementsPerMinute` (default `60`, max `600`) and `RestApiOptions.WriteRowsPerHour` (default `10_000`, max `1_000_000`) per `(tenantId, callerSid)` before and during `beforeCommit`. If `affectedRows` would push the caller over `WriteRowsPerHour`, throw inside `beforeCommit` so the transaction rolls back.
-- **`SEC-SIMPL-131` (Dedicated `WriteConnection` Separation):** Add `string? WriteConnectionString` to `DataSourceConnectionConfig`. Read queries (`SELECT`) ALWAYS use `ConnectionString` (read-only DB login). Governed DML (`INSERT`/`UPDATE`/`DELETE`) uses `WriteConnectionString` when configured; if `AllowWrites == true` on the data source and `WriteConnectionString` is null/empty, fail closed (`DATA_SOURCE_WRITE_CONNECTION_NOT_CONFIGURED`).
-- **`SEC-SIMPL-132` (Admin Required-Write-Privileges Endpoint):** Add `GET /api/v1/admin/datasources/{name}/required-write-privileges` (restricted to `GovernanceAdmin`), returning the exact SQL `GRANT SELECT, INSERT (cols), UPDATE (cols), DELETE ON schema.table` statements derived from active write-enabled policies/consents on that data source, without exposing connection strings or credentials.
+- **`SEC-SIMPL-131` (Dedicated `WriteConnection` Separation & Admin Required-Write-Privileges Report):**
+  - Add `string? WriteConnectionString` to `DataSourceConnectionConfig`. Read queries (`SELECT`) ALWAYS use `ConnectionString` (read-only DB login). Governed DML (`INSERT`/`UPDATE`/`DELETE`) uses `WriteConnectionString` when configured; if `AllowWrites == true` on the data source and `WriteConnectionString` is null/empty, fail closed (`DATA_SOURCE_WRITE_CONNECTION_NOT_CONFIGURED`).
+  - Add `GET /api/v1/admin/datasources/{name}/required-write-privileges` (restricted to `GovernanceAdmin`), returning the exact SQL `GRANT SELECT, INSERT (cols), UPDATE (cols), DELETE ON schema.table` statements derived from active write-enabled policies/consents on that data source, without exposing connection strings or credentials.
 
 ### Exact Changes to Make
-1. **`ICheckedDmlExecutor` & `CheckedDmlExecutor` (`src/Autheris.Application/Common/Interfaces/ICheckedDmlExecutor.cs`, `src/Autheris.Infrastructure/DataSources/CheckedDmlExecutor.cs:36-160`):**
+1. **`ICheckedDmlExecutor` & `CheckedDmlExecutor` (`src/TrinoSqlEngine/Ast/Emit/CheckedDmlExecutor.cs:36-160`):**
    - Add `Func<int, CancellationToken, Task>? beforeCommit = null` parameter to `ExecuteInTransactionAsync`. Call `await beforeCommit(affectedRows, ct)` after row-count cap validation and before `await transaction.CommitAsync(ct)`. On any exception from `beforeCommit`, roll back the transaction and rethrow.
-2. **Write Budget Store (`src/Autheris.Application/Services/IWriteBudgetStore.cs`, `InMemoryWriteBudgetStore.cs`, `src/Autheris.Api/Configuration/RestApiOptions.cs`):**
-   - Add `WriteStatementsPerMinute = 60` and `WriteRowsPerHour = 10_000` to `RestApiOptions` (validated in `RestApiOptionsValidator`).
+2. **Write Budget Store (`src/Autheris.Application/Policy/WriteGrants/IWriteBudgetStore.cs`, `InMemoryWriteBudgetStore.cs`, `src/Autheris.Domain/Options/Protocols/RestApiOptions.cs`):**
+   - Add `WriteStatementsPerMinute = 60` and `WriteRowsPerHour = 10_000` to `RestApiOptions` (`src/Autheris.Domain/Options/Protocols/RestApiOptions.cs`).
    - Implement `TryAcquireStatementSlotAsync(tenantId, callerSid, ct)` and `TryRecordAffectedRowsAsync(tenantId, callerSid, affectedRows, ct)`.
-3. **`GovernedSqlExecutor` Write Path (`src/Autheris.Infrastructure/WebSql/GovernedSqlExecutor.cs:440-530`):**
+3. **`GovernedSqlExecutor` Write Path (`src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs:440-530`):**
    - Enforce `Idempotency-Key` presence and payload-hash binding on WebSQL DML (`SEC-SIMPL-128`).
    - Check `IWriteBudgetStore.TryAcquireStatementSlotAsync` (`SEC-SIMPL-130`).
    - Resolve `WriteConnectionString` for DML (`SEC-SIMPL-131`).
    - Emit `WEBSQL_DML_INTENT` before execution and `WEBSQL_DML_EXECUTED` + `TryRecordAffectedRowsAsync` inside `beforeCommit` (`SEC-SIMPL-129`, `SEC-SIMPL-130`).
-4. **Admin Endpoint (`src/Autheris.Api/Endpoints/AdminDataSourceEndpoints.cs` or `GovernanceEndpoints.Catalog.cs`):**
-   - Map `GET /api/v1/admin/datasources/{name}/required-write-privileges` requiring `GovernanceAdmin` (`SEC-SIMPL-132`).
+4. **Admin Endpoint (`src/Autheris.Api/Endpoints/GovernanceEndpoints.Catalog.cs`):**
+   - Map `GET /api/v1/admin/datasources/{name}/required-write-privileges` requiring `GovernanceAdmin` (`SEC-SIMPL-131`).
 
 ### Required Unit Tests
 - `tests/Autheris.Tests.Unit/WebSql/GovernedSqlWriteExecutionSecurityTests.cs` (`[Trait("Category","Security")]`):
@@ -245,8 +246,9 @@ dotnet build tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj 
 ### Part 5A — `WP-OI-SCALE-5 (#676)`: Embedding Cache + Incremental BM25/Vector Delta Segments & Tombstones
 - **Worktree:** `/work/wt/oi-scale-676-incremental-search`
 - **Branch:** `feat/oi-scale-676-incremental-search`
+- **Target Files (`src/Autheris.Application/Catalog/Search/`):** `Bm25SearchIndex.cs` (`115` lines), `VectorSearchIndex.cs` (`57` lines), `CatalogSearchEngine.cs` (`510` lines), `CatalogSearchWarmupService.cs` (`324` lines), plus new `CatalogSearchEmbeddingCache.cs`.
 - **Plan & Security References:**
-  - `docs/plans/2026-11-13-plan-issues-catalog-scale.md` (`WP-OI-SCALE-5` / `#676`, lines 117–156)
+  - `docs/plans/2026-11-13-plan-issues-catalog-scale.md` (`WP-OI-SCALE-5` / `#676`, lines 95–107)
   - `docs/plans/2026-11-13-sec-issues-group-7.md` (`SEC-OI-676-1..5`, lines 83–98)
 
 #### Mandatory Security Conditions (`SEC-OI-676-1..5`)

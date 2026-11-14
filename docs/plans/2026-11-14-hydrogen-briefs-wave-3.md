@@ -20,11 +20,11 @@ Before scheduling Wave 3, all candidate items from `00-master-plan-overview.md`,
 | `WP-SIMPL-41 PR 1` (`OpenSchema` removal) | **ALREADY MERGED** on `main` (`OpenSchema` in `LegacySwitchGuard.Removed`) | **Do NOT schedule** (complete) |
 | `WP-SIMPL-46 PR 6a (#733)` & `PR 6b (#730)` | PR 6a **MERGED** (`75bcf65a`); PR 6b **COMPLETED** on `feat/simpl-46-pr6b-sqlendpoint-parity` (`9700bdd7`) | **Do NOT schedule** (complete) |
 | `WP-OI-CAT-1 (#666)`, `WP-OI-WEB-668 (#668)`, `#669`, `#624` | Open GitHub PRs `#748`, `#747`, `#744`, `#734` | **Do NOT schedule** (in flight) |
-| `WP-SIMPL-53 PR 4 (#573)`, `WP-OI-CAT-7 (#612)`, `WP-OI-CAT-3 (#670)`, `WP-OI-SQL-478-A/B (#478)` | Scheduled in **Wave 2** (`2026-11-14-hydrogen-briefs-wave-2.md`) | **In Wave 2** (note file overlap below) |
-| **`WP-SIMPL-41 PR 2`** (Discovery domain, step `0013_catalog_discovery`, flag API) | Implemented on unmerged branch `feat/simpl-41-pr2` (`4861b991`) with stale step number `0010` | **Wave 3 Brief 1 (Single DDL Slot `0013`)** |
+| `WP-SIMPL-53 PR 4 (#573)`, `WP-OI-CAT-7 (#612)`, `WP-OI-CAT-3 (#670)`, `WP-OI-SQL-478-A/B (#478)` | `#612` **MERGED** on `main` (`173703d6`); `#670` (`5bfa220a`), `#478-A` (`6ccbd417`), `#573` (`f45f7104`), `#478-B` in Wave 2 | **In Wave 2 / Merged** (note file overlap below) |
+| **`WP-SIMPL-41 PR 2`** (Discovery domain, step `0013_catalog_discovery`, flag API) | Reference diff on `origin/feat/simpl-41-pr2` (`bfc86f73`); do **NOT** use local `feat/simpl-41-pr2` (`4861b991`) | **Wave 3 Brief 1 (Single DDL Slot `0013`)** |
 | **`WP-OI-SQL-486 (#486)`** (Required filter column satisfaction across all paths) | Open on `main`; Phase 3 `APPROVED WITH CONDITIONS` (`SEC-OI-486-1..5`) | **Wave 3 Brief 2** |
-| **`WP-SIMPL-45 PR 4`** (Consent write workflow, `DmlWriterRoles` removal, rewriter write decision) | Open on `main`; unblocked by `WP-SIMPL-46 PR 1-5`; Phase 3 `APPROVED` (`SEC-SIMPL-120..127`) | **Wave 3 Brief 3** |
-| **`WP-OI-SCALE-4 PR 1 (#675)`** (`CatalogSnapshotProvider` event coalescing, no DDL) | Open on `main`; Phase 3 `APPROVED WITH CONDITIONS` (`SEC-OI-675-3..5`) | **Wave 3 Brief 4** |
+| **`WP-SIMPL-45 PR 4A & PR 4B`** (PR 4A: Steps 3 + 13 consent write workflow & `DmlWriterRoles` removal; PR 4B: Steps 5 + 8 `AccessDecisionPoint` + `GovernedSqlRewriter` write wiring) | Open on `main`; Phase 3 `APPROVED` (`SEC-SIMPL-120..127`) | **Wave 3 Brief 3A & Brief 3B** |
+| **`WP-OI-SCALE-4 PR 1 (#675)`** (`CatalogSnapshotProvider` event coalescing, no DDL) | Completed on `feat/oi-scale-675-pr1-coalescing` (`9b0e8de8`); Phase 3 `APPROVED WITH CONDITIONS` (`SEC-OI-675-3..5`) | **Wave 3 Brief 4** |
 
 ### File-Overlap & Sequencing Rules Across Wave 2, Wave 3, and Open PRs
 - **`ODataFilterParser.cs` overlap:** Wave 2 Brief 4B (`WP-OI-SQL-478-B`) and Wave 3 Brief 2 (`WP-OI-SQL-486`) both touch `src/Autheris.Application/OData/ODataFilterParser.cs`. Run Wave 2 Brief 4B first (or rebase whichever merges second).
@@ -56,23 +56,24 @@ Before scheduling Wave 3, all candidate items from `00-master-plan-overview.md`,
 - **Branch:** `feat/simpl-41-pr2-discovery-flags`
 - **Plan & Phase 3 References:**
   - `docs/plans/simplification/WP-SIMPL-41-authorized-data-discovery.md` (§5 steps 2–4, lines 94–125; §13 `SEC-DISC-01` .. `SEC-DISC-16`)
-  - Existing unmerged commit to reuse/rebase: `4861b991` (`feat/simpl-41-pr2`)
+  - **Reference Diff ONLY:** `origin/feat/simpl-41-pr2` (`bfc86f73`). **CRITICAL:** Do **NOT** branch from or cherry-pick local `feat/simpl-41-pr2` (`4861b991`) — commit `4861b991` contains literal unresolved git conflict markers (`<<<<<<< HEAD`, `=======`, `>>>>>>> bfc86f73`) committed into `src/` and `WP-SIMPL-41` comments in SQL!
 
-### 1.1 Context & Current State on `main` (`75bcf65a`)
-- Commit `4861b991` on branch `feat/simpl-41-pr2` already implemented `WP-SIMPL-41 PR 2` (`DiscoveryModels.cs`, `IDiscoveryArtifactStore.cs`, `DiscoveryArtifactStore.cs`, `DatasetCatalogStore.cs` overlay for `DiscoveryHidden`/`SamplesDisabled`/`HiddenColumns`, `DatasetCatalogAdminService.cs`, `PUT /api/v1/catalog/datasets/{id}/discovery`, and unit tests).
-- However, `4861b991` was authored when `0009_write_grants` was the latest migration step, so it numbered its migration step `0010_catalog_discovery`. Since then, steps `0010_table_column_ordinal`, `0011_role_grantee_and_profile_assignment_retirement`, and `0012_scim_identity_correlation` have merged on `main`, plus `#672` (`CatalogWriteScope`) and `#717` (endpoint-count ratchet).
+### 1.1 Context & Current State on `main` (`173703d6`)
+- Commit `bfc86f73` on `origin/feat/simpl-41-pr2` implemented `WP-SIMPL-41 PR 2` (`DiscoveryModels.cs`, `IDiscoveryArtifactStore.cs`, `DiscoveryArtifactStore.cs`, `DatasetCatalogStore.cs` overlay for `DiscoveryHidden`/`SamplesDisabled`/`HiddenColumns`, `DatasetCatalogAdminService.cs`, `PUT /api/v1/catalog/datasets/{id}/discovery`, and unit tests) against an earlier `main` (`24b53481`).
+- Since `24b53481`, `main` has landed `WP-SIMPL-45 PR 3`, steps `0010_table_column_ordinal`, `0011_role_grantee_and_profile_assignment_retirement`, and `0012_scim_external_identity_and_group_links`, unified `GovernanceRepository`, `CatalogApiEndpoints.Definition.cs`, `#672` (`CatalogWriteScope`), and `#717` (endpoint-count ratchet).
 
 ### 1.2 Exact Implementation Steps & Binding Security Conditions
 
-1. **Cherry-Pick / Rebase `4861b991` onto `origin/main` and Renumber Migration Step to `0013_catalog_discovery`:**
-   - Create worktree `/work/wt/simpl-41-pr2-discovery-flags` from `origin/main` and cherry-pick `4861b991` (resolving conflicts in `checksums.{postgresql,sqlserver}.txt`, `StepSqlLintTests.cs`, and `CutoverArchitectureTests.cs`).
-   - Rename:
-     - `src/Autheris.Infrastructure/Persistence/Migrations/Steps/postgresql/0010_catalog_discovery.sql` -> `0013_catalog_discovery.sql`
-     - `src/Autheris.Infrastructure/Persistence/Migrations/Steps/postgresql/0010_catalog_discovery.shape.json` -> `0013_catalog_discovery.shape.json`
-     - `src/Autheris.Infrastructure/Persistence/Migrations/Steps/sqlserver/0010_catalog_discovery.sql` -> `0013_catalog_discovery.sql`
-     - `src/Autheris.Infrastructure/Persistence/Migrations/Steps/sqlserver/0010_catalog_discovery.shape.json` -> `0013_catalog_discovery.shape.json`
-   - Merge the schema shape additions from `0010_table_column_ordinal`, `0011_role_grantee_and_profile_assignment_retirement`, and `0012_scim_identity_correlation` into `0013_catalog_discovery.shape.json` (both `postgresql` and `sqlserver`, setting `"version": 13`) and update `tests/Autheris.Tests.Unit/Golden/GovernanceSteps/checksums.{postgresql,sqlserver}.txt`.
-   - Strip any `WP-` / `SEC-` / `OD-` tokens from comments in `src/**/*.cs` added by `4861b991` (`PlanIdCommentRatchetTests`).
+1. **Port `bfc86f73` Cleanly Onto `origin/main` and Number Migration Step `0013_catalog_discovery`:**
+   - Create worktree `/work/wt/simpl-41-pr2-discovery-flags` branching fresh from `origin/main`.
+   - Use `git show bfc86f73` strictly as a diff reference and port the changes cleanly onto current `main` (`src/Autheris.Api/Endpoints/CatalogApiEndpoints.Definition.cs`, unified `src/Autheris.Infrastructure/Persistence/GovernanceRepository*.cs`, and `src/Autheris.Application/Catalog/`).
+   - Create migration step `0013_catalog_discovery`:
+     - `src/Autheris.Infrastructure/Persistence/Migrations/Steps/postgresql/0013_catalog_discovery.sql`
+     - `src/Autheris.Infrastructure/Persistence/Migrations/Steps/postgresql/0013_catalog_discovery.shape.json`
+     - `src/Autheris.Infrastructure/Persistence/Migrations/Steps/sqlserver/0013_catalog_discovery.sql`
+     - `src/Autheris.Infrastructure/Persistence/Migrations/Steps/sqlserver/0013_catalog_discovery.shape.json`
+   - Build `0013_catalog_discovery.shape.json` directly from `0012_scim_external_identity_and_group_links.shape.json` (both `postgresql` and `sqlserver`, setting `"version": 13`), update `PostgreSqlBaselineSchema.cs` and `SqlServerBaselineSchema.cs`, and update `tests/Autheris.Tests.Architecture/Golden/GovernanceSteps/checksums.{postgresql,sqlserver}.txt`.
+   - Ensure **zero** `WP-` / `SEC-` / `OD-` tokens appear in any comment under `src/**/*.cs` or `src/**/*.sql` (`PlanIdCommentRatchetTests`, `StepSqlLintTests`).
 
 2. **Verify Binding Security Conditions (`SEC-DISC-01..16` & `#672` `SEC-OI-672-2`):**
    - `DiscoveryOwner(string DisplayName, string? Email)` MUST NEVER expose `AdSid` or `AdAccount`.
@@ -166,30 +167,32 @@ MSBUILDCOPYTASKPARALLELISM=1 NUGET_PACKAGES=/work/nuget dotnet build tests/Authe
 
 ---
 
-## Brief 3: `WP-SIMPL-45 PR 4` — Governed Write Access: Consent Write Workflow, Decision-Point Rewriter Wiring, and `DmlWriterRoles` Removal
+## Brief 3: `WP-SIMPL-45 PR 4A & PR 4B` — Governed Write Access: Consent Write Workflow (`PR 4A`) and Decision-Point Rewriter Wiring (`PR 4B`)
 
-- **Worktree:** `/work/wt/simpl-45-pr4-write-workflow`
-- **Branch:** `feat/simpl-45-pr4-write-workflow`
-- **Sequencing Note:** Start after `feat/simpl-46-pr6b-sqlendpoint-parity` (`9700bdd7`) merges into `main` (both touch `GovernedSqlRewriter.cs`).
 - **Plan & Phase 3 References:**
-  - `docs/plans/simplification/WP-SIMPL-45-governed-write-access.md` (§5 steps 3, 5, 13; §6 tests; §9 PR 4; §12 `SEC-SIMPL-120` .. `SEC-SIMPL-127`)
+  - `docs/plans/simplification/WP-SIMPL-45-governed-write-access.md` (§5 steps 3, 5, 8, 13; §6 tests; §9 PR 4; §12 `SEC-SIMPL-120` .. `SEC-SIMPL-127`)
+  - `docs/plans/simplification/WP-SIMPL-45-pr3-ci-repair-addendum.md`
 
-### 3.1 Context & Current State on `main` (`75bcf65a`)
-- `WP-SIMPL-45 PR 1-3` (`#651`, `#652`, `#653`) and `WP-SIMPL-46 PR 1-5` are merged on `main`:
-  - `WriteRule`, `WriteOperation`, `WriteRowScope` (`src/Autheris.Domain/Model/WriteGrantModels.cs`), migration `0009_write_grants`, `IWriteGrantEvaluator` / `WriteGrantEvaluator` (`src/Autheris.Application/Policy/WriteGrants/WriteGrantEvaluator.cs`), and `DmlWritePermit` in `TrinoSqlEngine` are all in place, and `AccessDecisionPoint` already calls `IWriteGrantEvaluator` for `AccessOperation.Insert|Update|Delete`!
-- What remains for `WP-SIMPL-45 PR 4` (~300 net `src/` lines):
-  1. **Step 3 (Consent Write Workflow):**
-     - `ConsentRequestSubmission` (`src/Autheris.Application/ConsentRequests/IConsentRequestService.cs:21`) gains `IReadOnlyList<WriteRule>? RequestedWriteRules = null`.
-     - `ConsentRequestService.SubmitAsync` (`src/Autheris.Application/ConsentRequests/ConsentRequestService.cs`) validates requested write rules against the catalog: rejects unknown columns, write-protected columns (`column.WriteProtected` or primary-key columns on `Update`), policy-dependency tables (`IRowPolicyDependencyIndex`), and `WriteOperation.Delete` while `WebSql:Dml:AllowDeleteGrants == false`. A write request needs no read request (`OD-33`).
-     - Approval copies the approved write rules (the approver may narrow columns/operations/maxRows, never widen beyond `RequestedWriteRules`) onto the created `Consent` record (`Consent.WriteRules`), bounded by `valid_from`/`valid_until`, and emits `WRITE_GRANT_CHANGED` required audit events on grant/approval/revocation.
-  2. **Step 5 (Rewriter Decision-Point Wiring for DML):**
-     - In `src/Autheris.Application/Sql/Services/GovernedSqlRewriter.cs`:
-       - Replace the legacy `CanWriteTableAsync` block (`lines 581-585`) with `IAccessDecisionPoint.DecideAsync` for `AccessOperation.Insert | Update | Delete` (passing the written column set: `INSERT` target columns, `UPDATE` assigned columns, `DELETE` empty set) and build `DmlWritePermit(operation, writableColumns, writeProtectedColumns)` on `GovernancePolicy.Write`!
-       - Update `ArchitectureAndCleanCodeTests.DmlWritePermit_IsConstructedOnlyInTheEngine_UntilTheDecisionPointIsWired` allowlist to permit the single `GovernedSqlRewriter` / `GovernancePolicyFactory` mapping site (`WP-SIMPL-45-pr3-ci-repair-addendum.md` R-6).
-       - Enforce `OwnRows` vs `AllRows` row scope (`SEC-SIMPL-122`): a write requires no read grant (`OD-33`); under `OwnRows`, bound the statement by the caller's RLS predicate from the write decision; under `AllRows`, keep tenant and mandatory/virtual filters only.
-  3. **Step 13 (`DmlWriterRoles` Removal):**
-     - Delete `WebSqlOptions.DmlWriterRoles` (`src/Autheris.Domain/Options/Protocols/RestApiOptions.cs:95`), `InertOptionWarnings.cs:29-35`, and the writer-role startup check in `GraphQlAndSwitchStartupChecks.cs:151-154`.
-     - Add `"WebSql:DmlWriterRoles"` to `LegacySwitchGuard.Removed` / `UnknownGatewayKeyGuard` so configuring `Gateway:WebSql:DmlWriterRoles` fails startup with the replacement message (`SEC-SIMPL-31`).
+### 3.1 Context & Verified Split into `PR 4A` and `PR 4B` on `main` (`173703d6`)
+- `WP-SIMPL-45 PR 1-3` (`#651`, `#652`, `#653`) and `WP-SIMPL-46 PR 1-6b` (`2b2876bd`) are merged on `main`, providing `WriteRule`, `WriteOperation`, `WriteRowScope` (`src/Autheris.Domain/Model/WriteGrantModels.cs`), migration `0009_write_grants`, `IWriteGrantEvaluator` / `WriteGrantEvaluator` (`src/Autheris.Application/Policy/WriteGrants/WriteGrantEvaluator.cs`), and `DmlWritePermit` in `TrinoSqlEngine`.
+- **Why `WP-SIMPL-45 PR 4` is split into two `<= 400` `src/` line PRs (`PR 4A` and `PR 4B`):**
+  - On `main` today, `AccessDecisionPoint.cs` still calls `_policy.CanWriteTableAsync` and `DmlWriteDecisionArchitectureTests` asserts that `GovernedSqlRewriter.cs` calls `CanWriteTableAsync(`.
+  - **Brief 3A (`WP-SIMPL-45 PR 4A` — Steps 3 + 13, `/work/wt/simpl-45-pr4a-write-workflow`, branch `feat/simpl-45-pr4a-write-workflow`):**
+    1. **Step 3 (Consent Write Workflow + `CONSENT_WRITE_RULES` Persistence/Hydration):**
+       - `ConsentRequestSubmission` (`src/Autheris.Application/ConsentRequests/IConsentRequestService.cs:21`) gains `IReadOnlyList<WriteRule>? RequestedWriteRules = null`.
+       - `ConsentRequestService.SubmitAsync` (`src/Autheris.Application/ConsentRequests/ConsentRequestService.cs`) validates requested write rules against the catalog: rejects unknown columns, write-protected columns (`column.WriteProtected` or primary-key columns on `Update`), policy-dependency tables (`IRowPolicyDependencyIndex`), and `WriteOperation.Delete` while `WebSql:Dml:AllowDeleteGrants == false`. A write request needs no read request (`OD-33`).
+       - Approval copies the approved write rules (the approver may narrow columns/operations/maxRows, never widen beyond `RequestedWriteRules`) onto the created `Consent` record (`Consent.WriteRules`), persists/hydrates `CONSENT_WRITE_RULES` and `CONSENT_REQUESTS.requested_write_rules_json` in `GovernanceRepository.Consent*.cs`, and emits `WRITE_GRANT_CHANGED` required audit events on grant/approval/revocation.
+    2. **Step 13 (`DmlWriterRoles` Removal):**
+       - Delete `WebSqlOptions.DmlWriterRoles` (`src/Autheris.Domain/Options/Protocols/RestApiOptions.cs:95`), `InertOptionWarnings.cs:29-35`, and the writer-role startup check in `GraphQlAndSwitchStartupChecks.cs:151-154`.
+       - Add `"WebSql:DmlWriterRoles"` to `LegacySwitchGuard.Removed` / `UnknownGatewayKeyGuard` so configuring `Gateway:WebSql:DmlWriterRoles` fails startup with the replacement message (`SEC-SIMPL-31`).
+  - **Brief 3B (`WP-SIMPL-45 PR 4B` — Steps 5 + 8, `/work/wt/simpl-45-pr4b-rewriter-wiring`, branch `feat/simpl-45-pr4b-rewriter-wiring`, runs after `PR 4A`):**
+    1. **Step 5 (`AccessDecisionPoint` `IWriteGrantEvaluator` Wiring & `GovernedSqlRewriter` `DmlWritePermit`):**
+       - Wire `IWriteGrantEvaluator` into `AccessDecisionPoint` (`src/Autheris.Application/Authorization/AccessDecisionPoint.cs`) for `AccessOperation.Insert | Update | Delete`.
+       - In `src/Autheris.Application/Sql/Services/GovernedSqlRewriter.cs`, replace `CanWriteTableAsync` (`lines 581-585`) with `IAccessDecisionPoint.DecideAsync` for `AccessOperation.Insert | Update | Delete` (passing the written column set) and build `DmlWritePermit(operation, writableColumns, writeProtectedColumns)` on `GovernancePolicy.Write`.
+       - Delete `TableAccessPolicy.CanWriteTableAsync` (both overloads) and `DmlWriteDecisionTestSeam`, and update `DmlWriteDecisionArchitectureTests` / `ArchitectureAndCleanCodeTests.DmlWritePermit_IsConstructedOnlyInTheEngine_UntilTheDecisionPointIsWired`.
+       - Enforce `OwnRows` vs `AllRows` row scope (`SEC-SIMPL-122`).
+    2. **Step 8 (`DmlTransports` Gate):**
+       - Enforce `DmlTransports.Allowed = { SqlTransports.WebSql }` in `GovernedSqlRewriter.cs` (`dml_transport_not_wired`, audited as `WEBSQL_DML_REJECTED`), and ensure OData/GraphQL/REST/Trino/MCP reject writes fail-closed (`SEC-SIMPL-125`).
 
 ### 3.2 Required Unit Tests (`[Trait("Category", "Security")]`)
 1. `tests/Autheris.Tests.Unit/ConsentRequests/WriteConsentWorkflowTests.cs`:
