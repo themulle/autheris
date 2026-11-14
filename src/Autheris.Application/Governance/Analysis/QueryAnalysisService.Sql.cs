@@ -16,6 +16,7 @@ using Autheris.Application.Sql.Federation.Pushdown;
 using Autheris.Application.Sql.Federation.Subtrees;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using TrinoSqlEngine;
@@ -351,10 +352,15 @@ public sealed partial class QueryAnalysisService
                     }
                 }
             }
-            // Issue #123: Subtree pushdown analysis
+            // Issue #123: Subtree pushdown analysis (parity with execution eligibility and subtree cap).
             if (parsedStatement != null && resolvedTables.Count >= 2)
             {
-                var partitionResult = Autheris.Application.Sql.Federation.Subtrees.SubtreeGraphPartitioner.PartitionSubtrees(parsedStatement, resolvedTables);
+                var maxTablesPerSubtree = (_gatewayOptions.WebSql?.CrossSource ?? new CrossSourceOptions()).MaxTablesPerSubtree;
+                var partitionResult = Autheris.Application.Sql.Federation.Subtrees.SubtreeGraphPartitioner.PartitionSubtrees(
+                    parsedStatement,
+                    resolvedTables,
+                    maxTablesPerSubtree,
+                    t => TryIsPushdownEligible(t, scopeContext.TableDecisions));
                 foreach (var st in partitionResult.Subtrees)
                 {
                     var gen = TrinoSqlEngine.Ast.Generators.SqlDialectGeneratorFactory.GetGenerator(st.Dialect);
@@ -381,6 +387,31 @@ public sealed partial class QueryAnalysisService
             ? (int)Math.Min((long)int.MaxValue, metadata.ExplicitLimitValue.Value)
             : 1000;
         return outcome;
+    }
+
+    internal static bool TryIsPushdownEligible(
+        ResolvedSourceTable table,
+        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions) =>
+        TryIsPushdownEligible(table, id => decisions.TryGetValue(id, out var d) ? d : null);
+
+    internal static bool TryIsPushdownEligible(
+        ResolvedSourceTable table,
+        Func<TableIdentifier, TableAccessDecision?> lookupDecision)
+    {
+        try
+        {
+            var decision = lookupDecision(table.Metadata.Identifier);
+            if (decision is null)
+            {
+                return false;
+            }
+
+            return SubtreeCompiler.IsPushdownEligible(table, decision);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool IsBalancedSqlSyntax(string sql)
