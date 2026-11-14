@@ -1,16 +1,11 @@
 namespace Autheris.Application.Catalog.Search;
 
 using System;
-using System.IO;
-using System.Text.RegularExpressions;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
-public sealed partial class CatalogSearchOptionsValidator : IValidateOptions<CatalogSearchOptions>
+public sealed class CatalogSearchOptionsValidator : IValidateOptions<CatalogSearchOptions>
 {
-    [GeneratedRegex("^[a-fA-F0-9]{64}$")]
-    private static partial Regex Sha256Regex();
-
     public ValidateOptionsResult Validate(string? name, CatalogSearchOptions options)
     {
         if (options == null)
@@ -30,35 +25,7 @@ public sealed partial class CatalogSearchOptionsValidator : IValidateOptions<Cat
 
         if (options.EmbeddingProvider == CatalogEmbeddingProvider.LocalOnnx)
         {
-            if (string.IsNullOrWhiteSpace(options.ModelPath))
-            {
-                return ValidateOptionsResult.Fail("ModelPath must be configured when EmbeddingProvider is LocalOnnx.");
-            }
-
-            if (string.IsNullOrWhiteSpace(options.TokenizerPath))
-            {
-                return ValidateOptionsResult.Fail("TokenizerPath must be configured when EmbeddingProvider is LocalOnnx.");
-            }
-
-            if (options.ModelPath.Contains("..", StringComparison.Ordinal) || options.TokenizerPath.Contains("..", StringComparison.Ordinal))
-            {
-                return ValidateOptionsResult.Fail("Path traversal detected in ModelPath or TokenizerPath.");
-            }
-
-            if (!File.Exists(options.ModelPath))
-            {
-                return ValidateOptionsResult.Fail($"ModelPath file not found: {options.ModelPath}");
-            }
-
-            if (!File.Exists(options.TokenizerPath))
-            {
-                return ValidateOptionsResult.Fail($"TokenizerPath file not found: {options.TokenizerPath}");
-            }
-
-            if (string.IsNullOrWhiteSpace(options.ModelSha256) || !Sha256Regex().IsMatch(options.ModelSha256))
-            {
-                return ValidateOptionsResult.Fail("ModelSha256 must be a valid 64-character hex string when EmbeddingProvider is LocalOnnx.");
-            }
+            return ValidateOptionsResult.Fail("LocalOnnx embedding provider is not available in this build.");
         }
         else if (options.EmbeddingProvider == CatalogEmbeddingProvider.Ollama)
         {

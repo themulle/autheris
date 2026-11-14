@@ -46,4 +46,24 @@ public sealed class CatalogSearchOptionsValidatorTests
 
         result.Succeeded.ShouldBeTrue();
     }
+
+    [Fact]
+    public void LocalOnnx_FailsStartup_WithExplicitMessage()
+    {
+        var options = new CatalogSearchOptions
+        {
+            Enabled = true,
+            EmbeddingProvider = CatalogEmbeddingProvider.LocalOnnx,
+            ModelPath = "/models/model.onnx",
+            TokenizerPath = "/models/tokenizer.json",
+            ModelSha256 = new string('a', 64),
+            RefreshSeconds = 15
+        };
+
+        var result = _validator.Validate(null, options);
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldNotBeNull();
+        result.FailureMessage!.ShouldContain("LocalOnnx embedding provider is not available in this build.");
+    }
 }

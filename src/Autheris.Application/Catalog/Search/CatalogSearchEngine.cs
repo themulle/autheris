@@ -240,7 +240,10 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
 
             for (int i = 0; i < bm25Docs.Count; i++)
             {
-                vectorDocs.Add((bm25Docs[i].Item1, vectors[i]));
+                if (!vectors[i].IsEmpty)
+                {
+                    vectorDocs.Add((bm25Docs[i].Item1, vectors[i]));
+                }
             }
         }
 
@@ -303,6 +306,16 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         _options.Value.EmbeddingProvider != CatalogEmbeddingProvider.None &&
         (_embeddingGenerator is not ICatalogEmbeddingGenerator ceg || ceg.IsAvailable);
 
+    public string ResolveEffectiveMode(CatalogSearchMode requestedMode) =>
+        (requestedMode, IsVectorSearchAvailable()) switch
+        {
+            (CatalogSearchMode.KeywordBm25, _) => "keyword",
+            (_, false) => "keyword",
+            (CatalogSearchMode.SemanticVector, true) => "semantic",
+            (CatalogSearchMode.Hybrid, true) => "hybrid",
+            _ => "keyword"
+        };
+
     private IReadOnlyList<CatalogSearchHit> SearchCore(
         CatalogSearchQuery query,
         Func<TableIdentifier, bool> isVisiblePredicate,
@@ -326,20 +339,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         bool isAllowed(TableIdentifier id) =>
             isDomainMatch(id) && isVisiblePredicate(id);
 
-        bool vectorAvailable = _embeddingGenerator is not ICatalogEmbeddingGenerator ceg || ceg.IsAvailable;
-        if (_options.Value.EmbeddingProvider == CatalogEmbeddingProvider.None)
-        {
-            vectorAvailable = false;
-        }
-
-        string effectiveMode = (query.Mode, vectorAvailable) switch
-        {
-            (CatalogSearchMode.KeywordBm25, _) => "keyword",
-            (_, false) => "keyword",
-            (CatalogSearchMode.SemanticVector, true) => "semantic",
-            (CatalogSearchMode.Hybrid, true) => "hybrid",
-            _ => "keyword"
-        };
+        string effectiveMode = ResolveEffectiveMode(query.Mode);
 
         int rrfK = _options.Value.RrfConstantK;
         int topK = Math.Max(query.Limit * 3, 50);

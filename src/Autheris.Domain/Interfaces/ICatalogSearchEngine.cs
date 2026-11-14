@@ -89,6 +89,9 @@ public interface ICatalogSearchEngine
             null,
             LastIndexedAt.HasValue && utcNow.HasValue ? utcNow.Value - LastIndexedAt.Value : null);
 
+    /// <summary>Returns the effective search mode string ("keyword", "semantic", or "hybrid") for the requested mode.</summary>
+    string ResolveEffectiveMode(CatalogSearchMode requestedMode) => "keyword";
+
     /// <summary>Erzeugt atomar einen neuen unveränderlichen Such-Snapshot im Speicher.</summary>
     Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default);
 

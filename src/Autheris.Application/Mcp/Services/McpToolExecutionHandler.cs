@@ -20,7 +20,10 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Autheris.Application.Catalog.Services;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -53,6 +56,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
     private readonly IGraphQlCatalogMap? _graphQlMap;
+    private readonly ICatalogSearchEngine? _searchEngine;
+    private readonly ILogger<McpToolExecutionHandler> _logger;
 
     public McpToolExecutionHandler(
         IGovernedSqlExecutionService sqlExecutionService,
@@ -66,7 +71,9 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         IOptions<GatewayOptions>? gatewayOptions = null,
         Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
-        IGraphQlCatalogMap? graphQlMap = null)
+        IGraphQlCatalogMap? graphQlMap = null,
+        ICatalogSearchEngine? searchEngine = null,
+        ILogger<McpToolExecutionHandler>? logger = null)
     {
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
@@ -80,6 +87,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         _procedureCatalog = procedureCatalog;
         _procedureExecutionService = procedureExecutionService;
         _graphQlMap = graphQlMap;
+        _searchEngine = searchEngine;
+        _logger = logger ?? NullLogger<McpToolExecutionHandler>.Instance;
     }
 
     public bool CanHandle(string toolName) =>
@@ -223,10 +232,23 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, InvalidSearchQueryMessage);
             }
 
+            var requestedMode = string.IsNullOrWhiteSpace(modeStr) ? "hybrid" : modeStr.Trim().ToLowerInvariant();
+            var effectiveMode = results
+                .Select(h => h.EffectiveMode)
+                .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))
+                ?? _searchEngine?.ResolveEffectiveMode(mode)
+                ?? "keyword";
+            _logger.LogDebug(
+                "Catalog search executed: requestedMode={RequestedMode}, effectiveMode={EffectiveMode}, hitCount={HitCount}.",
+                requestedMode,
+                effectiveMode,
+                results.Count);
+
             return JsonSerializer.Serialize(new
             {
                 total_hits = results.Count,
                 query,
+                mode = effectiveMode,
                 datasets = results.Select(h => new
                 {
                     table = McpDatasetCatalog.DatasetIdOf(h),
