@@ -44,6 +44,9 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
     /// <summary>Maximum accumulated delta/tombstone entries before compacting segments into a clean base snapshot.</summary>
     public const int MaxDeltaEntriesBeforeRebuild = 5_000;
 
+    /// <summary>Maximum accumulated base-segment tombstones before compacting into a clean base snapshot.</summary>
+    public const int MaxTombstonesBeforeRebuild = 5_000;
+
     // Bounded LRU: arbitrary distinct queries must not grow the process memory without limit.
     private readonly BoundedCache<string, ReadOnlyMemory<float>> _embeddingCache = new(QueryEmbeddingCacheCapacity, comparer: StringComparer.Ordinal);
 
@@ -300,7 +303,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
 
     private static bool ShouldCompact(CatalogSearchSnapshot snapshot)
     {
-        if (snapshot.DeltaOperationCount > MaxDeltaEntriesBeforeRebuild)
+        if (snapshot.TombstoneCount >= MaxTombstonesBeforeRebuild ||
+            snapshot.DeltaOperationCount > MaxDeltaEntriesBeforeRebuild)
         {
             return true;
         }

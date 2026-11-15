@@ -418,6 +418,121 @@ public sealed class CatalogSearchIncrementalIndexSecurityTests
         snapshot.BaseDocumentCount.ShouldBe(10);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task TombstonedDocument_RemovedColumnText_NeverMatchesInBm25OrVector()
+    {
+        var embedder = new TrackingEmbeddingGenerator(vectorSelector: text =>
+            text.Contains("obsolete_secret_column", StringComparison.OrdinalIgnoreCase) ? BaseVec : AltVec);
+        var engine = CreateEngine(embedder);
+
+        var original = CreateTable("sales", "orders", "Customer orders", columns: ["id", "obsolete_secret_column"], visibility: DatasetVisibility.Full);
+        var neighbors = Enumerable.Range(0, 24)
+            .Select(i => CreateTable("hr", $"roles_{i}", "Access roles", columns: ["id", "role_name"], visibility: DatasetVisibility.Full))
+            .ToArray();
+        await engine.RebuildIndexAsync([original, .. neighbors]);
+
+        var updated = CreateTable("sales", "orders", "Customer orders", columns: ["id", "order_total"], visibility: DatasetVisibility.Full);
+        await engine.ApplyDeltaAsync([updated], []);
+
+        engine.Search(new CatalogSearchQuery("obsolete_secret_column", Mode: CatalogSearchMode.KeywordBm25), _ => true).ShouldBeEmpty();
+        engine.Search(new CatalogSearchQuery("obsolete_secret_column", Mode: CatalogSearchMode.SemanticVector), _ => true).ShouldBeEmpty();
+        var snap = engine.CurrentSnapshotForTesting!;
+        snap.Bm25Index.TombstoneCount.ShouldBe(1);
+        snap.VectorIndex.TombstoneCount.ShouldBe(1);
+        snap.VectorIndex.Search(BaseVec, minScore: 0.9f, topK: 10).ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task TombstoneCountExceeding5000_Or_DeltaAbove10Percent_TriggersFullRebuild()
+    {
+        CatalogSearchEngine.MaxTombstonesBeforeRebuild.ShouldBe(5_000);
+        var engine = CreateEngine(new TrackingEmbeddingGenerator());
+
+        // Branch 1: > 10% delta (2 / 12 = 16.7%) triggers compaction/rebuild.
+        var smallCorpus = Enumerable.Range(0, 12)
+            .Select(i => CreateTable("dom", $"small_{i}", $"Small corpus table {i}", visibility: DatasetVisibility.Full))
+            .ToList();
+        await engine.RebuildIndexAsync(smallCorpus);
+        await engine.ApplyDeltaAsync([], [smallCorpus[0].Identifier, smallCorpus[1].Identifier]);
+
+        var snapAfterRatio = engine.CurrentSnapshotForTesting!;
+        snapAfterRatio.TombstoneCount.ShouldBe(0);
+        snapAfterRatio.BaseDocumentCount.ShouldBe(10);
+
+        // Branch 2: > 5,000 tombstones (< 10% of 51,000 base tables) independently triggers compaction/rebuild.
+        const int largeCount = 51_000;
+        var largeCorpus = Enumerable.Range(0, largeCount)
+            .Select(i => CreateTable("scale", $"t_{i}", "Scale table", visibility: DatasetVisibility.Full))
+            .ToList();
+        await engine.RebuildIndexAsync(largeCorpus);
+
+        var removals = largeCorpus.Take(5_001).Select(t => t.Identifier).ToArray();
+        await engine.ApplyDeltaAsync([], removals);
+
+        var snapAfterTombstoneCap = engine.CurrentSnapshotForTesting!;
+        snapAfterTombstoneCap.TombstoneCount.ShouldBe(0);
+        snapAfterTombstoneCap.DeltaOperationCount.ShouldBe(0);
+        snapAfterTombstoneCap.BaseDocumentCount.ShouldBe(largeCount - 5_001);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void EmbeddingCache_KeyIncludesProviderModelDimensionAndScrubbedTextHash()
+    {
+        var cache = new CatalogSearchEmbeddingCache();
+        var hashA = CatalogSearchEmbeddingCache.ComputeContentSha256Hex("orders api_key=sk-secret-alpha-111 summary");
+        var hashB = CatalogSearchEmbeddingCache.ComputeContentSha256Hex("orders api_key=sk-secret-beta-222 summary");
+        hashA.ShouldBe(hashB);
+
+        cache.Set("LocalOnnx", "bge-small", 4, hashA, BaseVec);
+
+        cache.TryGet("LocalOnnx", "bge-small", 4, hashA, out var hit).ShouldBeTrue();
+        hit.ToArray().ShouldBe(BaseVec);
+        cache.TryGet("Ollama", "bge-small", 4, hashA, out _).ShouldBeFalse();
+        cache.TryGet("LocalOnnx", "bge-base", 4, hashA, out _).ShouldBeFalse();
+        cache.TryGet("LocalOnnx", "bge-small", 8, hashA, out _).ShouldBeFalse();
+        cache.TryGet("LocalOnnx", "bge-small", 4, hashA + "0", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ApplyDelta_PublishesNewImmutableSnapshot_ConcurrentReadersUnblocked()
+    {
+        var engine = CreateEngine(new TrackingEmbeddingGenerator());
+        var seed = Enumerable.Range(0, 30)
+            .Select(i => CreateTable("sales", $"tbl_{i}", $"Orders table item {i}", visibility: DatasetVisibility.Full))
+            .ToList();
+        await engine.RebuildIndexAsync(seed);
+
+        var beforeSnapshot = engine.CurrentSnapshotForTesting!;
+        using var cts = new CancellationTokenSource();
+
+        var readerTask = Task.Run(() =>
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                var hits = engine.Search(new CatalogSearchQuery("Orders table", Mode: CatalogSearchMode.Hybrid, Limit: 40), _ => true);
+                hits.Count.ShouldBeGreaterThan(0);
+            }
+        });
+
+        for (int step = 0; step < 5; step++)
+        {
+            var updated = CreateTable("sales", "tbl_0", $"Orders table revision {step}", visibility: DatasetVisibility.Full);
+            await engine.ApplyDeltaAsync([updated], []);
+        }
+
+        await cts.CancelAsync();
+        await readerTask;
+
+        var afterSnapshot = engine.CurrentSnapshotForTesting!;
+        ReferenceEquals(beforeSnapshot, afterSnapshot).ShouldBeFalse();
+        beforeSnapshot.MetadataMap[seed[0].Identifier].Table.Description.ShouldBe("Orders table item 0");
+        afterSnapshot.MetadataMap[seed[0].Identifier].Table.Description.ShouldBe("Orders table revision 4");
+    }
+
     private static CatalogSearchEngine CreateEngine(
         ILocalEmbeddingGenerator embedder,
         CatalogEmbeddingProvider provider = CatalogEmbeddingProvider.LocalOnnx,

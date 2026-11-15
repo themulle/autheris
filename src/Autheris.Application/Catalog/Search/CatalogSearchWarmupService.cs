@@ -1,12 +1,16 @@
 namespace Autheris.Application.Catalog.Search;
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -20,6 +24,8 @@ public sealed class CatalogSearchWarmupService : BackgroundService
 {
     public const string CatalogVisibilityChangedEventChannel = "catalog:visibility-changed";
     public static readonly TimeSpan MinimumRebuildInterval = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan FullRebuildBackstopInterval = TimeSpan.FromMinutes(10);
+    public const int MaxDeltaVersionSpan = 500;
 
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly ICatalogSearchEngine _searchEngine;
@@ -35,6 +41,8 @@ public sealed class CatalogSearchWarmupService : BackgroundService
     private IDisposable? _eventSubscription;
     private IDisposable? _visibilityEventSubscription;
     private CatalogVersion? _lastIndexedVersion;
+    private long _lastLoadedCombinedVersion;
+    private DateTimeOffset _lastFullRebuildUtc = DateTimeOffset.MinValue;
     private DateTimeOffset? _lastRebuildStartedUtc;
     private DateTimeOffset? _lastSuccessUtc;
     private DateTimeOffset? _lastAttemptUtc;
@@ -105,7 +113,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
 
         if (_options.Value.WarmupOnStartup)
         {
-            await RebuildSafeAsync(stoppingToken).ConfigureAwait(false);
+            await RebuildSafeAsync(stoppingToken, forceFullRebuild: true).ConfigureAwait(false);
         }
 
         while (!stoppingToken.IsCancellationRequested)
@@ -173,7 +181,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
                 }
             }
 
-            await RebuildSafeAsync(stoppingToken).ConfigureAwait(false);
+            await RebuildSafeAsync(stoppingToken, forceRebuild).ConfigureAwait(false);
         }
     }
 
@@ -223,7 +231,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
         }
     }
 
-    private async Task RebuildSafeAsync(CancellationToken ct)
+    private async Task RebuildSafeAsync(CancellationToken ct, bool forceFullRebuild = false)
     {
         await _rebuildLock.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -253,33 +261,33 @@ public sealed class CatalogSearchWarmupService : BackgroundService
                 }
             }
 
-            _logger.LogInformation("Starte Index-Neuaufbau für den Katalog-Suchindex...");
-            var tables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-            await _searchEngine.RebuildIndexAsync(tables, ct).ConfigureAwait(false);
+            var updatedViaDelta = false;
+            if (CanAttemptDelta(targetVersion, attemptUtc, forceFullRebuild))
+            {
+                updatedViaDelta = await TryApplyDeltaUpdateAsync(targetVersion!.Value, ct).ConfigureAwait(false);
+            }
+
+            if (!updatedViaDelta)
+            {
+                _logger.LogInformation("Starte Index-Neuaufbau für den Katalog-Suchindex...");
+                var tables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+                await _searchEngine.RebuildIndexAsync(tables, ct).ConfigureAwait(false);
+                _lastFullRebuildUtc = _timeProvider.GetUtcNow();
+                _logger.LogInformation("Katalog-Suchindex Neuaufbau erfolgreich beendet ({Count} Tabellen).", tables.Count);
+            }
 
             _lastIndexedVersion = targetVersion;
+            if (targetVersion.HasValue)
+            {
+                _lastLoadedCombinedVersion = targetVersion.Value.StructureVersion + targetVersion.Value.ContentVersion;
+            }
+
             var successUtc = _timeProvider.GetUtcNow();
             var versionTuple = targetVersion.HasValue
                 ? (targetVersion.Value.StructureVersion, targetVersion.Value.ContentVersion)
                 : ((long, long)?)null;
-            _logger.LogInformation("Katalog-Suchindex Neuaufbau erfolgreich beendet ({Count} Tabellen).", tables.Count);
 
-            if (_versionProvider != null && targetVersion.HasValue)
-            {
-                try
-                {
-                    var postVersion = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
-                    if (postVersion != targetVersion.Value)
-                    {
-                        Interlocked.Exchange(ref _pendingRebuild, 1);
-                        _changeSignal.Writer.TryWrite(true);
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogDebug(ex, "Fehler beim Nachprüfen der Katalog-Version nach dem Index-Neuaufbau.");
-                }
-            }
+            await CheckPostRebuildVersionAsync(targetVersion, ct).ConfigureAwait(false);
 
             RecordOutcome(successUtc, attemptUtc, lastErrorCode: null, versionTuple);
         }
@@ -304,6 +312,119 @@ public sealed class CatalogSearchWarmupService : BackgroundService
         finally
         {
             _rebuildLock.Release();
+        }
+    }
+
+    private bool CanAttemptDelta(CatalogVersion? targetVersion, DateTimeOffset attemptUtc, bool forceFullRebuild)
+    {
+        if (forceFullRebuild || !targetVersion.HasValue || !_lastIndexedVersion.HasValue || _lastLoadedCombinedVersion <= 0)
+        {
+            return false;
+        }
+
+        if (!_searchEngine.IsIndexReady || _searchEngine.IndexedTableCount <= 0)
+        {
+            return false;
+        }
+
+        var backstopDue = _lastFullRebuildUtc == DateTimeOffset.MinValue ||
+                          (attemptUtc - _lastFullRebuildUtc) >= FullRebuildBackstopInterval;
+        if (backstopDue)
+        {
+            return false;
+        }
+
+        var current = _lastIndexedVersion.Value;
+        var next = targetVersion.Value;
+        if (next.StructureVersion < current.StructureVersion || next.ContentVersion < current.ContentVersion)
+        {
+            return false;
+        }
+
+        var combined = next.StructureVersion + next.ContentVersion;
+        return combined > _lastLoadedCombinedVersion &&
+               (combined - _lastLoadedCombinedVersion) <= MaxDeltaVersionSpan;
+    }
+
+    private async Task<bool> TryApplyDeltaUpdateAsync(CatalogVersion targetVersion, CancellationToken ct)
+    {
+        try
+        {
+            var changed = await _metadataRepository.GetTablesChangedSinceAsync(_lastLoadedCombinedVersion, ct).ConfigureAwait(false);
+            if (changed is null)
+            {
+                return false;
+            }
+
+            if (changed.Count == 0 && _lastIndexedVersion is { } previous && targetVersion.StructureVersion > previous.StructureVersion)
+            {
+                return false;
+            }
+
+            var baseCount = _searchEngine.IndexedTableCount;
+            if (baseCount <= 0 || changed.Count * 10 >= baseCount)
+            {
+                _logger.LogInformation(
+                    "Catalog search delta contains {ChangedCount} of {BaseCount} indexed tables (>= 10%); falling back to full rebuild.",
+                    changed.Count, baseCount);
+                return false;
+            }
+
+            if (changed.Count > 0)
+            {
+                var updatedTables = await _metadataRepository.GetTablesAsync(changed, ct).ConfigureAwait(false);
+                if (updatedTables is null)
+                {
+                    return false;
+                }
+
+                var updatedIds = updatedTables.Select(static t => t.Identifier).ToHashSet();
+                var removedIds = changed.Where(id => !updatedIds.Contains(id)).ToArray();
+                await _searchEngine.ApplyDeltaAsync(updatedTables, removedIds, ct).ConfigureAwait(false);
+            }
+
+            _logger.LogInformation(
+                "Catalog search index updated incrementally for version {StructureVersion}.{ContentVersion} ({ChangedCount} changed tables).",
+                targetVersion.StructureVersion, targetVersion.ContentVersion, changed.Count);
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Incremental catalog search index update failed at version {StructureVersion}.{ContentVersion}; falling back to full rebuild.",
+                targetVersion.StructureVersion, targetVersion.ContentVersion);
+            return false;
+        }
+    }
+
+    private async Task CheckPostRebuildVersionAsync(CatalogVersion? targetVersion, CancellationToken ct)
+    {
+        if (_versionProvider == null || !targetVersion.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            var postVersion = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+            if (postVersion != targetVersion.Value)
+            {
+                Interlocked.Exchange(ref _pendingRebuild, 1);
+                _changeSignal.Writer.TryWrite(true);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Fehler beim Nachprüfen der Katalog-Version nach dem Index-Neuaufbau.");
         }
     }
 

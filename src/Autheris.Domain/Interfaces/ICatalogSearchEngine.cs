@@ -100,6 +100,13 @@ public interface ICatalogSearchEngine
     /// <summary>Erzeugt atomar einen neuen unveränderlichen Such-Snapshot im Speicher.</summary>
     Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default);
 
+    /// <summary>Applies an incremental delta of updated/inserted tables and removed or inactive identifiers.</summary>
+    Task ApplyDeltaAsync(
+        IReadOnlyList<TableMetadata> upsertedTables,
+        IReadOnlyCollection<TableIdentifier> removedOrInactiveIds,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} does not support incremental delta indexing.");
+
     /// <summary>Führt eine hochoptimierte, sperrenfreie Suche unter Berücksichtigung der Governance aus.</summary>
     IReadOnlyList<CatalogSearchHit> Search(
         CatalogSearchQuery query, 
