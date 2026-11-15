@@ -2056,7 +2056,7 @@
       "Group": "fn-string",
       "Sql": "SELECT strpos(a, 'x') AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CHARINDEX(@p0, [a]) AS [r] FROM [t]",
+      "Expected": "SELECT CHARINDEX((@p0) COLLATE Latin1_General_BIN2, ([a]) COLLATE Latin1_General_BIN2) AS [r] FROM [t]",
       "Parameters": [
         {
           "Marker": "@p0",

@@ -109,9 +109,9 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         });
     }
 
-    /// <summary>T-SQL SUBSTRING requires a length.</summary>
+    /// <summary>T-SQL SUBSTRING requires a length and diverges from Trino on <c>start &lt;= 0</c>.</summary>
     protected override void FormatSubstring(ref ValueStringBuilder builder, SubstringExpression substring, SqlEmitterContext context) =>
-        base.FormatSubstring(ref builder, substring.Length != null ? substring : substring with { Length = new LiteralExpression(2147483647L, LiteralType.Integer) }, context);
+        FormatTrinoSubstring(ref builder, substring, SubstringFunctionName, "LEN", requireLength: true, context);
 
     /// <summary>
     /// TRIM(x) and TRIM(chars FROM x) exist from SQL Server 2017; LTRIM/RTRIM with characters only from 2022, so leading or
@@ -342,12 +342,16 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
                 case "format" or "lpad" or "rpad" or "octet_length":
                     // No exact T-SQL equivalent: format differs between Trino printf and SQL Server .NET format strings; LPAD/RPAD truncate and repeat.
                     throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, $"{fn.Name.Parts[0].Value.ToLowerInvariant()} on SQL Server");
-                case "strpos" when fn.Arguments.Count == 2:
-                    base.GenerateFunctionCall(fn with
-                    {
-                        Name = new SqlQualifiedName("CHARINDEX"),
-                        Arguments = new[] { fn.Arguments[1], fn.Arguments[0] }
-                    }, ref builder, context);
+                case "strpos" when fn.Arguments.Count == 2 && !fn.Distinct:
+                    builder.Append("CHARINDEX((");
+                    GenerateExpression(fn.Arguments[1], ref builder, context);
+                    builder.Append(") ");
+                    AppendConstantFragment(ref builder, context, "COLLATE Latin1_General_BIN2");
+                    builder.Append(", (");
+                    GenerateExpression(fn.Arguments[0], ref builder, context);
+                    builder.Append(") ");
+                    AppendConstantFragment(ref builder, context, "COLLATE Latin1_General_BIN2");
+                    builder.Append(')');
                     return;
             }
         }

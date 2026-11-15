@@ -17,7 +17,7 @@ public class SqlServerFunctionMappingTests
 
     [Fact]
     public void Strpos_MapsToCharindex_WithSwappedArguments() =>
-        Assert.Contains("CHARINDEX(@p0, [a])", GenerateSqlServer("SELECT strpos(a, 'x') FROM t").Sql);
+        Assert.Contains("CHARINDEX((@p0) COLLATE Latin1_General_BIN2, ([a]) COLLATE Latin1_General_BIN2)", GenerateSqlServer("SELECT strpos(a, 'x') FROM t").Sql);
 
     [Fact]
     public void UnmappedFunctions_PassThroughUnchanged() => Assert.Contains("UPPER([a])", GenerateSqlServer("SELECT upper(a) FROM t").Sql);

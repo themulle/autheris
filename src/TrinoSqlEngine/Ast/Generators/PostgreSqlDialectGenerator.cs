@@ -28,21 +28,39 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
         _ => StandardTypeName(type)
     };
 
-    /// <summary>Trino <c>replace(s, search)</c> removes the search string; PostgreSQL <c>replace</c> needs the replacement (an empty bound string).</summary>
+    /// <summary>Trino <c>replace(s, search)</c> removes the search string; <c>substr</c>/<c>substring</c> match Trino <c>start &lt;= 0</c> rules.</summary>
     protected override void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
-        if (fn.Name.Parts.Count == 1 && !fn.Name.Parts[0].IsQuoted && fn.Window == null && fn.Filter == null && !fn.Distinct && fn.Arguments.Count == 2 &&
-            fn.Name.Parts[0].Value.Equals("replace", StringComparison.OrdinalIgnoreCase))
+        if (fn.Name.Parts.Count == 1 && !fn.Name.Parts[0].IsQuoted && fn.Window == null && fn.Filter == null && !fn.Distinct)
         {
-            base.GenerateFunctionCall(fn with
+            switch (fn.Name.Parts[0].Value.ToLowerInvariant())
             {
-                Arguments = new[] { fn.Arguments[0], fn.Arguments[1], new LiteralExpression(string.Empty, LiteralType.String) }
-            }, ref builder, context);
-            return;
+                case "substr" or "substring" when fn.Arguments.Count is 2 or 3:
+                    string functionName = fn.Name.Parts[0].Value.Equals("substr", StringComparison.OrdinalIgnoreCase)
+                        ? "SUBSTR"
+                        : SubstringFunctionName;
+                    FormatTrinoSubstring(
+                        ref builder,
+                        new SubstringExpression(fn.Arguments[0], fn.Arguments[1], fn.Arguments.Count == 3 ? fn.Arguments[2] : null),
+                        functionName,
+                        "CHAR_LENGTH",
+                        requireLength: false,
+                        context);
+                    return;
+                case "replace" when fn.Arguments.Count == 2:
+                    base.GenerateFunctionCall(fn with
+                    {
+                        Arguments = new[] { fn.Arguments[0], fn.Arguments[1], new LiteralExpression(string.Empty, LiteralType.String) }
+                    }, ref builder, context);
+                    return;
+            }
         }
 
         base.GenerateFunctionCall(fn, ref builder, context);
     }
+
+    protected override void FormatSubstring(ref ValueStringBuilder builder, SubstringExpression substring, SqlEmitterContext context) =>
+        FormatTrinoSubstring(ref builder, substring, SubstringFunctionName, "CHAR_LENGTH", requireLength: false, context);
 
     // The inline structural positions of this generator are registered with the emitter context.
     protected override bool BindLiterals => true;
