@@ -90,6 +90,7 @@ public sealed partial class TableAccessPolicy
     private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
     private readonly IAuthPluginHost? _authPluginHost;
     private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
+    private readonly Autheris.Application.Policy.RowScopes.RowScopeCompiler? _rowScopeCompiler;
 
     /// <param name="mandatoryFilters">
     /// Virtual filters; required on purpose: a decision point without it would silently skip them. Use
@@ -110,7 +111,8 @@ public sealed partial class TableAccessPolicy
         Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
         IAuthPluginHost? authPluginHost = null,
-        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null,
+        Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null)
     {
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _callerAttributes = callerAttributes;
@@ -118,6 +120,7 @@ public sealed partial class TableAccessPolicy
         _maskPolicyFactory = maskPolicyFactory;
         _authPluginHost = authPluginHost;
         _auditWriter = auditWriter;
+        _rowScopeCompiler = rowScopeCompiler;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
@@ -238,13 +241,26 @@ public sealed partial class TableAccessPolicy
             {
                 return decision;
             }
+
+            if (!query.Metadata.IsDelegatedSource && profiles.Any(p => p.RowScope.Count > 0))
+            {
+                decision = await ApplyAccessProfileRowScopesAsync(decision, query, profiles, _rowScopeCompiler, _callerAttributes, ct).ConfigureAwait(false);
+                if (!decision.IsAllowed)
+                {
+                    return decision;
+                }
+            }
         }
 
-        // Virtual filters: restrictive, AND with the consent decision (after the consent cache, which stays free of them;
+        // Virtual filters / hard row policies: restrictive, AND with the consent decision (after the consent cache, which stays free of them;
         // also with the consent bypass, decision 1). They never turn a denial into an allow.
         if (decision.IsAllowed)
         {
-            decision = await ApplyMandatoryVirtualFiltersAsync(decision, query, _mandatoryFilters, _rowPolicyFactory, _callerAttributes, ct).ConfigureAwait(false);
+            bool useCompilerForHard = _rowScopeCompiler is { CanResolveHardPolicies: true } &&
+                _mandatoryFilters is Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver or Autheris.Application.VirtualFilters.MandatoryRowFilterResolver;
+            decision = useCompilerForHard
+                ? await ApplyCompiledHardRowPoliciesAsync(decision, query, _rowScopeCompiler!, _callerAttributes, ct).ConfigureAwait(false)
+                : await ApplyMandatoryVirtualFiltersAsync(decision, query, _mandatoryFilters, _rowPolicyFactory, _callerAttributes, ct).ConfigureAwait(false);
         }
 
         if (!decision.IsAllowed)

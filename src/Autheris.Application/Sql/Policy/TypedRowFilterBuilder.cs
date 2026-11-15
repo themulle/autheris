@@ -32,15 +32,20 @@ public sealed partial class TypedRowFilterBuilder
     /// <exception cref="ArgumentException">No filters: the caller decides what "no restriction" means, this builder never guesses.</exception>
     public PolicyPredicate Build(
         IReadOnlyList<ConsentRowFilter> filters, TableIdentity table, TargetSqlDialect? dialect = null,
-        CallerAttributeSet? attributes = null, CallerAttributePadding? padding = null)
+        CallerAttributeSet? attributes = null, CallerAttributePadding? padding = null) =>
+        Build(filters, table, dialect, new PolicyParameterNamer(), attributes, padding);
+
+    internal PolicyPredicate Build(
+        IReadOnlyList<ConsentRowFilter> filters, TableIdentity table, TargetSqlDialect? dialect,
+        PolicyParameterNamer namer, CallerAttributeSet? attributes = null, CallerAttributePadding? padding = null)
     {
         ArgumentNullException.ThrowIfNull(filters);
+        ArgumentNullException.ThrowIfNull(namer);
         if (filters.Count == 0)
         {
             throw new ArgumentException("At least one row filter is required.", nameof(filters));
         }
 
-        var namer = new PolicyParameterNamer();
         var expression = ConsentExpression(filters, dialect, namer, isDeny: false, attributes, padding)
             ?? throw new InvalidOperationException($"The row filters of table '{table}' produced no condition.");
         return PolicyPredicate.Create(expression, namer.Values);

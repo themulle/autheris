@@ -47,6 +47,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     private readonly TableAccessPolicy? _policy;
     private readonly Autheris.Application.Policy.WriteGrants.IWriteGrantEvaluator? _writeGrantEvaluator;
     private readonly TimeProvider _timeProvider;
+    private readonly Autheris.Application.Policy.RowScopes.RowScopeCompiler? _rowScopeCompiler;
 
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
@@ -66,7 +67,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         ILogger<AccessDecisionPoint>? logger = null,
         Autheris.Application.Policy.WriteGrants.IWriteGrantEvaluator? writeGrantEvaluator = null,
         Autheris.Application.Policy.WriteGrants.IRowPolicyDependencyIndex? policyDependencyIndex = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _resolutionService = resolutionService;
@@ -84,6 +86,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         _auditWriter = auditWriter;
         _logger = logger ?? NullLogger<AccessDecisionPoint>.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _rowScopeCompiler = rowScopeCompiler;
         _writeGrantEvaluator = writeGrantEvaluator ?? (_consentRepository != null
             ? new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(_consentRepository, policyDependencyIndex, _timeProvider)
             : null);
@@ -105,7 +108,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 _typedPolicies?.CallerAttributes,
                 _restrictedScopes,
                 _authPluginHost,
-                _auditWriter);
+                _auditWriter,
+                _rowScopeCompiler);
         }
     }
 
@@ -181,16 +185,44 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         if (consentBypassed)
         {
             var allowed = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
-            var mandatory = await _mandatoryFilters.ResolveAsync(
-                new MandatoryFilterQuery(subject.UserSid, subject.GroupSids, roles, subject.TenantId, metadata),
-                ct).ConfigureAwait(false);
-            if (mandatory.IsDenied)
+            if (_rowScopeCompiler is { CanResolveHardPolicies: true } &&
+                _mandatoryFilters is NullMandatoryRowFilterResolver or MandatoryRowFilterResolver)
             {
-                return TableAccessDecision.Denied(table, mandatory.DenyReason ?? "Denied by virtual filters.");
+                var hardQuery = new TableAccessQuery(
+                    subject.UserSid,
+                    subject.TenantId,
+                    subject.GroupSids,
+                    roles,
+                    metadata,
+                    Claims: subject.Claims,
+                    RequestedColumns: request.Columns,
+                    ObjectKind: request.Transport == AccessTransport.Procedure ? FilterObjectKinds.ProcedureResult : FilterObjectKinds.Relation,
+                    AllUserSids: subject.Principal?.GetAllUserSids() ?? [subject.UserSid],
+                    Principal: subject.Principal);
+                allowed = await TableAccessPolicy.ApplyCompiledHardRowPoliciesAsync(
+                    allowed,
+                    hardQuery,
+                    _rowScopeCompiler,
+                    _typedPolicies?.CallerAttributes,
+                    ct).ConfigureAwait(false);
+                if (!allowed.IsAllowed)
+                {
+                    return allowed with { EvaluatedByPdp = true };
+                }
             }
-            if (mandatory.PredicateSql != null)
+            else
             {
-                allowed = allowed.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
+                var mandatory = await _mandatoryFilters.ResolveAsync(
+                    new MandatoryFilterQuery(subject.UserSid, subject.GroupSids, roles, subject.TenantId, metadata),
+                    ct).ConfigureAwait(false);
+                if (mandatory.IsDenied)
+                {
+                    return TableAccessDecision.Denied(table, mandatory.DenyReason ?? "Denied by virtual filters.");
+                }
+                if (mandatory.PredicateSql != null)
+                {
+                    allowed = allowed.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
+                }
             }
             if (_typedPolicies?.MaskPolicies != null)
             {

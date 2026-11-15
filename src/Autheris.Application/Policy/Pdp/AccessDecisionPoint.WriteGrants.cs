@@ -144,16 +144,6 @@ public sealed partial class AccessDecisionPoint
         }
 
         var grantIdSet = grantDecision.GrantIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (matchingConsents.MatchingAllows.Any(c =>
-                grantIdSet.Contains(c.Id.ToString("D")) &&
-                c.WriteRules.Any(w => w.Operation == writeOp && w.RowFilter is { Count: > 0 })))
-        {
-            return TableAccessDecision.Denied(table, "Write grant row-scope filters require row-scope compilation support.") with
-            {
-                Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "write_grant_row_scope_unsupported", "WriteGrant", null)],
-                EvaluatedByPdp = true
-            };
-        }
 
         var (readAccess, readUnconstrained) = ResolveReadColumnAccessForWrite(principal, subject, metadata, roles, matchingConsents);
         var columnAccess = AddFilterableColumnsForWriteOnlyCaller(readAccess, metadata, matchingConsents);
@@ -165,7 +155,7 @@ public sealed partial class AccessDecisionPoint
 
         if (grantDecision.RowScope == WriteRowScope.OwnRows)
         {
-            decision = await ApplyOwnRowsScopeAsync(decision, query, metadata, matchingConsents, ct).ConfigureAwait(false);
+            decision = await ApplyOwnRowsScopeAsync(decision, query, metadata, writeOp, grantIdSet, matchingConsents, ct).ConfigureAwait(false);
             if (!decision.IsAllowed)
             {
                 return decision with { EvaluatedByPdp = true };
@@ -180,13 +170,26 @@ public sealed partial class AccessDecisionPoint
             }
         }
 
-        decision = await TableAccessPolicy.ApplyMandatoryVirtualFiltersAsync(
-            decision,
-            query,
-            _mandatoryFilters,
-            _typedPolicies?.RowPolicies,
-            _typedPolicies?.CallerAttributes,
-            ct).ConfigureAwait(false);
+        if (_rowScopeCompiler is { CanResolveHardPolicies: true } &&
+            _mandatoryFilters is NullMandatoryRowFilterResolver or MandatoryRowFilterResolver)
+        {
+            decision = await TableAccessPolicy.ApplyCompiledHardRowPoliciesAsync(
+                decision,
+                query,
+                _rowScopeCompiler,
+                _typedPolicies?.CallerAttributes,
+                ct).ConfigureAwait(false);
+        }
+        else
+        {
+            decision = await TableAccessPolicy.ApplyMandatoryVirtualFiltersAsync(
+                decision,
+                query,
+                _mandatoryFilters,
+                _typedPolicies?.RowPolicies,
+                _typedPolicies?.CallerAttributes,
+                ct).ConfigureAwait(false);
+        }
 
         if (!decision.IsAllowed)
         {
@@ -321,6 +324,8 @@ public sealed partial class AccessDecisionPoint
         TableAccessDecision decision,
         TableAccessQuery query,
         TableMetadata metadata,
+        WriteOperation writeOp,
+        HashSet<string> grantIdSet,
         LoadedWriteConsents matchingConsents,
         CancellationToken ct)
     {
@@ -340,13 +345,93 @@ public sealed partial class AccessDecisionPoint
             return TableAccessDecision.Denied(metadata.Identifier, $"Access profile source unavailable (fail-closed): {ex.Message}");
         }
 
-        // Only active Allow grants that carry row filters OR are read grants contribute to the union RLS scope;
+        static IReadOnlyList<GrantRowScopeEntry> WriteEntriesFor(Consent consent, WriteOperation op, HashSet<string> ids) =>
+            ids.Contains(consent.Id.ToString("D"))
+                ? consent.WriteRules
+                    .Where(w => w.Operation == op && w.RowScope == WriteRowScope.OwnRows && w.RowFilter is { Count: > 0 })
+                    .SelectMany(static w => w.RowFilter!)
+                    .ToList()
+                : Array.Empty<GrantRowScopeEntry>();
+
+        // Only active Allow grants that carry row scopes/filters OR are read grants contribute to the union RLS scope;
         // unfiltered write-only grants do not widen a constrained read grant when OwnRows applies.
         var rlsAllows = matchingConsents.MatchingAllows
-            .Where(c => c.RowFilters.Count > 0 || c.WriteRules.Count == 0 || c.ColumnRules.Count > 0)
+            .Where(c => c.RowFilters.Count > 0 ||
+                        c.RowScope.Count > 0 ||
+                        c.WriteRules.Count == 0 ||
+                        c.ColumnRules.Count > 0 ||
+                        WriteEntriesFor(c, writeOp, grantIdSet).Count > 0)
             .ToList();
 
-        if (rlsAllows.Count > 0 || matchingConsents.DenyRowFilters.Count > 0)
+        bool hasStructuredRowScopes = rlsAllows.Any(c => c.RowScope.Count > 0 || WriteEntriesFor(c, writeOp, grantIdSet).Count > 0);
+        if (hasStructuredRowScopes)
+        {
+            if (_rowScopeCompiler == null)
+            {
+                return TableAccessDecision.Denied(metadata.Identifier, "Write grant row-scope filters require RowScopeCompiler.") with
+                {
+                    Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "write_grant_row_scope_unsupported", "WriteGrant", null)]
+                };
+            }
+
+            if (!metadata.IsDelegatedSource)
+            {
+                var grantInputs = rlsAllows
+                    .Select(c =>
+                    {
+                        var combinedEntries = new List<GrantRowScopeEntry>(c.RowScope);
+                        combinedEntries.AddRange(WriteEntriesFor(c, writeOp, grantIdSet));
+                        return new Autheris.Application.Policy.RowScopes.RowScopeGrant(
+                            c.Id.ToString("D"),
+                            c.GrantSource,
+                            combinedEntries,
+                            c.RowFilters.Count > 0 ? c.RowFilters : null);
+                    })
+                    .ToList();
+                var denyRowFilters = matchingConsents.DenyRowFilters
+                    .Select(static c => c.RowFilters)
+                    .Where(static f => f.Count > 0)
+                    .ToList();
+
+                var compileRequest = new Autheris.Application.Policy.RowScopes.RowScopeCompileRequest(
+                    query.Tenant,
+                    query.UserSid,
+                    query.GroupSids,
+                    metadata,
+                    grantInputs,
+                    DenyRowFilters: denyRowFilters,
+                    ObjectKind: query.ObjectKind,
+                    AllUserSids: query.AllUserSids,
+                    IncludeHardPolicies: false);
+
+                var outcome = await _rowScopeCompiler.CompileGrantsOnlyAsync(compileRequest, ct).ConfigureAwait(false);
+                if (outcome.IsDenied)
+                {
+                    return TableAccessDecision.Denied(metadata.Identifier, outcome.DenyReason ?? "Denied by write grant row scope.") with
+                    {
+                        DenialKind = TableAccessDenialKind.Policy,
+                        Reasons = [new DecisionReason(outcome.DenyStep ?? DecisionStep.DefaultDeny, outcome.DenyCode ?? "ROW_SCOPE_DENIED", "WriteGrant", null)]
+                    };
+                }
+
+                if (outcome.Predicate != null)
+                {
+                    var predicate = outcome.Predicate;
+                    if (outcome.CallerAttributes.Count > 0)
+                    {
+                        (predicate, _) = await TableAccessPolicy.BindVirtualFilterAttributesCoreAsync(
+                            predicate,
+                            outcome.CallerAttributes,
+                            query,
+                            _typedPolicies?.CallerAttributes,
+                            ct).ConfigureAwait(false);
+                    }
+
+                    decision = decision.WithAdditionalRowPolicy(_rowScopeCompiler.BuildRowPolicy(predicate, metadata.Dialect));
+                }
+            }
+        }
+        else if (rlsAllows.Count > 0 || matchingConsents.DenyRowFilters.Count > 0)
         {
             decision = await ApplyRowFilterRecipeAsync(decision, query, metadata, rlsAllows, matchingConsents.DenyRowFilters, ct).ConfigureAwait(false);
             if (!decision.IsAllowed)
@@ -364,6 +449,20 @@ public sealed partial class AccessDecisionPoint
             }
 
             decision = profiled with { ColumnAccess = decision.ColumnAccess };
+            if (profiles.Any(p => p.RowScope.Count > 0))
+            {
+                decision = await TableAccessPolicy.ApplyAccessProfileRowScopesAsync(
+                    decision,
+                    query,
+                    profiles,
+                    _rowScopeCompiler,
+                    _typedPolicies?.CallerAttributes,
+                    ct).ConfigureAwait(false);
+                if (!decision.IsAllowed)
+                {
+                    return decision;
+                }
+            }
         }
 
         return decision;

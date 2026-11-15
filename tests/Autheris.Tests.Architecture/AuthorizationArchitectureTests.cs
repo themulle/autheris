@@ -128,4 +128,63 @@ public sealed class AuthorizationArchitectureTests
         violations.ShouldBeEmpty(
             $"Free-SQL predicate string properties must not exist on grant or profile models: {string.Join(", ", violations)}");
     }
+
+    [Fact]
+    public void Row_scopes_built_only_by_RowScopeCompiler()
+    {
+        var allowedPrefixes = new[]
+        {
+            "src/Autheris.Application/Policy/RowScopes/RowScopeCompiler",
+            "src/Autheris.Application/Policy/RowScopes/GrantRowScopeValidator",
+            "src/Autheris.Application/Policy/RowScopes/RowPolicyMigrationConverter",
+            "src/TrinoSqlEngine/",
+            "src/Autheris.Domain/",
+            "src/Autheris.Infrastructure/Persistence/"
+        };
+
+        string[] predicateConstructionMarkers =
+        [
+            "PolicyPredicate.Create",
+            "PolicyPredicateRowPolicy",
+            "InListExpression",
+            "InSubqueryExpression",
+            "ExistsExpression",
+            "ValuesQueryBody",
+            "BuildTyped(",
+            "IVirtualFilterKeySetProvider",
+            "StructuredFilterSqlBuilder",
+            "TypedRowFilterBuilder"
+        ];
+
+        string[] rowScopeTokens =
+        [
+            "GrantRowScopeEntry",
+            "WriteRule.RowFilter"
+        ];
+
+        var violations = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles)
+        {
+            if (allowedPrefixes.Any(prefix => file.RelativePath.StartsWith(prefix, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            bool touchesRowScopeProp = System.Text.RegularExpressions.Regex.IsMatch(
+                file.Text,
+                @"\.RowScope\b",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            bool touchesWriteRowFilter = file.Text.Contains("WriteRule", StringComparison.Ordinal) &&
+                System.Text.RegularExpressions.Regex.IsMatch(file.Text, @"\.RowFilter\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            bool touchesRowScope = touchesRowScopeProp || touchesWriteRowFilter || rowScopeTokens.Any(token => file.Text.Contains(token, StringComparison.Ordinal));
+            bool buildsPredicate = predicateConstructionMarkers.Any(marker => file.Text.Contains(marker, StringComparison.Ordinal));
+            if (touchesRowScope && buildsPredicate)
+            {
+                violations.Add(file.RelativePath);
+            }
+        }
+
+        violations.ShouldBeEmpty(
+            $"Row-scope predicates for consents and write grants may only be constructed in RowScopeCompiler: {string.Join(", ", violations)}");
+    }
 }

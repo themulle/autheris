@@ -56,6 +56,12 @@ public sealed class RowPolicyFactory
         return new PolicyPredicateRowPolicy(predicate, PolicyParameterNamer.ToTargetDialect(dialect), _renderer);
     }
 
+    internal IRowPolicy FromPredicate(PolicyPredicate predicate, TargetSqlDialect dialect)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        return new PolicyPredicateRowPolicy(predicate, dialect, _renderer);
+    }
+
     /// <summary>The typed row policy of a consent decision; null when the recipe restricts no rows.</summary>
     /// <exception cref="InvalidOperationException">A filter is invalid (unsafe column, unknown operator); the caller keeps the decision string-only.</exception>
     public IRowPolicy? FromConsentFilters(

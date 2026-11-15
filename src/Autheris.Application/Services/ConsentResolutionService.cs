@@ -140,7 +140,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             }
         }
 
-        var unconstrainedConsents = aConsents.Where(c => c.RowFilters.Count == 0).ToList();
+        var unconstrainedConsents = aConsents.Where(c => c.RowFilters.Count == 0 && c.RowScope.Count == 0).ToList();
         var rowConstrainedGroups = unconstrainedConsents.Count > 0
             ? new List<List<Consent>>()
             : BuildRowFilterGroups(aConsents);
@@ -405,7 +405,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         var byFingerprint = new Dictionary<string, List<Consent>>(StringComparer.Ordinal);
         foreach (var consent in allowConsents)
         {
-            var key = RowFilterFingerprint(consent.RowFilters);
+            var key = consent.RowScope.Count > 0 ? null : RowFilterFingerprint(consent.RowFilters);
             if (key == null)
             {
                 groups.Add([consent]);

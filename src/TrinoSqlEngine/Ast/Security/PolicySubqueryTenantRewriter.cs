@@ -26,6 +26,11 @@ internal sealed class PolicySubqueryTenantRewriter : SqlAstRewriter
 
     public override SqlNode VisitSelectStatement(SelectStatement node)
     {
+        if (node is { With: null, Body: ValuesQueryBody, OrderBy: null, Pagination: null })
+        {
+            return base.VisitSelectStatement(node);
+        }
+
         if (++_depth > 1)
         {
             throw new SecurityException("Nested policy subqueries are not permitted.");

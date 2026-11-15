@@ -73,7 +73,13 @@ public sealed partial class TableAccessPolicy
 
         decision = ClassifyConsentDenial(decision, activeConsents);
 
-        if (useCache)
+        var contributingIds = decision.Grants.Select(g => g.GrantId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var contributingAllows = decision.IsAllowed
+            ? activeConsents.Where(c => c.Effect == ConsentEffect.Allow && contributingIds.Contains(c.Id.ToString("D"))).ToList()
+            : [];
+        bool hasGrantRowScopes = contributingAllows.Any(c => c.RowScope.Count > 0);
+
+        if (useCache && !hasGrantRowScopes)
         {
             // SEC: TTL bounded by the earliest consent ValidTo; shorter for highly sensitive tables.
             var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(query.Metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
@@ -85,6 +91,11 @@ public sealed partial class TableAccessPolicy
             // Task B3: Coarse gate on delegated sources
             // Defers fine-grained row-level filters and column masks to native source dynamic policies (current_user())
             return decision with { CombinedRowFilterSql = null, RowPolicy = null, MandatoryRowPredicateSql = null };
+        }
+
+        if (hasGrantRowScopes)
+        {
+            return await ApplyCompiledConsentRowScopesAsync(decision, query, activeConsents, contributingAllows, _rowScopeCompiler, _callerAttributes, ct).ConfigureAwait(false);
         }
 
         return await WithTypedConsentPolicyAsync(decision, query, ct).ConfigureAwait(false);
@@ -108,6 +119,185 @@ public sealed partial class TableAccessPolicy
                 ? TableAccessDenialKind.Policy
                 : TableAccessDenialKind.ConsentMissing;
         return decision with { DenialKind = kind };
+    }
+
+    internal static async Task<TableAccessDecision> ApplyCompiledConsentRowScopesAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        IReadOnlyList<Consent> activeConsents,
+        IReadOnlyList<Consent> contributingAllows,
+        Autheris.Application.Policy.RowScopes.RowScopeCompiler? compiler,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes,
+        CancellationToken ct)
+    {
+        var table = query.Metadata.Identifier;
+        if (compiler == null)
+        {
+            return TableAccessDecision.Denied(table, "Grant row scopes require RowScopeCompiler.") with
+            {
+                DenialKind = TableAccessDenialKind.Policy,
+                Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "ROW_SCOPE_COMPILER_UNAVAILABLE", "RowScope", null)]
+            };
+        }
+
+        var now = TimeProvider.System.GetUtcNow();
+        var denyRowFilters = activeConsents
+            .Where(c => c.Effect == ConsentEffect.Deny && c.RowFilters.Count > 0 &&
+                        ConsentResolutionService.IsApplicable(c, table, now, query.UserSid, query.GroupSids, query.Roles, query.AllUserSids))
+            .Select(static c => c.RowFilters)
+            .ToList();
+
+        var grantInputs = contributingAllows
+            .Select(Autheris.Application.Policy.RowScopes.RowScopeCompileRequest.FromConsent)
+            .ToList();
+
+        var compileRequest = new Autheris.Application.Policy.RowScopes.RowScopeCompileRequest(
+            query.Tenant,
+            query.UserSid,
+            query.GroupSids,
+            query.Metadata,
+            grantInputs,
+            DenyRowFilters: denyRowFilters,
+            ObjectKind: query.ObjectKind,
+            AllUserSids: query.AllUserSids,
+            IncludeHardPolicies: false);
+
+        var outcome = await compiler.CompileGrantsOnlyAsync(compileRequest, ct).ConfigureAwait(false);
+        if (outcome.IsDenied)
+        {
+            return TableAccessDecision.Denied(table, outcome.DenyReason ?? "Denied by row scope.") with
+            {
+                DenialKind = TableAccessDenialKind.Policy,
+                Reasons = [new DecisionReason(outcome.DenyStep ?? DecisionStep.DefaultDeny, outcome.DenyCode ?? "ROW_SCOPE_DENIED", "RowScope", null)]
+            };
+        }
+
+        var cleared = decision with { CombinedRowFilterSql = null, RowFilterParameters = null, ConsentFilterRecipe = null };
+        if (outcome.Predicate == null)
+        {
+            return cleared;
+        }
+
+        var predicate = outcome.Predicate;
+        IReadOnlyList<CallerAttributeAuditEntry>? audit = null;
+        if (outcome.CallerAttributes.Count > 0)
+        {
+            (predicate, audit) = await BindVirtualFilterAttributesCoreAsync(predicate, outcome.CallerAttributes, query, callerAttributes, ct).ConfigureAwait(false);
+        }
+
+        var policy = compiler.BuildRowPolicy(predicate, query.Metadata.Dialect);
+        var updated = cleared.WithAdditionalRowPolicy(policy);
+        return audit is { Count: > 0 }
+            ? updated with { CallerAttributes = Merge(updated.CallerAttributes, audit) }
+            : updated;
+    }
+
+    internal static async Task<TableAccessDecision> ApplyAccessProfileRowScopesAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        IReadOnlyList<AccessProfile> profiles,
+        Autheris.Application.Policy.RowScopes.RowScopeCompiler? compiler,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes,
+        CancellationToken ct)
+    {
+        var entries = profiles.SelectMany(static p => p.RowScope).ToList();
+        if (entries.Count == 0)
+        {
+            return decision;
+        }
+
+        var table = query.Metadata.Identifier;
+        if (compiler == null)
+        {
+            return TableAccessDecision.Denied(table, "Access profile row scopes require RowScopeCompiler.") with
+            {
+                DenialKind = TableAccessDenialKind.Policy,
+                Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "ROW_SCOPE_COMPILER_UNAVAILABLE", "AccessProfile", null)]
+            };
+        }
+
+        var compileRequest = new Autheris.Application.Policy.RowScopes.RowScopeCompileRequest(
+            query.Tenant,
+            query.UserSid,
+            query.GroupSids,
+            query.Metadata,
+            [new Autheris.Application.Policy.RowScopes.RowScopeGrant("access_profile", ConsentGrantSource.AccessProfile, entries)],
+            ObjectKind: query.ObjectKind,
+            AllUserSids: query.AllUserSids,
+            IncludeHardPolicies: false);
+
+        var outcome = await compiler.CompileGrantsOnlyAsync(compileRequest, ct).ConfigureAwait(false);
+        if (outcome.IsDenied)
+        {
+            return TableAccessDecision.Denied(table, outcome.DenyReason ?? "Denied by access profile row scope.") with
+            {
+                DenialKind = TableAccessDenialKind.Policy,
+                Reasons = [new DecisionReason(outcome.DenyStep ?? DecisionStep.DefaultDeny, outcome.DenyCode ?? "ROW_SCOPE_DENIED", "AccessProfile", null)]
+            };
+        }
+
+        if (outcome.Predicate == null)
+        {
+            return decision;
+        }
+
+        var predicate = outcome.Predicate;
+        IReadOnlyList<CallerAttributeAuditEntry>? audit = null;
+        if (outcome.CallerAttributes.Count > 0)
+        {
+            (predicate, audit) = await BindVirtualFilterAttributesCoreAsync(predicate, outcome.CallerAttributes, query, callerAttributes, ct).ConfigureAwait(false);
+        }
+
+        var policy = compiler.BuildRowPolicy(predicate, query.Metadata.Dialect);
+        var updated = decision.WithAdditionalRowPolicy(policy);
+        return audit is { Count: > 0 }
+            ? updated with { CallerAttributes = Merge(updated.CallerAttributes, audit) }
+            : updated;
+    }
+
+    internal static async Task<TableAccessDecision> ApplyCompiledHardRowPoliciesAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        Autheris.Application.Policy.RowScopes.RowScopeCompiler compiler,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes,
+        CancellationToken ct)
+    {
+        var table = query.Metadata.Identifier;
+        var outcome = await compiler.CompileHardPoliciesOnlyAsync(
+            query.Tenant,
+            query.UserSid,
+            query.GroupSids,
+            query.Metadata,
+            query.ObjectKind,
+            query.AllUserSids,
+            ct: ct).ConfigureAwait(false);
+
+        if (outcome.IsDenied)
+        {
+            return TableAccessDecision.Denied(table, outcome.DenyReason ?? "Denied by hard row policy.") with
+            {
+                DenialKind = TableAccessDenialKind.Policy,
+                Reasons = [new DecisionReason(outcome.DenyStep ?? DecisionStep.ExplicitDeny, outcome.DenyCode ?? Autheris.Application.Policy.RowScopes.RowScopeCompiler.HardPolicyUncoveredCode, "HardRowPolicy", null)]
+            };
+        }
+
+        if (outcome.Predicate == null)
+        {
+            return decision;
+        }
+
+        var predicate = outcome.Predicate;
+        IReadOnlyList<CallerAttributeAuditEntry>? audit = null;
+        if (outcome.CallerAttributes.Count > 0)
+        {
+            (predicate, audit) = await BindVirtualFilterAttributesCoreAsync(predicate, outcome.CallerAttributes, query, callerAttributes, ct).ConfigureAwait(false);
+        }
+
+        var policy = compiler.BuildRowPolicy(predicate, query.Metadata.Dialect);
+        var updated = decision.WithMandatoryPredicate(policy, outcome.AppliedHardPolicies, outcome.AppliedHardBindings);
+        return audit is { Count: > 0 }
+            ? updated with { CallerAttributes = Merge(updated.CallerAttributes, audit) }
+            : updated;
     }
 
     /// <summary>The compiler path needs the typed form only for SQL sources; the other sources keep the legacy text (no marker consumers there).</summary>
@@ -329,7 +519,7 @@ public sealed partial class TableAccessPolicy
         }
 
         var table = query.Metadata.Identifier;
-        var now = DateTimeOffset.UtcNow;
+        var now = TimeProvider.System.GetUtcNow();
         return AccessProfileAssignmentRules.Order(profiles.Where(p => p.IsActive(now) && p.MatchesTable(table)));
     }
 }
