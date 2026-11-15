@@ -118,7 +118,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 _rowScopeCompiler,
                 _catalogVersionProvider,
                 _ownershipRepository,
-                _timeProvider);
+                _timeProvider,
+                _typedPolicies?.ClassificationResolver);
         }
     }
 

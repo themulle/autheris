@@ -93,6 +93,7 @@ public sealed partial class TableAccessPolicy
     private readonly Autheris.Application.Policy.RowScopes.RowScopeCompiler? _rowScopeCompiler;
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
     private readonly IDataOwnershipRepository? _ownershipRepository;
+    private readonly Autheris.Application.Policy.Classification.ClassificationAccessResolver? _classificationResolver;
     private readonly TimeProvider _timeProvider;
 
     /// <param name="mandatoryFilters">
@@ -118,7 +119,8 @@ public sealed partial class TableAccessPolicy
         Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null,
         Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
         IDataOwnershipRepository? ownershipRepository = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Autheris.Application.Policy.Classification.ClassificationAccessResolver? classificationResolver = null)
     {
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _callerAttributes = callerAttributes;
@@ -130,6 +132,7 @@ public sealed partial class TableAccessPolicy
         _catalogVersionProvider = catalogVersionProvider;
         _ownershipRepository = ownershipRepository;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _classificationResolver = classificationResolver;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
@@ -166,15 +169,20 @@ public sealed partial class TableAccessPolicy
     /// </summary>
     private TableAccessDecision AttachTypedMasks(TableAccessDecision decision, TableAccessQuery query)
     {
-        if (_maskPolicyFactory == null || !decision.IsAllowed || decision.ColumnMasks != null || query.Metadata.IsDelegatedSource)
+        if (_maskPolicyFactory == null || !decision.IsAllowed || query.Metadata.IsDelegatedSource)
+        {
+            return decision;
+        }
+
+        if (decision.ColumnMasks is not null && decision.ColumnMasks is not ColumnMaskPolicy)
         {
             return decision;
         }
 
         try
         {
-            var masks = _maskPolicyFactory.ForDecision(decision, query.Metadata, query.Tenant);
-            return masks == null ? decision : decision with { ColumnMasks = masks };
+            var masks = _maskPolicyFactory.ForDecision(decision, query.Metadata, query.Tenant, decision.ColumnMasks);
+            return masks == null ? (decision.ColumnMasks is null ? decision : decision with { ColumnMasks = null }) : decision with { ColumnMasks = masks };
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
         {
@@ -232,6 +240,11 @@ public sealed partial class TableAccessPolicy
         TableAccessDecision decision = consentBypassed
             ? TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
             : await ResolveConsentAsync(query, ct).ConfigureAwait(false);
+
+        if (!consentBypassed && decision.IsAllowed)
+        {
+            decision = await ApplyClassificationAccessAsync(decision, query, ct).ConfigureAwait(false);
+        }
 
         // 143 (-14): a query without any claims (absent, not merely without scp) has unknown token scopes and is treated as
         // holding every restricted scope with no clearance. Applied after the cache read and the rebuilds above; the cache holds the plain

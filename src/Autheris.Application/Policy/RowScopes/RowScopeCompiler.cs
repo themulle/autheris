@@ -37,6 +37,8 @@ public sealed partial class RowScopeCompiler
     private readonly RowPolicyFactory _rowPolicyFactory;
     private readonly ITableMetadataRepository? _catalog;
     private readonly SqlDataSourceOptions? _dataSources;
+    private readonly Autheris.Application.Policy.Classification.ClassificationAccessResolver? _classificationResolver;
+    private readonly TimeProvider _timeProvider;
 
     public RowScopeCompiler(
         IVirtualFilterSnapshotProvider? snapshots = null,
@@ -44,7 +46,9 @@ public sealed partial class RowScopeCompiler
         IVirtualFilterKeySetProvider? keySetProvider = null,
         RowPolicyFactory? rowPolicyFactory = null,
         ITableMetadataRepository? catalog = null,
-        IOptions<GatewayOptions>? options = null)
+        IOptions<GatewayOptions>? options = null,
+        Autheris.Application.Policy.Classification.ClassificationAccessResolver? classificationResolver = null,
+        TimeProvider? timeProvider = null)
     {
         _snapshots = snapshots;
         _predicates = predicates ?? new StructuredFilterSqlBuilder(options);
@@ -52,6 +56,8 @@ public sealed partial class RowScopeCompiler
         _rowPolicyFactory = rowPolicyFactory ?? new RowPolicyFactory(new PolicyPredicateRenderer(), new PolicyExpressionParser(FastSqlEngine.Default));
         _catalog = catalog;
         _dataSources = options?.Value?.DataSources;
+        _classificationResolver = classificationResolver;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>True when a snapshot provider is configured for hard row policy resolution.</summary>

@@ -88,6 +88,7 @@ public sealed class Consent
     public IReadOnlyList<WriteRule> WriteRules { get; set; } = [];
     public IReadOnlyList<GrantRowScopeEntry> RowScope { get; set; } = [];
     public IReadOnlyList<string> ApprovingOwners { get; set; } = [];
+    public IReadOnlyList<ConsentClassificationAccess> ClassificationAccess { get; set; } = [];
 
     /// <summary>True when this grant targets objects dynamically via <see cref="ObjectPattern"/> rather than a fixed table.</summary>
     public bool IsPatternGrant => !string.IsNullOrWhiteSpace(ObjectPattern);

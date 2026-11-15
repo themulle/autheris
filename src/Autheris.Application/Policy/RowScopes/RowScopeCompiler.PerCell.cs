@@ -32,9 +32,20 @@ public sealed partial class RowScopeCompiler
         var table = query.Metadata.Identifier;
         var metadata = query.Metadata;
         var dialect = PolicyParameterNamer.ToTargetDialect(metadata.Dialect);
-        var now = TimeProvider.System.GetUtcNow();
+        var now = _timeProvider.GetUtcNow();
 
         var callerScopes = ResolveCallerScopes(query);
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<string, Autheris.Application.Policy.Classification.ColumnClassificationGrantOutcome>>? perGrantOutcomes = null;
+        IReadOnlyDictionary<string, Autheris.Application.Policy.Classification.ColumnClassificationGrantOutcome>? combinedClassWinners = null;
+        if (_classificationResolver is not null &&
+            (metadata.ColumnClassifications.Count > 0 ||
+             contributingAllows.Any(c => c.ClassificationAccess.Count > 0) ||
+             _classificationResolver.HasRepository))
+        {
+            (perGrantOutcomes, combinedClassWinners) = await _classificationResolver.ResolveForTableAsync(
+                metadata, contributingAllows, query.Tenant, callerScopes, ct: ct).ConfigureAwait(false);
+        }
+
         var (hardDenied, hardMasked) = CollectFilterlessDenyColumnCaps(
             activeConsents, table, now, query.UserSid, query.GroupSids, query.Roles, query.AllUserSids, callerScopes);
 
@@ -50,8 +61,10 @@ public sealed partial class RowScopeCompiler
 
         foreach (var allow in contributingAllows)
         {
+            IReadOnlyDictionary<string, Autheris.Application.Policy.Classification.ColumnClassificationGrantOutcome>? grantClassOutcomes = null;
+            perGrantOutcomes?.TryGetValue(allow.Id, out grantClassOutcomes);
             var (colMap, implicitMasked) = ComputeGrantEffectiveColumns(
-                allow, metadata, columnUniverse, callerScopes, hardDenied, hardMasked, baseDecision.ScopeClearance);
+                allow, metadata, columnUniverse, callerScopes, hardDenied, hardMasked, baseDecision.ScopeClearance, grantClassOutcomes);
 
             string sigKey = PerCellColumnPolicy.BuildSignatureKey(colMap);
             if (!groups.TryGetValue(sigKey, out var group))
@@ -87,7 +100,14 @@ public sealed partial class RowScopeCompiler
                 return DeniedPerCell(table, singleOutcome);
             }
 
-            var cleared = baseDecision with { CombinedRowFilterSql = null, RowFilterParameters = null, ConsentFilterRecipe = null };
+            var cleared = baseDecision with
+            {
+                CombinedRowFilterSql = null,
+                RowFilterParameters = null,
+                ConsentFilterRecipe = null,
+                ColumnAccess = groups[orderedKeys[0]].ColumnAccess,
+                ColumnMasks = BuildClassificationMaskPolicy(combinedClassWinners) ?? baseDecision.ColumnMasks
+            };
             if (singleOutcome.Predicate == null)
             {
                 return new PerCellCompileResult(cleared, []);
@@ -184,7 +204,8 @@ public sealed partial class RowScopeCompiler
             ColumnAccess = combinedColumnAccess,
             RowDependentColumns = rowDependentColumns.Count > 0 ? rowDependentColumns : null,
             ColumnSignatures = perCellPolicy is not null ? sigScopes : null,
-            PerCellColumns = perCellPolicy
+            PerCellColumns = perCellPolicy,
+            ColumnMasks = BuildClassificationMaskPolicy(combinedClassWinners) ?? baseDecision.ColumnMasks
         };
 
         PolicyPredicate? combinedRowPred = perCellPolicy?.AnySignatureUnfiltered == true
@@ -347,7 +368,8 @@ public sealed partial class RowScopeCompiler
         IReadOnlySet<string> callerScopes,
         IReadOnlySet<string> hardDenied,
         IReadOnlySet<string> hardMasked,
-        RestrictedScopeClearance? clearance)
+        RestrictedScopeClearance? clearance,
+        IReadOnlyDictionary<string, Autheris.Application.Policy.Classification.ColumnClassificationGrantOutcome>? classOutcomes = null)
     {
         var map = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
         var implicitMasked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -379,6 +401,20 @@ public sealed partial class RowScopeCompiler
                 continue;
             }
 
+            if (classOutcomes is not null && classOutcomes.TryGetValue(colName, out var classOutcome))
+            {
+                if (classOutcome.AccessLevel == ColumnAccessLevel.Deny)
+                {
+                    map[colName] = ColumnAccessLevel.Deny;
+                    continue;
+                }
+
+                if (classOutcome.AccessLevel == ColumnAccessLevel.Mask && raw == ColumnAccessLevel.Clear)
+                {
+                    raw = ColumnAccessLevel.Mask;
+                }
+            }
+
             bool isSensitive = metaCol?.IsSensitive == true || metadata.ColumnMaskingRules.ContainsKey(colName);
             bool hasExplicitClear = raw == ColumnAccessLevel.Clear && allow.ColumnRules.Any(r =>
                 string.Equals(r.ColumnName, colName, StringComparison.OrdinalIgnoreCase) &&
@@ -402,6 +438,29 @@ public sealed partial class RowScopeCompiler
         }
 
         return (map, implicitMasked);
+    }
+
+    private static ColumnMaskPolicy? BuildClassificationMaskPolicy(
+        IReadOnlyDictionary<string, Autheris.Application.Policy.Classification.ColumnClassificationGrantOutcome>? winners)
+    {
+        if (winners is null || winners.Count == 0)
+        {
+            return null;
+        }
+
+        Dictionary<string, MaskSpec>? specs = null;
+        foreach (var (colName, outcome) in winners)
+        {
+            if (outcome.MaskSpec is null)
+            {
+                continue;
+            }
+
+            specs ??= new Dictionary<string, MaskSpec>(StringComparer.OrdinalIgnoreCase);
+            specs[colName] = outcome.MaskSpec;
+        }
+
+        return specs is { Count: > 0 } ? new ColumnMaskPolicy(specs) : null;
     }
 
     private sealed record SignatureGroup(

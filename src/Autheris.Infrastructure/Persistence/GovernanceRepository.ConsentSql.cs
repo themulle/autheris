@@ -366,6 +366,8 @@ internal static class ConsentSqlCore
             c.WriteRules = writeRulesMap[key];
             c.RowScope = rowScopesMap[key];
         }
+
+        await GovernanceRepository.HydrateConsentClassificationAccessBatchAsync(conn, consents, ct).ConfigureAwait(false);
     }
 
     public static ConsentColumnRule ReadColumnRule(DbDataReader reader, string consentIdStr)
@@ -481,6 +483,7 @@ internal static class ConsentSqlCore
         }
 
         await ConsentWriteRulesSql.InsertWriteRulesAsync(conn, tx, consent, ct).ConfigureAwait(false);
+        await GovernanceRepository.InsertConsentClassificationAccessAsync(conn, tx, consent, ct).ConfigureAwait(false);
     }
 
     public static async Task<Guid> ResolveTableIdOrThrowAsync(DbConnection conn, DbTransaction? tx, string? findTableIdSql, Guid existingTableId, TableIdentifier table, string operationLabel, CancellationToken ct)

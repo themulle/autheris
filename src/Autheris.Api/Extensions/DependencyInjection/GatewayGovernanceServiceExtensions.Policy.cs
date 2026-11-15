@@ -83,6 +83,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<TrinoSqlEngine.Governance.IPolicyExpressionParser, TrinoSqlEngine.Governance.PolicyExpressionParser>();
         services.AddSingleton<Autheris.Application.Policy.RowPolicyFactory>();
         services.AddSingleton<Autheris.Application.Sql.Masking.SqlDataMaskingProvider>();
+        services.AddSingleton<Autheris.Application.Policy.Classification.ClassificationAccessResolver>();
         services.AddSingleton<Autheris.Application.Policy.ColumnMaskPolicyFactory>();
         services.AddSingleton<Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard>(sp =>
             new Autheris.Application.Plugins.Auth.AuthPluginRoleEscalationGuard(

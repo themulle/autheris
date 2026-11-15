@@ -71,4 +71,18 @@ public interface IClassificationRepository
         string tableColumnId,
         string? code,
         CancellationToken ct = default);
+
+    Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessAsync(
+        string tenantId,
+        Guid consentId,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessBatchAsync(
+        string tenantId,
+        IReadOnlyList<Guid> consentIds,
+        CancellationToken ct = default);
+
+    Task<ConsentClassificationAccess> UpsertConsentClassificationAccessAsync(
+        ConsentClassificationAccess entry,
+        CancellationToken ct = default);
 }

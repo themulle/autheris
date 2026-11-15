@@ -262,6 +262,39 @@ internal sealed class InMemoryClassificationRepository : IClassificationReposito
         return removed;
     }
 
+    public Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessAsync(
+        string tenantId, Guid consentId, CancellationToken ct = default)
+    {
+        IReadOnlyList<ConsentClassificationAccess> rows = _consentAccess
+            .Where(x => x.TenantId == tenantId && x.ConsentId == consentId)
+            .OrderBy(x => x.Code, StringComparer.Ordinal)
+            .ToList();
+        return Task.FromResult(rows);
+    }
+
+    public Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessBatchAsync(
+        string tenantId, IReadOnlyList<Guid> consentIds, CancellationToken ct = default)
+    {
+        var idSet = consentIds.ToHashSet();
+        IReadOnlyList<ConsentClassificationAccess> rows = _consentAccess
+            .Where(x => x.TenantId == tenantId && idSet.Contains(x.ConsentId))
+            .OrderBy(x => x.ConsentId)
+            .ThenBy(x => x.Code, StringComparer.Ordinal)
+            .ToList();
+        return Task.FromResult(rows);
+    }
+
+    public async Task<ConsentClassificationAccess> UpsertConsentClassificationAccessAsync(
+        ConsentClassificationAccess entry, CancellationToken ct = default)
+    {
+        _consentAccess.RemoveAll(x => x.TenantId == entry.TenantId && x.ConsentId == entry.ConsentId && x.Code == entry.Code);
+        _consentAccess.Add(entry);
+        await FlushImmediatelyAsync(ct);
+        return entry;
+    }
+
+    private readonly List<ConsentClassificationAccess> _consentAccess = [];
+
     private async Task FlushImmediatelyAsync(CancellationToken ct)
     {
         Interlocked.Increment(ref _flushes);

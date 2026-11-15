@@ -351,7 +351,8 @@ public partial class GovernanceRepository
             ColumnSetMode = source.ColumnSetMode,
             WorkflowMode = source.WorkflowMode,
             ProfileItemNo = source.ProfileItemNo,
-            ApprovingOwners = source.ApprovingOwners
+            ApprovingOwners = source.ApprovingOwners,
+            ClassificationAccess = source.ClassificationAccess
         };
 
     private static GrantRecordInput BuildConsentGrantInput(Consent consent, string tenantId, string requestedBy, string decisionJson, DateTimeOffset decidedAt, GrantRecordType? recordType = null) =>
