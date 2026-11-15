@@ -18,6 +18,7 @@ public static class GovernanceGlobalTables
         "DATA_OWNERS", // Platform data ownership assignments
         "TABLE_OWNERS", // Table owner mappings
         "DATA_OWNER_DELEGATIONS", // Data owner delegations
+        "DOC_OFFICIAL_DOCUMENTS", // Official documentation written only by canonical ClusterAdmin
         "ROLES", // Platform role definitions
         "ROLE_MEMBERS", // Role membership assignments
         "POLICY_EPOCHS", // Global policy version epochs

@@ -156,7 +156,8 @@ public static partial class GatewayGovernanceServiceExtensions
             Autheris.Application.Catalog.External.ICatalogChangeStore,
             IClassificationRepository,
             Autheris.Application.Governance.Grants.IOwnerGrantStore,
-            Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore
+            Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore,
+            Autheris.Application.Docs.Interfaces.IDocumentRepository
         where TMigrationRunner : class, IGovernanceMigrationRunner
     {
         services.AddSingleton<TRepository>();
@@ -201,6 +202,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IRecertificationRepository>(sp => (IRecertificationRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Catalog.External.ICatalogChangeStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IClassificationRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocumentRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
