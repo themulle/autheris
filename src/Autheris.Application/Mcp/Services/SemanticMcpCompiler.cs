@@ -124,7 +124,17 @@ public sealed class SemanticMcpCompiler(
             return [];
         }
 
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var scopeFilter = string.IsNullOrWhiteSpace(domainScope) ||
+                          domainScope.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+                          domainScope.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0
+            ? null
+            : domainScope;
+        var allTables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new Autheris.Application.Catalog.CatalogTableQuery(
+                DataSource: scopeFilter,
+                Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+            ct: ct).ConfigureAwait(false);
         var visible = await VisibleTablesAsync(allTables, principal, ct).ConfigureAwait(false);
 
         var filtered = string.IsNullOrWhiteSpace(domainScope)
@@ -171,7 +181,10 @@ public sealed class SemanticMcpCompiler(
         }
 
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new Autheris.Application.Catalog.CatalogTableQuery(Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+            ct: ct).ConfigureAwait(false);
         var visible = await VisibleTablesAsync(allTables, principal, ct).ConfigureAwait(false);
 
         // Descriptor items only (no Text): nothing is rendered and no golden query is loaded to list the URIs.
@@ -222,10 +235,24 @@ public sealed class SemanticMcpCompiler(
         }
 
         // Only the requested table is checked and rendered; unknown and invisible tables answer alike (null).
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var candidates = allTables.Where(t =>
-            string.Equals(t.Identifier.TableName, table, StringComparison.OrdinalIgnoreCase) &&
-            (domain is null || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (string.IsNullOrWhiteSpace(table) ||
+            table.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+            table.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0 ||
+            (domain is not null && (domain.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+                                    domain.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0)))
+        {
+            return null;
+        }
+
+        var candidates = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new Autheris.Application.Catalog.CatalogTableQuery(
+                DataSource: domain,
+                NamePrefix: table,
+                Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+            t => string.Equals(t.Identifier.TableName, table, StringComparison.OrdinalIgnoreCase) &&
+                 (domain is null || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase)),
+            ct: ct).ConfigureAwait(false);
         if (candidates.Count == 0)
         {
             return null;

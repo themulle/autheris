@@ -124,13 +124,31 @@ public sealed class DbtHealthExecutionMiddleware
                     {
                         try
                         {
-                            var allTables = await tableRepo.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false);
-                            var match = allTables.FirstOrDefault(t =>
-                                string.Equals(t.Identifier.TableName, modelName, StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(t.Identifier.ToString(), modelName, StringComparison.OrdinalIgnoreCase));
-                            if (match != null)
+                            if (TableIdentifier.TryParse(modelName, out var parsedTable))
                             {
-                                targetTable = match.Identifier;
+                                var exact = await tableRepo.GetTableMetadataAsync(parsedTable, context.RequestAborted).ConfigureAwait(false);
+                                if (exact != null)
+                                {
+                                    targetTable = exact.Identifier;
+                                }
+                            }
+                            else if (!string.IsNullOrWhiteSpace(modelName) &&
+                                     modelName.AsSpan().IndexOfAny('\0', '\r', '\n') < 0)
+                            {
+                                var prefix = modelName.Length <= Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength
+                                    ? modelName
+                                    : modelName[..Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength];
+                                var match = await Autheris.Application.Catalog.CatalogTablePageReader.FindFirstAsync(
+                                    tableRepo,
+                                    new Autheris.Application.Catalog.CatalogTableQuery(
+                                        NamePrefix: prefix,
+                                        Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                                    t => string.Equals(t.Identifier.TableName, modelName, StringComparison.OrdinalIgnoreCase),
+                                    ct: context.RequestAborted).ConfigureAwait(false);
+                                if (match != null)
+                                {
+                                    targetTable = match.Identifier;
+                                }
                             }
                         }
                         catch

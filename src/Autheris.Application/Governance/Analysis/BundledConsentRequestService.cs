@@ -65,6 +65,100 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         _dataOwnershipRepository = dataOwnershipRepository;
     }
 
+    private async Task<Dictionary<string, TableMetadata>> ResolveRequestedTablesAsync(
+        IReadOnlyList<RequestableConsentItem> items,
+        CancellationToken ct)
+    {
+        var tableLookup = new Dictionary<string, TableMetadata>(StringComparer.OrdinalIgnoreCase);
+        var distinctDatasets = items
+            .Select(i => i.Dataset)
+            .Where(d => !string.IsNullOrWhiteSpace(d))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var parsedIdentifiers = new List<TableIdentifier>();
+        var unqualified = new List<string>();
+        foreach (var dataset in distinctDatasets)
+        {
+            if (TableIdentifier.TryParse(dataset, out var parsedId))
+            {
+                parsedIdentifiers.Add(parsedId);
+            }
+            else
+            {
+                unqualified.Add(dataset);
+            }
+        }
+
+        if (parsedIdentifiers.Count > 0)
+        {
+            var batch = await _metadataRepository.GetTablesForRequestAsync(
+                parsedIdentifiers.Distinct().ToArray(),
+                ct).ConfigureAwait(false);
+            foreach (var table in batch)
+            {
+                var fullId = QueryAnalysisService.FormatDatasetId(table.Identifier);
+                tableLookup[fullId] = table;
+            }
+        }
+
+        foreach (var dataset in unqualified)
+        {
+            if (dataset.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0)
+            {
+                continue;
+            }
+
+            var dotIndex = dataset.IndexOf('.', StringComparison.Ordinal);
+            if (dotIndex >= 0)
+            {
+                if (dataset.IndexOf('.', dotIndex + 1) >= 0)
+                {
+                    continue;
+                }
+
+                var schema = dataset[..dotIndex];
+                var tableName = dataset[(dotIndex + 1)..];
+                if (string.IsNullOrWhiteSpace(schema) ||
+                    string.IsNullOrWhiteSpace(tableName) ||
+                    schema.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+                    tableName.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength)
+                {
+                    continue;
+                }
+
+                var match = await Autheris.Application.Catalog.CatalogTablePageReader.FindFirstAsync(
+                    _metadataRepository,
+                    new Autheris.Application.Catalog.CatalogTableQuery(
+                        Schema: schema,
+                        NamePrefix: tableName,
+                        Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                    t => string.Equals($"{t.Identifier.Schema}.{t.Identifier.TableName}", dataset, StringComparison.OrdinalIgnoreCase),
+                    ct: ct).ConfigureAwait(false);
+                if (match != null)
+                {
+                    tableLookup[dataset] = match;
+                }
+            }
+            else if (dataset.Length <= Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength)
+            {
+                var match = await Autheris.Application.Catalog.CatalogTablePageReader.FindFirstAsync(
+                    _metadataRepository,
+                    new Autheris.Application.Catalog.CatalogTableQuery(
+                        NamePrefix: dataset,
+                        Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                    t => string.Equals(t.Identifier.TableName, dataset, StringComparison.OrdinalIgnoreCase),
+                    ct: ct).ConfigureAwait(false);
+                if (match != null)
+                {
+                    tableLookup[dataset] = match;
+                }
+            }
+        }
+
+        return tableLookup;
+    }
+
     public async Task<BundledConsentRequestResult> SubmitBundledRequestAsync(
         ClaimsPrincipal requester,
         BundledConsentRequest request,
@@ -84,15 +178,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
             return new BundledConsentRequestResult(Array.Empty<OwnerConsentTicket>(), request.ConsumerReference);
         }
 
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var tableLookup = new Dictionary<string, TableMetadata>(StringComparer.OrdinalIgnoreCase);
-        foreach (var table in allTables)
-        {
-            var fullId = QueryAnalysisService.FormatDatasetId(table.Identifier);
-            tableLookup[fullId] = table;
-            tableLookup.TryAdd($"{table.Identifier.Schema}.{table.Identifier.TableName}", table);
-            tableLookup.TryAdd(table.Identifier.TableName, table);
-        }
+        var tableLookup = await ResolveRequestedTablesAsync(request.Items, ct).ConfigureAwait(false);
 
         var isAdmin = QueryAnalysisService.IsAdminPrincipal(requester);
         var roles = requester.GetUserRoles();

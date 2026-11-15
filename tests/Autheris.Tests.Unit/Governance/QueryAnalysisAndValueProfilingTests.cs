@@ -397,6 +397,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable, shipmentsTable, paymentsTable });
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(metadataRepo);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(

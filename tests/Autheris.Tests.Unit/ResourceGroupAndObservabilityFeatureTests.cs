@@ -297,6 +297,7 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
 
         repo.GetAllTablesAsync(NSubstitute.Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([sampleTable]));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, goldenService, options: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }));
 

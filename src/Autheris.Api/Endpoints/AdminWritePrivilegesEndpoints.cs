@@ -100,9 +100,6 @@ public static class AdminWritePrivilegesEndpoints
                             ?? EndpointSecurity.GetRequestTenant(httpContext);
         DateTimeOffset now = (timeProvider ?? TimeProvider.System).GetUtcNow();
 
-        IReadOnlyList<TableMetadata> allTables = await tableRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var metadataByTable = allTables.ToDictionary(t => t.Identifier);
-
         var activeWriteConsents = await LoadActiveWriteConsentsForDataSourceAsync(
             consentRepository,
             tenantId,
@@ -110,6 +107,15 @@ public static class AdminWritePrivilegesEndpoints
             gatewayOptions,
             now,
             ct).ConfigureAwait(false);
+
+        var consentedTables = activeWriteConsents
+            .Select(c => c.TableIdentifier)
+            .Distinct()
+            .ToArray();
+        var loadedTables = consentedTables.Length == 0
+            ? Array.Empty<TableMetadata>()
+            : await tableRepository.GetTablesAsync(consentedTables, ct).ConfigureAwait(false);
+        var metadataByTable = loadedTables.ToDictionary(t => t.Identifier);
 
         var report = BuildPrivilegesReport(matchedName, dialect, tenantId, activeWriteConsents, metadataByTable);
         return Results.Ok(report);

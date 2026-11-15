@@ -67,7 +67,7 @@ public sealed class CatalogListingVisibilityTests
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Lakehouse(OrdersId), Lakehouse(SalariesId)]));
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(null));
-        return repo;
+        return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
     }
 
     private static IConsentRepository Consents(params Consent[] consents)

@@ -91,6 +91,7 @@ public sealed partial class OlapFederationGateTests
             return metas.TryGetValue(ci.Arg<TableIdentifier>(), out var m) ? m : null;
         });
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(_ => (IReadOnlyList<TableMetadata>)metas.Values.ToList());
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
 
         var resolver = Substitute.For<ICrossDomainAccessResolver>();
         resolver.ResolveAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())

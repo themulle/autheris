@@ -79,14 +79,51 @@ public sealed class SemanticBaseTableResolver
             }
         }
 
-        var allTables = await _repository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var relLeaf = (model.NodeRelation ?? model.Name).Replace("\"", string.Empty, StringComparison.Ordinal).Split('.').LastOrDefault()?.Trim();
-        return allTables.FirstOrDefault(t =>
+        var relFull = model.NodeRelation?.Replace("\"", string.Empty, StringComparison.Ordinal);
+        var relLeaf = (relFull ?? model.Name).Split('.').LastOrDefault()?.Trim();
+        bool MatchesModel(TableMetadata t) =>
             t.Table.IsActive &&
             !SemanticVirtualTables.IsVirtualTable(t) &&
             (isVisible is null || isVisible(t)) &&
             (string.Equals(t.Identifier.TableName, relLeaf, StringComparison.OrdinalIgnoreCase) ||
              string.Equals(t.Identifier.TableName, model.Name, StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(t.Identifier.ToString(), model.NodeRelation?.Replace("\"", string.Empty, StringComparison.Ordinal), StringComparison.OrdinalIgnoreCase)));
+             string.Equals(t.Identifier.ToString(), relFull, StringComparison.OrdinalIgnoreCase));
+
+        if (NormalizePrefix(relLeaf) is { } leafPrefix)
+        {
+            var foundByLeaf = await CatalogTablePageReader.FindFirstAsync(
+                _repository,
+                new CatalogTableQuery(NamePrefix: leafPrefix, Limit: CatalogTableQuery.MaxLimit),
+                MatchesModel,
+                ct: ct).ConfigureAwait(false);
+            if (foundByLeaf is not null)
+            {
+                return foundByLeaf;
+            }
+        }
+
+        if (NormalizePrefix(model.Name) is { } namePrefix &&
+            !string.Equals(model.Name, relLeaf, StringComparison.OrdinalIgnoreCase))
+        {
+            return await CatalogTablePageReader.FindFirstAsync(
+                _repository,
+                new CatalogTableQuery(NamePrefix: namePrefix, Limit: CatalogTableQuery.MaxLimit),
+                MatchesModel,
+                ct: ct).ConfigureAwait(false);
+        }
+
+        return null;
+    }
+
+    private static string? NormalizePrefix(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate) || candidate.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0)
+        {
+            return null;
+        }
+
+        return candidate.Length <= CatalogTableQuery.MaxFilterLength
+            ? candidate
+            : candidate[..CatalogTableQuery.MaxFilterLength];
     }
 }

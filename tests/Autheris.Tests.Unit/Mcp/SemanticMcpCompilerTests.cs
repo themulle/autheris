@@ -29,7 +29,7 @@ public sealed class SemanticMcpCompilerTests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
-        return repo;
+        return Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
     }
 
     [Fact]

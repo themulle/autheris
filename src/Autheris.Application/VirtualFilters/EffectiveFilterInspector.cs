@@ -99,7 +99,10 @@ public sealed class EffectiveFilterInspector(
 
         int page = int.TryParse(query.Page, out var p) && p > 0 ? p : 1;
         int pageSize = int.TryParse(query.PageSize, out var ps) ? Math.Clamp(ps, 1, 500) : 100;
-        var tables = (await catalog.GetAllTablesAsync(ct).ConfigureAwait(false))
+        var tables = (await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+                catalog,
+                new Autheris.Application.Catalog.CatalogTableQuery(Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                ct: ct).ConfigureAwait(false))
             .OrderBy(t => t.Identifier.ToString(), StringComparer.OrdinalIgnoreCase)
             .ToList();
         var items = new List<EffectiveFilterListItem>();

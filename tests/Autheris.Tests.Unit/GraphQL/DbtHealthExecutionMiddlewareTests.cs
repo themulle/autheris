@@ -85,6 +85,7 @@ public class DbtHealthExecutionMiddlewareTests
         var tableId = new TableIdentifier("finance", "dbo", "orders");
         tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
 
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new DbtHealthState(tableId, DbtModelHealthStatus.Quarantined, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));
@@ -126,6 +127,7 @@ public class DbtHealthExecutionMiddlewareTests
         var tableId = new TableIdentifier("finance", "dbo", "orders");
         tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
 
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new DbtHealthState(tableId, DbtModelHealthStatus.Quarantined, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));
@@ -166,6 +168,7 @@ public class DbtHealthExecutionMiddlewareTests
         var tableId = new TableIdentifier("finance", "dbo", "orders");
         tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
 
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new DbtHealthState(tableId, DbtModelHealthStatus.Quarantined, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));
@@ -196,6 +199,7 @@ public class DbtHealthExecutionMiddlewareTests
         var tableId = new TableIdentifier("finance", "dbo", "orders");
         var meta = new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } };
         tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new[] { meta });
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(tableRepo);
         circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(new DbtHealthState(tableId, status, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));
 

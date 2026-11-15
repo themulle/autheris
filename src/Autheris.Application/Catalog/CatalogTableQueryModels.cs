@@ -2,6 +2,9 @@ namespace Autheris.Application.Catalog;
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -127,5 +130,114 @@ public static class CatalogTableCursor
 
         var s = StringComparer.OrdinalIgnoreCase.Compare(left.Schema, right.Schema);
         return s != 0 ? s : StringComparer.OrdinalIgnoreCase.Compare(left.TableName, right.TableName);
+    }
+}
+
+/// <summary>
+/// Bounded keyset page helpers over <see cref="ITableMetadataRepository.QueryTablesAsync"/>.
+/// Every loop advances via <see cref="CatalogTablePage.NextAfter"/> and fails closed if pagination stalls
+/// or exceeds the safety page bound.
+/// </summary>
+public static class CatalogTablePageReader
+{
+    public const int DefaultMaxPages = 1_000;
+
+    /// <summary>Reads all pages matching <paramref name="baseQuery"/> up to <paramref name="maxPages"/>.</summary>
+    public static async Task<IReadOnlyList<TableMetadata>> ReadAllAsync(
+        ITableMetadataRepository repository,
+        CatalogTableQuery baseQuery,
+        Func<TableMetadata, bool>? predicate = null,
+        int maxPages = DefaultMaxPages,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(baseQuery);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPages);
+
+        var results = new List<TableMetadata>();
+        await ScanPagesAsync(
+            repository,
+            baseQuery,
+            maxPages,
+            page =>
+            {
+                foreach (var item in page.Items)
+                {
+                    if (predicate is null || predicate(item))
+                    {
+                        results.Add(item);
+                    }
+                }
+
+                return false;
+            },
+            ct).ConfigureAwait(false);
+
+        return results;
+    }
+
+    /// <summary>Returns the first matching table across bounded keyset pages, or <see langword="null"/>.</summary>
+    public static async Task<TableMetadata?> FindFirstAsync(
+        ITableMetadataRepository repository,
+        CatalogTableQuery baseQuery,
+        Func<TableMetadata, bool> predicate,
+        int maxPages = DefaultMaxPages,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(baseQuery);
+        ArgumentNullException.ThrowIfNull(predicate);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPages);
+
+        TableMetadata? found = null;
+        await ScanPagesAsync(
+            repository,
+            baseQuery,
+            maxPages,
+            page =>
+            {
+                foreach (var item in page.Items)
+                {
+                    if (predicate(item))
+                    {
+                        found = item;
+                        return true;
+                    }
+                }
+
+                return false;
+            },
+            ct).ConfigureAwait(false);
+
+        return found;
+    }
+
+    private static async Task ScanPagesAsync(
+        ITableMetadataRepository repository,
+        CatalogTableQuery baseQuery,
+        int maxPages,
+        Func<CatalogTablePage, bool> onPage,
+        CancellationToken ct)
+    {
+        string? after = baseQuery.After;
+        for (int pageIndex = 0; pageIndex < maxPages; pageIndex++)
+        {
+            var page = await repository.QueryTablesAsync(baseQuery with { After = after }, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("Catalog repository returned a null page.");
+
+            if (onPage(page) || !page.HasMore || string.IsNullOrEmpty(page.NextAfter))
+            {
+                return;
+            }
+
+            if (string.Equals(after, page.NextAfter, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Catalog table keyset pagination failed to advance continuation cursor.");
+            }
+
+            after = page.NextAfter;
+        }
+
+        throw new InvalidOperationException($"Catalog table scan exceeded maximum page bound of {maxPages}.");
     }
 }

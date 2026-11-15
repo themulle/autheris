@@ -124,6 +124,7 @@ public sealed class IntegrationGapBTests
                 Columns = [new TableColumn { ColumnName = "iban", DataType = "varchar", IsSensitive = true }]
             }
         }));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
         var consents = Substitute.For<IConsentRepository>();
         var options = Options.Create(new GatewayOptions());
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, null, consents, options);

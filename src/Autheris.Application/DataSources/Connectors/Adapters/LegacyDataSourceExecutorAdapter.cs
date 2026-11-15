@@ -60,18 +60,21 @@ public sealed class LegacyDataSourceExecutorAdapter : IAutherisConnector
         public async Task<IReadOnlyList<string>> ListSchemasAsync(CancellationToken ct = default)
         {
             if (_repo == null) return Array.Empty<string>();
-            var all = await _repo.GetAllTablesAsync(ct);
+            var all = await Catalog.CatalogTablePageReader.ReadAllAsync(
+                _repo,
+                new Catalog.CatalogTableQuery(Limit: Catalog.CatalogTableQuery.MaxLimit),
+                ct: ct).ConfigureAwait(false);
             return all.Select(t => t.Table.SchemaName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         public async Task<IReadOnlyList<TableIdentifier>> ListTablesAsync(string? schema = null, CancellationToken ct = default)
         {
             if (_repo == null) return Array.Empty<TableIdentifier>();
-            var all = await _repo.GetAllTablesAsync(ct);
-            if (!string.IsNullOrWhiteSpace(schema))
-            {
-                all = all.Where(t => string.Equals(t.Table.SchemaName, schema, StringComparison.OrdinalIgnoreCase)).ToList();
-            }
+            var schemaFilter = string.IsNullOrWhiteSpace(schema) ? null : schema;
+            var all = await Catalog.CatalogTablePageReader.ReadAllAsync(
+                _repo,
+                new Catalog.CatalogTableQuery(Schema: schemaFilter, Limit: Catalog.CatalogTableQuery.MaxLimit),
+                ct: ct).ConfigureAwait(false);
             return all.Select(t => t.Identifier).ToList();
         }
 

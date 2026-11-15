@@ -181,8 +181,11 @@ public sealed class IcebergRestCatalogSecurityTests
     public async Task ListTables_and_ListNamespaces_without_sid_return_nothing()
     {
         var service = ServiceWith(Orders("id"), AllowFor("analyst@corp.com"));
+        var items = new[] { Orders("id") };
         _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { Orders("id") }));
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(items));
+        _metadataRepo.QueryTablesAsync(Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Autheris.Application.Catalog.CatalogTablePage(items, null)));
 
         (await service.ListNamespacesAsync("tenant-1", NoSid())).ShouldBeEmpty();
         (await service.ListTablesAsync("tenant-1", "raw", NoSid())).ShouldBeEmpty();
@@ -299,8 +302,18 @@ public sealed class IcebergRestCatalogSecurityTests
             Table = new Table { SourceName = "tenant-2", SchemaName = "raw", TableName = "cross_tenant_leak", DataSourceType = DataSourceType.LakehouseIceberg }
         };
 
+        var catalogTables = new[] { table1, table2, otherTenantTable };
         _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { table1, table2, otherTenantTable }));
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(catalogTables));
+        _metadataRepo.QueryTablesAsync(Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var domain = ci.Arg<Autheris.Application.Catalog.CatalogTableQuery>().DataSource;
+                var filtered = string.IsNullOrEmpty(domain)
+                    ? catalogTables
+                    : catalogTables.Where(t => string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase)).ToArray();
+                return Task.FromResult(new Autheris.Application.Catalog.CatalogTablePage(filtered, null));
+            });
 
         var catalogService = CreateService(auditRepository: Substitute.For<IAuditLogRepository>());
 

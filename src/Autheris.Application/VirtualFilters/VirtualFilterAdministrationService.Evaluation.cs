@@ -19,17 +19,28 @@ public sealed partial class VirtualFilterAdministrationService
             return filter;
         }
 
+        var sourceScope = string.IsNullOrWhiteSpace(filter.Source) ? null : filter.Source;
         if (filter.Sql != null)
         {
             var catalog = _catalog ?? throw new ArgumentException("Virtual filters with a sql definition need the catalog to be validated.", nameof(filter));
-            var tables = await catalog.GetAllTablesAsync(ct).ConfigureAwait(false);
+            var tables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+                catalog,
+                new Autheris.Application.Catalog.CatalogTableQuery(
+                    DataSource: sourceScope,
+                    Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                ct: ct).ConfigureAwait(false);
             var attributes = _callerAttributes is null ? null : await _callerAttributes.GetAsync(ct).ConfigureAwait(false);
             return SqlFilterCompiler.Validate(filter, tables, _options.AllowedReferenceTables, _dataSources?.RequireTenantColumn == true, _dataSources?.TenantColumnExemptTables, attributes);
         }
 
         if (filter.Structured != null && _catalog != null)
         {
-            var tables = await _catalog.GetAllTablesAsync(ct).ConfigureAwait(false);
+            var tables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+                _catalog,
+                new Autheris.Application.Catalog.CatalogTableQuery(
+                    DataSource: sourceScope,
+                    Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
+                ct: ct).ConfigureAwait(false);
             ValidateStructuredTablesAgainstCatalog(filter, tables);
         }
 
