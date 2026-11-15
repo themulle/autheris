@@ -72,8 +72,8 @@ public static class PatternMatcher
 
         // Convert wildcard glob (*, ?) into regex
         var escaped = Regex.Escape(trimmed)
-            .Replace(@"\*", ".*")
-            .Replace(@"\?", ".");
+            .Replace(@"\*", ".*", StringComparison.Ordinal)
+            .Replace(@"\?", ".", StringComparison.Ordinal);
 
         return $"^{escaped}$";
     }

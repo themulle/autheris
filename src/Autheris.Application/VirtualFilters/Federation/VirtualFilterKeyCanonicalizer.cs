@@ -86,7 +86,7 @@ public static class VirtualFilterKeyCanonicalizer
     private static string Normalize(string? dataType)
     {
         var text = (dataType ?? string.Empty).Trim().ToLowerInvariant();
-        int paren = text.IndexOf('(');
+        int paren = text.IndexOf('(', StringComparison.Ordinal);
         if (paren >= 0)
         {
             text = text[..paren].TrimEnd();

@@ -122,10 +122,10 @@ public static class ODataCsdlGenerator
 
         var escaped = System.Security.SecurityElement.Escape(value) ?? value;
         return escaped
-            .Replace("\r\n", "&#10;")
-            .Replace("\r", "&#13;")
-            .Replace("\n", "&#10;")
-            .Replace("\t", "&#9;");
+            .Replace("\r\n", "&#10;", StringComparison.Ordinal)
+            .Replace("\r", "&#13;", StringComparison.Ordinal)
+            .Replace("\n", "&#10;", StringComparison.Ordinal)
+            .Replace("\t", "&#9;", StringComparison.Ordinal);
     }
 
     public static string GetEntityName(TableMetadata table)

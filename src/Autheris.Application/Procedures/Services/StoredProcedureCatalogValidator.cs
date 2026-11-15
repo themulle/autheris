@@ -318,7 +318,7 @@ public sealed class StoredProcedureCatalogValidator
                 continue;
             }
 
-            string declaredBase = p.SqlType.Contains('(') ? p.SqlType[..p.SqlType.IndexOf('(')] : p.SqlType;
+            string declaredBase = p.SqlType.Contains('(', StringComparison.Ordinal) ? p.SqlType[..p.SqlType.IndexOf('(', StringComparison.Ordinal)] : p.SqlType;
             if (!string.Equals(declaredBase, info.Type, StringComparison.OrdinalIgnoreCase))
             {
                 errors.Add($"Parameter '{p.Name}' is declared as '{declaredBase}' but the procedure expects '{info.Type}'.");

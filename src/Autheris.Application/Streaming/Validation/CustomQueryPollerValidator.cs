@@ -175,7 +175,7 @@ public sealed class CustomQueryPollerValidator
 
         // Multi-statement semicolon check in raw text
         var trimmedQuery = poller.QueryTemplate.Trim();
-        var semicolonIndex = trimmedQuery.IndexOf(';');
+        var semicolonIndex = trimmedQuery.IndexOf(';', StringComparison.Ordinal);
         if (semicolonIndex >= 0 && semicolonIndex < trimmedQuery.Length - 1)
         {
             var remainder = trimmedQuery[(semicolonIndex + 1)..].Trim();

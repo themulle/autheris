@@ -523,7 +523,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
 
                 var strVal = v?.ToString() ?? string.Empty;
                 // Disallow directory traversal sequences in path placeholder parameters
-                if (strVal.Contains("..") || strVal.Contains('/') || strVal.Contains('\\'))
+                if (strVal.Contains("..", StringComparison.Ordinal) || strVal.Contains('/', StringComparison.Ordinal) || strVal.Contains('\\', StringComparison.Ordinal))
                 {
                     throw new System.Security.SecurityException($"Potential path traversal attack in parameter '{k}': path separators and '..' are not allowed.");
                 }
@@ -558,7 +558,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         var fullUrl = baseUrl + expandedPath;
         if (queryParams.Count > 0)
         {
-            var separator = fullUrl.Contains('?') ? "&" : "?";
+            var separator = fullUrl.Contains('?', StringComparison.Ordinal) ? "&" : "?";
             fullUrl += separator + string.Join("&", queryParams);
         }
 

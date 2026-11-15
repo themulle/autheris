@@ -22,7 +22,7 @@ public static class TraceContextResolver
 
         if (activity != null && !string.IsNullOrWhiteSpace(activity.Id))
         {
-            var sanitized = activity.Id.Replace("-", "").Replace("/", "").ToLowerInvariant();
+            var sanitized = activity.Id.Replace("-", "", StringComparison.Ordinal).Replace("/", "", StringComparison.Ordinal).ToLowerInvariant();
             if (sanitized.Length >= 32)
             {
                 return sanitized[..32];

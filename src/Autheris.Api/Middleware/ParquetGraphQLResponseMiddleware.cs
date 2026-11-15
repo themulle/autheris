@@ -63,7 +63,7 @@ public sealed class ParquetGraphQLResponseMiddleware
             return;
         }
 
-        if (context.Request.Path.StartsWithSegments(_graphQlPath))
+        if (context.Request.Path.StartsWithSegments(_graphQlPath, StringComparison.OrdinalIgnoreCase))
         {
             // Subscriptions (WebSocket / SSE / multipart) are never converted.
             if (!(HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)) ||
@@ -117,10 +117,10 @@ public sealed class ParquetGraphQLResponseMiddleware
     /// MCP (JSON-RPC envelope), webhooks, health probes and metrics are never converted or rejected.
     /// </summary>
     private bool IsExcludedPath(PathString path) =>
-        path.StartsWithSegments(_mcpBasePath) ||
-        path.StartsWithSegments("/api/webhooks") ||
-        path.StartsWithSegments("/health") ||
-        path.StartsWithSegments("/metrics") ||
+        path.StartsWithSegments(_mcpBasePath, StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWithSegments("/api/webhooks", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWithSegments("/metrics", StringComparison.OrdinalIgnoreCase) ||
         (path.Value?.Contains("/webhook", StringComparison.OrdinalIgnoreCase) ?? false);
 
     private async Task HandleGraphQLAsync(HttpContext context)

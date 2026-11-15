@@ -553,7 +553,7 @@ public sealed record TableMetadata
             }
 
             return Columns.FirstOrDefault(c =>
-                string.Equals(c.ColumnName.Replace("_", string.Empty).Replace("-", string.Empty), "tenantid", StringComparison.OrdinalIgnoreCase))?.ColumnName;
+                string.Equals(c.ColumnName.Replace("_", string.Empty, StringComparison.Ordinal).Replace("-", string.Empty, StringComparison.Ordinal), "tenantid", StringComparison.OrdinalIgnoreCase))?.ColumnName;
         }
         init => _tenantColumnName = value;
     }

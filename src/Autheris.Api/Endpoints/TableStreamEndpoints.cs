@@ -103,9 +103,9 @@ public static class TableStreamEndpoints
 
         // 1. Validate route identifiers
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(table) ||
-            domain.Contains('/') || schema.Contains('/') || table.Contains('/') ||
-            domain.Contains('\\') || schema.Contains('\\') || table.Contains('\\') ||
-            domain.Contains(';') || schema.Contains(';') || table.Contains(';'))
+            domain.Contains('/', StringComparison.Ordinal) || schema.Contains('/', StringComparison.Ordinal) || table.Contains('/', StringComparison.Ordinal) ||
+            domain.Contains('\\', StringComparison.Ordinal) || schema.Contains('\\', StringComparison.Ordinal) || table.Contains('\\', StringComparison.Ordinal) ||
+            domain.Contains(';', StringComparison.Ordinal) || schema.Contains(';', StringComparison.Ordinal) || table.Contains(';', StringComparison.Ordinal))
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The domain, schema and table must be valid single segment identifiers.", ct).ConfigureAwait(false);
             return;

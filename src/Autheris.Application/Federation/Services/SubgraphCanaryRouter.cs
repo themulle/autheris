@@ -100,7 +100,7 @@ public sealed class SubgraphCanaryRouter : ISubgraphCanaryRouter
             // 4. Percentage-based canary weight
             if (rule.WeightPercent > 0)
             {
-                var hash = Math.Abs(identityKey.GetHashCode());
+                var hash = Math.Abs(identityKey.GetHashCode(StringComparison.Ordinal));
                 var bucket = hash % 100;
                 if (bucket >= rule.WeightPercent)
                 {

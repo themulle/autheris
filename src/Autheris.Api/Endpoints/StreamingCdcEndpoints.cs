@@ -259,7 +259,7 @@ public static class StreamingCdcEndpoints
         if (!CdcCustomHeaders.WithinBounds(subscription.CustomHeaders)
             || (subscription.CustomHeaders is { } headers
             && headers.Any(h => Autheris.Application.Webhooks.WebhookDeliveryClient.IsForbiddenCustomHeader(h.Key)
-                                || h.Value is null || h.Value.Contains('\r') || h.Value.Contains('\n') || h.Key.Contains('\r') || h.Key.Contains('\n'))))
+                                || h.Value is null || h.Value.Contains('\r', StringComparison.Ordinal) || h.Value.Contains('\n', StringComparison.Ordinal) || h.Key.Contains('\r', StringComparison.Ordinal) || h.Key.Contains('\n', StringComparison.Ordinal))))
         {
             return SafeErrorResults.BadRequest("CDC_CUSTOM_HEADER_NOT_ALLOWED", "A custom header is not allowed.", context);
         }

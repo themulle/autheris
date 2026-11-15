@@ -135,7 +135,7 @@ public static class VirtualFilterBindingValidator
         // An exact target names one endpoint, so its declared capability can be checked now. A pattern can match many
         // endpoints; the planner then decides per table (format_unsupported: Tier 3, or a denial for pushdown_only).
         if (catalog == null || binding.TargetPattern is not { } target || TargetPatternMatcher.IsRegex(target) ||
-            target.Contains('*') || target.Contains('?') || !TableIdentifier.TryParse(target, out var table))
+            target.Contains('*', StringComparison.Ordinal) || target.Contains('?', StringComparison.Ordinal) || !TableIdentifier.TryParse(target, out var table))
         {
             return;
         }

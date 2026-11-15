@@ -129,7 +129,7 @@ public static class DatasetDataEndpoints
         }
 
         var tableId = new TableIdentifier(domain, schema, table);
-        var escapedId = id.Replace("'", "''");
+        var escapedId = id.Replace("'", "''", StringComparison.Ordinal);
         var filter = $"id eq '{escapedId}'";
 
         await ExecuteAndStreamQueryAsync(

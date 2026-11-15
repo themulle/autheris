@@ -94,7 +94,7 @@ public static class PushabilityMatrix
 
         if (like.Pattern is LiteralExpression lit && lit.Value is string patternText)
         {
-            return patternText.Contains('[') || patternText.Contains(']');
+            return patternText.Contains('[', StringComparison.Ordinal) || patternText.Contains(']', StringComparison.Ordinal);
         }
 
         return false;

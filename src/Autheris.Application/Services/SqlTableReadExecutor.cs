@@ -460,7 +460,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         }
 
         // Defense in depth: normalize ISO strings from DB without explicit UTC indicator to canonical UTC 'Z'
-        if (rawValue is string s && s.Length >= 19 && s[10] == 'T' && !s.EndsWith('Z') && !s.Contains('+') && s.IndexOf('-', 11) == -1)
+        if (rawValue is string s && s.Length >= 19 && s[10] == 'T' && !s.EndsWith('Z') && !s.Contains('+', StringComparison.Ordinal) && s.IndexOf('-', 11) == -1)
         {
             return s + "Z";
         }

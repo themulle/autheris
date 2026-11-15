@@ -28,7 +28,7 @@ public static class HealthCheckCli
             }
             else if (!string.IsNullOrWhiteSpace(urls))
             {
-                var firstUrl = urls.Split(';')[0].Replace("+", "127.0.0.1").Replace("*", "127.0.0.1").TrimEnd('/');
+                var firstUrl = urls.Split(';')[0].Replace("+", "127.0.0.1", StringComparison.Ordinal).Replace("*", "127.0.0.1", StringComparison.Ordinal).TrimEnd('/');
                 targetUrl = $"{firstUrl}/health/live";
             }
         }

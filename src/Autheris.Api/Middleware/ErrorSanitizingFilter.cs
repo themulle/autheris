@@ -186,7 +186,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     {
         if (string.IsNullOrWhiteSpace(message)) return false;
         var lower = message.ToLowerInvariant();
-        return SensitivePatterns.Any(pattern => lower.Contains(pattern));
+        return SensitivePatterns.Any(pattern => lower.Contains(pattern, StringComparison.Ordinal));
     }
 
     public IError OnError(IError error)

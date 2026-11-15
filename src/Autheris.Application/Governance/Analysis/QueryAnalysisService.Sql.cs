@@ -478,7 +478,7 @@ public sealed partial class QueryAnalysisService
         Dictionary<string, List<string>> targetMap)
     {
         var cleaned = rawColumnRef.Trim().Trim('"', '`', '[', ']');
-        var dotIdx = cleaned.IndexOf('.');
+        var dotIdx = cleaned.IndexOf('.', StringComparison.Ordinal);
         if (dotIdx > 0 && dotIdx < cleaned.Length - 1)
         {
             var prefix = cleaned[..dotIdx].Trim();

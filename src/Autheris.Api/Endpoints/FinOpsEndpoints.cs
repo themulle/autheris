@@ -137,6 +137,6 @@ public static class FinOpsEndpoints
             }
         }
 
-        return "\"" + val.Replace("\"", "\"\"") + "\"";
+        return "\"" + val.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
     }
 }

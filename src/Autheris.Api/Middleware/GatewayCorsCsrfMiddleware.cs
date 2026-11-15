@@ -59,7 +59,7 @@ public sealed class GatewayCorsCsrfMiddleware
 
         bool isGraphQLEndpoint = (HttpMethods.IsPost(context.Request.Method) ||
              (HttpMethods.IsGet(context.Request.Method) && (context.Request.Query.ContainsKey("query") || isWebSocketUpgrade)))
-            && context.Request.Path.StartsWithSegments(_endpoint);
+            && context.Request.Path.StartsWithSegments(_endpoint, StringComparison.OrdinalIgnoreCase);
 
         bool isStateChangingMethod = HttpMethods.IsPost(context.Request.Method) ||
                                      HttpMethods.IsPut(context.Request.Method) ||

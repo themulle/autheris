@@ -497,9 +497,9 @@ public sealed class SemanticMcpCompiler(
     {
         if (string.IsNullOrWhiteSpace(dataType)) return "string";
         var dt = dataType.Trim().ToLowerInvariant();
-        if (dt.Contains("int") || dt.Contains("long") || dt.Contains("serial")) return "integer";
-        if (dt.Contains("float") || dt.Contains("double") || dt.Contains("decimal") || dt.Contains("numeric") || dt.Contains("money")) return "number";
-        if (dt.Contains("bool")) return "boolean";
+        if (dt.Contains("int", StringComparison.Ordinal) || dt.Contains("long", StringComparison.Ordinal) || dt.Contains("serial", StringComparison.Ordinal)) return "integer";
+        if (dt.Contains("float", StringComparison.Ordinal) || dt.Contains("double", StringComparison.Ordinal) || dt.Contains("decimal", StringComparison.Ordinal) || dt.Contains("numeric", StringComparison.Ordinal) || dt.Contains("money", StringComparison.Ordinal)) return "number";
+        if (dt.Contains("bool", StringComparison.Ordinal)) return "boolean";
         return "string";
     }
 }

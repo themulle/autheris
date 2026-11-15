@@ -95,10 +95,10 @@ internal static class AdvancedRlsPredicateBuilder
             AdvancedRlsFilterGenerator.ValidateQualifiedIdentifier(filter.TargetTemporalColumn!, "TargetTemporalColumn");
             AdvancedRlsFilterGenerator.ValidateQualifiedIdentifier(filter.DependentValidFromColumn!, "DependentValidFromColumn");
 
-            ColumnReference Temporal() => filter.TargetTemporalColumn!.Contains('.')
+            ColumnReference Temporal() => filter.TargetTemporalColumn!.Contains('.', StringComparison.Ordinal)
                 ? Col(filter.TargetTemporalColumn!)
                 : PolicyParameterNamer.Column($"{RowFilterAliases.Target}.{filter.TargetTemporalColumn!}");
-            ColumnReference Dep(string column) => column.Contains('.') ? Col(column) : PolicyParameterNamer.Column($"{depAlias}.{column}");
+            ColumnReference Dep(string column) => column.Contains('.', StringComparison.Ordinal) ? Col(column) : PolicyParameterNamer.Column($"{depAlias}.{column}");
 
             conditions.Add(new BinaryExpression(Temporal(), BinaryOperator.GreaterThanOrEqual, Dep(filter.DependentValidFromColumn!)));
             if (!string.IsNullOrWhiteSpace(filter.DependentValidToColumn))
@@ -179,7 +179,7 @@ internal static class AdvancedRlsPredicateBuilder
 
     private static IEnumerable<Expression> SubqueryPredicates(string json, Func<string, string> rebase, string defaultAlias, PolicyParameterNamer namer)
     {
-        string Qualify(string column) => column.Contains('.') ? column : $"{defaultAlias}.{column}";
+        string Qualify(string column) => column.Contains('.', StringComparison.Ordinal) ? column : $"{defaultAlias}.{column}";
         var conditions = new List<Expression>();
         try
         {

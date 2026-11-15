@@ -131,7 +131,7 @@ public sealed record VirtualFilter
 
         if (Sql != null)
         {
-            if (string.IsNullOrWhiteSpace(Sql) || Sql.Length > MaxSqlLength || Sql.Contains('\0'))
+            if (string.IsNullOrWhiteSpace(Sql) || Sql.Length > MaxSqlLength || Sql.Contains('\0', StringComparison.Ordinal))
             {
                 throw new ArgumentException($"The sql definition must be non-empty and at most {MaxSqlLength} characters.", nameof(Sql));
             }
@@ -528,7 +528,7 @@ public static partial class VirtualFilterNames
         }
     }
 
-    public static string ColumnOf(string qualified) => qualified[(qualified.IndexOf('.') + 1)..];
+    public static string ColumnOf(string qualified) => qualified[(qualified.IndexOf('.', StringComparison.Ordinal) + 1)..];
 
     internal static string Sha256(string canonical) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));

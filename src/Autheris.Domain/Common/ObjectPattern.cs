@@ -176,7 +176,7 @@ public sealed class ObjectPattern
             }
 
             bool isExpression = text[0] == '(' && text[^1] == ')' && IsSingleGroup(text);
-            if (!isExpression && (text.Contains('(') || text.Contains(')')))
+            if (!isExpression && (text.Contains('(', StringComparison.Ordinal) || text.Contains(')', StringComparison.Ordinal)))
             {
                 error = $"Segment {index + 1} ('{text}'): parentheses must enclose the whole segment.";
                 return false;

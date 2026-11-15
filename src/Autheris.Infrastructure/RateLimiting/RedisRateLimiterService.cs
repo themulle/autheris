@@ -1,3 +1,4 @@
+using System;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -169,7 +170,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
     {
         try
         {
-            var sanitizedIp = ip.Replace("{", "_").Replace("}", "_");
+            var sanitizedIp = ip.Replace("{", "_", StringComparison.Ordinal).Replace("}", "_", StringComparison.Ordinal);
             var key = (RedisKey)$"{_prefix}ratelimit:ip:{sanitizedIp}";
             var res = (RedisResult[]?)await PreparedPreAuthIpScript.EvaluateAsync(
                 _db,
@@ -215,7 +216,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
     {
         try
         {
-            var sanitizedSid = sid.Replace("{", "_").Replace("}", "_");
+            var sanitizedSid = sid.Replace("{", "_", StringComparison.Ordinal).Replace("}", "_", StringComparison.Ordinal);
             var key = (RedisKey)$"{_prefix}ratelimit:sid:{sanitizedSid}";
             var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600; // 10 minutes idle expiry
@@ -277,7 +278,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
     {
         try
         {
-            var sanitizedKey = key.Replace("{", "_").Replace("}", "_");
+            var sanitizedKey = key.Replace("{", "_", StringComparison.Ordinal).Replace("}", "_", StringComparison.Ordinal);
             var redisKey = (RedisKey)$"{_prefix}ratelimit:quota:{sanitizedKey}";
             var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600;
@@ -336,7 +337,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
 
         try
         {
-            var sanitizedKey = key.Replace("{", "_").Replace("}", "_");
+            var sanitizedKey = key.Replace("{", "_", StringComparison.Ordinal).Replace("}", "_", StringComparison.Ordinal);
             var redisKey = (RedisKey)$"{_prefix}ratelimit:quota:{sanitizedKey}";
             var nowMs = _timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
             var ttlSeconds = 600;
@@ -396,7 +397,7 @@ public sealed class RedisRateLimiterService : IRateLimiterService
 
         try
         {
-            var sanitizedKey = key.Replace("{", "_").Replace("}", "_");
+            var sanitizedKey = key.Replace("{", "_", StringComparison.Ordinal).Replace("}", "_", StringComparison.Ordinal);
             var redisKey = (RedisKey)$"{_prefix}ratelimit:quota:{sanitizedKey}";
 
             var data = await _db.HashGetAsync(redisKey, [(RedisValue)"tokens", (RedisValue)"last_refill"]).ConfigureAwait(false);

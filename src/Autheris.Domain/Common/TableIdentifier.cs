@@ -44,7 +44,7 @@ public readonly record struct TableIdentifier : IEquatable<TableIdentifier>
 
     private static void ValidateComponent(string component, string paramName)
     {
-        if (component.Contains('\0') || component.Contains('\r') || component.Contains('\n') || component.Contains('.'))
+        if (component.Contains('\0', StringComparison.Ordinal) || component.Contains('\r', StringComparison.Ordinal) || component.Contains('\n', StringComparison.Ordinal) || component.Contains('.', StringComparison.Ordinal))
         {
             throw new ArgumentException($"TableIdentifier component '{paramName}' must not contain null bytes, control characters, or dot separators: '{component}'", paramName);
         }

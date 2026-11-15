@@ -338,7 +338,7 @@ public sealed class DatasourceTestingService : IDatasourceTestingService
                     }
 
                     // CRLF injection prevention
-                    if (k.Contains('\r') || k.Contains('\n') || (v != null && (v.Contains('\r') || v.Contains('\n'))))
+                    if (k.Contains('\r', StringComparison.Ordinal) || k.Contains('\n', StringComparison.Ordinal) || (v != null && (v.Contains('\r', StringComparison.Ordinal) || v.Contains('\n', StringComparison.Ordinal))))
                     {
                         continue;
                     }

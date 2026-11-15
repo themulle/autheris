@@ -111,7 +111,7 @@ public sealed partial class ColumnValueProfileService : IColumnValueProfileServi
                 numericValues.Add(parsedDec);
             }
             else if (DateTimeOffset.TryParse(str, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsedDate) &&
-                     str.Length >= 8 && str.Contains('-'))
+                     str.Length >= 8 && str.Contains('-', StringComparison.Ordinal))
             {
                 dateValues.Add(parsedDate);
             }

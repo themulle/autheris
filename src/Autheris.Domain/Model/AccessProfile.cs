@@ -24,7 +24,7 @@ public sealed class AccessProfile
     /// EP-01: True if any target table pattern contains a wildcard ('*' or '?').
     /// </summary>
     public bool HasWildcardPattern =>
-        TargetTables != null && TargetTables.Exists(p => p.Contains('*') || p.Contains('?'));
+        TargetTables != null && TargetTables.Exists(p => p.Contains('*', StringComparison.Ordinal) || p.Contains('?', StringComparison.Ordinal));
 
     /// <summary>
     /// expiry after the read-time clamp. A profile with typed assignments (as loaded for a caller: its effective, matched ones) stays active while ANY

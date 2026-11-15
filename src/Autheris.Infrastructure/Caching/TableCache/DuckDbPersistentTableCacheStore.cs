@@ -145,7 +145,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                         using var testConn = new DuckDBConnection("DataSource=:memory:");
                         testConn.Open();
                         using var cmd = testConn.CreateCommand();
-                        cmd.CommandText = $"ATTACH '{dbFile.FullName.Replace("'", "''")}' AS test_g; DETACH test_g;";
+                        cmd.CommandText = $"ATTACH '{dbFile.FullName.Replace("'", "''", StringComparison.Ordinal)}' AS test_g; DETACH test_g;";
                         cmd.ExecuteNonQuery();
                         isUnencrypted = true;
                     }
@@ -196,7 +196,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
 
     private string GetAttachSql(string dbPath, long epoch)
     {
-        var escapedPath = dbPath.Replace("'", "''");
+        var escapedPath = dbPath.Replace("'", "''", StringComparison.Ordinal);
         if (_options.Encryption.Enabled && _masterEncryptionKey != null)
         {
             var dek = TableCacheCryptoHelper.DeriveKey(_masterEncryptionKey, info: Encoding.UTF8.GetBytes("duckdb-gen-" + epoch));

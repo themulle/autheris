@@ -438,7 +438,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 // Column-level RLS filter auto-sync (F-DBT-6)
                 if (colDef.Meta.TryGetValue("rls_filter", out var colRls) && !string.IsNullOrWhiteSpace(colRls))
                 {
-                    if (!existingPending.Any(p => string.Equals(p.ColumnName, colName, StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("RLS_FILTER:")))
+                    if (!existingPending.Any(p => string.Equals(p.ColumnName, colName, StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("RLS_FILTER:", StringComparison.Ordinal)))
                     {
                         var proposal = new DbtMetadataProposal(
                             Id: Guid.NewGuid(),
@@ -465,7 +465,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             // Model-level Policy & RLS auto-sync (F-DBT-6)
             if (model.Meta.TryGetValue("rls_filter", out var modelRls) && !string.IsNullOrWhiteSpace(modelRls))
             {
-                if (!existingPending.Any(p => string.Equals(p.ColumnName, "*", StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("RLS_FILTER:")))
+                if (!existingPending.Any(p => string.Equals(p.ColumnName, "*", StringComparison.OrdinalIgnoreCase) && p.SuggestedRuleType.StartsWith("RLS_FILTER:", StringComparison.Ordinal)))
                 {
                     var proposal = new DbtMetadataProposal(
                         Id: Guid.NewGuid(),

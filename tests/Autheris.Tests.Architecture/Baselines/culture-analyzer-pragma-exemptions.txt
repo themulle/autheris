@@ -1,0 +1,2 @@
+# Shrink-only allowlist of production files permitted to carry `#pragma warning disable CA1307|CA1309|CA1310` (SEC-OI-613-4).
+# Format: <repo-relative-path>\t<Reason>

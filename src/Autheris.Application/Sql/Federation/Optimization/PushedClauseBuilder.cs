@@ -34,9 +34,9 @@ public static class PushedClauseBuilder
         }
 
         var normalized = dataType.Trim().ToLowerInvariant();
-        if (normalized.Contains('('))
+        if (normalized.Contains('(', StringComparison.Ordinal))
         {
-            normalized = normalized[..normalized.IndexOf('(')].Trim();
+            normalized = normalized[..normalized.IndexOf('(', StringComparison.Ordinal)].Trim();
         }
 
         return normalized switch

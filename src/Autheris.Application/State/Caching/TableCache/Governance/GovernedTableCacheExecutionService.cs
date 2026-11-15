@@ -173,7 +173,7 @@ public sealed class GovernedTableCacheExecutionService
         // -------------------------------------------------------------------
         var injectedFilters = new List<string>
         {
-            $"\"tenant_id\" = '{caller.TenantId.Value.Replace("'", "''")}'"
+            $"\"tenant_id\" = '{caller.TenantId.Value.Replace("'", "''", StringComparison.Ordinal)}'"
         };
 
         if (caller.Attributes != null)
@@ -181,7 +181,7 @@ public sealed class GovernedTableCacheExecutionService
             foreach (var (attrKey, attrVal) in caller.Attributes)
             {
                 TableCacheQueryRouter.ValidateIdentifier(attrKey);
-                injectedFilters.Add($"\"{attrKey}\" = '{attrVal.Replace("'", "''")}'");
+                injectedFilters.Add($"\"{attrKey}\" = '{attrVal.Replace("'", "''", StringComparison.Ordinal)}'");
             }
         }
 

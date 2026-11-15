@@ -478,7 +478,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         }
 
         // No values; the rule id (a guid) is the only identifier and is part of the dedupe key, not of the message template data of other sites.
-        _logger?.LogWarning("{Message} Key={Key}", message, key[(key.IndexOf(':') + 1)..]);
+        _logger?.LogWarning("{Message} Key={Key}", message, key[(key.IndexOf(':', StringComparison.Ordinal) + 1)..]);
     }
 
     private static void FallbackAll(RowFilterKeySetReport report, IEnumerable<Site> candidates, KeySetFallbackReason reason)

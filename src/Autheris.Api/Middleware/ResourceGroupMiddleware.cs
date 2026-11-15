@@ -47,9 +47,9 @@ public sealed class ResourceGroupMiddleware
         var path = context.Request.Path;
 
         // Skip system, metrics, and health endpoints so observability is never starved
-        if (path.StartsWithSegments("/health") ||
-            path.StartsWithSegments("/metrics") ||
-            path.StartsWithSegments("/api/governance/system"))
+        if (path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWithSegments("/metrics", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWithSegments("/api/governance/system", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;
@@ -137,13 +137,13 @@ public sealed class ResourceGroupMiddleware
         // MCP streamable-HTTP POSTs advertise text/event-stream but are short-lived tool calls: keep them in the slots.
         var accept = context.Request.Headers.Accept.ToString();
         if (accept.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) &&
-            (HttpMethods.IsGet(context.Request.Method) || !context.Request.Path.StartsWithSegments("/mcp")))
+            (HttpMethods.IsGet(context.Request.Method) || !context.Request.Path.StartsWithSegments("/mcp", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
 
         var path = context.Request.Path.Value ?? string.Empty;
-        return context.Request.Path.StartsWithSegments("/mcp") &&
+        return context.Request.Path.StartsWithSegments("/mcp", StringComparison.OrdinalIgnoreCase) &&
                path.EndsWith("/sse", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -176,7 +176,7 @@ public sealed class ResourceGroupMiddleware
             };
         }
 
-        var tenantId = rawTenantId.Replace("\r", string.Empty).Replace("\n", string.Empty).Trim();
+        var tenantId = rawTenantId.Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal).Trim();
         if (tenantId.Length > 64) tenantId = tenantId[..64];
         return tenantId.Length == 0 ? UnscopedTenantKey : tenantId;
     }
@@ -232,12 +232,12 @@ public sealed class ResourceGroupMiddleware
 
     private static ResourceGroupTier ResolvePathTier(PathString path)
     {
-        if (path.StartsWithSegments("/mcp"))
+        if (path.StartsWithSegments("/mcp", StringComparison.OrdinalIgnoreCase))
         {
             return ResourceGroupTier.AutonomousAgents;
         }
 
-        if (path.StartsWithSegments("/odata"))
+        if (path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
         {
             return ResourceGroupTier.BulkAnalytics;
         }

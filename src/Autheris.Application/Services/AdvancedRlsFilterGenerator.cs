@@ -120,11 +120,11 @@ public static partial class AdvancedRlsFilterGenerator
             ValidateQualifiedIdentifier(filter.TargetTemporalColumn, "TargetTemporalColumn");
             ValidateQualifiedIdentifier(filter.DependentValidFromColumn, "DependentValidFromColumn");
 
-            var quotedTargetTemporal = filter.TargetTemporalColumn.Contains('.')
+            var quotedTargetTemporal = filter.TargetTemporalColumn.Contains('.', StringComparison.Ordinal)
                 ? QuoteQualifiedColumn(Rebase(filter.TargetTemporalColumn), dialect)
                 : $"{quotedTargetAlias}.{QuoteSingleIdentifier(filter.TargetTemporalColumn, dialect)}";
 
-            var quotedValidFrom = filter.DependentValidFromColumn.Contains('.')
+            var quotedValidFrom = filter.DependentValidFromColumn.Contains('.', StringComparison.Ordinal)
                 ? QuoteQualifiedColumn(Rebase(filter.DependentValidFromColumn), dialect)
                 : $"{quotedDepAlias}.{QuoteSingleIdentifier(filter.DependentValidFromColumn, dialect)}";
 
@@ -133,7 +133,7 @@ public static partial class AdvancedRlsFilterGenerator
             if (!string.IsNullOrWhiteSpace(filter.DependentValidToColumn))
             {
                 ValidateQualifiedIdentifier(filter.DependentValidToColumn, "DependentValidToColumn");
-                var quotedValidTo = filter.DependentValidToColumn.Contains('.')
+                var quotedValidTo = filter.DependentValidToColumn.Contains('.', StringComparison.Ordinal)
                     ? QuoteQualifiedColumn(Rebase(filter.DependentValidToColumn), dialect)
                     : $"{quotedDepAlias}.{QuoteSingleIdentifier(filter.DependentValidToColumn, dialect)}";
 
@@ -239,7 +239,7 @@ public static partial class AdvancedRlsFilterGenerator
 
         string Qualify(string column)
         {
-            if (!column.Contains('.') && !string.IsNullOrWhiteSpace(defaultAlias))
+            if (!column.Contains('.', StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(defaultAlias))
             {
                 return $"{defaultAlias}.{column}";
             }
@@ -363,7 +363,7 @@ public static partial class AdvancedRlsFilterGenerator
     /// <summary>Rebases "configuredTargetAlias.column" onto the reserved target alias; other qualifiers stay.</summary>
     internal static string RebaseTargetQualifier(string qualifiedColumn, string configuredTargetAlias)
     {
-        int dot = qualifiedColumn.IndexOf('.');
+        int dot = qualifiedColumn.IndexOf('.', StringComparison.Ordinal);
         if (dot > 0 && string.Equals(qualifiedColumn[..dot], configuredTargetAlias, StringComparison.OrdinalIgnoreCase))
         {
             return RowFilterAliases.Target + qualifiedColumn[dot..];
