@@ -48,6 +48,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     private readonly Autheris.Application.Policy.WriteGrants.IWriteGrantEvaluator? _writeGrantEvaluator;
     private readonly TimeProvider _timeProvider;
     private readonly Autheris.Application.Policy.RowScopes.RowScopeCompiler? _rowScopeCompiler;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
+    private readonly IDataOwnershipRepository? _ownershipRepository;
 
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
@@ -68,7 +70,9 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         Autheris.Application.Policy.WriteGrants.IWriteGrantEvaluator? writeGrantEvaluator = null,
         Autheris.Application.Policy.WriteGrants.IRowPolicyDependencyIndex? policyDependencyIndex = null,
         TimeProvider? timeProvider = null,
-        Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null)
+        Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null,
+        Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
+        IDataOwnershipRepository? ownershipRepository = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _resolutionService = resolutionService;
@@ -87,6 +91,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         _logger = logger ?? NullLogger<AccessDecisionPoint>.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _rowScopeCompiler = rowScopeCompiler;
+        _catalogVersionProvider = catalogVersionProvider;
+        _ownershipRepository = ownershipRepository;
         _writeGrantEvaluator = writeGrantEvaluator ?? (_consentRepository != null
             ? new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(_consentRepository, policyDependencyIndex, _timeProvider)
             : null);
@@ -109,7 +115,10 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 _restrictedScopes,
                 _authPluginHost,
                 _auditWriter,
-                _rowScopeCompiler);
+                _rowScopeCompiler,
+                _catalogVersionProvider,
+                _ownershipRepository,
+                _timeProvider);
         }
     }
 

@@ -91,6 +91,9 @@ public sealed partial class TableAccessPolicy
     private readonly IAuthPluginHost? _authPluginHost;
     private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
     private readonly Autheris.Application.Policy.RowScopes.RowScopeCompiler? _rowScopeCompiler;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
+    private readonly IDataOwnershipRepository? _ownershipRepository;
+    private readonly TimeProvider _timeProvider;
 
     /// <param name="mandatoryFilters">
     /// Virtual filters; required on purpose: a decision point without it would silently skip them. Use
@@ -112,7 +115,10 @@ public sealed partial class TableAccessPolicy
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
         IAuthPluginHost? authPluginHost = null,
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
-        Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null)
+        Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null,
+        Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
+        IDataOwnershipRepository? ownershipRepository = null,
+        TimeProvider? timeProvider = null)
     {
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _callerAttributes = callerAttributes;
@@ -121,6 +127,9 @@ public sealed partial class TableAccessPolicy
         _authPluginHost = authPluginHost;
         _auditWriter = auditWriter;
         _rowScopeCompiler = rowScopeCompiler;
+        _catalogVersionProvider = catalogVersionProvider;
+        _ownershipRepository = ownershipRepository;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));

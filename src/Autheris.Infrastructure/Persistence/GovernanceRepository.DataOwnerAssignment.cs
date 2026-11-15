@@ -43,7 +43,17 @@ public partial class GovernanceRepository : IDataOwnerAssignmentRepository
         var result = await RunDataOwnerAssignmentCoreAsync(conn, tx, tableLookupSql, request, ct).ConfigureAwait(false);
         if (result.Success && !request.DryRun)
         {
+            Autheris.Application.Catalog.CatalogVersion? newVersion = null;
+            if (result.Changes.Count > 0)
+            {
+                newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
+            }
+
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
+            if (newVersion is { } bumpedVersion)
+            {
+                await PublishCatalogChangedEventAsync(bumpedVersion, ct).ConfigureAwait(false);
+            }
         }
         else
         {

@@ -86,5 +86,6 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService, Autheris.Application.ConsentRequests.ConsentRequestService>();
         services.AddHostedService<Autheris.Application.ConsentRequests.Events.ConsentWebhookDispatcherHostedService>();
         services.AddHostedService<Autheris.Application.Governance.Grants.GrantExpiryHostedService>();
+        services.AddHostedService<Autheris.Application.Policy.RowScopes.PatternCoverageMonitor>();
     }
 }

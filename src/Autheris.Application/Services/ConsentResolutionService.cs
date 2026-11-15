@@ -36,13 +36,27 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         IReadOnlyList<Consent> activeConsents,
         DatabaseDialect dialect = DatabaseDialect.SqlServer,
         IReadOnlySet<Sid>? allUserSids = null,
-        IReadOnlySet<string>? callerScopes = null)
+        IReadOnlySet<string>? callerScopes = null) =>
+        ResolveAccess(userSid, subjectGroupSids, userRoles, table, activeConsents, dialect, allUserSids, callerScopes, tableMetadata: null);
+
+    public TableAccessDecision ResolveAccess(
+        Sid userSid,
+        IReadOnlySet<Sid> subjectGroupSids,
+        IReadOnlySet<string> userRoles,
+        TableIdentifier table,
+        IReadOnlyList<Consent> activeConsents,
+        DatabaseDialect dialect,
+        IReadOnlySet<Sid>? allUserSids,
+        IReadOnlySet<string>? callerScopes,
+        TableMetadata? tableMetadata)
     {
         var now = DateTimeOffset.UtcNow;
 
-        // 1. Identify applicable active consents for Subject Set S
+        // 1. Identify applicable active consents for Subject Set S (hidden objects never get Allow from pattern grants)
+        bool isHiddenTable = tableMetadata?.Table.DiscoveryHidden == true;
         var applicable = activeConsents
-            .Where(c => IsApplicable(c, table, now, userSid, subjectGroupSids, userRoles, allUserSids))
+            .Where(c => IsApplicable(c, table, now, userSid, subjectGroupSids, userRoles, allUserSids)
+                        && !(isHiddenTable && c.IsPatternGrant && c.Effect == ConsentEffect.Allow))
             .ToList();
 
         // Separate into A (ALLOW) and D (DENY). Write-only consents (WriteRules without ColumnRules) never grant read access.
@@ -73,7 +87,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             var clampedConsent = activeConsents
                 .Where(c => c.Effect == ConsentEffect.Allow &&
                             (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0) &&
-                            c.TableIdentifier == table &&
+                            IsTableTargetMatch(c, table) &&
+                            !(isHiddenTable && c.IsPatternGrant) &&
                             !c.IsRevoked &&
                             c.ValidFrom <= now &&
                             now < c.ValidTo &&
@@ -140,12 +155,21 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             }
         }
 
+        if (tableMetadata != null && applicable.Any(c => c.IsPatternGrant))
+        {
+            foreach (var col in tableMetadata.Columns)
+            {
+                allReferencedColumns.Add(col.ColumnName);
+            }
+        }
+
         var unconstrainedConsents = aConsents.Where(c => c.RowFilters.Count == 0 && c.RowScope.Count == 0).ToList();
         var rowConstrainedGroups = unconstrainedConsents.Count > 0
             ? new List<List<Consent>>()
             : BuildRowFilterGroups(aConsents);
 
         var columnAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+        bool hasConcreteUnconstrainedAllow = aConsents.Any(c => !c.IsPatternGrant && c.ColumnRules.Count == 0);
         foreach (var column in allReferencedColumns)
         {
             if (hardDeniedColumns.Contains(column))
@@ -154,11 +178,44 @@ public sealed class ConsentResolutionService : IConsentResolutionService
                 continue;
             }
 
+            var metaCol = tableMetadata?.GetColumn(column);
+            if (metaCol?.DiscoveryHidden == true && !hasConcreteUnconstrainedAllow)
+            {
+                bool hasConcreteColumnAllow = aConsents.Any(c =>
+                    !c.IsPatternGrant &&
+                    c.ColumnRules.Any(r =>
+                        string.Equals(r.ColumnName, column, StringComparison.OrdinalIgnoreCase) &&
+                        r.AccessLevel > ColumnAccessLevel.Deny &&
+                        RuleAppliesToScopes(r, callerScopes)));
+                if (!hasConcreteColumnAllow)
+                {
+                    columnAccess[column] = ColumnAccessLevel.Deny;
+                    continue;
+                }
+            }
+
             var level = ResolveColumnLevel(column, unconstrainedConsents, rowConstrainedGroups, callerScopes);
 
             if (maskedOnlyColumns.Contains(column) && level == ColumnAccessLevel.Clear)
             {
                 level = ColumnAccessLevel.Mask;
+            }
+
+            if (level == ColumnAccessLevel.Clear &&
+                tableMetadata != null &&
+                TableAccessDecision.IsCatalogSensitive(column, tableMetadata))
+            {
+                bool hasConcreteOrExplicitClear = aConsents.Any(c =>
+                    !c.IsPatternGrant
+                        ? GetConsentColumnLevel(c, column, callerScopes) == ColumnAccessLevel.Clear
+                        : c.ColumnRules.Any(r =>
+                            string.Equals(r.ColumnName, column, StringComparison.OrdinalIgnoreCase) &&
+                            r.AccessLevel == ColumnAccessLevel.Clear &&
+                            RuleAppliesToScopes(r, callerScopes)));
+                if (!hasConcreteOrExplicitClear)
+                {
+                    level = ColumnAccessLevel.Mask;
+                }
             }
 
             columnAccess[column] = level;
@@ -538,7 +595,9 @@ public sealed class ConsentResolutionService : IConsentResolutionService
 
         if (matchingRules.Count == 0)
         {
-            return ColumnAccessLevel.Deny;
+            return consent.IsPatternGrant && consent.ColumnSetMode == ColumnSetMode.AllNonHidden
+                ? ColumnAccessLevel.Clear
+                : ColumnAccessLevel.Deny;
         }
 
         var baseRules = matchingRules
@@ -600,7 +659,18 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         IReadOnlySet<Sid> subjectGroupSids,
         IReadOnlySet<string> userRoles,
         IReadOnlySet<Sid>? allUserSids = null) =>
-        consent.IsActive(now) && consent.TableIdentifier == table && IsSubjectMatch(consent, userSid, subjectGroupSids, userRoles, allUserSids);
+        consent.IsActive(now) && IsTableTargetMatch(consent, table) && IsSubjectMatch(consent, userSid, subjectGroupSids, userRoles, allUserSids);
+
+    internal static bool IsTableTargetMatch(Consent consent, TableIdentifier table)
+    {
+        if (!consent.IsPatternGrant)
+        {
+            return consent.TableIdentifier == table;
+        }
+
+        return Autheris.Application.Policy.RowScopes.ObjectPatternMatcher.TryParse(consent.ObjectPattern, out var matcher, out _) &&
+               matcher!.Matches(table);
+    }
 
     private static bool IsSubjectMatch(
         Consent consent,

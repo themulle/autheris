@@ -46,8 +46,12 @@ internal static class CatalogColumnAccessResolver
         IReadOnlyList<Consent> tenantConsents,
         IReadOnlySet<string>? callerScopes)
     {
-        var decision = resolver.ResolveAccess(
-            userSid, groupSids, roles, table.Identifier, tenantConsents, table.Dialect, allUserSids: null, ForResolver(callerScopes));
+        var resolvedScopes = ForResolver(callerScopes);
+        var decision = tenantConsents.Any(static c => c.IsPatternGrant)
+            ? resolver.ResolveAccess(
+                userSid, groupSids, roles, table.Identifier, tenantConsents, table.Dialect, allUserSids: null, resolvedScopes, table)
+            : resolver.ResolveAccess(
+                userSid, groupSids, roles, table.Identifier, tenantConsents, table.Dialect, allUserSids: null, resolvedScopes);
 
         return decision is { IsAllowed: true }
             ? LevelsFromDecision(table, decision)

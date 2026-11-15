@@ -163,4 +163,10 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
         _inner.GetActiveRoleConsentsAsync(table, roleName, tenantId, atTime, ct);
 
     public Task<ConsentPage> GetConsentPageAsync(ConsentPageQuery query, CancellationToken ct = default) => _inner.GetConsentPageAsync(query, ct);
+
+    public Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
+        _inner.GetActivePatternConsentsAsync(tenantId, atTime, ct);
+
+    public Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(DateTimeOffset atTime, CancellationToken ct = default) =>
+        _inner.GetActiveInternalPatternConsentsAsync(atTime, ct);
 }

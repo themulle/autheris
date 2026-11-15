@@ -273,6 +273,16 @@ public interface IConsentRepository
     Task<IReadOnlySet<TableIdentifier>> GetRecentlyExpiredTableIdsAsync(
         Sid userSid, TenantId tenantId, DateTimeOffset since, CancellationToken ct = default)
         => Task.FromResult<IReadOnlySet<TableIdentifier>>(new HashSet<TableIdentifier>());
+
+    /// <summary>Returns all active non-revoked pattern grants in <paramref name="tenantId"/> at <paramref name="atTime"/>.</summary>
+    Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(
+        TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<Consent>>([]);
+
+    /// <summary>Returns all active non-revoked Internal-workflow Allow pattern grants across tenants at <paramref name="atTime"/>.</summary>
+    Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(
+        DateTimeOffset atTime, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<Consent>>([]);
 }
 
 
@@ -499,6 +509,37 @@ public interface IDataOwnershipRepository
             }
         }
         return owned;
+    }
+
+    /// <summary>Returns active direct owner and active delegate SIDs for <paramref name="table"/> at <paramref name="atTime"/>.</summary>
+    async Task<IReadOnlySet<string>> GetAuthorizedApproverSidsForTableAsync(
+        TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        var owners = await GetDataOwnersForTableAsync(table, ct).ConfigureAwait(false);
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var owner in owners)
+        {
+            if (owner.IsActive && !string.IsNullOrWhiteSpace(owner.AdSid.Value))
+            {
+                set.Add(owner.AdSid.Value);
+            }
+        }
+        return set;
+    }
+
+    /// <summary>Returns true if any SID in <paramref name="ownerSids"/> is currently an active owner or active delegate for <paramref name="table"/>.</summary>
+    async Task<bool> IsAnyApproverAuthorizedForTableAsync(
+        TableIdentifier table, IReadOnlyCollection<string> ownerSids, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        foreach (var sid in ownerSids)
+        {
+            if (!string.IsNullOrWhiteSpace(sid) &&
+                await IsAuthorizedApproverForTableAsync(table, new Sid(sid), ct).ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }
 

@@ -269,7 +269,7 @@ public sealed class ConsentApiMigrationStep0014Tests
             );
             CREATE TABLE CONSENTS (
                 id TEXT PRIMARY KEY,
-                table_id TEXT NOT NULL,
+                table_id TEXT NULL,
                 consent_request_id TEXT NULL,
                 effect TEXT NOT NULL,
                 grantee_type TEXT NOT NULL,
@@ -289,7 +289,19 @@ public sealed class ConsentApiMigrationStep0014Tests
                 grant_source TEXT NOT NULL DEFAULT 'CONSENT_REQUEST',
                 grant_record_seq INTEGER NOT NULL DEFAULT 0,
                 profile_assignment_id TEXT NULL,
-                expiry_notice_sent_at TEXT NULL
+                expiry_notice_sent_at TEXT NULL,
+                object_pattern TEXT NULL,
+                data_source TEXT NULL,
+                column_set_mode TEXT NOT NULL DEFAULT 'EXPLICIT',
+                workflow_mode TEXT NOT NULL DEFAULT 'INTERNAL',
+                profile_item_no INTEGER NULL
+            );
+            CREATE TABLE CONSENT_APPROVING_OWNERS (
+                tenant_id TEXT NOT NULL,
+                consent_id TEXT NOT NULL,
+                owner_sid TEXT NOT NULL,
+                owner_sid_norm TEXT NOT NULL,
+                PRIMARY KEY (tenant_id, consent_id, owner_sid_norm)
             );
             CREATE TABLE CONSENT_COLUMN_RULES (
                 id TEXT PRIMARY KEY,

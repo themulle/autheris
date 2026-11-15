@@ -42,6 +42,9 @@ public record TableAccessDecision(
     /// <summary>129 (BC-129-15): the caller attributes resolved for this decision (audit only; ids, outcomes and reason codes, no values).</summary>
     public IReadOnlyList<Autheris.Domain.Model.CallerAttributeAuditEntry>? CallerAttributes { get; init; }
 
+    /// <summary>Catalog epoch (structure + content version) under which this access decision was evaluated.</summary>
+    public long? CatalogEpoch { get; init; }
+
     /// <summary>
     /// set for a caller that holds a restricted scope. A catalog-sensitive column is then only in clear when the clearance permits it
     /// (see <see cref="GetEffectiveColumnAccess"/>); <c>null</c> = unrestricted caller. Init-only, so <c>with</c> copies keep it.

@@ -19,11 +19,22 @@ public sealed partial class TableAccessPolicy
         var table = query.Metadata.Identifier;
         var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(query.Claims);
         string? contextHash = null;
+        Autheris.Application.Catalog.CatalogVersion? catalogVersionAtLoad = null;
+        if (_catalogVersionProvider != null)
+        {
+            catalogVersionAtLoad = await _catalogVersionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+        }
+
         // MISC-06: a query with supplemental (metric) consents is never answered from, nor written to, the per-user decision cache.
         var useCache = _cacheService != null && query.SupplementalConsents is not { Count: > 0 };
         if (useCache)
         {
             contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles, scopes);
+            if (catalogVersionAtLoad is { } ver)
+            {
+                contextHash = $"{contextHash}:cat.{ver.StructureVersion}.{ver.ContentVersion}";
+            }
+
             var cached = await _cacheService!.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
             if (cached != null && !IsUntypedConsentFilter(cached, query.Metadata))
             {
@@ -40,7 +51,8 @@ public sealed partial class TableAccessPolicy
             .Concat(query.GroupSids)
             .Distinct()
             .ToList();
-        var activeConsents = (await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, DateTimeOffset.UtcNow, query.Tenant, ct).ConfigureAwait(false))
+        var now = _timeProvider.GetUtcNow();
+        var activeConsents = (await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, query.Tenant, ct).ConfigureAwait(false))
             .Where(c => c.TenantId == query.Tenant) // multi-tenancy isolation
             .ToList();
         if (query.SupplementalConsents is { Count: > 0 } supplemental)
@@ -54,24 +66,42 @@ public sealed partial class TableAccessPolicy
             }
         }
 
+        activeConsents = await FilterApplicablePatternConsentsAsync(activeConsents, query.Metadata, now, ct).ConfigureAwait(false);
+
         var allSids = query.AllUserSids != null && query.AllUserSids.Any(s => s != query.UserSid)
             ? query.AllUserSids
             : null;
-        var decision = _resolutionService.ResolveAccess(
-            query.UserSid,
-            query.GroupSids,
-            query.Roles,
-            table,
-            activeConsents,
-            query.Metadata.Dialect,
-            allSids,
-            scopes is { Count: > 0 } ? scopes : null);
+        var resolvedScopes = scopes is { Count: > 0 } ? scopes : null;
+        var decision = activeConsents.Any(static c => c.IsPatternGrant)
+            ? _resolutionService.ResolveAccess(
+                query.UserSid,
+                query.GroupSids,
+                query.Roles,
+                table,
+                activeConsents,
+                query.Metadata.Dialect,
+                allSids,
+                resolvedScopes,
+                query.Metadata)
+            : _resolutionService.ResolveAccess(
+                query.UserSid,
+                query.GroupSids,
+                query.Roles,
+                table,
+                activeConsents,
+                query.Metadata.Dialect,
+                allSids,
+                resolvedScopes);
         if (decision == null)
         {
             return TableAccessDecision.Denied(table, "Access denied: consent resolution returned no decision.");
         }
 
         decision = ClassifyConsentDenial(decision, activeConsents);
+        if (catalogVersionAtLoad is { } catVer)
+        {
+            decision = decision with { CatalogEpoch = catVer.StructureVersion + catVer.ContentVersion };
+        }
 
         var contributingIds = decision.Grants.Select(g => g.GrantId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var contributingAllows = decision.IsAllowed
@@ -86,9 +116,18 @@ public sealed partial class TableAccessPolicy
 
         if (useCache && !hasGrantRowScopes && !hasMultiSignatureLegacy)
         {
-            // SEC: TTL bounded by the earliest consent ValidTo; shorter for highly sensitive tables.
-            var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(query.Metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
-            await _cacheService!.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
+            bool catalogVersionStable = true;
+            if (_catalogVersionProvider != null && catalogVersionAtLoad is not null)
+            {
+                var currentCatalogVersion = await _catalogVersionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+                catalogVersionStable = currentCatalogVersion == catalogVersionAtLoad;
+            }
+
+            if (catalogVersionStable)
+            {
+                var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(query.Metadata.Table.IsHighlySensitive, activeConsents, _timeProvider.GetUtcNow());
+                await _cacheService!.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
+            }
         }
 
         if (query.Metadata.IsDelegatedSource && decision.IsAllowed)
@@ -117,6 +156,49 @@ public sealed partial class TableAccessPolicy
     /// all" is <see cref="TableAccessDenialKind.ConsentMissing"/>; a DENY consent is <see cref="TableAccessDenialKind.ConsentDeny"/>; any other
     /// denial (e.g. a restricted-scope or purpose limit despite an ALLOW consent) is final policy.
     /// </summary>
+    private async Task<List<Consent>> FilterApplicablePatternConsentsAsync(
+        List<Consent> activeConsents,
+        TableMetadata metadata,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (!activeConsents.Any(static c => c.IsPatternGrant && c.Effect == ConsentEffect.Allow))
+        {
+            return activeConsents;
+        }
+
+        var filtered = new List<Consent>(activeConsents.Count);
+        foreach (var consent in activeConsents)
+        {
+            if (!consent.IsPatternGrant || consent.Effect != ConsentEffect.Allow)
+            {
+                filtered.Add(consent);
+                continue;
+            }
+
+            if (metadata.Table.DiscoveryHidden)
+            {
+                continue;
+            }
+
+            if (consent.WorkflowMode == ConsentWorkflowMode.External)
+            {
+                filtered.Add(consent);
+                continue;
+            }
+
+            if (consent.ApprovingOwners.Count > 0 &&
+                _ownershipRepository != null &&
+                await _ownershipRepository.IsAnyApproverAuthorizedForTableAsync(
+                    metadata.Identifier, consent.ApprovingOwners, now, ct).ConfigureAwait(false))
+            {
+                filtered.Add(consent);
+            }
+        }
+
+        return filtered;
+    }
+
     private static TableAccessDecision ClassifyConsentDenial(TableAccessDecision decision, IReadOnlyList<Consent> activeConsents)
     {
         if (decision.IsAllowed)

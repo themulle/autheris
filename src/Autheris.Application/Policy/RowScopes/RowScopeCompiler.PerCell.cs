@@ -360,6 +360,13 @@ public sealed partial class RowScopeCompiler
                 continue;
             }
 
+            var metaCol = metadata.GetColumn(colName);
+            if (allow.IsPatternGrant && metaCol?.DiscoveryHidden == true)
+            {
+                map[colName] = ColumnAccessLevel.Deny;
+                continue;
+            }
+
             var raw = ConsentResolutionService.ResolveConsentColumnLevel(allow, colName, callerScopes);
             if (hardMasked.Contains(colName) && raw == ColumnAccessLevel.Clear)
             {
@@ -372,7 +379,6 @@ public sealed partial class RowScopeCompiler
                 continue;
             }
 
-            var metaCol = metadata.GetColumn(colName);
             bool isSensitive = metaCol?.IsSensitive == true || metadata.ColumnMaskingRules.ContainsKey(colName);
             bool hasExplicitClear = raw == ColumnAccessLevel.Clear && allow.ColumnRules.Any(r =>
                 string.Equals(r.ColumnName, colName, StringComparison.OrdinalIgnoreCase) &&

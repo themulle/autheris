@@ -27,6 +27,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _tableCacheKeys = new(StringComparer.OrdinalIgnoreCase);
     private static long _keySequence;
     private readonly TimeProvider _timeProvider;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
     private readonly IDisposable? _subscription;
 
     private readonly object _syncLock = new();
@@ -56,9 +57,11 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         IKeyVaultSecretProvider? secretProvider = null,
         ILogger<ConsentCacheService>? logger = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _catalogVersionProvider = catalogVersionProvider;
         _memoryCache = memoryCache;
         _epochValidationService = epochValidationService;
         _serializer = serializer;
@@ -113,6 +116,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             return result;
         }
 
+        contextHash = await ResolveEffectiveContextHashAsync(contextHash, ct).ConfigureAwait(false);
         var now = _timeProvider.GetUtcNow();
         var candidateEntries = new Dictionary<TableIdentifier, (string CacheKey, long Epoch, TableAccessDecision Decision, DateTimeOffset ValidUntil, bool FromL2, TimeSpan? L1PromotionTtl, RedisKey? L2Key)>();
         var missingTables = new List<TableIdentifier>();
@@ -282,6 +286,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         string? contextHash = null,
         CancellationToken ct = default)
     {
+        contextHash = await ResolveEffectiveContextHashAsync(contextHash, ct).ConfigureAwait(false);
         var now = _timeProvider.GetUtcNow();
         var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
         if (_memoryCache.TryGetValue(cacheKey, out CacheEntryEnvelope? envelope) && envelope != null)
@@ -394,6 +399,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             return;
         }
 
+        contextHash = await ResolveEffectiveContextHashAsync(contextHash, ct).ConfigureAwait(false);
         var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
         var currentEpoch = await _epochValidationService.GetCurrentEpochAsync(table, ct).ConfigureAwait(false);
 
@@ -539,6 +545,18 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
 
     // INF-03: ':' is legal in table components, so each part is escaped to keep the key unambiguous.
     private static string EscapeTablePart(string part) => Uri.EscapeDataString(part.ToLowerInvariant());
+
+    private async ValueTask<string?> ResolveEffectiveContextHashAsync(string? contextHash, CancellationToken ct)
+    {
+        if (_catalogVersionProvider is null)
+        {
+            return contextHash;
+        }
+
+        var version = await _catalogVersionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+        var baseContext = string.IsNullOrWhiteSpace(contextHash) ? "default" : contextHash;
+        return $"{baseContext}|cat:{version.StructureVersion}.{version.ContentVersion}";
+    }
 
     private static string BuildCacheKey(TenantId tenant, Sid userSid, TableIdentifier table, string? contextHash = null)
     {

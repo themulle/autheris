@@ -45,6 +45,11 @@ public sealed class Consent
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid TableId { get; init; }
     public TableIdentifier TableIdentifier { get; init; }
+    public string? ObjectPattern { get; init; }
+    public string? DataSource { get; init; }
+    public ColumnSetMode ColumnSetMode { get; init; } = ColumnSetMode.Explicit;
+    public ConsentWorkflowMode WorkflowMode { get; init; } = ConsentWorkflowMode.Internal;
+    public int? ProfileItemNo { get; init; }
     public Guid? ConsentRequestId { get; init; }
     public ConsentEffect Effect { get; init; } = ConsentEffect.Allow;
     public TenantId TenantId { get; set; }
@@ -80,6 +85,10 @@ public sealed class Consent
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
     public IReadOnlyList<WriteRule> WriteRules { get; set; } = [];
     public IReadOnlyList<GrantRowScopeEntry> RowScope { get; set; } = [];
+    public IReadOnlyList<string> ApprovingOwners { get; set; } = [];
+
+    /// <summary>True when this grant targets objects dynamically via <see cref="ObjectPattern"/> rather than a fixed table.</summary>
+    public bool IsPatternGrant => !string.IsNullOrWhiteSpace(ObjectPattern);
 
     /// <summary>expiry after the read-time clamp of legacy individual grants (never later than<see cref="ValidTo"/>).</summary>
     public DateTimeOffset EffectiveValidTo => IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo, Effect);
@@ -136,6 +145,36 @@ public sealed class Consent
             if (!Enum.IsDefined(entry.Uncovered))
             {
                 throw new InvalidOperationException($"Consent {Id}: invalid row-scope uncovered policy.");
+            }
+        }
+
+        if (!Enum.IsDefined(ColumnSetMode))
+        {
+            throw new InvalidOperationException($"Consent {Id}: invalid column set mode.");
+        }
+
+        if (!Enum.IsDefined(WorkflowMode))
+        {
+            throw new InvalidOperationException($"Consent {Id}: invalid workflow mode.");
+        }
+
+        if (IsPatternGrant)
+        {
+            if (TableId != Guid.Empty)
+            {
+                throw new InvalidOperationException($"Consent {Id}: pattern grant must not specify a concrete TableId.");
+            }
+
+            if (!ObjectPatternSpec.TryParse(ObjectPattern, out var spec, out var error))
+            {
+                throw new InvalidOperationException($"Consent {Id}: invalid object pattern ({error}).");
+            }
+
+            var effectiveSource = string.IsNullOrWhiteSpace(DataSource) ? spec!.DataSource : DataSource.Trim();
+            if (!string.Equals(effectiveSource, spec!.DataSource, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Consent {Id}: DataSource '{effectiveSource}' must match the literal source segment '{spec.DataSource}' of ObjectPattern.");
             }
         }
     }

@@ -174,6 +174,8 @@ public partial class GovernanceRepository
             ConsentSqlCore.ReadSubjectConsentRows(reader, table, atTime, subjectSet, seen, consents);
         }
 
+        await ConsentPatternSqlCore.ReadActivePatternConsentsForDomainAsync(
+            conn, table.Domain, tenantId, atTime, subjectSet, roleSet: null, seen, consents, ct).ConfigureAwait(false);
         consents.RemoveAll(c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime));
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
@@ -233,6 +235,8 @@ public partial class GovernanceRepository
             ConsentSqlCore.ReadAllSubjectConsentRows(reader, effectiveAt, subjectSet, roleSet, seen, consents);
         }
 
+        await ConsentPatternSqlCore.ReadActivePatternConsentsForDomainAsync(
+            conn, domain: null, tenantId, effectiveAt, subjectSet, roleSet, seen, consents, ct).ConfigureAwait(false);
         consents.RemoveAll(c => !c.IsActive(effectiveAt) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > effectiveAt));
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
@@ -263,7 +267,7 @@ public partial class GovernanceRepository
         TenantScope.RequireTenant(consent.TenantId, nameof(GovernanceTable.Consents));
         consent.Validate();
 
-        if (consent.RowScope.Count > 0)
+        if (consent.RowScope.Count > 0 && !consent.IsPatternGrant)
         {
             var tableMeta = await GetTableMetadataAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
             await using var readConn = await OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -276,9 +280,19 @@ public partial class GovernanceRepository
         try
         {
             var created = await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
-            await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
-            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
-            await InvalidateTableEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
+            if (consent.IsPatternGrant)
+            {
+                var newCatalogVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
+                await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
+                await PublishCatalogChangedEventAsync(newCatalogVersion, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
+                await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
+                await InvalidateTableEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
+            }
+
             return created;
         }
         catch
@@ -320,7 +334,13 @@ public partial class GovernanceRepository
             ColumnRules = source.ColumnRules,
             RowFilters = source.RowFilters,
             WriteRules = source.WriteRules,
-            RowScope = source.RowScope
+            RowScope = source.RowScope,
+            ObjectPattern = source.ObjectPattern,
+            DataSource = source.DataSource,
+            ColumnSetMode = source.ColumnSetMode,
+            WorkflowMode = source.WorkflowMode,
+            ProfileItemNo = source.ProfileItemNo,
+            ApprovingOwners = source.ApprovingOwners
         };
 
     private static GrantRecordInput BuildConsentGrantInput(Consent consent, string tenantId, string requestedBy, string decisionJson, DateTimeOffset decidedAt, GrantRecordType? recordType = null) =>
@@ -332,7 +352,9 @@ public partial class GovernanceRepository
             requestedBy,
             decisionJson,
             decidedAt,
-            ObjectId: !string.IsNullOrWhiteSpace(consent.TableIdentifier.TableName) ? consent.TableIdentifier.ToString() : consent.TableId.ToString("D"),
+            ObjectId: consent.IsPatternGrant
+                ? consent.ObjectPattern!
+                : (!string.IsNullOrWhiteSpace(consent.TableIdentifier.TableName) ? consent.TableIdentifier.ToString() : consent.TableId.ToString("D")),
             GranteeType: consent.GranteeType.ToString(),
             GranteeRef: consent.GranteeSid?.Value ?? consent.RoleName ?? consent.RoleId?.ToString("D"),
             RequestId: consent.ConsentRequestId,
@@ -346,7 +368,9 @@ public partial class GovernanceRepository
     {
         var grantWriter = RequireGrantWriter();
         var consentId = consent.Id == Guid.Empty ? Guid.NewGuid() : consent.Id;
-        var tableId = await ConsentSqlCore.ResolveTableIdOrThrowAsync(conn, tx, ConsentSql.FindTableIdSql, consent.TableId, consent.TableIdentifier, "consent", ct).ConfigureAwait(false);
+        var tableId = consent.IsPatternGrant
+            ? Guid.Empty
+            : await ConsentSqlCore.ResolveTableIdOrThrowAsync(conn, tx, ConsentSql.FindTableIdSql, consent.TableId, consent.TableIdentifier, "consent", ct).ConfigureAwait(false);
         var tenantIdStr = StoredTenant.RequireWritable(consent.TenantId);
 
         var draft = BuildPersistedConsent(consent, consentId, tableId, consent.GrantRecordSeq);
@@ -370,7 +394,7 @@ public partial class GovernanceRepository
             TenantId = consent.TenantId,
             EventType = AuditEventTypes.ConsentGranted,
             ActorSid = consent.GranteeSid ?? new Sid(consent.RoleName ?? "UNKNOWN"),
-            TargetTable = consent.TableIdentifier.ToString(),
+            TargetTable = consent.IsPatternGrant ? consent.ObjectPattern! : consent.TableIdentifier.ToString(),
             Decision = "ALLOW",
             TraceId = Guid.NewGuid().ToString("N"),
             DetailsJson = JsonSerializer.Serialize(new
@@ -379,7 +403,7 @@ public partial class GovernanceRepository
                 TableId = tableId,
                 consent.Effect,
                 Grantee = consent.GranteeSid?.Value ?? consent.RoleName,
-                Scope = consent.TableIdentifier.ToString(),
+                Scope = consent.IsPatternGrant ? consent.ObjectPattern! : consent.TableIdentifier.ToString(),
                 consent.ValidFrom,
                 consent.ValidTo
             })
@@ -397,7 +421,8 @@ public partial class GovernanceRepository
     public async Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        var consent = await ConsentSqlCore.ReadConsentByIdRowAsync(conn, consentId, ct).ConfigureAwait(false);
+        var consent = await ConsentSqlCore.ReadConsentByIdRowAsync(conn, consentId, ct).ConfigureAwait(false)
+            ?? await ConsentPatternSqlCore.ReadPatternConsentByIdRowAsync(conn, consentId, ct).ConfigureAwait(false);
         if (consent != null)
         {
             await HydrateConsentsBatchAsync(conn, [consent], ct).ConfigureAwait(false);
@@ -912,8 +937,11 @@ public partial class GovernanceRepository
         }
     }
 
-    private Task HydrateConsentsBatchAsync(DbConnection conn, List<Consent> consents, CancellationToken ct) =>
-        ConsentSqlCore.HydrateConsentsBatchAsync(conn, consents, ct);
+    private async Task HydrateConsentsBatchAsync(DbConnection conn, List<Consent> consents, CancellationToken ct)
+    {
+        await ConsentSqlCore.HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
+        await ConsentPatternSqlCore.HydrateApprovingOwnersBatchAsync(conn, consents, ct).ConfigureAwait(false);
+    }
 
     private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)
     {

@@ -13,8 +13,8 @@ public sealed class GrantRecordSqlCore(IGovernanceSqlDialect dialect) : IGrantRe
     private const string PgLockHeadSql = "INSERT INTO GRANT_RECORD_HEADS (tenant_id, last_seq, last_hash) VALUES (@tenant_id, 0, @genesis) ON CONFLICT (tenant_id) DO NOTHING; SELECT last_seq, last_hash FROM GRANT_RECORD_HEADS WHERE tenant_id = @tenant_id FOR UPDATE;";
     private const string SqlServerLockHeadSql = "IF NOT EXISTS (SELECT 1 FROM dbo.GRANT_RECORD_HEADS WITH (UPDLOCK, HOLDLOCK) WHERE tenant_id = @tenant_id) INSERT INTO dbo.GRANT_RECORD_HEADS (tenant_id, last_seq, last_hash) VALUES (@tenant_id, 0, @genesis); SELECT last_seq, last_hash FROM dbo.GRANT_RECORD_HEADS WITH (UPDLOCK, ROWLOCK) WHERE tenant_id = @tenant_id;";
     private const string InsertRecordSql = "INSERT INTO GRANT_RECORDS (tenant_id, seq, id, record_type, consent_id, request_id, grant_source, profile_assignment_id, grantee_type, grantee_ref, object_id, scope_json, valid_from, valid_until, requested_by, decision_json, decided_at, recorded_at, prev_hash, record_hash, signature, key_id) VALUES (@tenant_id, @seq, @id, @record_type, @consent_id, @request_id, @grant_source, @profile_assignment_id, @grantee_type, @grantee_ref, @object_id, @scope_json, @valid_from, @valid_until, @requested_by, @decision_json, @decided_at, @recorded_at, @prev_hash, @record_hash, @signature, @key_id);";
-    private const string InsertConsentSql = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id, description, grant_source, grant_record_seq, profile_assignment_id, expiry_notice_sent_at)
-                                VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId, @description, @grantSource, @grantRecordSeq, @profileAssignmentId, @expiryNoticeSentAt)";
+    private const string InsertConsentSql = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id, description, grant_source, grant_record_seq, profile_assignment_id, expiry_notice_sent_at, object_pattern, data_source, column_set_mode, workflow_mode, profile_item_no)
+                                VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId, @description, @grantSource, @grantRecordSeq, @profileAssignmentId, @expiryNoticeSentAt, @objectPattern, @dataSource, @columnSetMode, @workflowMode, @profileItemNo)";
     private const string AdvanceHeadSql = "UPDATE GRANT_RECORD_HEADS SET last_seq = @seq, last_hash = @record_hash WHERE tenant_id = @tenant_id;";
     private const string UpdateConsentSeqSql = "UPDATE CONSENTS SET grant_record_seq = @seq WHERE tenant_id = @tenant_id AND id = @id;";
     private const string SelectTenantChainSql = "SELECT tenant_id, seq, id, record_type, consent_id, request_id, grant_source, profile_assignment_id, grantee_type, grantee_ref, object_id, scope_json, valid_from, valid_until, requested_by, decision_json, decided_at, recorded_at, prev_hash, record_hash, signature, key_id FROM GRANT_RECORDS WHERE tenant_id = @tenant_id ORDER BY seq ASC;";
@@ -56,7 +56,7 @@ public sealed class GrantRecordSqlCore(IGovernanceSqlDialect dialect) : IGrantRe
         var tenantIdStr = StoredTenant.RequireWritable(consent.TenantId);
         using var cmd = CreateTxCommand(transaction, InsertConsentSql);
         cmd.AddBound("@id", consent.Id.ToString());
-        cmd.AddBound("@tid", consent.TableId.ToString());
+        cmd.AddBound("@tid", consent.IsPatternGrant ? (object)DBNull.Value : consent.TableId.ToString());
         cmd.AddBound("@reqId", consent.ConsentRequestId.HasValue ? consent.ConsentRequestId.Value.ToString() : (object)DBNull.Value);
         cmd.AddBound("@effect", consent.Effect.ToString());
         cmd.AddBound("@granteeType", consent.GranteeType.ToString());
@@ -69,7 +69,13 @@ public sealed class GrantRecordSqlCore(IGovernanceSqlDialect dialect) : IGrantRe
         cmd.AddBound("@tenantId", tenantIdStr);
         cmd.AddBound("@description", (object?)consent.Description ?? DBNull.Value);
         ConsentWorkflowSql.BindConsentParameters(cmd, consent.GrantSource, grantRecordSeq, consent.ProfileAssignmentId, consent.ExpiryNoticeSentAt);
+        ConsentPatternSqlCore.BindPatternParameters(cmd, consent);
+
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        if (consent.IsPatternGrant)
+        {
+            await ConsentPatternSqlCore.InsertApprovingOwnersAsync(transaction, consent, ct).ConfigureAwait(false);
+        }
     }
 
     public async Task<IReadOnlyList<GrantRecord>> ReadTenantChainAsync(string tenantId, CancellationToken ct = default)

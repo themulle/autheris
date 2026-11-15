@@ -1,0 +1,26 @@
+{
+  "ops": [
+    { "op": "alterColumn", "table": "consents", "column": { "name": "table_id", "type": "TEXT", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "object_pattern", "type": "CHARACTER VARYING(512)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "data_source", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "column_set_mode", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "workflow_mode", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "profile_item_no", "type": "INTEGER", "family": "integer", "nullable": true } },
+    { "op": "addIndex", "table": "consents", "name": "ix_consents_pattern", "unique": false, "columns": ["tenant_id", "data_source"] },
+    {
+      "op": "addTable",
+      "table": "consent_approving_owners",
+      "newTable": {
+        "name": "consent_approving_owners",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "owner_sid", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "owner_sid_norm", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "consent_id", "owner_sid_norm"],
+        "indexes": []
+      }
+    }
+  ]
+}
