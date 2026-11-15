@@ -167,13 +167,6 @@ public static partial class ProcedureDefinitionParser
             var other => throw new FormatException($"mode must be 'read' or 'write', got '{other}'.")
         };
 
-        var validationMode = (model.Validation?.Trim().ToLowerInvariant() ?? "catalog") switch
-        {
-            "catalog" => ProcedureValidationMode.Catalog,
-            "declared" => ProcedureValidationMode.Declared,
-            var other => throw new FormatException($"validation must be 'declared' or 'catalog', got '{other}'.")
-        };
-
         var rls = (model.Rls?.Trim().ToLowerInvariant() ?? "session-context") switch
         {
             "session-context" or "session_context" => ProcedureRlsMode.SessionContext,
@@ -215,9 +208,15 @@ public static partial class ProcedureDefinitionParser
                 }
                 else
                 {
+                    string direction = (p.Direction?.Trim().ToLowerInvariant() ?? "in") switch
+                    {
+                        "in" or "input" => "in",
+                        var other => throw new FormatException($"Parameter '{pName}' direction must be 'in' or 'input', got '{other}'.")
+                    };
                     string typeStr = string.IsNullOrWhiteSpace(p.Type) ? "string" : p.Type.Trim();
                     bool isReq = p.Required && (p.IsRequired ?? true);
-                    parameters.Add(ParseParameter($"{pName} {typeStr} {(isReq ? "required" : "optional")} {p.Description}"));
+                    var parsedParam = ParseParameter($"{pName} {typeStr} {(isReq ? "required" : "optional")} {p.Description}");
+                    parameters.Add(parsedParam with { Direction = direction, Default = p.Default });
                 }
 
                 argumentOrder.Add(pName);
@@ -267,7 +266,13 @@ public static partial class ProcedureDefinitionParser
             throw new FormatException("result_table must have the form schema.table.");
         }
 
-        var referencedTables = (model.ReferencedTables ?? [])
+        if (model.Tables is { Count: > 0 } && model.ReferencedTables is { Count: > 0 })
+        {
+            throw new FormatException("Specify either 'tables' or 'referenced_tables', not both.");
+        }
+
+        var rawTables = model.Tables ?? model.ReferencedTables ?? [];
+        var referencedTables = rawTables
             .Where(r => !string.IsNullOrWhiteSpace(r))
             .Select(r => r.Trim())
             .ToList();
@@ -276,7 +281,7 @@ public static partial class ProcedureDefinitionParser
         {
             if (!ResultTableRegex.IsMatch(rt))
             {
-                throw new FormatException($"referenced_tables entry '{rt}' must have the form schema.table.");
+                throw new FormatException($"tables entry '{rt}' must have the form schema.table.");
             }
         }
 
@@ -313,7 +318,6 @@ public static partial class ProcedureDefinitionParser
             ClearedResultColumns: cleared,
             RequiredRoles: roles,
             TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)),
-            ValidationMode: validationMode,
             DeclaredOutputs: outputs,
             Kind: kind)
         {
@@ -322,7 +326,7 @@ public static partial class ProcedureDefinitionParser
             DeclaredOutputSources = outputSources,
             ReferencedTables = referencedTables,
             DdlHash = model.Integrity?.DdlHash?.Trim(),
-            RowScopeKey = ValidateRowScopeKey(SplitRowScopeKey(ParseYamlRowScopeKey(model.RowScopeKey), out var scopeTableColumns), resultTable, validationMode, outputs),
+            RowScopeKey = ValidateRowScopeKey(SplitRowScopeKey(ParseYamlRowScopeKey(model.RowScopeKey), out var scopeTableColumns), resultTable, outputs),
             RowScopeKeyTable = scopeTableColumns,
             ErrorCodes = ParseErrorCodes(model.ErrorCodes)
         };
@@ -459,13 +463,12 @@ public static partial class ProcedureDefinitionParser
     }
 
     /// <summary>
-    /// The scope key identifies rows of the result table: it needs a result table, no duplicates, and in declared mode the
-    /// key columns must be part of the declared outputs (they are read from the result set).
+    /// The scope key identifies rows of the result table: it needs a result table, no duplicates, and when outputs are
+    /// declared, every key column must be part of the declared outputs (they are read from the result set).
     /// </summary>
     private static List<string> ValidateRowScopeKey(
         List<string> keys,
         string? resultTable,
-        ProcedureValidationMode validationMode,
         IReadOnlyList<string> declaredOutputs)
     {
         if (keys.Count == 0)
@@ -483,7 +486,7 @@ public static partial class ProcedureDefinitionParser
             throw new FormatException("row_scope_key must not list a column more than once.");
         }
 
-        if (validationMode == ProcedureValidationMode.Declared)
+        if (declaredOutputs.Count > 0)
         {
             var missing = keys.FirstOrDefault(k => !declaredOutputs.Contains(k, StringComparer.OrdinalIgnoreCase));
             if (missing != null)
@@ -638,7 +641,6 @@ public sealed class ProcedureYamlModel
     public string? Kind { get; set; }
     public string? Mode { get; set; }
     public string? DataSource { get; set; }
-    public string? Validation { get; set; }
     public string? Rls { get; set; }
     public string? ResultTable { get; set; }
     public int? Timeout { get; set; }
@@ -652,6 +654,9 @@ public sealed class ProcedureYamlModel
 
     /// <summary>Declared business error map .</summary>
     public List<ProcedureErrorCodeYamlModel>? ErrorCodes { get; set; }
+
+    /// <summary>Explicit list of governed tables referenced by the procedure.</summary>
+    public List<string>? Tables { get; set; }
 
     /// <summary>Explicit list of physical tables referenced by the procedure.</summary>
     public List<string>? ReferencedTables { get; set; }
@@ -677,6 +682,8 @@ public sealed class ProcedureParameterYamlModel
 {
     public string Name { get; set; } = string.Empty;
     public string Type { get; set; } = "string";
+    public string? Direction { get; set; }
+    public object? Default { get; set; }
     public bool Required { get; set; } = true;
     public bool? IsRequired { get; set; }
     public string? Description { get; set; }

@@ -21,4 +21,7 @@ public interface IProcedureRegistry
 
     /// <summary>Review P-7: Disables the entry only if it still holds <paramref name="expected"/>.</summary>
     bool TryMarkDisabled(ProcedureDefinition expected, string reason);
+
+    /// <summary>Keeps or returns the entry to Pending with a reason if it still holds <paramref name="expected"/>.</summary>
+    bool TryMarkPending(ProcedureDefinition expected, string reason) => false;
 }

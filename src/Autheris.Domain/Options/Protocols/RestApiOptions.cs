@@ -309,15 +309,7 @@ public sealed class ProcedureEndpointsOptions
     [Range(1, 300)] public int MaxTimeoutSeconds { get; init; } = 60;
 
     /// <summary>
-    /// Review P-1: Declarations with <c>validation: declared</c> skip the catalog validation (no check of SECURITY POLICY,
-    /// permissions, dynamic SQL or write access). They are accepted outside the Development environment only when this
-    /// switch is set explicitly. Even then they need <c>result_table</c> and non-empty <c>outputs</c>, and the declared
-    /// outputs are governed with the consent column rules of the result table.
-    /// </summary>
-    public bool AllowDeclaredValidation { get; init; } = false;
-
-    /// <summary>
-    /// INC-2 D-8 / whether<c>validation: declared</c> declarations must carry <c>integrity.ddl_hash</c>.
+    /// Controls whether declared procedure contracts must carry <c>integrity.ddl_hash</c>.
     /// Null resolves to required in every environment except exactly <c>Development</c> (Staging, Production, unknown and
     /// missing environment names: required). A missing hash is then rejected; otherwise it only logs a warning on every (re)load.
     /// </summary>

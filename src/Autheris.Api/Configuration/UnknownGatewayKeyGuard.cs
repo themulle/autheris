@@ -21,6 +21,13 @@ public static class UnknownGatewayKeyGuard
 
     private const string RemovedProcedureHotReloadKey = GatewayConfigurationSchema.Root + ":SqlEndpoints:Procedures:EnableHotReload";
 
+    private static readonly (string Key, string Message)[] RemovedProcedureDeclaredKeys =
+    [
+        (GatewayConfigurationSchema.Root + ":SqlEndpoints:Procedures:AllowDeclaredValidation", "SqlEndpoints:Procedures:AllowDeclaredValidation (removed; declared-only procedure validation is always active)"),
+        (GatewayConfigurationSchema.Root + ":Procedures:AllowDeclaredValidation", "Procedures:AllowDeclaredValidation (removed; declared-only procedure validation is always active)"),
+        (GatewayConfigurationSchema.Root + ":Rest:AllowDeclaredValidation", "Rest:AllowDeclaredValidation (removed; declared-only procedure validation is always active)")
+    ];
+
     private const string RemovedAuthzReplacement = "removed by ADR-020; data access is granted by grant records";
 
     private static readonly string[] RemovedAuthzPrefixes =
@@ -180,6 +187,14 @@ public static class UnknownGatewayKeyGuard
             unknown.Add("SqlEndpoints:Procedures:EnableHotReload (removed (WP-SIMPL-39); definitions are re-scanned each interval)");
         }
 
+        foreach (var (removedKey, message) in RemovedProcedureDeclaredKeys)
+        {
+            if (configuration.AsEnumerable().Any(kv => string.Equals(kv.Key, removedKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                unknown.Add(message);
+            }
+        }
+
         foreach (var removedPrefix in RemovedAuthzPrefixes)
         {
             if (configuration.GetSection(removedPrefix).Exists() ||
@@ -224,7 +239,8 @@ public static class UnknownGatewayKeyGuard
             }
 
             var fullKey = GatewayConfigurationSchema.Root + ":" + entry.Key;
-            if (string.Equals(fullKey, RemovedProcedureHotReloadKey, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(fullKey, RemovedProcedureHotReloadKey, StringComparison.OrdinalIgnoreCase) ||
+                RemovedProcedureDeclaredKeys.Any(r => string.Equals(fullKey, r.Key, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }

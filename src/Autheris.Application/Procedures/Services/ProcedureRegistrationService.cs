@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -16,8 +17,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// F-SQL-02: Loads the declarations, activates them after a successful catalog validation and re-validates them
-/// periodically so schema drift (renamed parameters, removed policies, ...) disables the endpoint (fail-closed, 503).
+/// F-SQL-02: Loads declared procedure contracts and activates them once all declared tables and policies satisfy
+/// static declared-only governance rules (fail-closed, 503).
 /// </summary>
 public sealed class ProcedureRegistrationService : BackgroundService
 {
@@ -95,8 +96,8 @@ public sealed class ProcedureRegistrationService : BackgroundService
 
         var due = _registry.GetAll()
             .Where(r => r.State == ProcedureState.Pending
-                || ((r.Definition.ValidationMode == ProcedureValidationMode.Catalog || !string.IsNullOrWhiteSpace(r.Definition.DdlHash)) && (r.ValidatedAt == null
-                    || now - r.ValidatedAt >= (r.State == ProcedureState.Disabled ? DisabledRetryInterval : interval))))
+                || r.ValidatedAt == null
+                || now - r.ValidatedAt >= (r.State == ProcedureState.Disabled ? DisabledRetryInterval : interval))
             .ToList();
 
         if (due.Count == 0)
@@ -105,136 +106,134 @@ public sealed class ProcedureRegistrationService : BackgroundService
         }
 
         using var scope = _scopeFactory.CreateScope();
-        var validator = scope.ServiceProvider.GetService<StoredProcedureCatalogValidator>();
         var audit = scope.ServiceProvider.GetService<IAuditLogRepository>();
+        var tableRepository = scope.ServiceProvider.GetService<ITableMetadataRepository>();
+        var virtualFilters = scope.ServiceProvider.GetService<IVirtualFilterSnapshotProvider>();
+        VirtualFilterSnapshot? filterSnapshot = null;
+        bool snapshotLoaded = false;
 
         foreach (var entry in due)
         {
             ct.ThrowIfCancellationRequested();
 
-            if (entry.Definition.ValidationMode == ProcedureValidationMode.Declared)
+            var referenced = entry.Definition.ReferencedTables;
+            if (string.IsNullOrWhiteSpace(entry.Definition.ResultTable)
+                || entry.Definition.DeclaredOutputs.Count == 0
+                || referenced.Count == 0)
             {
-                if (!string.IsNullOrWhiteSpace(entry.Definition.DdlHash) && validator != null)
+                _registry.TryMarkPending(entry.Definition, "DECLARED_CONTRACT_INCOMPLETE");
+                continue;
+            }
+
+            if (tableRepository != null)
+            {
+                string? missingTable = null;
+                foreach (var tableKey in referenced.Concat([entry.Definition.ResultTable!]).Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    var ddlCheck = await validator.ValidateDeclaredDdlHashAsync(entry.Definition, ct).ConfigureAwait(false);
-                    if (!ddlCheck.IsValid)
+                    if (!entry.Definition.TryResolveTable(tableKey, out var tableId))
                     {
-                        string ddlReason = string.Join(" | ", ddlCheck.Errors.OrderBy(e => e, StringComparer.Ordinal));
-                        bool wasAlreadyDisabledDdl = entry.State == ProcedureState.Disabled;
-                        if (!_registry.TryMarkDisabled(entry.Definition, ddlReason))
-                        {
-                            continue;
-                        }
+                        missingTable = tableKey;
+                        break;
+                    }
 
-                        if (!wasAlreadyDisabledDdl)
-                        {
-                            _logger?.LogWarning("Declared procedure endpoint '{Endpoint}' disabled: {Reason}", entry.Definition.Name, ddlReason);
-                        }
-
-                        if (audit != null && entry.State != ProcedureState.Disabled)
-                        {
-                            await audit.RecordAuditEventAsync(
-                                new AuditLogEntry
-                                {
-                                    TenantId = TenantId.Platform, // startup validation audit (DT-A-6)
-                                    EventType = "PROCEDURE_DISABLED",
-                                    ActorSid = new Sid("system:procedure-validator"),
-                                    TargetTable = entry.Definition.ProcedureName,
-                                    Decision = "DENY",
-                                    TraceId = Guid.NewGuid().ToString("N"),
-                                    DetailsJson = JsonSerializer.Serialize(new { endpoint = entry.Definition.Name, errors = ddlCheck.Errors })
-                                },
-                                ct).ConfigureAwait(false);
-                        }
-
-                        continue;
+                    var meta = await tableRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+                    if (meta == null || meta.Columns.Count == 0)
+                    {
+                        missingTable = tableKey;
+                        break;
                     }
                 }
 
-                var referenced = entry.Definition.ReferencedTables.Count > 0
-                    ? entry.Definition.ReferencedTables
-                    : (entry.Definition.ResultTable != null ? [entry.Definition.ResultTable] : []);
-
-                var sources = entry.Definition.DeclaredOutputSources.Count > 0
-                    ? entry.Definition.DeclaredOutputSources
-                    : null;
-
-                var declaredResult = new ProcedureValidationResult(
-                    IsValid: true,
-                    Errors: [],
-                    ResultColumns: entry.Definition.DeclaredOutputs,
-                    ReferencedTables: referenced,
-                    ParameterSqlTypes: entry.Definition.Parameters.ToDictionary(p => p.Name, p => p.SqlType, StringComparer.OrdinalIgnoreCase),
-                    ResultColumnSources: sources);
-
-                // Review P-7: only the exact definition that was snapshotted may be activated.
-                if (!_registry.TryMarkActive(entry.Definition, declaredResult))
+                if (missingTable != null)
                 {
+                    _registry.TryMarkPending(entry.Definition, $"TABLE_NOT_REGISTERED: {missingTable}");
                     continue;
                 }
+            }
 
-                if (entry.State != ProcedureState.Active)
+            if (entry.Definition.RlsMode == ProcedureRlsMode.SessionContext
+                && entry.Definition.RowScopeKey.Count == 0
+                && virtualFilters != null)
+            {
+                if (!snapshotLoaded)
                 {
-                    _logger?.LogInformation("Declared procedure endpoint '{Endpoint}' activated (contract-first).", entry.Definition.Name);
+                    filterSnapshot = await virtualFilters.GetAsync(ct).ConfigureAwait(false);
+                    snapshotLoaded = true;
                 }
 
+                if (filterSnapshot != null && ProcedureDefinitionLoader.HasActiveRowFilters(filterSnapshot, entry.Definition))
+                {
+                    await MarkDisabledAsync(entry, ["ROW_SCOPE_REQUIRED"], audit, ct).ConfigureAwait(false);
+                    continue;
+                }
+            }
+
+            var sources = entry.Definition.DeclaredOutputSources.Count > 0
+                ? entry.Definition.DeclaredOutputSources
+                : null;
+
+            var declaredResult = new ProcedureValidationResult(
+                IsValid: true,
+                Errors: [],
+                ResultColumns: entry.Definition.DeclaredOutputs,
+                ReferencedTables: referenced,
+                ParameterSqlTypes: entry.Definition.Parameters.ToDictionary(p => p.Name, p => p.SqlType, StringComparer.OrdinalIgnoreCase),
+                ResultColumnSources: sources);
+
+            // Review P-7: only the exact definition that was snapshotted may be activated.
+            if (!_registry.TryMarkActive(entry.Definition, declaredResult))
+            {
                 continue;
             }
 
-            var result = await validator!.ValidateAsync(entry.Definition, ct).ConfigureAwait(false);
-
-            if (result.IsValid)
+            if (entry.State != ProcedureState.Active)
             {
-                // Review P-7: compare-and-swap; a definition replaced or removed during validation is not touched.
-                if (!_registry.TryMarkActive(entry.Definition, result))
+                _logger?.LogInformation("Declared procedure endpoint '{Endpoint}' activated.", entry.Definition.Name);
+            }
+        }
+    }
+
+    private async Task MarkDisabledAsync(
+        RegisteredProcedure entry,
+        IReadOnlyList<string> errors,
+        IAuditLogRepository? audit,
+        CancellationToken ct)
+    {
+        string reason = string.Join(" | ", errors.OrderBy(e => e, StringComparer.Ordinal));
+        bool wasAlreadyDisabled = entry.State == ProcedureState.Disabled;
+
+        if (!_registry.TryMarkDisabled(entry.Definition, reason))
+        {
+            return;
+        }
+
+        if (!wasAlreadyDisabled)
+        {
+            _logger?.LogWarning("Procedure endpoint '{Endpoint}' disabled: {Reason}", entry.Definition.Name, reason);
+        }
+        else if (!string.Equals(entry.DisabledReason, reason, StringComparison.Ordinal))
+        {
+            _logger?.LogDebug("Procedure endpoint '{Endpoint}' disabled reason changed: {Reason}", entry.Definition.Name, reason);
+        }
+        else
+        {
+            _logger?.LogDebug("Procedure endpoint '{Endpoint}' still disabled: {Reason}", entry.Definition.Name, reason);
+        }
+
+        if (audit != null && entry.State != ProcedureState.Disabled)
+        {
+            await audit.RecordAuditEventAsync(
+                new AuditLogEntry
                 {
-                    continue;
-                }
-
-                if (entry.State != ProcedureState.Active)
-                {
-                    _logger?.LogInformation("Procedure endpoint '{Endpoint}' activated.", entry.Definition.Name);
-                }
-
-                continue;
-            }
-
-            string reason = string.Join(" | ", result.Errors.OrderBy(e => e, StringComparer.Ordinal));
-            bool wasAlreadyDisabled = entry.State == ProcedureState.Disabled;
-
-            if (!_registry.TryMarkDisabled(entry.Definition, reason))
-            {
-                continue; // replaced or removed (directory re-scan) while validating; the new entry is validated next round
-            }
-
-            if (!wasAlreadyDisabled)
-            {
-                _logger?.LogWarning("Procedure endpoint '{Endpoint}' disabled: {Reason}", entry.Definition.Name, reason);
-            }
-            else if (!string.Equals(entry.DisabledReason, reason, StringComparison.Ordinal))
-            {
-                _logger?.LogDebug("Procedure endpoint '{Endpoint}' disabled reason changed: {Reason}", entry.Definition.Name, reason);
-            }
-            else
-            {
-                _logger?.LogDebug("Procedure endpoint '{Endpoint}' still disabled: {Reason}", entry.Definition.Name, reason);
-            }
-
-            if (audit != null && entry.State != ProcedureState.Disabled)
-            {
-                await audit.RecordAuditEventAsync(
-                    new AuditLogEntry
-                    {
-                        TenantId = TenantId.Platform, // startup validation audit (DT-A-6)
-                        EventType = "PROCEDURE_DISABLED",
-                        ActorSid = new Sid("system:procedure-validator"),
-                        TargetTable = entry.Definition.ProcedureName,
-                        Decision = "DENY",
-                        TraceId = Guid.NewGuid().ToString("N"),
-                        DetailsJson = JsonSerializer.Serialize(new { endpoint = entry.Definition.Name, errors = result.Errors })
-                    },
-                    ct).ConfigureAwait(false);
-            }
+                    TenantId = TenantId.Platform, // startup validation audit (DT-A-6)
+                    EventType = "PROCEDURE_DISABLED",
+                    ActorSid = new Sid("system:procedure-validator"),
+                    TargetTable = entry.Definition.ProcedureName,
+                    Decision = "DENY",
+                    TraceId = Guid.NewGuid().ToString("N"),
+                    DetailsJson = JsonSerializer.Serialize(new { endpoint = entry.Definition.Name, errors })
+                },
+                ct).ConfigureAwait(false);
         }
     }
 }

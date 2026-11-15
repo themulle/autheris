@@ -128,17 +128,28 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
         allowed.ShouldBe(new[] { RowScopeKeys.Normalize(["200"])! });
     }
 
-    [Theory]
-    [InlineData("crane", "client_id")]       // only a partial unique index -> not unique
-    [InlineData("crane_state", "client_id")] // part of a composite unique index -> not unique
-    [InlineData("client", "client_id")]      // no index at all, duplicates exist
-    [InlineData("crane_state", "code")]      // only inside an expression index
-    public async Task NonUniqueKey_IsRejected(string tableName, string key)
+    [Fact]
+    public async Task NonUniqueKey_MixedRowsRejected_ByKeyClosure()
     {
-        var table = Table(tableName, columns: [key, "tenant_id"]);
+        var state = Table("crane_state", columns: ["id", "client_id", "code", "tenant_id"]);
+        // client_id = 1 has two rows in tenant-a: code 'A' and code 'B'. Under filter code = 'A', only one passes,
+        // so key closure excludes client_id = 1 while allowing client_id = 2 (whose only row has code 'A').
+        var allowed = await Resolver().GetAllowedKeysAsync(
+            Definition(), state, Decision(state, "[autheris_target].[code] = 'A'".Replace("[", "\"", StringComparison.Ordinal).Replace("]", "\"", StringComparison.Ordinal)),
+            ["client_id"], [[1L], [2L]], Caller, CancellationToken.None);
 
-        await Should.ThrowAsync<InvalidOperationException>(() => Resolver().GetAllowedKeysAsync(
-            Definition(), table, Decision(table, "1 = 1"), [key], [[1L]], Caller, CancellationToken.None));
+        allowed.ShouldBe(new[] { RowScopeKeys.Normalize([2L])! });
+    }
+
+    [Fact]
+    public async Task NonUniqueKey_AllRowsAllowed_AcceptedByKeyClosure()
+    {
+        var state = Table("crane_state", columns: ["id", "client_id", "code", "tenant_id"]);
+        var allowed = await Resolver().GetAllowedKeysAsync(
+            Definition(), state, Decision(state, "1 = 1"), ["client_id"], [[1L], [2L]], Caller, CancellationToken.None);
+
+        allowed.ShouldContain(RowScopeKeys.Normalize([1L])!);
+        allowed.ShouldContain(RowScopeKeys.Normalize([2L])!);
     }
 
     [Fact]
@@ -160,33 +171,12 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     }
 
     [Theory]
-    [InlineData(DatabaseDialect.SqlServer, "SELECT [serial_number] FROM [main].[crane] AS [autheris_target] WHERE [tenant_id] = @rs_tenant AND (f) AND (([serial_number] = @rs_0_0) OR ([serial_number] = @rs_1_0))")]
-    [InlineData(DatabaseDialect.PostgreSql, "SELECT \"serial_number\" FROM \"main\".\"crane\" AS \"autheris_target\" WHERE \"tenant_id\" = @rs_tenant AND (f) AND ((\"serial_number\" = @rs_0_0) OR (\"serial_number\" = @rs_1_0))")]
-    [InlineData(DatabaseDialect.Sqlite, "SELECT \"serial_number\" FROM \"crane\" AS \"autheris_target\" WHERE \"tenant_id\" = @rs_tenant AND (f) AND ((\"serial_number\" = @rs_0_0) OR (\"serial_number\" = @rs_1_0))")]
+    [InlineData(DatabaseDialect.SqlServer, "SELECT [serial_number] FROM [main].[crane] AS [autheris_target] WHERE (([serial_number] = @rs_0_0) OR ([serial_number] = @rs_1_0)) GROUP BY [serial_number] HAVING COUNT(*) = SUM(CASE WHEN [tenant_id] = @rs_tenant AND (f) THEN 1 ELSE 0 END)")]
+    [InlineData(DatabaseDialect.PostgreSql, "SELECT \"serial_number\" FROM \"main\".\"crane\" AS \"autheris_target\" WHERE ((\"serial_number\" = @rs_0_0) OR (\"serial_number\" = @rs_1_0)) GROUP BY \"serial_number\" HAVING COUNT(*) = SUM(CASE WHEN \"tenant_id\" = @rs_tenant AND (f) THEN 1 ELSE 0 END)")]
+    [InlineData(DatabaseDialect.Sqlite, "SELECT \"serial_number\" FROM \"crane\" AS \"autheris_target\" WHERE ((\"serial_number\" = @rs_0_0) OR (\"serial_number\" = @rs_1_0)) GROUP BY \"serial_number\" HAVING COUNT(*) = SUM(CASE WHEN \"tenant_id\" = @rs_tenant AND (f) THEN 1 ELSE 0 END)")]
     public void KeyQuery_IsQuotedPerDialect(DatabaseDialect dialect, string expected)
     {
         SqlProcedureRowScopeResolver.BuildKeyQuery(dialect, Table("crane"), ["serial_number"], "tenant_id", "f", 2).ShouldBe(expected);
-    }
-
-    [Theory]
-    [InlineData(DatabaseDialect.SqlServer, "[main].[crane]", "sys.indexes")]
-    [InlineData(DatabaseDialect.PostgreSql, "\"main\".\"crane\"", "pg_index")]
-    [InlineData(DatabaseDialect.Sqlite, "crane", "pragma_index_list")]
-    public void UniqueIndexQuery_UsesTheDialectCatalog(DatabaseDialect dialect, string tableArgument, string catalog)
-    {
-        SqlProcedureRowScopeResolver.UniqueIndexTableArgument(dialect, new TableIdentifier("erp", "main", "crane")).ShouldBe(tableArgument);
-        SqlProcedureRowScopeResolver.BuildUniqueIndexQuery(dialect).ShouldContain(catalog);
-    }
-
-    [Fact]
-    public void UniqueIndexMatch_ComparesColumnSetsPerDialect()
-    {
-        var indexes = new List<(long, string)> { (1, "Client_Id"), (1, "code"), (2, "id") };
-
-        SqlProcedureRowScopeResolver.HasUniqueIndexOn(DatabaseDialect.SqlServer, indexes, ["code", "client_id"]).ShouldBeTrue();
-        SqlProcedureRowScopeResolver.HasUniqueIndexOn(DatabaseDialect.PostgreSql, indexes, ["code", "client_id"]).ShouldBeFalse(); // case-sensitive
-        SqlProcedureRowScopeResolver.HasUniqueIndexOn(DatabaseDialect.Sqlite, indexes, ["client_id"]).ShouldBeFalse();              // subset only
-        SqlProcedureRowScopeResolver.HasUniqueIndexOn(DatabaseDialect.Sqlite, indexes, ["ID"]).ShouldBeTrue();
     }
 
     [Fact]

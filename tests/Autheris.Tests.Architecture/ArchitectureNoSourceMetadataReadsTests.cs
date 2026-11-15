@@ -61,8 +61,6 @@ public sealed class ArchitectureNoSourceMetadataReadsTests
     /// <summary>Temporary entries: the readers and validators that the declared-catalog work packages still delete.</summary>
     private static readonly Dictionary<string, string> TemporaryAllowlist = new(StringComparer.Ordinal)
     {
-        ["Autheris.Application/Procedures/Services/SqlProcedureRowScopeResolver.cs"] = Removed,
-        ["Autheris.Application/Procedures/Services/StoredProcedureCatalogValidator.cs"] = Removed,
         ["Autheris.Infrastructure/Persistence/Catalog/PostgreSqlKeyIndexMetadataReader.cs"] = Removed,
         ["Autheris.Infrastructure/Persistence/Catalog/SqlServerKeyIndexMetadataReader.cs"] = Removed
     };

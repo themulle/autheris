@@ -37,20 +37,12 @@ public sealed record ProcedureParameter(
     Type ClrType,
     bool IsRequired,
     int? MaxLength = null,
-    string? Description = null);
+    string? Description = null,
+    string Direction = "in",
+    object? Default = null);
 
 /// <summary>Binds a gateway security context value to a procedure parameter (never client-controlled).</summary>
 public sealed record ProcedureContextBinding(ProcedureContextKey Key, string ParameterName);
-
-/// <summary>F-SQL-02: How a stored procedure endpoint is validated.</summary>
-public enum ProcedureValidationMode
-{
-    /// <summary>Validated against the database catalog metadata (MSSQL default, Whitebox).</summary>
-    Catalog = 0,
-
-    /// <summary>Contract-first: input and output columns are explicitly declared in YAML (Blackbox).</summary>
-    Declared = 1
-}
 
 /// <summary>The invocation style of the procedure endpoint.</summary>
 public enum ProcedureKind
@@ -85,7 +77,6 @@ public sealed record ProcedureDefinition(
     IReadOnlyList<string> ClearedResultColumns,
     IReadOnlyList<string> RequiredRoles,
     int TimeoutSeconds,
-    ProcedureValidationMode ValidationMode = ProcedureValidationMode.Catalog,
     IReadOnlyList<string>? DeclaredOutputs = null,
     ProcedureKind Kind = ProcedureKind.Procedure)
 {
@@ -192,8 +183,8 @@ public sealed record ProcedureValidationResult(
 }
 
 /// <summary>
-/// SEC D-2: source of a result column as reported by <c>sys.dm_exec_describe_first_result_set_for_object(@id, 1)</c> (browse mode).
-/// Table/Column are null for computed or ambiguous columns.
+/// Source table and column of a declared procedure output column.
+/// Table/Column are null when no explicit source mapping is declared.
 /// </summary>
 public sealed record ResultColumnSource(string? Schema, string? Table, string? Column)
 {

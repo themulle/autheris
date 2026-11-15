@@ -93,7 +93,7 @@ public sealed class ProcedureSqlServerIntegrationTests : IAsyncLifetime
 
     private static ProcedureDefinition Definition(string procedure, string outputs) =>
         ProcedureDefinitionParser.ParseYaml(
-            $"name: p\nprocedure: dbo.{procedure}\nvalidation: declared\nresult_table: dbo.orders\noutputs:\n{outputs}", "p", false, 60);
+            $"name: p\nprocedure: dbo.{procedure}\nresult_table: dbo.orders\noutputs:\n{outputs}", "p", false, 60);
 
     private Task<RawProcedureResult> Run(ProcedureDefinition definition) =>
         Invoker().ExecuteReadAsync(definition, new Dictionary<string, object?>(), Caller, 100, CancellationToken.None);

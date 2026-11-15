@@ -733,17 +733,14 @@ public partial class ProcedureExecutionSecurityTests
     // ---------- zero tables, all modes ----------
 
     [Theory]
-    [InlineData("catalog")]
     [InlineData("declared")]
-    [InlineData("catalog-bypass")]
     [InlineData("declared-bypass")]
     [Trait("Category", "Security")]
     public async Task T_PROC152_12_ZeroTableProcedure_AllModes_InvisibleAndNeverInvoked(string mode)
     {
         var e = Active(d => d with
         {
-            ResultTable = null,
-            ValidationMode = mode.StartsWith("declared", StringComparison.Ordinal) ? ProcedureValidationMode.Declared : ProcedureValidationMode.Catalog
+            ResultTable = null
         }, tables: []);
         if (mode.EndsWith("bypass", StringComparison.Ordinal))
         {

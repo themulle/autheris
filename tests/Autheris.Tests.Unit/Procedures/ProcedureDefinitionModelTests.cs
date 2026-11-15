@@ -67,7 +67,7 @@ public sealed class ProcedureDefinitionModelTests
             DataSources = ProcedureTestData.SqlServerSources("procedures"),
             SqlEndpoints = new SqlEndpointsOptions
             {
-                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = ["api"] }
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = ["api"], RequireDdlHashForDeclared = false }
             }
         });
         return (new ProcedureDefinitionLoader(new InMemoryProcedureRegistry(), options), options, dir);

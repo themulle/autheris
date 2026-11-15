@@ -110,12 +110,12 @@ public sealed class ProcedureDialectAdmissionTests
                 {
                     Procedures = new ProcedureEndpointsOptions
                     {
-                        AllowDeclaredValidation = true, Enabled = true, ConnectionName = "procedures", Directory = dir, AllowedSchemas = ["api"], RequireDdlHashForDeclared = false
+                        Enabled = true, ConnectionName = "procedures", Directory = dir, AllowedSchemas = ["api"], RequireDdlHashForDeclared = false
                     }
                 }
             };
             string file = Path.Combine(dir, "p.proc.yaml");
-            File.WriteAllText(file, $"name: p\nprocedure: api.usp_P\nkind: {kind}\nvalidation: declared\nresult_table: sales.orders\noutputs:\n  - order_id\n");
+            File.WriteAllText(file, $"name: p\nprocedure: api.usp_P\nkind: {kind}\nresult_table: sales.orders\ntables:\n  - sales.orders\noutputs:\n  - order_id\n");
             var registry = new InMemoryProcedureRegistry();
             var loader = new ProcedureDefinitionLoader(registry, Microsoft.Extensions.Options.Options.Create(gateway));
 

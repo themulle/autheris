@@ -8,6 +8,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.Procedures.Interfaces;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
@@ -16,7 +17,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// F-SQL-02: Loads <c>*.proc.yaml</c> declarations into the <see cref="IProcedureRegistry"/> (state Pending).
-/// Activation happens only after <see cref="StoredProcedureCatalogValidator"/> accepted the declaration.
+/// Activation happens after declared-only policy and referenced-table checks accept the declaration.
 /// </summary>
 public sealed class ProcedureDefinitionLoader
 {
@@ -32,6 +33,7 @@ public sealed class ProcedureDefinitionLoader
     private readonly IOptions<GatewayOptions> _options;
     private readonly IHostEnvironment? _environment;
     private readonly ILogger<ProcedureDefinitionLoader>? _logger;
+    private readonly IVirtualFilterSnapshotProvider? _virtualFilters;
     private readonly ConcurrentDictionary<string, string> _fileToName = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> _fileHash = new(StringComparer.OrdinalIgnoreCase);
 
@@ -39,12 +41,14 @@ public sealed class ProcedureDefinitionLoader
         IProcedureRegistry registry,
         IOptions<GatewayOptions> options,
         IHostEnvironment? environment = null,
-        ILogger<ProcedureDefinitionLoader>? logger = null)
+        ILogger<ProcedureDefinitionLoader>? logger = null,
+        IVirtualFilterSnapshotProvider? virtualFilters = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _environment = environment;
         _logger = logger;
+        _virtualFilters = virtualFilters;
     }
 
     private ProcedureEndpointsOptions Settings => _options.Value.SqlEndpoints.Procedures;
@@ -254,28 +258,25 @@ public sealed class ProcedureDefinitionLoader
             return WriteModeRejectedMessage;
         }
 
-        // Review P-1: declared mode skips the catalog validation; it is opt-in outside Development and always needs a
-        // result table plus explicit outputs so consent column rules can be applied.
-        if (definition.ValidationMode == ProcedureValidationMode.Declared)
+        if (string.IsNullOrWhiteSpace(definition.DdlHash))
         {
-            if (_environment?.IsDevelopment() != true && !Settings.AllowDeclaredValidation)
+            if (RequireDdlHash)
             {
-                return "'validation: declared' is only allowed in Development or with SqlEndpoints.Procedures.AllowDeclaredValidation=true.";
+                return "declared procedure contract requires integrity.ddl_hash";
             }
 
-            if (string.IsNullOrWhiteSpace(definition.ResultTable) || definition.DeclaredOutputs.Count == 0)
-            {
-                return "'validation: declared' requires result_table and a non-empty list of outputs.";
-            }
+            _logger?.LogWarning("Procedure '{Procedure}' without integrity.ddl_hash; drift is not detected.", definition.Name);
+        }
 
-            if (string.IsNullOrWhiteSpace(definition.DdlHash))
+        if (_virtualFilters != null &&
+            definition.RlsMode == ProcedureRlsMode.SessionContext &&
+            definition.RowScopeKey.Count == 0)
+        {
+            var vt = _virtualFilters.GetAsync();
+            var snapshot = vt.IsCompletedSuccessfully ? vt.Result : vt.AsTask().GetAwaiter().GetResult();
+            if (HasActiveRowFilters(snapshot, definition))
             {
-                if (RequireDdlHash)
-                {
-                    return "declared mode requires integrity.ddl_hash";
-                }
-
-                _logger?.LogWarning("Procedure '{Procedure}' uses validation: declared without integrity.ddl_hash; drift is not detected.", definition.Name);
+                return "ROW_SCOPE_REQUIRED";
             }
         }
 
@@ -306,6 +307,62 @@ public sealed class ProcedureDefinitionLoader
         // every loaded definition passes the same closed dialect admission as host start.
         string sourceName = string.IsNullOrWhiteSpace(definition.DataSource) ? Settings.ConnectionName : definition.DataSource;
         return ProcedureConnectionProvider.CheckAdmission(_options.Value, sourceName, definition.Kind);
+    }
+
+    internal static bool HasActiveRowFilters(VirtualFilterSnapshot snapshot, ProcedureDefinition definition)
+    {
+        if (snapshot.Profiles.Count == 0)
+        {
+            return false;
+        }
+
+        var tables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(definition.ResultTable))
+        {
+            tables.Add(definition.ResultTable);
+        }
+
+        foreach (var rt in definition.ReferencedTables)
+        {
+            tables.Add(rt);
+        }
+
+        foreach (var src in definition.DeclaredOutputSources.Values)
+        {
+            if (!string.IsNullOrWhiteSpace(src.Table))
+            {
+                tables.Add(!string.IsNullOrWhiteSpace(src.Schema) ? $"{src.Schema}.{src.Table}" : src.Table);
+            }
+        }
+
+        foreach (var tableKey in tables)
+        {
+            if (!definition.TryResolveTable(tableKey, out var tableId))
+            {
+                continue;
+            }
+
+            foreach (var profile in snapshot.Profiles)
+            {
+                if (profile.Status != FilterApprovalStatus.Active || profile.PendingDeletion)
+                {
+                    continue;
+                }
+
+                foreach (var binding in profile.Bindings)
+                {
+                    bool matches = binding.TargetPattern != null
+                        ? binding.MatchesTarget(tableId)
+                        : !string.IsNullOrWhiteSpace(profile.Scope) && ObjectPattern.Parse(profile.Scope).MatchesObject(tableId);
+                    if (matches)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Fail-closed: a deleted or no longer valid declaration is removed from the registry.</summary>

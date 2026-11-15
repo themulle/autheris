@@ -39,7 +39,6 @@ public class PureYamlProcedureGovernanceTests
         const string yaml = """
             name: get_orders
             procedure: api.usp_GetOrders
-            validation: declared
             result_table: sales.orders
             referenced_tables:
               - sales.orders
@@ -61,7 +60,6 @@ public class PureYamlProcedureGovernanceTests
 
         def.Name.ShouldBe("get_orders");
         def.ProcedureName.ShouldBe("api.usp_GetOrders");
-        def.ValidationMode.ShouldBe(ProcedureValidationMode.Declared);
         def.DdlHash.ShouldBe("sha256:abc12345");
         def.ReferencedTables.ShouldBe(["sales.orders", "sales.customers"]);
 
@@ -86,7 +84,6 @@ public class PureYamlProcedureGovernanceTests
         const string yaml = """
             name: get_orders
             procedure: api.usp_GetOrders
-            validation: declared
             result_table: sales.orders
             referenced_tables:
               - sales.orders
@@ -132,7 +129,6 @@ public class PureYamlProcedureGovernanceTests
         const string yaml = """
             name: get_orders
             procedure: api.usp_GetOrders
-            validation: declared
             result_table: sales.orders
             referenced_tables:
               - sales.orders
@@ -240,7 +236,6 @@ public class PureYamlProcedureGovernanceTests
         const string yaml = """
             name: get_orders_clear
             procedure: api.usp_GetOrders
-            validation: declared
             result_table: sales.orders
             referenced_tables:
               - sales.orders
@@ -339,7 +334,6 @@ public class PureYamlProcedureGovernanceTests
         const string yaml = """
             name: get_orders_override
             procedure: api.usp_GetOrders
-            validation: declared
             result_table: sales.orders
             referenced_tables:
               - sales.orders

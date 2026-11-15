@@ -142,11 +142,39 @@ INSERT INTO md.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     }
 
     [Fact]
-    public async Task PartialUniqueIndex_IsNotAcceptedAsKey()
+    public async Task Non_unique_key_never_widens_access()
     {
         if (!_available) return;
 
-        await Should.ThrowAsync<InvalidOperationException>(() => Resolver().GetAllowedKeysAsync(
-            Definition(), Crane(), Decision("1 = 1"), ["client_id"], [[2]], Caller, CancellationToken.None));
+        await using (var conn = new NpgsqlConnection(_db!.ConnectionString))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+CREATE TABLE IF NOT EXISTS md.crane_dup (serial_number text PRIMARY KEY, client_id integer NOT NULL, is_delivered boolean, tenant_id text NOT NULL);
+TRUNCATE md.crane_dup;
+INSERT INTO md.crane_dup VALUES ('200', 2, NULL, 'tenant-a'), ('201', 2, true, 'tenant-a'), ('300', 3, NULL, 'tenant-a');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var dupTable = new TableMetadata
+        {
+            Identifier = new TableIdentifier("erp", "md", "crane_dup"),
+            Table = new Table { SourceName = "erp", SchemaName = "md", TableName = "crane_dup", SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
+            Columns =
+            [
+                new TableColumn { ColumnName = "serial_number" },
+                new TableColumn { ColumnName = "client_id" },
+                new TableColumn { ColumnName = "is_delivered" },
+                new TableColumn { ColumnName = "tenant_id" }
+            ]
+        };
+
+        var decision = TableAccessDecision.Allowed(dupTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: "\"is_delivered\" IS NULL", hasUnconstrainedColumnAllow: true);
+        var allowed = await Resolver().GetAllowedKeysAsync(
+            Definition(), dupTable, decision, ["client_id"], [[2], [3]], Caller, CancellationToken.None);
+
+        // client_id = 2 has mixed rows (is_delivered NULL and true), so key closure admits only client_id = 3.
+        allowed.ShouldBe(new[] { RowScopeKeys.Normalize([3])! });
     }
 }

@@ -87,7 +87,7 @@ GRANT EXECUTE ON FUNCTION public.fn_orders(), public.fn_write() TO {_login};";
         });
         var invoker = new ProcedureInvoker(new ProcedureConnectionProvider(new SqlConnectionFactory(new DevelopmentEnvironment()), options), options);
         var definition = ProcedureDefinitionParser.ParseYaml(
-            $"name: p\nprocedure: public.{function}\nkind: tvf\nvalidation: declared\nresult_table: public.orders\noutputs:\n{outputs}", "p", false, 60);
+            $"name: p\nprocedure: public.{function}\nkind: tvf\nresult_table: public.orders\noutputs:\n{outputs}", "p", false, 60);
         return invoker.ExecuteReadAsync(definition, new Dictionary<string, object?>(), Caller, 100, CancellationToken.None);
     }
 
