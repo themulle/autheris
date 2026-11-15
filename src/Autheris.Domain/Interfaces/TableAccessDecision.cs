@@ -3,6 +3,14 @@ namespace Autheris.Domain.Interfaces;
 using System;
 using System.Collections.Generic;
 using Autheris.Domain.Exceptions;
+using Autheris.Domain.Model;
+
+public sealed record TableWriteDecision(
+    WriteRowScope RowScope,
+    IReadOnlySet<string> WritableColumns,
+    long? MaxRowsPerStatement,
+    IReadOnlyList<string> GrantIds,
+    string? DenyCode = null);
 
 public record TableAccessDecision(
     TableIdentifier Table,
@@ -57,6 +65,11 @@ public record TableAccessDecision(
     /// profiles). A pre-evaluated decision without this marker is never trusted by the aggregation service.
     /// </summary>
     internal bool EvaluatedByPdp { get; init; }
+
+    /// <summary>
+    /// Populated by the unified policy decision point for DML write operations (INSERT / UPDATE / DELETE).
+    /// </summary>
+    public TableWriteDecision? WriteGrant { get; init; }
 
     /// <summary>The typed Virtual Filter policy behind <see cref="MandatoryRowPredicateSql"/> (null when it was added as text).</summary>
     public IRowPolicy? MandatoryRowPolicy { get; init; }

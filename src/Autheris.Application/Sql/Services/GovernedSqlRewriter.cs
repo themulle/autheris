@@ -43,7 +43,7 @@ using TrinoSqlEngine.Governance;
 /// Stage 4: RewriteOptions (typed GovernancePolicy via GovernancePolicyFactory, CompileRequest, dialect, function allowlists)
 /// Stage 5: SecureRewrite (ISqlEngine.Compile: every value bound, value-free template cache inside the engine)
 /// </summary>
-public sealed class GovernedSqlRewriter : ISqlRewritePipeline
+public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 {
     private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = ClientSqlTokenPolicy.Analysis;
 
@@ -142,7 +142,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
     /// <summary>The compiled statement of the governed pipeline (internal; the tests assert on the compiled text and its binds).</summary>
     internal async Task<CompiledSql> CompileAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
-        (await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct).ConfigureAwait(false)).Compiled;
+        (await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct, transport: SqlTransports.WebSql).ConfigureAwait(false)).Compiled;
 
     internal async Task<GovernedRewrite> RewriteCoreAsync(
         string rawSql,
@@ -156,7 +156,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         bool plannedTableRead = false,
         ClientListShapes? clientLists = null,
         SqlPageWindow? page = null,
-        bool readOnlyRequired = false)
+        bool readOnlyRequired = false,
+        string? transport = null)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -259,15 +260,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 GovernedSqlErrorCodes.StatementNotPermitted);
         }
 
-        bool isDml = metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete;
-        if (isDml && dmlContext != null)
-        {
-            dmlContext.StatementType = metadata.StatementType;
-            dmlContext.Tables = metadata.ReferencedTables
-                .Select(t => t.FullName)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
+        bool isDml = ValidateDmlStatementAndTransport(metadata, dmlContext, transport);
 
         if (metadata.StatementType != SqlStatementType.Select && (!isDml || !_options.Value.IsWebSqlDmlAllowed))
         {
@@ -401,8 +394,9 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         DatabaseDialect? targetDatabaseDialect = _dataSourceResolver.ResolveConnectionDialect(effectiveDataSourceName);
 
         var referenceSpellings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var target in metadata.ReferencedTables)
+        for (int tableIndex = 0; tableIndex < metadata.ReferencedTables.Count; tableIndex++)
         {
+            var target = metadata.ReferencedTables[tableIndex];
             if (referenceSpellings.TryGetValue(target.FullName, out var firstSpelling) &&
                 !string.Equals(firstSpelling, target.FullName, StringComparison.Ordinal))
             {
@@ -413,8 +407,12 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             referenceSpellings[target.FullName] = target.FullName;
         }
 
-        foreach (var target in metadata.ReferencedTables)
+        DmlWritePermit? writePermit = null;
+        long? dmlMaxRowsCap = null;
+        for (int tableIndex = 0; tableIndex < metadata.ReferencedTables.Count; tableIndex++)
         {
+            var target = metadata.ReferencedTables[tableIndex];
+            bool isDmlTarget = isDml && tableIndex == 0;
             TableIdentifier tableId = SqlDataSourceResolver.ResolveTableIdentifier(target, effectiveDataSourceName);
             TableIdentifier resolvedId = tableId;
             TableMetadata? tableMeta = null;
@@ -556,12 +554,15 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 accessedTables.Add(resolvedId);
             }
 
-            var decision = await DecideTableAsync(tableMeta, resolvedId, colList).ConfigureAwait(false);
-
-            if (!decision.IsAllowed)
+            TableAccessDecision decision = null!;
+            if (!isDmlTarget)
             {
-                _logger?.LogWarning("WebSQL access to table {Table} denied: {Reasons}", target.FullName, string.Join("; ", decision.DeniedReasons));
-                throw SqlDataSourceResolver.TableDenied(target);
+                decision = await DecideTableAsync(tableMeta, resolvedId, colList).ConfigureAwait(false);
+                if (!decision.IsAllowed)
+                {
+                    _logger?.LogWarning("WebSQL access to table {Table} denied: {Reasons}", target.FullName, string.Join("; ", decision.DeniedReasons));
+                    throw SqlDataSourceResolver.TableDenied(target);
+                }
             }
 
             // Check order of the DML block: tenant column (every referenced table), dependency set, write decision.
@@ -584,24 +585,29 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 {
                     throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {target.FullName} is not a plain identifier; the query is refused (fail-closed).");
                 }
-
             }
 
-            if (isDml)
+            if (isDmlTarget)
             {
-                // Then the dependency set, then the write decision (deny-all), which stays the last check.
                 dependencyScan ??= new DmlDependencyScan(_tableRepository!, DecideTableAsync, effectiveDataSourceName);
-                if (await dependencyScan.IsReadAsync(resolvedId, ct).ConfigureAwait(false))
+                bool isReadByPolicy;
+                try
+                {
+                    isReadByPolicy = await dependencyScan.IsReadAsync(resolvedId, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not WebSqlPolicyException && !ct.IsCancellationRequested)
+                {
+                    _logger?.LogError("WebSQL DML dependency scan failed for table {Table} ({FailureType}); failing closed.", target.FullName, ex.GetType().Name);
+                    throw SqlDataSourceResolver.TableDenied(target);
+                }
+
+                if (isReadByPolicy)
                 {
                     _logger?.LogWarning("WebSQL DML target {Table} is read by a row policy and is refused.", target.FullName);
                     throw new WebSqlPolicyException("WebSQL DML on a table that a row policy reads is not permitted.", GovernedSqlErrorCodes.PolicyViolation);
                 }
 
-                if (!await CanWriteTableAsync(user, tenantId, tableMeta, clientIp, ct).ConfigureAwait(false))
-                {
-                    _logger?.LogWarning("WebSQL DML write access to table {Table} denied.", target.FullName);
-                    throw SqlDataSourceResolver.TableDenied(target);
-                }
+                (decision, writePermit, dmlMaxRowsCap) = await AuthorizeDmlTargetAsync(user, tenantId, tableMeta, target, metadata, clientIp, transport, ct).ConfigureAwait(false);
             }
 
             if (decision.AppliedVirtualFilters is { Count: > 0 } applied)
@@ -695,6 +701,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         long deliveredRowLimit = probeExtraRow && !isDml && maxRows > 0 ? maxRows : 0;
         long enforcedMaxRows = deliveredRowLimit > 0 && maxRows < long.MaxValue ? maxRows + 1 : maxRows;
+        if (isDml && dmlMaxRowsCap is long cap && cap > 0)
+        {
+            enforcedMaxRows = enforcedMaxRows > 0 ? Math.Min(enforcedMaxRows, cap) : cap;
+        }
 
         string? pagingUnavailable = null;
         bool bindPageOffset = false;
@@ -769,7 +779,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             new(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
             {
                 Metadata = decidedTableMetadata,
-                KeySetStatement = new RowFilterKeySetStatement(isRead, rawSql.Length, CompileRequestFactory.DefaultMaxExpansionFactor, disabled)
+                KeySetStatement = new RowFilterKeySetStatement(isRead, rawSql.Length, CompileRequestFactory.DefaultMaxExpansionFactor, disabled),
+                WritePermit = writePermit
             };
 
         var assembly = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: false), ct).ConfigureAwait(false);
@@ -845,7 +856,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             }
         }
 
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap);
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();
@@ -967,17 +978,5 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private System.Net.IPAddress ResolveClientIp()
     {
         return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
-    }
-
-    private async Task<bool> CanWriteTableAsync(ClaimsPrincipal user, TenantId tenantId, TableMetadata tableMeta, System.Net.IPAddress clientIp, CancellationToken ct)
-    {
-        var secContext = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId, clientIp: clientIp);
-        var writeRequest = new Autheris.Application.Policy.Pdp.AccessRequest(
-            secContext,
-            tableMeta,
-            Autheris.Application.Policy.Pdp.AccessOperation.Update,
-            Autheris.Application.Policy.Pdp.AccessTransport.WebSql);
-        var writeDecision = await _accessDecisionPoint.DecideAsync(writeRequest, ct).ConfigureAwait(false);
-        return writeDecision.IsAllowed;
     }
 }

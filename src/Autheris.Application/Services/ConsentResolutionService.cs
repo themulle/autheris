@@ -45,8 +45,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             .Where(c => IsApplicable(c, table, now, userSid, subjectGroupSids, userRoles, allUserSids))
             .ToList();
 
-        // Separate into A (ALLOW) and D (DENY)
-        var aConsents = applicable.Where(c => c.Effect == ConsentEffect.Allow).ToList();
+        // Separate into A (ALLOW) and D (DENY). Write-only consents (WriteRules without ColumnRules) never grant read access.
+        var aConsents = applicable.Where(c => c.Effect == ConsentEffect.Allow && (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0)).ToList();
         var dConsents = applicable.Where(c => c.Effect == ConsentEffect.Deny).ToList();
 
         // Rule 1: Hard Table DENY
@@ -72,6 +72,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         {
             var clampedConsent = activeConsents
                 .Where(c => c.Effect == ConsentEffect.Allow &&
+                            (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0) &&
                             c.TableIdentifier == table &&
                             !c.IsRevoked &&
                             c.ValidFrom <= now &&

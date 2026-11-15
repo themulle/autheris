@@ -127,19 +127,27 @@ public sealed partial class TableAccessPolicy
     /// <see cref="ConsentRowFilterRecipe"/>). The text becomes the projection of the policy and the values become bound parameters. A
     /// filter that cannot be typed leaves the decision string-only, which the compiler path denies.
     /// </summary>
-    private async Task<TableAccessDecision> WithTypedConsentPolicyAsync(TableAccessDecision decision, TableAccessQuery query, CancellationToken ct)
+    internal async Task<TableAccessDecision> WithTypedConsentPolicyAsync(TableAccessDecision decision, TableAccessQuery query, CancellationToken ct) =>
+        await BuildTypedConsentPolicyAsync(decision, query, _rowPolicyFactory, _callerAttributes, ct).ConfigureAwait(false);
+
+    internal static async Task<TableAccessDecision> BuildTypedConsentPolicyAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        RowPolicyFactory? rowPolicyFactory,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes,
+        CancellationToken ct)
     {
         var metadata = query.Metadata;
-        if (!WantsTypedConsentPolicy(metadata) || !decision.IsAllowed || decision.RowPolicy != null || decision.ConsentFilterRecipe == null)
+        if (rowPolicyFactory == null || metadata.DataSourceType != DataSourceType.Sql || metadata.IsDelegatedSource ||
+            !decision.IsAllowed || decision.RowPolicy != null || decision.ConsentFilterRecipe == null)
         {
             return decision;
         }
 
         try
         {
-            // 129 (A-1, B-consent): values are bound here, per request, into the typed policy; the cached decision stays value-free.
-            var (attributes, padding) = await ResolveRecipeAttributesAsync(decision.ConsentFilterRecipe, query, ct).ConfigureAwait(false);
-            var policy = _rowPolicyFactory!.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect, attributes, padding);
+            var (attributes, padding) = await ResolveRecipeAttributesCoreAsync(decision.ConsentFilterRecipe, query, callerAttributes, ct).ConfigureAwait(false);
+            var policy = rowPolicyFactory.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect, attributes, padding);
             var typed = policy == null
                 ? decision
                 : (decision with { CombinedRowFilterSql = null, RowFilterParameters = null }).WithAdditionalRowPolicy(policy);
@@ -151,15 +159,13 @@ public sealed partial class TableAccessPolicy
         }
     }
 
-    /// <summary>
-    /// The caller attributes the recipe names, resolved once for this request (null when the recipe names none, the feature is off or no
-    /// resolver is registered: the builder then keeps the constants). A statement-wide bind budget guards the expansion (BC-129-09): over the
-    /// budget every attribute of the recipe is <c>OverCardinality</c>, which is the same constant as <c>Missing</c>.
-    /// </summary>
-    private async Task<(Autheris.Application.Identity.Attributes.CallerAttributeSet? Set, Autheris.Application.Identity.Attributes.CallerAttributePadding? Padding)> ResolveRecipeAttributesAsync(
-        ConsentRowFilterRecipe recipe, TableAccessQuery query, CancellationToken ct)
+    internal static async Task<(Autheris.Application.Identity.Attributes.CallerAttributeSet? Set, Autheris.Application.Identity.Attributes.CallerAttributePadding? Padding)> ResolveRecipeAttributesCoreAsync(
+        ConsentRowFilterRecipe recipe,
+        TableAccessQuery query,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes,
+        CancellationToken ct)
     {
-        if (_callerAttributes is not { IsEnabled: true } resolver)
+        if (callerAttributes is not { IsEnabled: true } resolver)
         {
             return (null, null);
         }
@@ -174,7 +180,7 @@ public sealed partial class TableAccessPolicy
     }
 
     /// <summary>Resolves <paramref name="names"/> for the caller of <paramref name="query"/> once, under the request's bind reserve (BC-129-09).</summary>
-    private static async Task<(Autheris.Application.Identity.Attributes.CallerAttributeSet? Set, Autheris.Application.Identity.Attributes.CallerAttributePadding? Padding)> ResolveAttributeSetAsync(
+    internal static async Task<(Autheris.Application.Identity.Attributes.CallerAttributeSet? Set, Autheris.Application.Identity.Attributes.CallerAttributePadding? Padding)> ResolveAttributeSetAsync(
         Autheris.Application.Identity.Attributes.ICallerAttributeResolver resolver, IReadOnlyCollection<string> names, TableAccessQuery query, CancellationToken ct)
     {
         var subject = resolver.CreateSubject(query.Principal, query.Tenant);
@@ -186,10 +192,14 @@ public sealed partial class TableAccessPolicy
     /// 129 (A-1, B-vf): binds the slots of a Virtual Filter predicate for this request. Feature off or anything unresolved: deny all rows
     /// (a Virtual Filter is a restriction ANDed with the consent decision, never a grant).
     /// </summary>
-    private async Task<(TrinoSqlEngine.Governance.PolicyPredicate Predicate, IReadOnlyList<CallerAttributeAuditEntry>? Audit)> BindVirtualFilterAttributesAsync(
-        TrinoSqlEngine.Governance.PolicyPredicate typed, IReadOnlyList<string> names, TableAccessQuery query, CancellationToken ct)
+    internal static async Task<(TrinoSqlEngine.Governance.PolicyPredicate Predicate, IReadOnlyList<CallerAttributeAuditEntry>? Audit)> BindVirtualFilterAttributesCoreAsync(
+        TrinoSqlEngine.Governance.PolicyPredicate typed,
+        IReadOnlyList<string> names,
+        TableAccessQuery query,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes,
+        CancellationToken ct)
     {
-        if (_callerAttributes is not { IsEnabled: true } resolver)
+        if (callerAttributes is not { IsEnabled: true } resolver)
         {
             return (TrinoSqlEngine.Governance.PolicyPredicate.DenyAll, null);
         }
@@ -207,7 +217,14 @@ public sealed partial class TableAccessPolicy
     /// profile never drops the row restriction of another. An admin predicate that cannot be parsed into a typed policy, or conflicting row
     /// filter parameters, deny the table (fail closed); the denial reason never echoes the predicate text.
     /// </summary>
-    private TableAccessDecision ApplyAccessProfiles(TableAccessDecision decision, IReadOnlyList<AccessProfile> profiles, TableMetadata metadata)
+    internal TableAccessDecision ApplyAccessProfiles(TableAccessDecision decision, IReadOnlyList<AccessProfile> profiles, TableMetadata metadata) =>
+        ApplyAccessProfilesCore(decision, profiles, metadata, _rowPolicyFactory);
+
+    internal static TableAccessDecision ApplyAccessProfilesCore(
+        TableAccessDecision decision,
+        IReadOnlyList<AccessProfile> profiles,
+        TableMetadata metadata,
+        RowPolicyFactory? rowPolicyFactory)
     {
         var table = metadata.Identifier;
         var predicates = profiles
@@ -218,14 +235,14 @@ public sealed partial class TableAccessPolicy
             .ToList();
 
         var rowPolicies = new List<IRowPolicy>();
-        if (_rowPolicyFactory is { CanParseAdminPredicates: true })
+        if (rowPolicyFactory is { CanParseAdminPredicates: true })
         {
             // WP-X0e: each admin-authored predicate is parsed on its own into a typed policy (never concatenated as text first).
             try
             {
                 foreach (var predicate in predicates)
                 {
-                    rowPolicies.Add(_rowPolicyFactory.FromAccessProfile(predicate, metadata));
+                    rowPolicies.Add(rowPolicyFactory.FromAccessProfile(predicate, metadata));
                 }
             }
             catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
@@ -302,9 +319,18 @@ public sealed partial class TableAccessPolicy
     /// The active profiles of the caller that match the table, most restrictive first (<see cref="AccessProfileAssignmentRules.Order"/>);
     /// empty when none applies.
     /// </summary>
-    private async Task<IReadOnlyList<AccessProfile>> ResolveActiveAccessProfilesAsync(TableAccessQuery query, CancellationToken ct)
+    internal Task<IReadOnlyList<AccessProfile>> ResolveActiveAccessProfilesAsync(TableAccessQuery query, CancellationToken ct) =>
+        ResolveActiveAccessProfilesCoreAsync(query, _accessProfileCache, _accessProfileRepository, _memoryCache, _options, ct);
+
+    internal static async Task<IReadOnlyList<AccessProfile>> ResolveActiveAccessProfilesCoreAsync(
+        TableAccessQuery query,
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache,
+        IAccessProfileRepository? accessProfileRepository,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache,
+        GatewayOptions? options,
+        CancellationToken ct)
     {
-        if (_accessProfileCache == null && _accessProfileRepository == null)
+        if (accessProfileCache == null && accessProfileRepository == null)
         {
             return [];
         }
@@ -315,8 +341,6 @@ public sealed partial class TableAccessPolicy
             return [];
         }
 
-        // ONE lookup with every identity of the caller (SIDs, aliases), its groups and its roles. Group and role mappings only match through
-        // this call; the profile of the first SID must not hide the profiles of the other identities.
         var users = new List<string> { query.UserSid.Value };
         if (query.AllUserSids != null)
         {
@@ -326,17 +350,23 @@ public sealed partial class TableAccessPolicy
         var groups = query.GroupSids.Select(g => g.Value).ToList();
         var roles = query.Roles.ToList();
 
-        IReadOnlyList<AccessProfile>? profiles = _accessProfileCache != null
-            ? await _accessProfileCache.GetProfilesForSubjectsAsync(tenant, users, groups, roles, ct).ConfigureAwait(false)
-            : await _accessProfileRepository!.GetProfilesForSubjectsAsync(tenant, users, groups, roles, ct).ConfigureAwait(false);
+        var cache = accessProfileCache ?? (accessProfileRepository != null
+            ? new Autheris.Application.Policy.Services.AccessProfileCache(
+                accessProfileRepository,
+                clusterState: null,
+                memoryCache ?? new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+                options != null ? Microsoft.Extensions.Options.Options.Create(options) : null)
+            : null);
+
+        IReadOnlyList<AccessProfile>? profiles = cache != null
+            ? await cache.GetProfilesForSubjectsAsync(tenant, users, groups, roles, ct).ConfigureAwait(false)
+            : await accessProfileRepository!.GetProfilesForSubjectsAsync(tenant, users, groups, roles, ct).ConfigureAwait(false);
 
         if (profiles == null || profiles.Count == 0)
         {
             return [];
         }
 
-        // The most restrictive masking mode wins across ALL matched profiles (Strict, Default, Unmasked) and every row filter applies; the cached
-        // entry is re-checked for expiry on every use.
         var table = query.Metadata.Identifier;
         var now = DateTimeOffset.UtcNow;
         return AccessProfileAssignmentRules.Order(profiles.Where(p => p.IsActive(now) && p.MatchesTable(table)));

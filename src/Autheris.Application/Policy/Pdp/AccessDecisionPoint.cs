@@ -27,7 +27,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
-public sealed class AccessDecisionPoint : IAccessDecisionPoint
+public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
 {
     private readonly IOptions<GatewayOptions> _options;
     private readonly IConsentRepository? _consentRepository;
@@ -45,6 +45,8 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
     private readonly IAuditWriter? _auditWriter;
     private readonly ILogger _logger;
     private readonly TableAccessPolicy? _policy;
+    private readonly Autheris.Application.Policy.WriteGrants.IWriteGrantEvaluator? _writeGrantEvaluator;
+    private readonly TimeProvider _timeProvider;
 
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
@@ -61,7 +63,10 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         IRestrictedScopePolicy? restrictedScopes = null,
         IAuthPluginHost? authPluginHost = null,
         IAuditWriter? auditWriter = null,
-        ILogger<AccessDecisionPoint>? logger = null)
+        ILogger<AccessDecisionPoint>? logger = null,
+        Autheris.Application.Policy.WriteGrants.IWriteGrantEvaluator? writeGrantEvaluator = null,
+        Autheris.Application.Policy.WriteGrants.IRowPolicyDependencyIndex? policyDependencyIndex = null,
+        TimeProvider? timeProvider = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _resolutionService = resolutionService;
@@ -78,6 +83,10 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
         _authPluginHost = authPluginHost;
         _auditWriter = auditWriter;
         _logger = logger ?? NullLogger<AccessDecisionPoint>.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _writeGrantEvaluator = writeGrantEvaluator ?? (_consentRepository != null
+            ? new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(_consentRepository, policyDependencyIndex, _timeProvider)
+            : null);
 
         if (_consentRepository != null && _resolutionService != null)
         {
@@ -138,20 +147,7 @@ public sealed class AccessDecisionPoint : IAccessDecisionPoint
 
         if (request.Operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete)
         {
-            var canWrite = _policy != null && await _policy.CanWriteTableAsync(
-                subject.TenantId,
-                metadata,
-                ct: ct).ConfigureAwait(false);
-
-            if (!canWrite)
-            {
-                return PreconditionDenied(
-                    table,
-                    "WRITE_TRANSPORT_NOT_WIRED",
-                    "Policy",
-                    null,
-                    $"Write access to table '{table.ToQualifiedName()}' is not permitted.");
-            }
+            return await DecideWriteAsync(request, ct).ConfigureAwait(false);
         }
 
         var roles = new HashSet<string>(subject.TenantRoles.Concat(subject.ClusterRoles), StringComparer.OrdinalIgnoreCase);

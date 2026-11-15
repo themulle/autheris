@@ -25,15 +25,33 @@ public sealed class DmlWriteDecisionArchitectureTests
     private static string Source(string relative) => File.ReadAllText(Path.Combine(Root(), relative));
 
     [Fact]
-    public void SEC_36_SP3a_CanWriteTableAsync_references_no_casbin_or_role_or_policy_evaluation()
+    public void IWriteGrantEvaluator_only_called_by_decision_point()
     {
-        var text = Source("src/Autheris.Application/Policy/TableAccessPolicy.cs");
-        var body = text[text.IndexOf("CanWriteTableAsync(", StringComparison.Ordinal)..];
-
-        foreach (var forbidden in new[] { "Casbin", "DecideAsync", "DmlWriterRoles", "IsInRole", "_policyEnforcementService", "IsConsentBypassed" })
+        var srcDir = Path.Combine(Root(), "src");
+        var allowed = new[]
         {
-            body.ShouldNotContain(forbidden, Case.Sensitive);
-        }
+            "src/Autheris.Application/Policy/Pdp/AccessDecisionPoint.cs",
+            "src/Autheris.Application/Policy/Pdp/AccessDecisionPoint.WriteGrants.cs",
+            "src/Autheris.Application/Policy/WriteGrants/IWriteGrantEvaluator.cs",
+            "src/Autheris.Application/Policy/WriteGrants/WriteGrantEvaluator.cs",
+            "src/Autheris.Api/Extensions/DependencyInjection/GatewayExecutionServiceExtensions.cs"
+        }.ToHashSet(StringComparer.Ordinal);
+
+        var callers = Directory.EnumerateFiles(srcDir, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") &&
+                        !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Where(f =>
+            {
+                var content = File.ReadAllText(f);
+                return content.Contains("IWriteGrantEvaluator", StringComparison.Ordinal) ||
+                       content.Contains("WriteGrantEvaluator", StringComparison.Ordinal);
+            })
+            .Select(f => Path.GetRelativePath(Root(), f).Replace('\\', '/'))
+            .Where(rel => !allowed.Contains(rel))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        callers.ShouldBeEmpty();
     }
 
     [Fact]
@@ -42,7 +60,7 @@ public sealed class DmlWriteDecisionArchitectureTests
         var text = Source("src/Autheris.Application/Sql/Services/GovernedSqlRewriter.cs");
         var tenantColumn = text.IndexOf("RequireTenantColumnOrThrow(", StringComparison.Ordinal);
         var dependency = text.IndexOf("dependencyScan.IsReadAsync(", StringComparison.Ordinal);
-        var write = text.IndexOf("CanWriteTableAsync(", StringComparison.Ordinal);
+        var write = text.IndexOf("AuthorizeDmlTargetAsync(", StringComparison.Ordinal);
 
         tenantColumn.ShouldBeGreaterThan(0);
         dependency.ShouldBeGreaterThan(tenantColumn);
@@ -50,19 +68,24 @@ public sealed class DmlWriteDecisionArchitectureTests
     }
 
     [Fact]
-    public void SEC_36_ORDER_02_Permissive_write_seam_is_internal_and_used_only_by_the_write_decision()
+    public void Legacy_write_seam_and_CanWriteTableAsync_are_deleted()
     {
-        Source("src/Autheris.Application/Policy/DmlWriteDecisionTestSeam.cs").ShouldContain("internal static class DmlWriteDecisionTestSeam");
+        File.Exists(Path.Combine(Root(), "src", "Autheris.Application", "Policy", "DmlWriteDecisionTestSeam.cs")).ShouldBeFalse();
 
-        var users = new[] { "src", "benchmarks", Path.Combine("tests", "Autheris.Tests.SqlCompilerGate") }
-            .Where(d => Directory.Exists(Path.Combine(Root(), d)))
-            .SelectMany(d => Directory.EnumerateFiles(Path.Combine(Root(), d), "*.cs", SearchOption.AllDirectories))
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && File.ReadAllText(f).Contains("DmlWriteDecisionTestSeam", StringComparison.Ordinal))
-            .Select(f => Path.GetFileName(f))
-            .Order(StringComparer.Ordinal)
+        var srcDir = Path.Combine(Root(), "src");
+        var matches = Directory.EnumerateFiles(srcDir, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") &&
+                        !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Where(f =>
+            {
+                var text = File.ReadAllText(f);
+                return text.Contains("DmlWriteDecisionTestSeam", StringComparison.Ordinal) ||
+                       text.Contains("CanWriteTableAsync", StringComparison.Ordinal);
+            })
+            .Select(f => Path.GetRelativePath(Root(), f).Replace('\\', '/'))
             .ToList();
 
-        users.ShouldBe(["DmlWriteDecisionTestSeam.cs", "TableAccessPolicy.cs"]);
+        matches.ShouldBeEmpty();
     }
 
     [Fact]

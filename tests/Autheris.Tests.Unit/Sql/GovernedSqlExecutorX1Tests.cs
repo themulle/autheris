@@ -97,26 +97,55 @@ public sealed class GovernedSqlExecutorX1Tests
     /// </summary>
     private static GovernedSqlExecutionService BuildService(string sourceType, bool allowRecursive, bool withWritePermit, ISqlConnectionFactory? connectionFactory)
     {
-        // Test-only seam: the production write decision denies every DML target.
-        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         var table = Orders(sourceType);
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(table.Identifier.Equals(ci.Arg<TableIdentifier>()) ? table : null));
+        var writeConsents = new List<Consent>();
+        if (withWritePermit)
+        {
+            var allCols = table.Columns.Select(c => c.ColumnName).ToList();
+            writeConsents.Add(new Consent
+            {
+                TableIdentifier = table.Identifier,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-1-5-21-X1"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                WriteRules =
+                [
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Insert, allCols, WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Update, allCols, WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)
+                ]
+            });
+        }
         var consents = Substitute.For<IConsentRepository>();
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>(writeConsents));
         var resolution = Substitute.For<IConsentResolutionService>();
         resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
+        var gatewayOptions = Options.Create(Gateway(sourceType == "PostgreSQL" ? "PostgreSql" : sourceType, allowRecursive: allowRecursive));
+        var typedPolicies = GovernedTestSupport.TypedPolicies();
+        var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            gatewayOptions,
+            resolution,
+            consents,
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            typedPolicies: typedPolicies,
+            writeGrantEvaluator: new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(consents, allowDeleteGrants: withWritePermit));
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
-            Options.Create(Gateway(sourceType == "PostgreSQL" ? "PostgreSql" : sourceType, allowRecursive: allowRecursive)), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
+            gatewayOptions, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
-            tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
+            tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: typedPolicies,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consents,
             connectionFactory: connectionFactory,
-            sqlEngine: withWritePermit ? new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()) : new TrinoSqlEngine.FastSqlEngine());
+            sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
+            accessDecisionPoint: pdp);
         return service;
     }
 
@@ -210,19 +239,17 @@ public sealed class GovernedSqlExecutorX1Tests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task WebSqlDml_WithTheProductionEngine_IsDeniedForLackOfAWritePermit_AndNothingIsExecuted()
+    public async Task WebSqlDml_WithoutAWriteGrant_IsDenied_AndNothingIsExecuted()
     {
-        // WP-SIMPL-45 PR 3 CI repair, SEC-CIFIX-2: without the test-only decorator the production engine denies every DML statement
-        // (SEC-SIMPL-120), also for a writer role, and no command reaches a connection.
+        // Without an active write grant the decision point denies every DML statement, also for a writer role, and no command reaches a connection.
         var connectionFactory = Substitute.For<ISqlConnectionFactory>();
         var service = BuildService("Sqlite", allowRecursive: false, withWritePermit: false, connectionFactory);
         bool written = false;
 
-        var ex = await Should.ThrowAsync<SecurityException>(() => service.ExecuteGovernedQueryAsync(
-            new GovernedSqlQueryRequest("UPDATE orders SET amount = 1 WHERE id = 1"), Writer(), new TenantId(Tenant),
+        await Should.ThrowAsync<Autheris.Application.Sql.WebSqlTableDeniedException>(() => service.ExecuteGovernedQueryAsync(
+            new GovernedSqlQueryRequest("UPDATE orders SET amount = 1 WHERE id = 1", Transport: SqlTransports.WebSql), Writer(), new TenantId(Tenant),
             (_, _) => { written = true; return Task.CompletedTask; }));
 
-        ex.Message.ShouldContain("A write permit is required for DML operations.");
         written.ShouldBeFalse();
         connectionFactory.ReceivedCalls().ShouldBeEmpty();
     }

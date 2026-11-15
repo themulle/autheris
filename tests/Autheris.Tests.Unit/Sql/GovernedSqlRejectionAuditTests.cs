@@ -39,8 +39,6 @@ public sealed class GovernedSqlRejectionAuditTests
 
     private static (GovernedSqlExecutionService Service, List<AuditLogEntry> Audit) CreateService(global::Autheris.Application.Audit.IAuditWriter? writer = null)
     {
-        // Test-only seam: the production write decision denies every DML target.
-        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         var table = new TableMetadata
         {
             Identifier = new TableIdentifier("default", "public", "orders"),
@@ -56,9 +54,23 @@ public sealed class GovernedSqlRejectionAuditTests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(table.Identifier.TableName == ci.Arg<TableIdentifier>().TableName ? table : null));
+        var writeConsent = new Consent
+        {
+            TableIdentifier = table.Identifier,
+            TenantId = new TenantId(Tenant),
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-5-21-L4"),
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            WriteRules =
+            [
+                new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["id", "dept", "amount", "tenant_id"], WriteRowScope.AllRows)
+            ]
+        };
         var consents = Substitute.For<IConsentRepository>();
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([writeConsent]));
         var resolution = Substitute.For<IConsentResolutionService>();
         resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
@@ -95,7 +107,7 @@ public sealed class GovernedSqlRejectionAuditTests
     {
         var (service, audit) = CreateService();
 
-        var ex = await Should.ThrowAsync<Exception>(() => service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql), Writer(), new TenantId(Tenant)));
+        var ex = await Should.ThrowAsync<Exception>(() => service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, Transport: SqlTransports.WebSql), Writer(), new TenantId(Tenant)));
 
         ex.ShouldNotBeOfType<System.Security.SecurityException>();   // the engine error itself, not a wrapped policy error
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
@@ -115,7 +127,7 @@ public sealed class GovernedSqlRejectionAuditTests
     {
         var (service, audit) = CreateService();
 
-        var ex = await Should.ThrowAsync<Exception>(() => service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql), Writer(), new TenantId(Tenant)));
+        var ex = await Should.ThrowAsync<Exception>(() => service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, Transport: SqlTransports.WebSql), Writer(), new TenantId(Tenant)));
 
         Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
         mapped.Code.ShouldBe(code);
@@ -146,7 +158,7 @@ public sealed class GovernedSqlRejectionAuditTests
         var (service, audit) = CreateService();
 
         await Should.ThrowAsync<TrinoSqlEngine.SqlCompileNotSupportedException>(() => service.ExecuteQueryBufferedAsync(
-            new GovernedSqlQueryRequest("UPDATE orders SET amount = 1 WHERE id IN (WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t)"),
+            new GovernedSqlQueryRequest("UPDATE orders SET amount = 1 WHERE id IN (WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT n FROM t)", Transport: SqlTransports.WebSql),
             Writer(), new TenantId(Tenant)));
 
         var rejected = audit.ShouldHaveSingleItem();

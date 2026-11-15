@@ -30,7 +30,7 @@ public sealed class WebSqlDmlGuardTests
     }
 
     private static Task Run(GovernedSqlExecutionService service, ClaimsPrincipal user, string sql) =>
-        service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(sql), user, new TenantId(BypassSemanticsAndDmlGuardrailTests.Tenant), (_, _) => Task.CompletedTask);
+        service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(sql, Transport: SqlTransports.WebSql), user, new TenantId(BypassSemanticsAndDmlGuardrailTests.Tenant), (_, _) => Task.CompletedTask);
 
     [Theory]
     [InlineData("WebSqlWriter")]
