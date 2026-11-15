@@ -8,7 +8,6 @@ using VirtualFilter = Autheris.Domain.Model.VirtualFilter;
 /// <summary>The kind of stored predicate a finding refers to.</summary>
 public enum PolicyLintKind
 {
-    AccessProfileRowFilter,
     VirtualFilter
 }
 

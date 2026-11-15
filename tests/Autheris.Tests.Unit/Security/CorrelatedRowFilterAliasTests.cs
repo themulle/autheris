@@ -40,66 +40,6 @@ public sealed class CorrelatedRowFilterAliasTests : IDisposable
         try { File.Delete(_dbPath); } catch { /* best effort */ }
     }
 
-    private static ConsentRowFilter CustomerCountryFilter(
-        string? targetAlias = null,
-        string depAlias = "c",
-        string? targetTemporalColumn = null,
-        string? dependentValidFromColumn = null,
-        IReadOnlyList<SubqueryJoinHop>? hops = null) => new()
-    {
-        FilterType = RowFilterType.SubqueryCorrelated,
-        TargetTableAlias = targetAlias,
-        DependentTable = new TableIdentifier("erp", "main", "customers"),
-        DependentTableAlias = depAlias,
-        ForeignKeyColumn = "customer_id",
-        PrimaryKeyColumn = "id",
-        SubqueryFilterPredicateJson = $"{{\"{depAlias}.country\": \"CH\"}}",
-        TargetTemporalColumn = targetTemporalColumn,
-        DependentValidFromColumn = dependentValidFromColumn,
-        AdditionalHops = hops
-    };
-
-    [Fact]
-    public void Generator_AlwaysReferencesReservedTargetAlias()
-    {
-        var sql = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(CustomerCountryFilter(), DatabaseDialect.Sqlite);
-
-        sql.ShouldBe("EXISTS (SELECT 1 FROM \"customers\" AS \"c\" WHERE \"c\".\"id\" = \"autheris_target\".\"customer_id\" AND \"c\".\"country\" = 'CH')");
-    }
-
-    [Fact]
-    public void Generator_RebasesLegacyTargetQualifierOntoReservedAlias()
-    {
-        var filter = CustomerCountryFilter(targetAlias: "i", targetTemporalColumn: "i.invoice_date", dependentValidFromColumn: "c.valid_from");
-
-        var sql = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.SqlServer);
-
-        sql.ShouldContain("[autheris_target].[invoice_date] >= [c].[valid_from]");
-        sql.ShouldNotContain("[i].");
-    }
-
-    [Theory]
-    [InlineData("target", null)]           // dependent alias equals the default target alias
-    [InlineData("i", "i")]                 // dependent alias equals the configured target alias
-    [InlineData("autheris_target", null)]  // dependent alias equals the reserved alias
-    public void Generator_RejectsDependentAliasCollidingWithTarget(string depAlias, string? targetAlias)
-    {
-        var filter = CustomerCountryFilter(targetAlias: targetAlias, depAlias: depAlias);
-
-        Should.Throw<InvalidOperationException>(() => AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.Sqlite));
-    }
-
-    [Fact]
-    public void Generator_RejectsDuplicateHopAlias()
-    {
-        var filter = CustomerCountryFilter(hops:
-        [
-            new SubqueryJoinHop { Table = new TableIdentifier("erp", "main", "assets"), TableAlias = "c", LeftJoinColumn = "c.id", RightJoinColumn = "c.customer_id" }
-        ]);
-
-        Should.Throw<InvalidOperationException>(() => AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.Sqlite));
-    }
-
     [Fact]
     public async Task SqlTableReadExecutor_AppliesCorrelatedPolicy_AgainstRealSqlite()
     {

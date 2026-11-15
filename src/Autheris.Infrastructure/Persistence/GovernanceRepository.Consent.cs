@@ -263,6 +263,14 @@ public partial class GovernanceRepository
         TenantScope.RequireTenant(consent.TenantId, nameof(GovernanceTable.Consents));
         consent.Validate();
 
+        if (consent.RowScope.Count > 0)
+        {
+            var tableMeta = await GetTableMetadataAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
+            await using var readConn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+            var snapshot = await VirtualFilterStore.LoadSnapshotAsync(readConn, ct).ConfigureAwait(false);
+            Autheris.Application.Policy.RowScopes.GrantRowScopeValidator.Validate(consent.RowScope, consent.TenantId, snapshot, tableMeta);
+        }
+
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -312,13 +320,15 @@ public partial class GovernanceRepository
             ColumnRules = source.ColumnRules,
             RowFilters = source.RowFilters,
             WriteRules = source.WriteRules,
-            RowFilterCondition = source.RowFilterCondition
+            RowScope = source.RowScope
         };
 
     private static GrantRecordInput BuildConsentGrantInput(Consent consent, string tenantId, string requestedBy, string decisionJson, DateTimeOffset decidedAt, GrantRecordType? recordType = null) =>
         new(
             tenantId,
-            "{}",
+            consent.RowScope.Count == 0
+                ? "{}"
+                : JsonSerializer.Serialize(new { row_scope = consent.RowScope }),
             requestedBy,
             decisionJson,
             decidedAt,

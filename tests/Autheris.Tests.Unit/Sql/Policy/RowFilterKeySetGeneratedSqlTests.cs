@@ -25,7 +25,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
     private static readonly TableIdentity Air1 = new("fms", "air1");
     private static readonly TableIdentity Engine = new("md", "engine");
     private static readonly TenantBinding Tenant = new("__autheris_tenant", "acme", SqlParameterType.String);
-    private readonly TypedRowFilterBuilder _builder = new();
+    private readonly TestCorrelatedPredicateBuilder _builder = new();
     private static readonly FastSqlEngine Compiler = new();
 
     // ---- catalog and policies ----
@@ -43,39 +43,38 @@ public sealed class RowFilterKeySetGeneratedSqlTests
     ], "dbo");
 
     /// <summary>Issue example 1: <c>fms.air1</c> through <c>conf.client</c> and the hop <c>md.crane</c>.</summary>
-    private static ConsentRowFilter Example1(string kind = "crane", int group = 0) => new()
+    private static TestCorrelatedRule Example1(string kind = "crane", int group = 0) => new()
     {
         FilterGroup = group,
-        FilterType = RowFilterType.SubqueryCorrelated,
+        IsCorrelated = true,
         DependentTable = new TableIdentifier("ds", "conf", "client"),
         DependentTableAlias = "c",
         ForeignKeyColumn = "client_id",
         PrimaryKeyColumn = "id",
-        AdditionalHops =
-        [
-            new SubqueryJoinHop { Table = new TableIdentifier("ds", "md", "crane"), TableAlias = "cr", LeftJoinColumn = "c.id", RightJoinColumn = "cr.client_id" }
-        ],
-        SubqueryFilterPredicateJson = $"{{\"cr.kind\": \"{kind}\"}}"
+        Hop = (new TableIdentifier("ds", "md", "crane"), "cr", "c.id", "cr.client_id"),
+        WhereColumn = "cr.kind",
+        WhereValue = kind
     };
 
     /// <summary>Issue example 2: <c>md.engine</c> through <c>md.crane</c>.</summary>
-    private static ConsentRowFilter Example2() => new()
+    private static TestCorrelatedRule Example2() => new()
     {
-        FilterType = RowFilterType.SubqueryCorrelated,
+        IsCorrelated = true,
         DependentTable = new TableIdentifier("ds", "md", "crane"),
         DependentTableAlias = "cr",
         ForeignKeyColumn = "crane_id",
         PrimaryKeyColumn = "id",
-        SubqueryFilterPredicateJson = "{\"cr.kind\": \"crane\"}"
+        WhereColumn = "cr.kind",
+        WhereValue = "crane"
     };
 
-    private static ConsentRowFilter Simple(string column = "region", string value = "\"US\"") => new() { ColumnName = column, Operator = "EQ", ValueJson = value };
+    private static TestCorrelatedRule Simple(string column = "region", string value = "\"US\"") => TestCorrelatedRule.Simple(column, value);
 
-    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = filters };
+    private static TestConsent Allow(params TestCorrelatedRule[] filters) => new(ConsentEffect.Allow, filters);
 
-    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = filters };
+    private static TestConsent Deny(params TestCorrelatedRule[] filters) => new(ConsentEffect.Deny, filters);
 
-    private PolicyPredicate Policy(Consent[] allow, Consent[]? deny = null, TableIdentity? table = null) =>
+    private PolicyPredicate Policy(TestConsent[] allow, TestConsent[]? deny = null, TableIdentity? table = null) =>
         _builder.BuildCombined(allow, deny ?? [], table ?? Air1)!;
 
     private static PolicyKeyQueryRequest KeyRequest(ExistsExpression exists, PolicyPredicate predicate, ITableCatalog catalog, TableIdentity target, TargetSqlDialect dialect, int limit = 2001) =>
@@ -375,16 +374,17 @@ public sealed class RowFilterKeySetGeneratedSqlTests
             new CatalogColumn("id", "INTEGER"), new CatalogColumn("client_id", "INTEGER"), new CatalogColumn("kind", "TEXT"), new CatalogColumn("tenant_id", "TEXT")), "tenant_id", 1)
     ], "main");
 
-    private static ConsentRowFilter SqliteExample1(string kind, int group = 0) => new()
+    private static TestCorrelatedRule SqliteExample1(string kind, int group = 0) => new()
     {
         FilterGroup = group,
-        FilterType = RowFilterType.SubqueryCorrelated,
+        IsCorrelated = true,
         DependentTable = new TableIdentifier("ds", "main", "client"),
         DependentTableAlias = "c",
         ForeignKeyColumn = "client_id",
         PrimaryKeyColumn = "id",
-        AdditionalHops = [new SubqueryJoinHop { Table = new TableIdentifier("ds", "main", "crane"), TableAlias = "cr", LeftJoinColumn = "c.id", RightJoinColumn = "cr.client_id" }],
-        SubqueryFilterPredicateJson = $"{{\"cr.kind\": \"{kind}\"}}"
+        Hop = (new TableIdentifier("ds", "main", "crane"), "cr", "c.id", "cr.client_id"),
+        WhereColumn = "cr.kind",
+        WhereValue = kind
     };
 
     private static SqliteConnection Seed()
@@ -444,7 +444,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
         return (viaExists, viaKeys);
     }
 
-    private PolicyPredicate SqlitePolicy(Consent[] allow, Consent[]? deny = null) => _builder.BuildCombined(allow, deny ?? [], SAir1)!;
+    private PolicyPredicate SqlitePolicy(TestConsent[] allow, TestConsent[]? deny = null) => _builder.BuildCombined(allow, deny ?? [], SAir1)!;
 
     [Fact]
     public void KeyQuery_ReturnsTheDistinctTenantScopedKeys_WithoutNull()

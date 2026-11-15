@@ -70,24 +70,7 @@ public sealed class RowPolicyFactory
     }
 
     /// <summary>
-    /// Parses an access-profile row filter (canonical Trino syntax) once into a typed policy.
-    /// </summary>
-    /// <exception cref="PolicyParseException">The predicate is invalid (the caller denies; the message never echoes the text).</exception>
-    /// <exception cref="InvalidOperationException">No parser is registered.</exception>
-    public IRowPolicy FromAccessProfile(string predicate, TableMetadata metadata)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(predicate);
-        ArgumentNullException.ThrowIfNull(metadata);
-        var parsed = ParseAdminPredicate(
-            predicate,
-            new TableIdentity(metadata.Identifier.Schema, metadata.Identifier.TableName),
-            metadata.Columns.Select(c => c.ColumnName).ToList(),
-            metadata.Dialect);
-        return new PolicyPredicateRowPolicy(parsed, PolicyParameterNamer.ToTargetDialect(metadata.Dialect), _renderer);
-    }
-
-    /// <summary>
-    /// Parses admin-authored predicate text (canonical Trino syntax, for example an access profile row filter) into a typed
+    /// Parses admin-authored predicate text (canonical Trino syntax) into a typed
     /// predicate: every literal becomes a bound policy parameter, columns must be in <paramref name="columns"/>, functions must be allow-listed.
     /// </summary>
     /// <exception cref="PolicyParseException">The predicate is invalid (the message never echoes the text).</exception>

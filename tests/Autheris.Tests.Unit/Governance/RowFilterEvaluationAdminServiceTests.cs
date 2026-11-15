@@ -30,15 +30,13 @@ public sealed class RowFilterEvaluationAdminServiceTests
         => new(_consents, _tables, _audit, new StaticOptionsMonitor<GatewayOptions>(
             new GatewayOptions { RowFilters = new RowFilterOptions { KeySetCache = caps ?? new RowFilterKeySetCacheOptions() } }));
 
-    private static ConsentRowFilter Rule(RowFilterType type = RowFilterType.SubqueryCorrelated, string? temporal = null,
-        RowFilterEvaluationSettings? stored = null) => new()
+    private static ConsentRowFilter Rule(RowFilterType type = RowFilterType.SimpleColumnPredicate) => new()
     {
         Id = RuleId,
         FilterType = type,
-        TargetTemporalColumn = temporal,
-        KeySetStrategy = stored?.Strategy,
-        KeySetDurationSeconds = stored?.DurationSeconds,
-        KeySetMaxKeys = stored?.MaxKeys
+        ColumnName = "region",
+        Operator = "EQ",
+        ValueJson = "\"EU\""
     };
 
     private void GivenRule(ConsentRowFilter filter, ConsentEffect effect = ConsentEffect.Allow, TenantId? tenant = null)
@@ -49,6 +47,7 @@ public sealed class RowFilterEvaluationAdminServiceTests
         => new(Orders, tenant, rule, before, after, 7);
 
     private static readonly RowFilterEvaluationSettings KeySet = new(RowFilterEvaluationStrategy.KeySetCache, 120, 500);
+    private static readonly RowFilterEvaluationSettings ExistsOnly = new(RowFilterEvaluationStrategy.Exists, null, null);
 
     // ---- rule level ----
 
@@ -56,11 +55,11 @@ public sealed class RowFilterEvaluationAdminServiceTests
     [Fact]
     public async Task WritesHmacChainedAuditWithBeforeAfter_SEC_RF107_14d()
     {
-        var before = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.Exists, 30, null);
-        GivenRule(Rule(stored: before));
-        _consents.UpdateRowFilterEvaluationAsync(RuleId, TenantA, KeySet, Arg.Any<CancellationToken>()).Returns(Change(before, KeySet, RuleId, TenantA));
+        var before = RowFilterEvaluationSettings.Inherit;
+        GivenRule(Rule());
+        _consents.UpdateRowFilterEvaluationAsync(RuleId, TenantA, ExistsOnly, Arg.Any<CancellationToken>()).Returns(Change(before, ExistsOnly, RuleId, TenantA));
 
-        var change = await Create().SetRuleAsync(RuleId, TenantA, KeySet, Actor, CancellationToken.None);
+        var change = await Create().SetRuleAsync(RuleId, TenantA, ExistsOnly, Actor, CancellationToken.None);
 
         change.ShouldNotBeNull();
         // The HMAC-chained writer in its required (fail-closed) mode, with the dedicated event type and not ConsentApplied.
@@ -71,8 +70,8 @@ public sealed class RowFilterEvaluationAdminServiceTests
             && e.TenantId == TenantA
             && e.TargetTable == Orders.ToString()
             && e.DetailsJson.Contains(RuleId.ToString())
-            && e.DetailsJson.Contains("\"before\":{\"strategy\":\"Exists\",\"durationSeconds\":30,\"maxKeys\":null}")
-            && e.DetailsJson.Contains("\"after\":{\"strategy\":\"KeySetCache\",\"durationSeconds\":120,\"maxKeys\":500}")), Arg.Any<CancellationToken>());
+            && e.DetailsJson.Contains("\"before\":{\"strategy\":null,\"durationSeconds\":null,\"maxKeys\":null}")
+            && e.DetailsJson.Contains("\"after\":{\"strategy\":\"Exists\",\"durationSeconds\":null,\"maxKeys\":null}")), Arg.Any<CancellationToken>());
         await _audit.DidNotReceive().RecordBestEffortAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
     }
 
@@ -80,13 +79,13 @@ public sealed class RowFilterEvaluationAdminServiceTests
     public async Task SetRule_PassesTheSettingsToTheRepository_WhichOwnsTheEpochBump()
     {
         GivenRule(Rule());
-        _consents.UpdateRowFilterEvaluationAsync(RuleId, TenantA, KeySet, Arg.Any<CancellationToken>())
-            .Returns(Change(RowFilterEvaluationSettings.Inherit, KeySet, RuleId, TenantA));
+        _consents.UpdateRowFilterEvaluationAsync(RuleId, TenantA, ExistsOnly, Arg.Any<CancellationToken>())
+            .Returns(Change(RowFilterEvaluationSettings.Inherit, ExistsOnly, RuleId, TenantA));
 
-        var change = await Create().SetRuleAsync(RuleId, TenantA, KeySet, Actor, CancellationToken.None);
+        var change = await Create().SetRuleAsync(RuleId, TenantA, ExistsOnly, Actor, CancellationToken.None);
 
         change!.NewEpoch.ShouldBe(7);
-        await _consents.Received(1).UpdateRowFilterEvaluationAsync(RuleId, TenantA, KeySet, Arg.Any<CancellationToken>());
+        await _consents.Received(1).UpdateRowFilterEvaluationAsync(RuleId, TenantA, ExistsOnly, Arg.Any<CancellationToken>());
     }
 
     [Trait("Category", "Security")]
@@ -131,19 +130,10 @@ public sealed class RowFilterEvaluationAdminServiceTests
         await Should.ThrowAsync<RowFilterEvaluationValidationException>(() => Create().SetRuleAsync(RuleId, TenantA, KeySet, Actor, CancellationToken.None));
     }
 
-    [Trait("Category", "Security")]
-    [Fact]
-    public async Task SetRule_TemporalRule_IsRejected_SEC_RF107_06e()
-    {
-        GivenRule(Rule(temporal: "order_date"));
-
-        await Should.ThrowAsync<RowFilterEvaluationValidationException>(() => Create().SetRuleAsync(RuleId, TenantA, KeySet, Actor, CancellationToken.None));
-    }
-
     [Fact]
     public async Task SetRule_ClearingOnADenyRule_IsAllowed()
     {
-        GivenRule(Rule(stored: KeySet), ConsentEffect.Deny);
+        GivenRule(Rule(), ConsentEffect.Deny);
         _consents.UpdateRowFilterEvaluationAsync(RuleId, TenantA, RowFilterEvaluationSettings.Inherit, Arg.Any<CancellationToken>())
             .Returns(Change(KeySet, RowFilterEvaluationSettings.Inherit, RuleId, TenantA));
 
@@ -153,16 +143,14 @@ public sealed class RowFilterEvaluationAdminServiceTests
     [Fact]
     public async Task SetRule_AboveCaps_IsRejected_AndLoweredCapsApplyImmediately()
     {
-        GivenRule(Rule());
-
         var lowered = Create(new RowFilterKeySetCacheOptions { MaxKeys = 100 });
-        await Should.ThrowAsync<RowFilterEvaluationValidationException>(() => lowered.SetRuleAsync(RuleId, TenantA, KeySet, Actor, CancellationToken.None));
+        await Should.ThrowAsync<RowFilterEvaluationValidationException>(() => lowered.SetObjectAsync(Orders, KeySet, Actor, TenantA, CancellationToken.None));
     }
 
     [Fact]
     public async Task GetRule_ReturnsStoredAndEffective_WithObjectLevelInFallbackOrder()
     {
-        GivenRule(Rule(stored: new RowFilterEvaluationSettings(null, 30, null)));
+        GivenRule(Rule());
         _tables.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
         {
             Identifier = Orders,
@@ -172,10 +160,10 @@ public sealed class RowFilterEvaluationAdminServiceTests
 
         var view = await Create().GetRuleAsync(RuleId, TenantA, CancellationToken.None);
 
-        view!.Stored.ShouldBe(new RowFilterEvaluationSettings(null, 30, null));
+        view!.Stored.ShouldBe(RowFilterEvaluationSettings.Inherit);
         view.Effective.Strategy.ShouldBe(RowFilterEvaluationStrategy.KeySetCache);
         view.Effective.StrategySource.ShouldBe(RowFilterEvaluationSource.Object);
-        view.Effective.Duration.ShouldBe(TimeSpan.FromSeconds(30));
+        view.Effective.Duration.ShouldBe(TimeSpan.FromSeconds(600));
         view.Effective.MaxKeys.ShouldBe(50);
     }
 
@@ -191,11 +179,11 @@ public sealed class RowFilterEvaluationAdminServiceTests
     [Fact]
     public async Task ValidateRule_ReturnsTheCurrentStoredSettings_WithoutWriting()
     {
-        GivenRule(Rule(stored: KeySet));
+        GivenRule(Rule());
 
         var preview = await Create().ValidateRuleAsync(RuleId, TenantA, RowFilterEvaluationSettings.Inherit, CancellationToken.None);
 
-        preview!.Before.ShouldBe(KeySet);
+        preview!.Before.ShouldBe(RowFilterEvaluationSettings.Inherit);
         preview.Table.ShouldBe(Orders);
         await _consents.DidNotReceive().UpdateRowFilterEvaluationAsync(Arg.Any<Guid>(), Arg.Any<TenantId>(), Arg.Any<RowFilterEvaluationSettings>(), Arg.Any<CancellationToken>());
     }

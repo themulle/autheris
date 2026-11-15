@@ -156,31 +156,18 @@ public static class ParityCases
             [Deny(F("amount", "GT", "45", 0), F("amount", "LT", "25", 1))]);
     }
 
-    // ---- correlated and cross-source cases ----
+    // ---- cross-source cases ----
 
-    private static ConsentRowFilter Correlated(ParityContext ctx, string predicateJson, string foreignKey = "customer_id") => new()
-    {
-        FilterType = RowFilterType.SubqueryCorrelated,
-        DependentTable = new TableIdentifier("gate", ctx.Schema, "customers"),
-        DependentTableAlias = "c",
-        ForeignKeyColumn = foreignKey,
-        PrimaryKeyColumn = "id",
-        SubqueryFilterPredicateJson = predicateJson
-    };
-
-    private static ParityCase Subquery(string id, string description, Func<ParityContext, ConsentRowFilter> filter, Func<RowDef, bool> reference,
-        RowFilterSubqueryStrategy strategy = RowFilterSubqueryStrategy.Exists, bool deny = false) =>
-        new(id, id.StartsWith("correlated.", StringComparison.Ordinal) ? ProducerKind.CorrelatedFilter : ProducerKind.CrossSourceSetFilter,
+    private static ParityCase CrossSource(string id, string description, Func<ParityContext, ConsentRowFilter> filter, Func<RowDef, bool> reference) =>
+        new(id, ProducerKind.CrossSourceSetFilter,
             description, ctx =>
             {
-                var consent = deny ? Deny(filter(ctx)) : Allow(filter(ctx));
-                Consent[] allow = deny ? [Allow(F("amount", "GT", "10"))] : [consent];
-                Consent[] denied = deny ? [consent] : [];
-                var builder = new RowFilterSqlBuilder(null, Options.Create(new GatewayOptions { RowFilters = new RowFilterOptions { SubqueryStrategy = strategy } }));
-                var legacy = builder.BuildCombinedRowFilter(allow, denied, ctx.Database)!;
-                var ir = builder.BuildCombinedRowFilterParameterized(allow, denied, ctx.Database);
+                Consent[] allow = [Allow(filter(ctx))];
+                var builder = new RowFilterSqlBuilder();
+                var legacy = builder.BuildCombinedRowFilter(allow, [], ctx.Database)!;
+                var ir = builder.BuildCombinedRowFilterParameterized(allow, [], ctx.Database);
                 return new ProducedPair(FilterText.Plain(legacy), new FilterText(ir.Sql!, ir.Parameters ?? FilterText.NoParameters));
-            }, deny ? row => Number(row, "amount") > 10 && !reference(row) : reference);
+            }, reference);
 
     private static bool CustomerOf(RowDef order, Func<RowDef, bool> customerPredicate) =>
         Of("customers").Any(c => Convert.ToInt64(Cell(c, "id"), CultureInfo.InvariantCulture) == Convert.ToInt64(Cell(order, "customer_id"), CultureInfo.InvariantCulture)
@@ -188,39 +175,15 @@ public static class ParityCases
 
     private static IEnumerable<ParityCase> SubqueryCases()
     {
-        yield return Subquery("correlated.object-eq", "correlated EXISTS, object predicate",
-            ctx => Correlated(ctx, "{\"c.name\": \"customers-A-1\"}"),
-            row => CustomerOf(row, c => Text(c, "name") == "customers-A-1"));
-        yield return Subquery("correlated.object-hostile", "correlated EXISTS, hostile value",
-            ctx => Correlated(ctx, "{\"c.name\": \"x' OR '1'='1\"}"),
-            _ => false);
-        yield return Subquery("correlated.object-null", "correlated EXISTS, NULL value",
-            ctx => Correlated(ctx, "{\"c.region\": \"EU\", \"c.name\": null}"),
-            _ => false);
-        yield return Subquery("correlated.array-ops", "correlated EXISTS, operator array",
-            ctx => Correlated(ctx, "[{\"column\":\"c.id\",\"op\":\"GTE\",\"value\":2},{\"column\":\"c.region\",\"op\":\"EQ\",\"value\":\"EU\"}]"),
-            row => CustomerOf(row, c => Number(c, "id") >= 2 && Text(c, "region") == "EU"));
-        yield return Subquery("correlated.region-eu", "correlated EXISTS, region",
-            ctx => Correlated(ctx, "{\"c.region\": \"EU\"}"),
-            row => CustomerOf(row, c => Text(c, "region") == "EU"));
-        yield return Subquery("correlated.deny", "correlated EXISTS as a deny consent",
-            ctx => Correlated(ctx, "{\"c.name\": \"customers-A-1\"}"),
-            row => CustomerOf(row, c => Text(c, "name") == "customers-A-1"), deny: true);
-        yield return Subquery("correlated.in-strategy", "legacy IN strategy against the IR EXISTS",
-            ctx => Correlated(ctx, "{\"c.region\": \"EU\"}"),
-            row => CustomerOf(row, c => Text(c, "region") == "EU"), RowFilterSubqueryStrategy.In);
-        yield return Subquery("correlated.in-correlated-strategy", "legacy correlated IN strategy against the IR EXISTS",
-            ctx => Correlated(ctx, "{\"c.region\": \"EU\"}"),
-            row => CustomerOf(row, c => Text(c, "region") == "EU"), RowFilterSubqueryStrategy.InCorrelated);
-        yield return Subquery("crosssource.set", "cross-source value set", _ => new ConsentRowFilter
+        yield return CrossSource("crosssource.set", "cross-source value set", _ => new ConsentRowFilter
         {
             FilterType = RowFilterType.CrossSourceSetFilter, ColumnName = "customer_id", ValueJson = "[1, 2]"
         }, row => new[] { 1L, 2L }.Contains(Convert.ToInt64(Cell(row, "customer_id"), CultureInfo.InvariantCulture)));
-        yield return Subquery("crosssource.hostile", "cross-source set with hostile strings", _ => new ConsentRowFilter
+        yield return CrossSource("crosssource.hostile", "cross-source set with hostile strings", _ => new ConsentRowFilter
         {
             FilterType = RowFilterType.CrossSourceSetFilter, ColumnName = "status", ValueJson = "[\"open\", \"a' OR '1'='1\"]"
         }, row => Text(row, "status") == "open");
-        yield return Subquery("crosssource.empty", "empty cross-source set denies all", _ => new ConsentRowFilter
+        yield return CrossSource("crosssource.empty", "empty cross-source set denies all", _ => new ConsentRowFilter
         {
             FilterType = RowFilterType.CrossSourceSetFilter, ColumnName = "customer_id", ValueJson = "[]"
         }, _ => false);

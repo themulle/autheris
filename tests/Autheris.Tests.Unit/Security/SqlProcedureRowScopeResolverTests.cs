@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
 using Autheris.Application.Services;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -112,15 +113,20 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     public async Task CorrelatedRowFilter_BindsToTheReservedAlias()
     {
         var table = Table("crane", columns: ["serial_number", "client_id", "is_delivered", "tenant_id"]);
-        string correlated = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(new ConsentRowFilter
+        var vf = new VirtualFilter
         {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("erp", "main", "client"),
-            DependentTableAlias = "c",
-            ForeignKeyColumn = "client_id",
-            PrimaryKeyColumn = "client_id",
-            SubqueryFilterPredicateJson = "{\"c.region\": \"DE\"}"
-        }, DatabaseDialect.Sqlite);
+            Name = "client_de",
+            TenantId = new TenantId("default"),
+            Source = "erp",
+            KeyColumns = ["c.client_id"],
+            Structured = new StructuredFilterDefinition
+            {
+                From = new TableIdentifier("erp", "main", "client"),
+                FromAlias = "c",
+                Where = [new FilterCondition("c.region", FilterConditionOperator.Eq, "DE")]
+            }
+        };
+        string correlated = new StructuredFilterSqlBuilder().Build(vf, new FilterBinding { FilterName = "client_de" }, table, DatabaseDialect.Sqlite);
 
         var allowed = await Resolver().GetAllowedKeysAsync(
             Definition(), table, Decision(table, correlated), ["serial_number"], [["100"], ["200"]], Caller, CancellationToken.None);

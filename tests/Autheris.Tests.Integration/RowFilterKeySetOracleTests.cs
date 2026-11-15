@@ -98,13 +98,36 @@ public sealed class RowFilterKeySetOracleTests
     [Fact]
     public async Task TargetAliasSpelling_InListAndExistsResolve()
     {
-        var filter = new ConsentRowFilter
+        var orders = new TableMetadata
         {
-            Id = Guid.NewGuid(), FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("default", AstCompilerOracleFixture.AppUser, "ENTITLEMENTS"), DependentTableAlias = "e",
-            ForeignKeyColumn = "ID", PrimaryKeyColumn = "ORDER_ID"
+            Identifier = new TableIdentifier("default", AstCompilerOracleFixture.AppUser, "ORDERS"),
+            Table = new Table { SourceName = "default", SchemaName = AstCompilerOracleFixture.AppUser, TableName = "ORDERS", SourceType = "Oracle" },
+            Columns =
+            [
+                new TableColumn { ColumnName = "ID" },
+                new TableColumn { ColumnName = "TENANT_ID" },
+                new TableColumn { ColumnName = "REGION" }
+            ]
         };
-        var exists = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], Orders)!;
+        var vf = new VirtualFilter
+        {
+            Name = "entitled_orders",
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            Source = "default",
+            KeyColumns = ["e.ORDER_ID"],
+            Structured = new StructuredFilterDefinition
+            {
+                From = new TableIdentifier("default", AstCompilerOracleFixture.AppUser, "ENTITLEMENTS"),
+                FromAlias = "e"
+            }
+        };
+        var binding = new FilterBinding
+        {
+            FilterName = "entitled_orders",
+            ColumnMap = new Dictionary<string, string> { ["ORDER_ID"] = "ID" }
+        };
+        var exists = new Autheris.Application.VirtualFilters.StructuredFilterSqlBuilder()
+            .BuildTyped(vf, binding, orders, DatabaseDialect.Oracle, "__p_")!;
         var node = exists.Expression switch
         {
             ExistsExpression e => e,

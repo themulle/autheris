@@ -1,0 +1,69 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "consent_row_scopes",
+      "newTable": {
+        "name": "consent_row_scopes",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "entry_no", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "policy_name", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "parameters_json", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "column_map_json", "type": "TEXT", "family": "string", "nullable": true },
+          { "name": "uncovered", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "consent_id", "entry_no"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "consent_row_scopes",
+      "name": "ix_consent_row_scopes_tenant_policy",
+      "unique": false,
+      "columns": ["tenant_id", "policy_name"]
+    },
+    {
+      "op": "addColumn",
+      "table": "virtual_filters",
+      "column": { "name": "parameters_json", "type": "TEXT", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "virtual_filters",
+      "column": { "name": "evaluation_mode", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": false }
+    },
+    {
+      "op": "addColumn",
+      "table": "virtual_filters",
+      "column": { "name": "key_set_max_age_seconds", "type": "INTEGER", "family": "integer", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "virtual_filters",
+      "column": { "name": "status", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": false }
+    },
+    {
+      "op": "addColumn",
+      "table": "virtual_filters",
+      "column": { "name": "approved_by_sid", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "virtual_filters",
+      "column": { "name": "approved_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "access_profiles",
+      "column": { "name": "row_scope_json", "type": "TEXT", "family": "string", "nullable": true }
+    },
+    {
+      "op": "dropColumn",
+      "table": "access_profiles",
+      "name": "row_filter_predicate"
+    }
+  ]
+}

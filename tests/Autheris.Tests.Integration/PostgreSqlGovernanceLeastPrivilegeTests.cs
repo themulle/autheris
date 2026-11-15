@@ -193,8 +193,8 @@ public sealed class PostgreSqlGovernanceLeastPrivilegeTests : IClassFixture<Post
         {
             TableId = tableId, TableIdentifier = identifier, TenantId = tenant, GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-lp"),
             Effect = ConsentEffect.Allow, ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(5),
-            RowFilters = [new ConsentRowFilter { TableColumnId = columnId, ColumnName = "customer_id", FilterType = RowFilterType.SubqueryCorrelated,
-                DependentTable = new TableIdentifier("lpsource", "dbo", "customers"), ForeignKeyColumn = "customer_id", PrimaryKeyColumn = "id", SubqueryFilterPredicateJson = "[]" }]
+            RowFilters = [new ConsentRowFilter { TableColumnId = columnId, ColumnName = "customer_id", FilterType = RowFilterType.SimpleColumnPredicate,
+                Operator = "EQ", ValueJson = "1" }]
         });
         var ruleId = (await repository.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-lp")], identifier, DateTimeOffset.UtcNow, tenant))
             .Single(c => c.Id == consent.Id).RowFilters.Single().Id;

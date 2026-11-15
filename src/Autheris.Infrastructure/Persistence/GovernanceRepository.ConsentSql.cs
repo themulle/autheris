@@ -28,22 +28,21 @@ internal static class ConsentSqlCore
 
     public const string SelectRowFiltersPrefix = @"SELECT id, consent_id, filter_group, table_column_id, column_name,
                                    operator, value_type, value_json, value_source, user_attribute,
-                                   filter_type, dependent_table, dependent_table_alias, foreign_key_column,
-                                   primary_key_column, subquery_predicate_json, target_temporal_column,
-                                   dependent_valid_from_column, dependent_valid_to_column, target_table_alias,
-                                   additional_hops_json, key_set_strategy, key_set_duration_seconds, key_set_max_keys
+                                   filter_type
                             FROM CONSENT_ROW_FILTERS WHERE consent_id IN (";
+
+    public const string SelectRowScopesPrefix = "SELECT consent_id, policy_name, parameters_json, column_map_json, uncovered FROM CONSENT_ROW_SCOPES WHERE consent_id IN (";
 
     public const string InsertColumnRuleSql = "INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes) VALUES (@id, @consentId, @colId, @colName, @level, @scopes)";
 
     public const string InsertRowFilterSql = @"INSERT INTO CONSENT_ROW_FILTERS (
                                         id, consent_id, filter_group, table_column_id, column_name, operator, value_type, value_json, value_source, user_attribute,
-                                        filter_type, dependent_table, dependent_table_alias, foreign_key_column, primary_key_column,
-                                        subquery_predicate_json, target_temporal_column, dependent_valid_from_column, dependent_valid_to_column,
-                                        target_table_alias, additional_hops_json, key_set_strategy, key_set_duration_seconds, key_set_max_keys
+                                        filter_type
                                     ) VALUES (
                                         @id, @consentId, @fg, @colId, @colName, @op, @vType, @vJson, @vSource, @uAttr,
-                                        @ft, @dt, @dta, @fk, @pk, @sqp, @ttc, @dvfc, @dvtc, @tta, @hops, @ksStrategy, @ksDuration, @ksMax)";
+                                        @ft)";
+
+    public const string InsertRowScopeSql = "INSERT INTO CONSENT_ROW_SCOPES (tenant_id, consent_id, entry_no, policy_name, parameters_json, column_map_json, uncovered) VALUES (@tenantId, @consentId, @entryNo, @policyName, @paramsJson, @columnMapJson, @uncovered)";
 
     public const string InsertConsentRequestSql = @"INSERT INTO CONSENT_REQUESTS (
                                     id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref,
@@ -308,6 +307,8 @@ internal static class ConsentSqlCore
             .ToDictionary(g => g.Key, _ => new List<ConsentRowFilter>(), StringComparer.OrdinalIgnoreCase);
         var writeRulesMap = consents.GroupBy(c => c.Id.ToString(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, _ => new List<WriteRule>(), StringComparer.OrdinalIgnoreCase);
+        var rowScopesMap = consents.GroupBy(c => c.Id.ToString(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, _ => new List<GrantRowScopeEntry>(), StringComparer.OrdinalIgnoreCase);
 
         for (int offset = 0; offset < consentIds.Count; offset += ConsentHydrateBatchSize)
         {
@@ -344,6 +345,17 @@ internal static class ConsentSqlCore
                     if (writeRulesMap.TryGetValue(cId, out var writeRuleList)) writeRuleList.Add(ConsentWriteRulesSql.ReadWriteRule(reader));
                 }
             }
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = SelectRowScopesPrefix + BindIdInClause(cmd, "cid", batch) + ") ORDER BY consent_id, entry_no";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var cId = reader.GetString(0);
+                    if (rowScopesMap.TryGetValue(cId, out var scopeList)) scopeList.Add(ReadRowScope(reader));
+                }
+            }
         }
 
         foreach (var c in consents)
@@ -352,6 +364,7 @@ internal static class ConsentSqlCore
             c.ColumnRules = rulesMap[key];
             c.RowFilters = filtersMap[key];
             c.WriteRules = writeRulesMap[key];
+            c.RowScope = rowScopesMap[key];
         }
     }
 
@@ -377,16 +390,6 @@ internal static class ConsentSqlCore
     public static ConsentRowFilter ReadRowFilter(DbDataReader reader, string consentIdStr)
     {
         var ftInt = reader.IsDBNull(10) ? 0 : reader.GetInt32(10);
-        TableIdentifier? depTable = !reader.IsDBNull(11) && TableIdentifier.TryParse(reader.GetString(11), out var dt) ? dt : null;
-
-        IReadOnlyList<SubqueryJoinHop>? hops = null;
-        var hopsJson = reader.IsDBNull(20) ? null : reader.GetString(20);
-        if (!string.IsNullOrWhiteSpace(hopsJson))
-        {
-            try { hops = JsonSerializer.Deserialize<List<SubqueryJoinHop>>(hopsJson); }
-            catch (JsonException ex) { throw new InvalidOperationException("Malformed additional hops JSON detected in consent row filter.", ex); }
-        }
-
         return new ConsentRowFilter
         {
             Id = Guid.Parse(reader.GetString(0)),
@@ -399,21 +402,25 @@ internal static class ConsentSqlCore
             ValueJson = reader.GetString(7),
             ValueSource = reader.GetString(8),
             UserAttribute = reader.IsDBNull(9) ? null : reader.GetString(9),
-            FilterType = (RowFilterType)ftInt,
-            DependentTable = depTable,
-            DependentTableAlias = reader.IsDBNull(12) ? null : reader.GetString(12),
-            ForeignKeyColumn = reader.IsDBNull(13) ? null : reader.GetString(13),
-            PrimaryKeyColumn = reader.IsDBNull(14) ? null : reader.GetString(14),
-            SubqueryFilterPredicateJson = reader.IsDBNull(15) ? null : reader.GetString(15),
-            TargetTemporalColumn = reader.IsDBNull(16) ? null : reader.GetString(16),
-            DependentValidFromColumn = reader.IsDBNull(17) ? null : reader.GetString(17),
-            DependentValidToColumn = reader.IsDBNull(18) ? null : reader.GetString(18),
-            TargetTableAlias = reader.IsDBNull(19) ? null : reader.GetString(19),
-            AdditionalHops = hops,
-            KeySetStrategy = reader.IsDBNull(21) ? null : (RowFilterEvaluationStrategy)reader.GetInt32(21),
-            KeySetDurationSeconds = reader.IsDBNull(22) ? null : reader.GetInt32(22),
-            KeySetMaxKeys = reader.IsDBNull(23) ? null : reader.GetInt32(23)
+            FilterType = (RowFilterType)ftInt
         };
+    }
+
+    public static GrantRowScopeEntry ReadRowScope(DbDataReader reader)
+    {
+        var policyName = reader.GetString(1);
+        var paramsJson = reader.IsDBNull(2) ? "{}" : reader.GetString(2);
+        var parameters = string.IsNullOrWhiteSpace(paramsJson)
+            ? new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            : JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(paramsJson) ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var columnMap = reader.IsDBNull(3) || string.IsNullOrWhiteSpace(reader.GetString(3))
+            ? null
+            : JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(3));
+        var uncoveredRaw = reader.IsDBNull(4) ? "DENY" : reader.GetString(4);
+        var uncovered = string.Equals(uncoveredRaw, "SKIP", StringComparison.OrdinalIgnoreCase)
+            ? UncoveredPolicy.Skip
+            : UncoveredPolicy.Deny;
+        return new GrantRowScopeEntry(policyName, parameters, columnMap, uncovered);
     }
 
     public static async Task InsertColumnRulesAndRowFiltersAsync(DbConnection conn, DbTransaction tx, Consent consent, CancellationToken ct)
@@ -436,7 +443,6 @@ internal static class ConsentSqlCore
         foreach (var filter in consent.RowFilters)
         {
             var filterId = filter.Id == Guid.Empty ? Guid.NewGuid() : filter.Id;
-            var hopsJson = filter.AdditionalHops != null && filter.AdditionalHops.Count > 0 ? JsonSerializer.Serialize(filter.AdditionalHops) : null;
 
             await using var filterCmd = conn.CreateCommand();
             filterCmd.Transaction = tx;
@@ -452,20 +458,23 @@ internal static class ConsentSqlCore
             filterCmd.AddBound("@vSource", filter.ValueSource);
             filterCmd.AddBound("@uAttr", (object?)filter.UserAttribute ?? DBNull.Value);
             filterCmd.AddBound("@ft", (int)filter.FilterType);
-            filterCmd.AddBound("@dt", filter.DependentTable.HasValue ? (object)filter.DependentTable.Value.ToString() : DBNull.Value);
-            filterCmd.AddBound("@dta", (object?)filter.DependentTableAlias ?? DBNull.Value);
-            filterCmd.AddBound("@fk", (object?)filter.ForeignKeyColumn ?? DBNull.Value);
-            filterCmd.AddBound("@pk", (object?)filter.PrimaryKeyColumn ?? DBNull.Value);
-            filterCmd.AddBound("@sqp", (object?)filter.SubqueryFilterPredicateJson ?? DBNull.Value);
-            filterCmd.AddBound("@ttc", (object?)filter.TargetTemporalColumn ?? DBNull.Value);
-            filterCmd.AddBound("@dvfc", (object?)filter.DependentValidFromColumn ?? DBNull.Value);
-            filterCmd.AddBound("@dvtc", (object?)filter.DependentValidToColumn ?? DBNull.Value);
-            filterCmd.AddBound("@tta", (object?)filter.TargetTableAlias ?? DBNull.Value);
-            filterCmd.AddBound("@hops", (object?)hopsJson ?? DBNull.Value);
-            filterCmd.AddBound("@ksStrategy", filter.KeySetStrategy is { } ksStrategy ? (object)(int)ksStrategy : DBNull.Value);
-            filterCmd.AddBound("@ksDuration", (object?)filter.KeySetDurationSeconds ?? DBNull.Value);
-            filterCmd.AddBound("@ksMax", (object?)filter.KeySetMaxKeys ?? DBNull.Value);
             await filterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        for (int i = 0; i < consent.RowScope.Count; i++)
+        {
+            var scope = consent.RowScope[i];
+            await using var scopeCmd = conn.CreateCommand();
+            scopeCmd.Transaction = tx;
+            scopeCmd.CommandText = InsertRowScopeSql;
+            scopeCmd.AddBound("@tenantId", StoredTenant.RequireWritable(consent.TenantId));
+            scopeCmd.AddBound("@consentId", consent.Id.ToString());
+            scopeCmd.AddBound("@entryNo", i);
+            scopeCmd.AddBound("@policyName", scope.PolicyName);
+            scopeCmd.AddBound("@paramsJson", JsonSerializer.Serialize(scope.Parameters ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal)));
+            scopeCmd.AddBound("@columnMapJson", scope.ColumnMap is { Count: > 0 } ? JsonSerializer.Serialize(scope.ColumnMap) : DBNull.Value);
+            scopeCmd.AddBound("@uncovered", scope.Uncovered == UncoveredPolicy.Skip ? "SKIP" : "DENY");
+            await scopeCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
         await ConsentWriteRulesSql.InsertWriteRulesAsync(conn, tx, consent, ct).ConfigureAwait(false);

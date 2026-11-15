@@ -466,17 +466,14 @@ public sealed class GovernancePolicyFactoryTests
     [Fact]
     public async Task CorrelatedConsentFilter_BuiltByTheProducer_CompilesAndFiltersEndToEnd()
     {
-        // The producer of correlated consent filters (AdvancedRlsFilterGenerator) through the assembly and the compiler on a real database.
-        var filter = new ConsentRowFilter
-        {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = InvoicesId,
-            DependentTableAlias = "dep",
-            ForeignKeyColumn = "id",
-            PrimaryKeyColumn = "id",
-            SubqueryFilterPredicateJson = null
-        };
-        var predicate = Autheris.Application.Services.AdvancedRlsFilterGenerator.BuildCorrelatedPredicate(filter);
+        var predicate = TestCorrelatedPredicateBuilder.BuildSingle(
+            fkColumn: "id",
+            domain: "default",
+            schema: "main",
+            table: "invoices",
+            alias: "dep",
+            pkColumn: "id",
+            whereColumn: null);
         var policy = new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.Sqlite, Renderer);
         var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _);
         var gp = await factory.CreateAsync(Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, policy) }), CancellationToken.None);

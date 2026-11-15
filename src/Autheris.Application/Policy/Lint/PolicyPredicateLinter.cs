@@ -23,13 +23,12 @@ public sealed class PolicyPredicateLinter
     /// <summary>129 (A-8, ST-129-18): a caller placeholder in an access profile predicate; only Virtual Filters may carry one, so a shared decision never embeds an attribute.</summary>
     public const string CodeCallerPlaceholderNotAllowed = "CALLER_PLACEHOLDER_NOT_ALLOWED";
 
-    private readonly IPolicyExpressionParser _parser;
     private readonly SqlDataSourceOptions? _dataSources;
 
     public PolicyPredicateLinter(IPolicyExpressionParser? parser = null, SqlDataSourceOptions? dataSources = null)
     {
+        _ = parser;
         _dataSources = dataSources;
-        _parser = parser ?? PolicyParserSetup.CreateParser();
     }
 
     public PolicyLintReport Lint(PolicyLintInput input)
@@ -38,23 +37,6 @@ public sealed class PolicyPredicateLinter
         var findings = new List<PolicyLintFinding>();
         int checkedCount = 0;
         int unchecked_ = 0;
-        var catalog = PolicyParserSetup.CreateCatalog(input.Catalog);
-
-        foreach (var profile in input.AccessProfiles.Where(p => !string.IsNullOrWhiteSpace(p.RowFilterPredicate)))
-        {
-            var tables = input.Catalog.Where(t => profile.MatchesTable(t.Identifier)).ToList();
-            if (tables.Count == 0)
-            {
-                unchecked_++;
-                continue;
-            }
-
-            foreach (var table in tables)
-            {
-                checkedCount++;
-                CheckText(PolicyLintKind.AccessProfileRowFilter, profile.ProfileId, profile.RowFilterPredicate!, table, catalog, input, findings);
-            }
-        }
 
         foreach (var filter in input.VirtualFilters.Where(f => f.Sql != null))
         {
@@ -71,32 +53,4 @@ public sealed class PolicyPredicateLinter
 
         return new PolicyLintReport(checkedCount, findings) { Unchecked = unchecked_ };
     }
-
-    private void CheckText(
-        PolicyLintKind kind, string policyId, string text, TableMetadata table, ITableCatalog catalog,
-        PolicyLintInput input, List<PolicyLintFinding> findings)
-    {
-        if (CallerPlaceholders.Contains(text))
-        {
-            findings.Add(new PolicyLintFinding(kind, TableId(table), policyId, CodeCallerPlaceholderNotAllowed));
-            return;
-        }
-
-        if (!PolicyParserSetup.TryCreateContext(table, catalog, input.AdditionalAllowedFunctions, 0, out var context))
-        {
-            findings.Add(new PolicyLintFinding(kind, TableId(table), policyId, CodeUnknownDialect));
-            return;
-        }
-
-        try
-        {
-            _parser.Parse(text, context);
-        }
-        catch (Exception ex) when (ex is PolicyParseException or System.Security.SecurityException or ArgumentException or NotSupportedException)
-        {
-            findings.Add(new PolicyLintFinding(kind, TableId(table), policyId, CodeParseRejected));
-        }
-    }
-
-    private static string TableId(TableMetadata table) => table.Identifier.ToString();
 }

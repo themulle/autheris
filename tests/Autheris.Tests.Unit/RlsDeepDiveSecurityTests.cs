@@ -262,25 +262,4 @@ public sealed class RlsDeepDiveSecurityTests
         computedTtl.TotalSeconds.ShouldBeLessThan(20);
         computedTtl.TotalSeconds.ShouldBeGreaterThan(5);
     }
-
-    [Fact]
-    public void Test7_CasbinCorrelatedSubquery_InvalidPredicateStructure_FailsClosed()
-    {
-        // RLS-9 / RLS-6 Verification:
-        // Invalid subquery predicate JSON structure must throw InvalidOperationException (Fail-Closed)
-        var filter = new ConsentRowFilter
-        {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("crm", "dbo", "customers"),
-            TargetTableAlias = "i",
-            ForeignKeyColumn = "customer_id",
-            PrimaryKeyColumn = "id",
-            SubqueryFilterPredicateJson = "[123, 456]" // Invalid: array of non-objects
-        };
-
-        Should.Throw<InvalidOperationException>(() =>
-        {
-            AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.SqlServer);
-        });
-    }
 }

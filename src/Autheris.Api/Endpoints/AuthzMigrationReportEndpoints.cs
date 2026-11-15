@@ -35,6 +35,12 @@ public static class AuthzMigrationReportEndpoints
 
         var consents = await repository.GetRevokedRoleConsentsAsync(ct).ConfigureAwait(false);
         var assignments = await repository.GetDeactivatedAssignmentsAsync(ct).ConfigureAwait(false);
-        return Results.Ok(new { revokedRoleConsents = consents, deactivatedProfileAssignments = assignments });
+        var revokedRowFilterConsents = await repository.GetRevokedRowFilterConsentsAsync(ct).ConfigureAwait(false);
+        return Results.Ok(new
+        {
+            revokedRoleConsents = consents,
+            deactivatedProfileAssignments = assignments,
+            revokedRowFilterConsents
+        });
     }
 }

@@ -140,7 +140,6 @@ public sealed class ConsentRowFilterGroupingTests
     public void Fingerprint_IsNullForAttributeAndAdvancedFilters_AndOrdinalForLiterals()
     {
         ConsentResolutionService.RowFilterFingerprint([AttributeFilter("region", "region")]).ShouldBeNull();
-        ConsentResolutionService.RowFilterFingerprint([new ConsentRowFilter { ColumnName = "id", FilterType = RowFilterType.SubqueryCorrelated }]).ShouldBeNull();
         ConsentResolutionService.RowFilterFingerprint([new ConsentRowFilter { ColumnName = "id", FilterType = RowFilterType.CrossSourceSetFilter }]).ShouldBeNull();
         ConsentResolutionService.RowFilterFingerprint([]).ShouldBeNull();
 

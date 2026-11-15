@@ -157,13 +157,32 @@ public sealed class RowFilterKeySetSqlServerTests : IClassFixture<RowFilterKeySe
             new TableCatalogEntry(orders, ImmutableArray.Create(new CatalogColumn("id", "int"), new CatalogColumn("client_id", "int"), new CatalogColumn("tenant_id", "nvarchar(64)")), "tenant_id", 1),
             new TableCatalogEntry(new TableIdentity("dbo", "customers"), ImmutableArray.Create(new CatalogColumn("id", "int"), new CatalogColumn("country", "nvarchar(20)"), new CatalogColumn("tenant_id", "nvarchar(64)")), "tenant_id", 1)
         ], "dbo");
-        var filter = new ConsentRowFilter
+        var vf = new VirtualFilter
         {
-            Id = Guid.NewGuid(), FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("default", "dbo", "customers"), DependentTableAlias = "c",
-            ForeignKeyColumn = "client_id", PrimaryKeyColumn = "id", SubqueryFilterPredicateJson = "{\"c.country\": \"CH\"}"
+            Name = "ch_customers",
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            Source = "default",
+            KeyColumns = ["c.id"],
+            Structured = new StructuredFilterDefinition
+            {
+                From = new TableIdentifier("default", "dbo", "customers"),
+                FromAlias = "c",
+                Where = [new FilterCondition("c.country", FilterConditionOperator.Eq, "CH")]
+            }
         };
-        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], orders)!;
+        var binding = new FilterBinding
+        {
+            FilterName = "ch_customers",
+            ColumnMap = new Dictionary<string, string> { ["id"] = "client_id" }
+        };
+        var ordersMeta = new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "dbo", "orders"),
+            Table = new Table { SourceName = "default", SchemaName = "dbo", TableName = "orders", SourceType = "SqlServer" },
+            Columns = [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "client_id" }, new TableColumn { ColumnName = "tenant_id" }]
+        };
+        var predicate = new Autheris.Application.VirtualFilters.StructuredFilterSqlBuilder()
+            .BuildTyped(vf, binding, ordersMeta, DatabaseDialect.SqlServer, "__p_")!;
         var node = predicate.Expression switch
         {
             TrinoSqlEngine.Ast.Nodes.ExistsExpression e => e,

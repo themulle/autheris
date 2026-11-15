@@ -64,13 +64,15 @@ public sealed class GovernancePolicyFactoryKeySetTests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(ci.Arg<TableIdentifier>().TableName switch { "orders" => orders, "customers" => customers, _ => null }));
-        var filter = new ConsentRowFilter
-        {
-            Id = Guid.NewGuid(), FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("default", "public", "customers"), DependentTableAlias = "c",
-            ForeignKeyColumn = "client_id", PrimaryKeyColumn = "id", SubqueryFilterPredicateJson = "{\"c.country\": \"CH\"}"
-        };
-        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], Orders)!;
+        var predicate = TestCorrelatedPredicateBuilder.BuildSingle(
+            fkColumn: "client_id",
+            domain: "default",
+            schema: "public",
+            table: "customers",
+            alias: "c",
+            pkColumn: "id",
+            whereColumn: "c.country",
+            whereValue: "CH");
         var decision = TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true)
             .WithAdditionalRowPolicy(new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.PostgreSql, new PolicyPredicateRenderer()));
         if (drifted)

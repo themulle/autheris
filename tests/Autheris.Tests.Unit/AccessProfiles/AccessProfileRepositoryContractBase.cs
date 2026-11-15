@@ -120,10 +120,12 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
     public async Task AccessProfile_TargetTables_And_RowFilterPredicate_RoundTrip()
     {
         if (!Available) return;
+        var paramVal = System.Text.Json.JsonDocument.Parse("\"DELIVERED\"").RootElement.Clone();
         var p = new AccessProfile
         {
             ProfileId = Id("p"), Name = Id("name"), TenantId = TenantA, MaskingMode = MaskingPolicyMode.Default,
-            TargetTables = ["tem.*", "conf.*"], RowFilterPredicate = "delivery_status != 'DELIVERED'",
+            TargetTables = ["tem.*", "conf.*"],
+            RowScope = [new GrantRowScopeEntry("not_delivered", new Dictionary<string, System.Text.Json.JsonElement> { ["status"] = paramVal })],
             CreatedAt = DateTimeOffset.UtcNow, CreatedBy = "admin1", Assignments = TestAssign.Users("alice")
         };
         await Repo.UpsertProfileAsync(p);
@@ -132,7 +134,7 @@ public abstract class AccessProfileRepositoryContractBase : IAsyncLifetime
 
         read.ShouldNotBeNull();
         read.TargetTables.ShouldBe(["tem.*", "conf.*"], ignoreOrder: true);
-        read.RowFilterPredicate.ShouldBe("delivery_status != 'DELIVERED'");
+        read.RowScope.ShouldHaveSingleItem().PolicyName.ShouldBe("not_delivered");
     }
 
     [Fact]

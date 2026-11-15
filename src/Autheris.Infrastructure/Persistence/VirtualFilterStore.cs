@@ -101,20 +101,29 @@ internal static class VirtualFilterStore
 
         foreach (var filter in changes.SaveFilters)
         {
+            string? parametersJson = filter.Parameters.Count == 0 ? null : JsonSerializer.Serialize(filter.Parameters);
+            object keySetMaxAgeSeconds = filter.KeySetMaxAge is { } age
+                ? (int)Math.Ceiling(age.TotalSeconds)
+                : DBNull.Value;
             await ExecuteAsync(connection, tx, sqlServer ? @"
                 MERGE VIRTUAL_FILTERS WITH (HOLDLOCK) AS t
                 USING (SELECT @tenant AS tenant_id, @name AS name) AS s ON t.tenant_id = s.tenant_id AND t.name = s.name
                 WHEN MATCHED THEN UPDATE SET
                     source = @source, definition_json = @json, definition_hash = @hash,
-                    managed_path = @path, managed_commit = @commit, updated_by = @by, updated_at = @at
-                WHEN NOT MATCHED THEN INSERT (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
-                    VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at);" : @"
-                INSERT INTO VIRTUAL_FILTERS (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
-                VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at)
+                    managed_path = @path, managed_commit = @commit, updated_by = @by, updated_at = @at,
+                    parameters_json = @parametersJson, evaluation_mode = @evalMode, key_set_max_age_seconds = @keySetMaxAgeSec,
+                    status = @status, approved_by_sid = @approvedBySid, approved_at = @approvedAt
+                WHEN NOT MATCHED THEN INSERT (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at, parameters_json, evaluation_mode, key_set_max_age_seconds, status, approved_by_sid, approved_at)
+                    VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at, @parametersJson, @evalMode, @keySetMaxAgeSec, @status, @approvedBySid, @approvedAt);" : @"
+                INSERT INTO VIRTUAL_FILTERS (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at, parameters_json, evaluation_mode, key_set_max_age_seconds, status, approved_by_sid, approved_at)
+                VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at, @parametersJson, @evalMode, @keySetMaxAgeSec, @status, @approvedBySid, @approvedAt)
                 ON CONFLICT (tenant_id, name) DO UPDATE SET
                     source = excluded.source, definition_json = excluded.definition_json, definition_hash = excluded.definition_hash,
                     managed_path = excluded.managed_path, managed_commit = excluded.managed_commit,
-                    updated_by = excluded.updated_by, updated_at = excluded.updated_at;",
+                    updated_by = excluded.updated_by, updated_at = excluded.updated_at,
+                    parameters_json = excluded.parameters_json, evaluation_mode = excluded.evaluation_mode,
+                    key_set_max_age_seconds = excluded.key_set_max_age_seconds, status = excluded.status,
+                    approved_by_sid = excluded.approved_by_sid, approved_at = excluded.approved_at;",
                 [
                     ("@id", filter.Id.ToString()),
                     ("@tenant", filter.TenantId.Value),
@@ -125,7 +134,13 @@ internal static class VirtualFilterStore
                     ("@path", filter.ManagedBy?.Path),
                     ("@commit", filter.ManagedBy?.Commit),
                     ("@by", filter.UpdatedBy),
-                    ("@at", filter.UpdatedAt.ToString("O", CultureInfo.InvariantCulture))
+                    ("@at", filter.UpdatedAt.ToString("O", CultureInfo.InvariantCulture)),
+                    ("@parametersJson", parametersJson),
+                    ("@evalMode", filter.EvaluationMode.ToString()),
+                    ("@keySetMaxAgeSec", keySetMaxAgeSeconds),
+                    ("@status", filter.Status.ToString()),
+                    ("@approvedBySid", filter.ApprovedBySid),
+                    ("@approvedAt", filter.ApprovedAt?.ToString("O", CultureInfo.InvariantCulture))
                 ], ct).ConfigureAwait(false);
         }
 

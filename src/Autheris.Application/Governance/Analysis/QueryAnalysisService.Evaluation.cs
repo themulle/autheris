@@ -88,7 +88,7 @@ public sealed partial class QueryAnalysisService
             .ToList();
 
         if (!string.IsNullOrWhiteSpace(table.Table.RlsExpression) ||
-            tableAllowConsents.Any(c => c.RowFilters is { Count: > 0 } || !string.IsNullOrWhiteSpace(c.RowFilterCondition)))
+            tableAllowConsents.Any(c => c.RowFilters is { Count: > 0 } || c.RowScope is { Count: > 0 }))
         {
             outcome.HasRowFilters = true;
         }

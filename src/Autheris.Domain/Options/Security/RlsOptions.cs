@@ -56,8 +56,6 @@ public sealed class VirtualFilterOptions
 /// </summary>
 public sealed class RowFilterOptions
 {
-    public RowFilterSubqueryStrategy SubqueryStrategy { get; set; } = RowFilterSubqueryStrategy.Exists;
-
     /// <summary>Issue #107: key-set cache strategy for correlated row filters (<c>Gateway:RowFilters:KeySetCache</c>).</summary>
     public RowFilterKeySetCacheOptions KeySetCache { get; init; } = new();
 }

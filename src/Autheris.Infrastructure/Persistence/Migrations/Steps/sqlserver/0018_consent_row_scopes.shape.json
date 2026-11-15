@@ -1,0 +1,69 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "CONSENT_ROW_SCOPES",
+      "newTable": {
+        "name": "CONSENT_ROW_SCOPES",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "entry_no", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "policy_name", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "parameters_json", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "column_map_json", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "uncovered", "type": "NVARCHAR", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "consent_id", "entry_no"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "CONSENT_ROW_SCOPES",
+      "name": "IX_CONSENT_ROW_SCOPES_TENANT_POLICY",
+      "unique": false,
+      "columns": ["tenant_id", "policy_name"]
+    },
+    {
+      "op": "addColumn",
+      "table": "VIRTUAL_FILTERS",
+      "column": { "name": "parameters_json", "type": "NVARCHAR", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "VIRTUAL_FILTERS",
+      "column": { "name": "evaluation_mode", "type": "NVARCHAR", "family": "string", "nullable": false }
+    },
+    {
+      "op": "addColumn",
+      "table": "VIRTUAL_FILTERS",
+      "column": { "name": "key_set_max_age_seconds", "type": "INT", "family": "integer", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "VIRTUAL_FILTERS",
+      "column": { "name": "status", "type": "NVARCHAR", "family": "string", "nullable": false }
+    },
+    {
+      "op": "addColumn",
+      "table": "VIRTUAL_FILTERS",
+      "column": { "name": "approved_by_sid", "type": "NVARCHAR", "family": "string", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "VIRTUAL_FILTERS",
+      "column": { "name": "approved_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true }
+    },
+    {
+      "op": "addColumn",
+      "table": "ACCESS_PROFILES",
+      "column": { "name": "row_scope_json", "type": "NVARCHAR", "family": "string", "nullable": true }
+    },
+    {
+      "op": "dropColumn",
+      "table": "ACCESS_PROFILES",
+      "name": "row_filter_predicate"
+    }
+  ]
+}

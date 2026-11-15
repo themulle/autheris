@@ -68,7 +68,7 @@ public sealed class ConsentSqlCoreGoldenTests
 
         await ConsentSqlCore.HydrateConsentsBatchAsync(conn, list, CancellationToken.None);
 
-        conn.Commands.Count.ShouldBe(3);
+        conn.Commands.Count.ShouldBe(4);
         conn.Commands[0].CommandText.ShouldStartWith(ConsentSqlCore.SelectColumnRulesPrefix);
         conn.Commands[0].Parameters.Select(p => p.Name).ShouldBe(["@cid0"]);
         conn.Commands[0].Parameters[0].Value.ShouldBe(c1.Id.ToString());
@@ -80,6 +80,10 @@ public sealed class ConsentSqlCoreGoldenTests
         conn.Commands[2].CommandText.ShouldStartWith(ConsentWriteRulesSql.SelectWriteRulesPrefix);
         conn.Commands[2].Parameters.Select(p => p.Name).ShouldBe(["@cid0"]);
         conn.Commands[2].Parameters[0].Value.ShouldBe(c1.Id.ToString());
+
+        conn.Commands[3].CommandText.ShouldStartWith(ConsentSqlCore.SelectRowScopesPrefix);
+        conn.Commands[3].Parameters.Select(p => p.Name).ShouldBe(["@cid0"]);
+        conn.Commands[3].Parameters[0].Value.ShouldBe(c1.Id.ToString());
     }
 
     [Theory]

@@ -185,31 +185,33 @@ public static partial class GovernanceEndpoints
                 context);
         }
 
-        // RowFilter sandbox AST validation
+        // Free-SQL row filters are rejected; use req.RowScope referencing active row policies instead.
         if (!string.IsNullOrWhiteSpace(req.RowFilter))
         {
-            var trimmedFilter = req.RowFilter.Trim();
-            if (trimmedFilter.Contains(';', StringComparison.Ordinal) || trimmedFilter.Contains("--", StringComparison.Ordinal) || trimmedFilter.Contains("/*", StringComparison.Ordinal) || trimmedFilter.Contains("*/", StringComparison.Ordinal))
-            {
-                return ApiProblems.BadRequest(ApiErrorCodes.RowFilterSyntaxInvalid, "Row filter predicate contains prohibited SQL constructs (semicolons or comments).", context);
-            }
-
-            try
-            {
-                var parser = FastSqlEngine.Default;
-                _ = parser.ParseExpression(trimmedFilter.AsMemory(), SqlTokenSecurityOptions.None, ct);
-            }
-            catch (Exception ex)
-            {
-                SafeErrorResults.LogFailure(context, ex, ApiErrorCodes.RowFilterSyntaxInvalid);
-                return SafeErrorResults.BadRequest(
-                    ApiErrorCodes.RowFilterSyntaxInvalid,
-                    "The row filter predicate is not valid SQL.",
-                    context);
-            }
+            return ApiProblems.BadRequest(
+                ApiErrorCodes.RowFilterSyntaxInvalid,
+                "The row filter predicate is not valid SQL.",
+                context);
         }
 
         var tenantId = EndpointSecurity.GetRequestTenant(context);
+        var rowScope = req.RowScope ?? [];
+        if (rowScope.Count > 0)
+        {
+            var vfRepo = context.RequestServices.GetService<Autheris.Application.VirtualFilters.IVirtualFilterRepository>();
+            var snapshot = vfRepo is not null
+                ? await vfRepo.LoadSnapshotAsync(ct).ConfigureAwait(false)
+                : Autheris.Application.VirtualFilters.VirtualFilterSnapshot.Empty;
+            try
+            {
+                Autheris.Application.Policy.RowScopes.GrantRowScopeValidator.Validate(rowScope, tenantId, snapshot);
+            }
+            catch (Autheris.Application.Policy.RowScopes.RowScopeValidationException ex)
+            {
+                return ApiProblems.BadRequest(ex.Code, ex.Message, context);
+            }
+        }
+
         var now = DateTimeOffset.UtcNow;
         var validTo = now.AddDays(req.ValidDays);
         var profileId = $"prof-{trimmedSubject.ToLowerInvariant()}-{mode.ToString().ToLowerInvariant()}-{now:yyyyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..6]}";
@@ -278,7 +280,7 @@ public static partial class GovernanceEndpoints
             Name = $"BulkConsent_{trimmedSubject}_{mode}",
             MaskingMode = mode,
             TargetTables = targetTables,
-            RowFilterPredicate = string.IsNullOrWhiteSpace(req.RowFilter) ? null : req.RowFilter.Trim(),
+            RowScope = rowScope,
             CreatedAt = now,
             ValidTo = validTo,
             Justification = req.Justification.Trim(),
@@ -332,7 +334,7 @@ public static partial class GovernanceEndpoints
                 subjectType,
                 maskingMode = mode.ToString(),
                 tables = targetTables,
-                rowFilter = profile.RowFilterPredicate,
+                rowScope = profile.RowScope,
                 validDays = req.ValidDays,
                 validTo,
                 justification = profile.Justification,
@@ -394,7 +396,7 @@ public static partial class GovernanceEndpoints
             subject = trimmedSubject,
             maskingMode = mode.ToString(),
             tablesMatched,
-            rowFilter = profile.RowFilterPredicate,
+            rowScope = profile.RowScope,
             validTo,
             auditEventId = auditEvent.Id,
             message

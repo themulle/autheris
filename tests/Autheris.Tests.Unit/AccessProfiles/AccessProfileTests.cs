@@ -106,7 +106,6 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "status != 'DELIVERED'",
             Assignments = TestAssign.Users("david", "S-1-5-21-DAVID"),
             CreatedAt = DateTimeOffset.UtcNow,
             ValidTo = DateTimeOffset.UtcNow.AddDays(90),
@@ -131,7 +130,6 @@ public sealed class AccessProfileTests
 
         // Assert
         decision.IsAllowed.ShouldBeTrue();
-        decision.CombinedRowFilterSql.ShouldBe("status != 'DELIVERED'");
 
         // David must see all columns as CLEAR (unmasked exception)
         decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Clear);
@@ -152,7 +150,6 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "status != 'DELIVERED'",
             Assignments = TestAssign.Users("philipp", "S-1-5-21-PHILIPP"),
             CreatedAt = DateTimeOffset.UtcNow,
             ValidTo = DateTimeOffset.UtcNow.AddDays(90),
@@ -175,58 +172,12 @@ public sealed class AccessProfileTests
 
         // Assert
         decision.IsAllowed.ShouldBeTrue();
-        decision.CombinedRowFilterSql.ShouldBe("status != 'DELIVERED'");
 
         // Philipp must see sensitive columns as MASKED
         decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Mask);
         decision.GetEffectiveColumnAccess("longitude", meta).ShouldBe(ColumnAccessLevel.Mask);
         decision.GetEffectiveColumnAccess("customer_id", meta).ShouldBe(ColumnAccessLevel.Mask);
         decision.GetEffectiveColumnAccess("crane_id", meta).ShouldBe(ColumnAccessLevel.Clear);
-    }
-
-    [Fact]
-    public async Task AccessProfileResolution_BothReceiveSameRowFilter()
-    {
-        var repo = new InMemoryAccessProfileRepository();
-        var rowFilter = "delivery_status != 'DELIVERED'";
-
-        var davidProfile = new AccessProfile
-        {
-            ProfileId = "prof-david",
-            Name = "David Profile",
-            TenantId = TenantLiebherr,
-            MaskingMode = MaskingPolicyMode.Unmasked,
-            TargetTables = ["tem.*"],
-            RowFilterPredicate = rowFilter,
-            Assignments = TestAssign.Users("david"),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(30)
-        };
-        var philippProfile = new AccessProfile
-        {
-            ProfileId = "prof-philipp",
-            Name = "Philipp Profile",
-            TenantId = TenantLiebherr,
-            MaskingMode = MaskingPolicyMode.Default,
-            TargetTables = ["tem.*"],
-            RowFilterPredicate = rowFilter,
-            Assignments = TestAssign.Users("philipp"),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(30)
-        };
-        await repo.UpsertProfileAsync(davidProfile);
-        await repo.UpsertProfileAsync(philippProfile);
-
-        var policy = CreatePolicy(repo);
-        var meta = CreateTelemetryTableMetadata();
-
-        var queryDavid = new TableAccessQuery(new Sid("david"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
-        var queryPhilipp = new TableAccessQuery(new Sid("philipp"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
-
-        var decisionDavid = await policy.DecideAsync(queryDavid, CancellationToken.None);
-        var decisionPhilipp = await policy.DecideAsync(queryPhilipp, CancellationToken.None);
-
-        decisionDavid.CombinedRowFilterSql.ShouldBe(rowFilter);
-        decisionPhilipp.CombinedRowFilterSql.ShouldBe(rowFilter);
-        decisionDavid.CombinedRowFilterSql.ShouldBe(decisionPhilipp.CombinedRowFilterSql);
     }
 
     [Fact]
@@ -240,7 +191,6 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = MaskingPolicyMode.Strict,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = null,
             Assignments = TestAssign.Users("restricted-user"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30)
         };
@@ -269,7 +219,6 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "status != 'DELIVERED'",
             Assignments = TestAssign.Users("david-expired"),
             ValidTo = DateTimeOffset.UtcNow.AddMinutes(-5) // Expired 5 minutes ago
         };
@@ -281,7 +230,7 @@ public sealed class AccessProfileTests
         var query = new TableAccessQuery(new Sid("david-expired"), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
         var decision = await policy.DecideAsync(query, CancellationToken.None);
 
-        // An expired profile is not applied: the consent decision stands unchanged (no profile row filter, sensitive columns stay masked).
+        // An expired profile is not applied: sensitive columns stay masked.
         decision.CombinedRowFilterSql.ShouldBeNull();
         decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Mask);
     }
@@ -301,7 +250,7 @@ public sealed class AccessProfileTests
             accessProfileRepository: repo);
     }
 
-    private static async Task<InMemoryAccessProfileRepository> RepoWithProfileAsync(string subject, MaskingPolicyMode mode, string? rowFilter = null)
+    private static async Task<InMemoryAccessProfileRepository> RepoWithProfileAsync(string subject, MaskingPolicyMode mode)
     {
         var repo = new InMemoryAccessProfileRepository();
         await repo.UpsertProfileAsync(new AccessProfile
@@ -311,7 +260,6 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = mode,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = rowFilter,
             Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         });
@@ -334,7 +282,7 @@ public sealed class AccessProfileTests
     [Fact]
     public async Task SR_M_07_ProfileWithoutAllowConsent_IsNotAnAllowSource()
     {
-        var repo = await RepoWithProfileAsync("srm07-user2", MaskingPolicyMode.Unmasked, "status != 'X'");
+        var repo = await RepoWithProfileAsync("srm07-user2", MaskingPolicyMode.Unmasked);
         var meta = CreateTelemetryTableMetadata();
         // The substitute resolution service returns no decision, which is a denial.
         var resolutionless = new TableAccessPolicy(
@@ -355,7 +303,7 @@ public sealed class AccessProfileTests
     [Fact]
     public async Task SR_M_07_UnmaskedProfile_DoesNotRelaxDeniedColumns_AndKeepsConsentRowFilter()
     {
-        var repo = await RepoWithProfileAsync("srm07-user3", MaskingPolicyMode.Unmasked, "status != 'X'");
+        var repo = await RepoWithProfileAsync("srm07-user3", MaskingPolicyMode.Unmasked);
         var meta = CreateTelemetryTableMetadata();
         var consent = TableAccessDecision.Allowed(
             TelemetryTable,
@@ -380,7 +328,6 @@ public sealed class AccessProfileTests
         decision.GetEffectiveColumnAccess("customer_id", meta).ShouldBe(ColumnAccessLevel.Deny);
         decision.CombinedRowFilterSql.ShouldNotBeNull();
         decision.CombinedRowFilterSql.ShouldContain("crane_id = 'C1'");
-        decision.CombinedRowFilterSql.ShouldContain("status != 'X'");
     }
 
     [Fact]
@@ -393,9 +340,8 @@ public sealed class AccessProfileTests
             ProfileId = "prof-cache-test",
             Name = "Cache Test Profile",
             TenantId = TenantLiebherr,
-            MaskingMode = MaskingPolicyMode.Unmasked,
+            MaskingMode = MaskingPolicyMode.Strict,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "status = 'ORIGINAL'",
             Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
@@ -409,17 +355,16 @@ public sealed class AccessProfileTests
         var query = new TableAccessQuery(new Sid(subject), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
 
         var decision1 = await policy.DecideAsync(query, CancellationToken.None);
-        decision1.CombinedRowFilterSql.ShouldBe("status = 'ORIGINAL'");
+        decision1.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Deny);
 
-        // Update profile in repo to new filter (new object instance so old cached reference isn't mutated in-place)
+        // Update profile in repo to new masking mode (new object instance so old cached reference isn't mutated in-place)
         var updatedProfile = new AccessProfile
         {
             ProfileId = "prof-cache-test",
             Name = "Cache Test Profile",
             TenantId = TenantLiebherr,
-            MaskingMode = MaskingPolicyMode.Unmasked,
+            MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "status = 'UPDATED'",
             Assignments = TestAssign.Users(subject),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         };
@@ -427,14 +372,14 @@ public sealed class AccessProfileTests
 
         // Without invalidation, cache still returns original
         var decisionCached = await policy.DecideAsync(query, CancellationToken.None);
-        decisionCached.CombinedRowFilterSql.ShouldBe("status = 'ORIGINAL'");
+        decisionCached.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Deny);
 
         // Invalidate cache
         await cache.InvalidateTenantAsync(TenantLiebherr);
 
-        // Now policy returns updated filter
+        // Now policy returns updated masking mode
         var decisionUpdated = await policy.DecideAsync(query, CancellationToken.None);
-        decisionUpdated.CombinedRowFilterSql.ShouldBe("status = 'UPDATED'");
+        decisionUpdated.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Mask);
     }
 
     [Theory]
@@ -719,7 +664,7 @@ public sealed class AccessProfileTests
         var (status, body) = await ExecuteResultAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
-        body.ShouldContain("Row filter predicate contains prohibited SQL constructs");
+        body.ShouldContain("ROW_FILTER_SYNTAX_INVALID");
     }
 
     [Fact]
@@ -845,7 +790,6 @@ public sealed class AccessProfileTests
             Subject = "david",
             MaskingMode = "Strict",
             Tables = ["tem.*"],
-            RowFilter = "status != 'DELIVERED'",
             Justification = "Enterprise PoC Telemetry Head cleartext exception approved",
             ValidDays = 60
         };
@@ -862,7 +806,7 @@ public sealed class AccessProfileTests
         var stored = profiles[0];
         stored.MaskingMode.ShouldBe(MaskingPolicyMode.Strict);
         stored.TargetTables.ShouldContain("tem.*");
-        stored.RowFilterPredicate.ShouldBe("status != 'DELIVERED'");
+        stored.RowScope.ShouldBeEmpty();
         stored.Justification.ShouldBe(req.Justification);
 
         // Verify audit log recorded Tier-A CONSENT_GRANTED
@@ -891,7 +835,6 @@ public sealed class AccessProfileTests
             Subject = "philipp",
             MaskingMode = "Default",
             Tables = ["tem.*"],
-            RowFilter = "status != 'DELIVERED'",
             Justification = "Analyst Telemetry masking profile approved by governance",
             ValidDays = 60
         };
@@ -1220,7 +1163,7 @@ public sealed class AccessProfileTests
     // ---------------------------------------------------------------- several matching profiles
 
     [Fact]
-    public async Task SeveralMatchingProfiles_AllRowFiltersApply_MostRestrictiveMaskingWins()
+    public async Task SeveralMatchingProfiles_MostRestrictiveMaskingWins()
     {
         var repo = new InMemoryAccessProfileRepository();
         await repo.UpsertProfileAsync(new AccessProfile
@@ -1230,7 +1173,6 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = MaskingPolicyMode.Unmasked,
             TargetTables = ["tem.*"],
-            RowFilterPredicate = "crane_id = 'C1'",
             Assignments = TestAssign.Users("multi-profile-user"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         });
@@ -1241,7 +1183,6 @@ public sealed class AccessProfileTests
             TenantId = TenantLiebherr,
             MaskingMode = MaskingPolicyMode.Default,
             TargetTables = ["tem.gps_position"],
-            RowFilterPredicate = "status != 'DELIVERED'",
             Assignments = TestAssign.Users("multi-profile-user"),
             ValidTo = DateTimeOffset.UtcNow.AddDays(1)
         });
@@ -1253,10 +1194,6 @@ public sealed class AccessProfileTests
         var decision = await policy.DecideAsync(query, CancellationToken.None);
 
         decision.IsAllowed.ShouldBeTrue();
-        decision.CombinedRowFilterSql.ShouldNotBeNull();
-        decision.CombinedRowFilterSql.ShouldContain("crane_id = 'C1'");
-        decision.CombinedRowFilterSql.ShouldContain("status != 'DELIVERED'");
-        decision.CombinedRowFilterSql.ShouldContain(" AND ");
         // Default (B) is more restrictive than Unmasked (A).
         decision.GetEffectiveColumnAccess("latitude", meta).ShouldBe(ColumnAccessLevel.Mask);
         decision.GetEffectiveColumnAccess("crane_id", meta).ShouldBe(ColumnAccessLevel.Clear);

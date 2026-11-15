@@ -66,8 +66,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<RowFilt
 
     private static StringContent Json(string json) => new(json, Encoding.UTF8, "application/json");
 
-    private async Task<(TableIdentifier Table, Guid RuleId)> SeedRuleAsync(
-        ConsentEffect effect = ConsentEffect.Allow, RowFilterType type = RowFilterType.SubqueryCorrelated, string? temporal = null)
+    private async Task<(TableIdentifier Table, Guid RuleId)> SeedRuleAsync(ConsentEffect effect = ConsentEffect.Allow)
     {
         _ = CreateClient(null); // starts the host
         var repo = _factory.Services.GetRequiredService<IGovernanceRepository>();
@@ -87,9 +86,8 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<RowFilt
             [
                 new ConsentRowFilter
                 {
-                    TableColumnId = columnId, ColumnName = "customer_id", FilterType = type,
-                    DependentTable = new TableIdentifier("Crm", "Dbo", "customers"), ForeignKeyColumn = "customer_id", PrimaryKeyColumn = "id",
-                    SubqueryFilterPredicateJson = "[]", TargetTemporalColumn = temporal
+                    TableColumnId = columnId, ColumnName = "customer_id", FilterType = RowFilterType.SimpleColumnPredicate,
+                    Operator = "EQ", ValueJson = "1"
                 }
             ]
         });
@@ -197,10 +195,6 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<RowFilt
         (await malformed.Content.ReadAsStringAsync()).ShouldBe(body);
         body.ShouldNotContain(ruleId.ToString("D"));
         body.ShouldNotContain(unknown.ToString("D"));
-
-        var repo = _factory.Services.GetRequiredService<IGovernanceRepository>();
-        var consents = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow);
-        consents.Single().RowFilters.Single().KeySetStrategy.ShouldBeNull();
     }
 
     [Theory]
@@ -230,8 +224,6 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<RowFilt
 
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         (await repo.GetTableEpochAsync(table)).ShouldBe(epoch);
-        var consents = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-alice")], table, DateTimeOffset.UtcNow);
-        consents.Single().RowFilters.Single().KeySetStrategy.ShouldBeNull();
     }
 
     [Fact]
@@ -256,7 +248,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<RowFilt
     [Fact]
     public async Task Rule_Put_KeySetOnNonCorrelatedRule_Returns400_SEC_RF107_06e()
     {
-        var (_, ruleId) = await SeedRuleAsync(type: RowFilterType.SimpleColumnPredicate);
+        var (_, ruleId) = await SeedRuleAsync();
 
         (await CreateClient("GovernanceAdmin").PutAsync(RuleUrl(ruleId), Json("""{"strategy":"KeySetCache"}"""))).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
@@ -264,7 +256,7 @@ public sealed class RowFilterEvaluationEndpointAuthTests : IClassFixture<RowFilt
     [Fact]
     public async Task Rule_Put_KeySetOnTemporalRule_Returns400_SEC_RF107_06e()
     {
-        var (_, ruleId) = await SeedRuleAsync(temporal: "order_date");
+        var (_, ruleId) = await SeedRuleAsync();
 
         (await CreateClient("GovernanceAdmin").PutAsync(RuleUrl(ruleId), Json("""{"strategy":"KeySetCache"}"""))).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }

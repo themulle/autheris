@@ -40,7 +40,7 @@ internal sealed class AccessProfileStore(
     private const AccessProfileAssignmentKind UnknownAssignmentKind = (AccessProfileAssignmentKind)(-1);
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
-    private const string ProfileColumns = "p.profile_id, p.tenant_id, p.name, p.masking_mode, p.target_tables, p.row_filter_predicate, p.justification, p.created_by, p.created_at, p.valid_to";
+    private const string ProfileColumns = "p.profile_id, p.tenant_id, p.name, p.masking_mode, p.target_tables, p.row_scope_json, p.justification, p.created_by, p.created_at, p.valid_to";
     private const string AssignmentColumns = "a.subject, a.subject_type, a.assigned_at, a.expires_at, a.created_by, a.approved_by, a.approved_at, a.justification, a.kind, a.renewal_count";
 
     // ---------------------------------------------------------------- reads
@@ -216,7 +216,7 @@ internal sealed class AccessProfileStore(
         await ExecAsync(conn, tx, ProfileUpsertSql, ct,
             ("@profileId", profile.ProfileId), ("@tenantId", profile.TenantId.Value), ("@name", profile.Name),
             ("@maskingMode", profile.MaskingMode.ToString()), ("@targetTables", JsonSerializer.Serialize(profile.TargetTables ?? [])),
-            ("@rowFilterPredicate", profile.RowFilterPredicate), ("@justification", profile.Justification),
+            ("@rowScopeJson", profile.RowScope.Count == 0 ? null : JsonSerializer.Serialize(profile.RowScope)), ("@justification", profile.Justification),
             ("@createdBy", profile.CreatedBy ?? "unknown"), ("@createdAt", Ts(profile.CreatedAt)), ("@validTo", Ts(profile.ValidTo))).ConfigureAwait(false);
 
         // O-5d: the typed assignments are authoritative (validated, period restarted now); an empty list clears every stored assignment.
@@ -368,14 +368,14 @@ internal sealed class AccessProfileStore(
     private string ProfileUpsertSql => dialect == AccessProfileDialect.SqlServer
         ? @"MERGE ACCESS_PROFILES WITH (HOLDLOCK) AS t
             USING (SELECT @profileId AS profile_id, @tenantId AS tenant_id) AS s ON t.tenant_id = s.tenant_id AND t.profile_id = s.profile_id
-            WHEN MATCHED THEN UPDATE SET name = @name, masking_mode = @maskingMode, target_tables = @targetTables, row_filter_predicate = @rowFilterPredicate,
+            WHEN MATCHED THEN UPDATE SET name = @name, masking_mode = @maskingMode, target_tables = @targetTables, row_scope_json = @rowScopeJson,
                 justification = @justification, created_by = @createdBy, created_at = @createdAt, valid_to = @validTo
-            WHEN NOT MATCHED THEN INSERT (profile_id, tenant_id, name, masking_mode, target_tables, row_filter_predicate, justification, created_by, created_at, valid_to)
-                VALUES (@profileId, @tenantId, @name, @maskingMode, @targetTables, @rowFilterPredicate, @justification, @createdBy, @createdAt, @validTo);"
-        : @"INSERT INTO ACCESS_PROFILES (profile_id, tenant_id, name, masking_mode, target_tables, row_filter_predicate, justification, created_by, created_at, valid_to)
-            VALUES (@profileId, @tenantId, @name, @maskingMode, @targetTables, @rowFilterPredicate, @justification, @createdBy, @createdAt, @validTo)
+            WHEN NOT MATCHED THEN INSERT (profile_id, tenant_id, name, masking_mode, target_tables, row_scope_json, justification, created_by, created_at, valid_to)
+                VALUES (@profileId, @tenantId, @name, @maskingMode, @targetTables, @rowScopeJson, @justification, @createdBy, @createdAt, @validTo);"
+        : @"INSERT INTO ACCESS_PROFILES (profile_id, tenant_id, name, masking_mode, target_tables, row_scope_json, justification, created_by, created_at, valid_to)
+            VALUES (@profileId, @tenantId, @name, @maskingMode, @targetTables, @rowScopeJson, @justification, @createdBy, @createdAt, @validTo)
             ON CONFLICT (tenant_id, profile_id) DO UPDATE SET name = excluded.name, masking_mode = excluded.masking_mode, target_tables = excluded.target_tables,
-                row_filter_predicate = excluded.row_filter_predicate, justification = excluded.justification, created_by = excluded.created_by,
+                row_scope_json = excluded.row_scope_json, justification = excluded.justification, created_by = excluded.created_by,
                 created_at = excluded.created_at, valid_to = excluded.valid_to";
 
     private string AssignmentUpsertSql => dialect == AccessProfileDialect.SqlServer
@@ -429,7 +429,9 @@ internal sealed class AccessProfileStore(
             Name = reader.GetString(o + 2),
             MaskingMode = mode,
             TargetTables = targets,
-            RowFilterPredicate = reader.IsDBNull(o + 5) ? null : reader.GetString(o + 5),
+            RowScope = reader.IsDBNull(o + 5) || string.IsNullOrWhiteSpace(reader.GetString(o + 5))
+                ? []
+                : JsonSerializer.Deserialize<List<GrantRowScopeEntry>>(reader.GetString(o + 5)) ?? [],
             Justification = reader.IsDBNull(o + 6) ? null : reader.GetString(o + 6),
             CreatedBy = reader.IsDBNull(o + 7) ? null : reader.GetString(o + 7),
             CreatedAt = ReadTs(reader, o + 8) ?? DateTimeOffset.UtcNow,

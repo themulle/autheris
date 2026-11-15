@@ -339,7 +339,7 @@ public class InfrastructureTests : IDisposable
     }
 
     [Fact]
-    public async Task Consent_AdvancedRlsRowFilter_PersistsAndLoadsCorrectly()
+    public async Task Consent_RowScope_PersistsAndLoadsCorrectly()
     {
         var targetTable = new TableIdentifier("finance", "dbo", "finance_table_1");
         var depTable = new TableIdentifier("finance", "dbo", "finance_items");
@@ -347,6 +347,29 @@ public class InfrastructureTests : IDisposable
 
         var meta = await _repository.GetTableMetadataAsync(targetTable);
         meta.ShouldNotBeNull();
+        string targetColumn = meta.Columns[0].ColumnName;
+        string policyName = $"finance_ch_{Guid.NewGuid():N}";
+
+        await ((Autheris.Application.VirtualFilters.IVirtualFilterRepository)_repository).ApplyAsync(
+            new Autheris.Application.VirtualFilters.VirtualFilterChangeSet
+            {
+                SaveFilters =
+                [
+                    new VirtualFilter
+                    {
+                        TenantId = Autheris.Tests.Common.TestTenants.Default,
+                        Name = policyName,
+                        Source = meta.Table.SourceName,
+                        KeyColumns = [$"c.{targetColumn}"],
+                        Structured = new StructuredFilterDefinition
+                        {
+                            From = new TableIdentifier(meta.Table.SourceName, depTable.Schema, depTable.TableName),
+                            FromAlias = "c",
+                            Where = [new FilterCondition("c.country", FilterConditionOperator.Eq, "CH")]
+                        }
+                    }
+                ]
+            });
 
         var consent = new Consent
         {
@@ -358,32 +381,14 @@ public class InfrastructureTests : IDisposable
             GranteeSid = userSid,
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
             ValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            RowFilters = new List<ConsentRowFilter>
-            {
-                new()
-                {
-                    FilterType = RowFilterType.SubqueryCorrelated,
-                    TargetTableAlias = "i",
-                    DependentTable = depTable,
-                    DependentTableAlias = "c",
-                    ForeignKeyColumn = "customer_id",
-                    PrimaryKeyColumn = "id",
-                    SubqueryFilterPredicateJson = "{\"c.country\":\"CH\"}",
-                    TargetTemporalColumn = "i.invoice_date",
-                    DependentValidFromColumn = "ao.valid_from",
-                    DependentValidToColumn = "ao.valid_to",
-                    AdditionalHops = new List<SubqueryJoinHop>
-                    {
-                        new()
-                        {
-                            Table = new TableIdentifier("finance", "dbo", "asset_ownership"),
-                            TableAlias = "ao",
-                            LeftJoinColumn = "c.id",
-                            RightJoinColumn = "ao.customer_id"
-                        }
-                    }
-                }
-            }
+            RowScope =
+            [
+                new GrantRowScopeEntry(
+                    policyName,
+                    new Dictionary<string, System.Text.Json.JsonElement>(),
+                    new Dictionary<string, string> { [targetColumn] = targetColumn },
+                    UncoveredPolicy.Skip)
+            ]
         };
 
         var created = await _repository.CreateConsentAsync(consent);
@@ -394,20 +399,11 @@ public class InfrastructureTests : IDisposable
 
         var loaded = loadedList.FirstOrDefault(c => c.Id == consent.Id);
         loaded.ShouldNotBeNull();
-        loaded.RowFilters.Count.ShouldBe(1);
-
-        var loadedFilter = loaded.RowFilters[0];
-        loadedFilter.FilterType.ShouldBe(RowFilterType.SubqueryCorrelated);
-        loadedFilter.DependentTable.ShouldBe(depTable);
-        loadedFilter.DependentTableAlias.ShouldBe("c");
-        loadedFilter.ForeignKeyColumn.ShouldBe("customer_id");
-        loadedFilter.PrimaryKeyColumn.ShouldBe("id");
-        loadedFilter.TargetTemporalColumn.ShouldBe("i.invoice_date");
-        loadedFilter.DependentValidFromColumn.ShouldBe("ao.valid_from");
-        loadedFilter.DependentValidToColumn.ShouldBe("ao.valid_to");
-        loadedFilter.AdditionalHops.ShouldNotBeNull();
-        loadedFilter.AdditionalHops.Count.ShouldBe(1);
-        loadedFilter.AdditionalHops[0].TableAlias.ShouldBe("ao");
+        loaded.RowScope.Count.ShouldBe(1);
+        loaded.RowScope[0].PolicyName.ShouldBe(policyName);
+        loaded.RowScope[0].ColumnMap.ShouldNotBeNull();
+        loaded.RowScope[0].ColumnMap![targetColumn].ShouldBe(targetColumn);
+        loaded.RowScope[0].Uncovered.ShouldBe(UncoveredPolicy.Skip);
     }
 
     private void DeletePolicyEpoch(TableIdentifier table) =>

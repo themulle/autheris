@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
 using Autheris.Application.Services;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -125,15 +126,21 @@ INSERT INTO md.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     {
         if (!_available) return;
 
-        string correlated = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(new ConsentRowFilter
+        var vf = new VirtualFilter
         {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("erp", "md", "client"),
-            DependentTableAlias = "c",
-            ForeignKeyColumn = "client_id",
-            PrimaryKeyColumn = "client_id",
-            SubqueryFilterPredicateJson = "{\"c.region\": \"DE\"}"
-        }, DatabaseDialect.PostgreSql);
+            Name = "client_de",
+            TenantId = new TenantId("tenant-a"),
+            Source = "erp",
+            KeyColumns = ["c.client_id"],
+            Structured = new StructuredFilterDefinition
+            {
+                From = new TableIdentifier("erp", "md", "client"),
+                FromAlias = "c",
+                Where = [new FilterCondition("c.region", FilterConditionOperator.Eq, "DE")]
+            }
+        };
+        string correlated = new StructuredFilterSqlBuilder().Build(
+            vf, new FilterBinding { FilterName = "client_de" }, Crane(), DatabaseDialect.PostgreSql);
 
         var allowed = await Resolver().GetAllowedKeysAsync(
             Definition(), Crane(), Decision(correlated), ["serial_number"], [["100"], ["200"]], Caller, CancellationToken.None);

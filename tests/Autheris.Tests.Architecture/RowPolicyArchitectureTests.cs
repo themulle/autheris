@@ -72,7 +72,7 @@ public sealed class RowPolicyArchitectureTests
         violations.AddRange(Callers(module,
             t => t.FullName is "Autheris.Application.Services.AdvancedRlsFilterGenerator" or "Autheris.Application.Services.RlsFilterGenerator"
                  or "Autheris.Application.Services.RowFilterSqlBuilder",
-            m => m.Name is "BuildCorrelatedPredicate" or "BuildCrossSourceSetPredicate" or "BuildCombinedRowFilterParameterized"));
+            m => m.Name is "BuildCrossSourceSetPredicate" or "BuildCombinedRowFilterParameterized"));
 
         violations.ShouldBeEmpty(string.Join(Environment.NewLine, violations));
     }

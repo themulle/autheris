@@ -19,23 +19,7 @@ public sealed class ConsentColumnRule
 public enum RowFilterType
 {
     SimpleColumnPredicate = 0,   // Standard: Column = Value / IN (...)
-    SubqueryCorrelated = 1,      // Single-Source: Correlated EXISTS / Subquery
     CrossSourceSetFilter = 2     // Multi-Source: Two-Phase GraphQL / DataLoader Virtual Set
-}
-
-public enum RowFilterSubqueryStrategy
-{
-    Exists = 0,        // Standard: EXISTS (SELECT 1 FROM ... WHERE ...)
-    InCorrelated = 1,  // Correlated IN: target.fk IN (SELECT dep.pk FROM ... WHERE dep.pk = target.fk AND ...)
-    In = 2             // Uncorrelated IN: target.fk IN (SELECT dep.pk FROM ... WHERE ...)
-}
-
-public sealed class SubqueryJoinHop
-{
-    public TableIdentifier Table { get; init; }
-    public string TableAlias { get; init; } = string.Empty;
-    public string LeftJoinColumn { get; init; } = string.Empty;
-    public string RightJoinColumn { get; init; } = string.Empty;
 }
 
 public sealed class ConsentRowFilter
@@ -50,24 +34,7 @@ public sealed class ConsentRowFilter
     public string ValueJson { get; init; } = "[]";
     public string ValueSource { get; init; } = "LITERAL"; // LITERAL, USER_ATTRIBUTE
     public string? UserAttribute { get; init; }
-
-    // Advanced RLS: Correlated Subquery & Cross-Source Set Properties
     public RowFilterType FilterType { get; init; } = RowFilterType.SimpleColumnPredicate;
-    public TableIdentifier? DependentTable { get; init; }
-    public string? DependentTableAlias { get; init; }
-    public string? ForeignKeyColumn { get; init; }
-    public string? PrimaryKeyColumn { get; init; }
-    public string? SubqueryFilterPredicateJson { get; init; }
-    public string? TargetTemporalColumn { get; init; }
-    public string? DependentValidFromColumn { get; init; }
-    public string? DependentValidToColumn { get; init; }
-    public string? TargetTableAlias { get; init; }
-    public IReadOnlyList<SubqueryJoinHop>? AdditionalHops { get; init; }
-
-    // Issue #107: key-set cache evaluation settings of this rule (null = inherit object/global). Serialized in ConsentRowFilterRecipe.
-    public RowFilterEvaluationStrategy? KeySetStrategy { get; init; }
-    public int? KeySetDurationSeconds { get; init; }
-    public int? KeySetMaxKeys { get; init; }
 }
 
 /// <summary>an in-place description change of a non-revoked consent (applied inside<c>ReplaceConsentsAsync</c>; never touches validity, rules or the epoch).</summary>
@@ -112,7 +79,7 @@ public sealed class Consent
     public IReadOnlyList<ConsentColumnRule> ColumnRules { get; set; } = Array.Empty<ConsentColumnRule>();
     public IReadOnlyList<ConsentRowFilter> RowFilters { get; set; } = Array.Empty<ConsentRowFilter>();
     public IReadOnlyList<WriteRule> WriteRules { get; set; } = [];
-    public string? RowFilterCondition { get; init; }
+    public IReadOnlyList<GrantRowScopeEntry> RowScope { get; set; } = [];
 
     /// <summary>expiry after the read-time clamp of legacy individual grants (never later than<see cref="ValidTo"/>).</summary>
     public DateTimeOffset EffectiveValidTo => IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo, Effect);
@@ -158,5 +125,18 @@ public sealed class Consent
         }
 
         ConsentRowFilterShape.Validate(RowFilters);
+
+        foreach (var entry in RowScope)
+        {
+            if (string.IsNullOrWhiteSpace(entry.PolicyName))
+            {
+                throw new InvalidOperationException($"Consent {Id}: row-scope entry policy name must not be empty.");
+            }
+
+            if (!Enum.IsDefined(entry.Uncovered))
+            {
+                throw new InvalidOperationException($"Consent {Id}: invalid row-scope uncovered policy.");
+            }
+        }
     }
 }

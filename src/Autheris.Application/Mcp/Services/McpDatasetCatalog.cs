@@ -879,7 +879,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         !string.IsNullOrWhiteSpace(table.Table.RlsExpression) ||
         activeConsents.Any(c => c.TableIdentifier == table.Identifier &&
                                 c.Effect == ConsentEffect.Allow &&
-                                (c.RowFilters is { Count: > 0 } || !string.IsNullOrWhiteSpace(c.RowFilterCondition)));
+                                (c.RowFilters is { Count: > 0 } || c.RowScope is { Count: > 0 }));
 
     /// <summary>
     /// Issue #127: the only producer of column levels for value profiles and synthetic samples. The level is the one the

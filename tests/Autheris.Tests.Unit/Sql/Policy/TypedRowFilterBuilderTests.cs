@@ -219,15 +219,14 @@ public sealed class TypedRowFilterBuilderTests
     [Fact]
     public void Renderer_RebasesTheTargetAlias()
     {
-        var filter = new ConsentRowFilter
-        {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("erp", "main", "customers"),
-            DependentTableAlias = "c",
-            ForeignKeyColumn = "customer_id",
-            PrimaryKeyColumn = "id"
-        };
-        var predicate = AdvancedRlsFilterGenerator.BuildCorrelatedPredicate(filter);
+        var predicate = TestCorrelatedPredicateBuilder.BuildSingle(
+            fkColumn: "customer_id",
+            domain: "erp",
+            schema: "main",
+            table: "customers",
+            alias: "c",
+            pkColumn: "id",
+            whereColumn: null);
 
         _renderer.Render(predicate, TargetSqlDialect.Sqlite, "o").Sql.ShouldContain("\"o\".\"customer_id\"");
         _renderer.Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql.ShouldContain("\"autheris_target\".\"customer_id\"");

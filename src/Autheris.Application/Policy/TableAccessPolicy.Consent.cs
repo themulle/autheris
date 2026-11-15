@@ -226,50 +226,11 @@ public sealed partial class TableAccessPolicy
         TableMetadata metadata,
         RowPolicyFactory? rowPolicyFactory)
     {
+        _ = rowPolicyFactory;
         var table = metadata.Identifier;
-        var predicates = profiles
-            .Select(p => p.RowFilterPredicate)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p!)
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-
-        var rowPolicies = new List<IRowPolicy>();
-        if (rowPolicyFactory is { CanParseAdminPredicates: true })
-        {
-            // WP-X0e: each admin-authored predicate is parsed on its own into a typed policy (never concatenated as text first).
-            try
-            {
-                foreach (var predicate in predicates)
-                {
-                    rowPolicies.Add(rowPolicyFactory.FromAccessProfile(predicate, metadata));
-                }
-            }
-            catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
-            {
-                return TableAccessDecision.Denied(table, "Access profile row filter is invalid (fail-closed).");
-            }
-        }
-
         try
         {
-            var restricted = ApplyProfileMasking(decision, AccessProfileAssignmentRules.EnforcedMode(profiles[0].MaskingMode), metadata);
-            if (rowPolicies.Count > 0)
-            {
-                foreach (var policy in rowPolicies)
-                {
-                    restricted = restricted.WithAdditionalRowPolicy(policy);
-                }
-
-                return restricted;
-            }
-
-            foreach (var predicate in predicates)
-            {
-                restricted = restricted.WithAdditionalRowFilter(predicate);
-            }
-
-            return restricted;
+            return ApplyProfileMasking(decision, AccessProfileAssignmentRules.EnforcedMode(profiles[0].MaskingMode), metadata);
         }
         catch (System.Security.SecurityException)
         {

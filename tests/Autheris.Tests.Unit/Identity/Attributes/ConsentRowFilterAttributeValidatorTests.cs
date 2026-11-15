@@ -87,7 +87,6 @@ public sealed class ConsentRowFilterAttributeValidatorTests
     }
 
     [Theory]
-    [InlineData(RowFilterType.SubqueryCorrelated)]
     [InlineData(RowFilterType.CrossSourceSetFilter)]
     public void CorrelatedAndCrossSourceFilters_CannotCarryAnAttribute(RowFilterType type) =>
         Should.Throw<InvalidOperationException>(() => ConsentRowFilterAttributeValidator.ValidateShape([Attr(type: type)]));

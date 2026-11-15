@@ -144,13 +144,32 @@ public sealed class RowFilterKeySetPostgreSqlTests : IClassFixture<RowFilterKeyS
             new TableCatalogEntry(orders, ImmutableArray.Create(new CatalogColumn("id", "integer"), new CatalogColumn("client_id", "integer"), new CatalogColumn("tenant_id", "character varying(64)")), "tenant_id", 1),
             new TableCatalogEntry(new TableIdentity("public", "customers"), ImmutableArray.Create(new CatalogColumn("id", "integer"), new CatalogColumn("country", "character varying(20)"), new CatalogColumn("tenant_id", "character varying(64)")), "tenant_id", 1)
         ], "public");
-        var filter = new ConsentRowFilter
+        var vf = new VirtualFilter
         {
-            Id = Guid.NewGuid(), FilterType = RowFilterType.SubqueryCorrelated,
-            DependentTable = new TableIdentifier("default", "public", "customers"), DependentTableAlias = "c",
-            ForeignKeyColumn = "client_id", PrimaryKeyColumn = "id", SubqueryFilterPredicateJson = "{\"c.country\": \"CH\"}"
+            Name = "ch_customers",
+            TenantId = Autheris.Tests.Common.TestTenants.Default,
+            Source = "default",
+            KeyColumns = ["c.id"],
+            Structured = new StructuredFilterDefinition
+            {
+                From = new TableIdentifier("default", "public", "customers"),
+                FromAlias = "c",
+                Where = [new FilterCondition("c.country", FilterConditionOperator.Eq, "CH")]
+            }
         };
-        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [filter] }], [], orders)!;
+        var binding = new FilterBinding
+        {
+            FilterName = "ch_customers",
+            ColumnMap = new Dictionary<string, string> { ["id"] = "client_id" }
+        };
+        var ordersMeta = new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "public", "orders"),
+            Table = new Table { SourceName = "default", SchemaName = "public", TableName = "orders", SourceType = "PostgreSQL" },
+            Columns = [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "client_id" }, new TableColumn { ColumnName = "tenant_id" }]
+        };
+        var predicate = new Autheris.Application.VirtualFilters.StructuredFilterSqlBuilder()
+            .BuildTyped(vf, binding, ordersMeta, DatabaseDialect.PostgreSql, "__p_")!;
         var node = predicate.Expression switch
         {
             TrinoSqlEngine.Ast.Nodes.ExistsExpression e => e,

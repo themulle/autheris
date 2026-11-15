@@ -31,19 +31,18 @@ public sealed class PolicyPredicateLintTests
         ]
     };
 
-    private static AccessProfile Profile(string id, string predicate) => new()
+    private static VirtualFilter Filter(string name, string sql, string source = "erp") => new()
     {
-        ProfileId = id,
-        Name = id,
         TenantId = Autheris.Tests.Common.TestTenants.Default,
-        TargetTables = ["erp.main.orders"],
-        RowFilterPredicate = predicate
+        Name = name,
+        Source = source,
+        Sql = sql
     };
 
     private static PolicyLintInput Input(
-        IEnumerable<AccessProfile>? profiles = null,
+        IEnumerable<VirtualFilter>? filters = null,
         string sourceType = "PostgreSQL") =>
-        new([Orders(sourceType)], (profiles ?? []).ToList(), []);
+        new([Orders(sourceType)], [], (filters ?? []).ToList());
 
     private static Task<PolicyLintInput> Load(PolicyLintInput input) => Task.FromResult(input);
 
@@ -61,29 +60,32 @@ public sealed class PolicyPredicateLintTests
     [Fact]
     public async Task Lint_ReportsUnparsable_ExitCode1()
     {
-        var input = Input([Profile("p-good", "region = 'EU'"), Profile("p-bad", "region = 'EU' AND [name] = 'x'")]);
+        var input = Input([
+            Filter("p_good", "from main.orders o where o.id = target.id and o.region = 'EU'"),
+            Filter("p_bad", "from main.orders o where o.id = target.id and [o].[name] = 'x'")
+        ]);
 
         var report = new PolicyPredicateLinter().Lint(input);
         var (exit, output) = await RunCli(input);
 
         report.Findings.Count.ShouldBe(1);
-        report.Findings[0].PolicyId.ShouldBe("p-bad");
-        report.Findings[0].Kind.ShouldBe(PolicyLintKind.AccessProfileRowFilter);
-        report.Findings[0].Table.ShouldBe("erp.main.orders");
+        report.Findings[0].PolicyId.ShouldBe("p_bad");
+        report.Findings[0].Kind.ShouldBe(PolicyLintKind.VirtualFilter);
+        report.Findings[0].Table.ShouldBe("erp");
         exit.ShouldBe(1);
-        output.ShouldContain("p-bad");
-        output.ShouldContain("erp.main.orders");
+        output.ShouldContain("p_bad");
+        output.ShouldContain("erp");
     }
 
     [Fact]
     public async Task Lint_OutputHasNoPolicyValues()
     {
-        var input = Input([Profile("p-bad", $"region = '{SecretValue}' AND [name] = '{SecretValue}'")]);
+        var input = Input([Filter("p_bad", $"from main.orders o where o.region = '{SecretValue}' AND [o].[name] = '{SecretValue}'")]);
 
         var (exit, output) = await RunCli(input);
 
         exit.ShouldBe(1);
-        output.ShouldContain("p-bad");
+        output.ShouldContain("p_bad");
         output.ShouldNotContain(SecretValue);
         output.ShouldNotContain("region");
     }
@@ -91,7 +93,10 @@ public sealed class PolicyPredicateLintTests
     [Fact]
     public async Task Lint_AllValid_ExitCode0()
     {
-        var input = Input([Profile("p1", "region = 'EU'"), Profile("p2", "id > 5 AND lower(name) = 'a'")]);
+        var input = Input([
+            Filter("p1", "from main.orders o where o.id = target.id and o.region = 'EU'"),
+            Filter("p2", "from main.orders o where o.id = target.id and o.id > 5 and lower(o.name) = 'a'")
+        ]);
 
         var report = new PolicyPredicateLinter().Lint(input);
         var (exit, output) = await RunCli(input);
@@ -105,19 +110,19 @@ public sealed class PolicyPredicateLintTests
     [Fact]
     public void Lint_UsesProductionFunctionAllowlist()
     {
-        var profiles = new[] { Profile("p-split", "split_part(name, '-', 1) = 'a'") };
+        var allowed = new[] { Filter("p_lower", "from main.orders o where o.id = target.id and lower(o.name) = 'a'") };
+        var disallowed = new[] { Filter("p_split", "from main.orders o where o.id = target.id and split_part(o.name, '-', 1) = 'a'") };
 
-        // split_part is on the PostgreSQL allowlist only: the lint must apply the allowlist of the table's own dialect.
-        new PolicyPredicateLinter().Lint(Input(profiles, sourceType: "PostgreSQL")).IsClean.ShouldBeTrue();
-        new PolicyPredicateLinter().Lint(Input(profiles, sourceType: "SqlServer")).Findings.Single().PolicyId.ShouldBe("p-split");
+        new PolicyPredicateLinter().Lint(Input(allowed, sourceType: "PostgreSQL")).IsClean.ShouldBeTrue();
+        new PolicyPredicateLinter().Lint(Input(disallowed, sourceType: "PostgreSQL")).Findings.Single().PolicyId.ShouldBe("p_split");
     }
 
     [Fact]
     public void Lint_ChecksColumnsAgainstTheCatalog()
     {
-        var report = new PolicyPredicateLinter().Lint(Input([Profile("p-col", "not_a_column = 'x'")]));
+        var report = new PolicyPredicateLinter().Lint(Input([Filter("p_col", "from main.not_a_table o where o.id = target.id and o.region = 'x'")]));
 
-        report.Findings.Single().PolicyId.ShouldBe("p-col");
+        report.Findings.Single().PolicyId.ShouldBe("p_col");
     }
 
     [Theory]
@@ -127,7 +132,7 @@ public sealed class PolicyPredicateLintTests
     [InlineData("Data Source=gov.db")]
     public async Task Lint_RejectsConnectionStringArgument(string arg)
     {
-        var (exit, output) = await RunCli(Input([Profile("p1", "region = 'EU'")]), [arg, "Server=db;Password=hunter2"]);
+        var (exit, output) = await RunCli(Input([Filter("p1", "from main.orders o where o.id = target.id and o.region = 'EU'")]), [arg, "Server=db;Password=hunter2"]);
 
         exit.ShouldBe(2);
         output.ShouldNotContain("hunter2");
@@ -140,28 +145,4 @@ public sealed class PolicyPredicateLintTests
 
         exit.ShouldBe(2);
     }
-}
-
-/// <summary>REQ-GOV-129 (A-8, ST-129-18): a caller placeholder is only valid in a Virtual Filter.</summary>
-[Trait("Category", "Security")]
-public sealed class PolicyPredicateLintCallerPlaceholderTests
-{
-    private static TableMetadata Orders() => new()
-    {
-        Table = new Table { SourceType = "PostgreSQL", SourceName = "erp", SchemaName = "main", TableName = "orders" },
-        Identifier = new TableIdentifier("erp", "main", "orders"),
-        Columns = [new TableColumn { ColumnName = "region", DataType = "varchar" }]
-    };
-
-    [Theory]
-    [InlineData("region = {{caller.dept}}")]
-    [InlineData("region = '{{caller.dept}}'")]
-    [InlineData("region = '__autheris_caller__dept'")]
-    public void AccessProfile_WithAPlaceholder_IsAFinding(string predicate)
-    {
-        var profile = new AccessProfile { ProfileId = "p", Name = "p", TenantId = Autheris.Tests.Common.TestTenants.Default, TargetTables = ["erp.main.orders"], RowFilterPredicate = predicate };
-        var report = new PolicyPredicateLinter().Lint(new PolicyLintInput([Orders()], [profile], []));
-        report.Findings.ShouldHaveSingleItem().Code.ShouldBe(PolicyPredicateLinter.CodeCallerPlaceholderNotAllowed);
-    }
-
 }

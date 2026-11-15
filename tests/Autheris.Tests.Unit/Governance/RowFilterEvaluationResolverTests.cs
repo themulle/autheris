@@ -126,141 +126,43 @@ public sealed class RowFilterEvaluationResolverTests
 
     // ---- Validate ----
 
-    private static ConsentRowFilter Correlated() => new() { FilterType = RowFilterType.SubqueryCorrelated };
-
     [Fact]
     public void Validate_ObjectLevel_ValidSettings_ReturnsNull()
-        => RowFilterEvaluationResolver.Validate(S(RowFilterEvaluationStrategy.KeySetCache, 60, 10), Global, null, null).ShouldBeNull();
+        => RowFilterEvaluationResolver.Validate(S(RowFilterEvaluationStrategy.KeySetCache, 60, 10), Global).ShouldBeNull();
 
     [Fact]
-    public void Validate_Inherit_IsAlwaysValid_EvenOnIneligibleRules()
+    public void Validate_Inherit_IsAlwaysValid()
     {
-        RowFilterEvaluationResolver.Validate(RowFilterEvaluationSettings.Inherit, Global, new ConsentRowFilter(), ConsentEffect.Deny).ShouldBeNull();
+        RowFilterEvaluationResolver.Validate(RowFilterEvaluationSettings.Inherit, Global).ShouldBeNull();
     }
 
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
     public void Validate_NonPositiveDuration_Rejected(int seconds)
-        => RowFilterEvaluationResolver.Validate(S(d: seconds), Global, null, null).ShouldNotBeNull();
+        => RowFilterEvaluationResolver.Validate(S(d: seconds), Global).ShouldNotBeNull();
 
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]
     public void Validate_NonPositiveMaxKeys_Rejected(int keys)
-        => RowFilterEvaluationResolver.Validate(S(k: keys), Global, null, null).ShouldNotBeNull();
+        => RowFilterEvaluationResolver.Validate(S(k: keys), Global).ShouldNotBeNull();
 
     [Fact]
     public void Validate_DurationAboveCap_Rejected_AndAtCapAccepted()
     {
-        RowFilterEvaluationResolver.Validate(S(d: 3601), Global, null, null).ShouldNotBeNull();
-        RowFilterEvaluationResolver.Validate(S(d: 3600), Global, null, null).ShouldBeNull();
+        RowFilterEvaluationResolver.Validate(S(d: 3601), Global).ShouldNotBeNull();
+        RowFilterEvaluationResolver.Validate(S(d: 3600), Global).ShouldBeNull();
     }
 
     [Fact]
     public void Validate_MaxKeysAboveCap_Rejected_AndAtCapAccepted()
     {
-        RowFilterEvaluationResolver.Validate(S(k: 2001), Global, null, null).ShouldNotBeNull();
-        RowFilterEvaluationResolver.Validate(S(k: 2000), Global, null, null).ShouldBeNull();
+        RowFilterEvaluationResolver.Validate(S(k: 2001), Global).ShouldNotBeNull();
+        RowFilterEvaluationResolver.Validate(S(k: 2000), Global).ShouldBeNull();
     }
 
     [Fact]
     public void Validate_UndefinedEnum_Rejected()
-        => RowFilterEvaluationResolver.Validate(S((RowFilterEvaluationStrategy)99), Global, null, null).ShouldNotBeNull();
-
-    [Fact]
-    public void Validate_RuleLevel_CorrelatedAllow_Accepted()
-        => RowFilterEvaluationResolver.Validate(S(RowFilterEvaluationStrategy.KeySetCache, 60, 10), Global, Correlated(), ConsentEffect.Allow).ShouldBeNull();
-
-    [Trait("Category", "Security")]
-    [Fact]
-    public void Validate_RuleLevel_Deny_Rejected_SEC_RF107_06e()
-        => RowFilterEvaluationResolver.Validate(S(RowFilterEvaluationStrategy.KeySetCache), Global, Correlated(), ConsentEffect.Deny).ShouldNotBeNull();
-
-    [Trait("Category", "Security")]
-    [Theory]
-    [InlineData(RowFilterType.SimpleColumnPredicate)]
-    [InlineData(RowFilterType.CrossSourceSetFilter)]
-    public void Validate_RuleLevel_NonCorrelated_Rejected_SEC_RF107_06e(RowFilterType type)
-        => RowFilterEvaluationResolver.Validate(
-            S(RowFilterEvaluationStrategy.KeySetCache), Global, new ConsentRowFilter { FilterType = type }, ConsentEffect.Allow).ShouldNotBeNull();
-
-    [Trait("Category", "Security")]
-    [Theory]
-    [InlineData("t", null, null)]
-    [InlineData(null, "f", null)]
-    [InlineData(null, null, "to")]
-    public void Validate_RuleLevel_Temporal_Rejected_SEC_RF107_06e(string? target, string? from, string? to)
-    {
-        var rule = new ConsentRowFilter
-        {
-            FilterType = RowFilterType.SubqueryCorrelated,
-            TargetTemporalColumn = target,
-            DependentValidFromColumn = from,
-            DependentValidToColumn = to
-        };
-
-        RowFilterEvaluationResolver.Validate(S(RowFilterEvaluationStrategy.KeySetCache), Global, rule, ConsentEffect.Allow).ShouldNotBeNull();
-    }
-
-    [Fact]
-    public void Validate_RuleLevel_ExistsOnDenyRule_IsHarmlessAndAccepted()
-        => RowFilterEvaluationResolver.Validate(S(RowFilterEvaluationStrategy.Exists), Global, Correlated(), ConsentEffect.Deny).ShouldBeNull();
-
-    [Fact]
-    public void Validate_RuleLevel_MissingEffect_FailsClosed()
-        => RowFilterEvaluationResolver.Validate(S(RowFilterEvaluationStrategy.KeySetCache), Global, Correlated(), null).ShouldNotBeNull();
-
-    private static ConsentRowFilter StoredKeySet(RowFilterType type = RowFilterType.SubqueryCorrelated, string? temporal = null) => new()
-    {
-        FilterType = type,
-        TargetTemporalColumn = temporal,
-        KeySetStrategy = RowFilterEvaluationStrategy.KeySetCache,
-        KeySetDurationSeconds = 60
-    };
-
-    private static readonly RowFilterEvaluationSettings ObjectKeySet = new(RowFilterEvaluationStrategy.KeySetCache, null, null);
-
-    [Trait("Category", "Security")]
-    [Fact]
-    public void ResolveForRule_StoredKeySetOnDenyRule_ResolvesToExists_SEC_RF107_06e()
-    {
-        var e = RowFilterEvaluationResolver.ResolveForRule(StoredKeySet(), ConsentEffect.Deny, ObjectKeySet, Global);
-
-        e.Strategy.ShouldBe(RowFilterEvaluationStrategy.Exists);
-        RowFilterEvaluationResolver.IsEligibleRule(StoredKeySet(), ConsentEffect.Deny).ShouldBeFalse();
-    }
-
-    [Trait("Category", "Security")]
-    [Fact]
-    public void ResolveForRule_StoredKeySetOnNonCorrelatedRule_ResolvesToExists_SEC_RF107_06e()
-    {
-        var rule = StoredKeySet(RowFilterType.SimpleColumnPredicate);
-
-        RowFilterEvaluationResolver.ResolveForRule(rule, ConsentEffect.Allow, ObjectKeySet, Global).Strategy.ShouldBe(RowFilterEvaluationStrategy.Exists);
-        RowFilterEvaluationResolver.IsEligibleRule(rule, ConsentEffect.Allow).ShouldBeFalse();
-    }
-
-    [Trait("Category", "Security")]
-    [Fact]
-    public void ResolveForRule_StoredKeySetOnTemporalRule_ResolvesToExists_SEC_RF107_06e()
-    {
-        var rule = StoredKeySet(temporal: "order_date");
-
-        RowFilterEvaluationResolver.ResolveForRule(rule, ConsentEffect.Allow, ObjectKeySet, Global).Strategy.ShouldBe(RowFilterEvaluationStrategy.Exists);
-        RowFilterEvaluationResolver.IsEligibleRule(rule, ConsentEffect.Allow).ShouldBeFalse();
-    }
-
-    [Fact]
-    public void ResolveForRule_EligibleRule_ResolvesLikeResolve()
-    {
-        var rule = StoredKeySet();
-
-        var e = RowFilterEvaluationResolver.ResolveForRule(rule, ConsentEffect.Allow, null, Global);
-
-        e.Strategy.ShouldBe(RowFilterEvaluationStrategy.KeySetCache);
-        e.StrategySource.ShouldBe(RowFilterEvaluationSource.Rule);
-        e.Duration.ShouldBe(TimeSpan.FromSeconds(60));
-        RowFilterEvaluationResolver.IsEligibleRule(rule, ConsentEffect.Allow).ShouldBeTrue();
-    }
+        => RowFilterEvaluationResolver.Validate(S((RowFilterEvaluationStrategy)99), Global).ShouldNotBeNull();
 }

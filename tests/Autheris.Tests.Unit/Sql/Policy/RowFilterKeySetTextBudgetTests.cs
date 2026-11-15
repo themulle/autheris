@@ -29,16 +29,6 @@ public sealed class RowFilterKeySetTextBudgetTests
             new CatalogColumn("id", whole), new CatalogColumn("tenant_id", text)), "tenant_id", 1)
     ], "dbo");
 
-    private static ConsentRowFilter Correlated() => new()
-    {
-        FilterType = RowFilterType.SubqueryCorrelated,
-        DependentTable = new TableIdentifier("ds", "conf", "client"),
-        DependentTableAlias = "c",
-        ForeignKeyColumn = "client_id",
-        PrimaryKeyColumn = "id",
-        SubqueryFilterPredicateJson = "{\"c.id\": 1}"
-    };
-
     private sealed class Policies(Dictionary<TableIdentity, PolicyPredicate> predicates) : IPolicyPredicateProvider, IColumnMaskProvider
     {
         public bool ShouldApplyPolicy(TableIdentity table) => predicates.ContainsKey(table);
@@ -52,7 +42,15 @@ public sealed class RowFilterKeySetTextBudgetTests
 
     private static PolicyPredicate Substituted(TargetSqlDialect dialect, int ordinal, int count)
     {
-        var predicate = new TypedRowFilterBuilder().BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [Correlated()] }], [], Air1)!;
+        var predicate = TestCorrelatedPredicateBuilder.BuildSingle(
+            fkColumn: "client_id",
+            domain: "ds",
+            schema: "conf",
+            table: "client",
+            alias: "c",
+            pkColumn: "id",
+            whereColumn: "c.id",
+            whereValue: 1L);
         var site = CorrelatedKeySetSubstitution.FindSites(predicate).Single().Node;
         var keys = Enumerable.Range(1, count).Select(i => new PolicyValue((long)i, SqlParameterType.Int64)).ToList();
         var replacement = new KeySetReplacement("client_id", keys, count, ordinal);

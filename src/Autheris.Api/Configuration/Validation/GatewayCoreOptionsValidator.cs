@@ -67,11 +67,6 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
 
         var failures = new List<string>();
 
-        if (!Enum.IsDefined(opts.RowFilters.SubqueryStrategy))
-        {
-            failures.Add("Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.");
-        }
-
         // 130 (BC-130-9): a time zone function without the closed zone set must not be admitted by configuration.
         if (opts.WebSql?.AdditionalAllowedFunctions is { Count: > 0 } additional &&
             additional.Any(TrinoSqlEngine.SqlFunctionAllowlists.IsTimeZoneFunctionName))

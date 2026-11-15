@@ -134,11 +134,6 @@ public sealed partial class TypedRowFilterBuilder
     private static Expression Condition(
         ConsentRowFilter filter, TargetSqlDialect? dialect, PolicyParameterNamer namer, bool isDeny, CallerAttributeSet? attributes, CallerAttributePadding? padding)
     {
-        if (filter.FilterType == RowFilterType.SubqueryCorrelated)
-        {
-            return AdvancedRlsPredicateBuilder.CorrelatedExpression(filter, namer, CorrelatedFilterSource.Consent);
-        }
-
         if (filter.FilterType == RowFilterType.CrossSourceSetFilter)
         {
             return AdvancedRlsPredicateBuilder.CrossSourceSetExpression(filter, dialect ?? TargetSqlDialect.Ansi, namer);

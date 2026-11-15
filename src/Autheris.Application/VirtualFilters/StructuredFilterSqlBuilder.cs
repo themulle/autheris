@@ -25,15 +25,13 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicateBuilder
 {
-    private readonly RowFilterSubqueryStrategy _strategy;
-
     private readonly ISqlEngine _engine;
 
-    /// <param name="options">Row filter options (the subquery strategy of the legacy string path).</param>
+    /// <param name="options">Optional gateway options.</param>
     /// <param name="engine">Parses sql-defined filters for the typed path; the shared <see cref="FastSqlEngine.Default"/> when none is injected.</param>
     public StructuredFilterSqlBuilder(IOptions<GatewayOptions>? options = null, ISqlEngine? engine = null)
     {
-        _strategy = options?.Value?.RowFilters?.SubqueryStrategy ?? RowFilterSubqueryStrategy.Exists;
+        _ = options;
         _engine = engine ?? FastSqlEngine.Default;
     }
 
@@ -105,20 +103,6 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
                 var to = Source(filter.ValidToColumn);
                 window.Add($"({to} IS NULL OR {time} < {to})");
             }
-        }
-
-        bool singleKeyIn = keys.Count == 1 && window.Count == 0 && dialect == DatabaseDialect.SqlServer &&
-                           _strategy is RowFilterSubqueryStrategy.In or RowFilterSubqueryStrategy.InCorrelated;
-        if (singleKeyIn)
-        {
-            var key = keys[0];
-            var where = new List<string>(conditions);
-            if (_strategy == RowFilterSubqueryStrategy.InCorrelated)
-            {
-                where.Add($"{key.Source} = {key.Target}");
-            }
-
-            return $"{key.Target} IN (SELECT {key.Source} {from}{Where(where)})";
         }
 
         var existsWhere = conditions

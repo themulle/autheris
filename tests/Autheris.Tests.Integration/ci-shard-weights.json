@@ -227,7 +227,6 @@
   "RestDatasetHttpTableRestNotOptedInIntegrationTests": 7.6,
   "RowFilterChannelParityTests": 1.2,
   "RowFilterEvaluationEndpointAuthTests": 274.3,
-  "RowFilterKeySetChannelParityTests": 2,
   "RowFilterKeySetOracleTests": 1.4,
   "RowFilterKeySetPostgreSqlTests": 0.1,
   "RowFilterKeySetSqlServerTests": 0.1,

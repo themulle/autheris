@@ -510,8 +510,22 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             var crane = (await repo.GetTableMetadataAsync(Crane))!;
             await repo.CreateConsentAsync(Consent(crane, Crane, []));
 
-            using var scope = _factory!.Services.CreateScope();
-            var admin = scope.ServiceProvider.GetRequiredService<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
+            await SeedDavidVirtualFilterAsync("default.main.*", UncoveredPolicy.Deny, "default.*.*.client_id");
+        }
+
+        private async Task SeedConsentRowFilterAsync(IGovernanceRepository repo, TableMetadata air1, TableMetadata client)
+        {
+            await repo.CreateConsentAsync(Consent(air1, Air1, []));
+            // The client table is readable without filter: it is the parent of the nested GraphQL query.
+            await repo.CreateConsentAsync(Consent(client, ClientTable, []));
+
+            await SeedDavidVirtualFilterAsync("default.main.air1", UncoveredPolicy.Skip, "default.main.air1.client_id");
+        }
+
+        private async Task SeedDavidVirtualFilterAsync(string scope, UncoveredPolicy uncovered, string targetPattern)
+        {
+            using var scopeContainer = _factory!.Services.CreateScope();
+            var admin = scopeContainer.ServiceProvider.GetRequiredService<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
             var actor = new Autheris.Application.VirtualFilters.VirtualFilterActor(new Sid("S-1-5-21-FILTER-ADMIN"), IsSync: UseSqlDefinition);
             await admin.SaveFilterAsync(UseSqlDefinition
                 ? new VirtualFilter
@@ -545,34 +559,10 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
                 Name = "david",
                 GranteeType = GranteeType.User,
                 GranteeSid = new Sid(DavidSid),
-                Scope = "default.main.*",
-                Uncovered = UncoveredPolicy.Deny,
-                Bindings = [new FilterBinding { FilterName = "nicht_ausgelieferte_krane", TargetPattern = "default.*.*.client_id" }]
+                Scope = scope,
+                Uncovered = uncovered,
+                Bindings = [new FilterBinding { FilterName = "nicht_ausgelieferte_krane", TargetPattern = targetPattern }]
             }, actor);
-        }
-
-        private static async Task SeedConsentRowFilterAsync(IGovernanceRepository repo, TableMetadata air1, TableMetadata client)
-        {
-            // The David case as a consent row filter: air1 rows of clients whose crane is not delivered yet.
-            await repo.CreateConsentAsync(Consent(air1, Air1,
-            [
-                new ConsentRowFilter
-                {
-                    FilterType = RowFilterType.SubqueryCorrelated,
-                    DependentTable = ClientTable,
-                    DependentTableAlias = "client",
-                    PrimaryKeyColumn = "client_id",
-                    ForeignKeyColumn = "client_id",
-                    AdditionalHops =
-                    [
-                        new SubqueryJoinHop { Table = Crane, TableAlias = "crane", LeftJoinColumn = "crane.serial_number", RightJoinColumn = "client.crane_serial_number" }
-                    ],
-                    SubqueryFilterPredicateJson = "{\"crane.is_delivered\": null}"
-                }
-            ]));
-
-            // The client table is readable without filter: it is the parent of the nested GraphQL query.
-            await repo.CreateConsentAsync(Consent(client, ClientTable, []));
         }
 
         protected static Consent Consent(TableMetadata meta, TableIdentifier id, IReadOnlyList<ConsentRowFilter> rowFilters, ConsentEffect effect = ConsentEffect.Allow) => new()

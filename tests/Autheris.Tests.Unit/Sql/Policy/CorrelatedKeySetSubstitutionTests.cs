@@ -22,20 +22,21 @@ namespace Autheris.Tests.Unit.Sql.Policy;
 public sealed class CorrelatedKeySetSubstitutionTests
 {
     private static readonly TableIdentity Orders = new("main", "orders");
-    private readonly TypedRowFilterBuilder _builder = new();
+    private readonly TestCorrelatedPredicateBuilder _builder = new();
     private readonly PolicyPredicateRenderer _renderer = new();
 
-    private static ConsentRowFilter Correlated(string fk = "client_id", string? json = "{\"c.country\": \"CH\"}", int group = 0, Guid? id = null,
+    private static TestCorrelatedRule Correlated(string fk = "client_id", string? json = "{\"c.country\": \"CH\"}", int group = 0, Guid? id = null,
         RowFilterEvaluationStrategy? strategy = null, int? duration = null, int? maxKeys = null, string? temporal = null, string? validFrom = null) => new()
     {
         Id = id ?? Guid.NewGuid(),
+        IsCorrelated = true,
         FilterGroup = group,
-        FilterType = RowFilterType.SubqueryCorrelated,
         DependentTable = new TableIdentifier("erp", "main", "customers"),
         DependentTableAlias = "c",
         ForeignKeyColumn = fk,
         PrimaryKeyColumn = "id",
-        SubqueryFilterPredicateJson = json,
+        WhereColumn = json is null ? null : "c.country",
+        WhereValue = json is null ? null : "CH",
         KeySetStrategy = strategy,
         KeySetDurationSeconds = duration,
         KeySetMaxKeys = maxKeys,
@@ -43,14 +44,14 @@ public sealed class CorrelatedKeySetSubstitutionTests
         DependentValidFromColumn = validFrom
     };
 
-    private static ConsentRowFilter Simple(string column = "region", string value = "\"EU\"", int group = 0) =>
-        new() { FilterGroup = group, ColumnName = column, Operator = "EQ", ValueJson = value };
+    private static TestCorrelatedRule Simple(string column = "region", string value = "\"EU\"", int group = 0) =>
+        TestCorrelatedRule.Simple(column, value, group);
 
-    private static Consent Allow(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = filters };
+    private static TestConsent Allow(params TestCorrelatedRule[] filters) => new(ConsentEffect.Allow, filters);
 
-    private static Consent Deny(params ConsentRowFilter[] filters) => new() { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = filters };
+    private static TestConsent Deny(params TestCorrelatedRule[] filters) => new(ConsentEffect.Deny, filters);
 
-    private PolicyPredicate Build(Consent[] allow, Consent[] deny) => _builder.BuildCombined(allow, deny, Orders)!;
+    private PolicyPredicate Build(TestConsent[] allow, TestConsent[] deny) => _builder.BuildCombined(allow, deny, Orders)!;
 
     private static PolicyValue Key(long value) => new(value, SqlParameterType.Int64);
 
@@ -287,7 +288,7 @@ public sealed class CorrelatedKeySetSubstitutionTests
         var sql = Sql(CorrelatedKeySetSubstitution.Substitute(predicate, Replace((node, Replacement(0, 2, 2, "a_id"))), TargetSqlDialect.SqlServer));
 
         sql.ShouldStartWith("(([autheris_target].[a_id] IN (@__rls_ks0_0, @__rls_ks0_1) OR [region] = @__gql_rls_");
-        sql.ShouldContain("AND NOT (EXISTS (SELECT 1 FROM [main].[customers] AS [c]");   // the DENY site stays EXISTS
+        sql.ShouldContain("AND NOT ((EXISTS (SELECT 1 FROM [main].[customers] AS [c]");   // the DENY site stays EXISTS
     }
 
     [Fact]

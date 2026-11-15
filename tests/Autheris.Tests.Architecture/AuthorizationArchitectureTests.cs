@@ -10,6 +10,7 @@ using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Procedures.Services;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Services;
+using Autheris.Domain.Model;
 using Autheris.GraphQL.Interceptors;
 using Shouldly;
 using Xunit;
@@ -95,5 +96,36 @@ public sealed class AuthorizationArchitectureTests
 
         violatingFiles.ShouldBeEmpty(
             $"DecisionReason and DecisionGrantRef must be surfaced only by explain and audit, never by transport error mappers: {string.Join(", ", violatingFiles)}");
+    }
+
+    [Fact]
+    public void No_free_sql_predicate_on_grant_models()
+    {
+        Type[] grantModelTypes =
+        [
+            typeof(Consent),
+            typeof(AccessProfile),
+            typeof(AccessProfileWriteRule),
+            typeof(AccessProfileAssignment),
+            typeof(WriteRule)
+        ];
+
+        var violations = new List<string>();
+        foreach (var type in grantModelTypes)
+        {
+            foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (prop.PropertyType == typeof(string) &&
+                    (prop.Name.Contains("Predicate", StringComparison.OrdinalIgnoreCase) ||
+                     prop.Name.Contains("RowFilter", StringComparison.OrdinalIgnoreCase) ||
+                     prop.Name.Contains("Sql", StringComparison.OrdinalIgnoreCase)))
+                {
+                    violations.Add($"{type.Name}.{prop.Name}");
+                }
+            }
+        }
+
+        violations.ShouldBeEmpty(
+            $"Free-SQL predicate string properties must not exist on grant or profile models: {string.Join(", ", violations)}");
     }
 }
