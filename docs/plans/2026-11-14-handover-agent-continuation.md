@@ -24,7 +24,7 @@ Pushed feature branches on `origin` ready for rebase, conflict resolution, and C
 - Never run `Autheris.sln` or unfiltered `Autheris.Tests.Unit` / `Autheris.Tests.Integration` / `Autheris.Tests.Parity` suites locally; compile-check `Autheris.Tests.Integration`, `tools/SqlGate.BenchCheck`, and `tests/Autheris.Tests.SqlCompilerGate` with `--no-dependencies` and offload full/integration suites to GitHub Actions.
 - **DDL serialization:** Only one DDL PR in flight at a time (next free migration step on `main` is **`0023`**).
 - Merge a PR when no check is red, watch `main` ("CI Build & Test") on the merge commit and repair first. No `--admin`.
-- Comments in `src/Autheris.Api` and `src/Autheris.Application` must not contain plan IDs (`WP-`/`SEC-`/`OD-`). English only for docs, comments, and commits. Never include literal `file://` links inside repo `.md` files (`DocsIntegrityTests`).
+- Comments in `src/Autheris.Api` and `src/Autheris.Application` must not contain plan IDs (`WP-`/`SEC-`/`OD-`). English only for docs, comments, and commits. Never include absolute filesystem links inside repo `.md` files (`DocsIntegrityTests`).
 
 ## 3. Ratchets & test verification gotchas
 
