@@ -112,6 +112,14 @@ src/Autheris.Api/Endpoints/SystemEndpoints.cs|/api/governance/system/resource-gr
 src/Autheris.Api/Endpoints/TrinoProtocolEndpoints.cs|/v1/statement/executing/{statementId}/{token:long:min(0)}
 src/Autheris.Api/Endpoints/TrinoProtocolEndpoints.cs|/v1/statement/queued/{statementId}/{token:long:min(0)}
 src/Autheris.Api/Endpoints/TrustedDocumentAdminEndpoints.cs|/{appId}
+src/Autheris.Api/Endpoints/UsageEndpoints.Reports.cs|/api/v1/usage/applications
+src/Autheris.Api/Endpoints/UsageEndpoints.Reports.cs|/api/v1/usage/grants/{grantId}
+src/Autheris.Api/Endpoints/UsageEndpoints.Reports.cs|/api/v1/usage/groups
+src/Autheris.Api/Endpoints/UsageEndpoints.Reports.cs|/api/v1/usage/me
+src/Autheris.Api/Endpoints/UsageEndpoints.Reports.cs|/api/v1/usage/sources
+src/Autheris.Api/Endpoints/UsageEndpoints.Reports.cs|/api/v1/usage/tables/{tableId}
+src/Autheris.Api/Endpoints/UsageEndpoints.Reports.cs|/api/v1/usage/tenant
+src/Autheris.Api/Endpoints/UsageEndpoints.Reports.cs|/api/v1/usage/users
 src/Autheris.Api/Endpoints/UsageEndpoints.Tariffs.cs|/api/v1/usage/tariffs
 src/Autheris.Api/Endpoints/UsageEndpoints.Tariffs.cs|/api/v1/usage/tariffs/{dataSource}/versions
 src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs|/config-sync/status

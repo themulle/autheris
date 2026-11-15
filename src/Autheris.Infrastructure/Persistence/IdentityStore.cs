@@ -223,6 +223,25 @@ internal sealed partial class IdentityStore(
             GroupSelectColumns + "FROM IDENTITY_GROUPS WHERE tenant_id = @tenantId AND realm_id = @realmId AND object_sid = @objectSid",
             tenantId, realmId, "@objectSid", objectSid, ct);
 
+    public async Task<string?> GetGroupDisplayNameBySidAsync(TenantId tenant, Sid groupSid, CancellationToken ct = default)
+    {
+        TenantScope.RequireTenant(tenant, "IDENTITY_GROUPS");
+        if (!SidFormat.IsCanonical(groupSid.Value))
+        {
+            return null;
+        }
+
+        await using var scope = await open(false, ct).ConfigureAwait(false);
+        await using var cmd = scope.Connection.CreateCommand();
+        cmd.CommandText = dialect == IdentityStoreDialect.SqlServer
+            ? "SELECT TOP (1) display_name FROM dbo.IDENTITY_GROUPS WHERE tenant_id = @tenantId AND object_sid = @objectSid ORDER BY realm_id ASC"
+            : "SELECT display_name FROM IDENTITY_GROUPS WHERE tenant_id = @tenantId AND object_sid = @objectSid ORDER BY realm_id ASC LIMIT 1";
+        AddParam(cmd, "@tenantId", tenant.Value);
+        AddParam(cmd, "@objectSid", groupSid.Value);
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is string name && !string.IsNullOrWhiteSpace(name) ? name : null;
+    }
+
     public async Task CreateGroupAsync(TenantId tenantId, string realmId, ScimGroup group, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(group);

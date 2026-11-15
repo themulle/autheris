@@ -75,6 +75,18 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetService<TimeProvider>(),
                 dataSource => gateway.CurrentValue.DataSources.Connections.ContainsKey(dataSource));
         });
+        services.AddSingleton<Autheris.Application.Usage.IUsageGroupNameResolver>(sp =>
+            new Autheris.Application.Usage.UsageGroupNameResolver(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                sp.GetService<Autheris.Domain.Interfaces.IScimGroupStore>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Usage.IUsageReportService>(sp =>
+            new Autheris.Application.Usage.UsageReportService(
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageRepository>(),
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageGroupNameResolver>(),
+                sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                sp.GetService<TimeProvider>()));
         services.AddHostedService<Autheris.Infrastructure.Usage.UsageFlushWorker>();
         services.AddHostedService<Autheris.Infrastructure.Usage.UsageInitialTariffSeedService>();
     }

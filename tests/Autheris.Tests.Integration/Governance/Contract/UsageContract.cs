@@ -4,12 +4,15 @@ using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Usage;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Security;
 using Autheris.Tests.Common;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -275,6 +278,49 @@ public abstract class UsageContract : GovernanceContractBase
 
         costAfter.CostUnits.Should().Be(costBefore.CostUnits);
         costAfter.AppliedVersionId.Should().Be(costBefore.AppliedVersionId);
+    }
+
+    [RequiresContainerRuntimeFact]
+    public async Task Query_breakdown_pages_distinct_dimensions_and_isolates_denies()
+    {
+        if (!Store.IsAvailable) return;
+
+        await Store.Usage.AccumulateAsync(BuildSnapshot(Store.TenantA, Day1, "S-1-5-21-50-1", [], TableSales.ToString(), "g-b1", rows: 5));
+        await Store.Usage.AccumulateAsync(BuildSnapshot(Store.TenantA, Day2, "S-1-5-21-50-1", [], TableSales.ToString(), "g-b2", rows: 7));
+        await Store.Usage.AccumulateAsync(BuildSnapshot(Store.TenantA, Day1, "S-1-5-21-50-2", [], TableSales.ToString(), "g-b3", rows: 9));
+
+        var page1 = await Store.Usage.QueryAsync(new UsageReportQuery(
+            Store.TenantA, Day1, Day2, UsageGroupBy.User, IncludeTariffBreakdown: true, Limit: 1));
+        page1.Rows.Should().HaveCount(2);
+        page1.Rows.Select(r => r.UserKey).Distinct().Should().ContainSingle().Which.Should().Be("S-1-5-21-50-1");
+        page1.NextCursor.Should().Be("S-1-5-21-50-1");
+
+        var page2 = await Store.Usage.QueryAsync(new UsageReportQuery(
+            Store.TenantA, Day1, Day2, UsageGroupBy.User, IncludeTariffBreakdown: true, Limit: 1, Cursor: page1.NextCursor));
+        page2.Rows.Should().ContainSingle();
+        page2.Rows[0].UserKey.Should().Be("S-1-5-21-50-2");
+        page2.NextCursor.Should().BeNull();
+    }
+
+    [RequiresContainerRuntimeFact]
+    public async Task GetGroupDisplayNameBySid_matches_object_sid_only()
+    {
+        if (!Store.IsAvailable) return;
+
+        var groupStore = Store.Services.GetRequiredService<IScimGroupStore>();
+        var sid = new Sid("S-1-5-21-100-200-300-777");
+        await groupStore.CreateGroupAsync(
+            Store.TenantA,
+            "default",
+            new ScimGroup(null, "S-1-5-21-100-200-300-888", "Analysts Group", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, sid.Value));
+
+        var matched = await groupStore.GetGroupDisplayNameBySidAsync(Store.TenantA, sid);
+        var byExternalId = await groupStore.GetGroupDisplayNameBySidAsync(Store.TenantA, new Sid("S-1-5-21-100-200-300-888"));
+        var wrongTenant = await groupStore.GetGroupDisplayNameBySidAsync(Store.TenantB, sid);
+
+        matched.Should().Be("Analysts Group");
+        byExternalId.Should().BeNull();
+        wrongTenant.Should().BeNull();
     }
 }
 

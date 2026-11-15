@@ -40,6 +40,7 @@ public partial class GovernanceRepository : IIdentityStoreRepository
     public Task<ScimGroup?> GetGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default) => IdentityStoreInstance.GetGroupAsync(tenantId, realmId, groupId, ct);
     public Task<ScimGroup?> GetGroupByExternalIdAsync(TenantId tenantId, string realmId, string externalId, CancellationToken ct = default) => IdentityStoreInstance.GetGroupByExternalIdAsync(tenantId, realmId, externalId, ct);
     public Task<ScimGroup?> GetGroupByObjectSidAsync(TenantId tenantId, string realmId, string objectSid, CancellationToken ct = default) => IdentityStoreInstance.GetGroupByObjectSidAsync(tenantId, realmId, objectSid, ct);
+    public Task<string?> GetGroupDisplayNameBySidAsync(TenantId tenant, Sid groupSid, CancellationToken ct = default) => IdentityStoreInstance.GetGroupDisplayNameBySidAsync(tenant, groupSid, ct);
     public Task UpsertGroupAsync(ScimGroup group, TenantId tenantId, string realmId, CancellationToken ct = default) => IdentityStoreInstance.UpsertGroupAsync(group, tenantId, realmId, ct);
     public Task CreateGroupAsync(TenantId tenantId, string realmId, ScimGroup group, CancellationToken ct = default) => IdentityStoreInstance.CreateGroupAsync(tenantId, realmId, group, ct);
     public Task UpdateGroupAsync(TenantId tenantId, string realmId, ScimGroup group, CancellationToken ct = default) => IdentityStoreInstance.UpdateGroupAsync(tenantId, realmId, group, ct);

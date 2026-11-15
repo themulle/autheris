@@ -131,6 +131,7 @@ public static class ApiErrorCodes
     public const string DiscoveryNotPermitted = "DISCOVERY_NOT_PERMITTED";
     public const string NotFound = "NOT_FOUND";
     public const string UsageAuditUnavailable = "USAGE_AUDIT_UNAVAILABLE";
+    public const string UsageReportInvalidRange = "USAGE_REPORT_INVALID_RANGE";
 
     private static readonly Regex CodeFormat = new("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 

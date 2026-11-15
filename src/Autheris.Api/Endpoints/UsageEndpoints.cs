@@ -8,6 +8,7 @@ public static partial class UsageEndpoints
     public static IEndpointRouteBuilder MapUsageEndpoints(this IEndpointRouteBuilder app)
     {
         MapTariffEndpoints(app);
+        MapReportEndpoints(app);
         return app;
     }
 }

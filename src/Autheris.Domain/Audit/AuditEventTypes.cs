@@ -174,5 +174,7 @@ public static class AuditEventTypes
 
     // Usage Accounting & Tariffs (Tier A — Required Audit)
     public const string UsageTariffVersionAdded = "USAGE_TARIFF_VERSION_ADDED";
+    public const string UsageReportRead = "USAGE_REPORT_READ";
+    public const string UsageDataErased = "USAGE_DATA_ERASED";
 }
 

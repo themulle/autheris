@@ -79,7 +79,6 @@ internal static class UsageStore
         ArgumentNullException.ThrowIfNull(query);
         TenantScope.RequireTenant(query.Tenant, query.GroupBy == UsageGroupBy.Grant ? "USAGE_GRANT_DAILY" : "USAGE_DAILY");
         if (query.Limit <= 0) throw new ArgumentOutOfRangeException(nameof(query), "Limit must be positive.");
-        if (query.IncludeTariffBreakdown) throw new NotSupportedException("Detailed breakdown paging is handled by the reporting service.");
         int pageSize = Math.Min(query.Limit, MaxPageSize);
 
         await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -109,6 +108,11 @@ internal static class UsageStore
         AppendFilters(cmd, where, query, alias, isGrant);
         AppendCursor(cmd, where, query.GroupBy, dimCol, query.Cursor);
 
+        if (query.IncludeTariffBreakdown)
+        {
+            return await QueryBreakdownAsync(repo, cmd, fromSql, where, dimCol, alias, isGrant, query.GroupBy, pageSize, ct).ConfigureAwait(false);
+        }
+
         string cols = isGrant
             ? $"{dimCol} AS dim_val, SUM(gd.accesses), SUM(gd.queries), SUM(gd.rows_returned), 0, SUM(gd.bytes), 0, SUM(gd.analysis_cost), SUM(gd.source_compute_ms), 0, SUM(gd.source_cost_micros), 0, SUM(gd.accesses), 0, 0, 0, 0, 0, 0"
             : $"{dimCol} AS dim_val, SUM(d.requests), SUM(d.queries), SUM(d.rows_returned), SUM(d.rows_measured), SUM(d.bytes), SUM(d.duration_ms), SUM(d.analysis_cost), SUM(d.source_compute_ms), SUM(d.source_compute_measured), SUM(d.source_cost_micros), SUM(d.source_cost_measured), SUM(d.allow_count), SUM(d.deny_access), SUM(d.deny_rate_limit), SUM(d.deny_cost), SUM(d.deny_quota), SUM(d.deny_other), SUM(d.errors)";
@@ -130,6 +134,65 @@ internal static class UsageStore
         }
 
         return new UsageReportPage(rows, nextCursor);
+    }
+
+    private static async Task<UsageReportPage> QueryBreakdownAsync(
+        GovernanceRepository repo, DbCommand cmd, string fromSql, StringBuilder where,
+        string dimCol, string alias, bool isGrant, UsageGroupBy groupBy, int pageSize, CancellationToken ct)
+    {
+        const int breakdownRowLimit = 50_000;
+        string sumCols = isGrant
+            ? $"{alias}.day, {alias}.data_source, {dimCol} AS dim_val, SUM(gd.accesses), SUM(gd.queries), SUM(gd.rows_returned), 0, SUM(gd.bytes), 0, SUM(gd.analysis_cost), SUM(gd.source_compute_ms), 0, SUM(gd.source_cost_micros), 0, SUM(gd.accesses), 0, 0, 0, 0, 0, 0"
+            : $"{alias}.day, {alias}.data_source, {dimCol} AS dim_val, SUM(d.requests), SUM(d.queries), SUM(d.rows_returned), SUM(d.rows_measured), SUM(d.bytes), SUM(d.duration_ms), SUM(d.analysis_cost), SUM(d.source_compute_ms), SUM(d.source_compute_measured), SUM(d.source_cost_micros), SUM(d.source_cost_measured), SUM(d.allow_count), SUM(d.deny_access), SUM(d.deny_rate_limit), SUM(d.deny_cost), SUM(d.deny_quota), SUM(d.deny_other), SUM(d.errors)";
+        string baseGroup = groupBy == UsageGroupBy.Day ? $"{alias}.day, {alias}.data_source"
+            : groupBy == UsageGroupBy.DataSource ? $"{alias}.data_source, {alias}.day"
+            : $"{dimCol}, {alias}.day, {alias}.data_source";
+        string allowGroup = isGrant ? string.Empty : ", CASE WHEN d.allow_count > 0 THEN 1 ELSE 0 END";
+        string allowOrder = isGrant ? string.Empty : ", CASE WHEN d.allow_count > 0 THEN 1 ELSE 0 END ASC";
+        string orderBy = $"{dimCol} ASC, {alias}.day ASC, {alias}.data_source ASC{allowOrder}";
+
+        cmd.AddBound("@limit", breakdownRowLimit, DbType.Int32);
+        cmd.CommandText = repo.Dialect is PostgreSqlGovernanceDialect
+            ? $"SELECT {sumCols} FROM {fromSql} WHERE {where} GROUP BY {baseGroup}{allowGroup} ORDER BY {orderBy} LIMIT @limit"
+            : $"SELECT TOP (@limit) {sumCols} FROM {fromSql} WHERE {where} GROUP BY {baseGroup}{allowGroup} ORDER BY {orderBy}";
+
+        var rows = new List<UsageReportRow>();
+        var distinctDims = new List<string>();
+        string? currentDim = null;
+        int rawRead = 0;
+
+        await using var reader = await repo.ExecuteReaderAsync(cmd, "Usage.QueryBreakdown", ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rawRead++;
+            var row = ReadBreakdownReportRow(reader, groupBy);
+            string dimKey = EncodeCursor(row, groupBy) ?? string.Empty;
+            if (!string.Equals(dimKey, currentDim, StringComparison.Ordinal))
+            {
+                if (distinctDims.Count >= pageSize)
+                {
+                    return new UsageReportPage(rows, EncodeCursor(rows[^1], groupBy));
+                }
+
+                distinctDims.Add(dimKey);
+                currentDim = dimKey;
+            }
+
+            rows.Add(row);
+        }
+
+        if (rawRead == breakdownRowLimit && distinctDims.Count > 1)
+        {
+            string lastDim = distinctDims[^1];
+            int cut = rows.FindIndex(r => string.Equals(EncodeCursor(r, groupBy) ?? string.Empty, lastDim, StringComparison.Ordinal));
+            if (cut > 0)
+            {
+                rows.RemoveRange(cut, rows.Count - cut);
+                return new UsageReportPage(rows, EncodeCursor(rows[^1], groupBy));
+            }
+        }
+
+        return new UsageReportPage(rows, null);
     }
 
     public static async Task<int> PurgeAsync(GovernanceRepository repo, DateOnly cutoffExclusive, int batchSize, CancellationToken ct)
@@ -644,17 +707,31 @@ internal static class UsageStore
         else cmd.AddBound("@cursor", cursor);
     }
 
-    private static UsageReportRow ReadReportRow(DbDataReader r, UsageGroupBy gb)
+    private static UsageReportRow ReadReportRow(DbDataReader r, UsageGroupBy gb) =>
+        BuildReportRow(r, gb, null, null, 0, 1);
+
+    private static UsageReportRow ReadBreakdownReportRow(DbDataReader r, UsageGroupBy gb) =>
+        BuildReportRow(r, gb, ReadDate(r, 0), r.GetString(1), 2, 3);
+
+    private static UsageReportRow BuildReportRow(DbDataReader r, UsageGroupBy gb, DateOnly? dayOverride, string? dataSourceOverride, int dimIdx, int c)
     {
-        DateOnly? day = gb == UsageGroupBy.Day ? ReadDate(r, 0) : null;
-        DataSourceTransportFlags? tr = gb == UsageGroupBy.Transport ? (DataSourceTransportFlags)Convert.ToInt16(r.GetValue(0), CultureInfo.InvariantCulture) : null;
-        string? s = gb is UsageGroupBy.Day or UsageGroupBy.Transport ? null : r.GetString(0);
-        return new UsageReportRow(day, gb == UsageGroupBy.User ? s : null, gb == UsageGroupBy.Group ? s : null,
-            gb == UsageGroupBy.BillingGroup ? s : null, gb == UsageGroupBy.DataSource ? s : null, gb == UsageGroupBy.Table ? s : null,
-            tr, gb == UsageGroupBy.Application ? s : null, gb == UsageGroupBy.ClientId ? s : null, gb == UsageGroupBy.Grant ? s : null,
-            r.GetInt64(1), r.GetInt64(2), r.GetInt64(3), r.GetInt64(4), r.GetInt64(5), r.GetInt64(6), r.GetInt64(7),
-            r.GetInt64(8), r.GetInt64(9), r.GetInt64(10), r.GetInt64(11), r.GetInt64(12), r.GetInt64(13), r.GetInt64(14),
-            r.GetInt64(15), r.GetInt64(16), r.GetInt64(17), r.GetInt64(18));
+        DateOnly? day = dayOverride ?? (gb == UsageGroupBy.Day ? ReadDate(r, dimIdx) : null);
+        DataSourceTransportFlags? tr = gb == UsageGroupBy.Transport ? (DataSourceTransportFlags)Convert.ToInt16(r.GetValue(dimIdx), CultureInfo.InvariantCulture) : null;
+        string? s = gb is UsageGroupBy.Day or UsageGroupBy.Transport ? null : r.GetString(dimIdx);
+        return new UsageReportRow(
+            day,
+            gb == UsageGroupBy.User ? s : null,
+            gb == UsageGroupBy.Group ? s : null,
+            gb == UsageGroupBy.BillingGroup ? s : null,
+            gb == UsageGroupBy.DataSource ? s : dataSourceOverride,
+            gb == UsageGroupBy.Table ? s : null,
+            tr,
+            gb == UsageGroupBy.Application ? s : null,
+            gb == UsageGroupBy.ClientId ? s : null,
+            gb == UsageGroupBy.Grant ? s : null,
+            r.GetInt64(c), r.GetInt64(c + 1), r.GetInt64(c + 2), r.GetInt64(c + 3), r.GetInt64(c + 4), r.GetInt64(c + 5),
+            r.GetInt64(c + 6), r.GetInt64(c + 7), r.GetInt64(c + 8), r.GetInt64(c + 9), r.GetInt64(c + 10), r.GetInt64(c + 11),
+            r.GetInt64(c + 12), r.GetInt64(c + 13), r.GetInt64(c + 14), r.GetInt64(c + 15), r.GetInt64(c + 16), r.GetInt64(c + 17));
     }
 
     private static string? EncodeCursor(UsageReportRow row, UsageGroupBy gb) => gb switch

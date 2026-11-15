@@ -11,8 +11,10 @@ using Autheris.Application.Audit;
 using Autheris.Application.Usage;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -37,7 +39,7 @@ public static partial class UsageEndpoints
     {
         app.MapGet("/api/v1/usage/tariffs", async (
             HttpContext httpContext,
-            IUsageTariffService tariffService,
+            [FromServices] IUsageTariffService tariffService,
             string? dataSource = null,
             string? at = null,
             string? tenant = null,
@@ -95,12 +97,14 @@ public static partial class UsageEndpoints
             return Results.Ok(new { effectiveAt = atDate, tariffs });
         })
         .RequireAuthorization(GatewayPolicies.UsageAdmin)
-        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead)
+        .WithIngressTransport(DataSourceTransportFlags.Rest)
+        .WithTags("Usage");
 
         app.MapGet("/api/v1/usage/tariffs/{dataSource}/versions", async (
             string dataSource,
             HttpContext httpContext,
-            IUsageTariffService tariffService,
+            [FromServices] IUsageTariffService tariffService,
             string? tenant = null,
             CancellationToken ct = default) =>
         {
@@ -132,13 +136,15 @@ public static partial class UsageEndpoints
             return Results.Ok(new { dataSource = dataSource.Trim(), versions });
         })
         .RequireAuthorization(GatewayPolicies.UsageAdmin)
-        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead)
+        .WithIngressTransport(DataSourceTransportFlags.Rest)
+        .WithTags("Usage");
 
         app.MapPost("/api/v1/usage/tariffs/{dataSource}/versions", async (
             string dataSource,
             CreateTariffVersionHttpRequest? request,
             HttpContext httpContext,
-            IUsageTariffService tariffService,
+            [FromServices] IUsageTariffService tariffService,
             string? tenant = null,
             CancellationToken ct = default) =>
         {
@@ -209,6 +215,8 @@ public static partial class UsageEndpoints
             }
         })
         .RequireAuthorization(GatewayPolicies.UsageAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.UsageTariffVersionAdded);
+        .WithAudit(AuditLevel.Full, AuditEventTypes.UsageTariffVersionAdded)
+        .WithIngressTransport(DataSourceTransportFlags.Rest)
+        .WithTags("Usage");
     }
 }

@@ -87,8 +87,16 @@
 /api/v1/tenants/{tenantId}/governance/recert/campaigns|GET|no side effect: lists recertification campaigns
 /api/v1/tenants/{tenantId}/governance/rights/{realmId}/|GET|no side effect: lists functional rights in realm
 /api/v1/tenants/{tenantId}/lifecycle/locks/{realmId}/{userKey}|GET|no side effect: reads subject lifecycle lock status
+/api/v1/usage/applications|GET|no side effect: reports tenant usage grouped by application or client id
+/api/v1/usage/grants/{grantId}|GET|no side effect: reports usage attributed to a single consent grant
+/api/v1/usage/groups|GET|no side effect: reports tenant usage grouped by group SID or billing group
+/api/v1/usage/me|GET|no side effect: reports authenticated caller's own usage
+/api/v1/usage/sources|GET|no side effect: reports tenant usage grouped by data source
+/api/v1/usage/tables/{tableId}|GET|no side effect: reports usage for a governed table
 /api/v1/usage/tariffs/{dataSource}/versions|GET|no side effect: lists tariff version history for a data source
 /api/v1/usage/tariffs|GET|no side effect: lists active tariffs effective at a UTC date
+/api/v1/usage/tenant|GET|no side effect: reports overall tenant usage summary and dimensional breakdown
+/api/v1/usage/users|GET|no side effect: reports tenant usage grouped by user
 /docs|GET|no side effect: serves API documentation page
 /graphql/{**slug}|ANY|no side effect: GraphQL HTTP GET only executes queries (mutations rejected)
 /health/live|GET|no side effect: liveness probe
