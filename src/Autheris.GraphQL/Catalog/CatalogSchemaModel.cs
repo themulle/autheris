@@ -72,6 +72,8 @@ public sealed partial class CatalogSchemaModel
     /// <summary>BUG #157: active SQL tables left out of the schema, in ordinal table order (immutable snapshot).</summary>
     public IReadOnlyList<CatalogOmittedTable> OmittedTables { get; }
 
+    private string? _cachedFingerprint;
+
     /// <summary>R-GQL-12: catalog without tables, used while the governance database is unreachable.</summary>
     public static CatalogSchemaModel Empty { get; } = new([], []);
 
@@ -81,28 +83,60 @@ public sealed partial class CatalogSchemaModel
     /// </summary>
     public string Fingerprint()
     {
-        var sb = new System.Text.StringBuilder();
-        foreach (var t in Tables)
+        if (_cachedFingerprint is not null)
         {
-            sb.Append(t.TypeName).Append('|').Append(t.Metadata.Table.SourceType).Append('{');
-            foreach (var c in t.Columns)
-            {
-                sb.Append(c.FieldName).Append(':').Append(c.ColumnName).Append(':').Append(c.FieldType).Append(',');
-            }
+            return _cachedFingerprint;
+        }
 
-            sb.Append('}').Append('[');
-            foreach (var r in t.Relations)
-            {
-                sb.Append(r.FieldName).Append('>').Append(r.TargetTypeName).Append(r.IsList ? "*" : "1")
-                  .Append('(').Append(string.Join(',', r.ParentColumns)).Append('=').Append(string.Join(',', r.ChildColumns)).Append(')');
-            }
+        var perTableHashes = new string[Tables.Count];
+        for (int i = 0; i < Tables.Count; i++)
+        {
+            perTableHashes[i] = ComputeTableFingerprint(Tables[i]);
+        }
 
-            sb.Append("];");
+        var computed = ComputeCombinedFingerprint(Tables, perTableHashes, OmittedTables);
+        _cachedFingerprint = computed;
+        return computed;
+    }
+
+    internal static string ComputeTableFingerprint(CatalogTableType t)
+    {
+        var sb = new StringBuilder();
+        sb.Append(t.TypeName).Append('|').Append(t.Metadata.Table.SourceType).Append('|').Append(t.Metadata.Table.DiscoveryHidden ? '1' : '0').Append('{');
+        foreach (var c in t.Columns)
+        {
+            sb.Append(c.FieldName).Append(':').Append(c.ColumnName).Append(':').Append(c.FieldType).Append(',');
+        }
+
+        sb.Append('}').Append('[');
+        foreach (var r in t.Relations)
+        {
+            sb.Append(r.FieldName).Append('>').Append(r.TargetTypeName).Append(r.IsList ? "*" : "1")
+              .Append('(').Append(string.Join(',', r.ParentColumns)).Append('=').Append(string.Join(',', r.ChildColumns)).Append(')');
+        }
+
+        sb.Append("];");
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
+    }
+
+    internal static string ComputeCombinedFingerprint(
+        IReadOnlyList<CatalogTableType> tables,
+        IReadOnlyList<string> perTableHashes,
+        IReadOnlyList<CatalogOmittedTable> omittedTables)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < tables.Count; i++)
+        {
+            var id = tables[i].Identifier;
+            sb.Append(id.Domain.Length).Append('.').Append(id.Domain)
+              .Append(id.Schema.Length).Append('.').Append(id.Schema)
+              .Append(id.TableName.Length).Append('.').Append(id.TableName)
+              .Append('=').Append(perTableHashes[i]).Append(';');
         }
 
         // BUG #157: omissions are part of the fingerprint so a newly added column-less table triggers a rebuild (and the
         // warning / health list). Each name part is length-prefixed, so no name content can merge or split entries.
-        foreach (var o in OmittedTables)
+        foreach (var o in omittedTables)
         {
             sb.Append('!');
             sb.Append(o.Table.Domain.Length).Append('.').Append(o.Table.Domain)
@@ -112,13 +146,14 @@ public sealed partial class CatalogSchemaModel
             sb.Append(':').Append(o.Reason).Append(';');
         }
 
-        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sb.ToString())));
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
     }
 
-    private CatalogSchemaModel(List<CatalogTableType> tables, IReadOnlyList<CatalogOmittedTable> omittedTables)
+    private CatalogSchemaModel(List<CatalogTableType> tables, IReadOnlyList<CatalogOmittedTable> omittedTables, string? precomputedFingerprint = null)
     {
         Tables = tables;
         OmittedTables = omittedTables;
+        _cachedFingerprint = precomputedFingerprint;
         TablesByIdentifier = tables.ToDictionary(t => t.Identifier);
         TablesByTypeName = tables.ToDictionary(t => t.TypeName, StringComparer.Ordinal);
         TablesByQueryFieldName = tables.ToDictionary(t => t.QueryFieldName, StringComparer.Ordinal);
@@ -156,7 +191,7 @@ public sealed partial class CatalogSchemaModel
         CancellationToken ct = default)
         => BuildAsync(metadataRepository, relationRepository, logger, dialectRegistry, crossSourceEnabled, tableFilter: null, ct);
 
-    public static async Task<CatalogSchemaModel> BuildAsync(
+    public static Task<CatalogSchemaModel> BuildAsync(
         ITableMetadataRepository metadataRepository,
         ITableRelationRepository relationRepository,
         Microsoft.Extensions.Logging.ILogger? logger,
@@ -164,26 +199,67 @@ public sealed partial class CatalogSchemaModel
         bool crossSourceEnabled,
         Func<TableMetadata, bool>? tableFilter,
         CancellationToken ct = default)
+        => BuildAsync(
+            metadataRepository,
+            relationRepository,
+            logger,
+            dialectRegistry,
+            crossSourceEnabled,
+            tableFilter,
+            fingerprintCache: null,
+            epochService: null,
+            timeProvider: null,
+            ct: ct);
+
+    internal static async Task<CatalogSchemaModel> BuildAsync(
+        ITableMetadataRepository metadataRepository,
+        ITableRelationRepository relationRepository,
+        Microsoft.Extensions.Logging.ILogger? logger,
+        Autheris.Application.Sql.Dialects.ISqlDialectRegistry? dialectRegistry,
+        bool crossSourceEnabled,
+        Func<TableMetadata, bool>? tableFilter,
+        CatalogTableFingerprintCache? fingerprintCache,
+        IEpochValidationService? epochService,
+        TimeProvider? timeProvider,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadataRepository);
         ArgumentNullException.ThrowIfNull(relationRepository);
 
         var registry = dialectRegistry ?? Autheris.Application.Sql.Dialects.ISqlDialectRegistry.Default;
+        var effectiveTime = timeProvider ?? TimeProvider.System;
+        long buildStartTimestamp = effectiveTime.GetTimestamp();
+        long lastProgressTimestamp = buildStartTimestamp;
+        int tablesProcessed = 0;
+
         var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
 
-        // Filter: only active SQL tables whose dialect the tree compiler supports. Every root query of this schema runs through
-        // the tree compiler (Descriptor.SupportsTreeCompile, G-6), so an admitted dialect without tree support (Oracle) would
-        // appear in the schema while every query failed (R-GQL-13); those tables are excluded and logged once. They stay
-        // readable as flat tables through OData, REST and MCP (governed compile path), ordered deterministically
-        var candidateTables = allTables
-            .Where(t => t.Table.IsActive && t.DataSourceType == DataSourceType.Sql);
-
-        if (tableFilter != null)
+        // Filter: only active, discovery-visible SQL tables whose dialect the tree compiler supports.
+        // Hidden tables are evicted from any fingerprint cache and excluded silently from the GraphQL schema.
+        var sqlTables = new List<TableMetadata>();
+        foreach (var candidate in allTables)
         {
-            candidateTables = candidateTables.Where(tableFilter);
-        }
+            if (candidate.Table.DiscoveryHidden)
+            {
+                fingerprintCache?.Invalidate(candidate.Identifier);
+                continue;
+            }
 
-        var sqlTables = candidateTables.ToList();
+            if (!candidate.Table.IsActive || candidate.DataSourceType != DataSourceType.Sql)
+            {
+                continue;
+            }
+
+            if (tableFilter != null && !tableFilter(candidate))
+            {
+                fingerprintCache?.Invalidate(candidate.Identifier);
+                continue;
+            }
+
+            sqlTables.Add(candidate);
+            tablesProcessed++;
+            MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, tablesProcessed);
+        }
         var omittedTables = new List<CatalogOmittedTable>();
         foreach (var excluded in sqlTables.Where(t =>
                      registry.TryGetByName(t.Table.SourceType, out var provider) &&
@@ -249,6 +325,11 @@ public sealed partial class CatalogSchemaModel
 
             foreach (var col in meta.Columns ?? [])
             {
+                if (col.DiscoveryHidden)
+                {
+                    continue;
+                }
+
                 // R-GQL-13: the tree compiler only accepts plain column names; others (e.g. "a-b") were offered in the
                 // schema under a sanitized name but could never be queried.
                 if (!QueryableColumnNameRegex().IsMatch(col.ColumnName))
@@ -353,6 +434,9 @@ public sealed partial class CatalogSchemaModel
                 {
                     relationsByTable[builder.Metadata.Identifier] = rels.ToList();
                 }
+
+                tablesProcessed++;
+                MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, tablesProcessed);
             }
         }
 
@@ -484,6 +568,7 @@ public sealed partial class CatalogSchemaModel
                 meta,
                 columns,
                 relations));
+            MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, finalTables.Count);
         }
 
         if (invalidRelations.Count > 0)
@@ -513,14 +598,63 @@ public sealed partial class CatalogSchemaModel
             .ThenBy(o => o.Table.TableName, StringComparer.Ordinal)
             .ToArray();
 
-        return new CatalogSchemaModel(finalTables, omittedSnapshot);
+        string? precomputedFingerprint = null;
+        if (fingerprintCache is not null)
+        {
+            IReadOnlyDictionary<TableIdentifier, long>? epochs = null;
+            if (epochService is not null && finalTables.Count > 0)
+            {
+                try
+                {
+                    epochs = await epochService.GetCurrentEpochsAsync(
+                        finalTables.Select(static t => t.Identifier),
+                        ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger?.LogDebug(ex, "GraphQL catalog schema build: batch epoch lookup failed; recomputing table fingerprints.");
+                }
+            }
+
+            precomputedFingerprint = fingerprintCache.ComputeModelFingerprint(finalTables, omittedSnapshot, epochs);
+        }
+
+        return new CatalogSchemaModel(finalTables, omittedSnapshot, precomputedFingerprint);
+    }
+
+    private static readonly TimeSpan BuildProgressLogInterval = TimeSpan.FromSeconds(5);
+
+    internal static void MaybeLogBuildProgress(
+        Microsoft.Extensions.Logging.ILogger? logger,
+        TimeProvider? timeProvider,
+        long buildStartTimestamp,
+        ref long lastProgressTimestamp,
+        int tablesProcessed)
+    {
+        if (logger is null || timeProvider is null)
+        {
+            return;
+        }
+
+        long nowTimestamp = timeProvider.GetTimestamp();
+        if (timeProvider.GetElapsedTime(lastProgressTimestamp, nowTimestamp) < BuildProgressLogInterval)
+        {
+            return;
+        }
+
+        lastProgressTimestamp = nowTimestamp;
+        long elapsedMs = (long)timeProvider.GetElapsedTime(buildStartTimestamp, nowTimestamp).TotalMilliseconds;
+        logger.LogInformation(
+            "GraphQL catalog schema build progress: tablesProcessed={TablesProcessed} elapsedMs={ElapsedMs}",
+            tablesProcessed,
+            elapsedMs);
     }
 
     private const int MaxInvalidRelationDetailLines = 10;
 
     /// <summary>
     /// Fail closed (08): the key pairs must satisfy<see cref="RelationKeyRules"/> and every key column must
-    /// still exist in the metadata of its table.
+    /// still exist as a visible metadata column of its table.
     /// </summary>
     private static bool HasValidKeys(TableRelation rel, TableMetadata parent, TableMetadata child)
     {
@@ -536,7 +670,8 @@ public sealed partial class CatalogSchemaModel
     {
         foreach (var key in keys)
         {
-            if (!table.HasColumn(key))
+            var col = table.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, key, StringComparison.OrdinalIgnoreCase));
+            if (col is null || col.DiscoveryHidden)
             {
                 return false;
             }
@@ -587,4 +722,176 @@ public sealed partial class CatalogSchemaModel
         ColumnValueKind.DateTime => CatalogFieldType.DateTime,
         _ => CatalogFieldType.String
     };
+}
+
+/// <summary>
+/// Per-table schema fingerprint cache keyed by <see cref="TableIdentifier"/> and validated against
+/// table policy epoch and structural metadata so unchanged tables are not re-hashed on incremental updates.
+/// </summary>
+internal sealed class CatalogTableFingerprintCache
+{
+    private sealed record CachedEntry(
+        long Epoch,
+        bool DiscoveryHidden,
+        string SourceType,
+        string TypeName,
+        IReadOnlyList<CatalogColumnField> Columns,
+        IReadOnlyList<CatalogRelationField> Relations,
+        string Hash);
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<TableIdentifier, CachedEntry> _entries = new();
+    private int _lastBuildRehashCount;
+    private int _totalRehashCount;
+
+    internal int LastBuildRehashCount => Volatile.Read(ref _lastBuildRehashCount);
+    internal int TotalRehashCount => Volatile.Read(ref _totalRehashCount);
+
+    internal void Invalidate(TableIdentifier id) => _entries.TryRemove(id, out _);
+
+    internal void Clear() => _entries.Clear();
+
+    internal string ComputeModelFingerprint(
+        IReadOnlyList<CatalogTableType> tables,
+        IReadOnlyList<CatalogOmittedTable> omittedTables,
+        IReadOnlyDictionary<TableIdentifier, long>? epochs)
+    {
+        var activeIds = new HashSet<TableIdentifier>();
+        var perTableHashes = new string[tables.Count];
+        int rehashes = 0;
+
+        for (int i = 0; i < tables.Count; i++)
+        {
+            var t = tables[i];
+            activeIds.Add(t.Identifier);
+            long epoch = epochs is not null && epochs.TryGetValue(t.Identifier, out var ep) ? ep : 0L;
+
+            if (_entries.TryGetValue(t.Identifier, out var cached) && IsMatch(cached, t, epoch))
+            {
+                perTableHashes[i] = cached.Hash;
+                continue;
+            }
+
+            string hash = CatalogSchemaModel.ComputeTableFingerprint(t);
+            _entries[t.Identifier] = new CachedEntry(
+                epoch,
+                t.Metadata.Table.DiscoveryHidden,
+                t.Metadata.Table.SourceType,
+                t.TypeName,
+                t.Columns,
+                t.Relations,
+                hash);
+            perTableHashes[i] = hash;
+            rehashes++;
+        }
+
+        foreach (var existingKey in _entries.Keys)
+        {
+            if (!activeIds.Contains(existingKey))
+            {
+                _entries.TryRemove(existingKey, out _);
+            }
+        }
+
+        Volatile.Write(ref _lastBuildRehashCount, rehashes);
+        if (rehashes > 0)
+        {
+            Interlocked.Add(ref _totalRehashCount, rehashes);
+        }
+
+        return CatalogSchemaModel.ComputeCombinedFingerprint(tables, perTableHashes, omittedTables);
+    }
+
+    private static bool IsMatch(CachedEntry cached, CatalogTableType current, long epoch)
+    {
+        if (cached.Epoch != epoch ||
+            cached.DiscoveryHidden ||
+            current.Metadata.Table.DiscoveryHidden ||
+            !string.Equals(cached.SourceType, current.Metadata.Table.SourceType, StringComparison.Ordinal) ||
+            !string.Equals(cached.TypeName, current.TypeName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return ColumnsMatch(cached.Columns, current.Columns) &&
+               RelationsMatch(cached.Relations, current.Relations);
+    }
+
+    private static bool ColumnsMatch(IReadOnlyList<CatalogColumnField> left, IReadOnlyList<CatalogColumnField> right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < left.Count; i++)
+        {
+            var a = left[i];
+            var b = right[i];
+            if (a.FieldType != b.FieldType ||
+                !string.Equals(a.FieldName, b.FieldName, StringComparison.Ordinal) ||
+                !string.Equals(a.ColumnName, b.ColumnName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool RelationsMatch(IReadOnlyList<CatalogRelationField> left, IReadOnlyList<CatalogRelationField> right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < left.Count; i++)
+        {
+            var a = left[i];
+            var b = right[i];
+            if (a.IsList != b.IsList ||
+                !string.Equals(a.FieldName, b.FieldName, StringComparison.Ordinal) ||
+                !string.Equals(a.TargetTypeName, b.TargetTypeName, StringComparison.Ordinal) ||
+                !StringListsMatch(a.ParentColumns, b.ParentColumns) ||
+                !StringListsMatch(a.ChildColumns, b.ChildColumns))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool StringListsMatch(IReadOnlyList<string> left, IReadOnlyList<string> right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < left.Count; i++)
+        {
+            if (!string.Equals(left[i], right[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }

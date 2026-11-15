@@ -36,12 +36,21 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     private readonly object _timerLock = new();
     private Timer? _refreshTimer;
     private sealed record BuiltState(string? Fingerprint, IReadOnlyList<CatalogOmittedTable> OmittedTables);
+    private sealed record PendingBuild(
+        CatalogSchemaModel Model,
+        string Fingerprint,
+        System.Collections.Concurrent.ConcurrentDictionary<string, bool> TransportSeen,
+        Autheris.Application.Catalog.CatalogVersion? CatalogVersion);
 
     // One volatile reference so readers never observe a fingerprint paired with another build's omissions.
     private volatile BuiltState _built = new(null, []);
     private volatile CatalogSchemaModel? _currentSchemaModel;
+    private PendingBuild? _pendingBuild;
     private long _builtStructureVersion = -1;
+    private long _builtContentVersion = -1;
     private readonly SemaphoreSlim _checkGate = new(1, 1);
+    private readonly CatalogTableFingerprintCache _tableFingerprintCache = new();
+    internal CatalogTableFingerprintCache FingerprintCache => _tableFingerprintCache;
 
     /// <summary>
     /// Issue #421: Ambient table metadata lookup for GraphQL cost analysis.
@@ -62,6 +71,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
     private readonly GraphQLOptions _graphQlOptions;
     private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
+    private readonly IEpochValidationService? _epochService;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>Logical source -> was it visible over GraphQL when the schema was built (issue #447).</summary>
     private System.Collections.Concurrent.ConcurrentDictionary<string, bool> _transportSeen = new(StringComparer.OrdinalIgnoreCase);
@@ -76,9 +87,13 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         bool crossSourceEnabled = false,
         bool metricsEnabled = true,
         GraphQLOptions? graphQlOptions = null,
-        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null)
+        Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
+        IEpochValidationService? epochService = null,
+        TimeProvider? timeProvider = null)
     {
         _transportResolver = transportResolver;
+        _epochService = epochService;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _aggregationEnabled = aggregationEnabled;
         _crossSourceEnabled = crossSourceEnabled;
         _metricsEnabled = metricsEnabled;
@@ -123,7 +138,9 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
     }
 
     /// <summary>True when a profile change flipped the GraphQL visibility of a source the schema was built with (forces a rebuild).</summary>
-    private bool TransportVisibilityChanged()
+    private bool TransportVisibilityChanged() => TransportVisibilityChanged(_transportSeen);
+
+    private bool TransportVisibilityChanged(System.Collections.Concurrent.ConcurrentDictionary<string, bool> seen)
     {
         var resolver = _transportResolver;
         if (resolver is null)
@@ -131,7 +148,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             return false;
         }
 
-        foreach (var (source, wasVisible) in _transportSeen)
+        foreach (var (source, wasVisible) in seen)
         {
             if (Autheris.Application.DataSources.TransportDiscoveryFilter.IsSourceVisible(
                     resolver, Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL, source) != wasVisible)
@@ -193,14 +210,25 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         var changed = false;
         try
         {
-            var builtVer = Volatile.Read(ref _builtStructureVersion);
+            var builtStruct = Volatile.Read(ref _builtStructureVersion);
+            var builtContent = Volatile.Read(ref _builtContentVersion);
             var transportChanged = TransportVisibilityChanged();
-            if (!transportChanged && _versionProvider != null && builtVer >= 0)
+            if (transportChanged)
+            {
+                _tableFingerprintCache.Clear();
+                Volatile.Write(ref _pendingBuild, null);
+            }
+
+            Autheris.Application.Catalog.CatalogVersion? currentVer = null;
+            if (_versionProvider != null)
             {
                 try
                 {
-                    var currentVersion = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
-                    if (currentVersion.StructureVersion == builtVer)
+                    currentVer = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+                    if (!transportChanged &&
+                        builtStruct >= 0 &&
+                        currentVer.Value.StructureVersion == builtStruct &&
+                        currentVer.Value.ContentVersion == builtContent)
                     {
                         return false;
                     }
@@ -211,10 +239,23 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
                 }
             }
 
+            var candidateSeen = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            CatalogSchemaModel candidateModel;
             string current;
             try
             {
-                current = (await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, null, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, tableFilter: GetTableFilter(), ct).ConfigureAwait(false)).Fingerprint();
+                candidateModel = await CatalogSchemaModel.BuildAsync(
+                    _metadataRepo,
+                    _relationRepo,
+                    _logger,
+                    dialectRegistry: null,
+                    crossSourceEnabled: _crossSourceEnabled,
+                    tableFilter: GetTableFilter(candidateSeen),
+                    fingerprintCache: _tableFingerprintCache,
+                    epochService: _epochService,
+                    timeProvider: _timeProvider,
+                    ct: ct).ConfigureAwait(false);
+                current = candidateModel.Fingerprint();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -224,9 +265,16 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
 
             if (!transportChanged && string.Equals(current, _built.Fingerprint, StringComparison.Ordinal))
             {
+                if (currentVer.HasValue)
+                {
+                    Volatile.Write(ref _builtStructureVersion, currentVer.Value.StructureVersion);
+                    Volatile.Write(ref _builtContentVersion, currentVer.Value.ContentVersion);
+                }
+                Volatile.Write(ref _pendingBuild, null);
                 return false;
             }
 
+            Volatile.Write(ref _pendingBuild, new PendingBuild(candidateModel, current, candidateSeen, currentVer));
             changed = true;
         }
         finally
@@ -271,27 +319,64 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
         CancellationToken cancellationToken)
     {
         CatalogSchemaModel schemaModel;
+        long buildStartTimestamp = _timeProvider.GetTimestamp();
+        long lastProgressTimestamp = buildStartTimestamp;
         try
         {
-            var seen = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-            schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, dialectRegistry: null, crossSourceEnabled: _crossSourceEnabled, tableFilter: GetTableFilter(seen), cancellationToken)
-                .ConfigureAwait(false);
-            _transportSeen = seen;
-            _currentSchemaModel = schemaModel;
-            CurrentLookup = GetTableMetadataForField;
-            _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);
-            if (_versionProvider != null)
+            var pending = Interlocked.Exchange(ref _pendingBuild, null);
+            if (pending != null && !TransportVisibilityChanged(pending.TransportSeen))
             {
-                var catVer = await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
-                Volatile.Write(ref _builtStructureVersion, catVer.StructureVersion);
+                schemaModel = pending.Model;
+                _transportSeen = pending.TransportSeen;
+                _currentSchemaModel = schemaModel;
+                CurrentLookup = GetTableMetadataForField;
+                _built = new BuiltState(pending.Fingerprint, schemaModel.OmittedTables);
+                if (pending.CatalogVersion.HasValue)
+                {
+                    Volatile.Write(ref _builtStructureVersion, pending.CatalogVersion.Value.StructureVersion);
+                    Volatile.Write(ref _builtContentVersion, pending.CatalogVersion.Value.ContentVersion);
+                }
+                else if (_versionProvider != null)
+                {
+                    var catVer = await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
+                    Volatile.Write(ref _builtStructureVersion, catVer.StructureVersion);
+                    Volatile.Write(ref _builtContentVersion, catVer.ContentVersion);
+                }
+            }
+            else
+            {
+                var seen = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+                schemaModel = await CatalogSchemaModel.BuildAsync(
+                    _metadataRepo,
+                    _relationRepo,
+                    _logger,
+                    dialectRegistry: null,
+                    crossSourceEnabled: _crossSourceEnabled,
+                    tableFilter: GetTableFilter(seen),
+                    fingerprintCache: _tableFingerprintCache,
+                    epochService: _epochService,
+                    timeProvider: _timeProvider,
+                    ct: cancellationToken).ConfigureAwait(false);
+                _transportSeen = seen;
+                _currentSchemaModel = schemaModel;
+                CurrentLookup = GetTableMetadataForField;
+                _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);
+                if (_versionProvider != null)
+                {
+                    var catVer = await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
+                    Volatile.Write(ref _builtStructureVersion, catVer.StructureVersion);
+                    Volatile.Write(ref _builtContentVersion, catVer.ContentVersion);
+                }
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger?.LogError(ex, "GraphQL catalog schema could not be built; serving the schema without catalog tables until the catalog is reachable.");
             schemaModel = CatalogSchemaModel.Empty;
+            Volatile.Write(ref _pendingBuild, null);
             _built = new BuiltState(null, []);
             Volatile.Write(ref _builtStructureVersion, -1);
+            Volatile.Write(ref _builtContentVersion, -1);
         }
 
         EnsureRefreshTimer();
@@ -315,6 +400,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             MetricGraphQlTypes.Register(types);
         }
 
+        int registeredTables = 0;
         foreach (var table in schemaModel.Tables)
         {
             types.Add(new InputObjectType(d =>
@@ -395,6 +481,8 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable, ICatalo
             }
 
             ConnectionGraphQlTypes.RegisterTable(types, table);
+            registeredTables++;
+            CatalogSchemaModel.MaybeLogBuildProgress(_logger, _timeProvider, buildStartTimestamp, ref lastProgressTimestamp, registeredTables);
         }
 
         if (schemaModel.Tables.Count > 0)
