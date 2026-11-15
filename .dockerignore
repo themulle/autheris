@@ -21,11 +21,12 @@
 *.pem
 *.key
 
-# Build output (everything but dist/publish is rebuilt)
+# Build output (everything but dist/publish and dist/modules is rebuilt)
 **/bin
 **/obj
 dist/*
 !dist/publish
+!dist/modules
 **/node_modules
 benchmarks/load/results
 deploy/results
