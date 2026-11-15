@@ -141,7 +141,7 @@ public sealed class ConsentApiEndpointSecurityTests
     {
         await using var harness = ConsentApiTestHarness.Create();
         var endpoints = harness.GetMappedRouteEndpoints();
-        endpoints.Count.ShouldBe(13);
+        endpoints.Count.ShouldBe(14);
 
         void AssertPolicy(string pattern, string method, string expectedPolicy)
         {
@@ -161,6 +161,7 @@ public sealed class ConsentApiEndpointSecurityTests
         AssertPolicy("/api/v1/consent/grants", "GET", GatewayPolicies.ConsentRead);
         AssertPolicy("/api/v1/consent/grants/{id:guid}", "GET", GatewayPolicies.ConsentRead);
         AssertPolicy("/api/v1/consent/grants/{id:guid}/revoke", "POST", GatewayPolicies.GrantRevoke);
+        AssertPolicy("/api/v1/consent/profile-assignments/{id:guid}/revoke", "POST", GatewayPolicies.GrantRevoke);
         AssertPolicy("/api/v1/consent/grant-records/proof", "GET", GatewayPolicies.GrantVerify);
         AssertPolicy("/api/v1/consent/grant-records/{seq:long}", "GET", GatewayPolicies.GrantVerify);
         AssertPolicy("/api/v1/consent/grant-records/verify", "POST", GatewayPolicies.GrantVerify);

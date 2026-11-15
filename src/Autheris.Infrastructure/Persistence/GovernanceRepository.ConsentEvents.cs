@@ -662,7 +662,7 @@ WHERE tenant_id = @tenant AND consent_id = @consentId AND record_type = 'EXPIRED
        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
        r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
 FROM CONSENT_REQUESTS r
-JOIN TABLES t ON r.table_id = t.id
+LEFT JOIN TABLES t ON r.table_id = t.id
 WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')
 ORDER BY r.requested_at ASC
 LIMIT 500"
@@ -672,7 +672,7 @@ LIMIT 500"
        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
        r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
 FROM dbo.CONSENT_REQUESTS r
-JOIN dbo.TABLES t ON r.table_id = t.id
+LEFT JOIN dbo.TABLES t ON r.table_id = t.id
 WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')
 ORDER BY r.requested_at ASC";
 
@@ -819,7 +819,7 @@ WHERE id = @id AND tenant_id = @tenant
             reader.GetString(6),
             ConsentWorkflowSql.ReadOptionalTimestamp(reader, 7) ?? DateTimeOffset.UnixEpoch,
             ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? DateTimeOffset.UnixEpoch,
-            new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
+            reader.IsDBNull(9) ? default : new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
             reader.IsDBNull(12) ? null : reader.GetString(12),
             StoredTenant.Parse(reader.GetString(13)).Value,
             ids,

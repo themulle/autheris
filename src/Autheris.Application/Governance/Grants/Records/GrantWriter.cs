@@ -62,10 +62,14 @@ public sealed class GrantWriter(IGrantRecordStore store, IGrantRecordSigner sign
         var (granteeType, granteeRef) = (input?.GranteeType ?? consent?.GranteeType.ToString(), input?.GranteeRef ?? consent?.GranteeSid?.Value ?? consent?.RoleName);
         if (string.IsNullOrWhiteSpace(objectId) || string.IsNullOrWhiteSpace(granteeType) || string.IsNullOrWhiteSpace(granteeRef))
             throw new ArgumentException("ObjectId, GranteeType, and GranteeRef are required.", nameof(input));
+        var validUntil = input?.ValidUntil
+            ?? (consent is not null && !(consent.GrantSource == ConsentGrantSource.Owner && consent.ValidTo == DateTimeOffset.MaxValue)
+                ? consent.ValidTo
+                : (DateTimeOffset?)null);
         return new GrantRecord(tenantId, 0, Guid.CreateVersion7(), recordType, consent?.Id, input?.RequestId ?? consent?.ConsentRequestId,
             input?.GrantSource ?? consent?.GrantSource ?? ConsentGrantSource.ConsentRequest, input?.ProfileAssignmentId ?? consent?.ProfileAssignmentId,
             granteeType, granteeRef, objectId, string.IsNullOrWhiteSpace(input?.ScopeJson) ? "{}" : input.ScopeJson,
-            input?.ValidFrom ?? consent?.ValidFrom, input?.ValidUntil ?? consent?.ValidTo,
+            input?.ValidFrom ?? consent?.ValidFrom, validUntil,
             !string.IsNullOrWhiteSpace(input?.RequestedBy) ? input.RequestedBy : consent?.CreatedBySid ?? string.Empty,
             string.IsNullOrWhiteSpace(input?.DecisionJson) ? "{}" : input.DecisionJson,
             input?.DecidedAt ?? _timeProvider.GetUtcNow(), DateTimeOffset.MinValue, GrantRecordChain.GenesisHash);

@@ -336,6 +336,9 @@ public static partial class ConsentApiEndpoints
     }
 
     internal static ConsentRequestDto ToRequestDto(ConsentRequest r) =>
+        ToRequestDto(r, null);
+
+    internal static ConsentRequestDto ToRequestDto(ConsentRequest r, ApprovalEffectPreviewDto? effectPreview) =>
         new(
             r.Id,
             r.TenantId.Value,
@@ -354,7 +357,8 @@ public static partial class ConsentApiEndpoints
             r.RequestedValidTo,
             r.UpdatedAt,
             r.RequestKind.ToSqlString(),
-            r.ProfileId);
+            r.ProfileId,
+            effectPreview);
 
     internal static ConsentGrantDto ToGrantDto(Consent c) =>
         new(
@@ -415,7 +419,8 @@ public sealed record ConsentRequestDto(
     DateTimeOffset RequestedValidTo,
     DateTimeOffset? UpdatedAt,
     string RequestKind,
-    Guid? ProfileId);
+    Guid? ProfileId,
+    ApprovalEffectPreviewDto? EffectPreview = null);
 
 public sealed record ConsentGrantDto(
     Guid Id,

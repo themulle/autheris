@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.State;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -114,6 +115,7 @@ public sealed class PatternCoverageMonitor : BackgroundService
             var ownershipRepo = scope.ServiceProvider.GetRequiredService<IDataOwnershipRepository>();
             var approvalRepo = scope.ServiceProvider.GetService<IConsentApprovalRepository>();
             var auditRepo = scope.ServiceProvider.GetService<IAuditLogRepository>();
+            var profileAssignmentService = scope.ServiceProvider.GetService<IProfileAssignmentRequestService>();
 
             var tables = await catalogRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
             var visibleTables = tables.Where(static t => !t.Table.DiscoveryHidden).ToList();
@@ -172,7 +174,7 @@ public sealed class PatternCoverageMonitor : BackgroundService
 
                     detections++;
                     await HandleUncoveredObjectAsync(
-                        consent, tableMeta, authorizedOwners.Count, epoch, now, approvalRepo, auditRepo, ct).ConfigureAwait(false);
+                        consent, tableMeta, authorizedOwners, epoch, now, approvalRepo, auditRepo, profileAssignmentService, ct).ConfigureAwait(false);
                 }
             }
 
@@ -191,14 +193,38 @@ public sealed class PatternCoverageMonitor : BackgroundService
     private async Task HandleUncoveredObjectAsync(
         Consent consent,
         TableMetadata tableMeta,
-        int ownerCount,
+        IReadOnlyCollection<string> authorizedOwners,
         long epoch,
         DateTimeOffset now,
         IConsentApprovalRepository? approvalRepo,
         IAuditLogRepository? auditRepo,
+        IProfileAssignmentRequestService? profileAssignmentService,
         CancellationToken ct)
     {
-        if (approvalRepo != null && consent.GranteeSid is { } requesterSid)
+        int ownerCount = authorizedOwners.Count;
+        if (consent.ProfileAssignmentId.HasValue && profileAssignmentService != null)
+        {
+            try
+            {
+                await profileAssignmentService
+                    .HandlePatternNewOwnerAsync(consent, tableMeta, authorizedOwners, now, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "PatternCoverageMonitor could not extend profile assignment {AssignmentId} for table {Table} under pattern grant {GrantId}.",
+                    consent.ProfileAssignmentId.Value,
+                    tableMeta.Identifier.ToString(),
+                    consent.Id);
+            }
+        }
+        else if (approvalRepo != null && consent.GranteeSid is { } requesterSid)
         {
             var request = new ConsentRequest
             {

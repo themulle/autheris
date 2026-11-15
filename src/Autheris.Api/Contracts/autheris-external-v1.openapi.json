@@ -303,6 +303,27 @@
         }
       }
     },
+    "/api/v1/consent/profile-assignments/{id}/revoke": {
+      "post": {
+        "operationId": "revokeProfileAssignment",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "Idempotency-Key", "in": "header", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RevokeConsentGrantBody" } } }
+        },
+        "responses": {
+          "200": { "description": "Profile assignment grants revoked" },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not Found" },
+          "409": { "description": "Already ended" },
+          "422": { "description": "Idempotency conflict" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
     "/api/v1/consent/grant-records/proof": {
       "get": {
         "operationId": "evaluateGrantRecordProof",
@@ -463,6 +484,17 @@
           "nextSince": { "type": "integer", "format": "int64" }
         }
       },
+      "ApprovalEffectPreviewDto": {
+        "type": "object",
+        "properties": {
+          "matchedObjectCount": { "type": "integer" },
+          "includesFutureObjects": { "type": "boolean" },
+          "redundantGrant": { "type": "boolean" },
+          "emptyHardIntersection": { "type": "boolean" },
+          "redundantGrantIds": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+          "flags": { "type": "array", "items": { "type": "string" } }
+        }
+      },
       "ConsentRequestDto": {
         "type": "object",
         "required": ["id", "tenantId", "table", "requesterSid", "granteeType", "granteeRef", "justification", "status", "version", "workflowMode", "requestedAt", "requestedValidTo", "requestKind"],
@@ -484,7 +516,8 @@
           "requestedValidTo": { "type": "string", "format": "date-time" },
           "updatedAt": { "type": "string", "format": "date-time", "nullable": true },
           "requestKind": { "type": "string" },
-          "profileId": { "type": "string", "format": "uuid", "nullable": true }
+          "profileId": { "type": "string", "format": "uuid", "nullable": true },
+          "effectPreview": { "$ref": "#/components/schemas/ApprovalEffectPreviewDto", "nullable": true }
         }
       },
       "ConsentGrantDto": {
@@ -525,7 +558,11 @@
           "requestWriteOnly": { "type": "boolean", "nullable": true },
           "requestedDuration": { "type": "string", "nullable": true },
           "requestedValidFrom": { "type": "string", "format": "date-time", "nullable": true },
-          "requestedValidTo": { "type": "string", "format": "date-time", "nullable": true }
+          "requestedValidTo": { "type": "string", "format": "date-time", "nullable": true },
+          "kind": { "type": "string", "nullable": true },
+          "profileId": { "type": "string", "format": "uuid", "nullable": true },
+          "grantee": { "type": "string", "nullable": true },
+          "granteeType": { "type": "string", "nullable": true }
         }
       },
       "ConsentDecisionBody": {
@@ -543,7 +580,9 @@
           "decidedAt": { "type": "string", "format": "date-time", "nullable": true },
           "approverSid": { "type": "string", "nullable": true },
           "approver": { "type": "object", "nullable": true },
-          "approvers": { "type": "array", "items": { "type": "object" }, "nullable": true }
+          "approvers": { "type": "array", "items": { "type": "object" }, "nullable": true },
+          "approvedItems": { "type": "array", "items": { "type": "integer" }, "nullable": true },
+          "approvedClearColumns": { "type": "array", "items": { "type": "string" }, "nullable": true }
         }
       },
       "RevokeConsentGrantBody": {

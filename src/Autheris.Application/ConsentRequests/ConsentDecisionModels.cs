@@ -28,6 +28,7 @@ public static class ConsentDecisionErrorCodes
     public const string DecisionNotPermitted = "DECISION_NOT_PERMITTED";
     public const string RerouteNotAllowed = "REROUTE_NOT_ALLOWED";
     public const string GrantNotFound = "GRANT_NOT_FOUND";
+    public const string DecisionExceedsRequest = "DECISION_EXCEEDS_REQUEST";
 }
 
 public enum ConsentDecisionKind
@@ -59,7 +60,9 @@ public sealed record ConsentDecisionCommand(
     TenantId? ContextTenantId = null,
     IReadOnlyList<ConsentRowFilter>? PrebuiltRowFilters = null,
     IReadOnlyList<ConsentColumnRule>? PrebuiltColumnRules = null,
-    bool HasPrebuiltRestrictions = false);
+    bool HasPrebuiltRestrictions = false,
+    IReadOnlyList<int>? ApprovedProfileItems = null,
+    IReadOnlyList<string>? ApprovedClearColumns = null);
 
 public sealed record ConsentDecisionResult(
     ConsentRequest Request,

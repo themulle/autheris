@@ -46,7 +46,7 @@ public partial class GovernanceRepository
                                        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
                                        r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
                                 FROM CONSENT_REQUESTS r
-                                JOIN TABLES t ON r.table_id = t.id
+                                LEFT JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.id = @id";
 
         public const string SelectRequestsByRequesterBaseSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
@@ -54,7 +54,7 @@ public partial class GovernanceRepository
                                        t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
                                        r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
                                 FROM CONSENT_REQUESTS r
-                                JOIN TABLES t ON r.table_id = t.id
+                                LEFT JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.requester_sid = @reqSid";
 
         public const string SelectPendingRequestsForApproverSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
@@ -62,9 +62,9 @@ public partial class GovernanceRepository
                                    t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
                                    r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
                             FROM CONSENT_REQUESTS r
-                            JOIN TABLES t ON r.table_id = t.id
+                            LEFT JOIN TABLES t ON r.table_id = t.id
                             WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
-                              AND r.table_id IN (
+                              AND (r.table_id IN (
                                   SELECT tow.table_id
                                   FROM TABLE_OWNERS tow
                                   JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
@@ -74,7 +74,18 @@ public partial class GovernanceRepository
                                   FROM DATA_OWNER_DELEGATIONS del
                                   JOIN TABLE_OWNERS tow ON del.data_owner_id = tow.data_owner_id
                                   WHERE del.delegate_sid = @apprSid AND del.valid_from <= @now AND @now < del.valid_to
-                              )";
+                              ) OR r.id IN (
+                                  SELECT pai.request_id
+                                  FROM PROFILE_ASSIGNMENT_ITEMS pai
+                                  WHERE pai.owner_decision = 'PENDING'
+                                    AND (pai.owner_sid = @apprSid
+                                         OR pai.owner_sid IN (
+                                             SELECT o.ad_sid
+                                             FROM DATA_OWNER_DELEGATIONS del
+                                             JOIN DATA_OWNERS o ON del.data_owner_id = o.id
+                                             WHERE del.delegate_sid = @apprSid AND del.valid_from <= @now AND @now < del.valid_to
+                                         ))
+                              ))";
 
         public const string CountConfiguredOwnersSql = @"SELECT COUNT(*)
                             FROM TABLES t

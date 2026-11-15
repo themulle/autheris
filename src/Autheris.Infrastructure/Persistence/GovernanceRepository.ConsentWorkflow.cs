@@ -359,7 +359,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
                      r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
                      r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
               FROM CONSENT_REQUESTS r
-              JOIN TABLES t ON r.table_id = t.id
+              LEFT JOIN TABLES t ON r.table_id = t.id
               WHERE r.tenant_id = @tenantId
                 AND (@status IS NULL OR UPPER(r.status) = @status)
                 AND (@externalSystemId IS NULL OR r.external_system_id = @externalSystemId)
@@ -379,7 +379,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
                      r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
                      r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
               FROM CONSENT_REQUESTS r
-              JOIN TABLES t ON r.table_id = t.id
+              LEFT JOIN TABLES t ON r.table_id = t.id
               WHERE r.tenant_id = @tenantId
                 AND (@status IS NULL OR UPPER(r.status) = @status)
                 AND (@externalSystemId IS NULL OR r.external_system_id = @externalSystemId)

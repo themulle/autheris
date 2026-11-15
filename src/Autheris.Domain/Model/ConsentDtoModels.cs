@@ -3,6 +3,15 @@ namespace Autheris.Domain.Model;
 using System;
 using System.Collections.Generic;
 
+/// <summary>Non-blocking approval-time structural effect summary (identifiers, flags, and counts only).</summary>
+public sealed record ApprovalEffectPreviewDto(
+    int MatchedObjectCount,
+    bool IncludesFutureObjects,
+    bool RedundantGrant,
+    bool EmptyHardIntersection,
+    IReadOnlyList<Guid> RedundantGrantIds,
+    IReadOnlyList<string> Flags);
+
 /// <summary>
 /// Issue #34: Self-service consent request DTO for own requests and approver inboxes.
 /// </summary>
@@ -20,6 +29,7 @@ public sealed class ConsentRequestDto
     public DateTimeOffset? RequestedValidTo { get; init; }
     public string? ItsmTicketId { get; init; }
     public string? ContextJson { get; init; }
+    public ApprovalEffectPreviewDto? EffectPreview { get; init; }
 }
 
 /// <summary>

@@ -105,6 +105,7 @@ public sealed partial class Query
         int? after = null,
         [Service] IConsentApprovalRepository approvalRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
+        [Service] Autheris.Application.Policy.Pdp.IGrantEffectPreview? effectPreview = null,
         CancellationToken ct = default)
     {
         var principal = httpContextAccessor?.HttpContext?.User;
@@ -123,32 +124,41 @@ public sealed partial class Query
         }
 
         var requests = await approvalRepository.GetPendingRequestsForApproverAsync(userSid.Value, ct).ConfigureAwait(false);
-        var dtos = requests.Select(r => new ConsentRequestDto
-        {
-            Id = r.Id,
-            TableId = r.TableId,
-            TableIdentifier = r.TableIdentifier.ToString(),
-            RequesterSid = r.RequesterSid.Value,
-            RequestedGranteeType = r.RequestedGranteeType.ToString(),
-            RequestedGranteeRef = r.RequestedGranteeRef,
-            BusinessJustification = r.BusinessJustification,
-            Status = r.Status,
-            RequestedAt = r.RequestedAt,
-            RequestedValidTo = r.RequestedValidTo,
-            ItsmTicketId = r.ItsmTicketId,
-            ContextJson = r.ContextJson
-        });
-
+        var paged = requests.AsEnumerable();
         if (after.HasValue && after.Value > 0)
         {
-            dtos = dtos.Skip(after.Value);
+            paged = paged.Skip(after.Value);
         }
         if (first.HasValue && first.Value > 0)
         {
-            dtos = dtos.Take(first.Value);
+            paged = paged.Take(first.Value);
         }
 
-        return dtos.ToList();
+        var dtos = new List<ConsentRequestDto>();
+        foreach (var r in paged)
+        {
+            var preview = await Autheris.Application.ConsentRequests.ProfileAssignments.ApprovalEffectPreviewHelper
+                .TryBuildAsync(effectPreview, r, userSid.Value, ct)
+                .ConfigureAwait(false);
+            dtos.Add(new ConsentRequestDto
+            {
+                Id = r.Id,
+                TableId = r.TableId,
+                TableIdentifier = r.TableIdentifier.ToString(),
+                RequesterSid = r.RequesterSid.Value,
+                RequestedGranteeType = r.RequestedGranteeType.ToString(),
+                RequestedGranteeRef = r.RequestedGranteeRef,
+                BusinessJustification = r.BusinessJustification,
+                Status = r.Status,
+                RequestedAt = r.RequestedAt,
+                RequestedValidTo = r.RequestedValidTo,
+                ItsmTicketId = r.ItsmTicketId,
+                ContextJson = r.ContextJson,
+                EffectPreview = preview
+            });
+        }
+
+        return dtos;
     }
 
     [GraphQLName("myActiveConsents")]

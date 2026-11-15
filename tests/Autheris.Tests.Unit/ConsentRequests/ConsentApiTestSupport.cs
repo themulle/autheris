@@ -16,11 +16,13 @@ using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Governance.Paging;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Domain.Audit;
@@ -265,6 +267,7 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             ctx,
             sp.GetRequiredService<IConsentRequestService>(),
             sp.GetRequiredService<IConsentApprovalRepository>(),
+            sp.GetService<IProfileAssignmentRequestService>(),
             sp.GetService<IRateLimiterService>(),
             sp.GetService<IOptions<GovernanceOptions>>());
         return await ExecuteResultAsync(ctx, result);
@@ -304,6 +307,8 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             ctx,
             sp.GetRequiredService<IConsentApprovalRepository>(),
             sp.GetRequiredService<IConsentWorkflowConfigRepository>(),
+            sp.GetService<IGrantEffectPreview>(),
+            sp.GetService<IProfileAssignmentStore>(),
             sp.GetService<IRateLimiterService>(),
             sp.GetService<IOptions<GovernanceOptions>>());
         return await ExecuteResultAsync(ctx, result);

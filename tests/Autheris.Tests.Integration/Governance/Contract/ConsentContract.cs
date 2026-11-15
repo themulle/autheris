@@ -17,7 +17,8 @@ namespace Autheris.Tests.Integration.Governance.Contract;
 
 /// <summary>
 /// Engine-agnostic contract suite for <c>IConsentRepository</c>, <c>IConsentApprovalRepository</c>,
-/// and <c>IConsentDescriptionRepository</c> (including grants, revocations, decisions, and keyset paging).
+/// <c>IConsentDescriptionRepository</c>, <c>IOwnerGrantStore</c>, and <c>IProfileAssignmentStore</c>
+/// (including grants, revocations, decisions, profile assignment items, owner grants, and keyset paging).
 /// </summary>
 public abstract class ConsentContract : GovernanceContractBase
 {

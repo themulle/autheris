@@ -32,9 +32,9 @@ public partial class GovernanceRepository
                                   AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
                                   AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
 
-        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source, c.role_name, c.consent_request_id, c.profile_assignment_id, c.valid_from, c.valid_to, c.table_id, c.effect
+        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source, c.role_name, c.consent_request_id, c.profile_assignment_id, c.valid_from, c.valid_to, c.table_id, c.effect, c.object_pattern, c.data_source
                                 FROM CONSENTS c 
-                                JOIN TABLES t ON c.table_id = t.id
+                                LEFT JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.id = @id
                                 FOR UPDATE OF c";
     }
@@ -50,9 +50,9 @@ public partial class GovernanceRepository
                                   AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
                                   AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
 
-        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source, c.role_name, c.consent_request_id, c.profile_assignment_id, c.valid_from, c.valid_to, c.table_id, c.effect
+        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source, c.role_name, c.consent_request_id, c.profile_assignment_id, c.valid_from, c.valid_to, c.table_id, c.effect, c.object_pattern, c.data_source
                                 FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)
-                                JOIN TABLES t ON c.table_id = t.id
+                                LEFT JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.id = @id";
     }
 
@@ -302,7 +302,7 @@ public partial class GovernanceRepository
         try
         {
             revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, effectiveAuthority, requireDeclarativeForPrune: false, ct).ConfigureAwait(false);
-            if (revoked is { } table)
+            if (revoked is { } table && !string.IsNullOrWhiteSpace(table.TableName))
             {
                 await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
             }
@@ -327,7 +327,7 @@ public partial class GovernanceRepository
             throw;
         }
 
-        if (revoked is { } committed)
+        if (revoked is { } committed && !string.IsNullOrWhiteSpace(committed.TableName))
         {
             await InvalidateTableEpochAsync(committed, ct).ConfigureAwait(false);
         }
@@ -403,6 +403,7 @@ public partial class GovernanceRepository
         }
 
         TableIdentifier? tableId = found.Table;
+        var isPattern = !string.IsNullOrWhiteSpace(found.ObjectPattern);
         if (!effectiveAuthority.TryCheckTenantAccess(found.TenantRaw, out var isAdminForTenant, out var denialTenant))
         {
             throw new KeyNotFoundException($"Consent with ID '{consentId}' does not exist.");
@@ -410,7 +411,9 @@ public partial class GovernanceRepository
 
         var isAuthorized = isAdminForTenant
                            || (!requireDeclarativeForPrune && found.IsGranteeSelf)
-                           || await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, ct).ConfigureAwait(false);
+                           || (isPattern
+                               ? await IsAuthorizedApproverForPatternConsentAsync(conn, tx, consentId, actor, ct).ConfigureAwait(false)
+                               : await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, ct).ConfigureAwait(false));
         if (!isAuthorized)
         {
             throw new RevocationDenialCaptureException(consentId, denialTenant, tableId.Value);
@@ -426,7 +429,8 @@ public partial class GovernanceRepository
             throw new InvalidOperationException($"Consent '{consentId}' is not a declarative grant and cannot be pruned.");
         }
 
-        var tenant = ConsentGrantSqlCore.ResolveConsentTenant(found.TenantRaw, consentId, tableId.Value.ToString());
+        var scopeLabel = isPattern ? found.ObjectPattern! : tableId.Value.ToString();
+        var tenant = ConsentGrantSqlCore.ResolveConsentTenant(found.TenantRaw, consentId, scopeLabel);
         var now = TimeProvider.System.GetUtcNow();
 
         if (!await ConsentGrantSqlCore.MarkRevokedAsync(conn, tx, consentId, actor, reason, now, ct).ConfigureAwait(false))
@@ -441,7 +445,7 @@ public partial class GovernanceRepository
             TenantId = tenant,
             EventType = "CONSENT_REVOKED",
             ActorSid = actor,
-            TargetTable = tableId.Value.ToString(),
+            TargetTable = scopeLabel,
             Decision = ConsentGrantSqlCore.RevokedDecision,
             TraceId = Guid.NewGuid().ToString("N"),
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
@@ -454,6 +458,28 @@ public partial class GovernanceRepository
         await EmitGrantRevokedEventInTransactionAsync(conn, tx, consentId, tenant, tableId.Value, now, ct).ConfigureAwait(false);
 
         return tableId;
+    }
+
+    private async Task<bool> IsAuthorizedApproverForPatternConsentAsync(
+        DbConnection conn, DbTransaction tx, Guid consentId, Sid approverSid, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"SELECT COUNT(*)
+                            FROM CONSENT_APPROVING_OWNERS cao
+                            WHERE cao.consent_id = @cid
+                              AND (UPPER(cao.owner_sid) = UPPER(@apprSid)
+                                   OR cao.owner_sid IN (
+                                       SELECT o.ad_sid
+                                       FROM DATA_OWNER_DELEGATIONS del
+                                       JOIN DATA_OWNERS o ON del.data_owner_id = o.id
+                                       WHERE del.delegate_sid = @apprSid AND del.valid_from <= @now AND @now < del.valid_to
+                                   ))";
+        cmd.AddBound("@cid", consentId.ToString("D"));
+        cmd.AddBound("@apprSid", approverSid.Value);
+        cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
+        var count = Convert.ToInt64(await ExecuteScalarAsync(cmd, "ConsentGrants.CheckPatternApprovers", ct).ConfigureAwait(false));
+        return count > 0;
     }
 
     private async Task EmitGrantRevokedEventInTransactionAsync(
@@ -569,7 +595,9 @@ internal readonly record struct RevokeTarget(
     DateTimeOffset? ValidFrom = null,
     DateTimeOffset? ValidTo = null,
     Guid TableId = default,
-    string? RawEffect = null);
+    string? RawEffect = null,
+    string? ObjectPattern = null,
+    string? DataSource = null);
 
 internal static class ConsentGrantSqlCore
 {
@@ -635,7 +663,7 @@ internal static class ConsentGrantSqlCore
             return null;
         }
 
-        var table = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
+        var table = reader.IsDBNull(0) ? default : new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
         var rawTenant = reader.IsDBNull(3) ? null : reader.GetString(3);
         var granteeType = reader.GetString(4);
         var rawGranteeSid = reader.IsDBNull(5) ? null : reader.GetString(5);
@@ -651,10 +679,13 @@ internal static class ConsentGrantSqlCore
         var validTo = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 12);
         var tableId = ConsentWorkflowSql.ReadOptionalGuid(reader, 13) ?? Guid.Empty;
         var rawEffect = ConsentWorkflowSql.ReadOptionalString(reader, 14);
+        var objectPattern = ConsentWorkflowSql.ReadOptionalString(reader, 15);
+        var dataSource = ConsentWorkflowSql.ReadOptionalString(reader, 16);
 
         return new RevokeTarget(
             table, rawTenant, isGranteeSelf, isRevoked, rawGrantSource,
-            granteeType, rawGranteeSid, roleName, consentRequestId, profileAssignmentId, validFrom, validTo, tableId, rawEffect);
+            granteeType, rawGranteeSid, roleName, consentRequestId, profileAssignmentId, validFrom, validTo, tableId, rawEffect,
+            objectPattern, dataSource);
     }
 
     public static Task RecordRevokedGrantAsync(
@@ -676,6 +707,7 @@ internal static class ConsentGrantSqlCore
             ? parsedEffect
             : ConsentEffect.Allow;
         var grantSource = ConsentWorkflowSqlMapping.ParseGrantSourceOrDefault(target.RawGrantSource);
+        var objectId = !string.IsNullOrWhiteSpace(target.ObjectPattern) ? target.ObjectPattern : table.ToString();
         var consent = new Consent
         {
             Id = consentId,
@@ -690,7 +722,9 @@ internal static class ConsentGrantSqlCore
             ValidFrom = target.ValidFrom ?? DateTimeOffset.MinValue,
             ValidTo = target.ValidTo ?? DateTimeOffset.MaxValue,
             GrantSource = grantSource,
-            ProfileAssignmentId = target.ProfileAssignmentId
+            ProfileAssignmentId = target.ProfileAssignmentId,
+            ObjectPattern = target.ObjectPattern,
+            DataSource = target.DataSource
         };
         var input = new GrantRecordInput(
             tenant.Value,
@@ -698,7 +732,7 @@ internal static class ConsentGrantSqlCore
             actor.Value,
             System.Text.Json.JsonSerializer.Serialize(new { Action = RevokedDecision, Reason = reason }),
             now,
-            ObjectId: table.ToString(),
+            ObjectId: objectId,
             GranteeType: granteeType.ToString(),
             GranteeRef: target.RawGranteeSid ?? target.RoleName ?? consentId.ToString("D"),
             RequestId: target.ConsentRequestId,

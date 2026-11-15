@@ -13,8 +13,10 @@ using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -22,6 +24,7 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 
@@ -126,6 +129,8 @@ public static partial class ConsentApiEndpoints
         HttpContext context,
         IConsentApprovalRepository approvalRepo,
         IConsentWorkflowConfigRepository workflowConfigRepo,
+        [FromServices] IGrantEffectPreview? effectPreview = null,
+        [FromServices] IProfileAssignmentStore? assignmentStore = null,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
         CancellationToken ct = default)
@@ -148,13 +153,25 @@ public static partial class ConsentApiEndpoints
             callerSystem = await ResolveAuthorizedExternalSystemAsync(req.TenantId, clientId, workflowConfigRepo, ct).ConfigureAwait(false);
         }
 
-        if (!CanReadRequest(req, tenantId, userSid, callerSystem, isServicePrincipal, isClusterAdmin, isPrivReader))
+        bool canRead = CanReadRequest(req, tenantId, userSid, callerSystem, isServicePrincipal, isClusterAdmin, isPrivReader);
+        if (!canRead && !isServicePrincipal && userSid.HasValue &&
+            req.RequestKind == ConsentRequestKind.ProfileAssignment &&
+            (isClusterAdmin || req.TenantId == tenantId) &&
+            assignmentStore is not null)
+        {
+            var items = await assignmentStore.GetAssignmentItemsAsync(null, req.Id, ct).ConfigureAwait(false);
+            canRead = items.Any(i => string.Equals(i.OwnerSid, userSid.Value.Value, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!canRead)
         {
             return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, $"Consent request '{id}' was not found.", context);
         }
 
+        var actorSid = userSid ?? new Sid(callerSystem?.Id.ToString("D") ?? "system");
+        var preview = await ApprovalEffectPreviewHelper.TryBuildAsync(effectPreview, req, actorSid, ct).ConfigureAwait(false);
         context.Response.Headers.ETag = FormatRequestETag(req.Version);
-        return Results.Ok(ToRequestDto(req));
+        return Results.Ok(ToRequestDto(req, preview));
     }
 
     internal static async Task<IResult> CreateRequestAsync(
@@ -162,6 +179,7 @@ public static partial class ConsentApiEndpoints
         HttpContext context,
         IConsentRequestService requestService,
         IConsentApprovalRepository approvalRepo,
+        [FromServices] IProfileAssignmentRequestService? profileAssignmentService = null,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
         CancellationToken ct = default)
@@ -201,24 +219,56 @@ public static partial class ConsentApiEndpoints
 
         try
         {
-            var result = await requestService.SubmitAsync(
-                new ConsentRequestSubmission(
-                    domain,
-                    schema,
-                    tableName,
-                    body.Justification ?? string.Empty,
-                    body.DurationDays ?? 30,
-                    idempotencyKey,
-                    userSid.Value,
-                    context.User,
-                    tenantId,
-                    body.Context,
-                    body.RequestedWriteRules,
-                    body.RequestWriteOnly,
-                    body.RequestedDuration,
-                    body.RequestedValidFrom,
-                    body.RequestedValidTo),
-                ct).ConfigureAwait(false);
+            SubmitConsentRequestResult result;
+            if (string.Equals(body.Kind, "profileAssignment", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!body.ProfileId.HasValue || body.ProfileId.Value == Guid.Empty)
+                {
+                    return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "profileId is required when kind is 'profileAssignment'.", context);
+                }
+
+                if (profileAssignmentService is null)
+                {
+                    return ApiProblems.Problem(StatusCodes.Status501NotImplemented, ApiErrorCodes.NotImplemented, "Profile assignment requests are not enabled.", context);
+                }
+
+                result = await profileAssignmentService.SubmitAsync(
+                    new ProfileAssignmentSubmission(
+                        body.ProfileId.Value,
+                        userSid.Value,
+                        context.User,
+                        tenantId,
+                        body.Grantee,
+                        body.GranteeType,
+                        body.Justification,
+                        body.RequestedDuration,
+                        body.RequestedValidFrom,
+                        body.RequestedValidTo,
+                        body.DurationDays,
+                        idempotencyKey),
+                    ct).ConfigureAwait(false);
+            }
+            else
+            {
+                result = await requestService.SubmitAsync(
+                    new ConsentRequestSubmission(
+                        domain,
+                        schema,
+                        tableName,
+                        body.Justification ?? string.Empty,
+                        body.DurationDays ?? 30,
+                        idempotencyKey,
+                        userSid.Value,
+                        context.User,
+                        tenantId,
+                        body.Context,
+                        body.RequestedWriteRules,
+                        body.RequestWriteOnly,
+                        body.RequestedDuration,
+                        body.RequestedValidFrom,
+                        body.RequestedValidTo),
+                    ct).ConfigureAwait(false);
+            }
 
             var created = await approvalRepo.GetConsentRequestAsync(result.RequestId, ct).ConfigureAwait(false);
             if (created is not null)
@@ -350,7 +400,9 @@ public static partial class ConsentApiEndpoints
                     body.RowFilterJson,
                     idempotencyKey,
                     attribution,
-                    tenantId),
+                    tenantId,
+                    ApprovedProfileItems: body.ApprovedItems,
+                    ApprovedClearColumns: body.ApprovedClearColumns),
                 ct).ConfigureAwait(false);
 
             var eTag = FormatRequestETag(result.Request.Version);
@@ -567,8 +619,9 @@ public static partial class ConsentApiEndpoints
         return ex.Code switch
         {
             "FORBIDDEN" => ApiProblems.Forbidden(ConsentDecisionErrorCodes.DecisionNotPermitted, "Consent request operation is not permitted.", context),
-            "TABLE_NOT_FOUND" or "NOT_FOUND" => ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "Target table or consent request was not found.", context),
+            "TABLE_NOT_FOUND" or "NOT_FOUND" => ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "Target table, access profile, or consent request was not found.", context),
             "CONFLICT" or "IDEMPOTENCY_CONFLICT" => ApiProblems.Conflict(ApiErrorCodes.Conflict, "Consent request conflicts with existing state.", context),
+            AccessProfileAssignmentRules.RoleSubjectUnsupported => ApiProblems.BadRequest(AccessProfileAssignmentRules.RoleSubjectUnsupported, "Access profiles cannot be assigned directly to Role subjects.", context),
             _ => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Consent request payload is invalid.", context)
         };
     }
@@ -587,7 +640,11 @@ public sealed record CreateConsentRequestBody(
     bool? RequestWriteOnly = null,
     string? RequestedDuration = null,
     DateTimeOffset? RequestedValidFrom = null,
-    DateTimeOffset? RequestedValidTo = null);
+    DateTimeOffset? RequestedValidTo = null,
+    string? Kind = null,
+    Guid? ProfileId = null,
+    string? Grantee = null,
+    string? GranteeType = null);
 
 public sealed record ConsentDecisionBody(
     string? Decision = null,
@@ -602,7 +659,9 @@ public sealed record ConsentDecisionBody(
     DateTimeOffset? DecidedAt = null,
     string? ApproverSid = null,
     AssertedApprover? Approver = null,
-    IReadOnlyList<AssertedApprover>? Approvers = null);
+    IReadOnlyList<AssertedApprover>? Approvers = null,
+    IReadOnlyList<int>? ApprovedItems = null,
+    IReadOnlyList<string>? ApprovedClearColumns = null);
 
 public sealed record ConsentDecisionApiResponse(
     ConsentRequestDto Request,

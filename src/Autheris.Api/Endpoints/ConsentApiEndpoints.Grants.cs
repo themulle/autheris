@@ -12,6 +12,7 @@ using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Audit;
@@ -22,6 +23,7 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 
@@ -38,6 +40,10 @@ public static partial class ConsentApiEndpoints
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("/grants/{id:guid}/revoke", RevokeGrantAsync)
+            .RequireAuthorization(GatewayPolicies.GrantRevoke)
+            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
+
+        group.MapPost("/profile-assignments/{id:guid}/revoke", RevokeProfileAssignmentAsync)
             .RequireAuthorization(GatewayPolicies.GrantRevoke)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
 
@@ -285,6 +291,129 @@ public static partial class ConsentApiEndpoints
         }
 
         var responsePayload = new { grantId = id, status = "REVOKED", revokedAt = now };
+        await StoreIdempotentResponseAsync(idempotencyStore, scopedKey, bodyHash, StatusCodes.Status200OK, responsePayload, null, ct).ConfigureAwait(false);
+        return Results.Ok(responsePayload);
+    }
+
+    internal static async Task<IResult> RevokeProfileAssignmentAsync(
+        Guid id,
+        RevokeConsentGrantBody? body,
+        HttpContext context,
+        IConsentApprovalRepository approvalRepo,
+        IConsentWorkflowConfigRepository workflowConfigRepo,
+        [FromServices] IProfileAssignmentStore assignmentStore,
+        [FromServices] IProfileAssignmentRequestService profileAssignmentService,
+        IDataOwnershipRepository ownershipRepo,
+        IIdempotencyStore? idempotencyStore = null,
+        IRateLimiterService? rateLimiter = null,
+        IOptions<GovernanceOptions>? governanceOptions = null,
+        TimeProvider? timeProvider = null,
+        CancellationToken ct = default)
+    {
+        if (await EnforceRateLimitAsync(context, rateLimiter, governanceOptions, ConsentApiRateLimitBucket.DecisionsAndRevokes, ct).ConfigureAwait(false) is { } limited)
+        {
+            return limited;
+        }
+
+        var (tenantId, userSid, clientId, isServicePrincipal, isClusterAdmin, _) = ResolveCaller(context);
+        ExternalWorkflowSystem? callerSystem = null;
+        if (isServicePrincipal)
+        {
+            callerSystem = await ResolveAuthorizedExternalSystemAsync(tenantId, clientId, workflowConfigRepo, ct).ConfigureAwait(false);
+            if (callerSystem is null)
+            {
+                return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Profile assignment '{id}' was not found.", context);
+            }
+        }
+
+        if (!TryExtractIdempotencyKey(context, out var idempotencyKey, out var keyError))
+        {
+            return keyError!;
+        }
+
+        var reason = body?.Reason?.Trim() ?? string.Empty;
+        if (reason.Length < 3 || reason.Length > 1000)
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "A revocation reason between 3 and 1000 characters is required.", context);
+        }
+
+        var bodyHash = ComputeBodyHash(new { reason });
+        var callerScope = isServicePrincipal ? (callerSystem?.Id.ToString("D") ?? clientId ?? "app") : (userSid?.Value ?? "user");
+        var scopedKey = BuildScopedIdempotencyKey("revoke-profile-assignment", tenantId, callerScope, id, idempotencyKey);
+
+        var (hit, replayResult) = await TryReplayIdempotentAsync(context, idempotencyStore, scopedKey, bodyHash, ct).ConfigureAwait(false);
+        if (hit)
+        {
+            return replayResult!;
+        }
+
+        var req = await approvalRepo.GetConsentRequestAsync(id, ct).ConfigureAwait(false);
+        if (req is not null && !isClusterAdmin && req.TenantId != tenantId)
+        {
+            return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Profile assignment '{id}' was not found.", context);
+        }
+
+        var effectiveTenant = req?.TenantId ?? tenantId;
+        if (isServicePrincipal && (req is null || req.ExternalSystemId != callerSystem!.Id))
+        {
+            return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Profile assignment '{id}' was not found.", context);
+        }
+
+        var grants = await assignmentStore.GetConsentsByProfileAssignmentAsync(null, effectiveTenant, id, ct).ConfigureAwait(false);
+        if (req is null && grants.Count == 0)
+        {
+            return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Profile assignment '{id}' was not found.", context);
+        }
+
+        Sid actorSid;
+        if (isServicePrincipal)
+        {
+            actorSid = new Sid(string.Concat("external-system:", callerSystem!.Id.ToString("D")));
+        }
+        else
+        {
+            if (!userSid.HasValue)
+            {
+                return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Authenticated user SID is required.", context);
+            }
+
+            actorSid = userSid.Value;
+            bool isAdmin = isClusterAdmin || context.User.IsInRole("GovernanceAdmin");
+            bool isSelf = (req is not null && req.RequesterSid == actorSid) || grants.Any(g => g.GranteeSid == actorSid);
+            bool isApprover = false;
+            if (!isAdmin && !isSelf)
+            {
+                foreach (var g in grants)
+                {
+                    if (!string.IsNullOrWhiteSpace(g.TableIdentifier.TableName) &&
+                        await ownershipRepo.IsAuthorizedApproverForTableAsync(g.TableIdentifier, actorSid, ct).ConfigureAwait(false))
+                    {
+                        isApprover = true;
+                        break;
+                    }
+
+                    if (g.IsPatternGrant && g.ApprovingOwners.Any(o => string.Equals(o, actorSid.Value, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        isApprover = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!isAdmin && !isSelf && !isApprover)
+            {
+                return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Caller is not authorized to revoke this profile assignment.", context);
+            }
+        }
+
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
+        var revokedCount = await profileAssignmentService.RevokeAssignmentAsync(effectiveTenant, id, actorSid, reason, ct).ConfigureAwait(false);
+        if (revokedCount == 0)
+        {
+            return ApiProblems.Conflict(ApiErrorCodes.GrantAlreadyEnded, $"Profile assignment '{id}' has no active grants left to revoke.", context);
+        }
+
+        var responsePayload = new { profileAssignmentId = id, revokedGrantCount = revokedCount, status = "REVOKED", revokedAt = now };
         await StoreIdempotentResponseAsync(idempotencyStore, scopedKey, bodyHash, StatusCodes.Status200OK, responsePayload, null, ct).ConfigureAwait(false);
         return Results.Ok(responsePayload);
     }

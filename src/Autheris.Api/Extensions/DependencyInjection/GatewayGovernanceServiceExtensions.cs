@@ -154,7 +154,9 @@ public static partial class GatewayGovernanceServiceExtensions
             IRecertificationRepository,
             Autheris.Application.Usage.IUsageRepository,
             Autheris.Application.Catalog.External.ICatalogChangeStore,
-            IClassificationRepository
+            IClassificationRepository,
+            Autheris.Application.Governance.Grants.IOwnerGrantStore,
+            Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore
         where TMigrationRunner : class, IGovernanceMigrationRunner
     {
         services.AddSingleton<TRepository>();
@@ -193,6 +195,8 @@ public static partial class GatewayGovernanceServiceExtensions
         // every engine persists access profiles; the in-memory repository is a test double only.
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IIdentityStoreRepository>(sp => (IIdentityStoreRepository)sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Governance.Grants.IOwnerGrantStore>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IFunctionalRightRepository>(sp => (IFunctionalRightRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IRecertificationRepository>(sp => (IRecertificationRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Catalog.External.ICatalogChangeStore>(sp => sp.GetRequiredService<TRepository>());

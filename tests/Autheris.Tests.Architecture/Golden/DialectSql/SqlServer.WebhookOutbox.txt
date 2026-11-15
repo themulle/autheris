@@ -88,8 +88,6 @@ id
 leaseOwner
 UPDATE dbo.WEBHOOK_OUTBOX SET 
  WHERE id = @id AND state = 1 AND lease_owner = @owner;
-@id
-@owner
 @status
 @status
 @error
@@ -97,6 +95,8 @@ UPDATE dbo.WEBHOOK_OUTBOX SET
 @now
 @next
 @next
+@id
+@owner
 ## set_Transaction 0
 ## method DeferSubscriptionAsync
 subscriptionId

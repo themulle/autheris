@@ -252,8 +252,15 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             };
     }
 
-    private static GrantSourceKind MapGrantSourceKind(Consent consent)
-        => GrantSourceKind.ConsentRequest;
+    private static GrantSourceKind MapGrantSourceKind(Consent consent) => consent.GrantSource switch
+    {
+        ConsentGrantSource.AccessProfile => GrantSourceKind.AccessProfile,
+        ConsentGrantSource.Owner => GrantSourceKind.Owner,
+        ConsentGrantSource.Bulk => GrantSourceKind.Bulk,
+        ConsentGrantSource.Declarative => GrantSourceKind.Declarative,
+        ConsentGrantSource.AccessPlan => GrantSourceKind.AccessPlan,
+        _ => GrantSourceKind.ConsentRequest
+    };
 
     private static (IReadOnlyList<DecisionGrantRef> Grants, IReadOnlyList<DecisionReason> Reasons) BuildGrantTrace(
         IReadOnlyList<Consent> aConsents,

@@ -84,6 +84,11 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ExternalSystemRequirementHandler>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentDecisionPipeline, Autheris.Application.ConsentRequests.ConsentDecisionPipeline>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService, Autheris.Application.ConsentRequests.ConsentRequestService>();
+        services.AddSingleton<Autheris.Application.Governance.Grants.IOwnerGrantService, Autheris.Application.Governance.Grants.OwnerGrantService>();
+        services.AddSingleton<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileGrantMaterializer, Autheris.Application.ConsentRequests.ProfileAssignments.ProfileGrantMaterializer>();
+        services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>();
+        services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentRequestService>(sp => sp.GetRequiredService<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>());
+        services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentDecisionHandler>(sp => sp.GetRequiredService<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>());
         services.AddHostedService<Autheris.Application.ConsentRequests.Events.ConsentWebhookDispatcherHostedService>();
         services.AddHostedService<Autheris.Application.Governance.Grants.GrantExpiryHostedService>();
         services.AddHostedService<Autheris.Application.Policy.RowScopes.PatternCoverageMonitor>();

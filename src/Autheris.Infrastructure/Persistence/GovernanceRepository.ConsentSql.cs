@@ -555,7 +555,9 @@ internal static class ConsentSqlCore
 
     public static async Task<ConsentRequest> CreateConsentRequestAsync(DbConnection conn, string? findTableIdSql, ConsentRequest request, CancellationToken ct)
     {
-        var tableGuid = await ResolveTableIdOrThrowAsync(conn, null, findTableIdSql, request.TableId, request.TableIdentifier, "consent request", ct).ConfigureAwait(false);
+        var tableGuid = request.RequestKind == ConsentRequestKind.ProfileAssignment && request.TableId == Guid.Empty && string.IsNullOrWhiteSpace(request.TableIdentifier.TableName)
+            ? Guid.Empty
+            : await ResolveTableIdOrThrowAsync(conn, null, findTableIdSql, request.TableId, request.TableIdentifier, "consent request", ct).ConfigureAwait(false);
         var reqId = request.Id == Guid.Empty ? Guid.NewGuid() : request.Id;
         var reqIdentifiersJson = request.RequesterIdentifiers != null && request.RequesterIdentifiers.Count > 0 ? JsonSerializer.Serialize(request.RequesterIdentifiers) : null;
 
@@ -636,7 +638,7 @@ internal static class ConsentSqlCore
             reader.GetString(6),
             DateTimeOffset.Parse(reader.GetString(7)),
             DateTimeOffset.Parse(reader.GetString(8)),
-            new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
+            reader.IsDBNull(9) ? default : new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
             reader.IsDBNull(12) ? null : reader.GetString(12),
             StoredTenant.Parse(reader.IsDBNull(13) ? null : reader.GetString(13)),
             reqIds ?? new List<string>(),
@@ -661,7 +663,7 @@ internal static class ConsentSqlCore
             reader.GetString(6),
             DateTimeOffset.Parse(reader.GetString(7)),
             DateTimeOffset.Parse(reader.GetString(8)),
-            new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
+            reader.IsDBNull(9) ? default : new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
             null,
             default,
             new List<string>(),

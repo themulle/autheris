@@ -471,7 +471,7 @@ WHERE id = @id AND tenant_id = @tenant";
             selectCmd.Transaction = tx;
             var sql = @"SELECT r.id, t.source_name, t.schema_name, t.table_name, r.status, r.version, r.workflow_mode, r.external_system_id
 FROM CONSENT_REQUESTS r
-JOIN TABLES t ON r.table_id = t.id
+LEFT JOIN TABLES t ON r.table_id = t.id
 WHERE r.tenant_id = @tenant
   AND r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')";
             if (fromSystemId.HasValue)
@@ -499,7 +499,7 @@ WHERE r.tenant_id = @tenant
 
                 candidates.Add((
                     reqId,
-                    new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3)),
+                    reader.IsDBNull(1) ? default : new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3)),
                     reader.GetString(4),
                     Convert.ToInt32(reader.GetValue(5), CultureInfo.InvariantCulture),
                     ConsentWorkflowSqlMapping.ParseWorkflowModeOrDefault(reader.GetString(6)),

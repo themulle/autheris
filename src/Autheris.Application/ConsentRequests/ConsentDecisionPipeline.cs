@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Validation;
@@ -48,7 +49,8 @@ public sealed class ConsentDecisionPipeline(
     IOptions<GovernanceTextOptions>? textOptions = null,
     TimeProvider? timeProvider = null,
     TenantId? fallbackTenantId = null,
-    IConsentEventOutbox? eventOutbox = null) : IConsentDecisionPipeline
+    IConsentEventOutbox? eventOutbox = null,
+    IProfileAssignmentDecisionHandler? profileAssignmentHandler = null) : IConsentDecisionPipeline
 {
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly IConsentApprovalRepository _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
@@ -122,6 +124,11 @@ public sealed class ConsentDecisionPipeline(
         else
         {
             await ValidateInternalCallerAuthorizationAsync(req, command.Principal!, actorSid, command.Decision, ct).ConfigureAwait(false);
+        }
+
+        if (req.RequestKind == ConsentRequestKind.ProfileAssignment && profileAssignmentHandler != null)
+        {
+            return await profileAssignmentHandler.DecideAsync(command, req, actorSid, externalApproverSids, ct).ConfigureAwait(false);
         }
 
         if (command.Decision == ConsentDecisionKind.Reject)
@@ -288,7 +295,7 @@ public sealed class ConsentDecisionPipeline(
 
         var roles = principal.FindAll(ClaimTypes.Role).Select(r => r.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         bool isPrivilegedAdmin = roles.Contains("GovernanceAdmin") || ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        if (!isPrivilegedAdmin)
+        if (!isPrivilegedAdmin && req.RequestKind != ConsentRequestKind.ProfileAssignment)
         {
             bool isAuthorized = await _ownershipRepository.IsAuthorizedApproverForTableAsync(req.TableIdentifier, approverSid, ct).ConfigureAwait(false);
             if (!isAuthorized)
