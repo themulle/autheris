@@ -106,14 +106,13 @@ public sealed class MetricResultMapperTests
     [Fact]
     public void Map_HasNoSuppressedRowCount_SEC_112_20()
     {
-        var dto = MetricResultMapper.Map(Result([], new AggregationMetadata(5, SmallGroupStrategy.Suppress, true, 2, 99, true, true, true)));
+        var dto = MetricResultMapper.Map(Result([], new AggregationMetadata(5, SmallGroupStrategy.Suppress, true, 2, 99, true, true)));
 
         dto.Suppressed.ShouldBeTrue();
         dto.SuppressedGroupsCount.ShouldBe(2);
         dto.MinimumGroupSize.ShouldBe(5);
         dto.MergedIntoOther.ShouldBeTrue();
         dto.Truncated.ShouldBeTrue();
-        dto.NoiseApplied.ShouldBeTrue();
         typeof(MetricResultDto).GetProperties().Select(p => p.Name).ShouldNotContain("SuppressedRowsCount");
     }
 

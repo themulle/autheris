@@ -53,7 +53,7 @@ public sealed class TypedMetricQueryGraphQlTests
         var (response, captured) = await RunAsync(host, """
             query($f: AutherisMetricFilter) {
               queryMetrics(metrics: ["revenue"], groupBy: ["region"], where: $f, orderBy: [{ metric: "revenue", direction: DESC }], limit: 10) {
-                metrics manifestVersion count suppressed suppressedGroupsCount minimumGroupSize mergedIntoOther truncated noiseApplied
+                metrics manifestVersion count suppressed suppressedGroupsCount minimumGroupSize mergedIntoOther truncated
                 groups { rowCount isMergedOther dimensions { name kind stringValue } values { alias kind decimalValue } }
                 metricDefinitions { name type label description unit }
               }

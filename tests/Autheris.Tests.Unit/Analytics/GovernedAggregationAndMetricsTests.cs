@@ -392,7 +392,7 @@ public sealed class GovernedAggregationAndMetricsTests
         var service = new GovernedAggregationService(
             metadataRepository: metaRepo,
             dataSourceExecutors: [new InMemoryRowExecutor(rows)],
-            analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5 }));
+            analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5, Privacy = new AnalyticsPrivacyOptions { ExposeSuppressedGroupsCount = true } }));
 
         // 1. Unfiltered query: "Sales" (10 rows, sum=1000) survives; "Executive" (2 rows) is primary suppressed, "Engineering" (6 rows) is complementary suppressed.
         var unfilteredQuery = new AggregationQuery(
@@ -472,7 +472,8 @@ public sealed class GovernedAggregationAndMetricsTests
             analyticsOptions: Options.Create(new AnalyticsOptions
             {
                 MinimumGroupSize = 5,
-                SmallGroupStrategy = SmallGroupStrategy.MergeIntoOther
+                SmallGroupStrategy = SmallGroupStrategy.MergeIntoOther,
+                Privacy = new AnalyticsPrivacyOptions { ExposeSuppressedGroupsCount = true }
             }));
 
         // Case 1: Combined small groups (3 + 3 = 6 >= 5) merge into "OTHER"
@@ -727,7 +728,7 @@ public sealed class GovernedAggregationAndMetricsTests
             resolutionService: resolutionService,
             dataSourceExecutors: [new InMemoryRowExecutor(rows)],
             auditLogRepository: auditRepo,
-            analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5 }));
+            analyticsOptions: Options.Create(new AnalyticsOptions { MinimumGroupSize = 5, Privacy = new AnalyticsPrivacyOptions { ExposeSuppressedGroupsCount = true } }));
 
         var metricService = new SemanticMetricQueryService(
             catalogService: catalog,

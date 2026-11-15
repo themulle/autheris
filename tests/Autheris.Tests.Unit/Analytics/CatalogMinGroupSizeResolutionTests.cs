@@ -411,43 +411,5 @@ public sealed class CatalogMinGroupSizeResolutionTests
         result.Value.ShouldBe(5);
         result.Source.ShouldBe(MinGroupSizeSource.Default);
     }
-
-    [Fact]
-    public void NoisyCacheKey_SameValueDifferentSource_DoesNotShare()
-    {
-        var keyCatalog = NoisyCacheKey.Build(
-            new TenantId("tenant-a"),
-            new Sid("alice"),
-            TestTableId,
-            ["status"],
-            [new AggregateSelection(AggregateFunction.Count, null, "cnt")],
-            null,
-            null,
-            10,
-            5,
-            SmallGroupStrategy.Suppress,
-            "20261018",
-            "fp",
-            null,
-            minGroupSizeSource: MinGroupSizeSource.Catalog);
-
-        var keyOperator = NoisyCacheKey.Build(
-            new TenantId("tenant-a"),
-            new Sid("alice"),
-            TestTableId,
-            ["status"],
-            [new AggregateSelection(AggregateFunction.Count, null, "cnt")],
-            null,
-            null,
-            10,
-            5,
-            SmallGroupStrategy.Suppress,
-            "20261018",
-            "fp",
-            null,
-            minGroupSizeSource: MinGroupSizeSource.Operator);
-
-        keyCatalog.ShouldNotBe(keyOperator);
-    }
 }
 

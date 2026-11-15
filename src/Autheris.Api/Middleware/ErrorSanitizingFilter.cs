@@ -82,7 +82,6 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "AGGREGATION_NOT_SUPPORTED",
         "UNKNOWN_METRIC",
         "METRIC_FILTER_INVALID",
-        "PRIVACY_BUDGET_EXHAUSTED",
         // ConsentRequestException codes the removed Development passthrough used to expose; fixed messages only.
         "INVALID_STATE",
         "CONSENT_ON_ATTRIBUTE_SOURCE",
@@ -137,7 +136,6 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["AGGREGATION_NOT_SUPPORTED"] = "The requested aggregation is not supported for this dataset.",
         ["UNKNOWN_METRIC"] = "The metric is not available.",
         ["METRIC_FILTER_INVALID"] = "The metric filter does not fit the dimension type.",
-        ["PRIVACY_BUDGET_EXHAUSTED"] = "Privacy budget exhausted.",
         ["INVALID_STATE"] = "The consent request is not in a state that allows this operation.",
         ["CONSENT_ON_ATTRIBUTE_SOURCE"] = "A consent on this table is not possible.",
         ["CONSENT_NOT_EXTENDABLE"] = "The consent cannot be extended. Create a new consent.",

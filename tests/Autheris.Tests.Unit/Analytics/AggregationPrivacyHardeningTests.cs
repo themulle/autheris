@@ -406,7 +406,7 @@ public sealed class AggregationPrivacyHardeningTests
     {
         var (service, _, _) = CreateService(
             DepartmentRows(("Big", 6, 1m), ("Tiny", 2, 1m)),
-            new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 5 } });
+            new AnalyticsOptions { Privacy = new AnalyticsPrivacyOptions { DefaultMinGroupSize = 5, ExposeSuppressedGroupsCount = true } });
 
         var result = await service.ExecuteAggregationAsync(CreatePrincipal(), new AggregationQuery(
             OrdersTableId, GroupBy: ["department"], PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));

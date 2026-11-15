@@ -64,7 +64,6 @@ public static class ApiErrorCodes
     public const string CatalogReservedSourceName = "CATALOG_RESERVED_SOURCE_NAME";
     public const string OlapQueryFailed = "OLAP_QUERY_FAILED";
     public const string OlapResultTooLarge = "OLAP_RESULT_TOO_LARGE";
-    public const string PrivacyBudgetExhausted = "PRIVACY_BUDGET_EXHAUSTED";
     public const string GovernancePlanInvalid = "GOVERNANCE_PLAN_INVALID";
     public const string ProcedureArgumentInvalid = "PROCEDURE_ARGUMENT_INVALID";
     public const string VirtualFilterConflict = "VIRTUAL_FILTER_CONFLICT";

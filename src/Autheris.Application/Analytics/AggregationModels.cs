@@ -125,9 +125,6 @@ public sealed record AggregationMetadata(
     long SuppressedRowsCount,
     bool MergedIntoOther,
     bool Truncated,
-    bool NoiseApplied = false,
-    double? EpsilonConsumed = null,
-    double? RemainingEpsilon = null,
     MinGroupSizeSource MinimumGroupSizeSource = MinGroupSizeSource.Default);
 
 /// <summary>
@@ -145,7 +142,6 @@ public sealed record AggregationResult(
     public int MinimumGroupSize => Metadata.MinimumGroupSize;
     public bool MergedIntoOther => Metadata.MergedIntoOther;
     public bool Truncated => Metadata.Truncated;
-    public bool NoiseApplied => Metadata.NoiseApplied;
 }
 
 /// <summary>

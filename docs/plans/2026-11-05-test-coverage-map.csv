@@ -292,3 +292,25 @@ Autheris.Tests.Unit.Sql.Policy.CorrelatedKeySetSubstitutionTests.CasbinSite_HasS
 Autheris.Tests.Unit.Tenancy.McpStdioTenantTests.DT_A_9_Stdio_Explicit_Tenant_Wins_Over_The_Default_Tenant,Autheris.Tests.Unit.Mcp.McpHttpTenantTests.McpHttp_Explicit_Tenant_In_SecurityContext_Overrides_Claims (MCP stdio deleted; replaced by HTTP MCP tenant check),Security
 Autheris.Tests.Unit.Tenancy.McpStdioTenantTests.DT_A_9_Stdio_Refuses_To_Start_Without_Tenant_And_Without_Default_Tenant,Autheris.Tests.Unit.Mcp.McpHttpTenantTests.McpHttp_Malformed_Tenant_Claim_Fails_Closed (MCP stdio deleted; replaced by HTTP MCP fail-closed check),Security
 Autheris.Tests.Unit.Tenancy.McpStdioTenantTests.DT_A_9_Stdio_Uses_The_Default_Tenant_When_No_Tenant_Is_Passed,Autheris.Tests.Unit.Mcp.McpHttpTenantTests.McpHttp_Authenticated_Caller_Carries_Resolved_Tenant_And_Identity (MCP stdio deleted; replaced by HTTP MCP resolved tenant check),Security
+Autheris.Tests.Unit.Analytics.CatalogMinGroupSizeResolutionTests.NoisyCacheKey_SameValueDifferentSource_DoesNotShare,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.Build_DifferentTimeBucketInterval_DifferentKey,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.Build_DifferentTimeZone_DifferentKey,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.Build_NullEmptyAndNonEmptyTimeBuckets_AllDiffer,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.Build_TimeBucketColumnChange_DifferentKey,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersAfterCallerAttributeChange_Generation,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersAfterPolicyChange_ColumnDecision,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersAfterPolicyChange_RowFilterText,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersByCallerAttributeValue_SameGeneration,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersByFingerprint,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersByParameterValue_SamePredicateText,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersBySubject,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersByTenant,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_FingerprintAndKey_DoNotContainValues,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_NoDelimiterCollision_GroupByColumns,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_NoDelimiterCollision_ParameterNamesAndValues,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_NoDelimiterCollision_TenantSubjectAndTable,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_ParameterOrderDoesNotMatter,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_ParameterTypeIsPartOfTheKey,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_SameDecision_SameFingerprint,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_SameInputs_SameKey,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.Security.Issue112SecurityConditionsTests.T_SEC_DATA112_08_NoisyCacheKeyParameterAndDecisionBinding,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security

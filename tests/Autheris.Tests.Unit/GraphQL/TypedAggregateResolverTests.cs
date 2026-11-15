@@ -51,7 +51,7 @@ public sealed class TypedAggregateResolverTests
                 groupBy: [region],
                 aggregates: [{ fn: SUM, column: amount, alias: "total" }, { fn: COUNT, alias: "n" }],
                 where: $w, orderBy: [{ alias: "total", direction: DESC }], limit: 5) {
-                count suppressed suppressedGroupsCount minimumGroupSize mergedIntoOther truncated noiseApplied
+                count suppressed suppressedGroupsCount minimumGroupSize mergedIntoOther truncated
                 groups { rowCount isMergedOther key { region amount } aggregates { alias kind intValue decimalValue floatValue stringValue dateTimeValue } }
               }
             }

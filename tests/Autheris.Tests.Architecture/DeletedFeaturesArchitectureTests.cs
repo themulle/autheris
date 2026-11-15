@@ -147,4 +147,34 @@ public sealed class DeletedFeaturesArchitectureTests
         }
         srcViolations.ShouldBeEmpty($"Found ITSM references in cleaned source files: {string.Join(", ", srcViolations)}");
     }
+
+    [Fact]
+    public void No_differential_privacy_members()
+    {
+        typeof(Autheris.Application.Analytics.AggregationMetadata).GetProperty("NoiseApplied").ShouldBeNull();
+        typeof(Autheris.Application.Analytics.AggregationMetadata).GetProperty("EpsilonConsumed").ShouldBeNull();
+        typeof(Autheris.Application.Analytics.AggregationMetadata).GetProperty("RemainingEpsilon").ShouldBeNull();
+        typeof(Autheris.Application.Analytics.AggregationResult).GetProperty("NoiseApplied").ShouldBeNull();
+
+        var appAssembly = typeof(Autheris.Application.Analytics.GovernedAggregationService).Assembly;
+        appAssembly.GetType("Autheris.Application.Analytics.NoisyCacheKey").ShouldBeNull();
+
+        typeof(Autheris.Api.Errors.ApiErrorCodes).GetField("PrivacyBudgetExhausted").ShouldBeNull();
+
+        var filterText = RepositoryScan.ReadText("src/Autheris.Api/Middleware/ErrorSanitizingFilter.cs");
+        filterText.ShouldNotContain("PRIVACY_BUDGET_EXHAUSTED");
+
+        var graphQlAssembly = typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly;
+        foreach (var typeName in new[]
+        {
+            "Autheris.GraphQL.Catalog.AutherisTypedAggregationResult",
+            "Autheris.GraphQL.Catalog.AggregateResultDto",
+            "Autheris.GraphQL.Catalog.MetricResultDto"
+        })
+        {
+            var type = graphQlAssembly.GetType(typeName);
+            type.ShouldNotBeNull();
+            type!.GetProperty("NoiseApplied").ShouldBeNull();
+        }
+    }
 }

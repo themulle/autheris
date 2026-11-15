@@ -22,7 +22,6 @@ internal sealed record MetricResultDto(
     int MinimumGroupSize,
     bool MergedIntoOther,
     bool Truncated,
-    bool NoiseApplied,
     IReadOnlyList<MetricDefinitionDto> MetricDefinitions,
     string MinimumGroupSizeSource = "default");
 
@@ -73,7 +72,6 @@ internal static class MetricResultMapper
             result.MinimumGroupSize,
             result.MergedIntoOther,
             result.Truncated(),
-            result.Metadata.NoiseApplied,
             definitions,
             result.Metadata.MinimumGroupSizeSource.ToString().ToLowerInvariant());
     }

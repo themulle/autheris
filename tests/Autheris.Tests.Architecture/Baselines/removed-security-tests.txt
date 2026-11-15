@@ -14,3 +14,25 @@ Autheris.Tests.Unit.Persistence.GovernanceRepositoryBatchUpsertTests.InvalidRowI
 Autheris.Tests.Unit.Persistence.GovernanceRepositoryBatchUpsertTests.LargeBatch_ChunksByParameterBudget_AndBoundsCommandParameters	#673	Moved SQLite-backed batch upsert tests from Autheris.Tests.Unit.Persistence to Autheris.Tests.Integration.Persistence per TestLayeringArchitectureTests
 Autheris.Tests.Unit.Persistence.GovernanceRepositoryBatchUpsertTests.MixedChunk_AndDocumentationPrecedence_BumpsEpochOnlyForChangedTables_AndPreservesGovernanceFields	#673	Moved SQLite-backed batch upsert tests from Autheris.Tests.Unit.Persistence to Autheris.Tests.Integration.Persistence per TestLayeringArchitectureTests
 Autheris.Tests.Unit.Persistence.GovernanceRepositoryBatchUpsertTests.TransientDeadlockConflict_RetriesUpToThreeTimes_WithZeroPrematureEpochOrInvalidation	#673	Moved SQLite-backed batch upsert tests from Autheris.Tests.Unit.Persistence to Autheris.Tests.Integration.Persistence per TestLayeringArchitectureTests
+Autheris.Tests.Unit.Analytics.CatalogMinGroupSizeResolutionTests.NoisyCacheKey_SameValueDifferentSource_DoesNotShare	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.Build_DifferentTimeBucketInterval_DifferentKey	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.Build_DifferentTimeZone_DifferentKey	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.Build_NullEmptyAndNonEmptyTimeBuckets_AllDiffer	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.Build_TimeBucketColumnChange_DifferentKey	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersAfterCallerAttributeChange_Generation	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersAfterPolicyChange_ColumnDecision	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersAfterPolicyChange_RowFilterText	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersByCallerAttributeValue_SameGeneration	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersByFingerprint	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersByParameterValue_SamePredicateText	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersBySubject	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_DiffersByTenant	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_FingerprintAndKey_DoNotContainValues	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_NoDelimiterCollision_GroupByColumns	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_NoDelimiterCollision_ParameterNamesAndValues	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_NoDelimiterCollision_TenantSubjectAndTable	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_ParameterOrderDoesNotMatter	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_ParameterTypeIsPartOfTheKey	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_SameDecision_SameFingerprint	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_SameInputs_SameKey	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
+Autheris.Tests.Unit.Security.Issue112SecurityConditionsTests.T_SEC_DATA112_08_NoisyCacheKeyParameterAndDecisionBinding	#WP-SIMPL-50	Deleted NoisyCacheKey DP leftover
