@@ -4,15 +4,6 @@ tests/Autheris.Tests.Unit/BypassSemanticsAndDmlGuardrailTests.cs
 tests/Autheris.Tests.Unit/DevExperienceTests.cs
 tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
 tests/Autheris.Tests.Unit/IntegrationGapATests.cs
-tests/Autheris.Tests.Unit/Security/AccessPlanningTenantBindingTests.cs
-tests/Autheris.Tests.Unit/Security/ActivationProbes.cs
-tests/Autheris.Tests.Unit/Security/CorrelatedRowFilterAliasTests.cs
-tests/Autheris.Tests.Unit/Security/CrossSourceRelationsSecurityTests.cs
-tests/Autheris.Tests.Unit/Security/DatasourceTestingSecurityTests.cs
-tests/Autheris.Tests.Unit/Security/OlapSqlInspectorTests.cs
-tests/Autheris.Tests.Unit/Security/ProcedureLobBudgetRSql8Tests.cs
-tests/Autheris.Tests.Unit/Security/ReadOnlyTokenProcedureRouteTests.cs
-tests/Autheris.Tests.Unit/Security/SqlProcedureRowScopeResolverTests.cs
 tests/Autheris.Tests.Unit/Sql/AstCompilerDuckDbExecutionTests.cs
 tests/Autheris.Tests.Unit/Sql/ClientListFixture.cs
 tests/Autheris.Tests.Unit/Sql/DuckDbBindingProbeTests.cs
@@ -23,4 +14,3 @@ tests/Autheris.Tests.Unit/Sql/Policy/TypedRowFilterBuilderTests.cs
 tests/Autheris.Tests.Unit/Sql/TimeZones/DuckDbIcuSandboxTests.cs
 tests/Autheris.Tests.Unit/Sql/TrinoColumnTypeTests.cs
 tests/Autheris.Tests.Unit/TestDoubles/SqliteGovernedSqlService.cs
-tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs

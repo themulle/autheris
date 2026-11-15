@@ -217,11 +217,6 @@ public sealed class AccessPlanningTenantBindingTests
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
         context.Request.ContentType = "application/json";
 
-        var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
-        var app = builder.Build();
-        app.MapGovernancePlanEndpoints();
-
-        // Call the service via the endpoint helper or mock invocation
         var applyReq = new AdminApplyAccessRequest("plan-1", "token-123");
         var adminSid = AdminSid;
         var requestTenant = EndpointSecurity.GetRequestTenant(context);

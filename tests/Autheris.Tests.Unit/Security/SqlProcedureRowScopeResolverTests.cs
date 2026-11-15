@@ -1,79 +1,41 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Data.Common;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
 using Autheris.Application.Services;
-using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.Procedures;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
-using Autheris.Tests.Unit.Procedures;
 
 namespace Autheris.Tests.Unit.Security;
 
 /// <summary>
-/// Row scope lookup of procedure results: governed read connection, key uniqueness verified in the database, dialect
-/// specific SQL (SQL Server, PostgreSQL, SQLite). SQLite runs for real; the other dialects are checked on the SQL text
-/// (PostgreSQL also by a Testcontainers contract test).
+/// Pure unit tests for <see cref="SqlProcedureRowScopeResolver"/>: governed read connection and dialect checks,
+/// key-query quoting per dialect, and parameter budgets. Database execution tests run against PostgreSQL in
+/// <see cref="Autheris.Tests.Integration.Security.SqlProcedureRowScopeResolverIntegrationTests"/>.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class SqlProcedureRowScopeResolverTests : IDisposable
+public sealed class SqlProcedureRowScopeResolverTests
 {
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-rowscope-{Guid.NewGuid():N}.db");
-
-    public SqlProcedureRowScopeResolverTests()
-    {
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-CREATE TABLE crane (serial_number TEXT PRIMARY KEY, client_id INTEGER NOT NULL, is_delivered INTEGER, tenant_id TEXT NOT NULL);
-CREATE UNIQUE INDEX ux_crane_partial ON crane (client_id) WHERE is_delivered IS NULL;
-CREATE TABLE crane_state (id INTEGER PRIMARY KEY, client_id INTEGER NOT NULL, code TEXT NOT NULL, tenant_id TEXT NOT NULL);
-CREATE UNIQUE INDEX ux_state_code ON crane_state (client_id, code);
-CREATE UNIQUE INDEX ux_state_expr ON crane_state (id, lower(code));
-CREATE TABLE client (client_id INTEGER NOT NULL, region TEXT NOT NULL);
-INSERT INTO crane VALUES ('100', 1, 1, 'tenant-a'), ('200', 2, NULL, 'tenant-a'), ('300', 3, NULL, 'tenant-b');
-INSERT INTO crane_state VALUES (1, 1, 'A', 'tenant-a'), (2, 1, 'B', 'tenant-a'), (3, 2, 'A', 'tenant-a');
-INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
-        cmd.ExecuteNonQuery();
-    }
-
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
-    }
-
-    private sealed class SqliteFixtureConnectionFactory(string dbPath) : ISqlConnectionFactory
-    {
-        public Task<System.Data.Common.DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
-        {
-            var conn = new SqliteConnection($"Data Source={dbPath}");
-            conn.Open();
-            return Task.FromResult<System.Data.Common.DbConnection>(new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(conn));
-        }
-    }
-
-    private SqlProcedureRowScopeResolver Resolver(string connectionName = "erp", string provider = "PostgreSql") => new(
-        new SqliteFixtureConnectionFactory(_dbPath),
+    private static SqlProcedureRowScopeResolver Resolver(string connectionName = "erp", string provider = "PostgreSql") => new(
+        new InMemoryConnectionFactory(),
         Options.Create(new GatewayOptions
         {
             DataSources = new SqlDataSourceOptions
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    [connectionName] = new() { Provider = provider, ConnectionString = $"Data Source={_dbPath}" }
+                    [connectionName] = new() { Provider = provider, ConnectionString = "Host=unused;Database=rowscope" }
                 }
             }
         }));
@@ -93,80 +55,6 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
         TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: filter, hasUnconstrainedColumnAllow: true);
 
     private static readonly ProcedureSecurityContext Caller = new("tenant-a", "S-1-5-21-1", null);
-
-    [Fact]
-    public async Task PrimaryKey_RowFilterAndTenant_AreAppliedInTheDatabase()
-    {
-        var table = Table("crane", columns: ["serial_number", "client_id", "is_delivered", "tenant_id"]);
-
-        var allowed = await Resolver().GetAllowedKeysAsync(
-            Definition(), table, Decision(table, "\"autheris_target\".\"is_delivered\" IS NULL"), ["serial_number"],
-            [["100"], ["200"], ["300"], ["999"]], Caller, CancellationToken.None);
-
-        // 100 is delivered (filter), 300 belongs to another tenant, 999 does not exist.
-        allowed.ShouldBe(new[] { RowScopeKeys.Normalize(["200"])! }, ignoreOrder: true);
-    }
-
-    [Fact]
-    public async Task CompositeUniqueIndex_IsAccepted()
-    {
-        var table = Table("crane_state", columns: ["id", "client_id", "code", "tenant_id"]);
-
-        var allowed = await Resolver().GetAllowedKeysAsync(
-            Definition(), table, Decision(table, "\"autheris_target\".\"code\" = 'A'"), ["client_id", "code"],
-            [[1L, "A"], [1L, "B"], [2L, "A"]], Caller, CancellationToken.None);
-
-        allowed.ShouldBe(new[] { RowScopeKeys.Normalize([1L, "A"])!, RowScopeKeys.Normalize([2L, "A"])! }, ignoreOrder: true);
-    }
-
-    [Fact]
-    public async Task CorrelatedRowFilter_BindsToTheReservedAlias()
-    {
-        var table = Table("crane", columns: ["serial_number", "client_id", "is_delivered", "tenant_id"]);
-        var vf = new VirtualFilter
-        {
-            Name = "client_de",
-            TenantId = new TenantId("default"),
-            Source = "erp",
-            KeyColumns = ["c.client_id"],
-            Structured = new StructuredFilterDefinition
-            {
-                From = new TableIdentifier("erp", "main", "client"),
-                FromAlias = "c",
-                Where = [new FilterCondition("c.region", FilterConditionOperator.Eq, "DE")]
-            }
-        };
-        string correlated = new StructuredFilterSqlBuilder().Build(vf, new FilterBinding { FilterName = "client_de" }, table, DatabaseDialect.PostgreSql);
-
-        var allowed = await Resolver().GetAllowedKeysAsync(
-            Definition(), table, Decision(table, correlated), ["serial_number"], [["100"], ["200"]], Caller, CancellationToken.None);
-
-        allowed.ShouldBe(new[] { RowScopeKeys.Normalize(["200"])! });
-    }
-
-    [Fact]
-    public async Task NonUniqueKey_MixedRowsRejected_ByKeyClosure()
-    {
-        var state = Table("crane_state", columns: ["id", "client_id", "code", "tenant_id"]);
-        // client_id = 1 has two rows in tenant-a: code 'A' and code 'B'. Under filter code = 'A', only one passes,
-        // so key closure excludes client_id = 1 while allowing client_id = 2 (whose only row has code 'A').
-        var allowed = await Resolver().GetAllowedKeysAsync(
-            Definition(), state, Decision(state, "[autheris_target].[code] = 'A'".Replace("[", "\"", StringComparison.Ordinal).Replace("]", "\"", StringComparison.Ordinal)),
-            ["client_id"], [[1L], [2L]], Caller, CancellationToken.None);
-
-        allowed.ShouldBe(new[] { RowScopeKeys.Normalize([2L])! });
-    }
-
-    [Fact]
-    public async Task NonUniqueKey_AllRowsAllowed_AcceptedByKeyClosure()
-    {
-        var state = Table("crane_state", columns: ["id", "client_id", "code", "tenant_id"]);
-        var allowed = await Resolver().GetAllowedKeysAsync(
-            Definition(), state, Decision(state, "1 = 1"), ["client_id"], [[1L], [2L]], Caller, CancellationToken.None);
-
-        allowed.ShouldContain(RowScopeKeys.Normalize([1L])!);
-        allowed.ShouldContain(RowScopeKeys.Normalize([2L])!);
-    }
 
     [Fact]
     public async Task CatalogDialectDifferentFromConnection_IsRejected()
@@ -199,5 +87,15 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     {
         SqlProcedureRowScopeResolver.MaxParameters(DatabaseDialect.SqlServer).ShouldBeLessThan(2100);
         SqlProcedureRowScopeResolver.MaxParameters(DatabaseDialect.PostgreSql).ShouldBeLessThan(65535);
+    }
+
+    private sealed class InMemoryConnectionFactory : ISqlConnectionFactory
+    {
+        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
+        {
+            var conn = new CallbackDbConnection((_, _) => new StubDbDataReader([], []));
+            conn.Open();
+            return Task.FromResult<DbConnection>(conn);
+        }
     }
 }

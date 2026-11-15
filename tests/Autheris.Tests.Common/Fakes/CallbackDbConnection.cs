@@ -10,13 +10,18 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
+public sealed class StubDbException(string message) : DbException(message);
+
 /// <summary>
 /// Pure in-memory <see cref="DbConnection"/> double driven by a caller-supplied command callback
 /// so unit tests exercise real ADO.NET parameter binding and row hydration without a DB host.
 /// </summary>
 public sealed class CallbackDbConnection(
     Func<string, IReadOnlyDictionary<string, object?>, DbDataReader> executeReader,
-    Func<CancellationToken, Task>? onOpenAsync = null) : DbConnection
+    Func<CancellationToken, Task>? onOpenAsync = null,
+    Func<string, IReadOnlyDictionary<string, object?>, int>? executeNonQuery = null,
+    Action? onCommit = null,
+    Action? onRollback = null) : DbConnection
 {
     private ConnectionState _state = ConnectionState.Closed;
 
@@ -51,22 +56,27 @@ public sealed class CallbackDbConnection(
     }
 
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) =>
-        new NoOpTransaction(this, isolationLevel);
+        new NoOpTransaction(this, isolationLevel, onCommit, onRollback);
 
     protected override DbCommand CreateDbCommand() =>
-        new CallbackDbCommand(this, executeReader);
+        new CallbackDbCommand(this, executeReader, executeNonQuery);
 
-    private sealed class NoOpTransaction(DbConnection conn, IsolationLevel level) : DbTransaction
+    private sealed class NoOpTransaction(
+        DbConnection conn,
+        IsolationLevel level,
+        Action? onCommit,
+        Action? onRollback) : DbTransaction
     {
         public override IsolationLevel IsolationLevel => level;
         protected override DbConnection DbConnection => conn;
-        public override void Commit() { }
-        public override void Rollback() { }
+        public override void Commit() => onCommit?.Invoke();
+        public override void Rollback() => onRollback?.Invoke();
     }
 
     private sealed class CallbackDbCommand(
         DbConnection conn,
-        Func<string, IReadOnlyDictionary<string, object?>, DbDataReader> executeReader) : DbCommand
+        Func<string, IReadOnlyDictionary<string, object?>, DbDataReader> executeReader,
+        Func<string, IReadOnlyDictionary<string, object?>, int>? executeNonQuery) : DbCommand
     {
         private readonly StubDbParameterCollection _parameters = new();
 
@@ -82,7 +92,8 @@ public sealed class CallbackDbConnection(
         protected override DbTransaction? DbTransaction { get; set; }
 
         public override void Cancel() { }
-        public override int ExecuteNonQuery() => 0;
+        public override int ExecuteNonQuery() =>
+            executeNonQuery is not null ? executeNonQuery(CommandText, _parameters.ToReadOnlyDictionary()) : 0;
 
         public override object? ExecuteScalar()
         {
@@ -185,9 +196,43 @@ public sealed class StubDbDataReader(IReadOnlyList<string> columns, IReadOnlyLis
 
     public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Raw(ordinal), CultureInfo.InvariantCulture);
     public override byte GetByte(int ordinal) => Convert.ToByte(Raw(ordinal), CultureInfo.InvariantCulture);
-    public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) => throw new NotSupportedException();
+    public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length)
+    {
+        var bytes = (byte[])Raw(ordinal)!;
+        if (buffer is null)
+        {
+            return bytes.Length;
+        }
+
+        if (dataOffset >= bytes.Length)
+        {
+            return 0;
+        }
+
+        var count = (int)Math.Min(length, bytes.Length - dataOffset);
+        Array.Copy(bytes, (int)dataOffset, buffer, bufferOffset, count);
+        return count;
+    }
+
     public override char GetChar(int ordinal) => Convert.ToChar(Raw(ordinal), CultureInfo.InvariantCulture);
-    public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) => throw new NotSupportedException();
+
+    public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length)
+    {
+        var str = GetString(ordinal);
+        if (buffer is null)
+        {
+            return str.Length;
+        }
+
+        if (dataOffset >= str.Length)
+        {
+            return 0;
+        }
+
+        var count = (int)Math.Min(length, str.Length - dataOffset);
+        str.CopyTo((int)dataOffset, buffer, bufferOffset, count);
+        return count;
+    }
     public override string GetDataTypeName(int ordinal) => Raw(ordinal)?.GetType().Name ?? "object";
     public override DateTime GetDateTime(int ordinal) => Convert.ToDateTime(Raw(ordinal), CultureInfo.InvariantCulture);
     public override decimal GetDecimal(int ordinal) => Convert.ToDecimal(Raw(ordinal), CultureInfo.InvariantCulture);

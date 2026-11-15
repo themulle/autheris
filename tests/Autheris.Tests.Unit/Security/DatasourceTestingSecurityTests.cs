@@ -14,7 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -69,7 +69,7 @@ public sealed class DatasourceTestingSecurityTests
         };
 
         _connectionFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => Task.FromResult<DbConnection>(new SqliteConnection()));
+            .Returns(_ => Task.FromResult<DbConnection>(new CallbackDbConnection((_, _) => new StubDbDataReader([], []))));
 
         var service = CreateService(gateway);
         var result = await service.TestDatasourceAsync(datasourceId, new DatasourceTestRequest(), Admin());

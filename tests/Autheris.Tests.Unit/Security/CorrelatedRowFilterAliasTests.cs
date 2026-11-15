@@ -1,22 +1,8 @@
-using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Security;
-using System.Security.Claims;
-using System.Threading.Tasks;
-using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Services;
-using Autheris.Domain.Common;
-using Autheris.Domain.Interfaces;
-using Autheris.Domain.Model;
-using Autheris.Domain.Options;
-using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
-using Shouldly;
 using Autheris.Tests.Unit.Sql;
+using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
@@ -30,69 +16,8 @@ namespace Autheris.Tests.Unit.Security;
 /// builders put on the filtered table.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class CorrelatedRowFilterAliasTests : IDisposable
+public sealed class CorrelatedRowFilterAliasTests
 {
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-corr-{Guid.NewGuid():N}.db");
-
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
-    }
-
-    [Fact]
-    public async Task SqlTableReadExecutor_AppliesCorrelatedPolicy_AgainstRealSqlite()
-    {
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = @"
-CREATE TABLE customers (id INTEGER PRIMARY KEY, country TEXT NOT NULL);
-CREATE TABLE invoices (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL, amount INTEGER NOT NULL);
-INSERT INTO customers VALUES (1, 'CH'), (2, 'DE');
-INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
-            cmd.ExecuteNonQuery();
-        }
-
-        var metadata = new TableMetadata
-        {
-            Identifier = new TableIdentifier("erp", "main", "invoices"),
-            Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "invoices", DataSourceType = DataSourceType.Sql, SourceType = "PostgreSql" },
-            Columns =
-            [
-                new TableColumn { ColumnName = "id", DataType = "integer" },
-                new TableColumn { ColumnName = "customer_id", DataType = "integer" },
-                new TableColumn { ColumnName = "amount", DataType = "integer" }
-            ]
-        };
-
-        var columnAccess = new Dictionary<string, ColumnAccessLevel>
-        {
-            ["id"] = ColumnAccessLevel.Clear,
-            ["customer_id"] = ColumnAccessLevel.Clear,
-            ["amount"] = ColumnAccessLevel.Clear
-        };
-        var principal = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TEST")], "Test"));
-        var context = new DataSourceExecutionContext(
-            SourceName: "erp",
-            Metadata: metadata,
-            Principal: principal,
-            AccessDecision: TableAccessDecision.Allowed(metadata.Identifier, columnAccess),
-            Arguments: new Dictionary<string, object?>(),
-            RequestedFields: ["id", "amount"]);
-
-        // The correlated row policy (EXISTS over customers of country CH) is applied by the compiler, not spliced as text.
-        var env = new TestCompileEnv(TargetSqlDialect.PostgreSql)
-            .Table("invoices", null, "id:INTEGER", "customer_id:INTEGER", "amount:INTEGER")
-            .Table("customers", null, "id:INTEGER", "country")
-            .Policy("invoices", CustomerCountryPolicy());
-        var executor = new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(conn, env).Executor();
-        var rows = await executor.ExecuteAsync(context);
-
-        rows.Select(r => Convert.ToInt64(r["id"])).OrderBy(x => x).ShouldBe(new long[] { 10, 12 });
-    }
-
     private static ColumnReference Col(params string[] parts) =>
         new(new SqlQualifiedName(parts.Select(p => new SqlIdentifier(p, false)).ToList()));
 
@@ -105,19 +30,6 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
                 new BinaryExpression(Col("c", "id"), BinaryOperator.Equal, Col(RowFilterAliases.Target, "customer_id")),
                 null, null), null, null)),
         new Dictionary<string, PolicyValue>());
-
-    /// <summary>EXISTS (SELECT 1 FROM customers c WHERE c.id = autheris_target.customer_id AND c.country = 'CH').</summary>
-    private static PolicyPredicate CustomerCountryPolicy() => PolicyPredicate.Create(
-        new ExistsExpression(new SelectStatement(null,
-            new QuerySpecification(false,
-                new SelectItem[] { new ColumnSelectItem(new LiteralExpression(1L, LiteralType.Integer), null) },
-                new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("customers", false) }), new SqlIdentifier("c", false)),
-                new BinaryExpression(
-                    new BinaryExpression(Col("c", "id"), BinaryOperator.Equal, Col(RowFilterAliases.Target, "customer_id")),
-                    BinaryOperator.And,
-                    new BinaryExpression(Col("c", "country"), BinaryOperator.Equal, new PolicyParameterExpression("__pol_country", SqlParameterType.String))),
-                null, null), null, null)),
-        new Dictionary<string, PolicyValue> { ["__pol_country"] = new("CH", SqlParameterType.String) });
 
     private static PolicyPredicate AmountPolicy() => PolicyPredicate.Create(
         new BinaryExpression(Col("amount"), BinaryOperator.Equal, new PolicyParameterExpression("__pol_amount", SqlParameterType.Int64)),

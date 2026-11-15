@@ -147,32 +147,6 @@ public sealed class OlapSqlInspectorTests
         }
     }
 
-    // ---- T3-06: autoload is off ----
-
-    [Fact]
-    public void ExtensionAutoloadSettings_AreFalse_AfterTheSandboxSetup()
-    {
-        using var connection = new DuckDB.NET.Data.DuckDBConnection("DataSource=:memory:");
-        connection.Open();
-        using (var setup = connection.CreateCommand())
-        {
-            setup.CommandText = DuckDbOlapEngine.BuildSetupSql(System.IO.Path.GetTempPath().Replace('\\', '/'), "256MB", "256MB", 1);
-            setup.ExecuteNonQuery();
-        }
-
-        using var read = connection.CreateCommand();
-        read.CommandText = "SELECT name, value FROM duckdb_settings() WHERE name IN ('autoload_known_extensions', 'autoinstall_known_extensions') ORDER BY name";
-        using var reader = read.ExecuteReader();
-        var values = new List<string>();
-        while (reader.Read())
-        {
-            values.Add(reader.GetString(1));
-        }
-
-        values.Count.ShouldBe(2);
-        values.ShouldAllBe(v => string.Equals(v, "false", StringComparison.OrdinalIgnoreCase));
-    }
-
     // ---- inspection facts ([verify]: shape of the DuckDB AST) ----
 
     [Fact]

@@ -1,10 +1,9 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
-using System.Data;
 using Autheris.Application.Procedures.Services;
 using Autheris.Domain.Exceptions;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Shouldly;
 using Xunit;
 
@@ -13,27 +12,13 @@ using Xunit;
 /// and binary values count with the Base64 factor of their JSON representation.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class ProcedureLobBudgetRSql8Tests : IDisposable
+public sealed class ProcedureLobBudgetRSql8Tests
 {
-    private readonly SqliteConnection _connection = new("Data Source=:memory:");
-
-    public ProcedureLobBudgetRSql8Tests()
+    private static StubDbDataReader OpenReader()
     {
-        _connection.Open();
-        using var cmd = _connection.CreateCommand();
-        cmd.CommandText = "CREATE TABLE lob(id INTEGER, txt TEXT, bin BLOB); INSERT INTO lob VALUES (1, $txt, $bin);";
-        cmd.Parameters.AddWithValue("$txt", new string('a', 100_000));
-        cmd.Parameters.AddWithValue("$bin", new byte[3000]);
-        cmd.ExecuteNonQuery();
-    }
-
-    public void Dispose() => _connection.Dispose();
-
-    private SqliteDataReader OpenReader()
-    {
-        var cmd = _connection.CreateCommand();
-        cmd.CommandText = "SELECT id, txt, bin FROM lob";
-        var reader = cmd.ExecuteReader(CommandBehavior.SequentialAccess);
+        var reader = new StubDbDataReader(
+            ["id", "txt", "bin"],
+            [[1L, new string('a', 100_000), new byte[3000]]]);
         reader.Read().ShouldBeTrue();
         return reader;
     }

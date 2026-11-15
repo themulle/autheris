@@ -17,7 +17,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Unit.Databricks;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -309,12 +309,27 @@ public sealed class WebSqlParserGatewaySecurityTests
     [Fact]
     public async Task P05_PostgreSqlConnection_ExecutesStandardConformingStringsBeforeTheQuery()
     {
-        // The factory hands out a SQLite connection although the data source is configured as PostgreSQL: the first
-        // statement sent must be the session initialization, which SQLite rejects with a syntax error near "SET". The caller only
-        // sees the sanitized provider error (X1.2); the original is in the server-side log.
+        // The first statement sent on a PostgreSQL connection must be the session initialization (SET ...);
+        // throwing on that non-query verifies the caller only sees the sanitized provider error (X1.2)
+        // while the original failure stays in the server-side log.
         var factory = Substitute.For<ISqlConnectionFactory>();
         factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => OpenSqliteAsync("Data Source=:memory:"));
+            .Returns(async _ =>
+            {
+                var conn = new CallbackDbConnection(
+                    executeReader: (_, _) => new StubDbDataReader([], []),
+                    executeNonQuery: (sql, _) =>
+                    {
+                        if (sql.StartsWith("SET", StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new StubDbException($"Simulated syntax error near \"SET\" for: {sql}");
+                        }
+
+                        return 0;
+                    });
+                await conn.OpenAsync();
+                return (DbConnection)conn;
+            });
         var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Host=unused" });
         var log = new CapturingLogger<GovernedSqlExecutionService>();
         var service = CreateService(options, CreateRepository(CreateTable("employees", "PostgreSQL")), factory, log);
@@ -324,14 +339,7 @@ public sealed class WebSqlParserGatewaySecurityTests
 
         ex.Code.ShouldBe("SQL_PROVIDER_ERROR");
         ex.Message.ShouldNotContain("SET");
-        log.Lines.ShouldContain(l => l.Contains("SqliteException") && l.Contains("SET"));
-    }
-
-    private static async Task<DbConnection> OpenSqliteAsync(string connectionString)
-    {
-        var connection = new SqliteConnection(connectionString);
-        await connection.OpenAsync();
-        return connection;
+        log.Lines.ShouldContain(l => l.Contains("StubDbException") && l.Contains("SET"));
     }
 
     // =========================================================================
