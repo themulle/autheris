@@ -17,5 +17,6 @@ public interface IDeclarativeConsentApplyService
         DeclarativeConsentManifest manifest,
         bool dryRun = false,
         SecurityPrincipalContext? callerContext = null,
+        DeclarativePruneMode pruneMode = DeclarativePruneMode.False,
         CancellationToken ct = default);
 }

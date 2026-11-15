@@ -55,6 +55,20 @@ public sealed record DeclarativeRowFilter(
     string? ValueSource = "LITERAL",
     string? UserAttribute = null);
 
+public enum DeclarativePruneMode
+{
+    False = 0,
+    True = 1,
+    Force = 2
+}
+
+public sealed record DeclarativePrunedConsentDto(
+    Guid ConsentId,
+    string Grantee,
+    string Domain,
+    string Schema,
+    string Table);
+
 public sealed record DeclarativeApplyResult(
     int TotalEvaluated,
     int Applied,
@@ -62,4 +76,6 @@ public sealed record DeclarativeApplyResult(
     int Revoked,
     bool DryRun,
     IReadOnlyList<string> Details,
-    int Updated = 0);
+    int Updated = 0,
+    int PrunedCount = 0,
+    IReadOnlyList<DeclarativePrunedConsentDto>? Pruned = null);

@@ -2,15 +2,19 @@ namespace Autheris.Application.Governance.Services;
 
 using Autheris.Domain.Identity;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -26,8 +30,21 @@ public sealed class DeclarativeConsentApplyService(
     IGrantPolicy? grantPolicy = null,
     IDatasetCatalogAdminService? datasetCatalog = null,
     IOptions<GovernanceTextOptions>? textOptions = null,
-    IGatewayRoleEvaluator? roleEvaluator = null) : IDeclarativeConsentApplyService
+    IGatewayRoleEvaluator? roleEvaluator = null,
+    IDataOwnershipRepository? dataOwnershipRepository = null) : IDeclarativeConsentApplyService
 {
+    public const int MaxDeclarativePruneCount = 10_000;
+    public const string PrunedByManifestReason = "PRUNED_BY_MANIFEST";
+
+    private sealed class KeyedLockEntry : IDisposable
+    {
+        public readonly SemaphoreSlim Semaphore = new(1, 1);
+        public int RefCount;
+        public void Dispose() => Semaphore.Dispose();
+    }
+
+    private static readonly object GranteeLocksGate = new();
+    private static readonly Dictionary<string, KeyedLockEntry> GranteeLocks = new(StringComparer.Ordinal);
     private static readonly GatewayRole[] RequiredApplyRoles = [GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin];
 
     // the policy is stateless; without an injected instance the built-in maxima apply (never "no policy").
@@ -36,6 +53,8 @@ public sealed class DeclarativeConsentApplyService(
 
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? new GrantPolicy();
     private readonly IGatewayRoleEvaluator _roleEvaluator = roleEvaluator ?? new GatewayRoleEvaluator();
+    private readonly IDataOwnershipRepository? _dataOwnershipRepository =
+        dataOwnershipRepository ?? (metadataRepository as IDataOwnershipRepository) ?? (consentRepository as IDataOwnershipRepository);
 
     private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
 
@@ -44,6 +63,7 @@ public sealed class DeclarativeConsentApplyService(
         DeclarativeConsentManifest manifest,
         bool dryRun = false,
         SecurityPrincipalContext? callerContext = null,
+        DeclarativePruneMode pruneMode = DeclarativePruneMode.False,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(caller);
@@ -70,7 +90,15 @@ public sealed class DeclarativeConsentApplyService(
         var hasDatasets = manifest.Datasets is { Count: > 0 };
         if ((manifest.Policies == null || manifest.Policies.Count == 0) && !hasDatasets)
         {
-            return new DeclarativeApplyResult(0, 0, 0, 0, dryRun, ["Empty manifest; 0 policies processed."]);
+            return new DeclarativeApplyResult(
+                0,
+                0,
+                0,
+                0,
+                dryRun,
+                ["Empty manifest; 0 policies processed."],
+                PrunedCount: 0,
+                Pruned: pruneMode != DeclarativePruneMode.False ? Array.Empty<DeclarativePrunedConsentDto>() : null);
         }
 
         var policies = manifest.Policies ?? [];
@@ -99,10 +127,23 @@ public sealed class DeclarativeConsentApplyService(
             descriptions[i] = check.Value;
         }
 
+        var lockKeys = !dryRun && policies.Count > 0
+            ? policies
+                .Where(p => !string.IsNullOrWhiteSpace(p.GranteeRef))
+                .Select(p => $"{tenantId.Value.ToUpperInvariant()}|{p.GranteeRef.Trim().ToUpperInvariant()}")
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(k => k, StringComparer.Ordinal)
+                .ToArray()
+            : [];
+
+        await using var granteeLocks = await AcquireGranteeLocksAsync(lockKeys, ct).ConfigureAwait(false);
+
         var revokeIds = new List<Guid>();
         var descriptionUpdates = new List<ConsentDescriptionUpdate>();
         var createList = new List<Consent>();
         var auditEntries = new List<AuditLogEntry>();
+        var manifestGrantees = new HashSet<(GranteeType Type, Sid Sid)>();
+        var declaredPairs = new HashSet<(GranteeType Type, Sid Sid, TableIdentifier Table)>();
 
         for (var policyIndex = 0; policyIndex < policies.Count; policyIndex++)
         {
@@ -113,6 +154,22 @@ public sealed class DeclarativeConsentApplyService(
             var metadata = await metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
             if (metadata == null)
             {
+                if (Enum.TryParse<GranteeType>(policy.GranteeType, ignoreCase: true, out var parsedType))
+                {
+                    if (parsedType != GranteeType.Role && !string.IsNullOrWhiteSpace(policy.GranteeRef))
+                    {
+                        var skippedSid = new Sid(policy.GranteeRef);
+                        manifestGrantees.Add((parsedType, skippedSid));
+                        declaredPairs.Add((parsedType, skippedSid, tableId));
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(policy.GranteeRef))
+                {
+                    var skippedSid = new Sid(policy.GranteeRef);
+                    manifestGrantees.Add((GranteeType.User, skippedSid));
+                    declaredPairs.Add((GranteeType.User, skippedSid, tableId));
+                }
+
                 details.Add($"Table '{tableId}' not found in catalog; skipped policy.");
                 continue;
             }
@@ -134,6 +191,8 @@ public sealed class DeclarativeConsentApplyService(
 
             Sid? granteeSid = null;
             granteeSid = new Sid(policy.GranteeRef);
+            manifestGrantees.Add((granteeType, granteeSid.Value));
+            declaredPairs.Add((granteeType, granteeSid.Value, tableId));
 
             // individual grants need an absolute, class-bounded validUntil (also in dry-run). Group/role grants are standing.
             var individual = granteeType is GranteeType.User or GranteeType.ServicePrincipal;
@@ -393,22 +452,150 @@ public sealed class DeclarativeConsentApplyService(
             }
         }
 
+        var authority = ConsentRevocationAuthority.FromPrincipal(caller);
+        var prunedDtos = new List<DeclarativePrunedConsentDto>();
+        var prunedIdSet = new HashSet<Guid>();
+        if (pruneMode != DeclarativePruneMode.False && manifestGrantees.Count > 0)
+        {
+            var manifestSids = manifestGrantees.Select(g => g.Sid).Distinct().ToList();
+            var activeForGrantees = await consentRepository
+                .GetAllActiveConsentsForSubjectsAsync(manifestSids, roles: null, atTime: now, tenantId: tenantId, ct)
+                .ConfigureAwait(false);
+
+            var activeDeclarative = activeForGrantees
+                .Where(c => c.IsActive(now)
+                            && c.TenantId == tenantId
+                            && c.GrantSource == ConsentGrantSource.Declarative
+                            && c.GranteeSid is { } sid
+                            && manifestGrantees.Contains((c.GranteeType, sid)))
+                .ToList();
+
+            var pruneCandidates = activeDeclarative
+                .Where(c => !declaredPairs.Contains((c.GranteeType, c.GranteeSid!.Value, c.TableIdentifier)))
+                .OrderBy(c => c.TableIdentifier.ToString(), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(c => c.GranteeSid!.Value.Value, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(c => c.Id)
+                .ToList();
+
+            if (pruneCandidates.Count > 0)
+            {
+                if (!authority.CanAccessTenant(tenantId))
+                {
+                    throw new ConsentRevocationForbiddenException();
+                }
+
+                if (!authority.AllowsAdminForTenant(tenantId))
+                {
+                    foreach (var table in pruneCandidates.Select(c => c.TableIdentifier).Distinct())
+                    {
+                        if (_dataOwnershipRepository is null ||
+                            !await _dataOwnershipRepository.IsAuthorizedApproverForTableAsync(table, actorSid, ct).ConfigureAwait(false))
+                        {
+                            throw new ConsentRevocationForbiddenException();
+                        }
+                    }
+                }
+
+                if (pruneCandidates.Count > MaxDeclarativePruneCount)
+                {
+                    throw new DeclarativePruneCapExceededException(pruneCandidates.Count, MaxDeclarativePruneCount);
+                }
+
+                if (pruneMode == DeclarativePruneMode.True &&
+                    activeDeclarative.Count >= 2 &&
+                    pruneCandidates.Count * 2 > activeDeclarative.Count)
+                {
+                    throw new DeclarativePruneThresholdExceededException(pruneCandidates.Count, activeDeclarative.Count);
+                }
+
+                var manifestSha256 = ComputeManifestSha256(manifest);
+                foreach (var candidate in pruneCandidates)
+                {
+                    prunedDtos.Add(new DeclarativePrunedConsentDto(
+                        candidate.Id,
+                        candidate.GranteeSid!.Value.Value,
+                        candidate.TableIdentifier.Domain,
+                        candidate.TableIdentifier.Schema,
+                        candidate.TableIdentifier.TableName));
+                    details.Add($"{(dryRun ? "[DryRun] Would prune" : "Pruned")} declarative consent '{candidate.Id}' for '{candidate.TableIdentifier}' -> '{candidate.GranteeSid!.Value.Value}'.");
+
+                    if (!dryRun)
+                    {
+                        prunedIdSet.Add(candidate.Id);
+                        auditEntries.Add(new AuditLogEntry
+                        {
+                            Id = Guid.NewGuid(),
+                            OccurredAt = now,
+                            EventType = AuditEventTypes.ConsentRevoked,
+                            ActorSid = actorSid,
+                            TargetTable = candidate.TableIdentifier.ToString(),
+                            Decision = "PRUNED",
+                            DetailsJson = JsonSerializer.Serialize(new
+                            {
+                                ConsentId = candidate.Id,
+                                Grantee = candidate.GranteeSid!.Value.Value,
+                                TableId = candidate.TableIdentifier.ToString(),
+                                Reason = PrunedByManifestReason,
+                                ManifestSha256 = manifestSha256
+                            }),
+                            TenantId = tenantId
+                        });
+                    }
+                }
+            }
+        }
+
         // one transaction and one epoch bump for the whole manifest; a fault leaves nothing changed and writes no audit.
         // M2: the APPLIED audit entries travel into the same transaction, so a committed change always has its (Tier-A, anchored) record and a failing
         // epoch invalidation after the commit cannot lose it.
-        if (!dryRun && (createList.Count > 0 || revokeIds.Count > 0 || descriptionUpdates.Count > 0))
+        if (!dryRun && (createList.Count > 0 || revokeIds.Count > 0 || descriptionUpdates.Count > 0 || prunedIdSet.Count > 0))
         {
-            var authority = ConsentRevocationAuthority.FromPrincipal(caller);
             var supersededReason = $"Superseded by GitOps declarative apply (version: {manifest.Version})";
-            if (descriptionUpdates.Count == 0)
+            if (prunedIdSet.Count == 0)
             {
-                await consentRepository.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, authority, auditEntries, ct).ConfigureAwait(false);
+                if (descriptionUpdates.Count == 0)
+                {
+                    await consentRepository.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, authority, auditEntries, ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    var descriptionWriter = consentRepository as IConsentDescriptionRepository
+                        ?? throw new InvalidOperationException("The consent repository does not support in-place description updates.");
+                    await descriptionWriter.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, authority, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
+                }
             }
             else
             {
-                var descriptionWriter = consentRepository as IConsentDescriptionRepository
-                    ?? throw new InvalidOperationException("The consent repository does not support in-place description updates.");
-                await descriptionWriter.ReplaceConsentsAsync(revokeIds, createList, actorSid, supersededReason, authority, auditEntries, descriptionUpdates, ct).ConfigureAwait(false);
+                var combinedRevokeIds = revokeIds.Concat(prunedIdSet).Distinct().ToList();
+                if (descriptionUpdates.Count == 0)
+                {
+                    await consentRepository.ReplaceConsentsAsync(
+                        combinedRevokeIds,
+                        createList,
+                        actorSid,
+                        supersededReason,
+                        authority,
+                        auditEntries,
+                        prunedIdSet,
+                        PrunedByManifestReason,
+                        ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    var descriptionWriter = consentRepository as IConsentDescriptionRepository
+                        ?? throw new InvalidOperationException("The consent repository does not support in-place description updates.");
+                    await descriptionWriter.ReplaceConsentsAsync(
+                        combinedRevokeIds,
+                        createList,
+                        actorSid,
+                        supersededReason,
+                        authority,
+                        auditEntries,
+                        descriptionUpdates,
+                        prunedIdSet,
+                        PrunedByManifestReason,
+                        ct).ConfigureAwait(false);
+                }
             }
         }
 
@@ -425,7 +612,105 @@ public sealed class DeclarativeConsentApplyService(
             }
         }
 
-        return new DeclarativeApplyResult(totalEvaluated, applied, unchanged, revoked, dryRun, details, updated);
+        return new DeclarativeApplyResult(
+            totalEvaluated,
+            applied,
+            unchanged,
+            revoked,
+            dryRun,
+            details,
+            updated,
+            PrunedCount: prunedDtos.Count,
+            Pruned: pruneMode != DeclarativePruneMode.False ? prunedDtos : null);
+    }
+
+    private static string ComputeManifestSha256(DeclarativeConsentManifest manifest)
+    {
+        var utf8Bytes = JsonSerializer.SerializeToUtf8Bytes(manifest);
+        return Convert.ToHexStringLower(SHA256.HashData(utf8Bytes));
+    }
+
+    private static async Task<GranteeLockLease> AcquireGranteeLocksAsync(string[] lockKeys, CancellationToken ct)
+    {
+        if (lockKeys.Length == 0)
+        {
+            return GranteeLockLease.Empty;
+        }
+
+        var acquired = new List<(string Key, KeyedLockEntry Entry)>(lockKeys.Length);
+        try
+        {
+            foreach (var key in lockKeys)
+            {
+                KeyedLockEntry entry;
+                lock (GranteeLocksGate)
+                {
+                    if (!GranteeLocks.TryGetValue(key, out entry!))
+                    {
+                        entry = new KeyedLockEntry();
+                        GranteeLocks[key] = entry;
+                    }
+
+                    entry.RefCount++;
+                }
+
+                try
+                {
+                    await entry.Semaphore.WaitAsync(ct).ConfigureAwait(false);
+                    acquired.Add((key, entry));
+                }
+                catch
+                {
+                    ReleaseLockEntry(key, entry, releaseSemaphore: false);
+                    throw;
+                }
+            }
+
+            return new GranteeLockLease(acquired);
+        }
+        catch
+        {
+            await new GranteeLockLease(acquired).DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static void ReleaseLockEntry(string key, KeyedLockEntry entry, bool releaseSemaphore)
+    {
+        if (releaseSemaphore)
+        {
+            entry.Semaphore.Release();
+        }
+
+        KeyedLockEntry? toDispose = null;
+        lock (GranteeLocksGate)
+        {
+            entry.RefCount--;
+            if (entry.RefCount <= 0 && GranteeLocks.TryGetValue(key, out var current) && ReferenceEquals(current, entry))
+            {
+                GranteeLocks.Remove(key);
+                toDispose = entry;
+            }
+        }
+
+        toDispose?.Dispose();
+    }
+
+    private sealed class GranteeLockLease(List<(string Key, KeyedLockEntry Entry)> entries) : IAsyncDisposable
+    {
+        public static readonly GranteeLockLease Empty = new([]);
+
+        public ValueTask DisposeAsync()
+        {
+            for (var i = entries.Count - 1; i >= 0; i--)
+            {
+                var (key, entry) = entries[i];
+                ReleaseLockEntry(key, entry, releaseSemaphore: true);
+            }
+
+            entries.Clear();
+            return ValueTask.CompletedTask;
+        }
     }
 
     // A Clear column rule exposes the column in clear text: the grant is classified like an Unmasked one.
@@ -580,4 +865,20 @@ public sealed class DeclarativeDatasetCatalogException(DatasetCatalogOutcome out
         DatasetCatalogOutcome.Unavailable => 503,
         _ => 400
     };
+}
+
+/// <summary>Raised when a declarative prune exceeds the hard per-run cap.</summary>
+public sealed class DeclarativePruneCapExceededException(int candidateCount, int maxAllowed)
+    : Exception($"Declarative consent prune candidate count ({candidateCount}) exceeds the maximum allowed per run ({maxAllowed}).")
+{
+    public int CandidateCount { get; } = candidateCount;
+    public int MaxAllowed { get; } = maxAllowed;
+}
+
+/// <summary>Raised when a declarative prune exceeds 50% of a grantee's active declarative consents without prune=force.</summary>
+public sealed class DeclarativePruneThresholdExceededException(int candidateCount, int totalCount)
+    : Exception($"Prune would revoke {candidateCount} of {totalCount} active declarative consents (> 50%); retry with prune=force to confirm.")
+{
+    public int CandidateCount { get; } = candidateCount;
+    public int TotalCount { get; } = totalCount;
 }

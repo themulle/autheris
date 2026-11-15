@@ -8,6 +8,7 @@ using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
@@ -75,6 +76,11 @@ public static partial class GovernanceEndpoints
             return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "You do not have permission to apply declarative consent manifests.", context);
         }
 
+        if (!TryParsePruneMode(context.Request.Query, out var pruneMode))
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.InvalidQuery, "Invalid 'prune' query parameter. Allowed values are 'false', 'true', and 'force'.", context);
+        }
+
         var dryRun = context.Request.Query.TryGetValue("dryRun", out var dryRunVal) &&
                      bool.TryParse(dryRunVal, out var parsedDryRun) && parsedDryRun;
 
@@ -121,12 +127,24 @@ public static partial class GovernanceEndpoints
 
         try
         {
-            var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, callerContext, ct);
+            var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, callerContext, pruneMode, ct);
             return Results.Ok(result);
+        }
+        catch (ConsentRevocationForbiddenException)
+        {
+            return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, ConsentRevocationForbiddenException.FixedMessage, context);
         }
         catch (Autheris.Application.Governance.Services.ConsentApplyForbiddenException)
         {
             return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "You do not have permission to apply declarative consent manifests.", context);
+        }
+        catch (Autheris.Application.Governance.Services.DeclarativePruneCapExceededException)
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The number of consents to prune exceeds the maximum allowed per run.", context);
+        }
+        catch (Autheris.Application.Governance.Services.DeclarativePruneThresholdExceededException)
+        {
+            return ApiProblems.Conflict(ApiErrorCodes.Conflict, "Prune exceeds 50% of active declarative consents for manifest grantees; retry with prune=force.", context);
         }
         catch (Autheris.Application.Governance.Services.DeclarativeDatasetCatalogException ex)
         {
@@ -150,5 +168,41 @@ public static partial class GovernanceEndpoints
                 context,
                 new Dictionary<string, object?>(StringComparer.Ordinal) { ["maxValidTo"] = ex.MaxValidTo });
         }
+    }
+
+    private static bool TryParsePruneMode(IQueryCollection query, out DeclarativePruneMode pruneMode)
+    {
+        if (!query.TryGetValue("prune", out var values))
+        {
+            pruneMode = DeclarativePruneMode.False;
+            return true;
+        }
+
+        if (values.Count != 1 || values[0] is not { } raw)
+        {
+            pruneMode = DeclarativePruneMode.False;
+            return false;
+        }
+
+        if (string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            pruneMode = DeclarativePruneMode.False;
+            return true;
+        }
+
+        if (string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            pruneMode = DeclarativePruneMode.True;
+            return true;
+        }
+
+        if (string.Equals(raw, "force", StringComparison.OrdinalIgnoreCase))
+        {
+            pruneMode = DeclarativePruneMode.Force;
+            return true;
+        }
+
+        pruneMode = DeclarativePruneMode.False;
+        return false;
     }
 }

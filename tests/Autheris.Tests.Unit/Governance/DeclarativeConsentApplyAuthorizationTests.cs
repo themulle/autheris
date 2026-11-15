@@ -76,6 +76,7 @@ public sealed class DeclarativeConsentApplyAuthorizationTests
             DeclarativeConsentManifest manifest,
             bool dryRun = false,
             Autheris.Domain.Security.SecurityPrincipalContext? callerContext = null,
+            DeclarativePruneMode pruneMode = DeclarativePruneMode.False,
             CancellationToken ct = default) =>
             Task.FromException<DeclarativeApplyResult>(toThrow);
     }

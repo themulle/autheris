@@ -235,6 +235,18 @@ public interface IConsentRepository
         ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default);
+
+    Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        ConsentRevocationAuthority authority,
+        IReadOnlyList<AuditLogEntry>? auditEntries,
+        IReadOnlySet<Guid>? prunedConsentIds,
+        string? pruneReason = null,
+        CancellationToken ct = default) =>
+        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, ct);
 }
 
 
@@ -471,6 +483,19 @@ public interface IConsentDescriptionRepository
         IReadOnlyList<AuditLogEntry>? auditEntries,
         IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
         CancellationToken ct);
+
+    Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        ConsentRevocationAuthority authority,
+        IReadOnlyList<AuditLogEntry>? auditEntries,
+        IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
+        IReadOnlySet<Guid>? prunedConsentIds,
+        string? pruneReason = null,
+        CancellationToken ct = default) =>
+        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, descriptionUpdates, ct);
 }
 
 /// <summary>

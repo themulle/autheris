@@ -30,7 +30,7 @@ public partial class GovernanceRepository
                                   AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
                                   AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
 
-        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
+        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source
                                 FROM CONSENTS c 
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.id = @id
@@ -48,7 +48,7 @@ public partial class GovernanceRepository
                                   AND c.is_revoked = 0" + (withTenant ? " AND c.tenant_id = @tenantId" : "") + @"
                                   AND c.grantee_type = 'Role' AND LOWER(c.role_name) = LOWER(@role)";
 
-        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
+        public const string RevokeTarget = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked, c.grant_source
                                 FROM CONSENTS c WITH (UPDLOCK, ROWLOCK)
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE c.id = @id";
@@ -79,6 +79,8 @@ public partial class GovernanceRepository
         return consents;
     }
 
+    internal const string PrunedByManifestReason = "PRUNED_BY_MANIFEST";
+
     public Task ReplaceConsentsAsync(
         IReadOnlyList<Guid> revokeConsentIds,
         IReadOnlyList<Consent> create,
@@ -87,9 +89,21 @@ public partial class GovernanceRepository
         ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries = null,
         CancellationToken ct = default) =>
-        ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, null, ct);
+        ReplaceConsentsCoreAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, null, null, null, ct);
 
-    public async Task ReplaceConsentsAsync(
+    public Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        ConsentRevocationAuthority authority,
+        IReadOnlyList<AuditLogEntry>? auditEntries,
+        IReadOnlySet<Guid>? prunedConsentIds,
+        string? pruneReason = null,
+        CancellationToken ct = default) =>
+        ReplaceConsentsCoreAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, null, prunedConsentIds, pruneReason, ct);
+
+    public Task ReplaceConsentsAsync(
         IReadOnlyList<Guid> revokeConsentIds,
         IReadOnlyList<Consent> create,
         Sid actor,
@@ -97,17 +111,45 @@ public partial class GovernanceRepository
         ConsentRevocationAuthority authority,
         IReadOnlyList<AuditLogEntry>? auditEntries,
         IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        ReplaceConsentsCoreAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, descriptionUpdates, null, null, ct);
+
+    public Task ReplaceConsentsAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        ConsentRevocationAuthority authority,
+        IReadOnlyList<AuditLogEntry>? auditEntries,
+        IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
+        IReadOnlySet<Guid>? prunedConsentIds,
+        string? pruneReason = null,
+        CancellationToken ct = default) =>
+        ReplaceConsentsCoreAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, descriptionUpdates, prunedConsentIds, pruneReason, ct);
+
+    private async Task ReplaceConsentsCoreAsync(
+        IReadOnlyList<Guid> revokeConsentIds,
+        IReadOnlyList<Consent> create,
+        Sid actor,
+        string reason,
+        ConsentRevocationAuthority authority,
+        IReadOnlyList<AuditLogEntry>? auditEntries,
+        IReadOnlyList<ConsentDescriptionUpdate>? descriptionUpdates,
+        IReadOnlySet<Guid>? prunedConsentIds,
+        string? pruneReason,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(revokeConsentIds);
         ArgumentNullException.ThrowIfNull(create);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-        if (revokeConsentIds.Count > 0 && string.IsNullOrWhiteSpace(actor.Value))
+        var hasPruned = prunedConsentIds is { Count: > 0 };
+        if ((revokeConsentIds.Count > 0 || hasPruned) && string.IsNullOrWhiteSpace(actor.Value))
         {
             throw new ArgumentException("Actor SID is required.", nameof(actor));
         }
 
         var effectiveAuthority = authority ?? ConsentRevocationAuthority.FromPrincipal(null);
+        var effectivePruneReason = string.IsNullOrWhiteSpace(pruneReason) ? PrunedByManifestReason : pruneReason;
 
         foreach (var c in create)
         {
@@ -126,14 +168,28 @@ public partial class GovernanceRepository
             }
         }
 
+        var allRevokeIds = hasPruned
+            ? revokeConsentIds.Concat(prunedConsentIds!).Distinct()
+            : revokeConsentIds.Distinct();
+
         var tables = new Dictionary<string, TableIdentifier>(StringComparer.OrdinalIgnoreCase);
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
-            foreach (var id in revokeConsentIds.Distinct())
+            foreach (var id in allRevokeIds)
             {
-                var revoked = await RevokeConsentInTransactionAsync(conn, tx, id, actor, reason, effectiveAuthority, ct).ConfigureAwait(false);
+                var isPruned = hasPruned && prunedConsentIds!.Contains(id);
+                var effectiveReason = isPruned ? effectivePruneReason : reason;
+                var revoked = await RevokeConsentInTransactionAsync(
+                    conn,
+                    tx,
+                    id,
+                    actor,
+                    effectiveReason,
+                    effectiveAuthority,
+                    requireDeclarativeForPrune: isPruned,
+                    ct).ConfigureAwait(false);
                 if (revoked != null)
                 {
                     tables[revoked.Value.ToString().ToLowerInvariant()] = revoked.Value;
@@ -243,7 +299,7 @@ public partial class GovernanceRepository
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
-            revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, effectiveAuthority, ct).ConfigureAwait(false);
+            revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, effectiveAuthority, requireDeclarativeForPrune: false, ct).ConfigureAwait(false);
             if (revoked is { } table)
             {
                 await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
@@ -328,7 +384,7 @@ public partial class GovernanceRepository
     }
 
     private async Task<TableIdentifier?> RevokeConsentInTransactionAsync(
-        DbConnection conn, DbTransaction tx, Guid consentId, Sid actor, string reason, ConsentRevocationAuthority authority, CancellationToken ct)
+        DbConnection conn, DbTransaction tx, Guid consentId, Sid actor, string reason, ConsentRevocationAuthority authority, bool requireDeclarativeForPrune, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(actor.Value))
         {
@@ -350,7 +406,7 @@ public partial class GovernanceRepository
         }
 
         var isAuthorized = isAdminForTenant
-                           || found.IsGranteeSelf
+                           || (!requireDeclarativeForPrune && found.IsGranteeSelf)
                            || await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, null, ct).ConfigureAwait(false);
         if (!isAuthorized)
         {
@@ -360,6 +416,11 @@ public partial class GovernanceRepository
         if (found.AlreadyRevoked)
         {
             return null;
+        }
+
+        if (requireDeclarativeForPrune && !string.Equals(found.RawGrantSource, "DECLARATIVE", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Consent '{consentId}' is not a declarative grant and cannot be pruned.");
         }
 
         var tenant = ConsentGrantSqlCore.ResolveConsentTenant(found.TenantRaw, consentId, tableId.Value.ToString());
@@ -430,7 +491,7 @@ public partial class GovernanceRepository
     }
 }
 
-internal readonly record struct RevokeTarget(TableIdentifier Table, string? TenantRaw, bool IsGranteeSelf, bool AlreadyRevoked);
+internal readonly record struct RevokeTarget(TableIdentifier Table, string? TenantRaw, bool IsGranteeSelf, bool AlreadyRevoked, string? RawGrantSource);
 
 internal static class ConsentGrantSqlCore
 {
@@ -503,8 +564,9 @@ internal static class ConsentGrantSqlCore
                              string.Equals(granteeType, "ServicePrincipal", StringComparison.OrdinalIgnoreCase)) &&
                             string.Equals(reader.IsDBNull(5) ? null : reader.GetString(5), actor.Value, StringComparison.OrdinalIgnoreCase);
         var isRevoked = reader.GetInt32(6) == 1;
+        var rawGrantSource = reader.FieldCount > 7 && !reader.IsDBNull(7) ? reader.GetString(7) : null;
 
-        return new RevokeTarget(table, rawTenant, isGranteeSelf, isRevoked);
+        return new RevokeTarget(table, rawTenant, isGranteeSelf, isRevoked, rawGrantSource);
     }
 
     public static async Task<bool> UpdateDescriptionAsync(
