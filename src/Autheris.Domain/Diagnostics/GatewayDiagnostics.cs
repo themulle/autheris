@@ -88,6 +88,9 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> RowFilterKeySetMisses =
         Meter.CreateCounter<long>("autheris.rowfilter.keyset.misses", description: "Correlated row-filter sites whose key set was loaded for the statement");
 
+    public static readonly Counter<long> DiscoveryFailuresCounter =
+        Meter.CreateCounter<long>("discovery_failures_total", description: "Catalog discovery evaluations that failed closed and returned empty or null");
+
     public static readonly Counter<long> RowFilterKeySetFallbacks =
         Meter.CreateCounter<long>("autheris.rowfilter.keyset.fallbacks", description: "Correlated row-filter sites that kept the exact EXISTS form, by reason");
 

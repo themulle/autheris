@@ -20,15 +20,24 @@ public sealed class TableRecordPayload
 
 public sealed class TableMetadataDto
 {
+    public DiscoveryObjectKind Kind { get; init; } = DiscoveryObjectKind.Table;
     public string Domain { get; init; } = string.Empty;
     public string Schema { get; init; } = string.Empty;
     public string TableName { get; init; } = string.Empty;
     public string DisplayName { get; init; } = string.Empty;
     public string Sensitivity { get; init; } = string.Empty;
     public string? Description { get; init; }
-    public IReadOnlyList<string> Columns { get; init; } = [];
+    public IReadOnlyList<DiscoveryColumn> Columns { get; init; } = [];
+    [GraphQLDeprecated("Use columns instead.")]
+    public IReadOnlyList<string> ColumnNames { get; init; } = [];
     public IReadOnlyList<string> Tags { get; init; } = [];
     public string? AccessStatus { get; init; }
+    public DiscoveryAccessState Access { get; init; } = DiscoveryAccessState.None;
+    public DiscoveryRowScope? RowScope { get; init; }
+    public IReadOnlyList<DiscoveryOwner> Owners { get; init; } = [];
+    public DiscoveryTableStatistics? Statistics { get; init; }
+    public bool SamplesAvailable { get; init; }
+    public bool IsHidden { get; init; }
     public string? DataOwner { get; init; }
     public IReadOnlyList<string>? Delegates { get; init; }
     public string? Language { get; init; }

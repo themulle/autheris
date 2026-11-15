@@ -31,83 +31,28 @@ public static partial class CatalogApiEndpoints
     {
         var group = app.MapGroup("/api/v1/catalog").WithIngressTransport(DataSourceTransportFlags.Rest);
 
-        group.MapGet("/datasets", async (
+        group.MapGet("/datasets", (
             ICatalogDiscoveryService discoveryService,
             HttpContext httpContext,
             CancellationToken ct) =>
-        {
-            var targetLang = ApplyCatalogLanguageAndVary(httpContext);
-            var context = CreateRequestContext(httpContext, targetLang);
-            var datasets = await discoveryService.ListDatasetsAsync(context, ct);
-            return Results.Ok(datasets);
-        })
+            CatalogDiscoveryApiHelpers.ListDatasetsAsync(discoveryService, httpContext, ApplyCatalogLanguageAndVary, CreateRequestContext, ct))
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        group.MapGet("/datasets/{*datasetId}", async (
+        group.MapGet("/datasets/{*datasetId}", (
             string datasetId,
             ICatalogDiscoveryService discoveryService,
             HttpContext httpContext,
             CancellationToken ct) =>
-        {
-            if (!TableIdentifier.TryParse(datasetId.Replace('/', '.'), out var tableId))
-            {
-                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The dataset identifier is invalid.", httpContext);
-            }
-
-            var targetLang = ApplyCatalogLanguageAndVary(httpContext);
-            var context = CreateRequestContext(httpContext, targetLang);
-            var detail = await discoveryService.GetDatasetDetailAsync(tableId, context, ct);
-            if (detail is null)
-            {
-                return Results.NotFound();
-            }
-
-            var isBrief = httpContext.Request.Query.TryGetValue("brief", out var briefVal) &&
-                          bool.TryParse(briefVal.ToString(), out var b) && b;
-            if (isBrief)
-            {
-                var briefDetail = new
-                {
-                    dataset = detail.DatasetId,
-                    domain = detail.Domain,
-                    schema = detail.Schema,
-                    table = detail.Table,
-                    description = detail.Description,
-                    sensitivity = detail.Sensitivity,
-                    primaryKeys = detail.PrimaryKeys,
-                    size = detail.Size,
-                    columns = detail.Columns.Select(c => new
-                    {
-                        name = c.Name,
-                        type = c.Type,
-                        description = c.Description,
-                        isPrimaryKey = c.IsPrimaryKey,
-                        isSensitive = c.Sensitivity != "Public" && c.Sensitivity != "NORMAL" && !string.IsNullOrEmpty(c.Sensitivity)
-                    })
-                };
-                return Results.Ok(briefDetail);
-            }
-
-            return Results.Ok(detail);
-        })
+            CatalogDiscoveryApiHelpers.GetDatasetDetailAsync(datasetId, discoveryService, httpContext, ApplyCatalogLanguageAndVary, CreateRequestContext, ct))
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        group.MapGet("/domains", async (
+        group.MapGet("/domains", (
             ICatalogDiscoveryService discoveryService,
             HttpContext httpContext,
             CancellationToken ct) =>
-        {
-            var context = CreateRequestContext(httpContext);
-            var datasets = await discoveryService.ListDatasetsAsync(context, ct);
-            var domains = datasets
-                .GroupBy(d => d.Domain, StringComparer.OrdinalIgnoreCase)
-                .Select(g => new { domain = g.Key, tableCount = g.Count() })
-                .OrderByDescending(d => d.tableCount)
-                .ToList();
-            return Results.Ok(new { totalTables = datasets.Count, totalDomains = domains.Count, domains });
-        })
+            CatalogDiscoveryApiHelpers.ListDomainsAsync(discoveryService, httpContext, CreateRequestContext, ct))
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
@@ -148,7 +93,7 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        group.MapGet("/search", async (
+        group.MapGet("/search", (
             string? q,
             string? domain,
             int? limit,
@@ -156,26 +101,7 @@ public static partial class CatalogApiEndpoints
             ICatalogDiscoveryService discoveryService,
             HttpContext httpContext,
             CancellationToken ct) =>
-        {
-            var targetLang = ApplyCatalogLanguageAndVary(httpContext);
-            var context = CreateRequestContext(httpContext, targetLang);
-            var searchMode = mode?.ToLowerInvariant() switch
-            {
-                "semantic" => CatalogSearchMode.SemanticVector,
-                "keyword" => CatalogSearchMode.KeywordBm25,
-                _ => CatalogSearchMode.Hybrid
-            };
-
-            var query = new CatalogSearchQuery(
-                QueryText: q ?? string.Empty,
-                DomainFilter: domain,
-                Limit: Math.Clamp(limit ?? 10, 1, 50),
-                Mode: searchMode,
-                Language: targetLang);
-
-            var hits = await discoveryService.SearchCatalogDetailedAsync(query, context, ct);
-            return Results.Ok(hits);
-        })
+            CatalogDiscoveryApiHelpers.SearchAsync(q, domain, limit, mode, discoveryService, httpContext, ApplyCatalogLanguageAndVary, CreateRequestContext, ct))
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 

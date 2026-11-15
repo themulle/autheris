@@ -78,6 +78,42 @@ type DataCatalogSyncPayload {
   warnings: [String!]!
 }
 
+type DiscoveryColumn {
+  clearAccessRequiresSeparateApproval: Boolean!
+  clearInSomeRows: Boolean!
+  dataType: String!
+  description: String
+  displayName: String
+  name: String!
+  pii: Boolean!
+  state: DiscoveryColumnState!
+  statistics: DiscoveryColumnStatistics
+}
+
+type DiscoveryColumnStatistics {
+  approxDistinctCount: Long
+  maxLength: Int
+  maxValue: String
+  minLength: Int
+  minValue: String
+  nullable: Boolean
+  nullRatio: Float
+  topValues: [String!]
+}
+
+type DiscoveryOwner {
+  displayName: String!
+  email: String
+}
+
+type DiscoveryTableStatistics {
+  approxRowCount: Long
+  lastUpdatedAt: DateTime
+  partitionColumns: [String!]
+  sizeBytes: Long
+  uploadedAt: DateTime!
+}
+
 type DownstreamConsumerEntity {
   distanceFromRoot: Int!
   id: String!
@@ -135,6 +171,7 @@ type Mutation {
     idempotencyKey: String
     requestId: UUID!
     rowFilter: RowFilterInput
+    writeRules: [ConsentWriteRuleInput!]
   ): ConsentRequestPayload! @cost(weight: "10")
   rejectConsentRequest(
     idempotencyKey: String
@@ -148,8 +185,10 @@ type Mutation {
     durationDays: Int!
     idempotencyKey: String
     justification: String!
+    requestWriteOnly: Boolean
     schema: String!
     tableName: String!
+    writeRules: [ConsentWriteRuleInput!]
   ): ConsentRequestPayload! @cost(weight: "10")
   revokeConsent(consentId: UUID!, reason: String!): Boolean! @cost(weight: "10")
   setConsentDescription(consentId: UUID!, description: String): ConsentDto!
@@ -181,6 +220,12 @@ type Query {
     search: String
     tag: String
   ): [TableMetadataDto!]! @cost(weight: "10")
+  catalogObject(
+    domain: String!
+    language: String
+    name: String!
+    schema: String!
+  ): TableMetadataDto @cost(weight: "10")
   exportGdprDataDisclosureReportPdfBase64(
     domain: String
     schema: String
@@ -247,16 +292,24 @@ type TableConsumersReport {
 }
 
 type TableMetadataDto {
+  access: DiscoveryAccessState!
   accessStatus: String
-  columns: [String!]!
+  columnNames: [String!]! @deprecated(reason: "Use columns instead.")
+  columns: [DiscoveryColumn!]!
   dataOwner: String
   delegates: [String!]
   description: String
   displayName: String!
   domain: String!
+  isHidden: Boolean!
+  kind: DiscoveryObjectKind!
   language: String
+  owners: [DiscoveryOwner!]!
+  rowScope: DiscoveryRowScope
+  samplesAvailable: Boolean!
   schema: String!
   sensitivity: String!
+  statistics: DiscoveryTableStatistics
   tableName: String!
   tags: [String!]!
 }
@@ -284,6 +337,14 @@ input ColumnMaskRuleInput {
   maskingType: String
 }
 
+input ConsentWriteRuleInput {
+  columns: [String!]!
+  id: UUID
+  maxRowsPerStatement: Long
+  operation: WriteOperation!
+  rowScope: WriteRowScope!
+}
+
 input RowFilterInput {
   filterGroup: String
   predicates: [RowFilterPredicateInput!]
@@ -305,12 +366,47 @@ enum ColumnAccessLevel {
   MASK
 }
 
+enum DiscoveryAccessState {
+  EXPIRED
+  GRANTED
+  NONE
+  REQUESTED
+}
+
+enum DiscoveryColumnState {
+  CLEAR
+  MASKED
+  NO_ACCESS
+}
+
+enum DiscoveryObjectKind {
+  PROCEDURE
+  TABLE
+  VIEW
+}
+
+enum DiscoveryRowScope {
+  FULL
+  ROW_RESTRICTED
+}
+
 enum LineageNodeType {
   COLUMN
   DASHBOARD
   EXTERNAL_SERVICE
   PIPELINE
   TABLE
+}
+
+enum WriteOperation {
+  DELETE
+  INSERT
+  UPDATE
+}
+
+enum WriteRowScope {
+  ALL_ROWS
+  OWN_ROWS
 }
 
 "The `DateTime` scalar type represents a date and time with time zone offset information."

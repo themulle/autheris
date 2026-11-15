@@ -52,7 +52,8 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(),
             sp.GetService<TimeProvider>(),
-            sp.GetService<ICatalogVisibilityMetrics>()));
+            sp.GetService<ICatalogVisibilityMetrics>(),
+            sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>()));
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Application.Policy.RowFilterKeySetCacheOptionsValidator>();
         // Issue #107: the row-filter key-set cache runtime. The cache size and concurrency are read once (a size change needs a restart,
         // 16); every other option is read per statement by the stage through IOptionsMonitor.

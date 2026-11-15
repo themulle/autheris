@@ -53,6 +53,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly IOptions<CatalogLocalizationOptions>? _localizationOptions;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly McpAccessHints _hints;
+    private readonly Autheris.Application.Catalog.Discovery.IDiscoveryService? _discoveryService;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public McpDatasetCatalog(
@@ -76,7 +77,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         IOptions<CatalogLocalizationOptions>? localizationOptions = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
-        IReadPathSwitches? switches = null)
+        IReadPathSwitches? switches = null,
+        Autheris.Application.Catalog.Discovery.IDiscoveryService? discoveryService = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -100,6 +102,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._localizationOptions = localizationOptions;
         this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _hints = new McpAccessHints(switches, options?.Value.Mcp.Enabled ?? false);
+        _discoveryService = discoveryService;
     }
 
     public McpDatasetCatalog(
@@ -122,7 +125,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         IOptions<CatalogLocalizationOptions>? localizationOptions = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
-        IReadPathSwitches? switches = null)
+        IReadPathSwitches? switches = null,
+        Autheris.Application.Catalog.Discovery.IDiscoveryService? discoveryService = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -145,6 +149,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         this._localizationOptions = localizationOptions;
         this._transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _hints = new McpAccessHints(switches, options?.Value.Mcp.Enabled ?? false);
+        _discoveryService = discoveryService;
     }
 
     public Task<McpDatasetList> ListDatasetsAsync(
@@ -196,6 +201,11 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         string? format,
         CancellationToken ct = default)
     {
+        if (_discoveryService != null && !IsBypassed)
+        {
+            return await ListDatasetsWithDiscoveryAsync(principal, search, domain, offset, limit, tag, language, overview, format, ct).ConfigureAwait(false);
+        }
+
         // F-C11: the service has already dropped every row the shaping rule maps to NotFound; the check below is the second line of
         // defence so such a row never reaches the filters, the total or the paging.
         var (allVisible, isAdminView) = await VisibleSetAsync(principal, ct).ConfigureAwait(false);
@@ -391,6 +401,11 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         if (dataset.TrimStart().StartsWith("procedure:", StringComparison.OrdinalIgnoreCase))
         {
             return await DescribeProcedureDatasetAsync(principal, dataset.Trim(), ct).ConfigureAwait(false);
+        }
+
+        if (_discoveryService != null && !IsBypassed)
+        {
+            return await DescribeDatasetWithDiscoveryAsync(principal, dataset, language, brief, ct).ConfigureAwait(false);
         }
 
         var (table, shape) = await FindVisibleAsync(principal, dataset, ct).ConfigureAwait(false);
@@ -1260,47 +1275,5 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         return row is { Shape: not CatalogOutputShape.NotFound } visible
             ? (visible.Table, visible.Shape)
             : throw new TableNotFoundException(requested);
-    }
-
-    private static bool Matches(TableMetadata table, string search)
-    {
-        var id = table.Identifier;
-        if (id.TableName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            id.Domain.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-            id.Schema.Contains(search, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (search.Contains('.', StringComparison.Ordinal) && DatasetId(id).Contains(search, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (table.Table.Description != null && table.Table.Description.Contains(search, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (table.Table.Texts.Entries.Count > 0 && table.Table.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) == true))
-        {
-            return true;
-        }
-
-        // A Summary row matches on identifier and description only; Full rows carry no DENY-masked column (removed by the engine).
-        if (table.CatalogView != CatalogView.Summary && table.Columns.Count > 0)
-        {
-            foreach (var c in table.Columns)
-            {
-                if (c.ColumnName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                    (c.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (c.Texts.Entries.Count > 0 && c.Texts.Entries.Values.Any(e => e.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 }

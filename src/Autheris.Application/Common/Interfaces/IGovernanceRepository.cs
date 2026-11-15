@@ -270,6 +270,15 @@ public interface IConsentRepository
         string? pruneReason = null,
         CancellationToken ct = default) =>
         ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, ct);
+
+    /// <summary>
+    /// Returns the tables in <paramref name="tenantId"/> on which <paramref name="userSid"/> held a non-revoked
+    /// Allow consent whose validity window expired on or after <paramref name="since"/>. Used by discovery to mark
+    /// <c>Expired</c> vs <c>None</c>; never grants access.
+    /// </summary>
+    Task<IReadOnlySet<TableIdentifier>> GetRecentlyExpiredTableIdsAsync(
+        Sid userSid, TenantId tenantId, DateTimeOffset since, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlySet<TableIdentifier>>(new HashSet<TableIdentifier>());
 }
 
 
@@ -436,6 +445,37 @@ public interface IDataOwnershipRepository
     Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default);
     Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default);
     Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default);
+
+    /// <summary>Batch-loads active data owners keyed by table identifier.</summary>
+    async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>> GetDataOwnersForTablesAsync(
+        IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
+    {
+        var result = new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>();
+        foreach (var table in tables)
+        {
+            var owners = await GetDataOwnersForTableAsync(table, ct).ConfigureAwait(false);
+            result[table] = owners.Where(static o => o.IsActive).ToList();
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Returns the subset of <paramref name="tables"/> on which <paramref name="actorSid"/> is an active owner
+    /// or active delegate at <paramref name="atTime"/>.
+    /// </summary>
+    async Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(
+        Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        var owned = new HashSet<TableIdentifier>();
+        foreach (var table in tables)
+        {
+            if (await IsAuthorizedApproverForTableAsync(table, actorSid, ct).ConfigureAwait(false))
+            {
+                owned.Add(table);
+            }
+        }
+        return owned;
+    }
 }
 
 public interface ITableRelationRepository

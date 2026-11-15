@@ -18,6 +18,7 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class CatalogSearchWarmupService : BackgroundService
 {
+    public const string CatalogVisibilityChangedEventChannel = "catalog:visibility-changed";
     public static readonly TimeSpan MinimumRebuildInterval = TimeSpan.FromSeconds(5);
 
     private readonly ITableMetadataRepository _metadataRepository;
@@ -32,12 +33,14 @@ public sealed class CatalogSearchWarmupService : BackgroundService
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
     private readonly object _statusLock = new();
     private IDisposable? _eventSubscription;
+    private IDisposable? _visibilityEventSubscription;
     private CatalogVersion? _lastIndexedVersion;
     private DateTimeOffset? _lastRebuildStartedUtc;
     private DateTimeOffset? _lastSuccessUtc;
     private DateTimeOffset? _lastAttemptUtc;
     private string? _lastErrorCode;
     private int _pendingRebuild;
+    private int _forceRebuild;
     private bool _isWaitingForCooldown;
 
     public bool HasPendingRebuild => Volatile.Read(ref _pendingRebuild) != 0;
@@ -84,6 +87,16 @@ public sealed class CatalogSearchWarmupService : BackgroundService
                 ICatalogVersionProvider.CatalogChangedEventChannel,
                 _ =>
                 {
+                    Interlocked.Exchange(ref _pendingRebuild, 1);
+                    _changeSignal.Writer.TryWrite(true);
+                    return Task.CompletedTask;
+                });
+
+            _visibilityEventSubscription = _eventBus.Subscribe<object>(
+                CatalogVisibilityChangedEventChannel,
+                _ =>
+                {
+                    Interlocked.Exchange(ref _forceRebuild, 1);
                     Interlocked.Exchange(ref _pendingRebuild, 1);
                     _changeSignal.Writer.TryWrite(true);
                     return Task.CompletedTask;
@@ -143,7 +156,8 @@ public sealed class CatalogSearchWarmupService : BackgroundService
             while (_changeSignal.Reader.TryRead(out _)) { }
             Interlocked.Exchange(ref _pendingRebuild, 0);
 
-            if (_versionProvider != null)
+            var forceRebuild = Interlocked.Exchange(ref _forceRebuild, 0) != 0;
+            if (!forceRebuild && _versionProvider != null)
             {
                 try
                 {
@@ -319,6 +333,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
     public override void Dispose()
     {
         _eventSubscription?.Dispose();
+        _visibilityEventSubscription?.Dispose();
         _rebuildLock.Dispose();
         base.Dispose();
     }

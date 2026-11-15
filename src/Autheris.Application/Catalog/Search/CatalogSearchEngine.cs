@@ -138,7 +138,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         var (opId, startVersion) = BeginMergeOperation();
         try
         {
-            var activeTables = tables.Where(static t => t != null && t.Table.IsActive).ToList();
+            var activeTables = tables.Where(static t => t != null && t.Table.IsActive && !t.Table.DiscoveryHidden).ToList();
             var prepared = PrepareDocuments(activeTables, ct);
             var vectors = await ResolveEmbeddingsWithCacheAsync(prepared, existingVectorIndex: null, ct).ConfigureAwait(false);
             var baseSnapshot = BuildCleanSnapshot(prepared, vectors, _timeProvider.GetUtcNow());
@@ -183,7 +183,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         foreach (var table in upsertedTables)
         {
             ArgumentNullException.ThrowIfNull(table);
-            if (!table.Table.IsActive || explicitRemovals.Contains(table.Identifier))
+            if (!table.Table.IsActive || table.Table.DiscoveryHidden || explicitRemovals.Contains(table.Identifier))
             {
                 explicitRemovals.Add(table.Identifier);
                 continue;
@@ -266,7 +266,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
                 await BeforeCompactionCommitForTesting(ct).ConfigureAwait(false);
             }
 
-            var activeTables = captured.MetadataMap.Values.Where(static t => t.Table.IsActive).ToList();
+            var activeTables = captured.MetadataMap.Values.Where(static t => t.Table.IsActive && !t.Table.DiscoveryHidden).ToList();
             var prepared = PrepareDocuments(activeTables, ct);
             var vectors = await ResolveEmbeddingsWithCacheAsync(prepared, captured.VectorIndex, ct).ConfigureAwait(false);
             var compactedBase = BuildCleanSnapshot(prepared, vectors, _timeProvider.GetUtcNow());
@@ -519,10 +519,11 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         {
             var doc = candidates[i];
             // If an existing non-hidden table transitioned to Hidden, treat it as removed from searchable segments.
-            if (current != null &&
-                current.MetadataMap.TryGetValue(doc.Table.Identifier, out var existing) &&
-                existing.Table.Visibility != DatasetVisibility.Hidden &&
-                doc.Table.Table.Visibility == DatasetVisibility.Hidden)
+            if (doc.Table.Table.DiscoveryHidden ||
+                (current != null &&
+                 current.MetadataMap.TryGetValue(doc.Table.Identifier, out var existing) &&
+                 existing.Table.Visibility != DatasetVisibility.Hidden &&
+                 doc.Table.Table.Visibility == DatasetVisibility.Hidden))
             {
                 removals.Add(doc.Table.Identifier);
                 continue;
@@ -746,7 +747,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
                 }
 
                 var matchedCols = meta?.Columns
-                    .Where(c => kvp.Value.Terms.Any(term =>
+                    .Where(c => !c.DiscoveryHidden && kvp.Value.Terms.Any(term =>
                         c.ColumnName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
                         (!string.IsNullOrEmpty(c.DisplayName) && c.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
                         (!string.IsNullOrEmpty(c.Description) && c.Description.Contains(term, StringComparison.OrdinalIgnoreCase)) ||

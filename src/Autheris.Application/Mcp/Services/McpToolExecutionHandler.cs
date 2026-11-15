@@ -8,6 +8,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.Catalog.Semantic;
@@ -244,28 +245,31 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 effectiveMode,
                 results.Count);
 
-            return JsonSerializer.Serialize(new
+            var payloadItems = results.Select(h => new
             {
+                table = McpDatasetCatalog.DatasetIdOf(h),
+                domain = h.Domain,
+                display_name = DiscoveryTextSanitizer.SanitizeText(h.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
+                description = DiscoveryTextSanitizer.SanitizeText(h.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
+                language = h.Language,
+                relevance_score = Math.Round(h.CombinedScore, 4),
+                matched_terms = h.MatchedTerms.Select(t => DiscoveryTextSanitizer.SanitizeRequiredText(t, string.Empty, DiscoveryTextSanitizer.MaxDisplayNameRunes)).ToList(),
+                matched_columns = h.RelevantColumns,
+                join_relations = h.RelatedJoinPaths.Select(r => new
+                {
+                    target_table = McpDatasetCatalog.DatasetId(r.ToTable),
+                    join_condition = $"{h.TableIdentifier.TableName}.{r.FromColumn} = {r.ToTable.TableName}.{r.ToColumn}"
+                })
+            }).ToList();
+
+            return SerializeBoundedList(payloadItems, items => new
+            {
+                contentNotice = McpDocTools.UntrustedContentNotice,
                 total_hits = results.Count,
                 query,
                 mode = effectiveMode,
-                datasets = results.Select(h => new
-                {
-                    table = McpDatasetCatalog.DatasetIdOf(h),
-                    domain = h.Domain,
-                    display_name = h.DisplayName,
-                    description = h.Description,
-                    language = h.Language,
-                    relevance_score = Math.Round(h.CombinedScore, 4),
-                    matched_terms = h.MatchedTerms,
-                    matched_columns = h.RelevantColumns,
-                    join_relations = h.RelatedJoinPaths.Select(r => new
-                    {
-                        target_table = McpDatasetCatalog.DatasetId(r.ToTable),
-                        join_condition = $"{h.TableIdentifier.TableName}.{r.FromColumn} = {r.ToTable.TableName}.{r.ToColumn}"
-                    })
-                })
-            }, JsonOpts);
+                datasets = items
+            });
         }
 
         if (string.Equals(tool.Name, McpDatasetTools.FindRelevantTables, StringComparison.OrdinalIgnoreCase))
@@ -291,7 +295,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var candidates = results.Select(h => new McpUseCaseCandidate(
                 Dataset: McpDatasetCatalog.DatasetIdOf(h),
                 Domain: h.Domain ?? h.TableIdentifier.Domain ?? "",
-                Description: h.Description,
+                Description: DiscoveryTextSanitizer.SanitizeText(h.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
                 RelevanceScore: Math.Round(h.CombinedScore, 4),
                 MatchedColumns: h.RelevantColumns,
                 Relations: h.RelatedJoinPaths.Select(r => new McpTableRelation(
@@ -300,13 +304,14 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     ToColumn: r.ToColumn)).ToList()
             )).ToList();
 
-            var result = new McpUseCaseDiscoveryResult(
-                UseCase: useCase,
-                TotalCandidates: candidates.Count,
-                Candidates: candidates,
-                RecommendedNextStep: "Call get_table_schema(datasets: [...]) to inspect required columns and join conditions, then generate query using query_sql or query_dataset.");
-
-            return JsonSerializer.Serialize(result, JsonOpts);
+            return SerializeBoundedList(candidates, items => new
+            {
+                contentNotice = McpDocTools.UntrustedContentNotice,
+                UseCase = useCase,
+                TotalCandidates = results.Count,
+                Candidates = items,
+                RecommendedNextStep = "Call get_table_schema(datasets: [...]) to inspect required columns and join conditions, then generate query using query_sql or query_dataset."
+            });
         }
 
         if (string.Equals(tool.Name, McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase))
@@ -697,6 +702,24 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
 
     private static string CreateMcpError(string tenantId, string tool, string code, string message) =>
         McpToolError.Serialize(code, message, tenantId, tool);
+
+    private static string SerializeBoundedList<T>(IReadOnlyList<T> items, Func<IReadOnlyList<T>, object> envelope)
+    {
+        var slice = items;
+        while (slice.Count > 0)
+        {
+            var json = JsonSerializer.Serialize(envelope(slice), JsonOpts);
+            if (System.Text.Encoding.UTF8.GetByteCount(json) <= DiscoveryTextSanitizer.MaxMcpPayloadBytes)
+            {
+                return json;
+            }
+
+            var nextCount = slice.Count == 1 ? 0 : slice.Count / 2;
+            slice = slice.Take(nextCount).ToList();
+        }
+
+        return JsonSerializer.Serialize(envelope([]), JsonOpts);
+    }
 
     private static ClaimsPrincipal BuildUserPrincipal(McpSessionContext session)
     {

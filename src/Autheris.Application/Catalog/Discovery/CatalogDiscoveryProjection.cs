@@ -1,0 +1,128 @@
+namespace Autheris.Application.Catalog.Discovery;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Search;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
+
+/// <summary>
+/// Projects <see cref="DiscoveryObject"/> records into existing REST/Application catalog DTOs.
+/// </summary>
+public static class CatalogDiscoveryProjection
+{
+    public static CatalogDatasetSummary ToDatasetSummary(DiscoveryObject obj, string? language) =>
+        new(
+            DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}",
+            Domain: obj.Domain,
+            Schema: obj.Schema,
+            Table: obj.Name,
+            SourceType: obj.Kind.ToString().ToLowerInvariant(),
+            Sensitivity: obj.Sensitivity,
+            Description: obj.Description,
+            IsActive: true,
+            DisplayName: obj.DisplayName,
+            Language: language);
+
+    public static CatalogDatasetDetail ToDatasetDetail(DiscoveryObject obj, string? language)
+    {
+        var columns = obj.Columns.Select(c => new CatalogColumnDetail(
+            Name: c.Name,
+            Type: c.DataType,
+            Sensitivity: c.Pii ? "Sensitive" : "Public",
+            MaskingState: c.State switch
+            {
+                DiscoveryColumnState.Clear => "Clear",
+                DiscoveryColumnState.Masked => "Masked",
+                _ => "Deny"
+            },
+            IsPrimaryKey: false,
+            IsPiiIndicator: c.Pii,
+            DisplayName: c.DisplayName ?? c.Name,
+            Description: c.Description)).ToList();
+
+        return new CatalogDatasetDetail(
+            DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}",
+            Domain: obj.Domain,
+            Schema: obj.Schema,
+            Table: obj.Name,
+            Columns: columns,
+            PrimaryKeys: [],
+            Sensitivity: obj.Sensitivity,
+            IsActive: true,
+            Indexes: [],
+            DisplayName: obj.DisplayName,
+            Description: obj.Description,
+            LongDescription: null,
+            Language: language);
+    }
+
+    public static CatalogSearchHit ToSearchHit(DiscoveryObject obj, string? effectiveMode, string? language) =>
+        new(
+            TableIdentifier: new TableIdentifier(obj.Domain, obj.Schema, obj.Name),
+            DisplayName: obj.DisplayName ?? $"{obj.Domain}.{obj.Name}",
+            Description: obj.Description,
+            Domain: obj.Domain,
+            Sensitivity: obj.Sensitivity,
+            CombinedScore: 1.0,
+            Bm25Score: 1.0,
+            VectorScore: null,
+            MatchedTerms: [],
+            RelevantColumns: obj.Columns.Where(static c => c.State != DiscoveryColumnState.NoAccess).Select(static c => c.Name).Take(5).ToList(),
+            RelatedJoinPaths: [],
+            SuggestedGraphQlField: null,
+            EffectiveMode: effectiveMode,
+            Language: language,
+            Kind: obj.Kind.ToString().ToLowerInvariant(),
+            DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}");
+
+    public static IReadOnlyList<CatalogDatasetSummary> FilterProcedureSummaries(
+        IReadOnlyList<RegisteredProcedure> visibleProcedures,
+        string? domain,
+        string? trimmedQuery) =>
+        visibleProcedures
+            .Where(p => string.IsNullOrWhiteSpace(domain) || string.Equals(p.Definition.CatalogDomain, domain, StringComparison.OrdinalIgnoreCase))
+            .Where(p => string.IsNullOrWhiteSpace(trimmedQuery) ||
+                        p.Definition.Name.Contains(trimmedQuery, StringComparison.OrdinalIgnoreCase) ||
+                        p.Definition.Summary.Contains(trimmedQuery, StringComparison.OrdinalIgnoreCase) ||
+                        (p.Definition.Description?.Contains(trimmedQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                        p.Definition.Parameters.Any(param => param.Name.Contains(trimmedQuery, StringComparison.OrdinalIgnoreCase)))
+            .Select(p => new CatalogDatasetSummary(
+                DatasetId: $"procedure:{p.Definition.Name}",
+                Domain: p.Definition.CatalogDomain,
+                Schema: "procedure",
+                Table: p.Definition.Name,
+                SourceType: "procedure",
+                Sensitivity: "NORMAL",
+                Description: p.Definition.Summary,
+                IsActive: true))
+            .ToList();
+
+    public static IReadOnlyList<CatalogSearchHit> FilterProcedureHits(
+        IReadOnlyList<RegisteredProcedure> visibleProcedures,
+        string? domain,
+        string? trimmedQuery) =>
+        visibleProcedures
+            .Where(p => string.IsNullOrWhiteSpace(domain) || string.Equals(p.Definition.CatalogDomain, domain, StringComparison.OrdinalIgnoreCase))
+            .Where(p => string.IsNullOrWhiteSpace(trimmedQuery) ||
+                        p.Definition.Name.Contains(trimmedQuery, StringComparison.OrdinalIgnoreCase) ||
+                        p.Definition.Summary.Contains(trimmedQuery, StringComparison.OrdinalIgnoreCase))
+            .Select(p => new CatalogSearchHit(
+                TableIdentifier: new TableIdentifier(p.Definition.CatalogDomain, "procedure", p.Definition.Name),
+                DisplayName: p.Definition.Summary,
+                Description: p.Definition.Description ?? p.Definition.Summary,
+                Domain: p.Definition.CatalogDomain,
+                Sensitivity: "NORMAL",
+                CombinedScore: 1.0,
+                Bm25Score: 1.0,
+                VectorScore: null,
+                MatchedTerms: string.IsNullOrWhiteSpace(trimmedQuery) ? [] : [trimmedQuery],
+                RelevantColumns: p.Definition.Parameters.Select(param => param.Name).ToList(),
+                RelatedJoinPaths: [],
+                SuggestedGraphQlField: null,
+                Kind: "procedure",
+                DatasetId: $"procedure:{p.Definition.Name}"))
+            .ToList();
+}

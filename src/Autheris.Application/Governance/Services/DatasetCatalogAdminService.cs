@@ -40,6 +40,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
     private readonly IOptionsMonitor<GatewayOptions> _options;
     private readonly TimeProvider _time;
     private readonly ICatalogVisibilityMetrics? _metrics;
+    private readonly IEventBus? _eventBus;
     // Probe throttle state: bounded (hard cap, then one shared overflow bucket), swept at most once per window under the lock.
     private readonly Dictionary<string, ProbeWindowState> _probes = new(StringComparer.Ordinal);
     private readonly object _probeLock = new();
@@ -57,7 +58,8 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         IAuditWriter audit,
         IOptionsMonitor<GatewayOptions> options,
         TimeProvider? time = null,
-        ICatalogVisibilityMetrics? metrics = null)
+        ICatalogVisibilityMetrics? metrics = null,
+        IEventBus? eventBus = null)
     {
         _tables = tables ?? throw new ArgumentNullException(nameof(tables));
         _owners = owners;
@@ -65,6 +67,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _time = time ?? TimeProvider.System;
         _metrics = metrics;
+        _eventBus = eventBus;
     }
 
     private sealed class ProbeWindowState(DateTimeOffset start, Caller owner, bool overflow = false)
@@ -319,6 +322,14 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         {
             await AuditChangeAsync(AuditEventTypes.CatalogVisibilityChanged, actor, table, source, discoveryChange!.Before, discoveryChange.After).ConfigureAwait(false);
             _metrics?.RequestRefresh();
+        }
+
+        if ((visibilityChanged || discoveryChanged) && _eventBus != null)
+        {
+            await _eventBus.PublishAsync(
+                Autheris.Application.Catalog.Search.CatalogSearchWarmupService.CatalogVisibilityChangedEventChannel,
+                table.ToString(),
+                ct).ConfigureAwait(false);
         }
 
         if (privacyChanged)

@@ -518,6 +518,66 @@ internal static class CatalogRowHydrator
         return owners;
     }
 
+    internal static async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>> GetDataOwnersForTablesAsync(
+        DbConnection conn,
+        string sql,
+        IReadOnlyCollection<TableIdentifier> tables,
+        CancellationToken ct)
+    {
+        var wanted = tables as IReadOnlySet<TableIdentifier> ?? tables.ToHashSet();
+        var grouped = new Dictionary<TableIdentifier, List<DataOwner>>();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var id = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
+            if (!wanted.Contains(id))
+            {
+                continue;
+            }
+
+            if (!grouped.TryGetValue(id, out var list))
+            {
+                list = [];
+                grouped[id] = list;
+            }
+
+            list.Add(ReadDataOwner(reader, o: 3));
+        }
+
+        return grouped.ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<DataOwner>)kvp.Value);
+    }
+
+    internal static async Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(
+        DbConnection conn,
+        string sql,
+        Sid actorSid,
+        IReadOnlyCollection<TableIdentifier> tables,
+        DateTimeOffset atTime,
+        CancellationToken ct)
+    {
+        var wanted = tables as IReadOnlySet<TableIdentifier> ?? tables.ToHashSet();
+        var owned = new HashSet<TableIdentifier>();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.AddBound("@sid", actorSid.Value);
+        cmd.AddBound("@now", atTime.ToUniversalTime().ToString("O"));
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var id = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
+            if (wanted.Contains(id))
+            {
+                owned.Add(id);
+            }
+        }
+
+        return owned;
+    }
+
     internal static async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(
         DbConnection conn,
         string sql,

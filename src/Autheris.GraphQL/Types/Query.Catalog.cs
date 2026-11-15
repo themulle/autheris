@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
@@ -124,6 +125,7 @@ public sealed partial class Query
         string? language = null,
         [Service] Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         [Service] IOptions<Autheris.Domain.Options.CatalogLocalizationOptions>? localizationOptions = null,
+        [Service] IDiscoveryService? discoveryService = null,
         CancellationToken ct = default)
     {
         var httpContext = httpContextAccessor?.HttpContext;
@@ -195,6 +197,26 @@ public sealed partial class Query
                 .Build());
         }
 
+        if (discoveryService != null)
+        {
+            var caller = new Autheris.Application.Catalog.Interfaces.CatalogCaller(
+                principal,
+                tenantId,
+                Autheris.Application.Catalog.Interfaces.CatalogChannel.GraphQl);
+            try
+            {
+                var page = await discoveryService.ListAsync(
+                    new DiscoveryQuery(domain, null, search, tag, targetLang, first ?? 1000, after ?? 0, DiscoverySurface.GraphQl),
+                    caller,
+                    ct).ConfigureAwait(false);
+                return page.Items.Select(o => ToTableMetadataDto(o, targetLang)).ToList();
+            }
+            catch (DiscoveryStatusException ex)
+            {
+                throw MapDiscoveryGraphQlError(ex);
+            }
+        }
+
         // #138 INC-1: the one visibility service decides the row set (caller scope, consent, tier, shape); a missing service is empty.
         // Scope, admin view and shape come from the returned set; this channel never recomputes them.
         if (visibilityService == null)
@@ -234,6 +256,108 @@ public sealed partial class Query
         return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
     }
 
+    public async Task<TableMetadataDto?> GetCatalogObjectAsync(
+        string domain,
+        string schema,
+        string name,
+        string? language = null,
+        [Service] IDiscoveryService? discoveryService = null,
+        [Service] IHttpContextAccessor httpContextAccessor = default!,
+        [Service] Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
+        [Service] IOptions<Autheris.Domain.Options.CatalogLocalizationOptions>? localizationOptions = null,
+        CancellationToken ct = default)
+    {
+        if (!TableIdentifier.TryCreate(domain, schema, name, out var tableId))
+        {
+            throw InvalidTableArgument();
+        }
+
+        var httpContext = httpContextAccessor?.HttpContext;
+        var principal = httpContext?.User;
+        if (principal?.Identity?.IsAuthenticated != true || principal.GetUserSid() == null)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage("Authentication is required for catalog queries.")
+                .Build());
+        }
+
+        TenantId tenantId;
+        try
+        {
+            tenantId = principal.GetTenantId();
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage("No valid tenant in the authentication token.")
+                .Build());
+        }
+
+        if (discoveryService == null)
+        {
+            return null;
+        }
+
+        var acceptLanguage = httpContext?.Request?.Headers.AcceptLanguage.ToString();
+        var requestedLang = !string.IsNullOrWhiteSpace(language) ? language : (!string.IsNullOrWhiteSpace(acceptLanguage) ? acceptLanguage : null);
+        var targetLang = languageNegotiator?.NegotiateLanguage(requestedLang, localizationOptions?.Value.SupportedLanguages, localizationOptions?.Value.DefaultLanguage);
+        var caller = new Autheris.Application.Catalog.Interfaces.CatalogCaller(principal, tenantId, Autheris.Application.Catalog.Interfaces.CatalogChannel.GraphQl);
+
+        try
+        {
+            var found = await discoveryService.GetAsync(tableId, caller, ct).ConfigureAwait(false);
+            return found == null ? null : ToTableMetadataDto(found, targetLang);
+        }
+        catch (DiscoveryStatusException ex)
+        {
+            throw MapDiscoveryGraphQlError(ex);
+        }
+    }
+
+    private static GraphQLException MapDiscoveryGraphQlError(DiscoveryStatusException ex)
+    {
+        var code = ex.Kind switch
+        {
+            DiscoveryFailureKind.Unauthenticated => "UNAUTHORIZED",
+            DiscoveryFailureKind.Forbidden => "FORBIDDEN",
+            DiscoveryFailureKind.RateLimited => "RATE_LIMITED",
+            _ => "BAD_REQUEST"
+        };
+        return new GraphQLException(ErrorBuilder.New().SetCode(code).SetMessage(ex.Message).Build());
+    }
+
+    internal static TableMetadataDto ToTableMetadataDto(DiscoveryObject obj, string? language = null) =>
+        new()
+        {
+            Kind = obj.Kind,
+            Domain = obj.Domain,
+            Schema = obj.Schema,
+            TableName = obj.Name,
+            DisplayName = obj.DisplayName ?? obj.Name,
+            Sensitivity = obj.Sensitivity,
+            Description = obj.Description,
+            Columns = obj.Columns,
+            ColumnNames = obj.Columns.Select(static c => c.Name).ToList(),
+            Tags = obj.Tags,
+            AccessStatus = obj.Access switch
+            {
+                DiscoveryAccessState.Granted => "GRANTED",
+                DiscoveryAccessState.Requested => "PENDING",
+                DiscoveryAccessState.Expired => "EXPIRED",
+                _ => "REQUEST_ACCESS"
+            },
+            Access = obj.Access,
+            RowScope = obj.RowScope,
+            Owners = obj.Owners,
+            Statistics = obj.Statistics,
+            SamplesAvailable = obj.SamplesAvailable,
+            IsHidden = obj.IsHidden,
+            DataOwner = obj.Owners.FirstOrDefault()?.DisplayName,
+            Language = language
+        };
+
     /// <summary>The shaping loop of the catalog query: rows that do not exist for the caller are dropped before filtering and paging (F-C11).</summary>
     internal static List<TableMetadataDto> ToCatalogDtos(
         IEnumerable<TableMetadata> visibleTables, bool isAdminView, IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests, bool isAdmin, string? language = null)
@@ -266,6 +390,23 @@ public sealed partial class Query
 
         var resolved = !string.IsNullOrWhiteSpace(language) ? t.Table.Texts.Resolve(language) : null;
 
+        var columnNames = shape == Autheris.Application.Services.CatalogOutputShape.Summary ? [] : t.Columns.Select(c => c.ColumnName).ToList();
+        IReadOnlyList<DiscoveryColumn> columns = shape == Autheris.Application.Services.CatalogOutputShape.Summary
+            ? Array.Empty<DiscoveryColumn>()
+            : t.Columns.Select(c =>
+            {
+                var colResolved = !string.IsNullOrWhiteSpace(language) ? c.Texts.Resolve(language) : null;
+                return new DiscoveryColumn(
+                    c.ColumnName,
+                    colResolved?.Title ?? c.DisplayName,
+                    c.DataType,
+                    colResolved?.Description ?? c.Description,
+                    c.IsSensitive,
+                    false,
+                    c.IsSensitive ? DiscoveryColumnState.Masked : DiscoveryColumnState.Clear,
+                    null);
+            }).ToList();
+
         return new TableMetadataDto
         {
             Domain = t.Identifier.Domain,
@@ -274,7 +415,8 @@ public sealed partial class Query
             DisplayName = resolved?.Title ?? t.Table.DisplayName,
             Sensitivity = t.Table.Sensitivity,
             Description = resolved?.Description ?? t.Table.Description,
-            Columns = shape == Autheris.Application.Services.CatalogOutputShape.Summary ? [] : t.Columns.Select(c => c.ColumnName).ToList(),
+            Columns = columns,
+            ColumnNames = columnNames,
             Tags = t.CatalogTags,
             AccessStatus = status,
             Language = language
@@ -314,7 +456,7 @@ public sealed partial class Query
                 t.TableName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 (t.DisplayName != null && t.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
                 (t.Description != null && t.Description.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
-                t.Columns.Any(c => c.Contains(search, StringComparison.OrdinalIgnoreCase)));
+                t.ColumnNames.Any(c => c.Contains(search, StringComparison.OrdinalIgnoreCase)));
         }
 
         if (after.HasValue && after.Value > 0)

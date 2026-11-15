@@ -38,6 +38,11 @@ internal static class CatalogSearchDocumentBuilder
 
         foreach (var c in t.Columns)
         {
+            if (c.DiscoveryHidden)
+            {
+                continue;
+            }
+
             docBuilder.Append($"{c.ColumnName} {c.DataType} ");
             if (!string.IsNullOrWhiteSpace(c.DisplayName))
                 docBuilder.Append($"{SecretScrubber.Redact(c.DisplayName)} ");
@@ -63,7 +68,7 @@ internal static class CatalogSearchDocumentBuilder
 
         foreach (var col in t.Columns)
         {
-            if (declaredKey.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
+            if (col.DiscoveryHidden || declaredKey.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
                 continue;
 
             string? targetTable = null;

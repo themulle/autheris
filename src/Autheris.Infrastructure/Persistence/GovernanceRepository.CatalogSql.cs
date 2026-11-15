@@ -295,6 +295,29 @@ JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
 JOIN TABLES t ON tow.table_id = t.id
 WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table) AND o.is_active = 1";
 
+        public const string AllActiveDataOwnersWithTableSql = @"SELECT t.source_name, t.schema_name, t.table_name, o.id, o.ad_sid, o.ad_account, o.display_name, o.email, o.is_active
+FROM DATA_OWNERS o
+JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
+JOIN TABLES t ON tow.table_id = t.id
+WHERE t.is_active = 1 AND o.is_active = 1";
+
+        public const string OwnedOrDelegatedTablesForSidSql = @"SELECT DISTINCT t.source_name, t.schema_name, t.table_name
+FROM TABLES t
+JOIN TABLE_OWNERS tow ON t.id = tow.table_id
+JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
+WHERE t.is_active = 1
+  AND o.is_active = 1
+  AND (
+      o.ad_sid = @sid
+      OR EXISTS (
+          SELECT 1 FROM DATA_OWNER_DELEGATIONS d
+          WHERE d.data_owner_id = o.id
+            AND d.delegate_sid = @sid
+            AND d.valid_from <= @now
+            AND d.valid_to > @now
+      )
+  )";
+
         public const string ResolveDataOwnerIdsSql = @"SELECT id FROM DATA_OWNERS
 WHERE LOWER(ad_sid) = LOWER(@p) OR LOWER(ad_account) = LOWER(@p) OR LOWER(email) = LOWER(@p)";
 

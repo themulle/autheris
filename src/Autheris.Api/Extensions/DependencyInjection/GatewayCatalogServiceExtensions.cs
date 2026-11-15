@@ -70,7 +70,41 @@ public static class GatewayCatalogServiceExtensions
         services.AddHostedService<CatalogSearchWarmupService>();
 
         services.TryAddScoped<ICatalogVisibilityService, CatalogVisibilityService>();
-        services.TryAddScoped<ICatalogDiscoveryService, CatalogDiscoveryService>();
+        services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryService>(sp =>
+            new Autheris.Application.Catalog.Discovery.DiscoveryService(
+                sp.GetService<ITableMetadataRepository>(),
+                sp.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>(),
+                sp.GetService<IConsentRepository>(),
+                sp.GetService<IConsentApprovalRepository>(),
+                sp.GetService<IDataOwnershipRepository>(),
+                sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore>(),
+                sp.GetService<Autheris.Application.Audit.IAuditWriter>(),
+                sp.GetRequiredService<IOptions<GatewayOptions>>(),
+                sp.GetService<IOptions<CatalogDiscoveryOptions>>(),
+                sp.GetService<IRateLimiterService>(),
+                sp.GetService<ICatalogSearchEngine>(),
+                sp.GetService<TimeProvider>(),
+                sp.GetService<ILogger<Autheris.Application.Catalog.Discovery.DiscoveryService>>()));
+        services.TryAddScoped<ICatalogDiscoveryService>(sp => new CatalogDiscoveryService(
+            sp.GetRequiredService<ITableMetadataRepository>(),
+            sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+            sp.GetRequiredService<IOptions<GatewayOptions>>(),
+            sp.GetRequiredService<ICatalogVisibilityService>(),
+            sp.GetService<IKeyVaultSecretProvider>(),
+            sp.GetService<IOpenApiIngestionService>(),
+            sp.GetService<ICatalogSearchEngine>(),
+            sp.GetService<ILogger<CatalogDiscoveryService>>(),
+            sp.GetService<IOptions<CatalogDiscoveryOptions>>(),
+            sp.GetService<System.Net.Http.IHttpClientFactory>(),
+            sp.GetService<Autheris.Application.Procedures.Interfaces.IProcedureCatalog>(),
+            sp.GetService<IConsentResolutionService>(),
+            sp.GetService<IConsentRepository>(),
+            sp.GetService<TimeProvider>(),
+            sp.GetService<Autheris.Application.DataSources.IDataSourceOptionsResolver>(),
+            sp.GetService<Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap>(),
+            sp.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>() is null
+                ? null
+                : sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryService>()));
         services.TryAddScoped<IPrincipalResolverService, PrincipalResolverService>();
         services.TryAddScoped<IDatasourceTestingService, DatasourceTestingService>();
         services.TryAddSingleton<IColumnValueProfileService, ColumnValueProfileService>();

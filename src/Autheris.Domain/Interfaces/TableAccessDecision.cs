@@ -81,6 +81,12 @@ public record TableAccessDecision(
     public IReadOnlyList<IRowPolicy>? RowPoliciesAfterVirtualFilters { get; init; }
 
     /// <summary>
+    /// Column names whose effective access varies per row (overlapping grants with different masking rules); discovery
+    /// projects these as <see cref="Autheris.Domain.Model.DiscoveryColumnState.Masked"/> with <c>ClearInSomeRows = true</c>.
+    /// </summary>
+    public IReadOnlySet<string>? RowDependentColumns { get; init; }
+
+    /// <summary>
     /// Typed variant of <see cref="WithAdditionalRowFilter"/>: AND-merges <paramref name="policy"/> into <see cref="RowPolicy"/> and
     /// re-projects the text. On a decision that carries only a string filter the text is composed and the decision stays string-only
     /// (and is therefore denied by <see cref="RequireTypedRowPolicy"/>).

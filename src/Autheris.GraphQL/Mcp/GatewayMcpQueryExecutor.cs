@@ -168,6 +168,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 var handled = await _toolExecutionHandler.ExecuteToolAsync(tool, argumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
                 return Capped(tool.Name, handled, McpRowCap.TrimRows(handled, RowCap()));
             }
+            catch (Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)
+            {
+                return CreateDiscoveryErrorResult(sessionContext.TenantId, tool.Name, ex);
+            }
             catch (Exception ex) when (ex is not OperationCanceledException && SqlCompilerErrorMapper.TryMap(ex, out _))
             {
                 // WP-X0a: a governed SQL error answers with its stable code and fixed message, never Exception.Message.
@@ -344,6 +348,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return tool.Name.Equals(McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase)
                 ? Capped(tool.Name, serialized, McpRowCap.TrimRows(serialized, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows)))
                 : serialized;
+        }
+        catch (Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)
+        {
+            return CreateDiscoveryErrorResult(sessionContext.TenantId, tool.Name, ex);
         }
         catch (TableNotFoundException)
         {
@@ -730,6 +738,18 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);
         }
         return new ClaimsPrincipal(identity);
+    }
+
+    private string CreateDiscoveryErrorResult(string tenantId, string toolName, Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)
+    {
+        var code = ex.Kind switch
+        {
+            Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.Unauthenticated => "UNAUTHORIZED",
+            Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.Forbidden => McpErrorCodes.Forbidden,
+            Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.RateLimited => "RATE_LIMITED",
+            _ => McpErrorCodes.InvalidParams
+        };
+        return CreateErrorResult(tenantId, toolName, code, ex.Message);
     }
 }
 

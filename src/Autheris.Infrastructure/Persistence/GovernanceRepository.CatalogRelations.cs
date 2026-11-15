@@ -122,6 +122,30 @@ public partial class GovernanceRepository
         return await CatalogRowHydrator.GetDataOwnersForTableAsync(conn, CatalogSql.DataOwnersForTableSql, table, ct).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>> GetDataOwnersForTablesAsync(
+        IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
+    {
+        if (tables.Count == 0)
+        {
+            return new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>();
+        }
+
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetDataOwnersForTablesAsync(conn, CatalogSql.AllActiveDataOwnersWithTableSql, tables, ct).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(
+        Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        if (tables.Count == 0)
+        {
+            return new HashSet<TableIdentifier>();
+        }
+
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await CatalogRowHydrator.GetOwnedOrDelegatedTablesAsync(conn, CatalogSql.OwnedOrDelegatedTablesForSidSql, actorSid, tables, atTime, ct).ConfigureAwait(false);
+    }
+
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
         IsAuthorizedApproverForTableInternalAsync(table, approverSid, null, ct);
 
