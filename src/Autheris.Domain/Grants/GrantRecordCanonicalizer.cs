@@ -74,7 +74,20 @@ public static class GrantRecordCanonicalizer
         GrantRecordType.Renewed => "RENEWED",
         GrantRecordType.Revoked => "REVOKED",
         GrantRecordType.Expired => "EXPIRED",
+        GrantRecordType.Rejected => "REJECTED",
+        GrantRecordType.RequestExpired => "REQUEST_EXPIRED",
         _ => throw new ArgumentOutOfRangeException(nameof(recordType), recordType, "Unsupported grant record type.")
+    };
+
+    public static GrantRecordType ParseSqlString(string value) => value switch
+    {
+        "ISSUED" => GrantRecordType.Issued,
+        "RENEWED" => GrantRecordType.Renewed,
+        "REVOKED" => GrantRecordType.Revoked,
+        "EXPIRED" => GrantRecordType.Expired,
+        "REJECTED" => GrantRecordType.Rejected,
+        "REQUEST_EXPIRED" => GrantRecordType.RequestExpired,
+        _ => throw new InvalidOperationException($"Unsupported grant record type '{value}'.")
     };
 
     private static string NormalizeEmbeddedJson(string value)

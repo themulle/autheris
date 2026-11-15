@@ -55,6 +55,20 @@ public static partial class GatewayGovernanceServiceExtensions
 
     private static void AddConsentRequests(IServiceCollection services)
     {
+        services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantRecordStore>(sp =>
+            new GrantRecordSqlCore(sp.GetRequiredService<GovernanceRepository>()));
+        services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantRecordSigner>(sp =>
+            GrantRecordKeyStartupCheck.CreateSigner(
+                sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+                sp.GetService<IKeyVaultSecretProvider>(),
+                sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>()));
+        services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantWriter>(sp =>
+            new Autheris.Application.Governance.Grants.Records.GrantWriter(
+                sp.GetRequiredService<Autheris.Application.Governance.Grants.Records.IGrantRecordStore>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Grants.Records.IGrantRecordSigner>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantChainVerifier, Autheris.Application.Governance.Grants.Records.GrantChainVerifier>();
+        services.AddHostedService<GrantRecordKeyStartupCheck>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService, Autheris.Application.ConsentRequests.ConsentRequestService>();
         services.AddScoped<IConsentRecertificationService, ConsentRecertificationWorkflowService>();
         services.AddHostedService<ConsentRecertificationHostedService>();

@@ -68,6 +68,7 @@ public static class ApiErrorCodes
     public const string ProcedureArgumentInvalid = "PROCEDURE_ARGUMENT_INVALID";
     public const string VirtualFilterConflict = "VIRTUAL_FILTER_CONFLICT";
     public const string ResourceLocked = "RESOURCE_LOCKED";
+    public const string GrantRecordUnavailable = "GRANT_RECORD_UNAVAILABLE";
     public const string VirtualFilterInvalid = "VIRTUAL_FILTER_INVALID";
 
     // O-5b step 2: codes of the migrated bare error bodies. Registered here once so no later work package touches this file.

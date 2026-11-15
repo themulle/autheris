@@ -7,7 +7,9 @@ public enum GrantRecordType
     Issued = 0,
     Renewed = 1,
     Revoked = 2,
-    Expired = 3
+    Expired = 3,
+    Rejected = 4,
+    RequestExpired = 5
 }
 
 public sealed record GrantRecord(
