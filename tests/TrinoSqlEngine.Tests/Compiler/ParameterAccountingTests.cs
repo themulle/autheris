@@ -122,18 +122,29 @@ public class ParameterAccountingTests
     public void DeepOrChain_IsRejectedWithTypedError_NoCrash()
     {
         // SEC-ADG-05: a very deep tree (built by hand, the parser caps its own depth) must not overflow the stack.
-        Expression deep = new LiteralExpression(1L, LiteralType.Integer);
+        // Left-associative chains are unrolled iteratively and hit the emitted length cap; right-nested trees hit NestingDepth.
+        var col = new ColumnReference(new SqlQualifiedName("a"));
+        Expression leftDeep = new LiteralExpression(1L, LiteralType.Integer);
+        Expression rightDeep = new LiteralExpression(1L, LiteralType.Integer);
         for (int i = 0; i < 200_000; i++)
         {
-            deep = new BinaryExpression(deep, BinaryOperator.Or, new ColumnReference(new SqlQualifiedName("a")));
+            leftDeep = new BinaryExpression(leftDeep, BinaryOperator.Or, col);
+            rightDeep = new BinaryExpression(col, BinaryOperator.Or, rightDeep);
         }
 
-        var stmt = new SelectStatement(null,
+        var leftStmt = new SelectStatement(null,
             new QuerySpecification(false, new SelectItem[] { new WildcardSelectItem(null) },
-                new NamedTableSource(new SqlQualifiedName("t"), null), deep, null, null),
+                new NamedTableSource(new SqlQualifiedName("t"), null), leftDeep, null, null),
             null, null);
-        var ex = Assert.Throws<SqlLimitExceededException>(() => CompilerTestHelpers.GenerateSqlServer(stmt));
-        Assert.Equal(SqlLimitKind.NestingDepth, ex.Kind);
+        var leftEx = Assert.Throws<SqlLimitExceededException>(() => CompilerTestHelpers.GenerateSqlServer(leftStmt));
+        Assert.Equal(SqlLimitKind.EmittedSqlLength, leftEx.Kind);
+
+        var rightStmt = new SelectStatement(null,
+            new QuerySpecification(false, new SelectItem[] { new WildcardSelectItem(null) },
+                new NamedTableSource(new SqlQualifiedName("t"), null), rightDeep, null, null),
+            null, null);
+        var rightEx = Assert.Throws<SqlLimitExceededException>(() => CompilerTestHelpers.GenerateSqlServer(rightStmt));
+        Assert.Equal(SqlLimitKind.NestingDepth, rightEx.Kind);
     }
 
     [Fact]

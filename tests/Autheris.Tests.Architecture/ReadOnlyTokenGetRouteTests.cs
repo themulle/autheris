@@ -34,6 +34,7 @@ namespace Autheris.Tests.Architecture;
 /// checked-in allowlist where each entry documents "no side effect", pins that proxy method override headers
 /// can only restrict, and verifies GraphQL GET mutations are rejected for read-only tokens.
 /// </summary>
+[Collection("HostStartupSequential")]
 public sealed class ReadOnlyTokenGetRouteTests
 {
     private const int MinimumEndpoints = 90;

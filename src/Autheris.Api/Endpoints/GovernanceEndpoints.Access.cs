@@ -208,7 +208,10 @@ public static partial class GovernanceEndpoints
             }
             catch (Autheris.Application.Policy.RowScopes.RowScopeValidationException ex)
             {
-                return ApiProblems.BadRequest(ex.Code, ex.Message, context);
+                var logger = (context.RequestServices?.GetService(typeof(Microsoft.Extensions.Logging.ILoggerFactory)) as Microsoft.Extensions.Logging.ILoggerFactory)
+                    ?.CreateLogger("Autheris.Api.Endpoints.GovernanceEndpoints");
+                if (logger is not null) Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(logger, ex, "Row scope validation failed ({Code}).", ex.Code);
+                return ApiProblems.BadRequest(ex.Code, "The row scope rule is invalid.", context);
             }
         }
 

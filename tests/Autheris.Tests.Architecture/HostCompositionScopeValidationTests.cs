@@ -17,6 +17,7 @@ using Microsoft.Extensions.Logging;
 using Shouldly;
 using Xunit;
 
+[Collection("HostStartupSequential")]
 [Trait("Category", "Security")]
 public sealed class HostCompositionScopeValidationTests
 {

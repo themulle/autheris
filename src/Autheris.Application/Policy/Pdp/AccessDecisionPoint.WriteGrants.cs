@@ -606,7 +606,7 @@ public sealed partial class AccessDecisionPoint
 
         foreach (var groupSid in subject.GroupSids)
         {
-            claims.Add(new Claim(ClaimTypes.GroupSid, groupSid.Value));
+            claims.Add(Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(groupSid.Value));
         }
 
         if (subject.ResolvedTenant is { Value: { Length: > 0 } resolvedTenant })

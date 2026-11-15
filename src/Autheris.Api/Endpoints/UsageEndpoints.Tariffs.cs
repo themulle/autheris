@@ -235,7 +235,10 @@ public static partial class UsageEndpoints
         }
         catch (UsageTariffValidationException ex)
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, ex.Message, httpContext);
+            var logger = (httpContext.RequestServices?.GetService(typeof(Microsoft.Extensions.Logging.ILoggerFactory)) as Microsoft.Extensions.Logging.ILoggerFactory)
+                ?.CreateLogger("Autheris.Api.Endpoints.UsageEndpoints");
+            if (logger is not null) Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(logger, ex, "Usage tariff request validation failed.");
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The usage tariff request is invalid.", httpContext);
         }
         catch (AuditUnavailableException)
         {

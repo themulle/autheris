@@ -12,7 +12,7 @@ using Xunit;
 namespace Autheris.Tests.Integration.Governance.Contract;
 
 /// <summary>
-/// Engine-agnostic contract suite for <c>ITableMetadataRepository</c> and <c>IPolicyEpochRepository</c>.
+/// Engine-agnostic contract suite for <c>ITableMetadataRepository</c>, <c>ICatalogVersionFlusher</c>, and <c>IPolicyEpochRepository</c>.
 /// </summary>
 public abstract class CatalogContract : GovernanceContractBase
 {
@@ -384,6 +384,19 @@ public abstract class CatalogContract : GovernanceContractBase
         var named = await Store.ExecuteScalarAsync(
             "SELECT COUNT(*) FROM POLICY_EPOCHS WHERE LOWER(table_name) = LOWER(@name)", ("@name", unknown.TableName));
         Convert.ToInt64(named).Should().Be(0);
+    }
+
+    [RequiresContainerRuntimeFact]
+    public async Task Flush_catalog_version_advances_structure_and_content_versions()
+    {
+        if (!Store.IsAvailable) return;
+
+        var before = await Store.TableMetadata.GetCatalogVersionAsync();
+        await Store.TableMetadata.FlushCatalogVersionAsync(2, 3);
+        var after = await Store.TableMetadata.GetCatalogVersionAsync();
+
+        after.StructureVersion.Should().BeGreaterOrEqualTo(before.StructureVersion + 2);
+        after.ContentVersion.Should().BeGreaterOrEqualTo(before.ContentVersion + 3);
     }
 }
 

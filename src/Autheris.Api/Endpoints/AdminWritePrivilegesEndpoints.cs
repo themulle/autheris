@@ -11,6 +11,7 @@ using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Paging;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -106,8 +107,7 @@ public static class AdminWritePrivilegesEndpoints
             consentRepository,
             tenantId,
             matchedName,
-            gatewayOptions.WebSql,
-            connections,
+            gatewayOptions,
             now,
             ct).ConfigureAwait(false);
 
@@ -119,8 +119,7 @@ public static class AdminWritePrivilegesEndpoints
         IConsentRepository consentRepository,
         TenantId tenantId,
         string dataSourceName,
-        WebSqlOptions webSqlOptions,
-        IReadOnlyDictionary<string, DataSourceConnectionOptions> connections,
+        GatewayOptions gatewayOptions,
         DateTimeOffset now,
         CancellationToken ct)
     {
@@ -142,7 +141,7 @@ public static class AdminWritePrivilegesEndpoints
                     continue;
                 }
 
-                if (MatchesDataSource(consent.TableIdentifier, dataSourceName, webSqlOptions, connections))
+                if (MatchesDataSource(consent.TableIdentifier, dataSourceName, gatewayOptions))
                 {
                     result.Add(consent);
                 }
@@ -183,14 +182,11 @@ public static class AdminWritePrivilegesEndpoints
     private static bool MatchesDataSource(
         TableIdentifier table,
         string targetDataSourceName,
-        WebSqlOptions webSql,
-        IReadOnlyDictionary<string, DataSourceConnectionOptions> connections)
+        GatewayOptions gatewayOptions)
     {
-        if (webSql.DataSourceMappings is { Count: > 0 } &&
-            webSql.DataSourceMappings.TryGetValue(table.Domain, out string? mapped) &&
-            !string.IsNullOrWhiteSpace(mapped))
+        if (SqlDataSourceResolver.ResolveConnectionKey(gatewayOptions, table.Domain) is { } resolvedKey)
         {
-            return string.Equals(mapped, targetDataSourceName, StringComparison.OrdinalIgnoreCase);
+            return string.Equals(resolvedKey, targetDataSourceName, StringComparison.OrdinalIgnoreCase);
         }
 
         if (string.Equals(table.Domain, targetDataSourceName, StringComparison.OrdinalIgnoreCase))
@@ -198,9 +194,12 @@ public static class AdminWritePrivilegesEndpoints
             return true;
         }
 
-        bool domainHasDedicatedConnection = connections.Keys.Any(k => string.Equals(k, table.Domain, StringComparison.OrdinalIgnoreCase));
+        var connections = gatewayOptions.DataSources?.Connections;
+        bool domainHasDedicatedConnection = connections is not null &&
+                                            connections.Keys.Any(k => string.Equals(k, table.Domain, StringComparison.OrdinalIgnoreCase));
         if (!domainHasDedicatedConnection &&
-            string.Equals(targetDataSourceName, webSql.DefaultDataSourceName, StringComparison.OrdinalIgnoreCase))
+            !SqlDataSourceResolver.TryGetMapping(gatewayOptions.WebSql, table.Domain, out _) &&
+            string.Equals(targetDataSourceName, gatewayOptions.WebSql.DefaultDataSourceName, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

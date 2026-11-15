@@ -7,6 +7,7 @@ namespace Autheris.Tests.Architecture;
 /// SEC-SIMPL-61: Security guards for configuration reference generation:
 /// secret masking, default value prohibitions, and process isolation (no config/env reads).
 /// </summary>
+[Collection("HostStartupSequential")]
 [Trait("Category", "Security")]
 public sealed class ConfigReferenceTests
 {

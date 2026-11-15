@@ -159,11 +159,13 @@ route /ui/swagger/assets/{file} | static docs, swagger or Nitro portal page; no 
 
 # --- src files that create DI scopes or call Task.Run (copy = stamps/copies ingress; exempt = reviewed) ---
 scope src/Autheris.Api/Configuration/Validation/DataSourceTransportConfigurationReporter.cs | startup/reload advisory logging only: reads catalog source names once at start, reaches no data executor or connector (issue #447 WP-5; needs security approval, SEC-ATR-13)
+scope src/Autheris.Api/Endpoints/Health/ReadinessProbe.cs | exempt: health readiness probe Task.Run timeout check; reaches no governed data
 scope src/Autheris.Api/Extensions/DependencyInjection/DataApiServiceExtensions.cs | exempt: VirtualSystemTablesHostedService registration; reaches no governed data
 scope src/Autheris.Api/Hosting/Warmup/GraphQlExecutorGate.cs | exempt: GraphQL warmup probe/eviction Task.Run; reaches no governed data
 scope src/Autheris.Api/Hosting/Warmup/StartupWarmupService.cs | exempt: startup warmup Task.Run bound; no request ingress, reaches no governed data
 scope src/Autheris.Application/Audit/AuditGroupCommitSink.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Audit/AuditRetentionPurgeWorker.cs | exempt: audit retention purge; reaches no governed data
+scope src/Autheris.Application/Catalog/CatalogSnapshotProvider.cs | exempt: infrastructure background work (catalog snapshot refresh); reaches no governed data
 scope src/Autheris.Application/Catalog/Search/OllamaEmbeddingGenerator.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Events/InMemoryGatewayEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Governance/Services/CatalogVisibilityMetrics.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
@@ -175,6 +177,7 @@ scope src/Autheris.Application/Runtime/Jobs/Services/AsyncQueryJobBackgroundWork
 scope src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs | scoped IngressTransportContext captured through the injected gate; Task.Run creates no new scope
 scope src/Autheris.Application/Sql/Services/WebSqlStatementManager.cs | copy: copies the ingress transport into the new scope (stamp site)
+scope src/Autheris.Application/State/Caching/BoundedCache.cs | exempt: infrastructure background work (single-flight cache fill); reaches no governed data
 scope src/Autheris.Application/State/Caching/SingleFlightKeySetCache.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/State/Caching/TableCache/TableCacheManager.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Streaming/Services/CdcStreamTailHub.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data

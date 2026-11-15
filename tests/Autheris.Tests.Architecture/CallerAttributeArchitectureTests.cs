@@ -145,6 +145,7 @@ public sealed partial class CallerAttributeArchitectureTests
         var allowlist = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["src/Autheris.Api/Endpoints/VirtualFilterEndpoints.cs"] = "effective-filters explanation for administrators: shows the constant",
+            ["src/Autheris.Application/Catalog/Discovery/DiscoveryAccessMapper.cs"] = "discovery catalog visibility projection: boolean presence check only (HasRowPredicate); evaluates no caller attributes or row filters",
             ["src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.Cursors.cs"] = "known-key disclosure check only (presence of a filter); row evaluation goes through InMemoryRowFilterEvaluator.RowPassesDecision",
             ["src/Autheris.Application/DataSources/Relations/CrossSourceRelationResolver.cs"] = "cross-source child read: an applying Virtual Filter refuses the request (VF-02, presence check; no row evaluation of the text)",
             ["src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs"] = "an applying Virtual Filter denies (ext_authz cannot enforce row filters)",

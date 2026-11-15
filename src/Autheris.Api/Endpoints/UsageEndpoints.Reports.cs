@@ -513,7 +513,10 @@ public static partial class UsageEndpoints
         }
         catch (UsageReportValidationException ex)
         {
-            return ApiProblems.BadRequest(ex.ErrorCode, ex.Message, httpContext);
+            var logger = (httpContext.RequestServices?.GetService(typeof(Microsoft.Extensions.Logging.ILoggerFactory)) as Microsoft.Extensions.Logging.ILoggerFactory)
+                ?.CreateLogger("Autheris.Api.Endpoints.UsageEndpoints");
+            if (logger is not null) Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(logger, ex, "Usage erasure request validation failed ({ErrorCode}).", ex.ErrorCode);
+            return ApiProblems.BadRequest(ex.ErrorCode, "The usage erasure request parameters are invalid.", httpContext);
         }
         catch (AuditUnavailableException)
         {
@@ -606,7 +609,10 @@ public static partial class UsageEndpoints
         }
         catch (UsageReportValidationException ex)
         {
-            return ApiProblems.BadRequest(ex.ErrorCode, ex.Message, httpContext);
+            var logger = (httpContext.RequestServices?.GetService(typeof(Microsoft.Extensions.Logging.ILoggerFactory)) as Microsoft.Extensions.Logging.ILoggerFactory)
+                ?.CreateLogger("Autheris.Api.Endpoints.UsageEndpoints");
+            if (logger is not null) Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(logger, ex, "Usage report query validation failed ({ErrorCode}).", ex.ErrorCode);
+            return ApiProblems.BadRequest(ex.ErrorCode, "The usage report query parameters are invalid.", httpContext);
         }
         catch (AuditUnavailableException)
         {

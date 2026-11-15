@@ -152,11 +152,31 @@ internal static class CatalogDiscoveryApiHelpers
         }
     }
 
-    internal static IResult MapException(DiscoveryStatusException ex, HttpContext httpContext) => ex.Kind switch
+    internal static IResult MapException(DiscoveryStatusException ex, HttpContext httpContext)
     {
-        DiscoveryFailureKind.Unauthenticated => ApiProblems.Unauthorized(ApiErrorCodes.Unauthorized, ex.Message, httpContext),
-        DiscoveryFailureKind.Forbidden => ApiProblems.Forbidden(ApiErrorCodes.DiscoveryNotPermitted, ex.Message, httpContext),
-        DiscoveryFailureKind.RateLimited => ApiProblems.TooManyRequests(ApiErrorCodes.RateLimitExceeded, ex.Message, httpContext, ex.RetryAfterSeconds ?? 1),
-        _ => ApiProblems.BadRequest(ApiErrorCodes.InvalidQuery, ex.Message, httpContext)
-    };
+        var logger = (httpContext.RequestServices?.GetService(typeof(Microsoft.Extensions.Logging.ILoggerFactory)) as Microsoft.Extensions.Logging.ILoggerFactory)
+            ?.CreateLogger("Autheris.Api.Endpoints.CatalogDiscoveryApiHelpers");
+        if (logger is not null) Microsoft.Extensions.Logging.LoggerExtensions.LogWarning(logger, ex, "Catalog discovery request failed ({Kind}).", ex.Kind);
+
+        return ex.Kind switch
+        {
+            DiscoveryFailureKind.Unauthenticated => ApiProblems.Unauthorized(
+                ApiErrorCodes.Unauthorized,
+                "Authentication is required for catalog discovery.",
+                httpContext),
+            DiscoveryFailureKind.Forbidden => ApiProblems.Forbidden(
+                ApiErrorCodes.DiscoveryNotPermitted,
+                "Catalog discovery is not permitted for the current caller.",
+                httpContext),
+            DiscoveryFailureKind.RateLimited => ApiProblems.TooManyRequests(
+                ApiErrorCodes.RateLimitExceeded,
+                "Catalog discovery rate limit exceeded. Retry later.",
+                httpContext,
+                ex.RetryAfterSeconds ?? 1),
+            _ => ApiProblems.BadRequest(
+                ApiErrorCodes.InvalidQuery,
+                "The catalog discovery request is invalid.",
+                httpContext)
+        };
+    }
 }
