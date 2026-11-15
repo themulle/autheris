@@ -246,4 +246,98 @@ public sealed class UsageOptionsValidatorTests
         result.Failed.ShouldBeTrue();
         result.FailureMessage.ShouldContain("InitialTariffs[0]");
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3601)]
+    public void QuotaStalenessSeconds_out_of_range_fails(int value)
+    {
+        var options = new UsageAccountingOptions { QuotaStalenessSeconds = value };
+        var result = _validator.Validate(null, options);
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain("QuotaStalenessSeconds");
+    }
+
+    [Fact]
+    public void Quotas_with_valid_entries_succeed()
+    {
+        var options = new UsageAccountingOptions
+        {
+            Quotas =
+            [
+                new UsageQuota
+                {
+                    Scope = UsageQuotaScope.Group,
+                    Subject = "S-1-5-21-100-200",
+                    Tenant = "tenant-a",
+                    Period = UsageQuotaPeriod.Month,
+                    Metric = UsageQuotaMetric.CostUnits,
+                    Limit = 500m,
+                    SoftLimitRatio = 0.85,
+                    UnitLabel = "credits"
+                },
+                new UsageQuota
+                {
+                    Scope = UsageQuotaScope.Tenant,
+                    Subject = "*",
+                    Tenant = "*",
+                    Period = UsageQuotaPeriod.Day,
+                    Metric = UsageQuotaMetric.Requests,
+                    Limit = 10_000m,
+                    SoftLimitRatio = 0.8
+                }
+            ]
+        };
+
+        var result = _validator.Validate(null, options);
+        result.Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Quotas_invalid_entries_and_duplicates_fail()
+    {
+        var options = new UsageAccountingOptions
+        {
+            Quotas =
+            [
+                new UsageQuota
+                {
+                    Scope = UsageQuotaScope.User,
+                    Subject = "not-a-sid",
+                    Tenant = "tenant-a",
+                    Period = UsageQuotaPeriod.Day,
+                    Metric = UsageQuotaMetric.CostUnits,
+                    Limit = 0m,
+                    SoftLimitRatio = 1.5,
+                    UnitLabel = null
+                },
+                new UsageQuota
+                {
+                    Scope = UsageQuotaScope.Group,
+                    Subject = "S-1-5-21-100-1",
+                    Tenant = "tenant-a",
+                    Period = UsageQuotaPeriod.Day,
+                    Metric = UsageQuotaMetric.Requests,
+                    Limit = 10m
+                },
+                new UsageQuota
+                {
+                    Scope = UsageQuotaScope.Group,
+                    Subject = "S-1-5-21-100-1",
+                    Tenant = "tenant-a",
+                    Period = UsageQuotaPeriod.Day,
+                    Metric = UsageQuotaMetric.Requests,
+                    Limit = 20m
+                }
+            ]
+        };
+
+        var result = _validator.Validate(null, options);
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain("Quotas[0]:Subject");
+        result.FailureMessage.ShouldContain("Quotas[0]:Limit");
+        result.FailureMessage.ShouldContain("Quotas[0]:SoftLimitRatio");
+        result.FailureMessage.ShouldContain("Quotas[0]:UnitLabel");
+        result.FailureMessage.ShouldContain("duplicate quota rule");
+    }
 }

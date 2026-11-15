@@ -246,5 +246,10 @@ public sealed class UsageVolumeSecurityTests
 
             return Task.FromResult(new UsageReportPage(pageRows, nextCursor));
         }
+
+        public Task<UsageQuotaTenantSnapshot> GetQuotaSnapshotAsync(TenantId tenant, DateOnly fromUtc, DateOnly toUtc, CancellationToken ct = default) =>
+            Task.FromResult(UsageQuotaTenantSnapshot.Empty);
+        public Task<IReadOnlyList<TenantId>> GetActiveUsageTenantsAsync(DateOnly fromUtc, DateOnly toUtc, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TenantId>>([]);
     }
 }

@@ -353,6 +353,10 @@ public sealed class UsageReportAuthorizationTests
             Task.FromResult<IReadOnlyDictionary<string, int>>(new Dictionary<string, int>());
         public Task<IReadOnlyList<UsageTariffVersion>> GetTariffsAsync(TenantId tenant, DateOnly fromUtc, DateOnly toUtc, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<UsageTariffVersion>>(Tariffs);
+        public Task<UsageQuotaTenantSnapshot> GetQuotaSnapshotAsync(TenantId tenant, DateOnly fromUtc, DateOnly toUtc, CancellationToken ct = default) =>
+            Task.FromResult(UsageQuotaTenantSnapshot.Empty);
+        public Task<IReadOnlyList<TenantId>> GetActiveUsageTenantsAsync(DateOnly fromUtc, DateOnly toUtc, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TenantId>>([]);
 
         public Task<UsageReportPage> QueryAsync(UsageReportQuery query, CancellationToken ct = default)
         {

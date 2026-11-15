@@ -124,7 +124,7 @@ public sealed class UsageRequestScope : IDisposable
         }
     }
 
-    public void Complete(long durationMs, long bytes, int statusCode)
+    public void Complete(long durationMs, long bytes, int statusCode, string? problemCode = null)
     {
         if (Interlocked.Exchange(ref _completed, 1) != 0)
         {
@@ -137,7 +137,7 @@ public sealed class UsageRequestScope : IDisposable
             factsSnapshot = _facts.Take(_factCount).ToArray();
         }
 
-        _aggregator?.Record(Identity, Transport, Caller, durationMs, bytes, statusCode, factsSnapshot);
+        _aggregator?.Record(Identity, Transport, Caller, durationMs, bytes, statusCode, factsSnapshot, problemCode);
     }
 
     public void Dispose()

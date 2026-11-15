@@ -40,4 +40,12 @@ public partial class GovernanceRepository : IUsageRepository
     public Task<IReadOnlyDictionary<string, int>> QueryDistinctActorCountsAsync(
         TableIdentifier tableId, TenantId tenantId, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct = default) =>
         UsageStore.QueryDistinctActorCountsAsync(this, tableId, tenantId, fromUtc, toUtc, ct);
+
+    public Task<UsageQuotaTenantSnapshot> GetQuotaSnapshotAsync(
+        TenantId tenant, DateOnly fromUtc, DateOnly toUtc, CancellationToken ct = default) =>
+        UsageStore.GetQuotaSnapshotAsync(this, tenant, fromUtc, toUtc, ct);
+
+    public Task<IReadOnlyList<TenantId>> GetActiveUsageTenantsAsync(
+        DateOnly fromUtc, DateOnly toUtc, CancellationToken ct = default) =>
+        UsageStore.GetActiveUsageTenantsAsync(this, fromUtc, toUtc, ct);
 }

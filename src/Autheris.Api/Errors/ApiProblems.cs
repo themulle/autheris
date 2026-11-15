@@ -187,6 +187,7 @@ public static class ApiProblems
     private static readonly HashSet<string> AllowedExtensionKeys = new(StringComparer.Ordinal)
     {
         "retryAfterSeconds", "maxValidTo", "phase", "sunsetDate", "replacement", "limit", "discardedEvents",
+        "scope", "metric", "period",
         // NL-SC-32: privacy-budget 429 figures (typed values of the budget decision, caller's own client id only).
         "clientId", "consumed", "totalBudget",
         // Syntax error position

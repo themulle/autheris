@@ -195,6 +195,10 @@ public sealed class UsageFlushWorkerTests
             Task.FromResult<IReadOnlyList<ConsumerAppDailySummary>>(Array.Empty<ConsumerAppDailySummary>());
         public Task<IReadOnlyDictionary<string, int>> QueryDistinctActorCountsAsync(TableIdentifier tableId, TenantId tenantId, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyDictionary<string, int>>(new Dictionary<string, int>());
+        public Task<UsageQuotaTenantSnapshot> GetQuotaSnapshotAsync(TenantId tenant, DateOnly fromUtc, DateOnly toUtc, CancellationToken ct = default) =>
+            Task.FromResult(UsageQuotaTenantSnapshot.Empty);
+        public Task<IReadOnlyList<TenantId>> GetActiveUsageTenantsAsync(DateOnly fromUtc, DateOnly toUtc, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TenantId>>([]);
     }
 
     private sealed class CapturingLogger<T> : ILogger<T>

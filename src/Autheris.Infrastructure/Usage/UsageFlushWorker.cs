@@ -21,6 +21,7 @@ public sealed class UsageFlushWorker : BackgroundService
     private readonly IOptions<UsageAccountingOptions> _options;
     private readonly ILogger<UsageFlushWorker> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly IUsageQuotaService? _quotaService;
 
     private int _consecutiveFailures;
     private DateTimeOffset _lastErrorLoggedAt = DateTimeOffset.MinValue;
@@ -31,23 +32,27 @@ public sealed class UsageFlushWorker : BackgroundService
         IUsageRepository repository,
         IOptions<UsageAccountingOptions> options,
         ILogger<UsageFlushWorker> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IUsageQuotaService? quotaService = null)
     {
         _aggregator = aggregator ?? throw new ArgumentNullException(nameof(aggregator));
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _quotaService = quotaService;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await RefreshQuotasAsync(stoppingToken).ConfigureAwait(false);
         int seconds = Math.Max(5, _options.Value.FlushIntervalSeconds);
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(seconds), _timeProvider);
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
         {
             await FlushOnceAsync(stoppingToken).ConfigureAwait(false);
             await PurgeIfDueAsync(stoppingToken).ConfigureAwait(false);
+            await RefreshQuotasAsync(stoppingToken).ConfigureAwait(false);
         }
     }
 
@@ -57,6 +62,26 @@ public sealed class UsageFlushWorker : BackgroundService
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(StopFlushTimeout);
         await FlushOnceAsync(timeoutCts.Token).ConfigureAwait(false);
+    }
+
+    private async Task RefreshQuotasAsync(CancellationToken ct)
+    {
+        if (_quotaService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _quotaService.RefreshAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Usage quota refresh cycle failed.");
+        }
     }
 
     internal async Task FlushOnceAsync(CancellationToken ct)

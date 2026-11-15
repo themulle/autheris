@@ -117,7 +117,8 @@ public sealed class UsageAggregator : IUsageAggregator
         long durationMs,
         long bytes,
         int statusCode,
-        IReadOnlyList<UsageFact> facts)
+        IReadOnlyList<UsageFact> facts,
+        string? problemCode = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
 
@@ -143,7 +144,7 @@ public sealed class UsageAggregator : IUsageAggregator
 
             if (facts == null || facts.Count == 0)
             {
-                var outcome = UsageAttribution.MapStatusCodeToOutcome(statusCode);
+                var outcome = UsageAttribution.MapStatusCodeToOutcome(statusCode, problemCode);
                 var key = new UsageSeriesKey(
                     identity.Tenant,
                     dayUtc,
@@ -361,6 +362,27 @@ public sealed class UsageAggregator : IUsageAggregator
         }
 
         return old.ToSnapshot();
+    }
+
+    public void CollectQuotaUsage(
+        TenantId tenant,
+        DateOnly fromUtc,
+        DateOnly toUtc,
+        ICollection<UsageQuotaSeriesEntry> destination,
+        IDictionary<string, IReadOnlyList<Sid>> groupSets)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(groupSets);
+        var gen = _currentGeneration;
+        gen.Enter();
+        try
+        {
+            gen.CollectQuotaUsage(tenant, fromUtc, toUtc, destination, groupSets);
+        }
+        finally
+        {
+            gen.Exit();
+        }
     }
 
     public void Merge(UsageGenerationSnapshot snapshot)
@@ -654,6 +676,45 @@ public sealed class UsageAggregator : IUsageAggregator
                 new Dictionary<UsageGrantSeriesKey, UsageGrantSeriesCounters>(_grantSeries),
                 new Dictionary<(TenantId Tenant, string GroupSetId), IReadOnlyList<Sid>>(_groupSets),
                 new Dictionary<(TenantId Tenant, string GrantId), GrantRef>(_grantRefs));
+        }
+
+        public void CollectQuotaUsage(
+            TenantId tenant,
+            DateOnly fromUtc,
+            DateOnly toUtc,
+            ICollection<UsageQuotaSeriesEntry> destination,
+            IDictionary<string, IReadOnlyList<Sid>> groupSets)
+        {
+            foreach (var (key, counters) in _series)
+            {
+                if (key.Tenant == tenant && key.DayUtc >= fromUtc && key.DayUtc <= toUtc)
+                {
+                    destination.Add(new UsageQuotaSeriesEntry(
+                        key.DayUtc,
+                        key.UserKey,
+                        key.GroupSetId,
+                        key.BillingGroup,
+                        key.DataSource,
+                        counters.Requests,
+                        counters.Queries,
+                        counters.Rows,
+                        counters.Bytes,
+                        counters.DurationMs,
+                        counters.AnalysisCost,
+                        counters.SourceComputeMs,
+                        counters.SourceComputeMeasured,
+                        counters.SourceCostMicros,
+                        counters.Allow));
+                }
+            }
+
+            foreach (var ((t, groupSetId), sids) in _groupSets)
+            {
+                if (t == tenant && !groupSets.ContainsKey(groupSetId))
+                {
+                    groupSets[groupSetId] = sids;
+                }
+            }
         }
     }
 }

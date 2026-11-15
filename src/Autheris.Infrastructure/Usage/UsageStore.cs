@@ -14,6 +14,7 @@ using Autheris.Application.Usage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options.DataSources;
+using Autheris.Domain.Security;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Dialects;
 
@@ -771,4 +772,92 @@ internal static class UsageStore
         string s => DateTimeOffset.Parse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime(),
         var v => throw new InvalidOperationException($"Unexpected timestamp type {v.GetType().Name}.")
     };
+
+    public static async Task<UsageQuotaTenantSnapshot> GetQuotaSnapshotAsync(
+        GovernanceRepository repo, TenantId tenant, DateOnly fromUtc, DateOnly toUtc, CancellationToken ct)
+    {
+        TenantScope.RequireTenant(tenant, "USAGE_DAILY");
+
+        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
+        var series = new List<UsageQuotaSeriesEntry>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = @"SELECT day, user_key, group_set_id, billing_group, data_source,
+                requests, queries, rows_returned, bytes, duration_ms, analysis_cost,
+                source_compute_ms, source_compute_measured, source_cost_micros, allow_count
+                FROM USAGE_DAILY WHERE tenant_id = @tenant_id AND day >= @from_utc AND day <= @to_utc";
+            cmd.AddBound("@tenant_id", tenant.Value);
+            AddDate(cmd, "@from_utc", fromUtc);
+            AddDate(cmd, "@to_utc", toUtc);
+            await using var r = await repo.ExecuteReaderAsync(cmd, "Usage.QuotaSeries", ct).ConfigureAwait(false);
+            while (await r.ReadAsync(ct).ConfigureAwait(false))
+            {
+                series.Add(new UsageQuotaSeriesEntry(
+                    ReadDate(r, 0),
+                    r.GetString(1),
+                    r.GetString(2),
+                    r.GetString(3),
+                    r.GetString(4),
+                    r.GetInt64(5),
+                    r.GetInt64(6),
+                    r.GetInt64(7),
+                    r.GetInt64(8),
+                    r.GetInt64(9),
+                    r.GetInt64(10),
+                    r.GetInt64(11),
+                    r.GetInt64(12),
+                    r.GetInt64(13),
+                    r.GetInt64(14)));
+            }
+        }
+
+        var groupSets = new Dictionary<string, IReadOnlyList<Sid>>(StringComparer.Ordinal);
+        using (var gsCmd = conn.CreateCommand())
+        {
+            gsCmd.CommandText = @"SELECT DISTINCT gs.group_set_id, gs.group_sid
+                FROM USAGE_GROUP_SET gs
+                INNER JOIN USAGE_DAILY d ON d.tenant_id = gs.tenant_id AND d.group_set_id = gs.group_set_id
+                WHERE d.tenant_id = @tenant_id AND d.day >= @from_utc AND d.day <= @to_utc";
+            gsCmd.AddBound("@tenant_id", tenant.Value);
+            AddDate(gsCmd, "@from_utc", fromUtc);
+            AddDate(gsCmd, "@to_utc", toUtc);
+            await using var r = await repo.ExecuteReaderAsync(gsCmd, "Usage.QuotaGroupSets", ct).ConfigureAwait(false);
+            while (await r.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var setId = r.GetString(0);
+                var sid = new Sid(r.GetString(1));
+                if (!groupSets.TryGetValue(setId, out var list))
+                {
+                    list = new List<Sid>();
+                    groupSets[setId] = list;
+                }
+
+                ((List<Sid>)list).Add(sid);
+            }
+        }
+
+        var tariffs = await GetTariffsAsync(repo, tenant, fromUtc, toUtc, ct).ConfigureAwait(false);
+        return new UsageQuotaTenantSnapshot(series, groupSets, tariffs);
+    }
+
+    public static async Task<IReadOnlyList<TenantId>> GetActiveUsageTenantsAsync(
+        GovernanceRepository repo, DateOnly fromUtc, DateOnly toUtc, CancellationToken ct)
+    {
+        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT DISTINCT tenant_id FROM USAGE_DAILY WHERE day >= @from_utc AND day <= @to_utc";
+        AddDate(cmd, "@from_utc", fromUtc);
+        AddDate(cmd, "@to_utc", toUtc);
+        var tenants = new List<TenantId>();
+        await using var r = await repo.ExecuteReaderAsync(cmd, "Usage.QuotaActiveTenants", ct).ConfigureAwait(false);
+        while (await r.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (TenantId.TryParse(r.GetString(0), out var parsed))
+            {
+                tenants.Add(parsed);
+            }
+        }
+
+        return tenants;
+    }
 }

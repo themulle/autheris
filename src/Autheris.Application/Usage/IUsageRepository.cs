@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options.DataSources;
+using Autheris.Domain.Security;
 
 public enum UsageGroupBy
 {
@@ -129,4 +130,45 @@ public interface IUsageRepository
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
         CancellationToken ct = default);
+
+    Task<UsageQuotaTenantSnapshot> GetQuotaSnapshotAsync(
+        TenantId tenant,
+        DateOnly fromUtc,
+        DateOnly toUtc,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<TenantId>> GetActiveUsageTenantsAsync(
+        DateOnly fromUtc,
+        DateOnly toUtc,
+        CancellationToken ct = default);
+}
+
+/// <summary>Aggregated usage series row projected for quota evaluation across a fixed UTC window.</summary>
+public sealed record UsageQuotaSeriesEntry(
+    DateOnly DayUtc,
+    string UserKey,
+    string GroupSetId,
+    string BillingGroup,
+    string DataSource,
+    long Requests,
+    long Queries,
+    long RowsReturned,
+    long Bytes,
+    long DurationMs,
+    long AnalysisCost,
+    long SourceComputeMs,
+    long SourceComputeMeasured,
+    long SourceCostMicros,
+    long AllowCount);
+
+/// <summary>Cached persisted usage state for one tenant over the active quota window.</summary>
+public sealed record UsageQuotaTenantSnapshot(
+    IReadOnlyList<UsageQuotaSeriesEntry> Series,
+    IReadOnlyDictionary<string, IReadOnlyList<Sid>> GroupSets,
+    IReadOnlyList<UsageTariffVersion> Tariffs)
+{
+    public static readonly UsageQuotaTenantSnapshot Empty = new(
+        [],
+        new Dictionary<string, IReadOnlyList<Sid>>(StringComparer.Ordinal),
+        []);
 }

@@ -37,7 +37,8 @@ public interface IUsageAggregator
         long durationMs,
         long bytes,
         int statusCode,
-        IReadOnlyList<UsageFact> facts);
+        IReadOnlyList<UsageFact> facts,
+        string? problemCode = null);
 
     void RecordUnscoped(
         TenantId tenant,
@@ -67,4 +68,12 @@ public interface IUsageAggregator
 
     /// <summary>Validates that <paramref name="sourceCostUnit"/> matches the expected unit configured for <paramref name="dataSource"/>.</summary>
     bool IsSourceCostUnitValid(string dataSource, string? sourceCostUnit);
+
+    /// <summary>Copies unflushed series and group-set entries for <paramref name="tenant"/> within the UTC window for quota evaluation.</summary>
+    void CollectQuotaUsage(
+        TenantId tenant,
+        DateOnly fromUtc,
+        DateOnly toUtc,
+        ICollection<UsageQuotaSeriesEntry> destination,
+        IDictionary<string, IReadOnlyList<Sid>> groupSets);
 }

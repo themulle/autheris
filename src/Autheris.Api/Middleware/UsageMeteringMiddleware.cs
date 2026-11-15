@@ -1,8 +1,11 @@
 namespace Autheris.Api.Middleware;
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Threading.Tasks;
+using Autheris.Api.Errors;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.DataSources;
 using Autheris.Application.Usage;
@@ -28,7 +31,8 @@ public sealed class UsageMeteringMiddleware
         HttpContext context,
         IUsageAggregator? aggregator = null,
         IIngressTransportContext? ingress = null,
-        ICallerContextProvider? callerProvider = null)
+        ICallerContextProvider? callerProvider = null,
+        IUsageQuotaService? quotaService = null)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -54,6 +58,21 @@ public sealed class UsageMeteringMiddleware
 
         var caller = secContext.Caller ?? callerProvider?.ResolveCallerContext();
         var identity = new UsageIdentity(tenant, secContext.UserSid, secContext.GroupSids);
+
+        if (quotaService is not null && !IsQuotaExemptPath(context.Request.Path))
+        {
+            var decision = quotaService.Evaluate(identity);
+            if (decision.Kind is UsageQuotaDecisionKind.Exceeded or UsageQuotaDecisionKind.Unavailable)
+            {
+                return WriteQuotaRejectionAsync(context, identity, transport, caller, aggregator, decision);
+            }
+
+            if (decision.Kind == UsageQuotaDecisionKind.AllowWithWarning && decision.Warnings is { Count: > 0 } warnings)
+            {
+                context.Response.Headers["X-Usage-Quota-Warning"] = FormatWarnings(warnings);
+            }
+        }
+
         return ExecuteMeteredAsync(context, identity, transport, caller, aggregator);
     }
 
@@ -91,6 +110,73 @@ public sealed class UsageMeteringMiddleware
             scope.Complete(durationMs, bytes, context.Response.StatusCode);
         }
     }
+
+    private static async Task WriteQuotaRejectionAsync(
+        HttpContext context,
+        UsageIdentity identity,
+        DataSourceTransportFlags transport,
+        CallerContext? caller,
+        IUsageAggregator? aggregator,
+        UsageQuotaDecision decision)
+    {
+        using var scope = UsageRequestScope.Begin(identity, transport, caller, aggregator);
+        int statusCode;
+        string errorCode;
+        string detail;
+        Dictionary<string, object?> ext;
+
+        if (decision.RetryAfterSeconds > 0)
+        {
+            context.Response.Headers.RetryAfter = decision.RetryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (decision.Kind == UsageQuotaDecisionKind.Exceeded)
+        {
+            statusCode = StatusCodes.Status429TooManyRequests;
+            errorCode = ApiErrorCodes.UsageQuotaExceeded;
+            detail = "Usage quota exceeded.";
+            ext = new Dictionary<string, object?>
+            {
+                ["scope"] = decision.ViolatedScope?.ToString(),
+                ["metric"] = decision.ViolatedMetric?.ToString(),
+                ["period"] = decision.ViolatedPeriod?.ToString(),
+                ["limit"] = decision.Limit,
+                ["retryAfterSeconds"] = decision.RetryAfterSeconds
+            };
+        }
+        else
+        {
+            statusCode = StatusCodes.Status503ServiceUnavailable;
+            errorCode = ApiErrorCodes.UsageQuotaUnavailable;
+            detail = "Usage quota totals are temporarily unavailable.";
+            ext = new Dictionary<string, object?>
+            {
+                ["retryAfterSeconds"] = decision.RetryAfterSeconds
+            };
+        }
+
+        await ApiProblems.WriteAsync(context, statusCode, errorCode, detail, context.RequestAborted, ext).ConfigureAwait(false);
+        scope.Complete(0, 0, statusCode, errorCode);
+    }
+
+    private static string FormatWarnings(IReadOnlyList<UsageQuotaWarning> warnings)
+    {
+        if (warnings.Count == 1)
+        {
+            return $"{warnings[0].Scope};{warnings[0].Metric}";
+        }
+
+        var parts = new string[warnings.Count];
+        for (int i = 0; i < warnings.Count; i++)
+        {
+            parts[i] = $"{warnings[i].Scope};{warnings[i].Metric}";
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private static bool IsQuotaExemptPath(PathString path) =>
+        path.StartsWithSegments("/api/v1/usage/me", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsSkippedPath(PathString path) =>
         path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||

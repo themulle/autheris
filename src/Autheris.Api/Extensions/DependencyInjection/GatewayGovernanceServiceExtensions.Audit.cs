@@ -89,6 +89,13 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
                 sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Usage.IUsageQuotaService>(sp =>
+            new Autheris.Application.Usage.UsageQuotaService(
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageRepository>(),
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageAggregator>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                timeProvider: sp.GetService<TimeProvider>(),
+                logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Usage.UsageQuotaService>>()));
         services.AddHostedService<Autheris.Infrastructure.Usage.UsageFlushWorker>();
         services.AddHostedService<Autheris.Infrastructure.Usage.SourceCostCollectorWorker>();
         services.AddHostedService<Autheris.Infrastructure.Usage.UsageInitialTariffSeedService>();
