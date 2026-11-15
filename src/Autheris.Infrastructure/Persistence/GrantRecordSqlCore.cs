@@ -18,6 +18,7 @@ public sealed class GrantRecordSqlCore(IGovernanceSqlDialect dialect) : IGrantRe
     private const string AdvanceHeadSql = "UPDATE GRANT_RECORD_HEADS SET last_seq = @seq, last_hash = @record_hash WHERE tenant_id = @tenant_id;";
     private const string UpdateConsentSeqSql = "UPDATE CONSENTS SET grant_record_seq = @seq WHERE tenant_id = @tenant_id AND id = @id;";
     private const string SelectTenantChainSql = "SELECT tenant_id, seq, id, record_type, consent_id, request_id, grant_source, profile_assignment_id, grantee_type, grantee_ref, object_id, scope_json, valid_from, valid_until, requested_by, decision_json, decided_at, recorded_at, prev_hash, record_hash, signature, key_id FROM GRANT_RECORDS WHERE tenant_id = @tenant_id ORDER BY seq ASC;";
+    private const string SelectConsentChainSql = "SELECT tenant_id, seq, id, record_type, consent_id, request_id, grant_source, profile_assignment_id, grantee_type, grantee_ref, object_id, scope_json, valid_from, valid_until, requested_by, decision_json, decided_at, recorded_at, prev_hash, record_hash, signature, key_id FROM GRANT_RECORDS WHERE tenant_id = @tenant_id AND consent_id = @consent_id ORDER BY seq ASC;";
     private readonly IGovernanceSqlDialect _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
 
     public async Task<(long LastSeq, string LastHash)> LockAndReadHeadAsync(DbTransaction transaction, string tenantId, CancellationToken ct = default)
@@ -76,6 +77,19 @@ public sealed class GrantRecordSqlCore(IGovernanceSqlDialect dialect) : IGrantRe
         using var cmd = conn.CreateCommand();
         (cmd.CommandText, var items) = (SelectTenantChainSql, new List<GrantRecord>());
         cmd.AddBound("@tenant_id", tenantId);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false)) items.Add(ReadRecord(reader));
+        return items;
+    }
+
+    public async Task<IReadOnlyList<GrantRecord>> ReadConsentChainAsync(string tenantId, Guid consentId, CancellationToken ct = default)
+    {
+        await using var conn = _dialect.CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+        using var cmd = conn.CreateCommand();
+        (cmd.CommandText, var items) = (SelectConsentChainSql, new List<GrantRecord>());
+        cmd.AddBound("@tenant_id", tenantId);
+        cmd.AddBound("@consent_id", consentId.ToString("D"));
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false)) items.Add(ReadRecord(reader));
         return items;

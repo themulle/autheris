@@ -28,7 +28,7 @@ using Microsoft.Extensions.Hosting;
 /// <summary>
 /// Admin endpoints for consent workflow routes, external workflow systems, and controlled open-request rerouting.
 /// </summary>
-public static class ConsentWorkflowAdminEndpoints
+public static partial class ConsentWorkflowAdminEndpoints
 {
     public static IEndpointRouteBuilder MapConsentWorkflowAdminEndpoints(this IEndpointRouteBuilder app)
     {
@@ -49,6 +49,14 @@ public static class ConsentWorkflowAdminEndpoints
         group.MapPost("/external-systems/{id:guid}:disable", DisableExternalSystemAsync);
 
         group.MapPost("/requests:reroute", RerouteRequestsAsync);
+
+        app.MapGet("/api/v1/admin/consent/grant-records/{grantId:guid}/export", ExportGrantRecordAsync)
+            .RequireAuthorization(GatewayPolicies.AuditorOrAbove)
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditExport);
+
+        app.MapPost("/api/v1/admin/consent/grant-records:verify", VerifyGrantRecordsAsync)
+            .RequireAuthorization(GatewayPolicies.AuditorOrAbove)
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
 
         return app;
     }

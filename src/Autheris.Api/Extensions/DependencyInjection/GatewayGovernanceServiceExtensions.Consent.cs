@@ -66,6 +66,7 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.Governance.Grants.Records.IGrantRecordSigner>(),
                 sp.GetService<TimeProvider>()));
         services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantChainVerifier, Autheris.Application.Governance.Grants.Records.GrantChainVerifier>();
+        services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantRecordExportService, Autheris.Application.Governance.Grants.Records.GrantRecordExportService>();
         services.AddHostedService<GrantRecordKeyStartupCheck>();
         services.AddOptions<Autheris.Domain.Options.GrantValidityOptions>()
             .BindConfiguration(Autheris.Domain.Options.GrantValidityOptions.SectionName)

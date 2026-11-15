@@ -27,6 +27,7 @@ public static class ConsentDecisionErrorCodes
     public const string ExternalSystemNotAuthorized = "EXTERNAL_SYSTEM_NOT_AUTHORIZED";
     public const string DecisionNotPermitted = "DECISION_NOT_PERMITTED";
     public const string RerouteNotAllowed = "REROUTE_NOT_ALLOWED";
+    public const string GrantNotFound = "GRANT_NOT_FOUND";
 }
 
 public enum ConsentDecisionKind
