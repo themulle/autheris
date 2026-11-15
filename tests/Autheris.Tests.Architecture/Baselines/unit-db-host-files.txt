@@ -18,7 +18,6 @@ tests/Autheris.Tests.Unit/DataApi/GovernedTableReadPlannerSqliteBucketTests.cs
 tests/Autheris.Tests.Unit/DataApi/Issue390ReadOrderDirectionTests.cs
 tests/Autheris.Tests.Unit/DevExperienceTests.cs
 tests/Autheris.Tests.Unit/Governance/BaselineSchemaShapeParityTests.cs
-tests/Autheris.Tests.Unit/Governance/ConsentRecertificationScanTests.cs
 tests/Autheris.Tests.Unit/Governance/GovernanceSchemaShapeVerifierTests.cs
 tests/Autheris.Tests.Unit/Governance/ReadPathSwitchesMetricsAndAnalyzeTests.cs
 tests/Autheris.Tests.Unit/Governance/SqliteConsentDescriptionRepositoryContractTests.cs

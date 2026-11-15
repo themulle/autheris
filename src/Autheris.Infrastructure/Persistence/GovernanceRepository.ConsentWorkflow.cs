@@ -5,14 +5,18 @@ using System.Collections.Generic;
 using System.Data.Common;
 using System.Globalization;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.ConsentRequests;
+using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.Routing;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence.Dialects;
 
-public partial class GovernanceRepository : IConsentWorkflowConfigRepository
+public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IConsentWorkflowAdminRepository
 {
     public async Task<ConsentRequest> ApproveExternalConsentRequestStepAsync(
         Guid requestId,
@@ -351,4 +355,5 @@ WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@sc
 
         return ownerIds;
     }
+
 }

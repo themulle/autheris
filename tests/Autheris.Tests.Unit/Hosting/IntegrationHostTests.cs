@@ -9,8 +9,8 @@ using Autheris.Api.Hosting;
 using Autheris.Api.Hosting.Warmup;
 using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Search;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Recertification;
-using Autheris.Infrastructure.Governance;
 using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -32,7 +32,7 @@ public sealed class IntegrationHostTests
             [
                 typeof(CatalogSearchWarmupService),
                 typeof(CatalogSnapshotBackgroundService),
-                typeof(ConsentRecertificationHostedService),
+                typeof(GrantExpiryHostedService),
                 typeof(RecertificationGovernorHostedService),
                 typeof(TrafficDrainHostedService),
             ],

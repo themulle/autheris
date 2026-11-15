@@ -21,7 +21,6 @@ using Autheris.Application.Mcp.Services;
 using Autheris.Application.Security;
 using Autheris.Application.State;
 using Autheris.Application.Streaming.Interfaces;
-using Autheris.Application.Governance.Workflows;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;

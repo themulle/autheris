@@ -26,6 +26,7 @@ public static class ConsentDecisionErrorCodes
     public const string RequestNotDecidable = "CONSENT_REQUEST_NOT_DECIDABLE";
     public const string ExternalSystemNotAuthorized = "EXTERNAL_SYSTEM_NOT_AUTHORIZED";
     public const string DecisionNotPermitted = "DECISION_NOT_PERMITTED";
+    public const string RerouteNotAllowed = "REROUTE_NOT_ALLOWED";
 }
 
 public enum ConsentDecisionKind

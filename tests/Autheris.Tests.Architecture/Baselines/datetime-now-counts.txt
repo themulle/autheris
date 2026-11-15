@@ -47,7 +47,6 @@ src/Autheris.Application/Governance/Services/EuAiActAuditExporter.cs|1
 src/Autheris.Application/Governance/Services/InMemoryDataContractEngine.cs|2
 src/Autheris.Application/Governance/Services/SchemaSunsettingService.cs|1
 src/Autheris.Application/Governance/Services/WormConfigurationAuditService.cs|1
-src/Autheris.Application/Governance/Workflows/ConsentRecertificationWorkflowService.cs|5
 src/Autheris.Application/Identity/Caching/RoleResolverCache.cs|1
 src/Autheris.Application/Identity/Providers/GraphRoleProvider.cs|4
 src/Autheris.Application/Identity/RoleResolver.cs|1

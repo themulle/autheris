@@ -28,14 +28,16 @@ public static class GatewayEventServiceExtensions
 
         // durable webhook outbox. The bridge enqueues configured-webhook rows; the delivery service (any node) drains
         // with leases. CloudEvent (CDC) rows must be delivered even when the configured webhooks are disabled.
+        // Consent event webhooks also reuse WebhookDeliveryClient + WebhookRetryPolicy unconditionally.
+        services.AddSingleton(sp => new WebhookRetryPolicy(
+            sp.GetRequiredService<IOptions<GatewayOptions>>().Value.Webhooks,
+            sp.GetService<TimeProvider>() ?? TimeProvider.System));
+        services.AddHttpClient<WebhookDeliveryClient>()
+            .AddSecureOutboundHandlers(EgressIntegrations.Webhooks);
+
         var cdcWebhooksEnabled = CdcWebhooksFeature.IsEnabled(services);
         if (gatewayOptions.Webhooks.Enabled || cdcWebhooksEnabled)
         {
-            services.AddSingleton(sp => new WebhookRetryPolicy(
-                sp.GetRequiredService<IOptions<GatewayOptions>>().Value.Webhooks,
-                sp.GetService<TimeProvider>() ?? TimeProvider.System));
-            services.AddHttpClient<WebhookDeliveryClient>()
-                .AddSecureOutboundHandlers(EgressIntegrations.Webhooks);
             services.AddSingleton<WebhookSubscriptionResolver>();
             services.AddHostedService<WebhookDeliveryHostedService>();
         }

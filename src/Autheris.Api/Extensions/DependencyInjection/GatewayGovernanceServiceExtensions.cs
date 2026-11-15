@@ -19,12 +19,10 @@ using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.Webhooks;
-using Autheris.Application.Governance.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
-using Autheris.Infrastructure.Governance;
 using Autheris.Infrastructure.Lineage;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Dialects;
@@ -148,6 +146,9 @@ public static partial class GatewayGovernanceServiceExtensions
             Autheris.Application.Streaming.Interfaces.ICdcStreamStore,
             Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore,
             Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository,
+            Autheris.Application.ConsentRequests.Routing.IConsentWorkflowAdminRepository,
+            Autheris.Application.ConsentRequests.Events.IConsentEventOutbox,
+            Autheris.Application.Governance.Grants.IGrantExpiryStore,
             IIdentityStoreRepository,
             IFunctionalRightRepository,
             IRecertificationRepository,
@@ -176,6 +177,9 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowAdminRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.ConsentRequests.Events.IConsentEventOutbox>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Governance.Grants.IGrantExpiryStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentDescriptionRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>()); // INC1 (same validating decorator instance as IConsentRepository)
         services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IDataOwnerAssignmentRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #393 part b: dbt import owner write seam

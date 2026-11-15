@@ -451,7 +451,67 @@ public partial class GovernanceRepository
             })
         }, tx, ct).ConfigureAwait(false);
 
+        await EmitGrantRevokedEventInTransactionAsync(conn, tx, consentId, tenant, tableId.Value, now, ct).ConfigureAwait(false);
+
         return tableId;
+    }
+
+    private async Task EmitGrantRevokedEventInTransactionAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        Guid consentId,
+        TenantId tenant,
+        TableIdentifier tableId,
+        DateTimeOffset occurredAt,
+        CancellationToken ct)
+    {
+        Guid? requestId = null;
+        var workflowMode = ConsentWorkflowMode.Internal;
+        Guid? externalSystemId = null;
+
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = @"SELECT r.id, r.workflow_mode, r.external_system_id
+FROM CONSENTS c
+LEFT JOIN CONSENT_REQUESTS r ON r.id = c.consent_request_id
+WHERE c.id = @id";
+            cmd.AddBound("@id", consentId.ToString("D"));
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                requestId = ConsentWorkflowSql.ReadOptionalGuid(reader, 0);
+                workflowMode = ConsentWorkflowSql.ReadWorkflowMode(reader, 1);
+                externalSystemId = ConsentWorkflowSql.ReadOptionalGuid(reader, 2);
+            }
+        }
+
+        var payload = new Autheris.Application.ConsentRequests.Events.ConsentThinEventPayload(
+            tenant.Value,
+            requestId,
+            consentId,
+            tableId.ToString(),
+            "REVOKED",
+            1,
+            workflowMode.ToSqlString(),
+            occurredAt,
+            new Autheris.Application.ConsentRequests.Events.ConsentEventLinks(
+                $"/api/v1/consent/grants/{consentId}",
+                "/api/v1/consent/events"));
+
+        await AppendConsentEventInTransactionAsync(
+            conn,
+            tx,
+            new Autheris.Application.ConsentRequests.Events.ConsentEventWrite(
+                tenant.Value,
+                Guid.NewGuid(),
+                Autheris.Application.ConsentRequests.Events.ConsentEventTypes.GrantRevoked,
+                consentId.ToString("D"),
+                Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.Serialize(payload),
+                occurredAt,
+                externalSystemId),
+            tenant,
+            ct).ConfigureAwait(false);
     }
 
     internal async Task<bool> IsAuthorizedApproverForTableInternalAsync(

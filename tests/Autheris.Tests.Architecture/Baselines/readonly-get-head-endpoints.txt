@@ -28,6 +28,8 @@
 /api/governance/system/resource-groups|GET|no side effect: lists governance resource groups
 /api/sql/statements/{statementId}|GET|no side effect: reads WebSQL statement status and results
 /api/v1/admin/authz/migration-report|GET|no side effect: reads authorization migration report
+/api/v1/admin/consent/external-systems/{id:guid}|GET|no side effect: reads registered external workflow system configuration
+/api/v1/admin/consent/routes/{scopeKind}/{scopeRef}|GET|no side effect: reads consent workflow routing configuration
 /api/v1/admin/datasources/{name}/required-write-privileges|GET|no side effect: computes least-privilege GRANT report without mutations
 /api/v1/analytics/metrics|GET|no side effect: reads gateway analytics metrics
 /api/v1/authz/objects/{objectName}/grants|GET|no side effect: reads effective object grants

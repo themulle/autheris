@@ -59,6 +59,10 @@ route /api/governance/system/health | governance admin route (CatalogApiEndpoint
 route /api/governance/system/metrics | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/system/resource-groups | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/lineage/openlineage/sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/v1/admin/consent/routes/{scopeKind}/{scopeRef} | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/external-systems/{id:guid} | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/external-systems/{id:guid}:disable | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/requests:reroute | governance admin route; no C1..C5 choke point
 route /api/v1/cdc/events | CDC ingestion: the caller pushes the event body and the response carries only an event id; no source is read (Streaming services have no source-reader dependency, CdcRoutesReachNoSourceReaderTests)
 route /api/v1/cdc/streams | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/streams/{id}/reset-watermark | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
@@ -168,7 +172,6 @@ scope src/Autheris.Application/Streaming/Services/CdcWebhookDeliveryService.cs |
 scope src/Autheris.Application/Webhooks/WebhookDeliveryHostedService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Connectors/SqlConnector.cs | copy: copies ConnectorSessionContext.Items into its scope
-scope src/Autheris.Infrastructure/Governance/ConsentRecertificationHostedService.cs | exempt: consent recertification; governance state only
 scope src/Autheris.Infrastructure/Health/CachedGatewayHealthCheckService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Messaging/InProcessChannelEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Messaging/RedisEventBus.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data

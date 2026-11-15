@@ -9,6 +9,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Common.Interfaces;
@@ -39,6 +41,8 @@ public sealed class ConsentRequestService : IConsentRequestService
     private readonly IGrantValidityPolicy _grantValidityPolicy;
     private readonly TimeProvider _timeProvider;
     private readonly IConsentWorkflowConfigRepository? _workflowConfigRepository;
+    private readonly IConsentWorkflowRouter? _workflowRouter;
+    private readonly IConsentEventOutbox? _eventOutbox;
     private readonly IIdentitySubjectResolver? _subjectResolver;
     private readonly IConsentMaterializationGuard? _materializationGuard;
     private readonly IRowPolicyDependencyIndex? _policyDependencyIndex;
@@ -54,7 +58,9 @@ public sealed class ConsentRequestService : IConsentRequestService
         IRowPolicyDependencyIndex? policyDependencyIndex = null,
         IGrantValidityPolicy? grantValidityPolicy = null,
         TimeProvider? timeProvider = null,
-        IConsentWorkflowConfigRepository? workflowConfigRepository = null)
+        IConsentWorkflowConfigRepository? workflowConfigRepository = null,
+        IConsentWorkflowRouter? workflowRouter = null,
+        IConsentEventOutbox? eventOutbox = null)
     {
         _materializationGuard = materializationGuard;
         _policyDependencyIndex = policyDependencyIndex;
@@ -64,6 +70,8 @@ public sealed class ConsentRequestService : IConsentRequestService
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _workflowConfigRepository = workflowConfigRepository ?? (_approvalRepository as IConsentWorkflowConfigRepository);
+        _workflowRouter = workflowRouter;
+        _eventOutbox = eventOutbox ?? (_approvalRepository as IConsentEventOutbox);
         _idempotencyStore = idempotencyStore;
         _gatewayOptions = gatewayOptions;
         _subjectResolver = subjectResolver;
@@ -163,6 +171,35 @@ public sealed class ConsentRequestService : IConsentRequestService
         var validatedWriteRules = WriteRuleWorkflowHelper.ValidateRequestedWriteRules(
             meta, command.RequestedWriteRules, tableId, tenantId, _policyDependencyIndex);
 
+        ConsentWorkflowMode workflowMode;
+        Guid? externalSystemId;
+        if (_workflowRouter != null)
+        {
+            var resolution = await _workflowRouter.ResolveForTableAsync(tenantId, tableId, ct).ConfigureAwait(false);
+            workflowMode = resolution.Mode;
+            externalSystemId = workflowMode == ConsentWorkflowMode.External ? resolution.ExternalSystemId : null;
+            var routeMaxEnd = (command.RequestedValidFrom ?? now).AddDays(Math.Max(1, resolution.MaxDurationDays));
+            if (resolvedValidTo > routeMaxEnd)
+            {
+                if (command.RequestedValidTo.HasValue || command.RequestedDuration is not null || command.DurationDays > 0)
+                {
+                    throw new ConsentRequestException(
+                        "VALIDITY_EXCEEDS_MAXIMUM",
+                        $"Requested grant duration exceeds the configured route maximum of {resolution.MaxDurationDays} days.");
+                }
+
+                resolvedValidTo = routeMaxEnd;
+            }
+        }
+        else
+        {
+            var route = _workflowConfigRepository != null
+                ? await _workflowConfigRepository.ResolveWorkflowRouteAsync(tenantId, tableId, ct).ConfigureAwait(false)
+                : null;
+            workflowMode = route?.Mode ?? ConsentWorkflowMode.Internal;
+            externalSystemId = workflowMode == ConsentWorkflowMode.External ? route?.ExternalSystemId : null;
+        }
+
         // a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
         var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
             GranteeType.User,
@@ -178,10 +215,6 @@ public sealed class ConsentRequestService : IConsentRequestService
             throw new ConsentRequestException(grantDecision.ErrorCode ?? GrantErrorCodes.Indeterminate, grantDecision.Reason);
         }
 
-        var route = _workflowConfigRepository != null
-            ? await _workflowConfigRepository.ResolveWorkflowRouteAsync(tenantId, tableId, ct).ConfigureAwait(false)
-            : null;
-        var workflowMode = route?.Mode ?? ConsentWorkflowMode.Internal;
         var initialStatus = workflowMode == ConsentWorkflowMode.External
             ? "PENDING_EXTERNAL_APPROVAL"
             : "PENDING";
@@ -203,7 +236,7 @@ public sealed class ConsentRequestService : IConsentRequestService
             RequestedValidTo = resolvedValidTo,
             Status = initialStatus,
             WorkflowMode = workflowMode,
-            ExternalSystemId = workflowMode == ConsentWorkflowMode.External ? route?.ExternalSystemId : null,
+            ExternalSystemId = externalSystemId,
             TenantId = tenantId,
             RequesterIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value),
             ContextJson = contextJson,
@@ -212,6 +245,21 @@ public sealed class ConsentRequestService : IConsentRequestService
         };
 
         var created = await _approvalRepository.CreateConsentRequestAsync(request, ct).ConfigureAwait(false);
+        if (_eventOutbox != null)
+        {
+            var payload = ConsentEventPayloads.ForRequest(created, now);
+            await _eventOutbox.AppendAsync(
+                new ConsentEventWrite(
+                    created.TenantId.Value,
+                    Guid.NewGuid(),
+                    ConsentEventTypes.RequestCreated,
+                    created.Id.ToString("D"),
+                    ConsentEventPayloads.Serialize(payload),
+                    now,
+                    created.ExternalSystemId),
+                transaction: null,
+                ct: ct).ConfigureAwait(false);
+        }
 
         if (workflowMode == ConsentWorkflowMode.Internal && _gatewayOptions?.Value.IsAutoApproveEnabled == true)
         {

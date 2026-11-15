@@ -9,7 +9,11 @@ using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests;
+using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Events.Interfaces;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
@@ -110,6 +114,10 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public ICdcStreamStore CdcStreams => Services.GetRequiredService<ICdcStreamStore>();
     public ICdcStreamKeyStore CdcStreamKeys => Services.GetRequiredService<ICdcStreamKeyStore>();
     public ICloudEventSubscriptionStore CloudEventSubscriptions => Services.GetRequiredService<ICloudEventSubscriptionStore>();
+    public IConsentWorkflowConfigRepository ConsentWorkflowConfig => Services.GetRequiredService<IConsentWorkflowConfigRepository>();
+    public IConsentWorkflowAdminRepository ConsentWorkflowAdmin => Services.GetRequiredService<IConsentWorkflowAdminRepository>();
+    public IConsentEventOutbox ConsentEventOutbox => Services.GetRequiredService<IConsentEventOutbox>();
+    public IGrantExpiryStore GrantExpiry => Services.GetRequiredService<IGrantExpiryStore>();
 
     public void SetCaller(CallerContext? caller) => _callerProvider.Current = caller;
 

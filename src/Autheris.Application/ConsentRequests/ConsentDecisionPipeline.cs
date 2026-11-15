@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Validation;
@@ -46,7 +47,8 @@ public sealed class ConsentDecisionPipeline(
     IOptions<GatewayOptions>? gatewayOptions = null,
     IOptions<GovernanceTextOptions>? textOptions = null,
     TimeProvider? timeProvider = null,
-    TenantId? fallbackTenantId = null) : IConsentDecisionPipeline
+    TenantId? fallbackTenantId = null,
+    IConsentEventOutbox? eventOutbox = null) : IConsentDecisionPipeline
 {
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly IConsentApprovalRepository _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
@@ -57,6 +59,7 @@ public sealed class ConsentDecisionPipeline(
     private readonly IGrantValidityPolicy _grantValidityPolicy = grantValidityPolicy ?? throw new ArgumentNullException(nameof(grantValidityPolicy));
     private readonly IExternalDecisionGuard _externalDecisionGuard = externalDecisionGuard ?? throw new ArgumentNullException(nameof(externalDecisionGuard));
     private readonly IConsentWorkflowConfigRepository? _workflowConfigRepository = workflowConfigRepository ?? (approvalRepository as IConsentWorkflowConfigRepository);
+    private readonly IConsentEventOutbox? _eventOutbox = eventOutbox ?? (approvalRepository as IConsentEventOutbox);
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly int _descriptionMaxLength = textOptions?.Value?.ConsentDescriptionMaxLength ?? new GovernanceTextOptions().ConsentDescriptionMaxLength;
 
@@ -318,10 +321,12 @@ public sealed class ConsentDecisionPipeline(
                 var effectiveApprover = externalApproverSids[^1];
                 var rejectedExt = await _approvalRepository.RejectExternalConsentRequestAsync(
                     req.Id, command.ExternalAttribution!, effectiveApprover, trimmedReason, ct).ConfigureAwait(false);
+                await EmitRequestEventAsync(rejectedExt, ConsentEventTypes.RequestDecided, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
                 return new ConsentDecisionResult(rejectedExt);
             }
 
             var rejected = await _approvalRepository.RejectConsentRequestAsync(req.Id, actorSid, trimmedReason, ct).ConfigureAwait(false);
+            await EmitRequestEventAsync(rejected, ConsentEventTypes.RequestDecided, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
             return new ConsentDecisionResult(rejected);
         }
         catch (ConsentRequestStatusConflictException ex)
@@ -421,10 +426,12 @@ public sealed class ConsentDecisionPipeline(
                 {
                     var extStep = await _approvalRepository.ApproveExternalConsentRequestStepAsync(
                         req.Id, command.ExternalAttribution!, externalApproverSids[0], ct).ConfigureAwait(false);
+                    await EmitRequestEventAsync(extStep, ConsentEventTypes.RequestUpdated, now, ct).ConfigureAwait(false);
                     return new ConsentDecisionResult(extStep);
                 }
 
                 var stepReq = await _approvalRepository.ApproveConsentRequestStepAsync(req.Id, actorSid, ct).ConfigureAwait(false);
+                await EmitRequestEventAsync(stepReq, ConsentEventTypes.RequestUpdated, now, ct).ConfigureAwait(false);
                 return new ConsentDecisionResult(stepReq);
             }
 
@@ -507,6 +514,7 @@ public sealed class ConsentDecisionPipeline(
             }
 
             req.Status = "APPROVED";
+            await EmitRequestEventAsync(req, ConsentEventTypes.RequestDecided, now, ct).ConfigureAwait(false);
             return new ConsentDecisionResult(req, activated);
         }
         catch (ConsentRequestStatusConflictException ex)
@@ -517,6 +525,31 @@ public sealed class ConsentDecisionPipeline(
         {
             throw new ConsentDecisionException(ConsentDecisionErrorCodes.FourEyesSameApprover, ex.Message, statusCode: 409);
         }
+    }
+
+    private async Task EmitRequestEventAsync(
+        ConsentRequest request,
+        string eventType,
+        DateTimeOffset occurredAt,
+        CancellationToken ct)
+    {
+        if (_eventOutbox is null)
+        {
+            return;
+        }
+
+        var payload = ConsentEventPayloads.ForRequest(request, occurredAt);
+        await _eventOutbox.AppendAsync(
+            new ConsentEventWrite(
+                request.TenantId.Value,
+                Guid.NewGuid(),
+                eventType,
+                request.Id.ToString("D"),
+                ConsentEventPayloads.Serialize(payload),
+                occurredAt,
+                request.ExternalSystemId),
+            transaction: null,
+            ct: ct).ConfigureAwait(false);
     }
 
     private string? ValidateOptionalDescription(string? description)

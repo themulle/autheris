@@ -22,6 +22,8 @@ src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/domains
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/search
 src/Autheris.Api/Endpoints/CdcStreamAdminEndpoints.cs|/api/v1/cdc/streams
 src/Autheris.Api/Endpoints/ChangeDetectionEndpoints.cs|/api/v1/data/{domain}/{schema}/{table}/change-token
+src/Autheris.Api/Endpoints/ConsentWorkflowAdminEndpoints.cs|/external-systems/{id:guid}
+src/Autheris.Api/Endpoints/ConsentWorkflowAdminEndpoints.cs|/routes/{scopeKind}/{scopeRef}
 src/Autheris.Api/Endpoints/DataContractEndpoints.cs|/api/v1/governance/contracts
 src/Autheris.Api/Endpoints/DatasetDataEndpoints.cs|/api/v1/data/{datasetId}
 src/Autheris.Api/Endpoints/DatasetDataEndpoints.cs|/api/v1/data/{domain}/{schema}/{table}
