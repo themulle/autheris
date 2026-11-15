@@ -33,8 +33,7 @@ internal static class CatalogBatchUpsertHelper
         Dictionary<Guid, List<TableColumn>> ColumnsByTable,
         Dictionary<Guid, Dictionary<string, MaskingRule>> MasksByTable,
         HashSet<Guid> CorruptedIds,
-        Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? Keys,
-        Dictionary<Guid, List<CatalogPhysicalIndexStore.Row>>? PhysicalIndexes);
+        Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? Keys);
 
     internal static async Task<ChunkItemOutcome[]> ExecuteChunkWithRetryAsync(
         GovernanceRepository repo,
@@ -97,7 +96,7 @@ internal static class CatalogBatchUpsertHelper
                 }
             }
 
-            var before = await LoadChunkDetailsAsync(repo, conn, tx, existingTableIds, includePhysical: false, ct).ConfigureAwait(false);
+            var before = await LoadChunkDetailsAsync(repo, conn, tx, existingTableIds, ct).ConfigureAwait(false);
             var precedence = repo.OptionsSnapshot?.Catalog?.DocumentationSourcePrecedence;
             var anyStoredBefore = false;
 
@@ -173,7 +172,7 @@ internal static class CatalogBatchUpsertHelper
             {
                 var afterItems = existingLookupIndices.Select(idx => chunk[idx]).ToArray();
                 afterTables = await SelectChunkTablesAsync(repo, conn, tx, afterItems, lockForUpdate: false, ct).ConfigureAwait(false);
-                after = await LoadChunkDetailsAsync(repo, conn, tx, existingTableIds, includePhysical: false, ct).ConfigureAwait(false);
+                after = await LoadChunkDetailsAsync(repo, conn, tx, existingTableIds, ct).ConfigureAwait(false);
             }
 
             var anyRestrictive = false;
@@ -316,7 +315,7 @@ internal static class CatalogBatchUpsertHelper
         await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
         var tables = await SelectChunkTablesAsync(repo, conn, null, chunk, lockForUpdate: false, ct).ConfigureAwait(false);
         var loadedIds = tables.Values.Select(e => e.Id).ToList();
-        var details = await LoadChunkDetailsAsync(repo, conn, null, loadedIds, includePhysical: true, ct).ConfigureAwait(false);
+        var details = await LoadChunkDetailsAsync(repo, conn, null, loadedIds, ct).ConfigureAwait(false);
         var rowFilters = await RowFilterEvaluationStore.ReadBatchObjectAsync(conn, null, repo.KeyDialect, ct).ConfigureAwait(false);
 
         Dictionary<Guid, long>? epochs = null;
@@ -354,10 +353,6 @@ internal static class CatalogBatchUpsertHelper
                     conn, null, repo.KeyDialect, incoming.Identifier, entity.Id, cols, ct,
                     repo.KeyTableProbe, details.Keys is not null && details.Keys.TryGetValue(entity.Id, out var kr) ? kr : null).ConfigureAwait(false);
 
-                var physicalIndexes = details.PhysicalIndexes is not null && details.PhysicalIndexes.TryGetValue(entity.Id, out var physicalRows)
-                    ? CatalogPhysicalIndexStore.Assemble(cols, physicalRows)
-                    : Array.Empty<PhysicalIndexDefinition>();
-
                 rowFilters.TryGetValue(entity.Id, out var rowFilterEval);
 
                 var structural = new TableMetadata
@@ -369,7 +364,6 @@ internal static class CatalogBatchUpsertHelper
                     PrimaryKeyColumns = pkCols,
                     PrimaryKeyDirections = pkDirs,
                     Indexes = indexes,
-                    PhysicalIndexes = physicalIndexes,
                     RowFilterEvaluation = rowFilterEval
                 };
                 structural.ValidateRequiredFilterColumns();
@@ -401,28 +395,22 @@ internal static class CatalogBatchUpsertHelper
         DbConnection conn,
         DbTransaction? tx,
         IReadOnlyList<Guid> tableIds,
-        bool includePhysical,
         CancellationToken ct)
     {
         if (tableIds.Count == 0)
         {
-            return new ChunkColumnKeySnapshot(new(), new(), new(), null, null);
+            return new ChunkColumnKeySnapshot(new(), new(), new(), null);
         }
 
         var (cols, masks, corrupted) = await LoadChunkColumnsAsync(repo, conn, tx, tableIds, ct).ConfigureAwait(false);
         var keyTablesExist = await CatalogKeyDefinitionStore.TablesExistAsync(conn, tx, repo.KeyDialect, ct, repo.KeyTableProbe).ConfigureAwait(false);
         Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? keys = null;
-        Dictionary<Guid, List<CatalogPhysicalIndexStore.Row>>? physical = null;
         if (keyTablesExist)
         {
             keys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, tx, repo.KeyDialect, tableIds, ct).ConfigureAwait(false);
-            if (includePhysical)
-            {
-                physical = await CatalogPhysicalIndexStore.ReadBatchAsync(conn, tx, repo.KeyDialect, tableIds, ct).ConfigureAwait(false);
-            }
         }
 
-        return new ChunkColumnKeySnapshot(cols, masks, corrupted, keys, physical);
+        return new ChunkColumnKeySnapshot(cols, masks, corrupted, keys);
     }
 
     private static async Task<CatalogTablePersistedProjection?> TryProjectFromSnapshotAsync(

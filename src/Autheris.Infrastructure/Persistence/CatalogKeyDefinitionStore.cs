@@ -612,7 +612,7 @@ internal static class CatalogKeyDefinitionStore
             return true;
         }
 
-        foreach (var table in new[] { PrimaryKeyTable, IndexTable, IndexColumnTable, CatalogPhysicalIndexStore.IndexTable, CatalogPhysicalIndexStore.ColumnTable })
+        foreach (var table in new[] { PrimaryKeyTable, IndexTable, IndexColumnTable })
         {
             await using var cmd = conn.CreateCommand();
             Enlist(cmd, tx);

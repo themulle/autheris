@@ -56,14 +56,8 @@ public sealed class ArchitectureNoSourceMetadataReadsTests
         ["Autheris.Application/VirtualFilters/EffectiveFilterInspector.cs"] = "audit target label literal, never sent to a source"
     };
 
-    private const string Removed = "removed in PR 2-4";
-
-    /// <summary>Temporary entries: the readers and validators that the declared-catalog work packages still delete.</summary>
-    private static readonly Dictionary<string, string> TemporaryAllowlist = new(StringComparer.Ordinal)
-    {
-        ["Autheris.Infrastructure/Persistence/Catalog/PostgreSqlKeyIndexMetadataReader.cs"] = Removed,
-        ["Autheris.Infrastructure/Persistence/Catalog/SqlServerKeyIndexMetadataReader.cs"] = Removed
-    };
+    /// <summary>Temporary entries: empty after WP-SIMPL-44 deletes all physical key/index readers.</summary>
+    private static readonly Dictionary<string, string> TemporaryAllowlist = new(StringComparer.Ordinal);
 
     private const string MigrationsDirectory = "Autheris.Infrastructure/Persistence/Migrations/";
 
@@ -177,28 +171,6 @@ public sealed class ArchitectureNoSourceMetadataReadsTests
         scanned.ShouldContain("Autheris.Extensions/Cdc/CdcTableActivator.cs");
         scanned.ShouldContain("Autheris.Extensions/Cdc/CdcSourceQueries.cs");
         scanned.ShouldContain("Autheris.Infrastructure/Persistence/SqlConnectionFactory.cs");
-    }
-
-    [Fact]
-    public void KeyIndexReaders_AreReferencedOnlyByTheGovernedCatalogProviderAndComposition()
-    {
-        const string Persistence = "Autheris.Infrastructure/Persistence/Catalog/";
-        const string Composition = "Autheris.Api/Extensions/DependencyInjection/GatewayStorageServiceExtensions.cs";
-        var concrete = new[] { "SqlServerKeyIndexMetadataReader", "PostgreSqlKeyIndexMetadataReader" };
-        var port = new[]
-        {
-            "Autheris.Application/Sql/Catalog/IKeyIndexMetadataReader.cs", Persistence + "SqlServerKeyIndexMetadataReader.cs",
-            Persistence + "PostgreSqlKeyIndexMetadataReader.cs", Persistence + "GovernedCatalogProvider.cs",
-            Composition
-        };
-
-        var portUsers = AllSourceFiles().Where(f => File.ReadAllText(f).Contains("IKeyIndexMetadataReader", StringComparison.Ordinal)).Select(Relative).Order(StringComparer.Ordinal);
-        portUsers.ShouldBe(port.Order(StringComparer.Ordinal));
-
-        var concreteUsers = AllSourceFiles()
-            .Where(f => { var text = File.ReadAllText(f); return concrete.Any(c => text.Contains(c, StringComparison.Ordinal)); })
-            .Select(Relative).Order(StringComparer.Ordinal);
-        concreteUsers.ShouldBe(new[] { Composition, Persistence + "PostgreSqlKeyIndexMetadataReader.cs", Persistence + "SqlServerKeyIndexMetadataReader.cs" }.Order(StringComparer.Ordinal));
     }
 
     private static readonly (string Pattern, string Sample)[] Samples =

@@ -109,12 +109,6 @@ public sealed class IngestionCallersBatchUpsertTests
             Task.FromResult(assets.FirstOrDefault(a => a.Identifier.Equals(table)));
     }
 
-    private sealed class NoopPhysicalKeyCatalog : IPhysicalKeyCatalog
-    {
-        public ValueTask<PhysicalKeySnapshot> ReadAsync(TableMetadata metadata, CancellationToken ct) =>
-            ValueTask.FromResult(PhysicalKeySnapshot.Unsupported);
-    }
-
     private sealed class NoopAuditWriter : IAuditWriter
     {
         public Task RecordRequiredAsync(AuditLogEntry entry, CancellationToken ct = default) => Task.CompletedTask;
@@ -331,7 +325,6 @@ public sealed class IngestionCallersBatchUpsertTests
             repo,
             epochs,
             Options.Create(new GatewayOptions()),
-            new NoopPhysicalKeyCatalog(),
             new NoopAuditWriter(),
             NullLogger<DataCatalogSyncService>.Instance);
 

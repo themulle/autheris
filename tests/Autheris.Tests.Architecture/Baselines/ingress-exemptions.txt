@@ -42,7 +42,6 @@ route /api/governance/classification/proposals/{proposalId:guid}/reject | govern
 route /api/governance/classification/transition | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/consents/apply | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/datasources | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/datasources/{id}/refresh-physical-keys | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/eu-ai-act/article-10-certificate | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/gdpr/export-pdf | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/hitl/approve | governance admin route (CatalogApiEndpoints and siblings); governance repositories only

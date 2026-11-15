@@ -8,11 +8,12 @@ public static partial class TableKeyDefinitionValidator
     public const int MaxColumnsPerKey = 32;
     public const int MaxIndexesPerTable = 64;
 
-    /// <summary>Issue #404 (I404-SC-06): upper bound of physical non-unique indexes stored per table.</summary>
-    public const int MaxPhysicalIndexesPerTable = 32;
-
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}\z")]
     private static partial Regex IndexNameRegex();
+
+    /// <summary>True when <paramref name="name"/> is a valid declared index identifier.</summary>
+    public static bool IsValidIndexName(string? name) =>
+        !string.IsNullOrWhiteSpace(name) && IndexNameRegex().IsMatch(name);
 
     private const int MaxEchoedNameLength = 64;
 
@@ -51,7 +52,8 @@ public static partial class TableKeyDefinitionValidator
             if (declaredPk.Count > MaxColumnsPerKey)
             {
                 throw new TableDefinitionException(
-                    $"Primary key on table '{metadata.Identifier}' has {declaredPk.Count} columns, exceeding maximum {MaxColumnsPerKey}.");
+                    $"Primary key on table '{metadata.Identifier}' has {declaredPk.Count} columns, exceeding maximum {MaxColumnsPerKey}.",
+                    "PK_TOO_WIDE");
             }
 
             var seenPk = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -59,17 +61,19 @@ public static partial class TableKeyDefinitionValidator
             {
                 if (string.IsNullOrWhiteSpace(colName))
                 {
-                    throw new TableDefinitionException($"Primary key on table '{metadata.Identifier}' contains an empty column name.");
+                    throw new TableDefinitionException($"Primary key on table '{metadata.Identifier}' contains an empty column name.", "PK_EMPTY_COLUMN");
                 }
 
                 var col = metadata.GetColumn(colName.Trim())
                     ?? throw new TableDefinitionException(
-                        $"Primary key column '{Safe(colName)}' does not exist in table '{metadata.Identifier}'.");
+                        $"Primary key column '{Safe(colName)}' does not exist in table '{metadata.Identifier}'.",
+                        "PK_UNKNOWN_COLUMN");
 
                 if (!seenPk.Add(col.ColumnName))
                 {
                     throw new TableDefinitionException(
-                        $"Primary key on table '{metadata.Identifier}' lists column '{col.ColumnName}' more than once.");
+                        $"Primary key on table '{metadata.Identifier}' lists column '{col.ColumnName}' more than once.",
+                        "PK_DUPLICATE_COLUMN");
                 }
 
                 primaryKey.Add(col.ColumnName);
@@ -82,7 +86,7 @@ public static partial class TableKeyDefinitionValidator
             // Issue #390: one direction per declared column and only defined enum values; the message never echoes input.
             if (declaredDirections.Count != primaryKey.Count || !AllDefined(declaredDirections))
             {
-                throw new TableDefinitionException($"Primary key directions on table '{metadata.Identifier}' do not match its columns.");
+                throw new TableDefinitionException($"Primary key directions on table '{metadata.Identifier}' do not match its columns.", "PK_DIRECTIONS_MISMATCH");
             }
 
             primaryKeyDirections = KeyDirections.Canonical(declaredDirections) ?? Array.Empty<KeyColumnDirection>();
@@ -94,7 +98,8 @@ public static partial class TableKeyDefinitionValidator
             if (declaredIndexes.Count > MaxIndexesPerTable)
             {
                 throw new TableDefinitionException(
-                    $"Table '{metadata.Identifier}' declares {declaredIndexes.Count} indexes, exceeding maximum {MaxIndexesPerTable}.");
+                    $"Table '{metadata.Identifier}' declares {declaredIndexes.Count} indexes, exceeding maximum {MaxIndexesPerTable}.",
+                    "INDEXES_TOO_MANY");
             }
 
             var seenIndexNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -103,19 +108,22 @@ public static partial class TableKeyDefinitionValidator
                 if (index == null || string.IsNullOrWhiteSpace(index.Name) || !IndexNameRegex().IsMatch(index.Name))
                 {
                     throw new TableDefinitionException(
-                        $"Index name '{Safe(index?.Name)}' on table '{metadata.Identifier}' is invalid.");
+                        $"Index name '{Safe(index?.Name)}' on table '{metadata.Identifier}' is invalid.",
+                        "INDEX_NAME_INVALID");
                 }
 
                 if (!seenIndexNames.Add(index.Name))
                 {
                     throw new TableDefinitionException(
-                        $"Index name '{Safe(index.Name)}' is declared more than once on table '{metadata.Identifier}'.");
+                        $"Index name '{Safe(index.Name)}' is declared more than once on table '{metadata.Identifier}'.",
+                        "INDEX_NAME_DUPLICATE");
                 }
 
                 if (index.Columns == null || index.Columns.Count == 0 || index.Columns.Count > MaxColumnsPerKey)
                 {
                     throw new TableDefinitionException(
-                        $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' must have between 1 and {MaxColumnsPerKey} columns.");
+                        $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' must have between 1 and {MaxColumnsPerKey} columns.",
+                        "INDEX_COLUMNS_INVALID");
                 }
 
                 var normalizedCols = new List<string>(index.Columns.Count);
@@ -125,17 +133,20 @@ public static partial class TableKeyDefinitionValidator
                     if (string.IsNullOrWhiteSpace(colName))
                     {
                         throw new TableDefinitionException(
-                            $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' contains an empty column name.");
+                            $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' contains an empty column name.",
+                            "INDEX_EMPTY_COLUMN");
                     }
 
                     var col = metadata.GetColumn(colName.Trim())
                         ?? throw new TableDefinitionException(
-                            $"Index '{Safe(index.Name)}' references unknown column '{Safe(colName)}' on table '{metadata.Identifier}'.");
+                            $"Index '{Safe(index.Name)}' references unknown column '{Safe(colName)}' on table '{metadata.Identifier}'.",
+                            "INDEX_UNKNOWN_COLUMN");
 
                     if (!seenCols.Add(col.ColumnName))
                     {
                         throw new TableDefinitionException(
-                            $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' lists column '{col.ColumnName}' more than once.");
+                            $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' lists column '{col.ColumnName}' more than once.",
+                            "INDEX_DUPLICATE_COLUMN");
                     }
 
                     normalizedCols.Add(col.ColumnName);
@@ -144,7 +155,8 @@ public static partial class TableKeyDefinitionValidator
                 if (index.Directions is { Count: > 0 } indexDirections && (indexDirections.Count != normalizedCols.Count || !AllDefined(indexDirections)))
                 {
                     throw new TableDefinitionException(
-                        $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' has directions that do not match its columns.");
+                        $"Index '{Safe(index.Name)}' on table '{metadata.Identifier}' has directions that do not match its columns.",
+                        "INDEX_DIRECTIONS_MISMATCH");
                 }
 
                 indexes.Add(new TableIndexDefinition(index.Name, normalizedCols, index.IsUnique, KeyDirections.Canonical(index.Directions)));
@@ -174,4 +186,7 @@ public static partial class TableKeyDefinitionValidator
 }
 
 /// <summary>The declared key or index definition of a table is invalid (mapped to HTTP 400).</summary>
-public sealed class TableDefinitionException(string message) : ArgumentException(message);
+public sealed class TableDefinitionException(string message, string ruleCode = "TABLE_DEFINITION_INVALID") : ArgumentException(message)
+{
+    public string RuleCode { get; } = ruleCode;
+}

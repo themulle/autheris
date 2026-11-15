@@ -672,7 +672,7 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             repo,
             Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.OpenMetadata } }),
-            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync();
 

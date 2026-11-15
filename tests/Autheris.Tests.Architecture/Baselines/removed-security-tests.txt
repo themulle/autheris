@@ -62,3 +62,75 @@ Autheris.Tests.Integration.Seed.PERS_04_Extend_UnknownId_IsRejected_NoAuditNoEpo
 Autheris.Tests.Integration.Seed.PERS_04_Extend_UsesServerTimeInTheUpdatePredicate	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
 Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.SEC_SC_20_RenewalCount_StartsAtZero_AndIsIncrementedByEveryExtension	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
 Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.SEC_SC_20_Renewal_RestartsTheClampPeriod_AtDay150	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Extensions.Tests.CollectingLogger.I404_T_18_Sync_Known_ReplacesOnlyWhenChanged	#WP-SIMPL-44	Removed physical non-unique index sync in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.CollectingLogger.I404_T_20_Sync_Unsupported_ClearsStored	#WP-SIMPL-44	Removed physical non-unique index sync in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.CollectingLogger.I404_T_21_Sync_DryRun_WritesNothing	#WP-SIMPL-44	Removed physical non-unique index sync in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.CollectingLogger.I404_T_22_Sync_AdmissionDenied_NoReadNoWrite	#WP-SIMPL-44	Removed physical non-unique index sync in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.CollectingLogger.I404_T_S02_Sync_Unavailable_KeepsStored_WarningHasCodeAndTableIdOnly_NoIndexNameNoErrorText	#WP-SIMPL-44	Removed physical non-unique index sync in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.CollectingLogger.I404_T_S03_Sync_AuditFailure_KeepsStoredList	#WP-SIMPL-44	Removed physical non-unique index sync in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.CollectingLogger.I404_T_S03_Sync_Replace_WritesAudit_BeforeStore_NoNamesNoColumns	#WP-SIMPL-44	Removed physical non-unique index sync in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.CollectingLogger.I404_T_S04_Sync_NoChange_WritesNoAudit	#WP-SIMPL-44	Removed physical non-unique index sync in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.Issue403DataCatalogSyncDirectionTests.AdmissionDeniedTable_NoPhysicalRead_NoFinding	#WP-SIMPL-44	Removed physical key direction reconciliation in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.Issue403DataCatalogSyncDirectionTests.AssetWithoutDirections_ChangedColumns_DirectionsReset	#WP-SIMPL-44	Removed physical key direction reconciliation in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.Issue403DataCatalogSyncDirectionTests.AssetWithoutDirections_SameColumns_StoredDescRetained_FlagPath	#WP-SIMPL-44	Removed physical key direction reconciliation in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.Issue403DataCatalogSyncDirectionTests.AuditThrows_NoPhysicalDirectionPersisted_AuditBeforeUpsertOrdering	#WP-SIMPL-44	Removed physical key direction reconciliation in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.Issue403DataCatalogSyncDirectionTests.DryRun_NoAuditNoUpsertNoEpochInvalidation	#WP-SIMPL-44	Removed physical key direction reconciliation in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.Issue403DataCatalogSyncDirectionTests.PhysicalDirections_NeverChangeSecurityFlags_RatchetStillApplied	#WP-SIMPL-44	Removed physical key direction reconciliation in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.Issue403DataCatalogSyncDirectionTests.Sync_RestrictToTenant_NoForeignFindings	#WP-SIMPL-44	Removed physical key direction reconciliation in WP-SIMPL-44 PR 4
+Autheris.Extensions.Tests.Issue403DataCatalogSyncDirectionTests.Warnings_AuditAndLogs_NeverContainIndexColumnOrExceptionText	#WP-SIMPL-44	Removed physical key direction reconciliation in WP-SIMPL-44 PR 4
+Autheris.Tests.Architecture.ArchitectureNoSourceMetadataReadsTests.KeyIndexReaders_AreReferencedOnlyByTheGovernedCatalogProviderAndComposition	#WP-SIMPL-44	Deleted all physical key/index readers in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.CatalogKeyDefinitionContractTestsBase.I404_T_S06_S07_PhysicalIndexes_Replace_RejectsInvalid_WritesNothing_AndIsolatesTables	#WP-SIMPL-44	Removed IPhysicalIndexRepository in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.Governance.CatalogPhysicalIndexStoreTests.I404_SC_01_PhysicalIndexTables_HaveNoNameOrTimestampColumn	#WP-SIMPL-44	Deleted CatalogPhysicalIndexStore in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.Governance.CatalogPhysicalIndexStoreTests.I404_T_07_Read_UnresolvedColumn_DropsWholeIndex	#WP-SIMPL-44	Deleted CatalogPhysicalIndexStore in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.Governance.CatalogPhysicalIndexStoreTests.I404_T_09_Store_Sql_BoundParametersOnly	#WP-SIMPL-44	Deleted CatalogPhysicalIndexStore in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.Governance.CatalogPhysicalIndexStoreTests.I404_T_S06_Store_Replace_RejectsOverCapOrdinalGapOrDuplicateColumn_WritesNothing	#WP-SIMPL-44	Deleted CatalogPhysicalIndexStore in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.Governance.CatalogPhysicalIndexStoreTests.I404_T_S07_Store_Replace_CrossTenantTable_Isolated_AndNeverTouchesDeclaredIndexes	#WP-SIMPL-44	Deleted CatalogPhysicalIndexStore in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.Governance.Issue404SyncThenDescribeTests.I404_RemovedAndReRegisteredTable_DoesNotResurfaceOldPhysicalRows	#WP-SIMPL-44	Removed physical index chain in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.Governance.Issue404SyncThenDescribeTests.I404_T_24_SyncThenDescribe_NonUniqueIndexListed_NoNames	#WP-SIMPL-44	Removed physical index chain in WP-SIMPL-44 PR 4; declared non-unique indexes covered via DatasetIndexVisibilityLeakTests
+Autheris.Tests.Integration.KeyIndexMetadataReaderContractTests.I404_T_12_FilteredPartialExpressionIncluded_Excluded	#WP-SIMPL-44	Deleted physical key/index readers in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.KeyIndexMetadataReaderContractTests.QuotedMixedCaseNames_BoundNotInterpolated	#WP-SIMPL-44	Deleted physical key/index readers in WP-SIMPL-44 PR 4
+Autheris.Tests.Integration.PhysicalKeyRefreshEndpointAuthIntegrationTests.Anonymous_Returns401	#WP-SIMPL-44	Deleted refresh-physical-keys routes in WP-SIMPL-44 PR 4; 404 regression covered by DeletedPhysicalKeyRoutesTests.RefreshPhysicalKeys_BothRoutes_404
+Autheris.Tests.Integration.PhysicalKeyRefreshEndpointAuthIntegrationTests.NonAdmin_Returns403	#WP-SIMPL-44	Deleted refresh-physical-keys routes in WP-SIMPL-44 PR 4; 404 regression covered by DeletedPhysicalKeyRoutesTests.RefreshPhysicalKeys_BothRoutes_404
+Autheris.Tests.Unit.Catalog.PhysicalKeyRefreshEndpointTests.CAT427_T08_RefreshEndpoint_WhenNoSid_ReturnsForbidden	#WP-SIMPL-44	Deleted refresh-physical-keys routes in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Catalog.PhysicalKeyRefreshEndpointTests.CAT427_T09_RefreshEndpoint_WhenInvalidDatasourceId_ReturnsBadRequest	#WP-SIMPL-44	Deleted refresh-physical-keys routes in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Catalog.PhysicalKeyRefreshEndpointTests.CAT427_T10_RefreshEndpoint_WhenInvalidTableFilter_ReturnsBadRequest	#WP-SIMPL-44	Deleted refresh-physical-keys routes in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Catalog.PhysicalKeyRefreshEndpointTests.CAT427_T11_RefreshEndpoint_WhenDatasourceNotFound_ReturnsNotFound	#WP-SIMPL-44	Deleted refresh-physical-keys routes in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Catalog.PhysicalKeyRefreshEndpointTests.CAT427_T12_RefreshEndpoint_WhenValid_ReturnsOkWithRefreshResult	#WP-SIMPL-44	Deleted refresh-physical-keys routes in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Catalog.PhysicalKeyRefreshEndpointTests.CAT427_T13_MapCatalogEndpoints_RegistersRefreshRouteWithoutException	#WP-SIMPL-44	Deleted refresh-physical-keys routes in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.AssetWithoutDirections_ChangedColumns_DirectionsReset	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.AssetWithoutDirections_SameColumns_StoredDescRetained_PkAndUnique_FlagPath	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.NoIncomingKey_StoredUntouched_DriftOnly	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.PartialOverlapOrReorder_NoDirectionApplied	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.PhysicalDirections_NeverChangeSecurityFlags_RatchetStillApplied	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.PhysicalPkDiffersInColumns_Mismatch_NoDirection	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.PhysicalPkDiffersInOrder_Mismatch_NoDirection	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.Precedence_AssetOverStoredOverPhysical_NeverSilentOverride	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.StoredNonEmptyDirections_Kept_ConflictReported_NoCrossSide	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.TwoUniqueCandidatesDifferentDirections_Ambiguous	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.Issue403PhysicalKeyReconcilerTests.Unavailable_Or_Unsupported_NoChange	#WP-SIMPL-44	Deleted PhysicalKeyDirectionReconciler in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.PhysicalKeyRefreshServiceTests.CAT427_T06_PhysicalKeyRefreshService_DryRun_DoesNotMutateStoreOrAudit	#WP-SIMPL-44	Deleted PhysicalKeyRefreshService in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.PhysicalKeyRefreshServiceTests.CAT427_T07_PhysicalKeyRefreshService_WhenPhysicalApplied_AuditsAndPersists	#WP-SIMPL-44	Deleted PhysicalKeyRefreshService in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.PhysicalKeyRefreshServiceTests.PhysicalKeyRefreshService_WhenNonUniqueIndexesChanged_AuditsAndPersistsAndInvalidatesEpoch	#WP-SIMPL-44	Deleted PhysicalKeyRefreshService in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.PhysicalKeyRefreshServiceTests.PhysicalKeyRefreshService_WhenTenantRestricted_OnlyRefreshesTenantTables	#WP-SIMPL-44	Deleted PhysicalKeyRefreshService in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.PhysicalNonUniqueIndexTests.PhysicalIndexes_NeverAffectReadOrderingKeysetPolicyMasking	#WP-SIMPL-44	Deleted PhysicalNonUniqueIndexResolver in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.DataCatalog.PhysicalNonUniqueIndexTests.UnmappedColumn_DropsIndex_AndPostgreSqlMapsCaseSensitive	#WP-SIMPL-44	Deleted PhysicalNonUniqueIndexResolver in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Dbt.DbtPhysicalKeyIngestionTests.CAT427_T01_DbtIngestion_WhenSqlTableHasClusteredDescKey_ReconcilesPhysicalDirections	#WP-SIMPL-44	Deleted physical key reconciliation for dbt in WP-SIMPL-44 PR 4; replaced by dbt meta.indexes in DbtMetaIndexesTests
+Autheris.Tests.Unit.Dbt.DbtPhysicalKeyIngestionTests.CAT427_T02_DbtIngestion_WhenExplicitDirectionDeclared_DeclaredPrecedenceWins	#WP-SIMPL-44	Deleted physical key reconciliation for dbt in WP-SIMPL-44 PR 4; replaced by dbt meta.indexes in DbtMetaIndexesTests
+Autheris.Tests.Unit.Dbt.DbtPhysicalKeyIngestionTests.CAT427_T03_DbtIngestion_WhenPhysicalKeyColumnsMismatch_ReconcilesNoDirections	#WP-SIMPL-44	Deleted physical key reconciliation for dbt in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Dbt.DbtPhysicalKeyIngestionTests.CAT427_T04_DbtIngestion_WhenPhysicalReadFails_RetainsDeclaredWithoutError	#WP-SIMPL-44	Deleted physical key reconciliation for dbt in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Dbt.DbtPhysicalKeyIngestionTests.CAT427_T05_DbtIngestion_WhenAuditFails_RollsBackToWithoutPhysical	#WP-SIMPL-44	Deleted physical key reconciliation for dbt in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Mcp.DatasetIndexInfoComparer.I404_T_33_Restrict_FiltersPhysicalIndexesAllOrNothing	#WP-SIMPL-44	Removed TableMetadata.PhysicalIndexes in WP-SIMPL-44 PR 4; declared non-unique indexes covered by DatasetIndexVisibilityLeakTests
+Autheris.Tests.Unit.Mcp.DatasetIndexInfoComparer.I404_T_S01_PhysicalIndex_OverMaskedColumn_NotDescribed_Mcp_Rest_GraphQl	#WP-SIMPL-44	Removed TableMetadata.PhysicalIndexes in WP-SIMPL-44 PR 4; declared non-unique index leakage covered by DatasetIndexVisibilityLeakTests
+Autheris.Tests.Unit.Sql.CollectingLogger.AdmissionDeniedTable_NoPhysicalRead_NoFinding	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.CapExceeded_Unavailable_NoPartialSnapshot	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.CommandTimeout_Unavailable_NoPartialUpdate	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.DialectMismatch_Unavailable	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.EmptyResultWithReadableColumns_Unavailable	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.Exception_LoggedWithoutSqlOrNames	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.I404_T_14_BrokenNonUniqueShape_NonUniqueUnavailable_KeysKnown_AndKeyUnavailableImpliesNonUniqueUnavailable	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.I404_T_15_RowCap_AllUnavailable	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.I404_T_S05_Reader_Caps_33rdIndex_NonUniqueUnavailable_KeysStayKnown	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.OrdinalGapDuplicateOrDuplicateColumn_Unavailable	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.CollectingLogger.PhysicalRead_UsesGovernedProviderPathAndBreaker_NoSecondConnection	#WP-SIMPL-44	Deleted GovernedCatalogProvider physical-key path in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.KeyIndexMetadataReaderTests.PostgreSqlReader_Sql_MatchesGolden	#WP-SIMPL-44	Deleted key/index metadata readers in WP-SIMPL-44 PR 4
+Autheris.Tests.Unit.Sql.KeyIndexMetadataReaderTests.Reader_Sql_NoInterpolation_BoundParametersOnly_BothDialects	#WP-SIMPL-44	Deleted key/index metadata readers in WP-SIMPL-44 PR 4

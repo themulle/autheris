@@ -177,4 +177,32 @@ public sealed class DeletedFeaturesArchitectureTests
             type!.GetProperty("NoiseApplied").ShouldBeNull();
         }
     }
+
+    [Fact]
+    public void No_physical_key_chain_types_or_refresh_routes()
+    {
+        foreach (var typeName in new[]
+        {
+            "IPhysicalKeyRefreshService",
+            "PhysicalKeyRefreshService",
+            "IPhysicalIndexRepository",
+            "IKeyIndexMetadataReader",
+            "IPhysicalKeyCatalog",
+            "PhysicalNonUniqueIndexResolver",
+            "CatalogPhysicalIndexStore",
+            "PhysicalKeyDirectionReconciler",
+            "PhysicalIndexSync",
+            "PostgreSqlKeyIndexMetadataReader",
+            "SqlServerKeyIndexMetadataReader",
+            "PhysicalIndexDefinition"
+        })
+        {
+            Deleted_Types_Do_Not_Exist_In_Production_Assemblies(typeName);
+        }
+
+        typeof(Autheris.Domain.Model.TableMetadata).GetProperty("PhysicalIndexes").ShouldBeNull();
+
+        var endpointsText = RepositoryScan.ReadText("src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs");
+        endpointsText.ShouldNotContain("refresh-physical-keys");
+    }
 }

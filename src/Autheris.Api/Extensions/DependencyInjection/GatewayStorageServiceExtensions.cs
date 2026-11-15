@@ -91,12 +91,8 @@ public static class GatewayStorageServiceExtensions
         var catalogOptions = new GovernedCatalogOptions { CacheTtlSeconds = gatewayOptions.DataSources.CatalogCacheTtlSeconds };
         catalogOptions.Validate();
         services.AddSingleton(catalogOptions);
-        // I403: key and index column direction. Only SQL Server and PostgreSQL expose a direction; no other dialect has a reader.
-        services.AddSingleton<IKeyIndexMetadataReader, PostgreSqlKeyIndexMetadataReader>();
-        services.AddSingleton<IKeyIndexMetadataReader, SqlServerKeyIndexMetadataReader>();
         services.AddSingleton<GovernedCatalogProvider>();
         services.AddSingleton<IGovernedCatalogProvider>(sp => sp.GetRequiredService<GovernedCatalogProvider>());
-        services.AddSingleton<IPhysicalKeyCatalog>(sp => sp.GetRequiredService<GovernedCatalogProvider>());
         services.AddSingleton<AuditChainIntegrityMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<AuditChainIntegrityMonitor>());
         services.AddHostedService<Autheris.Api.Configuration.Validation.DmlIdempotencyStoreStartupCheck>();

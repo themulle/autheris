@@ -34,6 +34,8 @@ public static class DbtArtifactStreamingParser
         var pending = new List<DbtPendingRelation>();
         // Issue #94 (D-8): declared keys per model unique id (constraints and unique tests may arrive in any node order).
         var keyBuilders = new Dictionary<string, CatalogKeyDefinitionImport.Collector>(StringComparer.OrdinalIgnoreCase);
+        // Issue #459: config.meta.indexes (fallback meta.indexes) per model/source unique id (takes precedence over key tests).
+        var metaIndexBuilders = new Dictionary<string, CatalogKeyDefinitionImport.Collector>(StringComparer.OrdinalIgnoreCase);
 
         // Parse JsonDocument asynchronously using streaming options
         var jsonDocOptions = new JsonDocumentOptions
@@ -277,6 +279,8 @@ public static class DbtArtifactStreamingParser
                     modelKeys.AddPrimaryKey(columnLevelPrimaryKey);
                 }
 
+                CollectMetaIndexes(uniqueId, node, metaIndexBuilders, relations);
+
                 // Depends On
                 var dependsOn = new List<string>();
                 if (node.TryGetProperty("depends_on", out var dependsProp) &&
@@ -362,6 +366,8 @@ public static class DbtArtifactStreamingParser
                     }
                 }
 
+                CollectMetaIndexes(uniqueId, srcNode, metaIndexBuilders, relations);
+
                 resolver.RegisterSource(uniqueId, ReadString(srcNode, "source_name") ?? "", name, ReadString(srcNode, "package_name"));
 
                 models.Add(new DbtModelDefinition(
@@ -384,7 +390,11 @@ public static class DbtArtifactStreamingParser
 
         for (var i = 0; i < models.Count; i++)
         {
-            if (keyBuilders.TryGetValue(models[i].UniqueId, out var builder) && ToDeclaredKeys(builder) is { } keys)
+            var id = models[i].UniqueId;
+            var builder = metaIndexBuilders.TryGetValue(id, out var metaBuilder)
+                ? metaBuilder
+                : keyBuilders.TryGetValue(id, out var keyBuilder) ? keyBuilder : null;
+            if (builder is not null && ToDeclaredKeys(builder) is { } keys)
             {
                 models[i] = models[i] with { DeclaredKeys = keys };
             }
@@ -607,15 +617,193 @@ public static class DbtArtifactStreamingParser
         }
     }
 
+    private static void CollectMetaIndexes(
+        string uniqueId,
+        JsonElement node,
+        Dictionary<string, CatalogKeyDefinitionImport.Collector> builders,
+        RelationCollector warnings)
+    {
+        if (!TryGetMetaIndexes(node, out var indexesElem))
+        {
+            return;
+        }
+
+        var collector = new CatalogKeyDefinitionImport.Collector();
+        builders[uniqueId] = collector;
+
+        if (indexesElem.ValueKind != JsonValueKind.Array)
+        {
+            FailMetaIndexes(collector, warnings, uniqueId, "META_INDEXES_INVALID_SHAPE");
+            return;
+        }
+
+        var count = indexesElem.GetArrayLength();
+        if (count > TableKeyDefinitionValidator.MaxIndexesPerTable + 1)
+        {
+            FailMetaIndexes(collector, warnings, uniqueId, "INDEXES_TOO_MANY");
+            return;
+        }
+
+        foreach (var entry in indexesElem.EnumerateArray())
+        {
+            if (!TryCollectMetaIndexEntry(entry, collector, out var rule))
+            {
+                FailMetaIndexes(collector, warnings, uniqueId, rule);
+                return;
+            }
+        }
+
+        if (collector.HasDeclaration)
+        {
+            var knownColumns = (collector.PrimaryKey ?? [])
+                .Concat(collector.Indexes!.SelectMany(static idx => idx.Columns))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(static c => new TableColumn { ColumnName = c })
+                .ToArray();
+            try
+            {
+                TableKeyDefinitionValidator.Validate(new TableMetadata
+                {
+                    Identifier = new TableIdentifier("dbt", "meta", "validation"),
+                    Columns = knownColumns,
+                    PrimaryKeyColumns = collector.PrimaryKey ?? Array.Empty<string>(),
+                    PrimaryKeyDirections = collector.PrimaryKeyDirections ?? Array.Empty<KeyColumnDirection>(),
+                    Indexes = collector.Indexes!
+                });
+            }
+            catch (TableDefinitionException ex)
+            {
+                FailMetaIndexes(collector, warnings, uniqueId, ex.RuleCode);
+            }
+        }
+    }
+
+    private static bool TryCollectMetaIndexEntry(
+        JsonElement entry,
+        CatalogKeyDefinitionImport.Collector collector,
+        out string errorRule)
+    {
+        errorRule = "META_INDEXES_INVALID_ENTRY";
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var hasPrimaryKeyFlag = TryReadOptionalBool(entry, "primary_key", out var isPrimaryKey, out var pkValid);
+        var hasUniqueFlag = TryReadOptionalBool(entry, "unique", out var isUnique, out var uniqueValid);
+        _ = TryReadOptionalBool(entry, "clustered", out _, out var clusteredValid);
+        if (!pkValid || !uniqueValid || !clusteredValid)
+        {
+            errorRule = "META_INDEXES_INVALID_FLAG";
+            return false;
+        }
+
+        if (hasPrimaryKeyFlag && isPrimaryKey && hasUniqueFlag && !isUnique)
+        {
+            errorRule = "META_INDEXES_CONFLICTING_FLAGS";
+            return false;
+        }
+
+        string? explicitName = null;
+        if (entry.TryGetProperty("name", out var nameProp) && nameProp.ValueKind != JsonValueKind.Null)
+        {
+            if (nameProp.ValueKind != JsonValueKind.String || !TableKeyDefinitionValidator.IsValidIndexName(nameProp.GetString()))
+            {
+                errorRule = "INDEX_NAME_INVALID";
+                return false;
+            }
+
+            explicitName = nameProp.GetString();
+        }
+
+        var columns = ReadKeyColumnArray(entry, "columns", out var directions);
+        if (columns is null)
+        {
+            errorRule = "META_INDEXES_INVALID_COLUMNS";
+            return false;
+        }
+
+        if (isPrimaryKey)
+        {
+            collector.AddPrimaryKey(columns, directions);
+        }
+        else
+        {
+            collector.AddIndex(columns, isUnique, explicitName, directions);
+        }
+
+        if (collector.Invalid)
+        {
+            errorRule = collector.InvalidRule ?? "META_INDEXES_INVALID_ENTRY";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryGetMetaIndexes(JsonElement node, out JsonElement indexesElem)
+    {
+        if (node.TryGetProperty("config", out var cfg) &&
+            cfg.ValueKind == JsonValueKind.Object &&
+            cfg.TryGetProperty("meta", out var cfgMeta) &&
+            cfgMeta.ValueKind == JsonValueKind.Object &&
+            cfgMeta.TryGetProperty("indexes", out indexesElem))
+        {
+            return true;
+        }
+
+        if (node.TryGetProperty("meta", out var meta) &&
+            meta.ValueKind == JsonValueKind.Object &&
+            meta.TryGetProperty("indexes", out indexesElem))
+        {
+            return true;
+        }
+
+        indexesElem = default;
+        return false;
+    }
+
+    private static bool TryReadOptionalBool(JsonElement owner, string property, out bool value, out bool isValid)
+    {
+        if (!owner.TryGetProperty(property, out var prop) || prop.ValueKind == JsonValueKind.Null)
+        {
+            value = false;
+            isValid = true;
+            return false;
+        }
+
+        if (prop.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            value = prop.GetBoolean();
+            isValid = true;
+            return true;
+        }
+
+        value = false;
+        isValid = false;
+        return false;
+    }
+
+    private static void FailMetaIndexes(
+        CatalogKeyDefinitionImport.Collector collector,
+        RelationCollector warnings,
+        string uniqueId,
+        string ruleCode)
+    {
+        collector.MarkInvalid(ruleCode);
+        warnings.Warn($"Node '{uniqueId}' declared an invalid meta.indexes entry ({ruleCode}); the declaration was dropped.");
+    }
+
     private static DbtDeclaredKeys? ToDeclaredKeys(CatalogKeyDefinitionImport.Collector collector) =>
-        collector.Invalid ? new DbtDeclaredKeys(null, [], true)
+        collector.Invalid ? new DbtDeclaredKeys(null, [], true, InvalidRule: collector.InvalidRule)
         : !collector.HasDeclaration ? null
         : new DbtDeclaredKeys(
             collector.PrimaryKey,
-            collector.Indexes!.Select(i => i.Columns).ToList(),
+            collector.Indexes!.Where(static i => i.IsUnique).Select(static i => i.Columns).ToList(),
             false,
             collector.PrimaryKeyDirections,
-            collector.Indexes!.Select(i => i.Directions).ToList());
+            collector.Indexes!.Where(static i => i.IsUnique).Select(static i => i.Directions).ToList(),
+            collector.Indexes);
 
     public static string ExtractModelName(string raw)
     {

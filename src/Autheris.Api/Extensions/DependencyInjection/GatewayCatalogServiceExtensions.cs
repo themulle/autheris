@@ -112,7 +112,6 @@ public static class GatewayCatalogServiceExtensions
         services.TryAddScoped<IQueryAnalysisService, QueryAnalysisService>();
         services.TryAddScoped<IGraphQlCostAnalysisEngine, Autheris.GraphQL.Analysis.HotChocolateGraphQlCostAnalysisEngine>();
         services.TryAddScoped<IBundledConsentRequestService, BundledConsentRequestService>();
-        services.TryAddScoped<IPhysicalKeyRefreshService, PhysicalKeyRefreshService>();
         return services;
     }
 }

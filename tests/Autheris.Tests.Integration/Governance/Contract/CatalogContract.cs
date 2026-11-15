@@ -12,8 +12,7 @@ using Xunit;
 namespace Autheris.Tests.Integration.Governance.Contract;
 
 /// <summary>
-/// Engine-agnostic contract suite for <c>ITableMetadataRepository</c>, <c>IPolicyEpochRepository</c>,
-/// and <c>IPhysicalIndexRepository</c>.
+/// Engine-agnostic contract suite for <c>ITableMetadataRepository</c> and <c>IPolicyEpochRepository</c>.
 /// </summary>
 public abstract class CatalogContract : GovernanceContractBase
 {
@@ -252,13 +251,6 @@ public abstract class CatalogContract : GovernanceContractBase
         var declaredAct = () => Store.TableMetadata.UpsertTableMetadataAsync(
             table with { Indexes = overCapDeclaredIndexes, ReplaceKeyDefinition = true });
         await declaredAct.Should().ThrowAsync<TableDefinitionException>();
-
-        var overCapIndexes = Enumerable.Range(0, TableKeyDefinitionValidator.MaxPhysicalIndexesPerTable + 1)
-            .Select(_ => new PhysicalIndexDefinition(["id"], [KeyColumnDirection.Ascending]))
-            .ToList();
-
-        var act = () => Store.PhysicalIndexes.ReplacePhysicalIndexesAsync(table.Identifier, overCapIndexes);
-        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [RequiresContainerRuntimeFact]
@@ -392,34 +384,6 @@ public abstract class CatalogContract : GovernanceContractBase
         var named = await Store.ExecuteScalarAsync(
             "SELECT COUNT(*) FROM POLICY_EPOCHS WHERE LOWER(table_name) = LOWER(@name)", ("@name", unknown.TableName));
         Convert.ToInt64(named).Should().Be(0);
-    }
-
-    [RequiresContainerRuntimeFact]
-    public async Task Physical_indexes_and_policy_epochs_round_trip_atomically()
-    {
-        if (!Store.IsAvailable) return;
-
-        var table = await Store.TableMetadata.UpsertTableMetadataAsync(BuildTable("phys_epoch"));
-        var epoch0 = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
-
-        var epoch1 = await Store.PolicyEpochs.IncrementTableEpochAsync(table.Identifier);
-        epoch1.Should().Be(epoch0 + 1);
-
-        var replaced = await Store.PhysicalIndexes.ReplacePhysicalIndexesAsync(
-            table.Identifier,
-            [
-                new PhysicalIndexDefinition(["tenant_code", "id"], [KeyColumnDirection.Ascending, KeyColumnDirection.Descending]),
-                new PhysicalIndexDefinition(["email"], [])
-            ]);
-        replaced.Should().BeTrue();
-
-        var epoch2 = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
-        epoch2.Should().Be(epoch1 + 1);
-
-        var loaded = await Store.TableMetadata.GetTableMetadataAsync(table.Identifier);
-        loaded!.PhysicalIndexes.Should().HaveCount(2);
-        loaded.PhysicalIndexes[0].Columns.Should().Equal("tenant_code", "id");
-        loaded.PhysicalIndexes[0].Directions.Should().Equal(KeyColumnDirection.Ascending, KeyColumnDirection.Descending);
     }
 }
 

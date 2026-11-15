@@ -11,7 +11,6 @@ tests/Autheris.Tests.Unit/Catalog/CatalogApiEndpointsTests.cs
 tests/Autheris.Tests.Unit/Catalog/CatalogKeysEndpointTests.cs
 tests/Autheris.Tests.Unit/Catalog/CatalogTagsVisibilityEndpointTests.cs
 tests/Autheris.Tests.Unit/Catalog/DatasourceTestingServiceSqlTests.cs
-tests/Autheris.Tests.Unit/Catalog/PhysicalKeyRefreshEndpointTests.cs
 tests/Autheris.Tests.Unit/CdcStream/CdcStreamAdminEndpointsTests.cs
 tests/Autheris.Tests.Unit/Configuration/RemovedConfigKeysTests.cs
 tests/Autheris.Tests.Unit/ConnectorSpiTests.cs
@@ -58,7 +57,6 @@ tests/Autheris.Tests.Unit/Sql/AstCompilerDuckDbExecutionTests.cs
 tests/Autheris.Tests.Unit/Sql/AstSqliteExecutionTests.cs
 tests/Autheris.Tests.Unit/Sql/ClientListFixture.cs
 tests/Autheris.Tests.Unit/Sql/DuckDbBindingProbeTests.cs
-tests/Autheris.Tests.Unit/Sql/GovernedCatalogProviderPhysicalKeysTests.cs
 tests/Autheris.Tests.Unit/Sql/GovernedCatalogProviderTests.cs
 tests/Autheris.Tests.Unit/Sql/GovernedSqlExecutorX1Tests.cs
 tests/Autheris.Tests.Unit/Sql/Policy/AdvancedRowPolicyPredicateTests.cs

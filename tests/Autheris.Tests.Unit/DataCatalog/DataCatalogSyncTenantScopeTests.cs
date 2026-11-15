@@ -65,7 +65,7 @@ public sealed class DataCatalogSyncTenantScopeTests
             metadataRepo,
             epochService,
             options,
-            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var result = await sut.SyncCatalogAsync(dryRun: false, restrictToTenant: new TenantId("tenant-a"));
 

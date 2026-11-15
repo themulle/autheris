@@ -40,7 +40,6 @@ public sealed class CatalogMutatingWritersBumpChangeVersionTests
         var root = RepositoryScan.FindRepositoryRoot();
         var catalogSource = File.ReadAllText(Path.Combine(root, "src/Autheris.Infrastructure/Persistence/GovernanceRepository.Catalog.cs"));
         var relationsSource = File.ReadAllText(Path.Combine(root, "src/Autheris.Infrastructure/Persistence/GovernanceRepository.CatalogRelations.cs"));
-        var physicalSource = File.ReadAllText(Path.Combine(root, "src/Autheris.Infrastructure/Persistence/GovernanceRepository.PhysicalIndexes.cs"));
 
         var writeCatalogSettings = ExtractMethod(catalogSource, "WriteCatalogSettingsAsync");
         writeCatalogSettings.ShouldContain("BumpCatalogVersionInternalAsync");
@@ -54,10 +53,6 @@ public sealed class CatalogMutatingWritersBumpChangeVersionTests
         var setRowFilter = ExtractMethod(catalogSource, "SetRowFilterEvaluationAsync");
         setRowFilter.ShouldContain("IncrementTableEpochInternalAsync");
         setRowFilter.ShouldContain("SetTableEpochChangeVersionInternalAsync");
-
-        var replacePhysical = ExtractMethod(physicalSource, "ReplacePhysicalIndexesAsync");
-        replacePhysical.ShouldContain("IncrementTableEpochInternalAsync");
-        replacePhysical.ShouldContain("SetTableEpochChangeVersionInternalAsync");
 
         var createRelation = ExtractMethod(relationsSource, "CreateRelationAsync");
         createRelation.ShouldContain("BumpRelationTableEpochsInternalAsync");

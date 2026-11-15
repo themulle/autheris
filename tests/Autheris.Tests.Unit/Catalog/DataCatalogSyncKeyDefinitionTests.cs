@@ -30,7 +30,7 @@ public sealed class DataCatalogSyncKeyDefinitionTests
             .Returns(c => { _upserts.Add(c.Arg<TableMetadata>()); return Task.FromResult(c.Arg<TableMetadata>()); });
         return new DataCatalogSyncService(_client, _repo, Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions { Catalog = new DataCatalogOptions { Provider = DataCatalogProviderType.OpenMetadata } }),
-            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
     }
 
     private static CatalogTableAsset Asset(Action<CatalogTableAsset, List<CatalogColumnAsset>>? configure = null)

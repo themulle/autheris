@@ -12,7 +12,7 @@ internal static class DbtDeclaredKeysImport
         var collector = new CatalogKeyDefinitionImport.Collector();
         if (declared.Invalid)
         {
-            collector.AddPrimaryKey(null);
+            collector.MarkInvalid(declared.InvalidRule ?? "INVALID_KEY_DEFINITION");
         }
         else
         {
@@ -21,9 +21,19 @@ internal static class DbtDeclaredKeysImport
                 collector.AddPrimaryKey(declared.PrimaryKey, declared.PrimaryKeyDirections);
             }
 
-            for (var i = 0; i < declared.UniqueConstraints.Count; i++)
+            if (declared.DeclaredIndexes is { Count: > 0 } declaredIndexes)
             {
-                collector.AddUnique(declared.UniqueConstraints[i], declared.UniqueDirections is { } unique && i < unique.Count ? unique[i] : null);
+                foreach (var index in declaredIndexes)
+                {
+                    collector.AddIndex(index.Columns, index.IsUnique, index.Name, index.Directions);
+                }
+            }
+            else
+            {
+                for (var i = 0; i < declared.UniqueConstraints.Count; i++)
+                {
+                    collector.AddUnique(declared.UniqueConstraints[i], declared.UniqueDirections is { } unique && i < unique.Count ? unique[i] : null);
+                }
             }
         }
 

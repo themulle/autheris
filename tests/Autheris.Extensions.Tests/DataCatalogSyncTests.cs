@@ -53,7 +53,7 @@ public class DataCatalogSyncTests
             _tableRepo,
             _epochService,
             Options.Create(gatewayOptions),
-            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
     }
 
     [Fact]
@@ -266,7 +266,7 @@ public class DataCatalogSyncTests
             _tableRepo,
             _epochService,
             Options.Create(gatewayOptions),
-            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         var tableId = new TableIdentifier("sales", "dbo", "leads_active");
         var catalogTable = new CatalogTableAsset

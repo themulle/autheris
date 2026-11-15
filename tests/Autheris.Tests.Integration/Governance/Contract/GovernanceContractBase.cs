@@ -96,7 +96,6 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IPolicyEpochRepository PolicyEpochs => Services.GetRequiredService<IPolicyEpochRepository>();
     public IDataOwnershipRepository DataOwnership => Services.GetRequiredService<IDataOwnershipRepository>();
     public IDataOwnerAssignmentRepository DataOwnerAssignments => Services.GetRequiredService<IDataOwnerAssignmentRepository>();
-    public IPhysicalIndexRepository PhysicalIndexes => Services.GetRequiredService<IPhysicalIndexRepository>();
     public ITableRelationRepository TableRelations => Services.GetRequiredService<ITableRelationRepository>();
     public IVirtualFilterRepository VirtualFilters => Services.GetRequiredService<IVirtualFilterRepository>();
     public ICallerAttributeRepository CallerAttributes => Services.GetRequiredService<ICallerAttributeRepository>();

@@ -59,10 +59,9 @@ public static class DatasetIndexProjection
             : [];
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var seenShape = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var indexes = new List<DatasetIndexInfo>();
 
-        // Order: declared unique, declared non-unique, then physical non-unique (issue #404). An omitted index never takes a slot.
+        // Order: declared unique, then declared non-unique. An omitted index never takes a slot.
         for (var pass = 0; pass < 2 && indexes.Count < MaxIndexesPerTable; pass++)
         {
             foreach (var index in table.Indexes)
@@ -78,26 +77,11 @@ public static class DatasetIndexProjection
                     continue;
                 }
 
-                seenShape.Add(Shape(index.Columns, directions));
                 indexes.Add(new DatasetIndexInfo(index.Columns.ToArray(), index.IsUnique, directions));
                 if (indexes.Count == MaxIndexesPerTable)
                 {
                     break;
                 }
-            }
-        }
-
-        foreach (var physical in table.PhysicalIndexes)
-        {
-            if (indexes.Count == MaxIndexesPerTable)
-            {
-                break;
-            }
-
-            var directions = KeyDirections.Canonical(physical.Directions)?.ToArray();
-            if (Readable(table, physical.Columns, clearColumns) && seenShape.Add(Shape(physical.Columns, directions)))
-            {
-                indexes.Add(new DatasetIndexInfo(physical.Columns.ToArray(), false, directions));
             }
         }
 

@@ -111,9 +111,6 @@ public partial class GovernanceRepository
                 throw;
             }
 
-            var physicalIndexes = await CatalogPhysicalIndexStore.ReadAsync(
-                conn, null, KeyDialect, tableId.Value, columns, ct).ConfigureAwait(false);
-
             var rowFilterEvaluation = await RowFilterEvaluationStore.ReadObjectAsync(
                 conn, null, KeyDialect, tableId.Value, ct).ConfigureAwait(false);
 
@@ -126,7 +123,6 @@ public partial class GovernanceRepository
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
-                PhysicalIndexes = physicalIndexes,
                 RowFilterEvaluation = rowFilterEvaluation
             };
             result.ValidateRequiredFilterColumns();
@@ -251,12 +247,10 @@ public partial class GovernanceRepository
             }
 
             Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys = null;
-            Dictionary<Guid, List<CatalogPhysicalIndexStore.Row>>? prefetchedPhysical = null;
             var allActiveTableIds = activeTables.Select(t => t.Id).ToList();
             if (await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, KeyDialect, ct, _keyTables).ConfigureAwait(false))
             {
                 prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
-                prefetchedPhysical = await CatalogPhysicalIndexStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
             }
 
             var rowFilterStrategies = await RowFilterEvaluationStore.ReadBatchObjectAsync(
@@ -295,12 +289,10 @@ public partial class GovernanceRepository
         Dictionary<Guid, RowFilterEvaluationSettings>? prefetchedRowFilterStrategies = null)
     {
         Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys = null;
-        Dictionary<Guid, List<CatalogPhysicalIndexStore.Row>>? prefetchedPhysical = null;
         var allActiveTableIds = activeTables.Select(t => t.Id).ToList();
         if (allActiveTableIds.Count > 0 && await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, KeyDialect, ct, _keyTables).ConfigureAwait(false))
         {
             prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
-            prefetchedPhysical = await CatalogPhysicalIndexStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
         }
 
         var rowFilterStrategies = prefetchedRowFilterStrategies
@@ -357,7 +349,6 @@ public partial class GovernanceRepository
                 PrimaryKeyColumns = pkColumns,
                 PrimaryKeyDirections = pkDirections,
                 Indexes = indexes,
-                PhysicalIndexes = prefetchedPhysical is not null && prefetchedPhysical.TryGetValue(tid, out var physicalRows) ? CatalogPhysicalIndexStore.Assemble(columns, physicalRows) : Array.Empty<PhysicalIndexDefinition>(),
                 RowFilterEvaluation = rowFilterEvaluation
             };
 

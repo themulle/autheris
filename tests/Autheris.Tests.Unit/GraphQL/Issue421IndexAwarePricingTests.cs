@@ -153,11 +153,11 @@ public sealed class Issue421IndexAwarePricingTests
     }
 
     [Fact]
-    public void HasUsableIndex_PhysicalNonUniqueIndex_MatchesFilter()
+    public void HasUsableIndex_NonUniqueDeclaredIndex_MatchesFilter()
     {
         var metadata = CreateTable(
             pk: ["id"],
-            physicalIndexes: [new PhysicalIndexDefinition(["customer_id"], [])]);
+            indexes: [new TableIndexDefinition("idx_customer", ["customer_id"], IsUnique: false)]);
 
         var filter = new List<string> { "customer_id" };
         var isUsable = IndexUsabilityEvaluator.HasUsableIndex(metadata, visibleColumns: null, orderBy: null, filterColumns: filter);
@@ -320,7 +320,7 @@ public sealed class Issue421IndexAwarePricingTests
         var metadata = CreateTable(
             pk: ["id"],
             pkDirections: [KeyColumnDirection.Ascending],
-            physicalIndexes: [new PhysicalIndexDefinition(["customer_id"], [])]);
+            indexes: [new TableIndexDefinition("idx_customer", ["customer_id"], IsUnique: false)]);
 
         var orderBy = new List<(string, string)> { ("id", "ASC") };
         var filter = new List<string> { "customer_id" };
@@ -452,8 +452,7 @@ public sealed class Issue421IndexAwarePricingTests
     private static TableMetadata CreateTable(
         IReadOnlyList<string>? pk = null,
         IReadOnlyList<KeyColumnDirection>? pkDirections = null,
-        IReadOnlyList<TableIndexDefinition>? indexes = null,
-        IReadOnlyList<PhysicalIndexDefinition>? physicalIndexes = null)
+        IReadOnlyList<TableIndexDefinition>? indexes = null)
     {
         var cols = new List<TableColumn>
         {
@@ -473,8 +472,7 @@ public sealed class Issue421IndexAwarePricingTests
             Columns = cols,
             PrimaryKeyColumns = pk ?? [],
             PrimaryKeyDirections = pkDirections ?? [],
-            Indexes = indexes ?? [],
-            PhysicalIndexes = physicalIndexes ?? []
+            Indexes = indexes ?? []
         };
     }
 }

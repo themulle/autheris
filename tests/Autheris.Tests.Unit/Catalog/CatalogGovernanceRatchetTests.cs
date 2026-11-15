@@ -342,7 +342,7 @@ public sealed class CatalogGovernanceRatchetTests
         nameof(TableMetadata.PrimaryKeyColumns),
         nameof(TableMetadata.PrimaryKeyDirections),
         nameof(TableMetadata.Indexes),
-        nameof(TableMetadata.PhysicalIndexes), // issue #404: written only by the catalog sync seam (IPhysicalIndexRepository), never by an upsert
+        // Kept empty: PhysicalIndexes removed in WP-SIMPL-44 PR 4.
         nameof(TableMetadata.ReplaceKeyDefinition),
         nameof(TableMetadata.ReplaceColumns),
         nameof(TableMetadata.CatalogTags),

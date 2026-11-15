@@ -323,36 +323,19 @@ public sealed class DatasetIndexVisibilityLeakTests
         public int GetHashCode(DatasetIndexInfo obj) => obj.Columns.Count;
     }
 
-    private static TableMetadata WithPhysical(TableMetadata table) => table with
+    private static TableMetadata WithDeclaredNonUnique(TableMetadata table) => table with
     {
-        PhysicalIndexes =
+        Indexes =
         [
-            new PhysicalIndexDefinition(["email"], []),
-            new PhysicalIndexDefinition(["amount"], [KeyColumnDirection.Descending]),
-            new PhysicalIndexDefinition(["id", "email"], []),
-            new PhysicalIndexDefinition(["id", "amount"], [])   // equals the declared ix_visible: de-duplicated
+            .. table.Indexes,
+            new TableIndexDefinition("ix_amount_desc", ["amount"], false, [KeyColumnDirection.Descending])
         ]
     };
 
     [Fact]
-    [Trait("SecurityCondition", "I404-SC-13")]
-    public async Task I404_T_S01_PhysicalIndex_OverMaskedColumn_NotDescribed_Mcp_Rest_GraphQl()
-    {
-        var mcp = await Mcp(WithPhysical(Table())).DescribeDatasetAsync(User(), "sales.public.orders");
-        var rest = await Rest(WithPhysical(Table())).GetDatasetDetailAsync(Orders, Admin());
-
-        // GraphQL MCP describe answers through the same DescribeDatasetAsync path (T-32 parity by construction).
-        Columns(mcp.Indexes).ShouldBe("id,amount|amount");
-        Columns(rest!.Indexes).ShouldBe("id,amount|amount");
-        mcp.Indexes!.Last().Unique.ShouldBeFalse();
-        mcp.Indexes!.Last().Directions.ShouldBe([KeyColumnDirection.Descending]);
-        mcp.Indexes!.ShouldAllBe(x => !x.Columns.Contains("email"));
-    }
-
-    [Fact]
     public async Task I404_T_34_Describe_JsonHasNoIndexName()
     {
-        var mcp = await Mcp(WithPhysical(Table())).DescribeDatasetAsync(User(), "sales.public.orders");
+        var mcp = await Mcp(WithDeclaredNonUnique(Table())).DescribeDatasetAsync(User(), "sales.public.orders");
 
         var json = System.Text.Json.JsonSerializer.Serialize(mcp.Indexes);
 
@@ -364,7 +347,7 @@ public sealed class DatasetIndexVisibilityLeakTests
     [Fact]
     public void I404_T_S11_S12_DedupAndCap_AfterVisibility_NoCountSideChannel_AndNoCrossCallerState()
     {
-        var table = WithPhysical(Table());
+        var table = WithDeclaredNonUnique(Table());
         var all = new HashSet<string>(["id", "amount", "email"], StringComparer.OrdinalIgnoreCase);
         var noEmail = new HashSet<string>(["id", "amount"], StringComparer.OrdinalIgnoreCase);
 
@@ -376,23 +359,23 @@ public sealed class DatasetIndexVisibilityLeakTests
         Columns(visibleToOther.Indexes).ShouldBe("id,amount|amount");
         Columns(again.Indexes).ShouldBe(Columns(visibleToOther.Indexes), "the projection is a pure function of table and clear set");
 
-        // Hidden physical indexes do not consume cap slots.
-        var many = Enumerable.Range(0, 40).Select(n => new PhysicalIndexDefinition(["email", "c" + n], [])).ToList();
-        var capped = table with { PhysicalIndexes = [.. many, new PhysicalIndexDefinition(["amount"], [])] };
-        Columns(DatasetIndexProjection.Project(capped, noEmail).Indexes).ShouldBe("id,amount|amount");
+        // Hidden declared indexes do not consume cap slots.
+        var many = Enumerable.Range(0, 40).Select(n => new TableIndexDefinition($"ix_hidden_{n}", ["email", "c" + n], false)).ToList();
+        var capped = table with { Indexes = [.. many, new TableIndexDefinition("ix_amount", ["amount"], false)] };
+        Columns(DatasetIndexProjection.Project(capped, noEmail).Indexes).ShouldBe("amount");
     }
 
     [Fact]
     public void I404_T_28_DeclaredAndPhysical_OrderedUniqueFirst_DedupedAndCapped()
     {
         var names = Enumerable.Range(0, 40).Select(i => $"c{i}").ToArray();
+        var extraNonUnique = names.Select((n, i) => (n, i)).Where(x => x.i != 1 && x.i != 2).Select(x => new TableIndexDefinition($"ix_{x.i}", [x.n], false));
         var table = new TableMetadata
         {
             Identifier = Orders,
             Table = new Table { TableName = "orders", SchemaName = "public" },
             Columns = names.Select(n => new TableColumn { ColumnName = n, DataType = "int" }).ToList(),
-            Indexes = [new TableIndexDefinition("n1", ["c1"], false), new TableIndexDefinition("u2", ["c2"], true)],
-            PhysicalIndexes = names.Select(n => new PhysicalIndexDefinition([n], [])).ToList()
+            Indexes = [new TableIndexDefinition("n1", ["c1"], false), new TableIndexDefinition("u2", ["c2"], true), .. extraNonUnique]
         };
         var clear = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
 
@@ -404,16 +387,5 @@ public sealed class DatasetIndexVisibilityLeakTests
         projected.Indexes[1].Columns.ShouldBe(["c1"]);
         projected.Indexes.Skip(2).ShouldAllBe(x => !x.Unique);
         projected.Indexes.Select(x => string.Join(",", x.Columns)).Distinct().Count().ShouldBe(32);
-    }
-
-    [Fact]
-    [Trait("SecurityCondition", "I404-SC-13")]
-    public void I404_T_33_Restrict_FiltersPhysicalIndexesAllOrNothing()
-    {
-        var table = WithPhysical(Table());
-
-        var restricted = TableKeyVisibility.Restrict(table, table.Columns.Where(c => c.ColumnName != "email").ToList());
-
-        restricted.PhysicalIndexes.Select(i => string.Join(",", i.Columns)).ToArray().ShouldBe(["amount", "id,amount"]);
     }
 }

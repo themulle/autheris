@@ -264,7 +264,7 @@ Run the migrations as a one-off job with `Autheris.Api --migrate-governance`: it
 
 ### 2.4 `DataSources` (Backend-Fachdatenbanken & RLS-Pushdown)
 
-Konfiguriert echte relationale Datenbank-Backends für die abgefragten Fachdaten. Das Gateway unterstützt über `ISqlConnectionFactory` die Provider `"SqlServer"`, `"PostgreSql"` und `"Sqlite"`. 
+Konfiguriert echte relationale Datenbank-Backends für die abgefragten Fachdaten. Das Gateway unterstützt über `ISqlConnectionFactory` die Provider `"SqlServer"`, `"PostgreSql"` und `"Sqlite"`. See [source-least-privilege-roles.md](operations/source-least-privilege-roles.md) for least-privilege source database role templates.
 
 SQL table reads (GraphQL, OData, MCP, connectors) run through the governed SQL pipeline (`SqlTableReadExecutor`, the AST compiler and the dialect binder): the compiler **applies the tenant filter, the row-level security policy and the column masks inside the statement sent to the database**. There is no synthetic-data fallback:
 

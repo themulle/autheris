@@ -14,7 +14,6 @@ using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy;
-using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Tenancy;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Audit;
@@ -40,7 +39,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly IDataOwnerAssignmentRepository? _ownerAssignments;
     private readonly IAuditLogRepository? _auditLog;
     private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
-    private readonly IPhysicalKeyCatalog? _physicalKeys;
     private readonly IAuditWriter? _auditWriter;
     private readonly IDataOwnershipRepository? _ownershipRepo;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
@@ -62,7 +60,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ILineageGraphStore lineageGraphStore,
         IAuditWriter? auditWriter,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, null, null, auditWriter, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, null, null, auditWriter, logger)
     {
     }
 
@@ -180,7 +178,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
         IDbtTestTargetMap? testTargetMap,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, null, logger)
     {
     }
 
@@ -669,7 +667,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                         PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
                         Indexes = existingMeta.Indexes,
-                        PhysicalIndexes = existingMeta.PhysicalIndexes,
                         PredefinedSyntheticSamples = mergedSamples,
                         MinGroupSize = existingMeta.MinGroupSize,
                         NonPersonal = existingMeta.NonPersonal,
@@ -678,14 +675,11 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         ExpectedRows = existingMeta.ExpectedRows
                     };
 
-                    // Issue #94 (D-8): primary_key / unique constraints and unique tests of the manifest replace the stored definition.
+                    // Issue #94 (D-8): primary_key / unique constraints, unique tests, and meta.indexes replace the stored definition.
                     if (model.DeclaredKeys is { } declared)
                     {
                         updatedMetadata = DbtDeclaredKeysImport.Apply(updatedMetadata, declared, _logger);
                     }
-
-                    // Issue #427: Reconcile physical key directions for SQL tables
-                    updatedMetadata = await ReconcilePhysicalDirectionsIfApplicableAsync(updatedMetadata, existingMeta, warnings, ct).ConfigureAwait(false);
 
                     if (!dryRun)
                     {
@@ -1551,7 +1545,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     ColumnMaskingRules = updatedMaskingRules,
                     PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                     PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
-                    Indexes = existingMeta.Indexes, PhysicalIndexes = existingMeta.PhysicalIndexes
+                    Indexes = existingMeta.Indexes
                 };
 
                 pendingUpserts.Add(updatedMetadata);

@@ -763,7 +763,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
                 Catalog = new DataCatalogOptions { Provider = provider, ActivateNewTables = activateNewTables },
                 OpenMetadata = new OpenMetadataOptions { DefaultTenantId = "default-tenant", ActivateNewTables = activateNewTables }
             }),
-            Substitute.For<IPhysicalKeyCatalog>(), Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
+            Substitute.For<IAuditWriter>(), NullLogger<DataCatalogSyncService>.Instance);
 
         await sut.SyncCatalogAsync();
 
