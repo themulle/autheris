@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Sql;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -101,6 +102,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(table.Identifier.Equals(ci.Arg<TableIdentifier>()) ? table : null));
+        repo.StubTables([table]);
         var writeConsents = new List<Consent>();
         if (withWritePermit)
         {
@@ -616,6 +618,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(tables.FirstOrDefault(t => t.Identifier.Equals(ci.Arg<TableIdentifier>()))));
+        repo.StubTables(tables);
         var consents = Substitute.For<IConsentRepository>();
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));

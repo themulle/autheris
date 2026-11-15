@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -53,7 +54,7 @@ public sealed class McpSearchHitDatasetIdTests
             Table(ArchiveUnit, "Telematic units removed from service"),
             Table(Crane, "Cranes")
         ];
-        _metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(tables));
+        _metadata.StubTables(tables);
     }
 
     private static TableMetadata Table(TableIdentifier id, string description) => new()

@@ -59,7 +59,7 @@ public sealed class DatasetIndexVisibilityLeakTests
     private static McpDatasetCatalog Mcp(TableMetadata table, IConsentResolutionService? resolution = null)
     {
         var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        metadata.StubTables([table]);
         var consents = Substitute.For<IConsentRepository>();
         consents.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(
@@ -167,7 +167,7 @@ public sealed class DatasetIndexVisibilityLeakTests
 
         // OpenAPI has no caller context: it emits no index and no index name at all.
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Table()]));
+        repo.StubTables([Table()]);
         var openApi = await new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance).GenerateOpenApiJsonAsync(null);
         openApi.ShouldNotContain("x-autheris-indexes");
         openApi.ShouldNotContain("ix_leaks_email_name");

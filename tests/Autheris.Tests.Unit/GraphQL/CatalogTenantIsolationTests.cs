@@ -62,8 +62,7 @@ public sealed class CatalogTenantIsolationTests
     private static (ITableMetadataRepository Metadata, IConsentRepository Consents) Repositories()
     {
         var metadata = Substitute.For<ITableMetadataRepository>();
-        metadata.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Meta(OrdersA), Meta(InvoicesB), Meta(Reference)]));
+        metadata.StubTables([Meta(OrdersA), Meta(InvoicesB), Meta(Reference)]);
 
         var consents = Substitute.For<IConsentRepository>();
         consents.GetTablesWithConsentsForTenantAsync(new TenantId("tenant-a"), Arg.Any<CancellationToken>())

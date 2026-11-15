@@ -71,7 +71,7 @@ public sealed class CatalogKeyDefinitionReportTests
     public async Task OpenApi_ReportsNoIndexes_AndNoPartialRequiredKey()
     {
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Table()]));
+        repo.StubTables([Table()]);
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
 
         var json = await generator.GenerateOpenApiJsonAsync(null);

@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Application.Catalog;
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -210,7 +212,7 @@ public class Issue175SecurityConditionsTests
 
         var usersTable = CreateTable("users", DatasetVisibility.Full, ("id", "varchar", false), ("name", "varchar", false));
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([usersTable]);
+        metadataRepo.StubTables([usersTable]);
 
         var caller = CreatePrincipal("user-1");
         var consentRepo = Substitute.For<IConsentRepository>();
@@ -301,7 +303,7 @@ fragment FragB on User {
         var usersTable = CreateTable("users", DatasetVisibility.Full, ("id", "varchar", false), ("name", "varchar", false));
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([usersTable]);
+        metadataRepo.StubTables([usersTable]);
 
         var caller = CreatePrincipal("user-1");
         var consentRepo = Substitute.For<IConsentRepository>();
@@ -328,7 +330,7 @@ fragment FragB on User {
         result.SourceDatabaseReadsExecuted.Should().Be(0);
 
         // Verification: Only catalog metadata was loaded; zero data query executions or database connections occurred
-        await metadataRepo.Received(1).GetAllTablesAsync(Arg.Any<CancellationToken>());
+        await metadataRepo.Received().QueryTablesAsync(Arg.Any<CatalogTableQuery>(), Arg.Any<CancellationToken>());
         await consentRepo.Received(1).GetAllActiveConsentsForSubjectsAsync(
             Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
     }
@@ -346,7 +348,7 @@ fragment FragB on User {
 
         var hiddenTable = CreateTable("secret_ledger", DatasetVisibility.Hidden, ("id", "varchar", false), ("balance", "numeric", false));
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([hiddenTable]);
+        metadataRepo.StubTables([hiddenTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         // Unprivileged caller has no consent on hiddenTable

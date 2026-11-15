@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Federation;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -92,7 +93,7 @@ public sealed class ExplainSubtreeEligibilityTests
         IConsentResolutionService? consentResolution = null)
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(tables);
+        metadataRepo.StubTables(tables);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetAllActiveConsentsForSubjectsAsync(

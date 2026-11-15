@@ -1,3 +1,4 @@
+using Autheris.Tests.Unit.Catalog;
 using Autheris.Tests.Unit.TestDoubles;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions.DependencyInjection;
@@ -142,7 +143,7 @@ public sealed class ProcedureKillSwitchTests
     public async Task Disabled_OpenApiHasNoProcedureLink()
     {
         var repo = Substitute.For<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([]));
+        repo.StubTables([]);
         var off = new Autheris.Application.OData.Services.DynamicOpenApiGenerator(repo, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.OData.Services.DynamicOpenApiGenerator>.Instance);
         var on = new Autheris.Application.OData.Services.DynamicOpenApiGenerator(repo, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.OData.Services.DynamicOpenApiGenerator>.Instance,
             new OpenApiDocumentOptions { IncludeStoredProcedureSpec = true });

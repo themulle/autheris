@@ -1,5 +1,7 @@
 namespace Autheris.Tests.Unit.Sql;
 
+using Autheris.Tests.Unit.Catalog;
+using Autheris.Application.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -69,6 +71,8 @@ public sealed class GovernedPipelineCachePoisoningTests
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(OrdersId.Equals(ci.Arg<TableIdentifier>()) ? table() : null));
+        repo.QueryTablesAsync(Arg.Any<CatalogTableQuery>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult(CatalogRepositoryStubs.Page([table()], ci.Arg<CatalogTableQuery>())));
         var defaultConsents = new List<Consent>();
         if (allowDml && consents is null)
         {

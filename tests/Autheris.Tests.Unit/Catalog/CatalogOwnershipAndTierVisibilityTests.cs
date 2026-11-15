@@ -92,8 +92,7 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
         var table3 = CreateTableMetadata(AuditLogs, "Audit logs", ["audit", "system"], DatasetVisibility.Full);
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table1, table2, table3]));
+        metadataRepo.StubTables([table1, table2, table3]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         var gatewayExec = Substitute.For<IGatewayExecutionService>();
@@ -129,8 +128,7 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
         // Arrange
         var table = CreateTableMetadata(Orders, "Orders table", ["sales"], DatasetVisibility.Full);
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        metadataRepo.StubTables([table]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         var gatewayExec = Substitute.For<IGatewayExecutionService>();
@@ -312,8 +310,7 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
         var table2 = CreateTableMetadata(Customers, "Customers table", ["crm"], DatasetVisibility.Full);
 
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
-        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table1, table2]));
+        metadataRepo.StubTables([table1, table2]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
         var httpContextAccessor = Substitute.For<IHttpContextAccessor>();

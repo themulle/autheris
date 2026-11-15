@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -235,8 +236,7 @@ public sealed class SrH03DatasourceSecretRefTests
             }
         };
         var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(
-            [new TableMetadata { Identifier = new TableIdentifier("crm", "dbo", "customers"), Table = table, Columns = [] }]);
+        repo.StubTables([new TableMetadata { Identifier = new TableIdentifier("crm", "dbo", "customers"), Table = table, Columns = [] }]);
         string? sentKey = null;
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient("DeclarativeHttp").Returns(new HttpClient(new CapturingHandler(r => sentKey = r.Headers.TryGetValues("X-Api-Key", out var v) ? v.First() : null)));
