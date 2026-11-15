@@ -25,7 +25,9 @@ public sealed record ColumnClassificationGrantOutcome(
     MaskSpec? MaskSpec,
     string? ReasonCode,
     CatalogTextVisibility CatalogText,
-    int WinningRestrictionRank = 0);
+    int WinningRestrictionRank = 0,
+    string? KeyRef = null,
+    IReadOnlyList<string>? ClassificationCodes = null);
 
 /// <summary>
 /// Immutable tenant-effective classification and mask-rule catalog snapshot for a policy decision.
@@ -329,11 +331,20 @@ public sealed class ClassificationAccessResolver
                 ColumnAccessLevel.Clear, null, null, null, null, CatalogTextVisibility.Visible);
         }
 
-        return ResolveMaskOutcome(maskDefs.Count > 0 ? maskDefs : defs, columnName, dataType, columnOverrides, catalog, tenant, dialect);
+        return ResolveMaskOutcome(
+            maskDefs.Count > 0 ? maskDefs : defs,
+            defs.Select(static d => d.Code).ToList(),
+            columnName,
+            dataType,
+            columnOverrides,
+            catalog,
+            tenant,
+            dialect);
     }
 
     private ColumnClassificationGrantOutcome ResolveMaskOutcome(
         IReadOnlyList<DataClassification> defs,
+        IReadOnlyList<string> allColumnCodes,
         string columnName,
         string? dataType,
         IReadOnlyList<ColumnMaskOverride> columnOverrides,
@@ -400,17 +411,24 @@ public sealed class ClassificationAccessResolver
                 null,
                 resolution.DenialReason ?? "MASK_RESOLUTION_FAILED",
                 catalogText,
-                winner.RestrictionRank);
+                winner.RestrictionRank,
+                KeyRef: null,
+                ClassificationCodes: allColumnCodes);
         }
 
+        string? auditKeyRef = resolution.EffectiveFunction is MaskFunction.Hash or MaskFunction.Tokenize
+            ? winner.KeyRef
+            : null;
         return new ColumnClassificationGrantOutcome(
             ColumnAccessLevel.Mask,
-            winner.Function,
+            resolution.EffectiveFunction,
             winner.ClassificationCode,
             resolution.Spec,
             null,
             catalogText,
-            winner.RestrictionRank);
+            winner.RestrictionRank,
+            KeyRef: auditKeyRef,
+            ClassificationCodes: allColumnCodes);
     }
 
     private static MaskCandidate? ResolveCandidateForClassification(
@@ -650,29 +668,25 @@ public sealed class ClassificationAccessResolver
         return map.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<ConsentClassificationAccess>)kv.Value);
     }
 
-    private static List<ColumnClassification> DeduplicateScopedClassifications(
-        IReadOnlyList<ColumnClassification> list,
-        string tenantId)
+    internal async ValueTask<IReadOnlyList<GrantClassificationAuditEntry>> BuildGrantAuditEntriesAsync(IReadOnlyList<Consent> allowGrants, TenantId tenant, CancellationToken ct = default)
     {
-        var seen = new Dictionary<string, ColumnClassification>(StringComparer.Ordinal);
-        foreach (var item in list)
+        if (allowGrants.Count == 0) return Array.Empty<GrantClassificationAuditEntry>();
+        var grantAccessMap = await LoadEffectiveGrantAccessAsync(allowGrants, tenant.Value, ct).ConfigureAwait(false);
+        var now = _timeProvider.GetUtcNow();
+        var result = new List<GrantClassificationAuditEntry>(allowGrants.Count);
+        foreach (var grant in allowGrants.OrderBy(static g => g.Id))
         {
-            if (ClassificationScopes.IsGlobal(item.Scope))
-            {
-                seen[item.Code] = item;
-            }
+            if (!grantAccessMap.TryGetValue(grant.Id, out var rows) || rows.Count == 0) continue;
+            var levels = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            foreach (var row in rows)
+                levels[row.Code] = (row.ValidUntil is null || now < row.ValidUntil.Value ? row.AccessLevel : ColumnAccessLevel.Mask).ToString().ToUpperInvariant();
+            if (levels.Count > 0) result.Add(new GrantClassificationAuditEntry(grant.Id.ToString("D"), levels));
         }
-
-        foreach (var item in list)
-        {
-            if (string.Equals(item.Scope, tenantId, StringComparison.Ordinal))
-            {
-                seen[item.Code] = item;
-            }
-        }
-
-        return seen.Values.OrderBy(c => c.Code, StringComparer.Ordinal).ToList();
+        return result;
     }
+
+    private static IReadOnlyList<ColumnClassification> DeduplicateScopedClassifications(IReadOnlyList<ColumnClassification> list, string tenantId) =>
+        ClassificationMetadata.DeduplicateScoped(list, tenantId);
 
     private static (Dictionary<string, ColumnMaskOverride> Keyed, ColumnMaskOverride? Unkeyed) ResolveEffectiveOverrides(
         IReadOnlyList<ColumnMaskOverride> overrides,

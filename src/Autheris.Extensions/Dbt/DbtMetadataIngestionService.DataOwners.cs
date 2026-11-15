@@ -48,7 +48,9 @@ public sealed partial class DbtMetadataIngestionService
         IDataOwnerIdentityVerifier? ownerIdentityVerifier = null,
         IAuditWriter? auditWriter = null,
         IDataOwnershipRepository? ownershipRepo = null,
-        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null)
+        Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null,
+        IClassificationRepository? classificationRepository = null,
+        TimeProvider? timeProvider = null)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
             virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, auditWriter, logger)
     {
@@ -57,6 +59,11 @@ public sealed partial class DbtMetadataIngestionService
         _ownerIdentityVerifier = ownerIdentityVerifier;
         _ownershipRepo = ownershipRepo;
         _catalogWriteScopes = catalogWriteScopeFactory;
+        _classificationRepository = classificationRepository;
+        if (timeProvider is not null)
+        {
+            _timeProvider = timeProvider;
+        }
     }
 
     public DbtMetadataIngestionService(

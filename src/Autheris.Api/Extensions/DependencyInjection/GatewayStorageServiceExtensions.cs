@@ -72,7 +72,8 @@ public static class GatewayStorageServiceExtensions
 
         services.AddSingleton<ITableSensitivityLookup>(sp => new TableMetadataSensitivityLookup(
             () => sp.GetService<ITableMetadataRepository>(),
-            sp.GetService<Microsoft.Extensions.Logging.ILogger<TableMetadataSensitivityLookup>>()));
+            sp.GetService<Microsoft.Extensions.Logging.ILogger<TableMetadataSensitivityLookup>>(),
+            () => sp.GetService<IClassificationRepository>()));
         services.AddSingleton<EpochValidationService>();
         services.AddSingleton<IEpochValidationService>(sp => sp.GetRequiredService<EpochValidationService>());
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();

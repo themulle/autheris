@@ -533,7 +533,7 @@ public sealed partial class TableAccessPolicy
         {
             var raw = consent.GetColumnAccess(col.ColumnName);
             var effective = consent.GetEffectiveColumnAccess(col.ColumnName, metadata);
-            var sensitive = col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName);
+            var sensitive = ClassificationMetadata.IsColumnSensitive(metadata, col);
             ColumnAccessLevel level;
             if (raw == ColumnAccessLevel.Deny)
             {

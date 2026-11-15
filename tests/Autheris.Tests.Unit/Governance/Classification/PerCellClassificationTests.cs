@@ -154,7 +154,7 @@ public sealed class PerCellClassificationTests
             classificationResolver: resolver);
 
         var decision = await policy.DecideAsync(
-            new TableAccessQuery(UserSid, Tenant, new HashSet<Sid>(), new HashSet<string>(), meta),
+            new TableAccessQuery(UserSid, Tenant, new HashSet<Sid>(), new HashSet<string>(), meta, Claims: []),
             CancellationToken.None);
 
         var ordersIdentity = new TableIdentity("dbo", "orders");

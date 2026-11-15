@@ -444,3 +444,54 @@ public static class ClassificationHierarchyValidator
         }
     }
 }
+
+/// <summary>Classification lookup helpers replacing legacy column sensitivity flags while preserving empty-classification fallback.</summary>
+public static class ClassificationMetadata
+{
+    public static bool IsColumnSensitive(TableMetadata? metadata, string columnName) =>
+        metadata is not null && IsColumnSensitive(metadata, metadata.GetColumn(columnName), columnName);
+
+    public static bool IsColumnSensitive(TableMetadata? metadata, TableColumn? column, string? columnName = null)
+    {
+        var name = column?.ColumnName ?? columnName;
+        if (metadata is not null && !string.IsNullOrWhiteSpace(name) &&
+            TryGetEffectiveColumnClassifications(metadata, name, null, out var classifications))
+            return classifications.Any(static cc => !string.Equals(cc.Code, ClassificationScopes.PublicCode, StringComparison.OrdinalIgnoreCase));
+        if (column?.IsSensitive == true) return true;
+        return metadata is not null && !string.IsNullOrWhiteSpace(name) &&
+               (metadata.ColumnMaskingRules.ContainsKey(name) || (column is not null && metadata.ColumnMaskingRules.ContainsKey(column.ColumnName)));
+    }
+
+    public static bool IsTableSensitive(TableMetadata? metadata) =>
+        metadata is not null && (metadata.Table.IsHighlySensitive ||
+            metadata.Columns.Any(c => IsColumnSensitive(metadata, c)) ||
+            metadata.ColumnClassifications.Values.SelectMany(static x => x).Any(static cc => !string.Equals(cc.Code, ClassificationScopes.PublicCode, StringComparison.OrdinalIgnoreCase)) ||
+            metadata.ColumnMaskingRules.Count > 0);
+
+    public static bool TryGetEffectiveColumnClassifications(TableMetadata metadata, string columnName, string? tenantId, out IReadOnlyList<ColumnClassification> effective)
+    {
+        effective = metadata.ColumnClassifications.TryGetValue(columnName, out var list) && list.Count > 0 ? DeduplicateScoped(list, tenantId) : [];
+        return effective.Count > 0;
+    }
+
+    public static IReadOnlyList<ColumnClassification> DeduplicateScoped(IReadOnlyList<ColumnClassification> list, string? tenantId)
+    {
+        if (list.Count == 0) return [];
+        var seen = new Dictionary<string, ColumnClassification>(StringComparer.Ordinal);
+        foreach (var item in list) if (ClassificationScopes.IsGlobal(item.Scope)) seen[item.Code] = item;
+        if (!string.IsNullOrWhiteSpace(tenantId))
+            foreach (var item in list) if (string.Equals(item.Scope, tenantId, StringComparison.Ordinal)) seen[item.Code] = item;
+        return seen.Values.OrderBy(static c => c.Code, StringComparer.Ordinal).ToList();
+    }
+
+    public static bool IsPiiCode(string code, IReadOnlyDictionary<string, DataClassification>? catalog = null)
+    {
+        if (string.IsNullOrWhiteSpace(code)) return false;
+        if (string.Equals(code, ClassificationScopes.PiiCode, StringComparison.OrdinalIgnoreCase) || string.Equals(code, ClassificationScopes.PiiSpecialCode, StringComparison.OrdinalIgnoreCase)) return true;
+        if (catalog is null) return false;
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (string? cur = code; cur is not null && visited.Count < 16 && visited.Add(cur); cur = catalog.TryGetValue(cur, out var def) ? def.ParentCode : null)
+            if (string.Equals(cur, ClassificationScopes.PiiCode, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+}

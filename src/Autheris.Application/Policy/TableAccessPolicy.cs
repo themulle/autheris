@@ -257,7 +257,7 @@ public sealed partial class TableAccessPolicy
                 var restricted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var col in query.Metadata.Columns)
                 {
-                    if ((col.IsSensitive || query.Metadata.ColumnMaskingRules.ContainsKey(col.ColumnName)) && !unknown.Permits(col.ColumnName))
+                    if (ClassificationMetadata.IsColumnSensitive(query.Metadata, col) && !unknown.Permits(col.ColumnName))
                     {
                         restricted.Add(col.ColumnName);
                     }

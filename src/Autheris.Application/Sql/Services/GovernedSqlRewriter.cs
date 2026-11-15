@@ -868,7 +868,9 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             }
         }
 
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap);
+        var maskedAudit = decisions.Values.SelectMany(d => d.MaskedColumnsAudit).ToList();
+        var grantAudit = decisions.Values.SelectMany(d => d.GrantClassificationsAudit).ToList();
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, assembly.KeySets.Outcomes, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, grantAudit);
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<TargetSqlDialect, byte> ClampWarned = new();

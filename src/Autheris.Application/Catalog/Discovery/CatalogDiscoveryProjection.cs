@@ -38,10 +38,8 @@ public static class CatalogDiscoveryProjection
                 DiscoveryColumnState.Masked => "Masked",
                 _ => "Deny"
             },
-            IsPrimaryKey: false,
-            IsPiiIndicator: c.Pii,
-            DisplayName: c.DisplayName ?? c.Name,
-            Description: c.Description)).ToList();
+            IsPrimaryKey: false, IsPiiIndicator: c.Pii, DisplayName: c.DisplayName ?? c.Name,
+            Description: c.Description, Classifications: c.Classifications, ClearRequestable: c.ClearRequestable)).ToList();
 
         return new CatalogDatasetDetail(
             DatasetId: $"{obj.Domain}.{obj.Schema}.{obj.Name}",

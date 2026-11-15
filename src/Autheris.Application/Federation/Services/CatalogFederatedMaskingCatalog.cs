@@ -71,7 +71,7 @@ public sealed class CatalogFederatedMaskingCatalog : IFederatedMaskingCatalog
             foreach (var column in table.Columns)
             {
                 var hasRule = table.ColumnMaskingRules.TryGetValue(column.ColumnName, out var rule);
-                if (!column.IsSensitive && !hasRule)
+                if (!ClassificationMetadata.IsColumnSensitive(table, column))
                 {
                     continue;
                 }

@@ -90,7 +90,28 @@ public sealed partial class TableAccessPolicy
                 decision, query, applicable, allowGrants, _callerAttributes, ct).ConfigureAwait(false);
             if (!perCellResult.Decision.IsAllowed || perCellResult.Decision.PerCellColumns is not null)
             {
-                return perCellResult.Decision;
+                if (!perCellResult.Decision.IsAllowed)
+                {
+                    return perCellResult.Decision;
+                }
+
+                var perCellMasked = combinedWinners
+                    .Where(kv => kv.Value.MaskSpec is not null &&
+                                 perCellResult.Decision.ColumnAccess.TryGetValue(kv.Key, out var lvl) &&
+                                 lvl is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent)
+                    .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(kv => new MaskedColumnAuditEntry(
+                        kv.Key,
+                        kv.Value.ClassificationCodes ?? (kv.Value.WinningClassificationCode is not null ? [kv.Value.WinningClassificationCode] : Array.Empty<string>()),
+                        kv.Value.WinningMaskFunction.HasValue ? ClassificationMaskFunctions.ToCode(kv.Value.WinningMaskFunction.Value) : "TYPE_SAFE_REDACT",
+                        kv.Value.KeyRef))
+                    .ToList();
+                var perCellGrants = await _classificationResolver.BuildGrantAuditEntriesAsync(allowGrants, query.Tenant, ct).ConfigureAwait(false);
+                return perCellResult.Decision with
+                {
+                    MaskedColumnsAudit = perCellMasked,
+                    GrantClassificationsAudit = perCellGrants
+                };
             }
 
             decision = perCellResult.Decision;
@@ -184,20 +205,21 @@ public sealed partial class TableAccessPolicy
             }
         }
 
-        foreach (var (colName, winner) in combinedWinners)
+        var maskedAudit = new List<MaskedColumnAuditEntry>();
+        foreach (var (colName, winner) in combinedWinners.OrderBy(static kv => kv.Key, StringComparer.OrdinalIgnoreCase))
         {
-            if (winner.MaskSpec is not null &&
-                updatedColumns.TryGetValue(colName, out var lvl) &&
-                lvl is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent)
-            {
-                specs[colName] = winner.MaskSpec;
-            }
+            if (winner.MaskSpec is null || !updatedColumns.TryGetValue(colName, out var lvl) || lvl is not (ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent)) continue;
+            specs[colName] = winner.MaskSpec;
+            var fnCode = winner.WinningMaskFunction.HasValue ? ClassificationMaskFunctions.ToCode(winner.WinningMaskFunction.Value) : "TYPE_SAFE_REDACT";
+            var codes = winner.ClassificationCodes ?? (winner.WinningClassificationCode is not null ? [winner.WinningClassificationCode] : Array.Empty<string>());
+            maskedAudit.Add(new MaskedColumnAuditEntry(colName, codes, fnCode, winner.KeyRef));
         }
-
         return decision with
         {
             ColumnAccess = updatedColumns,
-            ColumnMasks = specs.Count > 0 ? new ColumnMaskPolicy(specs) : decision.ColumnMasks
+            ColumnMasks = specs.Count > 0 ? new ColumnMaskPolicy(specs) : decision.ColumnMasks,
+            MaskedColumnsAudit = maskedAudit,
+            GrantClassificationsAudit = await _classificationResolver.BuildGrantAuditEntriesAsync(allowGrants, query.Tenant, ct).ConfigureAwait(false)
         };
     }
 

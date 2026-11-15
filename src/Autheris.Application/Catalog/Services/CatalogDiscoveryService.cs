@@ -214,17 +214,21 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         var columnDetails = metadata.Columns.Select(c =>
         {
             var maskingState = MaskingStateOf(metadata, c);
+            var (pii, _, classifications, clearRequestable) = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper
+                .ResolveColumnClassifications(metadata, c, metadata.Table.DiscoveryHidden, context.TenantId.Value);
 
             var colResolved = !string.IsNullOrWhiteSpace(lang) ? c.Texts.Resolve(lang) : null;
             return new CatalogColumnDetail(
                 Name: c.ColumnName,
                 Type: c.DataType,
-                Sensitivity: c.IsSensitive ? "Sensitive" : "Public",
+                Sensitivity: pii || ClassificationMetadata.IsColumnSensitive(metadata, c) ? "Sensitive" : "Public",
                 MaskingState: maskingState,
                 IsPrimaryKey: pkSet.Contains(c.ColumnName),
-                IsPiiIndicator: CatalogPiiDetector.IsPii(c.ColumnName, c.IsSensitive),
+                IsPiiIndicator: pii,
                 DisplayName: colResolved?.Title ?? c.DisplayName ?? c.ColumnName,
-                Description: colResolved?.Description ?? c.Description
+                Description: colResolved?.Description ?? c.Description,
+                Classifications: classifications,
+                ClearRequestable: clearRequestable
             );
         }).ToList();
 
@@ -299,7 +303,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             return rule.RuleType;
         }
 
-        return c.IsSensitive ? "Masked" : "Clear";
+        return ClassificationMetadata.IsColumnSensitive(metadata, c) ? "Masked" : "Clear";
     }
 
     private async Task<IReadOnlyList<RegisteredProcedure>> GetVisibleProceduresAsync(RequestContext context, CancellationToken ct)

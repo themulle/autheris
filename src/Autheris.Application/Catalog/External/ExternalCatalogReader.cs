@@ -222,7 +222,7 @@ public sealed class ExternalCatalogReader(
                     c.DisplayName,
                     c.DataType,
                     c.Description,
-                    c.IsSensitive,
+                    IsSensitive = ClassificationMetadata.IsColumnSensitive(table, c),
                     c.DiscoveryHidden,
                     c.WriteProtected,
                     masking = DefaultMaskingState(table, c)
@@ -497,6 +497,8 @@ public sealed class ExternalCatalogReader(
                 continue;
             }
 
+            var columnSecurity = metaCol is not null && ClassificationMetadata.IsColumnSensitive(table, metaCol);
+            var exposeClassifications = !colHidden && !table.Table.DiscoveryHidden;
             list.Add(new ExternalCatalogColumnDto(
                 Name: vc.Name,
                 DisplayName: vc.DisplayName,
@@ -506,12 +508,14 @@ public sealed class ExternalCatalogReader(
                 Sensitivity: vc.Pii ? "SENSITIVE" : "NORMAL",
                 Pii: vc.Pii,
                 DefaultMaskingState: metaCol is not null ? DefaultMaskingState(table, metaCol) : "clear",
-                ColumnSecurity: metaCol is not null && (metaCol.IsSensitive || table.ColumnMaskingRules.ContainsKey(metaCol.ColumnName)),
+                ColumnSecurity: columnSecurity,
                 Hidden: colHidden,
                 WriteProtected: vc.WriteProtected,
                 AccessState: includeAccessState ? vc.State.ToString().ToLowerInvariant() : null,
                 ClearInSomeRows: vc.ClearInSomeRows,
-                Statistics: vc.Statistics));
+                Statistics: vc.Statistics,
+                Classifications: exposeClassifications ? vc.Classifications : [],
+                ClearRequestable: exposeClassifications ? vc.ClearRequestable : []));
         }
 
         if (includeHiddenColumns)
@@ -523,7 +527,8 @@ public sealed class ExternalCatalogReader(
                     continue;
                 }
 
-                bool pii = col.IsSensitive || CatalogPiiDetector.IsPii(col.ColumnName, col.IsSensitive);
+                var isSensitive = ClassificationMetadata.IsColumnSensitive(table, col);
+                bool pii = isSensitive || CatalogPiiDetector.IsPii(col.ColumnName, isSensitive);
                 list.Add(new ExternalCatalogColumnDto(
                     Name: col.ColumnName,
                     DisplayName: col.DisplayName,
@@ -533,12 +538,14 @@ public sealed class ExternalCatalogReader(
                     Sensitivity: pii ? "SENSITIVE" : "NORMAL",
                     Pii: pii,
                     DefaultMaskingState: DefaultMaskingState(table, col),
-                    ColumnSecurity: col.IsSensitive || table.ColumnMaskingRules.ContainsKey(col.ColumnName),
+                    ColumnSecurity: isSensitive,
                     Hidden: true,
                     WriteProtected: col.WriteProtected,
                     AccessState: includeAccessState ? DiscoveryColumnState.NoAccess.ToString().ToLowerInvariant() : null,
                     ClearInSomeRows: false,
-                    Statistics: null));
+                    Statistics: null,
+                    Classifications: [],
+                    ClearRequestable: []));
             }
         }
 
@@ -694,7 +701,7 @@ public sealed class ExternalCatalogReader(
             };
         }
 
-        return column.IsSensitive ? "masked" : "clear";
+        return ClassificationMetadata.IsColumnSensitive(table, column) ? "masked" : "clear";
     }
 
     private static IReadOnlyList<string> MergeTags(TableMetadata table, IReadOnlyList<string> primary) =>

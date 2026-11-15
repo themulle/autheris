@@ -336,7 +336,7 @@ public sealed partial class ColumnValueProfileService : IColumnValueProfileServi
             {
                 level = explicitLevel;
             }
-            else if (col.IsSensitive || (table.ColumnMaskingRules != null && table.ColumnMaskingRules.ContainsKey(col.ColumnName)))
+            else if (ClassificationMetadata.IsColumnSensitive(table, col))
             {
                 level = ColumnAccessLevel.Mask;
             }

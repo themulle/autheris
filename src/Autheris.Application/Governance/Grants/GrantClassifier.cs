@@ -44,7 +44,12 @@ public static class GrantClassifier
             return true;
         }
 
-        return table.Columns.Any(c => c.IsSensitive || (c.Meta.TryGetValue("pii", out var pii) && IsTruthy(pii)));
+        if (ClassificationMetadata.IsTableSensitive(table))
+        {
+            return true;
+        }
+
+        return table.Columns.Any(c => c.Meta.TryGetValue("pii", out var pii) && IsTruthy(pii));
     }
 
     private static bool IsPiiTag(string tag) =>

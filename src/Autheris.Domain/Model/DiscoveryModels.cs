@@ -26,6 +26,8 @@ public sealed record DiscoveryWriteState(
         Requestable: false);
 }
 
+public sealed record DiscoveryColumnClassification(string Code, string DisplayName);
+
 public sealed record DiscoveryColumn(
     string Name,
     string? DisplayName,
@@ -36,7 +38,13 @@ public sealed record DiscoveryColumn(
     DiscoveryColumnState State,
     DiscoveryColumnStatistics? Statistics,
     bool ClearInSomeRows = false,
-    bool WriteProtected = false);
+    bool WriteProtected = false,
+    IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
+    IReadOnlyList<string>? ClearRequestable = null)
+{
+    public IReadOnlyList<DiscoveryColumnClassification> Classifications { get; init; } = Classifications ?? [];
+    public IReadOnlyList<string> ClearRequestable { get; init; } = ClearRequestable ?? [];
+}
 
 public sealed record DiscoveryObject(
     DiscoveryObjectKind Kind,

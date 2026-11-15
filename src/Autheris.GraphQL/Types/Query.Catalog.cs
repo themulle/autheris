@@ -397,16 +397,21 @@ public sealed partial class Query
             : t.Columns.Select(c =>
             {
                 var colResolved = !string.IsNullOrWhiteSpace(language) ? c.Texts.Resolve(language) : null;
+                var isSens = ClassificationMetadata.IsColumnSensitive(t, c);
+                var (pii, clearSep, classifications, clearRequestable) = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper
+                    .ResolveColumnClassifications(t, c, t.Table.DiscoveryHidden);
                 return new DiscoveryColumn(
                     c.ColumnName,
                     colResolved?.Title ?? c.DisplayName,
                     c.DataType,
                     colResolved?.Description ?? c.Description,
-                    c.IsSensitive,
-                    false,
-                    c.IsSensitive ? DiscoveryColumnState.Masked : DiscoveryColumnState.Clear,
+                    pii,
+                    clearSep,
+                    isSens ? DiscoveryColumnState.Masked : DiscoveryColumnState.Clear,
                     null,
-                    WriteProtected: c.WriteProtected);
+                    WriteProtected: c.WriteProtected,
+                    Classifications: classifications,
+                    ClearRequestable: clearRequestable);
             }).ToList();
 
         return new TableMetadataDto

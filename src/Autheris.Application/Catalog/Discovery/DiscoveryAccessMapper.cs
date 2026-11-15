@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text.Json;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.Policy.Classification;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
@@ -28,7 +29,10 @@ public static class DiscoveryAccessMapper
         bool isHidden,
         TableAccessDecision? insertDecision = null,
         TableAccessDecision? updateDecision = null,
-        TableAccessDecision? deleteDecision = null)
+        TableAccessDecision? deleteDecision = null,
+        IReadOnlyDictionary<string, DataClassification>? classificationDefinitions = null,
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>>? repoColumnClassifications = null,
+        string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(decision);
@@ -45,11 +49,16 @@ public static class DiscoveryAccessMapper
             tableStats = tableStats with { PartitionColumns = filteredPartitions };
         }
 
+        var defs = classificationDefinitions
+            ?? ClassificationAccessResolver.BuiltInCatalog(tenantId ?? ClassificationScopes.Global).Definitions;
         var mappedCols = new List<DiscoveryColumn>(visibleCols.Count);
         foreach (var col in visibleCols)
         {
             var (colState, clearInSomeRows) = MapColumnState(table, decision, col.ColumnName);
-            var pii = col.IsSensitive || CatalogPiiDetector.IsPii(col.ColumnName, col.IsSensitive);
+            IReadOnlyList<ColumnClassification>? overrideRows = null;
+            repoColumnClassifications?.TryGetValue(col.ColumnName, out overrideRows);
+            var (pii, clearSep, classifications, clearRequestable) = ResolveColumnClassifications(
+                table, col, isHidden, tenantId, defs, overrideRows);
             var colLocalized = !string.IsNullOrWhiteSpace(language) ? col.Texts.Resolve(language) : null;
             var colDisplayName = DiscoveryTextSanitizer.SanitizeText(
                 colLocalized?.Title ?? col.DisplayName,
@@ -72,11 +81,13 @@ public static class DiscoveryAccessMapper
                 DataType: col.DataType,
                 Description: colDescription,
                 Pii: pii,
-                ClearAccessRequiresSeparateApproval: pii,
+                ClearAccessRequiresSeparateApproval: clearSep,
                 State: colState,
                 Statistics: stats,
                 ClearInSomeRows: clearInSomeRows,
-                WriteProtected: col.WriteProtected));
+                WriteProtected: col.WriteProtected,
+                Classifications: classifications,
+                ClearRequestable: clearRequestable));
         }
 
         var tableLocalized = !string.IsNullOrWhiteSpace(language) ? table.Table.Texts.Resolve(language) : null;
@@ -421,5 +432,34 @@ public static class DiscoveryAccessMapper
         }
 
         return list;
+    }
+
+    public static (bool Pii, bool ClearRequiresSeparateApproval, IReadOnlyList<DiscoveryColumnClassification> Classifications, IReadOnlyList<string> ClearRequestable)
+        ResolveColumnClassifications(TableMetadata table, TableColumn column, bool isHidden, string? tenantId = null,
+            IReadOnlyDictionary<string, DataClassification>? classificationDefinitions = null, IReadOnlyList<ColumnClassification>? overrideRows = null)
+    {
+        if (isHidden || column.DiscoveryHidden) return (false, false, [], []);
+        IReadOnlyList<ColumnClassification> effective = overrideRows is { Count: > 0 }
+            ? ClassificationMetadata.DeduplicateScoped(overrideRows, tenantId)
+            : (ClassificationMetadata.TryGetEffectiveColumnClassifications(table, column.ColumnName, tenantId, out var fromTable) ? fromTable : []);
+        if (effective.Count == 0)
+        {
+            var sens = ClassificationMetadata.IsColumnSensitive(table, column);
+            var fallbackPii = sens || CatalogPiiDetector.IsPii(column.ColumnName, sens);
+            return (fallbackPii, fallbackPii, [], []);
+        }
+
+        var defs = classificationDefinitions ?? ClassificationAccessResolver.BuiltInCatalog(tenantId ?? ClassificationScopes.Global).Definitions;
+        var items = new List<DiscoveryColumnClassification>(effective.Count);
+        var clearReq = new List<string>();
+        bool pii = false, sep = false;
+        foreach (var cc in effective)
+        {
+            defs.TryGetValue(cc.Code, out var def);
+            items.Add(new DiscoveryColumnClassification(cc.Code, def?.DisplayName ?? cc.Code));
+            if (ClassificationMetadata.IsPiiCode(cc.Code, defs)) pii = true;
+            if (def is { IsActive: true, SeparateApproval: true }) { sep = true; if (def.ClearGrantable) clearReq.Add(cc.Code); }
+        }
+        return (pii, sep, items, clearReq);
     }
 }

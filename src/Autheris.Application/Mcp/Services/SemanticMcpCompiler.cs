@@ -386,7 +386,7 @@ public sealed class SemanticMcpCompiler(
                            $"* **Columns**:\n" +
                            string.Join("\n", visibleColumns.Select(c =>
                            {
-                               var sensitivityTag = c.IsSensitive ? " [SENSITIVE/MASKED]" : "";
+                               var sensitivityTag = ClassificationMetadata.IsColumnSensitive(t, c) ? " [SENSITIVE/MASKED]" : "";
                                var descTag = !string.IsNullOrWhiteSpace(c.Description) ? $": {c.Description}" : "";
                                return $"  - `{c.ColumnName}` ({c.DataType}){sensitivityTag}{descTag}";
                            }));
@@ -437,7 +437,7 @@ public sealed class SemanticMcpCompiler(
         sb.AppendLine($"* **Table**: {table}");
         sb.AppendLine($"* **Column**: `{col.ColumnName}`");
         sb.AppendLine($"* **Data Type**: `{col.DataType}`");
-        sb.AppendLine($"* **Sensitivity**: {(col.IsSensitive ? "Sensitive/Masked" : "Standard")}");
+        sb.AppendLine($"* **Sensitivity**: {(ClassificationMetadata.IsColumnSensitive(t, col) ? "Sensitive/Masked" : "Standard")}");
         sb.AppendLine();
 
         if (hasDesc)

@@ -115,7 +115,7 @@ public sealed class PerCellColumnPolicy : IPerCellColumnPolicy
             foreach (var col in metadata.Columns)
             {
                 var raw = map.TryGetValue(col.ColumnName, out var lvl) ? lvl : ColumnAccessLevel.Deny;
-                bool sensitive = col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName);
+                bool sensitive = ClassificationMetadata.IsColumnSensitive(metadata, col);
                 bool wasImplicitMask = implicitSet.Contains(col.ColumnName);
 
                 ColumnAccessLevel updated = raw;

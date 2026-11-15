@@ -447,7 +447,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     c.ColumnName,
                     c.DataType,
                     colResolved?.Description ?? c.Description,
-                    c.IsSensitive,
+                    ClassificationMetadata.IsColumnSensitive(table, c),
                     primaryKeys.Contains(c.ColumnName),
                     DisplayName: colResolved?.Title ?? c.DisplayName);
             }).ToList();
@@ -502,11 +502,11 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     c.ColumnName,
                     c.DataType,
                     colDescription,
-                    c.IsSensitive,
+                    ClassificationMetadata.IsColumnSensitive(table, c),
                     primaryKeys.Contains(c.ColumnName),
                     field?.Field,
                     field?.GraphQlType,
-                    RestrictSemantics(c, canViewProfile ? effectiveLevel : Autheris.Domain.Interfaces.ColumnAccessLevel.Deny, valueProfile),
+                    RestrictSemantics(table, c, canViewProfile ? effectiveLevel : Autheris.Domain.Interfaces.ColumnAccessLevel.Deny, valueProfile),
                     Deprecation: deprecation,
                     ValueProfile: valueProfile,
                     DisplayName: colDisplayName);
@@ -694,7 +694,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 Name: col.ColumnName,
                 Type: col.DataType,
                 Description: col.Description,
-                Sensitive: col.IsSensitive,
+                Sensitive: ClassificationMetadata.IsColumnSensitive(resMeta, col),
                 PrimaryKey: false,
                 Access: access));
         }
@@ -852,11 +852,11 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     /// values (the profile layer applies row filter, publication policy and small-table coarsening); in every other case only
     /// <see cref="DescriptiveMetaKeys"/> remain (fail closed).
     /// </summary>
-    private static ColumnSemantics RestrictSemantics(TableColumn column, Autheris.Domain.Interfaces.ColumnAccessLevel level, ColumnValueProfile? profile)
+    private static ColumnSemantics RestrictSemantics(TableMetadata table, TableColumn column, Autheris.Domain.Interfaces.ColumnAccessLevel level, ColumnValueProfile? profile)
     {
         var semantics = column.Semantics;
         var publishesValues = level == Autheris.Domain.Interfaces.ColumnAccessLevel.Clear &&
-                              !column.IsSensitive &&
+                              !ClassificationMetadata.IsColumnSensitive(table, column) &&
                               profile is { AllowedValues: not null } or { MinValue: not null } or { MaxValue: not null } or { SampleValues: not null };
         if (publishesValues || column.Meta == null || column.Meta.Count == 0)
         {

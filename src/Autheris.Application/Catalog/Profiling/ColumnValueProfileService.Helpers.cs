@@ -32,7 +32,7 @@ public sealed partial class ColumnValueProfileService
             return true;
         }
 
-        if (column.IsSensitive)
+        if (ClassificationMetadata.IsColumnSensitive(table, column))
         {
             return true;
         }

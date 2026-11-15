@@ -314,7 +314,8 @@ public sealed partial class McpDatasetCatalog
                     GraphQlType: field?.GraphQlType,
                     ValueProfile: colProfile,
                     Access: c.State == DiscoveryColumnState.Clear ? "clear" : "mask",
-                    DisplayName: DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes));
+                    DisplayName: DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
+                    Classifications: c.Classifications, ClearRequestable: c.ClearRequestable);
             })
             .ToList();
 

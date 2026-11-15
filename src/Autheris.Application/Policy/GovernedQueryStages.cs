@@ -119,6 +119,14 @@ public static class GovernedQueryStages
         }
 
         details["grants"] = decision.IsAllowed ? ToAuditGrants(decision.Grants) : Array.Empty<AuditGrantEntry>();
+        if (decision.IsAllowed && decision.MaskedColumnsAudit.Count > 0)
+        {
+            details["masked_columns"] = decision.MaskedColumnsAudit;
+        }
+        if (decision.IsAllowed && decision.GrantClassificationsAudit.Count > 0)
+        {
+            details["grant_classifications"] = decision.GrantClassificationsAudit;
+        }
 
         return details;
     }

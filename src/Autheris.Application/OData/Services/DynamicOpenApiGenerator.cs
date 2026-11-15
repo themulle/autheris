@@ -338,7 +338,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
 
         foreach (var col in table.Columns)
         {
-            var colProp = MapColumnToJsonSchema(col);
+            var colProp = MapColumnToJsonSchema(col, table);
             properties[col.ColumnName] = colProp;
 
             if (keyView.PrimaryKeyColumns.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
@@ -380,7 +380,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
         };
     }
 
-    private static JsonObject MapColumnToJsonSchema(TableColumn col)
+    private static JsonObject MapColumnToJsonSchema(TableColumn col, TableMetadata table)
     {
         var node = new JsonObject();
         var dt = col.DataType.Trim().ToLowerInvariant();
@@ -453,7 +453,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             node["x-dbt-meta"] = metaObj;
         }
 
-        if (col.IsSensitive)
+        if (ClassificationMetadata.IsColumnSensitive(table, col))
         {
             node["x-sensitive"] = true;
         }

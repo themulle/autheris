@@ -15,6 +15,7 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Search;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.Classification;
 using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Audit;
@@ -52,6 +53,7 @@ public sealed class DiscoveryService : IDiscoveryService
     private readonly ICatalogSearchEngine? _searchEngine;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<DiscoveryService> _logger;
+    private readonly IClassificationRepository? _classificationRepository;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
@@ -76,7 +78,8 @@ public sealed class DiscoveryService : IDiscoveryService
         IRateLimiterService? rateLimiter = null,
         ICatalogSearchEngine? searchEngine = null,
         TimeProvider? timeProvider = null,
-        ILogger<DiscoveryService>? logger = null)
+        ILogger<DiscoveryService>? logger = null,
+        IClassificationRepository? classificationRepository = null)
     {
         ArgumentNullException.ThrowIfNull(gatewayOptions);
         _metadataRepository = metadataRepository;
@@ -92,6 +95,7 @@ public sealed class DiscoveryService : IDiscoveryService
         _searchEngine = searchEngine;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<DiscoveryService>.Instance;
+        _classificationRepository = classificationRepository;
     }
 
     public async ValueTask<DiscoveryPage> ListAsync(
@@ -473,6 +477,9 @@ public sealed class DiscoveryService : IDiscoveryService
             throw new InvalidOperationException("AccessDecisionPoint returned mismatched write decision count.");
         }
 
+        var defs = _classificationRepository is null
+            ? ClassificationAccessResolver.BuiltInCatalog(caller.Tenant.Value).Definitions
+            : ClassificationHierarchyValidator.ResolveEffective(await _classificationRepository.GetClassificationsAsync(caller.Tenant.Value, includeInactive: true, ct).ConfigureAwait(false), caller.Tenant.Value);
         var maxSampleRows = Math.Clamp(_discoveryOptions.Discovery.MaxSampleRows, 1, CatalogDiscoverySettings.HardMaxSampleRows);
 
         for (var i = 0; i < uncached.Count; i++)
@@ -482,22 +489,20 @@ public sealed class DiscoveryService : IDiscoveryService
             var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
             var isPending = !decision.IsAllowed && pendingTables.Contains(table.Identifier);
             var isExpired = !decision.IsAllowed && !isPending && expiredTables.Contains(table.Identifier);
-            var artifacts = _artifactStore is null
-                ? null
-                : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
+            var artifacts = _artifactStore is null ? null : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
+            Dictionary<string, IReadOnlyList<ColumnClassification>>? repoColClasses = null;
+            if (_classificationRepository is not null && !table.Table.DiscoveryHidden)
+            {
+                foreach (var col in table.Columns.Where(c => !c.DiscoveryHidden && !table.ColumnClassifications.ContainsKey(c.ColumnName)))
+                {
+                    var rows = await _classificationRepository.GetColumnClassificationsAsync(col.Id.ToString(), caller.Tenant.Value, ct).ConfigureAwait(false);
+                    if (rows.Count > 0) (repoColClasses ??= new(StringComparer.OrdinalIgnoreCase))[col.ColumnName] = rows;
+                }
+            }
 
             var mapped = DiscoveryAccessMapper.Map(
-                table,
-                decision,
-                owners,
-                isPending,
-                isExpired,
-                artifacts,
-                language,
-                isHidden: table.Table.DiscoveryHidden,
-                insertDecision: insertDecisions[i],
-                updateDecision: updateDecisions[i],
-                deleteDecision: deleteDecisions[i]);
+                table, decision, owners, isPending, isExpired, artifacts, language,
+                isHidden: table.Table.DiscoveryHidden, insertDecisions[i], updateDecisions[i], deleteDecisions[i], defs, repoColClasses, caller.Tenant.Value);
 
             results[targetIdx] = mapped;
             lock (_memoLock)

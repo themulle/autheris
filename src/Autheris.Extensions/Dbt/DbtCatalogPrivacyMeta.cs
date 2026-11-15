@@ -100,17 +100,10 @@ internal static class DbtCatalogPrivacyMeta
                 {
                     foreach (var col in existingMetadata.Columns)
                     {
-                        if (col.IsSensitive)
+                        if (ClassificationMetadata.IsColumnSensitive(existingMetadata, col))
                         {
                             targetNonPersonal = false;
                             warnings.Add($"Table '{tableId}': stored column '{col.ColumnName}' is sensitive; autheris.non_personal forced to false.");
-                            break;
-                        }
-
-                        if (existingMetadata.ColumnMaskingRules.ContainsKey(col.ColumnName))
-                        {
-                            targetNonPersonal = false;
-                            warnings.Add($"Table '{tableId}': stored column '{col.ColumnName}' has masking rules; autheris.non_personal forced to false.");
                             break;
                         }
 

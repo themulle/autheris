@@ -689,7 +689,7 @@ public sealed class ConsentDecisionPipeline(
         }
 
         var maskedByDefault = meta.Columns
-            .Where(col => col.IsSensitive || meta.ColumnMaskingRules.ContainsKey(col.ColumnName))
+            .Where(col => ClassificationMetadata.IsColumnSensitive(meta, col))
             .Select(col => col.ColumnName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 

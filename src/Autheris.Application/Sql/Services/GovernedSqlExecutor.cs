@@ -482,6 +482,14 @@ public sealed partial class GovernedSqlExecutor
                 AddCallerAttributeAuditFields(fields, rewrite, compiled);
                 AddCompiledAuditFields(fields, compiled, clientValues);
                 AddKeySetAuditFields(fields, rewrite);
+                if (rewrite.MaskedColumnsAudit is { Count: > 0 })
+                {
+                    fields["masked_columns"] = rewrite.MaskedColumnsAudit;
+                }
+                if (rewrite.GrantClassificationsAudit is { Count: > 0 })
+                {
+                    fields["grant_classifications"] = rewrite.GrantClassificationsAudit;
+                }
                 await _auditWriter.RecordAsync(new AuditLogEntry
                 {
                     TenantId = tenantId,

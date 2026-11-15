@@ -99,6 +99,12 @@ public record TableAccessDecision(
     /// </summary>
     public IPerCellColumnPolicy? PerCellColumns { get; init; }
 
+    /// <summary>Data-access audit entries for masked columns (column, classifications, maskFunction, keyRef — never key material).</summary>
+    public IReadOnlyList<MaskedColumnAuditEntry> MaskedColumnsAudit { get; init; } = [];
+
+    /// <summary>Data-access audit entries for classification levels applied per grant.</summary>
+    public IReadOnlyList<GrantClassificationAuditEntry> GrantClassificationsAudit { get; init; } = [];
+
     /// <summary>
     /// Typed variant of <see cref="WithAdditionalRowFilter"/>: AND-merges <paramref name="policy"/> into <see cref="RowPolicy"/> and
     /// re-projects the text. On a decision that carries only a string filter the text is composed and the decision stays string-only
@@ -495,19 +501,9 @@ public record TableAccessDecision(
         return access;
     }
 
-    /// <summary>True when the catalog marks the column sensitive (<c>IsSensitive</c> or a column masking rule). The one definition used by the effective-access rule.</summary>
-    public static bool IsCatalogSensitive(string columnName, TableMetadata? metadata)
-    {
-        if (metadata == null)
-        {
-            return false;
-        }
-
-        var column = metadata.GetColumn(columnName);
-        return column?.IsSensitive == true ||
-               metadata.ColumnMaskingRules.ContainsKey(columnName) ||
-               (column != null && metadata.ColumnMaskingRules.ContainsKey(column.ColumnName));
-    }
+    /// <summary>True when the catalog marks the column sensitive via classifications (or legacy fallback when unclassified).</summary>
+    public static bool IsCatalogSensitive(string columnName, TableMetadata? metadata) =>
+        ClassificationMetadata.IsColumnSensitive(metadata, columnName);
 
     /// <summary>
     /// true when the column is catalog-sensitive with an explicit<c>Clear</c> that the restricted-scope clearance does not
@@ -562,4 +558,14 @@ public readonly record struct DecisionGrantRef(
     GrantSourceKind Source,
     DateTimeOffset ValidFrom,
     DateTimeOffset? ValidUntil = null);
+
+public sealed record MaskedColumnAuditEntry(
+    [property: System.Text.Json.Serialization.JsonPropertyName("column")] string Column,
+    [property: System.Text.Json.Serialization.JsonPropertyName("classifications")] IReadOnlyList<string> Classifications,
+    [property: System.Text.Json.Serialization.JsonPropertyName("maskFunction")] string MaskFunction,
+    [property: System.Text.Json.Serialization.JsonPropertyName("keyRef")] string? KeyRef = null);
+
+public sealed record GrantClassificationAuditEntry(
+    [property: System.Text.Json.Serialization.JsonPropertyName("grantId")] string GrantId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("classificationLevels")] IReadOnlyDictionary<string, string> ClassificationLevels);
 

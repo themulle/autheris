@@ -22,7 +22,9 @@ internal sealed record GovernedRewrite(
     string? PagingUnavailable = null,
     bool BindPageOffset = false,
     IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null,
-    long? WriteMaxRowsPerStatement = null);
+    long? WriteMaxRowsPerStatement = null,
+    IReadOnlyList<Autheris.Domain.Interfaces.MaskedColumnAuditEntry>? MaskedColumnsAudit = null,
+    IReadOnlyList<Autheris.Domain.Interfaces.GrantClassificationAuditEntry>? GrantClassificationsAudit = null);
 
 /// <summary>
 /// Collects the DML classification during governance so that executed AND rejected DML can be audited.

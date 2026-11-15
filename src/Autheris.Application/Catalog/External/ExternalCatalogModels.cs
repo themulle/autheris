@@ -113,7 +113,9 @@ public sealed record ExternalCatalogColumnDto(
     bool WriteProtected,
     string? AccessState = null,
     bool ClearInSomeRows = false,
-    DiscoveryColumnStatistics? Statistics = null);
+    DiscoveryColumnStatistics? Statistics = null,
+    IReadOnlyList<DiscoveryColumnClassification>? Classifications = null,
+    IReadOnlyList<string>? ClearRequestable = null);
 
 public sealed record ExternalCatalogObjectDto(
     string ObjectId,

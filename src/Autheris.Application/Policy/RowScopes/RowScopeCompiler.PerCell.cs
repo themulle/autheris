@@ -401,7 +401,8 @@ public sealed partial class RowScopeCompiler
                 continue;
             }
 
-            if (classOutcomes is not null && classOutcomes.TryGetValue(colName, out var classOutcome))
+            Autheris.Application.Policy.Classification.ColumnClassificationGrantOutcome? classOutcome = null;
+            if (classOutcomes is not null && classOutcomes.TryGetValue(colName, out classOutcome))
             {
                 if (classOutcome.AccessLevel == ColumnAccessLevel.Deny)
                 {
@@ -415,11 +416,12 @@ public sealed partial class RowScopeCompiler
                 }
             }
 
-            bool isSensitive = metaCol?.IsSensitive == true || metadata.ColumnMaskingRules.ContainsKey(colName);
-            bool hasExplicitClear = raw == ColumnAccessLevel.Clear && allow.ColumnRules.Any(r =>
-                string.Equals(r.ColumnName, colName, StringComparison.OrdinalIgnoreCase) &&
-                r.AccessLevel == ColumnAccessLevel.Clear &&
-                ConsentResolutionService.RuleAppliesToScopes(r, callerScopes));
+            bool isSensitive = ClassificationMetadata.IsColumnSensitive(metadata, metaCol, colName);
+            bool hasExplicitClear = raw == ColumnAccessLevel.Clear &&
+                (classOutcome?.AccessLevel == ColumnAccessLevel.Clear || allow.ColumnRules.Any(r =>
+                    string.Equals(r.ColumnName, colName, StringComparison.OrdinalIgnoreCase) &&
+                    r.AccessLevel == ColumnAccessLevel.Clear &&
+                    ConsentResolutionService.RuleAppliesToScopes(r, callerScopes)));
 
             bool clearancePermits = clearance is null || clearance.Permits(colName);
             if (isSensitive && (!hasExplicitClear || !clearancePermits))

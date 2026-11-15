@@ -22,6 +22,7 @@ public sealed partial class DbtMetadataIngestionService
         await using var scope = Autheris.Application.Catalog.CatalogWriteScopeFactoryExtensions.BeginOrNoop(_catalogWriteScopes, "dbt-manifest-sync");
         var batch = pendingModelUpdates.Select(static u => u.Metadata).ToList();
         await _metadataRepository.UpsertBatchWithFallbackAsync(batch, ct).ConfigureAwait(false);
+        await SyncColumnClassificationsAsync(pendingModelUpdates, warnings, ct).ConfigureAwait(false);
 
         foreach (var (metadata, tags) in pendingModelUpdates)
         {

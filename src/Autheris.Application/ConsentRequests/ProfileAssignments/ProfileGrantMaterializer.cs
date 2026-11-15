@@ -500,9 +500,11 @@ public sealed class ProfileGrantMaterializer(
         var filter = new HashSet<string>(approvedClearColumns, StringComparer.OrdinalIgnoreCase);
         if (maskingMode != MaskingPolicyMode.Unmasked)
         {
-            var matchedCols = items.SelectMany(i => MatchTablesForItem(i, tenantTables)).SelectMany(t => t.Columns).ToList();
+            var matched = items.SelectMany(i => MatchTablesForItem(i, tenantTables)).ToList();
             var forbidden = filter.FirstOrDefault(c =>
-                matchedCols.Any(mc => string.Equals(mc.ColumnName, c, StringComparison.OrdinalIgnoreCase) && mc.IsSensitive));
+                matched.Any(t => t.Columns.Any(mc =>
+                    string.Equals(mc.ColumnName, c, StringComparison.OrdinalIgnoreCase) &&
+                    ClassificationMetadata.IsColumnSensitive(t, mc))));
             if (forbidden is not null)
             {
                 throw new ConsentDecisionException(
@@ -570,14 +572,14 @@ public sealed class ProfileGrantMaterializer(
             }
 
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var col in matchedTables.SelectMany(t => t.Columns))
+            foreach (var col in matchedTables.SelectMany(t => t.Columns.Select(c => (Table: t, Col: c))))
             {
-                if (col.DiscoveryHidden || !col.IsSensitive || !seen.Add(col.ColumnName))
+                if (col.Col.DiscoveryHidden || !ClassificationMetadata.IsColumnSensitive(col.Table, col.Col) || !seen.Add(col.Col.ColumnName))
                 {
                     continue;
                 }
 
-                if (clearFilter != null && !clearFilter.Contains(col.ColumnName))
+                if (clearFilter != null && !clearFilter.Contains(col.Col.ColumnName))
                 {
                     continue;
                 }
@@ -585,8 +587,8 @@ public sealed class ProfileGrantMaterializer(
                 rules.Add(new ConsentColumnRule
                 {
                     Id = Guid.NewGuid(),
-                    TableColumnId = col.Id,
-                    ColumnName = col.ColumnName,
+                    TableColumnId = col.Col.Id,
+                    ColumnName = col.Col.ColumnName,
                     AccessLevel = ColumnAccessLevel.Clear
                 });
             }
@@ -602,7 +604,7 @@ public sealed class ProfileGrantMaterializer(
                 continue;
             }
 
-            bool isSensitive = col.IsSensitive || meta.ColumnMaskingRules.ContainsKey(col.ColumnName);
+            bool isSensitive = ClassificationMetadata.IsColumnSensitive(meta, col);
             ColumnAccessLevel level;
             if (maskingMode == MaskingPolicyMode.Unmasked)
             {

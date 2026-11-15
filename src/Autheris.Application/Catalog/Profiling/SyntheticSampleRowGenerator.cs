@@ -161,7 +161,7 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
         }
 
         if (level == ColumnAccessLevel.Clear &&
-            (column.IsSensitive || (table.ColumnMaskingRules != null && table.ColumnMaskingRules.ContainsKey(column.ColumnName))))
+            ClassificationMetadata.IsColumnSensitive(table, column))
         {
             return ColumnAccessLevel.Mask;
         }

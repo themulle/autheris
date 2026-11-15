@@ -42,6 +42,7 @@ public sealed partial class AuditDetailsBuilder
     private static readonly HashSet<string> AllowListedNormalizedKeys = new(StringComparer.Ordinal)
     {
         "keyset",
+        "keyref",
         "primarykey",
         "keycolumns",
         "idempotencykeyhash"
