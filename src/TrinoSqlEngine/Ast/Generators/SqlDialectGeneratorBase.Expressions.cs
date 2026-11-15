@@ -79,7 +79,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
                     builder.Append(" ESCAPE ");
                     int escapeStart = builder.Length;
-                    builder.Append("'\\'");
+                    builder.Append(LikeEscapeLiteral());
                     context.RegisterConstantFragment(escapeStart, builder.Length - escapeStart);
                     break;
                 }
@@ -95,14 +95,14 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 {
                     builder.Append(" ESCAPE ");
                     int escapeStart = builder.Length;
-                    builder.Append(normalized.Pattern is LiteralExpression { Type: LiteralType.String } ? "'\\'" : "''");
+                    builder.Append(normalized.Pattern is LiteralExpression { Type: LiteralType.String } || TargetDialect == TargetSqlDialect.Databricks ? LikeEscapeLiteral() : "''");
                     context.RegisterConstantFragment(escapeStart, builder.Length - escapeStart);
                 }
                 else if (TargetDialect == TargetSqlDialect.SqlServer)
                 {
                     builder.Append(" ESCAPE ");
                     int escapeStart = builder.Length;
-                    builder.Append("'\\'");
+                    builder.Append(LikeEscapeLiteral());
                     context.RegisterConstantFragment(escapeStart, builder.Length - escapeStart);
                 }
                 break;
@@ -290,6 +290,9 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         GenerateExpression(b.Right, ref builder, context);
         if (parensRight) builder.Append(')');
     }
+
+    /// <summary>The ESCAPE literal for the backslash escape character. Spark interprets backslash escapes inside quoted literals, so it needs the doubled form.</summary>
+    private string LikeEscapeLiteral() => TargetDialect == TargetSqlDialect.Databricks ? "'\\\\'" : "'\\'";
 
     protected virtual void FormatBinaryExpression(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
     {

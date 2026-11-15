@@ -106,11 +106,13 @@ public sealed class UserLikeEscapeEmissionTests
     public void PostgreSql_And_Databricks_EmitExplicitEscape_ForLiteralAndNonLiteralPatterns(TargetSqlDialect dialect)
     {
         var literal = Compile("SELECT id FROM orders WHERE name LIKE 'a\\b%'", dialect);
-        Assert.Contains("ESCAPE '\\'", literal.Sql, StringComparison.Ordinal);
+        // Spark interprets backslash escapes inside quoted literals, so Databricks needs the doubled form and has no "no escape" spelling.
+        var backslashEscape = dialect == TargetSqlDialect.Databricks ? "ESCAPE '\\\\'" : "ESCAPE '\\'";
+        Assert.Contains(backslashEscape, literal.Sql, StringComparison.Ordinal);
         Assert.Contains(literal.Parameters, p => Equals(p.Value, "a\\\\b%"));
 
         var nonLiteral = Compile("SELECT id FROM orders WHERE name LIKE email", dialect);
-        Assert.Contains("ESCAPE ''", nonLiteral.Sql, StringComparison.Ordinal);
+        Assert.Contains(dialect == TargetSqlDialect.Databricks ? backslashEscape : "ESCAPE ''", nonLiteral.Sql, StringComparison.Ordinal);
 
         var custom = Compile("SELECT id FROM orders WHERE name LIKE 'a\\b%' ESCAPE '!'", dialect);
         Assert.Contains(custom.Parameters, p => Equals(p.Value, "a\\b%"));

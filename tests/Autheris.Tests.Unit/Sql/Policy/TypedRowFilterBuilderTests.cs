@@ -47,6 +47,20 @@ public sealed class TypedRowFilterBuilderTests
         rendered.Parameters["@__gql_rls_0"].ShouldBe("EU");
     }
 
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer, "[region] LIKE @__gql_rls_0 ESCAPE '\\'")]
+    [InlineData(TargetSqlDialect.Databricks, "`region` LIKE @__gql_rls_0 ESCAPE '\\\\'")]
+    [InlineData(TargetSqlDialect.PostgreSql, "\"region\" LIKE @__gql_rls_0 ESCAPE ''")]
+    public void ConsentLike_RendersOnEveryDialect_WithTheRenderedPolicyMarkerAsPattern(TargetSqlDialect dialect, string expectedSql)
+    {
+        var predicate = _builder.Build([Filter("region", "LIKE", "\"EU%\"")], Orders);
+
+        var rendered = _renderer.Render(predicate, dialect, RowFilterAliases.Target);
+
+        rendered.Sql.ShouldBe(expectedSql);
+        rendered.Parameters["@__gql_rls_0"].ShouldBe("EU%");
+    }
+
     [Fact]
     public void BuildsTypedPredicate_ForIn_AndNull()
     {

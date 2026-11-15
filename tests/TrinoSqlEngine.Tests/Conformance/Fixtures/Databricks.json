@@ -348,7 +348,7 @@
       "Group": "select",
       "Sql": "SELECT a FROM t WHERE a LIKE 'x%'",
       "Outcome": "ok",
-      "Expected": "SELECT `a` FROM `t` WHERE `a` LIKE :p1 ESCAPE '\\'",
+      "Expected": "SELECT `a` FROM `t` WHERE `a` LIKE :p1 ESCAPE '\\\\'",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -365,7 +365,7 @@
       "Group": "select",
       "Sql": "SELECT a FROM t WHERE a NOT LIKE '%x'",
       "Outcome": "ok",
-      "Expected": "SELECT `a` FROM `t` WHERE `a` NOT LIKE :p1 ESCAPE '\\'",
+      "Expected": "SELECT `a` FROM `t` WHERE `a` NOT LIKE :p1 ESCAPE '\\\\'",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -1292,7 +1292,7 @@
       "Group": "operator",
       "Sql": "SELECT a LIKE b AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT `a` LIKE `b` ESCAPE '' AS `r` FROM `t`",
+      "Expected": "SELECT `a` LIKE `b` ESCAPE '\\\\' AS `r` FROM `t`",
       "Parameters": []
     },
     {
@@ -6343,7 +6343,7 @@
       "Group": "dml-update",
       "Sql": "UPDATE orders SET status = 'it''s' WHERE region LIKE 'E%'",
       "Outcome": "ok",
-      "Expected": "UPDATE `dbo`.`Orders` SET `Status` = :p1 WHERE (`region` LIKE :p2 ESCAPE '\\') AND (CAST(`TenantId` AS BINARY) = CAST(:p3 AS BINARY))",
+      "Expected": "UPDATE `dbo`.`Orders` SET `Status` = :p1 WHERE (`region` LIKE :p2 ESCAPE '\\\\') AND (CAST(`TenantId` AS BINARY) = CAST(:p3 AS BINARY))",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -6563,7 +6563,7 @@
       "Group": "dml-delete",
       "Sql": "DELETE FROM orders WHERE email LIKE 'x%'",
       "Outcome": "ok",
-      "Expected": "DELETE FROM `dbo`.`Orders` WHERE (`email` LIKE :p1 ESCAPE '\\') AND (CAST(`TenantId` AS BINARY) = CAST(:p2 AS BINARY))",
+      "Expected": "DELETE FROM `dbo`.`Orders` WHERE (`email` LIKE :p1 ESCAPE '\\\\') AND (CAST(`TenantId` AS BINARY) = CAST(:p2 AS BINARY))",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -6792,7 +6792,7 @@
       "Group": "complex",
       "Sql": "SELECT upper(a) || '-' || CAST(b AS varchar) AS k, coalesce(c, 0) + 1 AS n FROM t WHERE lower(a) LIKE 'x%' AND b BETWEEN 1 AND 5",
       "Outcome": "ok",
-      "Expected": "SELECT UPPER(`a`) || :p1 || CAST(`b` AS STRING) AS `k`, COALESCE(`c`, :p2) + :p3 AS `n` FROM `t` WHERE LOWER(`a`) LIKE :p4 ESCAPE '\\' AND (`b` BETWEEN :p3 AND :p5)",
+      "Expected": "SELECT UPPER(`a`) || :p1 || CAST(`b` AS STRING) AS `k`, COALESCE(`c`, :p2) + :p3 AS `n` FROM `t` WHERE LOWER(`a`) LIKE :p4 ESCAPE '\\\\' AND (`b` BETWEEN :p3 AND :p5)",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -7253,7 +7253,7 @@
       "Group": "ast",
       "Sql": "@policy-param-like",
       "Outcome": "ok",
-      "Expected": "SELECT `a` AS `r` FROM `s`.`t` WHERE `b` LIKE :p1 ESCAPE '\\'",
+      "Expected": "SELECT `a` AS `r` FROM `s`.`t` WHERE `b` LIKE :p1 ESCAPE '\\\\'",
       "Parameters": [
         {
           "Marker": ":p1",

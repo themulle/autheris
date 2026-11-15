@@ -35,13 +35,25 @@ internal static class LikePatternEscaper
     };
 
     /// <summary>
+    /// True when the pattern is made of policy bind markers only (a literal-free || chain). The policy predicate renderer swaps every
+    /// policy parameter for such a marker before emitting, so the pattern keeps its admin-authored wildcards and is never user text.
+    /// </summary>
+    private static bool IsRenderedPolicyMarker(Expression pattern) => pattern switch
+    {
+        NamedBindMarkerExpression => true,
+        BinaryExpression { Operator: BinaryOperator.Concat } b => IsRenderedPolicyMarker(b.Left) && IsRenderedPolicyMarker(b.Right),
+        ParenthesizedExpression p => IsRenderedPolicyMarker(p.Expression),
+        _ => false
+    };
+
+    /// <summary>
     /// Validates user LIKE escape clauses and normalizes dialect-sensitive user LIKE patterns in a single idempotent pass.
     /// Preserves SQL pattern wildcards (<c>%</c> and <c>_</c>) while neutralizing dialect-specific metacharacters.
     /// </summary>
     public static LikeExpression NormalizeUserLike(LikeExpression like, TargetSqlDialect? dialect, int? maxQueryLength)
     {
         char? userEscape = ValidateUserEscape(like.Escape);
-        if (like.IsPatternNormalized || ContainsPolicyParameter(like.Pattern))
+        if (like.IsPatternNormalized || ContainsPolicyParameter(like.Pattern) || IsRenderedPolicyMarker(like.Pattern))
         {
             return like;
         }
