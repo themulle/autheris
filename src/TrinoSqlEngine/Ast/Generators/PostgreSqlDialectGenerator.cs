@@ -346,10 +346,90 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
                 break;
             }
 
+            case TrinoSqlEngine.Governance.MaskKind.TruncateDate:
+            {
+                string unitFrag = (args.TruncateUnit ?? throw MissingArgument(mask, "TruncateUnit")) switch
+                {
+                    TrinoSqlEngine.Governance.MaskDateTruncateUnit.Year => "'year'",
+                    TrinoSqlEngine.Governance.MaskDateTruncateUnit.Month => "'month'",
+                    TrinoSqlEngine.Governance.MaskDateTruncateUnit.Day => "'day'",
+                    _ => throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect)
+                };
+                builder.Append("CAST(DATE_TRUNC(");
+                AppendConstantFragment(ref builder, context, unitFrag);
+                Put(ref builder, ", ", column, ")");
+                AppendStructural(ref builder, context, " AS " + type + ")");
+                break;
+            }
+
+            case TrinoSqlEngine.Governance.MaskKind.BucketNumber:
+            {
+                string width = context.BindPolicy(args.BucketWidth ?? throw MissingArgument(mask, "BucketWidth"));
+                string calc = IsFloatingType(type) ? "double precision" : "numeric";
+                Put(ref builder, "CAST(FLOOR(CAST(", column, " AS ", calc, ") / CAST(", width, " AS ", calc, ")) * CAST(", width, " AS ", calc, ")");
+                AppendStructural(ref builder, context, ") AS " + type + ")");
+                break;
+            }
+
+            case TrinoSqlEngine.Governance.MaskKind.RoundNumber:
+            {
+                string digits = context.BindPolicy(args.RoundDigits ?? throw MissingArgument(mask, "RoundDigits"));
+                Put(ref builder, "CAST(ROUND(CAST(", column, " AS numeric), CAST(", digits, " AS integer))");
+                AppendStructural(ref builder, context, " AS " + type + ")");
+                break;
+            }
+
+            case TrinoSqlEngine.Governance.MaskKind.EmailDomain:
+            {
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN ");
+                AppendStructural(ref builder, context, "CAST(NULL AS text)");
+                builder.Append(" WHEN POSITION(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, " IN ", text, ") > ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(" AND POSITION(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, " IN ", text, ") < length(", text, ") THEN concat(");
+                AppendConstantFragment(ref builder, context, "'***@'");
+                Put(ref builder, ", substring(", text, " FROM POSITION(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, " IN ", text, ") + ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(")) ELSE ");
+                AppendConstantFragment(ref builder, context, "'***@***'");
+                builder.Append(" END");
+                break;
+            }
+
+            case TrinoSqlEngine.Governance.MaskKind.Tokenize:
+            {
+                string domain = context.BindPolicy(args.TokenDomain ?? throw MissingArgument(mask, "TokenDomain"));
+                string key = context.BindPolicy(args.HmacKey ?? throw MissingArgument(mask, "HmacKey"));
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN ");
+                AppendStructural(ref builder, context, "CAST(NULL AS text)");
+                builder.Append(" ELSE concat(");
+                AppendConstantFragment(ref builder, context, "'TOK_'");
+                Put(ref builder, ", CAST(", domain, " AS text), ");
+                AppendConstantFragment(ref builder, context, "'_'");
+                Put(ref builder, ", left(ENCODE(HMAC(", text, ", CAST(", key, " AS text), ");
+                AppendConstantFragment(ref builder, context, "'sha256'");
+                builder.Append("), ");
+                AppendConstantFragment(ref builder, context, "'hex'");
+                builder.Append("), ");
+                AppendInlineInteger(ref builder, 8, context);
+                builder.Append(")) END");
+                break;
+            }
+
             default:
                 throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
         }
     }
+
+    private static bool IsFloatingType(string nativeType) =>
+        nativeType.StartsWith("real", StringComparison.Ordinal) ||
+        nativeType.StartsWith("double", StringComparison.Ordinal) ||
+        nativeType.StartsWith("float", StringComparison.Ordinal);
 
     private static System.Security.SecurityException MissingArgument(MaskExpression mask, string argument) =>
         new($"The {mask.Kind} mask requires the {argument} argument.");

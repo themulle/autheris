@@ -59,6 +59,9 @@ public sealed class ColumnMaskPolicy : IColumnMaskPolicy
         yield return ("maskChar", a.MaskChar);
         yield return ("hmacKey", a.HmacKey);
         yield return ("hmacKeyOuter", a.HmacKeyOuter);
+        yield return ("bucketWidth", a.BucketWidth);
+        yield return ("roundDigits", a.RoundDigits);
+        yield return ("tokenDomain", a.TokenDomain);
     }
 
     private static void Validate(string column, MaskSpec spec)
@@ -88,7 +91,8 @@ public sealed class ColumnMaskPolicy : IColumnMaskPolicy
         foreach (var (column, spec) in _masks.OrderBy(m => m.Key, StringComparer.OrdinalIgnoreCase))
         {
             text.Append(column.ToUpperInvariant()).Append(':').Append(spec.Kind)
-                .Append(":d").Append(spec.Arguments.Decimals?.ToString(CultureInfo.InvariantCulture) ?? "-");
+                .Append(":d").Append(spec.Arguments.Decimals?.ToString(CultureInfo.InvariantCulture) ?? "-")
+                .Append(":u").Append(spec.Arguments.TruncateUnit?.ToString() ?? "-");
             foreach (var (role, parameter) in Arguments(spec.Arguments))
             {
                 if (parameter is not null)

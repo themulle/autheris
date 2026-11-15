@@ -501,6 +501,99 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
                 break;
             }
 
+            case Governance.MaskKind.TruncateDate:
+            {
+                switch (args.TruncateUnit ?? throw MissingArgument(mask, "TruncateUnit"))
+                {
+                    case Governance.MaskDateTruncateUnit.Day:
+                        Put(ref builder, "CAST(CAST(", column, " AS date)");
+                        AppendStructural(ref builder, context, " AS " + type + ")");
+                        break;
+                    case Governance.MaskDateTruncateUnit.Month:
+                        Put(ref builder, "CAST(DATEFROMPARTS(YEAR(", column, "), MONTH(", column, "), ");
+                        AppendInlineInteger(ref builder, 1, context);
+                        AppendStructural(ref builder, context, ") AS " + type + ")");
+                        break;
+                    case Governance.MaskDateTruncateUnit.Year:
+                        Put(ref builder, "CAST(DATEFROMPARTS(YEAR(", column, "), ");
+                        AppendInlineInteger(ref builder, 1, context);
+                        builder.Append(", ");
+                        AppendInlineInteger(ref builder, 1, context);
+                        AppendStructural(ref builder, context, ") AS " + type + ")");
+                        break;
+                    default:
+                        throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
+                }
+
+                break;
+            }
+
+            case Governance.MaskKind.BucketNumber:
+            {
+                string width = context.BindPolicy(args.BucketWidth ?? throw MissingArgument(mask, "BucketWidth"));
+                string calc = type.StartsWith("float", StringComparison.Ordinal) || type.StartsWith("real", StringComparison.Ordinal)
+                    ? "float"
+                    : "decimal(38, 10)";
+                Put(ref builder, "CAST(FLOOR(CAST(", column, " AS ");
+                AppendStructural(ref builder, context, calc);
+                Put(ref builder, ") / CAST(", width, " AS ");
+                AppendStructural(ref builder, context, calc);
+                Put(ref builder, ")) * CAST(", width, " AS ");
+                AppendStructural(ref builder, context, calc);
+                AppendStructural(ref builder, context, ") AS " + type + ")");
+                break;
+            }
+
+            case Governance.MaskKind.RoundNumber:
+            {
+                string digits = context.BindPolicy(args.RoundDigits ?? throw MissingArgument(mask, "RoundDigits"));
+                Put(ref builder, "CAST(ROUND(", column, ", CAST(", digits, " AS int))");
+                AppendStructural(ref builder, context, " AS " + type + ")");
+                break;
+            }
+
+            case Governance.MaskKind.EmailDomain:
+            {
+                string text = "CAST(" + column + " AS NVARCHAR(MAX))";
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN NULL WHEN CHARINDEX(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, ", ", text, ") > ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(" AND CHARINDEX(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, ", ", text, ") < LEN(", text, ") THEN CONCAT(");
+                AppendConstantFragment(ref builder, context, "'***@'");
+                Put(ref builder, ", SUBSTRING(", text, ", CHARINDEX(");
+                AppendConstantFragment(ref builder, context, "'@'");
+                Put(ref builder, ", ", text, ") + ");
+                AppendInlineInteger(ref builder, 1, context);
+                Put(ref builder, ", LEN(", text, ") + ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(")) ELSE ");
+                AppendConstantFragment(ref builder, context, "'***@***'");
+                builder.Append(" END");
+                break;
+            }
+
+            case Governance.MaskKind.Tokenize:
+            {
+                string domain = context.BindPolicy(args.TokenDomain ?? throw MissingArgument(mask, "TokenDomain"));
+                string inner = context.BindPolicy(args.HmacKey ?? throw MissingArgument(mask, "HmacKey"));
+                string outer = context.BindPolicy(args.HmacKeyOuter ?? throw MissingArgument(mask, "HmacKeyOuter"));
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN NULL ELSE CONCAT(");
+                AppendConstantFragment(ref builder, context, "'TOK_'");
+                Put(ref builder, ", CAST(", domain, " AS NVARCHAR(MAX)), ");
+                AppendConstantFragment(ref builder, context, "'_'");
+                AppendConstantFragment(ref builder, context, ", LEFT(LOWER(CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', ");
+                builder.Append(outer);
+                AppendConstantFragment(ref builder, context, " + HASHBYTES('SHA2_256', ");
+                builder.Append(inner);
+                AppendConstantFragment(ref builder, context, " + CAST(CAST(");
+                builder.Append(column);
+                AppendConstantFragment(ref builder, context, " AS NVARCHAR(MAX)) AS VARBINARY(MAX)))), 2)), 8)) END");
+                break;
+            }
+
             default:
                 throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
         }

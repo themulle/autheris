@@ -58,7 +58,8 @@ public static class EmittedSqlInvariantChecker
         IReadOnlyList<EmittedRange> ranges,
         bool structuralOnly = false,
         SqlStatementClass statementClass = SqlStatementClass.Select,
-        int maxRecursionDepth = 0)
+        int maxRecursionDepth = 0,
+        DialectCapabilities? capabilities = null)
     {
         ArgumentNullException.ThrowIfNull(sql);
         ArgumentNullException.ThrowIfNull(ranges);
@@ -69,7 +70,7 @@ public static class EmittedSqlInvariantChecker
         }
 
         // The lexer rules come from the capability table (delimiter characters and marker style); a dialect without an entry throws.
-        var caps = DialectCapabilityTable.Default.Get(dialect);
+        var caps = capabilities ?? DialectCapabilityTable.Default.Get(dialect);
         char open = caps.IdentifierOpenQuote, close = caps.IdentifierCloseQuote;
         var style = caps.MarkerStyle;
 

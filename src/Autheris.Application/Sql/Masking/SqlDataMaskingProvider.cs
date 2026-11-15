@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -194,6 +195,161 @@ public sealed class SqlDataMaskingProvider
             }.ToFrozenDictionary(StringComparer.Ordinal));
     }
 
+    public sealed record ClassificationMaskResolution(
+        bool IsDenied,
+        string? DenialReason,
+        MaskSpec? Spec,
+        MaskFunction EffectiveFunction,
+        bool TypeFallbackApplied)
+    {
+        public static ClassificationMaskResolution Deny(string reason, MaskFunction function) =>
+            new(true, reason, null, function, false);
+    }
+
+    public ClassificationMaskResolution ResolveClassificationMask(
+        string? maskFunctionCode,
+        string? paramsJson,
+        string columnName,
+        string? dataType,
+        TargetSqlDialect dialect,
+        TenantId tenantId,
+        string? explicitKeyRef = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        if (!ClassificationMaskFunctions.TryParse(maskFunctionCode, out var requestedFunction))
+        {
+            return ClassificationMaskResolution.Deny("MASK_UNKNOWN_FUNCTION", default);
+        }
+
+        return ResolveClassificationMask(requestedFunction, paramsJson, columnName, dataType, dialect, tenantId, explicitKeyRef);
+    }
+
+    public ClassificationMaskResolution ResolveClassificationMask(
+        MaskFunction requestedFunction,
+        string? paramsJson,
+        string columnName,
+        string? dataType,
+        TargetSqlDialect dialect,
+        TenantId tenantId,
+        string? explicitKeyRef = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        if (!Enum.IsDefined(requestedFunction))
+        {
+            return ClassificationMaskResolution.Deny("MASK_UNKNOWN_FUNCTION", requestedFunction);
+        }
+
+        if (!MaskFunctionCatalog.TryParseAndValidate(requestedFunction, paramsJson, out var parsed, out _, explicitKeyRef))
+        {
+            return ClassificationMaskResolution.Deny("MASK_INVALID_PARAMETERS", requestedFunction);
+        }
+
+        var family = MaskFunctionCatalog.ClassifyColumnType(dataType);
+        bool typeFallback = !MaskFunctionCatalog.IsCompatibleWithType(requestedFunction, family);
+        var effectiveFunction = typeFallback ? MaskFunction.TypeSafeRedact : requestedFunction;
+        if (typeFallback)
+        {
+            GatewayDiagnostics.MaskTypeFallbackCounter.Add(1,
+                new KeyValuePair<string, object?>("requested_function", ClassificationMaskFunctions.ToCode(requestedFunction)));
+        }
+
+        var names = new MaskParameterNames(columnName);
+        MaskSpec spec;
+        switch (effectiveFunction)
+        {
+            case MaskFunction.Nullify:
+                spec = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
+                break;
+
+            case MaskFunction.Redact:
+            case MaskFunction.TypeSafeRedact:
+                spec = Redact(names, parsed.Replacement ?? "***");
+                break;
+
+            case MaskFunction.Partial:
+                spec = PartialMask(names, parsed.KeepFirst, parsed.KeepLast, parsed.MaskChar);
+                break;
+
+            case MaskFunction.GeoJitter:
+                spec = new MaskSpec(MaskKind.GeoJitter, new MaskArguments(Decimals: parsed.GeoDecimals), FrozenDictionary<string, PolicyValue>.Empty);
+                break;
+
+            case MaskFunction.TruncateDate:
+                spec = new MaskSpec(MaskKind.TruncateDate, new MaskArguments(TruncateUnit: parsed.TruncateUnit), FrozenDictionary<string, PolicyValue>.Empty);
+                break;
+
+            case MaskFunction.BucketNumber:
+            {
+                var widthParam = names.Parameter("bw", SqlParameterType.Decimal);
+                spec = new MaskSpec(
+                    MaskKind.BucketNumber,
+                    new MaskArguments(BucketWidth: widthParam),
+                    new Dictionary<string, PolicyValue> { [widthParam.Name] = new PolicyValue(parsed.BucketWidth!.Value, SqlParameterType.Decimal) }
+                        .ToFrozenDictionary(StringComparer.Ordinal));
+                break;
+            }
+
+            case MaskFunction.RoundNumber:
+            {
+                var digitsParam = names.Parameter("rd", SqlParameterType.Int32);
+                spec = new MaskSpec(
+                    MaskKind.RoundNumber,
+                    new MaskArguments(RoundDigits: digitsParam),
+                    new Dictionary<string, PolicyValue> { [digitsParam.Name] = new PolicyValue(parsed.RoundDigits, SqlParameterType.Int32) }
+                        .ToFrozenDictionary(StringComparer.Ordinal));
+                break;
+            }
+
+            case MaskFunction.EmailDomain:
+                spec = new MaskSpec(MaskKind.EmailDomain, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
+                break;
+
+            case MaskFunction.Hash:
+            case MaskFunction.Tokenize:
+            {
+                var masterKey = TryResolveClassificationKey(parsed.KeyRef);
+                if (masterKey is null)
+                {
+                    return new ClassificationMaskResolution(true, "MASK_KEY_UNAVAILABLE", null, effectiveFunction, typeFallback);
+                }
+
+                if (_options.Value.DataMasking.PreventInDbHmacKeyExposure || dialect is not (TargetSqlDialect.PostgreSql or TargetSqlDialect.SqlServer))
+                {
+                    spec = Redact(names, "***");
+                    effectiveFunction = MaskFunction.TypeSafeRedact;
+                    break;
+                }
+
+                var kind = effectiveFunction == MaskFunction.Tokenize ? MaskKind.Tokenize : MaskKind.Hmac;
+                spec = BuildHmacOrTokenizeSpec(names, dialect, masterKey, tenantId, parsed.KeyRef!, kind, parsed.TokenDomain);
+                break;
+            }
+
+            default:
+                return ClassificationMaskResolution.Deny("MASK_UNKNOWN_FUNCTION", effectiveFunction);
+        }
+
+        return new ClassificationMaskResolution(false, null, spec, effectiveFunction, typeFallback);
+    }
+
+    private byte[]? TryResolveClassificationKey(string? keyRef)
+    {
+        if (string.IsNullOrWhiteSpace(keyRef) || _secretProvider is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var fetched = _secretProvider.GetSecretBytes(keyRef);
+            return fetched is { Length: > 0 } ? fetched : null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
     private MaskSpec? TryBuildHmacSpec(MaskParameterNames names, DatabaseDialect dialect, string keyId, TenantId tenantId, string columnName)
     {
         if (_options.Value.DataMasking.PreventInDbHmacKeyExposure)
@@ -214,8 +370,28 @@ public sealed class SqlDataMaskingProvider
             return null;
         }
 
+        return BuildHmacOrTokenizeSpec(names, SqlDialectMapper.ToTargetDialect(dialect), masterKey, tenantId, keyId, MaskKind.Hmac, null);
+    }
+
+    private static MaskSpec BuildHmacOrTokenizeSpec(
+        MaskParameterNames names,
+        TargetSqlDialect dialect,
+        byte[] masterKey,
+        TenantId tenantId,
+        string keyId,
+        MaskKind kind,
+        string? tokenDomain)
+    {
         string hexKey = DeriveHexKey(masterKey, tenantId, keyId);
-        if (dialect == DatabaseDialect.SqlServer)
+        var parameters = new Dictionary<string, PolicyValue>(StringComparer.Ordinal);
+        PolicyParameterExpression? domainParam = null;
+        if (kind == MaskKind.Tokenize)
+        {
+            domainParam = names.Parameter("td", SqlParameterType.String);
+            parameters[domainParam.Name] = new PolicyValue(tokenDomain ?? "DEFAULT", SqlParameterType.String);
+        }
+
+        if (dialect == TargetSqlDialect.SqlServer)
         {
             // HMAC from two bound pads (inner, outer) derived from the same key.
             byte[] keyBytes = Encoding.ASCII.GetBytes(hexKey);
@@ -229,20 +405,19 @@ public sealed class SqlDataMaskingProvider
 
             var inner = names.Parameter("ki", SqlParameterType.Binary);
             var outer = names.Parameter("ko", SqlParameterType.Binary);
-            return new MaskSpec(MaskKind.Hmac, new MaskArguments(HmacKey: inner, HmacKeyOuter: outer),
-                new Dictionary<string, PolicyValue>
-                {
-                    [inner.Name] = new PolicyValue(innerPad, SqlParameterType.Binary),
-                    [outer.Name] = new PolicyValue(outerPad, SqlParameterType.Binary)
-                }.ToFrozenDictionary(StringComparer.Ordinal));
+            parameters[inner.Name] = new PolicyValue(innerPad, SqlParameterType.Binary);
+            parameters[outer.Name] = new PolicyValue(outerPad, SqlParameterType.Binary);
+            return new MaskSpec(kind, new MaskArguments(HmacKey: inner, HmacKeyOuter: outer, TokenDomain: domainParam),
+                parameters.ToFrozenDictionary(StringComparer.Ordinal));
         }
 
         var key = names.Parameter("k", SqlParameterType.String);
-        return new MaskSpec(MaskKind.Hmac, new MaskArguments(HmacKey: key),
-            new Dictionary<string, PolicyValue> { [key.Name] = new PolicyValue(hexKey, SqlParameterType.String) }.ToFrozenDictionary(StringComparer.Ordinal));
+        parameters[key.Name] = new PolicyValue(hexKey, SqlParameterType.String);
+        return new MaskSpec(kind, new MaskArguments(HmacKey: key, TokenDomain: domainParam),
+            parameters.ToFrozenDictionary(StringComparer.Ordinal));
     }
 
-    private static string DeriveHexKey(byte[] masterKey, TenantId tenantId, string keyId)
+    internal static string DeriveHexKey(byte[] masterKey, TenantId tenantId, string keyId)
     {
         byte[] derivedKey = HKDF.DeriveKey(
             HashAlgorithmName.SHA256,

@@ -58,6 +58,9 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> TransportDenied =
         Meter.CreateCounter<long>("autheris_transport_denied_total", description: "Requests refused because the data source does not allow the ingress transport");
 
+    public static readonly Counter<long> MaskTypeFallbackCounter =
+        Meter.CreateCounter<long>("autheris_mask_type_fallback_total", description: "Classification masks that fell back to TYPE_SAFE_REDACT due to incompatible column type");
+
     public static readonly Counter<long> AuditWriteFailedCounter =
         Meter.CreateCounter<long>("autheris_audit_write_failed_total", description: "Audit writes that failed, by tier (required or best_effort)");
 

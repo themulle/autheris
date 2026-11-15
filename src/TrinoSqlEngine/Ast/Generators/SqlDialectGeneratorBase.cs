@@ -82,7 +82,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         };
         if (!CompilerHooks.IsDisabled(SecurityControl.EmittedTextChecker))
         {
-            EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals, statementClass, context.MaxRecursionDepth);
+            EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals, statementClass, context.MaxRecursionDepth, capabilities);
         }
 
         return new CompiledSql(

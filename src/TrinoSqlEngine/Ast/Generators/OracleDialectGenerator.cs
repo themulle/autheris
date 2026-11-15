@@ -462,8 +462,78 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
                 break;
             }
 
+            case Governance.MaskKind.TruncateDate:
+            {
+                string fmt = (args.TruncateUnit ?? throw MissingArgument(mask, "TruncateUnit")) switch
+                {
+                    Governance.MaskDateTruncateUnit.Year => "'YYYY'",
+                    Governance.MaskDateTruncateUnit.Month => "'MM'",
+                    Governance.MaskDateTruncateUnit.Day => "'DD'",
+                    _ => throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect)
+                };
+                builder.Append("CAST(TRUNC(");
+                builder.Append(column);
+                builder.Append(", ");
+                AppendConstantFragment(ref builder, context, fmt);
+                AppendStructural(ref builder, context, ") AS " + type + ")");
+                break;
+            }
+
+            case Governance.MaskKind.BucketNumber:
+            {
+                string width = context.BindPolicy(args.BucketWidth ?? throw MissingArgument(mask, "BucketWidth"));
+                string calc = type.StartsWith("BINARY_", StringComparison.Ordinal) || type.StartsWith("FLOAT", StringComparison.Ordinal)
+                    ? "BINARY_DOUBLE"
+                    : "NUMBER";
+                Put(ref builder, context, "CAST(FLOOR(CAST(", column, " AS ", calc, ") / CAST(", width, " AS ", calc, ")) * CAST(", width, " AS ", calc, ") AS ", type, ")");
+                break;
+            }
+
+            case Governance.MaskKind.RoundNumber:
+            {
+                string digits = context.BindPolicy(args.RoundDigits ?? throw MissingArgument(mask, "RoundDigits"));
+                builder.Append("CAST(ROUND(");
+                builder.Append(column);
+                builder.Append(", CAST(");
+                builder.Append(digits);
+                AppendStructural(ref builder, context, " AS NUMBER(10))) AS " + type + ")");
+                break;
+            }
+
+            case Governance.MaskKind.EmailDomain:
+            {
+                builder.Append("CASE WHEN ");
+                builder.Append(column);
+                builder.Append(" IS NULL THEN NULL WHEN INSTR(");
+                builder.Append(column);
+                builder.Append(", ");
+                AppendConstantFragment(ref builder, context, "'@'");
+                builder.Append(") > ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(" AND INSTR(");
+                builder.Append(column);
+                builder.Append(", ");
+                AppendConstantFragment(ref builder, context, "'@'");
+                builder.Append(") < LENGTH(");
+                builder.Append(column);
+                builder.Append(") THEN ");
+                AppendConstantFragment(ref builder, context, "'***@'");
+                builder.Append(" || SUBSTR(");
+                builder.Append(column);
+                builder.Append(", INSTR(");
+                builder.Append(column);
+                builder.Append(", ");
+                AppendConstantFragment(ref builder, context, "'@'");
+                builder.Append(") + ");
+                AppendInlineInteger(ref builder, 1, context);
+                builder.Append(") ELSE ");
+                AppendConstantFragment(ref builder, context, "'***@***'");
+                builder.Append(" END");
+                break;
+            }
+
             default:
-                // HMAC needs DBMS_CRYPTO (InDbHmac = false by default): the compiler degrades HMAC to Redact before emission.
+                // HMAC and Tokenize need DBMS_CRYPTO (InDbHmac = false by default): the compiler degrades them to Redact before emission.
                 throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
         }
     }

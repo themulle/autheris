@@ -99,14 +99,14 @@ public sealed class TypedPolicyContext
     }
 
     /// <summary>
-    /// The mask for a column. Decision B-2: where the dialect cannot compute an HMAC in the database (<c>InDbHmac = false</c>)
-    /// an HMAC mask degrades to Redact (fail closed). Gateway-side HMAC is rejected for WebSQL because user SQL could aggregate
-    /// or sort the raw value. The key parameters of the degraded mask are dropped, so the key never reaches the statement.
+    /// The mask for a column. Where the dialect cannot compute an HMAC in the database (<c>InDbHmac = false</c>)
+    /// a Hash or Tokenize mask degrades to Redact (fail closed). Gateway-side HMAC is rejected for WebSQL because user SQL could
+    /// aggregate or sort the raw value. The key parameters of the degraded mask are dropped, so the key never reaches the statement.
     /// </summary>
     public MaskSpec GetMaskSpec(TableIdentity table, string column)
     {
         var spec = Masks.GetMask(table, column);
-        if (spec.Kind != MaskKind.Hmac || Capabilities.InDbHmac)
+        if ((spec.Kind != MaskKind.Hmac && spec.Kind != MaskKind.Tokenize) || Capabilities.InDbHmac)
         {
             return spec;
         }

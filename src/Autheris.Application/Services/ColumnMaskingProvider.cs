@@ -3,12 +3,14 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Sql.Masking;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine.Governance;
 
 namespace Autheris.Application.Services;
 
@@ -528,14 +530,91 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         return provider.MaskValue("column", value, effectiveRule);
     }
 
-    private static bool IsNumericOrTemporalType(string? dataType)
+    private static bool IsNumericOrTemporalType(string? dataType) =>
+        MaskFunctionCatalog.ClassifyColumnType(dataType) is ClassificationColumnFamily.Numeric
+            or ClassificationColumnFamily.DateOrTimestamp
+            or ClassificationColumnFamily.Boolean
+        || string.Equals(MaskFunctionCatalog.NormalizeCatalogType(dataType ?? string.Empty), "time", StringComparison.Ordinal)
+        || string.Equals(MaskFunctionCatalog.NormalizeCatalogType(dataType ?? string.Empty), "uniqueidentifier", StringComparison.Ordinal)
+        || string.Equals(MaskFunctionCatalog.NormalizeCatalogType(dataType ?? string.Empty), "uuid", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Evaluates a classification <see cref="MaskSpec"/> in memory using identical null handling, rounding, bucketing,
+    /// truncation, email extraction, partial reveal, and tenant-derived HKDF HMAC/tokenization semantics as the SQL dialect emitters.
+    /// </summary>
+    public object? EvaluateClassificationMask(
+        MaskSpec spec,
+        object? rawValue,
+        TenantId tenantId,
+        string? keyRef = null,
+        byte[]? masterSecretKey = null)
     {
-        if (string.IsNullOrWhiteSpace(dataType)) return false;
-        var dt = dataType.Trim().ToLowerInvariant();
-        if (dt.Contains('(', StringComparison.Ordinal)) dt = dt[..dt.IndexOf('(', StringComparison.Ordinal)].Trim();
-        return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
-            or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
-            or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"
-            or "timestamp" or "timestamptz" or "time" or "uniqueidentifier" or "uuid";
+        ArgumentNullException.ThrowIfNull(spec);
+        if (rawValue is null or DBNull)
+        {
+            return null;
+        }
+
+        string canonical = rawValue is byte[] rawBytes
+            ? Convert.ToHexStringLower(rawBytes)
+            : MaskingInputCanonicalizer.ToCanonicalString(rawValue);
+
+        switch (spec.Kind)
+        {
+            case MaskKind.GeoJitter:
+            {
+                double val = Convert.ToDouble(rawValue, CultureInfo.InvariantCulture);
+                if (val == 0.0)
+                {
+                    return val;
+                }
+
+                int decimals = Math.Clamp(spec.Arguments.Decimals ?? 2, 0, 6);
+                return Math.Round(val, decimals, MidpointRounding.AwayFromZero);
+            }
+
+            case MaskKind.Hmac:
+            case MaskKind.Tokenize:
+            {
+                string effectiveHexKey = ResolveHmacHexKey(spec, tenantId, keyRef, masterSecretKey);
+                byte[] hmacBytes = HMACSHA256.HashData(
+                    Encoding.UTF8.GetBytes(effectiveHexKey),
+                    Encoding.UTF8.GetBytes(canonical));
+                string digest = Convert.ToHexStringLower(hmacBytes);
+                if (spec.Kind == MaskKind.Hmac)
+                {
+                    return digest;
+                }
+
+                string domain = "DEFAULT";
+                if (spec.Arguments.TokenDomain is { } domParam &&
+                    spec.Parameters.TryGetValue(domParam.Name, out var boundDom) &&
+                    boundDom.Value is string domStr &&
+                    !string.IsNullOrWhiteSpace(domStr))
+                {
+                    domain = domStr;
+                }
+
+                return $"TOK_{domain}_{digest[..8]}";
+            }
+
+            default:
+                return MaskSpecEvaluator.Evaluate(spec, rawValue, canonical);
+        }
+    }
+
+    private string ResolveHmacHexKey(MaskSpec spec, TenantId tenantId, string? keyRef, byte[]? masterSecretKey)
+    {
+        if (spec.Arguments.HmacKey is { } keyParam &&
+            spec.Parameters.TryGetValue(keyParam.Name, out var bound) &&
+            bound.Value is string boundHex &&
+            !string.IsNullOrEmpty(boundHex))
+        {
+            return boundHex;
+        }
+
+        byte[] master = masterSecretKey is { Length: > 0 } ? masterSecretKey : _hmacKey;
+        string effectiveKeyRef = !string.IsNullOrWhiteSpace(keyRef) ? keyRef : (_options.HmacKeyId ?? "default");
+        return SqlDataMaskingProvider.DeriveHexKey(master, tenantId, effectiveKeyRef);
     }
 }
