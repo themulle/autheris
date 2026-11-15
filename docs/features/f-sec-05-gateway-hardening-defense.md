@@ -116,7 +116,7 @@ The resulting WORM audit record in `AUDIT_LOG_ENTRIES` automatically reflects th
 
 ## 4. Security, Zero-Trust & Fail-Closed Behavior
 
-1. **Defense-in-Depth Rate Limiting:** Exempting valid Bearer tokens from pre-auth IP counts never bypasses authentication or resource control. Downstream, each authenticated user is governed by per-SID limits (`PostAuthSidRateLimitingMiddleware`), hierarchical FinOps budgets, and resource group concurrency gates.
+1. **Defense-in-Depth Rate Limiting:** Exempting valid Bearer tokens from pre-auth IP counts never bypasses authentication or resource control. Downstream, each authenticated user is governed by per-SID limits (`PostAuthSidRateLimitingMiddleware`) and resource group concurrency gates.
 2. **Anti-Enumeration Oracle Invariant:** If an unauthorized or hostile client attempts to discover tables by inspecting error messages, `ErrorSanitizingFilter` normalizes missing tables and forbidden tables into an identical error payload outside development:
    ```json
    {

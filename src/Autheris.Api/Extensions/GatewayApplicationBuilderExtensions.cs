@@ -253,7 +253,6 @@ public static class GatewayApplicationBuilderExtensions
         app.MapTenantRegistryAdminEndpoints(); // M-A2: operator resolution of a tenant id collision
         app.MapTrustedDocumentAdminEndpointsWhenEnabled(gatewayOptions); // Issue #281
 
-        app.MapFinOpsEndpoints();
         app.MapUsageEndpoints();
         app.MapVirtualFilterEndpoints();
         app.MapCallerAttributeAdminEndpoints();

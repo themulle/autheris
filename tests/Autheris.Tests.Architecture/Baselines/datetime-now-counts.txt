@@ -2,7 +2,6 @@
 src/Autheris.Api/Endpoints/AuthEndpoints.cs|1
 src/Autheris.Api/Endpoints/CallerAttributeAdminEndpoints.cs|1
 src/Autheris.Api/Endpoints/DocIngestionEndpoints.cs|1
-src/Autheris.Api/Endpoints/FinOpsEndpoints.cs|2
 src/Autheris.Api/Endpoints/GovernanceClassificationEndpoints.cs|1
 src/Autheris.Api/Endpoints/GovernanceEndpoints.Access.cs|1
 src/Autheris.Api/Endpoints/HealthEndpoints.cs|8
@@ -33,7 +32,6 @@ src/Autheris.Application/ConsentRequests/ConsentRequestService.cs|1
 src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.Cursors.cs|2
 src/Autheris.Application/Docs/Services/MarkdownDocIngestor.cs|1
 src/Autheris.Application/Federation/Services/SubgraphContextPropagationService.cs|1
-src/Autheris.Application/FinOps/Services/FocusCostAccountingService.cs|2
 src/Autheris.Application/Governance/Analysis/BundledConsentRequestService.cs|4
 src/Autheris.Application/Governance/Analysis/QueryAnalysisService.cs|2
 src/Autheris.Application/Governance/Recertification/RecertificationGovernorHostedService.cs|1

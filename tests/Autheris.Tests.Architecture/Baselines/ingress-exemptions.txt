@@ -83,8 +83,6 @@ route /api/v1/docs/topics | catalog integration, lineage, schema-registry, webho
 route /api/v1/envoy/check/{**originalPath} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/envoy/export/envoyfilter.yaml | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/envoy/export/wasmplugin.yaml | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/finops/budget/{tenantId} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/finops/focus | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/authz/explain | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/authz/objects/{objectName}/grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/2fa/enroll | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point

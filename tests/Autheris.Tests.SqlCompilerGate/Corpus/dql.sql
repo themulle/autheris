@@ -1018,9 +1018,6 @@ SELECT serial_number, tonnage FROM e2e_cranes WHERE crane_type = 'Mobilkran' ORD
 -- @id 9d10a4b067c9 class=select expected=accept source=tests/Autheris.Tests.Integration/EndToEndSqliteTests.cs
 SELECT COUNT(*) AS n FROM e2e_cranes
 
--- @id d5dd403ea324 class=select expected=accept source=tests/Autheris.Tests.Integration/FinOpsEndToEndSqliteTests.cs
-SELECT serial_number FROM fin_cranes ORDER BY id
-
 -- @id 00ca292889e7 class=select expected=accept source=tests/Autheris.Tests.Integration/GovernedWebSqlIntegrationTests.cs
 SELECT id, name FROM users
 

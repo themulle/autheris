@@ -315,3 +315,15 @@ Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_SameDecision_Same
 Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_SameInputs_SameKey,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
 Autheris.Tests.Unit.Security.Issue112SecurityConditionsTests.T_SEC_DATA112_08_NoisyCacheKeyParameterAndDecisionBinding,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
 Autheris.Tests.Unit.DataApi.FixedExecutor.I405_T_11_Sqlite_NeverRefused_NoFamily,feature deleted (WP-SIMPL-31; SQLite data source dialect removed),Security
+Autheris.Tests.Unit.FinOps.FocusCostAccountingTests.DT_A_9_Platform_Spend_Is_Accounted_Without_Budget_Enforcement_And_Never_Touches_A_Tenant_Budget,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.FinOps.FocusCostAccountingTests.DT_A_9_RecordUsage_Without_Tenant_Is_Platform_Scoped_Never_Default,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Security.MediumsGroupBTests.E14_BudgetIsSharedAcrossReplicas,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Security.MediumsGroupBTests.E14_FallsBackToLocalAccountingWhenSharedStoreIsUnreachable,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Security.MediumsGroupBTests.E14_ResetClearsSharedSpend,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Security.PolicyMetamorphicSecurityTests.M_FINOPS_01_CostMonotonicity_AddingDimensions_StrictlyIncreasesCost,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Security.PolicyMetamorphicSecurityTests.M_FINOPS_02_CostMonotonicity_CountDistinct_CostlierThanStandardAggregation,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Security.PolicyMetamorphicSecurityTests.M_FINOPS_03_CostSubAdditivity_UnionQuery_CostNeverExceedsSumOfParts,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Security.SecurityReviewRemediationCoverageTests.API_4_FinOpsBudgetMiddleware_AnonymousRequest_IsNotAccounted,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Security.SecurityReviewRemediationCoverageTests.API_4_FinOpsBudgetMiddleware_InvalidTenantClaim_FailsClosed_NeverSkipsAccounting,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Tenancy.Wp4ReviewFindingsTests.DT_SC_03_FinOps_Authenticated_Caller_With_Invalid_Tenant_Claim_Does_Not_Skip_The_Budget_Check,feature deleted (WP-SIMPL-42; FinOps deleted),Security
+Autheris.Tests.Unit.Tenancy.Wp4ReviewFindingsTests.DT_SC_03_FinOps_Authenticated_Caller_Without_Tenant_Is_Not_Waved_Through,feature deleted (WP-SIMPL-42; FinOps deleted),Security

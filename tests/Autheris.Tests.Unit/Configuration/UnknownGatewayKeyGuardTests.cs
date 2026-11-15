@@ -263,6 +263,7 @@ public sealed class UnknownGatewayKeyGuardTests
         {
             "Gateway:Catalog:Alation:CustomFieldIdPii" => "Gateway:Catalog:Alation",
             "Gateway:Catalog:Collibra:CommunityId" => "Gateway:Catalog:Collibra",
+            "Gateway:FinOps:ScopeMonthlyBudgets" => "Gateway:FinOps",
             _ => key
         };
         foreach (var value in new[] { "false", "", "sample" })
@@ -329,7 +330,6 @@ public sealed class UnknownGatewayKeyGuardTests
         "Gateway:Classification:Workflow:Profiles:OwnerResolution:RuleBasedMappings",
         "Gateway:Dbt:DatabaseMappings",
         "Gateway:Federation:FieldClassifications",
-        "Gateway:FinOps:TenantMonthlyBudgets",
         "Gateway:OpenMetadata:RoleToGatewayRoleMap",
         "Gateway:OpenMetadata:ServiceDatabaseToDomainMap",
         "Gateway:OpenMetadata:ServiceDatabaseToTenantMap",

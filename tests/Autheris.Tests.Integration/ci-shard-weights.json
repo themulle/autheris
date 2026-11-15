@@ -42,8 +42,6 @@
   "FederatedVirtualFilterShapeTests": 0.9,
   "FederatedVirtualFilterTierTests": 1.3,
   "Federation.FederationSecurityTests": 0,
-  "FinOpsEndToEndSqliteTests": 7.8,
-  "FinOpsIntegrationTests": 54.4,
   "FourEyesAndDelegationIntegrationTests": 18.2,
   "Governance.AccessProfileMaskingModeIntegrityTests": 0.8,
   "Governance.AccessProfileUndefinedModeTests": 4,

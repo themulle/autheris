@@ -10,7 +10,6 @@ Docs
 Events
 Extensibility
 Federation
-FinOps
 Governance
 Identity
 Lineage

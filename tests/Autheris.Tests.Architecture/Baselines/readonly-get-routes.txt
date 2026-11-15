@@ -44,8 +44,6 @@ src/Autheris.Api/Endpoints/DocIngestionEndpoints.cs|/api/v1/docs/topics
 src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs|/api/v1/envoy/check/{**originalPath}
 src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs|/api/v1/envoy/export/envoyfilter.yaml
 src/Autheris.Api/Endpoints/EnvoyExtAuthzEndpoints.cs|/api/v1/envoy/export/wasmplugin.yaml
-src/Autheris.Api/Endpoints/FinOpsEndpoints.cs|/api/v1/finops/budget/{tenantId}
-src/Autheris.Api/Endpoints/FinOpsEndpoints.cs|/api/v1/finops/focus
 src/Autheris.Api/Endpoints/FunctionalRightEndpoints.cs|
 src/Autheris.Api/Endpoints/GovernanceClassificationEndpoints.cs|/api/governance/classification/config-hash
 src/Autheris.Api/Endpoints/GovernanceClassificationEndpoints.cs|/api/governance/classification/proposals/pending

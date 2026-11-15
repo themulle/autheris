@@ -46,7 +46,6 @@ public static class GatewaySections
     public const string ResourceGroups = "Gateway:ResourceGroups";
     public const string RowLimits = "Gateway:RowLimits";
     public const string SystemMetrics = "Gateway:SystemMetrics";
-    public const string FinOps = "Gateway:FinOps";
     public const string Governance = "Gateway:Governance";
     public const string QueryAnalysis = "Gateway:Governance:QueryAnalysis";
     public const string QueryCost = "Gateway:QueryCost";

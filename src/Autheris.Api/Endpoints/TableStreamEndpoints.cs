@@ -43,7 +43,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Dedicated Governed Single-Table Bulk Keyset Streaming Endpoint.
 /// Strictly scoped to a single table, authorized for read-only callers, with monotonic keyset cursor seek,
-/// bounded zero-allocation chunked streaming, and two-phase token bucket FinOps metering.
+/// bounded zero-allocation chunked streaming, and two-phase token bucket usage metering.
 /// </summary>
 public static class TableStreamEndpoints
 {

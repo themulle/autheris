@@ -4,8 +4,6 @@ tests/Autheris.Tests.Common/Eventually.cs|1
 tests/Autheris.Tests.Common/WaitHelper.cs|1
 tests/Autheris.Tests.Integration/AstCompilerSqliteExecutionTests.cs|1
 tests/Autheris.Tests.Integration/CdcWebhookEndToEndTests.cs|2
-tests/Autheris.Tests.Integration/FinOpsEndToEndSqliteTests.cs|1
-tests/Autheris.Tests.Integration/FinOpsIntegrationTests.cs|1
 tests/Autheris.Tests.Integration/GovernedDialectEndToEndTests.cs|1
 tests/Autheris.Tests.Integration/GovernedEntryPointsEndToEndTests.cs|1
 tests/Autheris.Tests.Integration/ReadPathSwitchIntegrationTests.cs|1

@@ -15,7 +15,6 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
-using Autheris.Application.FinOps.Interfaces;
 using Autheris.Application.Identity;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Observability.IncrementalDelivery;
@@ -33,7 +32,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>WP-DT-4 Phase 5 review findings: no "default" tenant bucket, one tenant claim reader, fail-closed FinOps, stable tenant source.</summary>
+/// <summary>WP-DT-4 Phase 5 review findings: no "default" tenant bucket, one tenant claim reader, stable tenant source.</summary>
 [Trait("Category", "Security")]
 public sealed class Wp4ReviewFindingsTests
 {
@@ -85,34 +84,6 @@ public sealed class Wp4ReviewFindingsTests
         ResourceGroupMiddleware.ResolveTenantKey(invalid).ShouldNotBe("a");
         ResourceGroupMiddleware.ResolveTenantKey(invalid).ShouldNotBe("b");
         ResourceGroupMiddleware.ResolveTenantKey(valid).ShouldBe("tenant-a");
-    }
-
-    [Fact]
-    public async Task DT_SC_03_FinOps_Authenticated_Caller_With_Invalid_Tenant_Claim_Does_Not_Skip_The_Budget_Check()
-    {
-        var accounting = Substitute.For<IFinOpsAccountingService>();
-        accounting.IsEnabled.Returns(true);
-        var nextCalled = false;
-        var middleware = new FinOpsBudgetMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, NullLogger<FinOpsBudgetMiddleware>.Instance);
-        var context = new DefaultHttpContext { User = Principal(new Claim("tenant_id", "a"), new Claim("tid", "b")) };
-        context.Request.Path = "/graphql";
-
-        await Should.ThrowAsync<TenantClaimInvalidException>(() => middleware.InvokeAsync(context, accounting));
-        nextCalled.ShouldBeFalse();
-    }
-
-    [Fact]
-    public async Task DT_SC_03_FinOps_Authenticated_Caller_Without_Tenant_Is_Not_Waved_Through()
-    {
-        var accounting = Substitute.For<IFinOpsAccountingService>();
-        accounting.IsEnabled.Returns(true);
-        var nextCalled = false;
-        var middleware = new FinOpsBudgetMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, NullLogger<FinOpsBudgetMiddleware>.Instance);
-        var context = new DefaultHttpContext { User = Principal(new Claim("sub", "u")) };
-        context.Request.Path = "/graphql";
-
-        await Should.ThrowAsync<TenantUnresolvedException>(() => middleware.InvokeAsync(context, accounting));
-        nextCalled.ShouldBeFalse();
     }
 
     [Fact]

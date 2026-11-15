@@ -110,7 +110,6 @@ public static class ApiErrorCodes
     public const string TenantUnknown = "TENANT_UNKNOWN";
     public const string TenantRegistrationRateLimited = "TENANT_REGISTRATION_RATE_LIMITED";
     public const string TokenRevocationUnavailable = "TOKEN_REVOCATION_UNAVAILABLE";
-    public const string FinOpsBudgetExceeded = "FINOPS_BUDGET_EXCEEDED";
     public const string IncrementalStreamLimitExceeded = "INCREMENTAL_STREAM_LIMIT_EXCEEDED";
     public const string InvalidSchemaContract = "INVALID_SCHEMA_CONTRACT";
     public const string PersistentConnectionLimitExceeded = "PERSISTENT_CONNECTION_LIMIT_EXCEEDED";

@@ -8,7 +8,6 @@ using System.Text;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
 using Autheris.Application.Catalog.Services;
-using Autheris.Application.FinOps.Interfaces;
 using Autheris.Application.Governance;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
@@ -159,61 +158,6 @@ public sealed class SecurityReviewRemediationCoverageTests
     // =========================================================================
     // POL-3 (High): Column snapshot on consent activation & later column is Deny
     // =========================================================================
-
-    // =========================================================================
-    // API-4 / R-API-2: FinOps Anonymous & Invalid Tenant Handling
-    // =========================================================================
-
-    [Fact]
-    public async Task API_4_FinOpsBudgetMiddleware_AnonymousRequest_IsNotAccounted()
-    {
-        var accountingService = Substitute.For<IFinOpsAccountingService>();
-        accountingService.IsEnabled.Returns(true);
-
-        bool nextCalled = false;
-        var middleware = new FinOpsBudgetMiddleware(
-            next: ctx =>
-            {
-                nextCalled = true;
-                return Task.CompletedTask;
-            },
-            logger: NullLogger<FinOpsBudgetMiddleware>.Instance);
-
-        var context = new DefaultHttpContext();
-        context.User = new ClaimsPrincipal(new ClaimsIdentity()); // Unauthenticated / Anonymous
-
-        await middleware.InvokeAsync(context, accountingService);
-
-        nextCalled.ShouldBeTrue();
-        await accountingService.DidNotReceiveWithAnyArgs().CheckBudgetAsync(default!, default);
-    }
-
-    [Fact]
-    public async Task API_4_FinOpsBudgetMiddleware_InvalidTenantClaim_FailsClosed_NeverSkipsAccounting()
-    {
-        var accountingService = Substitute.For<IFinOpsAccountingService>();
-        accountingService.IsEnabled.Returns(true);
-
-        bool nextCalled = false;
-        var middleware = new FinOpsBudgetMiddleware(
-            next: ctx =>
-            {
-                nextCalled = true;
-                return Task.CompletedTask;
-            },
-            logger: NullLogger<FinOpsBudgetMiddleware>.Instance);
-
-        var context = new DefaultHttpContext();
-        // Claim with invalid tenant format (e.g. contains illegal characters / punctuation)
-        var identity = new ClaimsIdentity([new Claim("tenant_id", "invalid!tenant@name#bad")], "Bearer");
-        context.User = new ClaimsPrincipal(identity);
-
-        // DT-SC-03: an authenticated caller with an invalid tenant claim is rejected, the budget check is never skipped.
-        await Should.ThrowAsync<Autheris.Domain.Exceptions.TenantClaimInvalidException>(() => middleware.InvokeAsync(context, accountingService));
-
-        nextCalled.ShouldBeFalse();
-        await accountingService.DidNotReceiveWithAnyArgs().CheckBudgetAsync(default!, default);
-    }
 
     // =========================================================================
     // R-SQL-5: WebSql Throttling returns 429 with Retry-After header

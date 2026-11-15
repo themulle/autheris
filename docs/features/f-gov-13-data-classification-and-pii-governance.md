@@ -83,7 +83,7 @@ Sensitivity levels are fully declarative and configurable via `GatewayOptions.Cl
 | `PII_INDIRECT` | Postal Code, Date of Birth, IP Address, GPS Coordinates | `GEO_JITTER` (GPS) or `REDACT_YEAR` (Birthdate) | GDPR Recital 26 |
 | `GDPR_ART9_SPECIAL` | Health Data, Religious Beliefs, Biometrics, Ethnic Origin | `NULLING` / `BLOCKED` (unless compliance profile granted) | GDPR Art. 9 |
 | `PCI_DSS` | Primary Account Number (PAN), Cardholder Name, CVV | `PARTIAL_MASK` (First 4 + Last 4) or `TOKENIZATION` | PCI-DSS v4.0 |
-| `FINANCIAL_CONFIDENTIAL` | Annual Salary, Bonus Payments, Account Balances | `NOISE` (Differential Privacy) or `REDACT` | SOX, FinOps |
+| `FINANCIAL_CONFIDENTIAL` | Annual Salary, Bonus Payments, Account Balances | `NOISE` (Differential Privacy) or `REDACT` | SOX, Financial Compliance |
 | `NON_SENSITIVE` | Technical Primary Keys (`id`), Status Flags, Timestamps | No Masking (Plaintext) | - |
 
 > [!NOTE]

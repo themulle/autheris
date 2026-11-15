@@ -27,6 +27,7 @@ public sealed class DeletedFeaturesArchitectureTests
     [InlineData("Autheris.Extensions.Backstage")]
     [InlineData("Autheris.Infrastructure.Itsm")]
     [InlineData("Autheris.Application.Integrations.Backstage")]
+    [InlineData("Autheris.Application.FinOps")]
     public void Deleted_feature_namespaces_have_no_types(string deletedNamespace)
     {
         var typesInNamespace = ProductionAssemblies
@@ -45,6 +46,7 @@ public sealed class DeletedFeaturesArchitectureTests
     [InlineData("Autheris.Extensions.Backstage", "src/Autheris.Extensions/Backstage")]
     [InlineData("Autheris.Infrastructure.Itsm", "src/Autheris.Infrastructure/Itsm")]
     [InlineData("Autheris.Application.Integrations.Backstage", "src/Autheris.Application/Integrations/Backstage")]
+    [InlineData("Autheris.Application.FinOps", "src/Autheris.Application/FinOps")]
     public void Deleted_feature_directories_do_not_exist(string featureName, string relativeDirectory)
     {
         var fullPath = Path.Combine(RepositoryScan.RepoRoot, relativeDirectory);
@@ -62,6 +64,13 @@ public sealed class DeletedFeaturesArchitectureTests
     [InlineData("IDataCatalogClientFactory")]
     [InlineData("IDataCatalogWebhookHandler")]
     [InlineData("JustificationAndBreakGlassInterceptor")]
+    [InlineData("FinOpsEndpoints")]
+    [InlineData("FinOpsBudgetMiddleware")]
+    [InlineData("IFinOpsAccountingService")]
+    [InlineData("FocusCostAccountingService")]
+    [InlineData("FinOpsOptions")]
+    [InlineData("FocusCostRecord")]
+    [InlineData("BudgetStatus")]
     public void Deleted_Types_Do_Not_Exist_In_Production_Assemblies(string typeName)
     {
         foreach (var assembly in ProductionAssemblies)
@@ -204,5 +213,13 @@ public sealed class DeletedFeaturesArchitectureTests
 
         var endpointsText = RepositoryScan.ReadText("src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs");
         endpointsText.ShouldNotContain("refresh-physical-keys");
+    }
+
+    [Fact]
+    public void No_finops_members_remain()
+    {
+        typeof(Autheris.Domain.Options.GatewayOptions).GetProperty("FinOps").ShouldBeNull();
+        typeof(Autheris.Domain.Options.GatewaySections).GetField("FinOps").ShouldBeNull();
+        typeof(Autheris.Api.Errors.ApiErrorCodes).GetField("FinOpsBudgetExceeded").ShouldBeNull();
     }
 }

@@ -41,6 +41,11 @@ public static class UnknownGatewayKeyGuard
     private const string RemovedCasbinReplacement =
         "removed by ADR-020; data access is granted only by grant records (consents), column rules and virtual filters";
 
+    private const string RemovedFinOpsPrefix = GatewayConfigurationSchema.Root + ":FinOps";
+
+    private const string RemovedFinOpsMessage =
+        "Gateway:FinOps was removed; usage is tracked by Gateway:UsageAccounting; quotas: Gateway:UsageAccounting:Quotas";
+
     private static readonly string[] RemovedSimpl12Prefixes =
     [
         GatewayConfigurationSchema.Root + ":Itsm",
@@ -218,6 +223,15 @@ public static class UnknownGatewayKeyGuard
             unknown.Add($"{key} ({RemovedCasbinReplacement})");
         }
 
+        if (configuration.GetSection(RemovedFinOpsPrefix).Exists() ||
+            configuration.AsEnumerable().Any(kv =>
+                !string.IsNullOrEmpty(kv.Key) &&
+                (kv.Key.Equals(RemovedFinOpsPrefix, StringComparison.OrdinalIgnoreCase) ||
+                 kv.Key.StartsWith(RemovedFinOpsPrefix + ":", StringComparison.OrdinalIgnoreCase))))
+        {
+            unknown.Add(RemovedFinOpsMessage);
+        }
+
         // Removed sections and keys fail startup with any value (including false or empty).
         foreach (var removedPrefix in RemovedSimpl12Prefixes)
         {
@@ -250,7 +264,8 @@ public static class UnknownGatewayKeyGuard
                 continue;
             }
 
-            if (IsClaimedByLoadedModule(fullKey, RemovedAuthzPrefixes) || IsClaimedByLoadedModule(fullKey, [RemovedCasbinPrefix]))
+            if (IsClaimedByLoadedModule(fullKey, RemovedAuthzPrefixes) ||
+                IsClaimedByLoadedModule(fullKey, [RemovedCasbinPrefix, RemovedFinOpsPrefix]))
             {
                 continue;
             }

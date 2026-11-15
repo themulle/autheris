@@ -7,8 +7,6 @@ using Autheris.Application.DataSources.Connectors;
 using Autheris.Application.DataSources.Connectors.CrossDomain;
 using Autheris.Application.Events.Interfaces;
 using Autheris.Application.Events.Services;
-using Autheris.Application.FinOps.Interfaces;
-using Autheris.Application.FinOps.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Observability.IncrementalDelivery;
@@ -153,9 +151,6 @@ public static class GatewayExecutionServiceExtensions
             services.AddHostedService<Autheris.Application.Streaming.Services.CdcWebhookDeliveryService>();
             services.AddHostedService<Autheris.Api.Hosting.CdcWebhookStartupCheck>();
         }
-
-        // FOCUS FinOps Accounting (F-AI-08)
-        services.AddSingleton<IFinOpsAccountingService, FocusCostAccountingService>();
 
         // Incremental Delivery (@defer & @stream) (F-PERF-12)
         services.AddSingleton<IIncrementalDeliveryFormatter, IncrementalDeliveryFormatter>();

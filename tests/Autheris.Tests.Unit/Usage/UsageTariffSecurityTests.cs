@@ -2,12 +2,9 @@ namespace Autheris.Tests.Unit.Usage;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Json;
 using System.Security.Claims;
-using System.Text.Encodings.Web;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
@@ -19,13 +16,14 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.AspNetCore.Authentication;
+using Autheris.Domain.Options.DataSources;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -42,95 +40,117 @@ public sealed class UsageTariffSecurityTests
     [Fact]
     public async Task Tenant_admin_cannot_add_wildcard_tariff()
     {
-        await using var host = await TariffTestHost.CreateAsync();
-        var client = host.CreateClient("TenantAdmin", "tenant-a");
+        var harness = new TariffHarness();
+        var ctxSource = harness.CreateHttpContext("TenantAdmin", "tenant-a");
+        var resSource = await UsageEndpoints.HandleAddTariffVersionAsync(
+            "*",
+            new UsageEndpoints.CreateTariffVersionHttpRequest(
+                ValidFrom: Tomorrow,
+                BasePerQuery: 0.5m,
+                UnitLabel: "credits",
+                Reason: "attempt wildcard source"),
+            ctxSource,
+            harness.Service);
+        (await ExecuteAsync(resSource, ctxSource)).Status.ShouldBe(StatusCodes.Status403Forbidden);
 
-        // Wildcard data source "*" -> 403
-        var resSource = await client.PostAsJsonAsync("/api/v1/usage/tariffs/*/versions", new
-        {
-            validFrom = Tomorrow.ToString("yyyy-MM-dd"),
-            basePerQuery = 0.5m,
-            unitLabel = "credits",
-            reason = "attempt wildcard source"
-        });
-        resSource.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        var ctxTenant = harness.CreateHttpContext("TenantAdmin", "tenant-a");
+        var resTenant = await UsageEndpoints.HandleAddTariffVersionAsync(
+            "pg-main",
+            new UsageEndpoints.CreateTariffVersionHttpRequest(
+                ValidFrom: Tomorrow,
+                BasePerQuery: 0.5m,
+                UnitLabel: "credits",
+                Reason: "attempt wildcard tenant",
+                TenantId: "*"),
+            ctxTenant,
+            harness.Service);
+        (await ExecuteAsync(resTenant, ctxTenant)).Status.ShouldBe(StatusCodes.Status403Forbidden);
 
-        // Wildcard tenant "*" -> 403
-        var resTenant = await client.PostAsJsonAsync("/api/v1/usage/tariffs/pg-main/versions", new
-        {
-            tenantId = "*",
-            validFrom = Tomorrow.ToString("yyyy-MM-dd"),
-            basePerQuery = 0.5m,
-            unitLabel = "credits",
-            reason = "attempt wildcard tenant"
-        });
-        resTenant.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-
-        host.Repo.Versions.ShouldBeEmpty();
-        host.Audit.Entries.ShouldBeEmpty();
+        harness.Repo.Versions.ShouldBeEmpty();
+        harness.Audit.Entries.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Tenant_admin_cannot_add_tariff_for_other_tenant()
     {
-        await using var host = await TariffTestHost.CreateAsync();
-        var client = host.CreateClient("TenantAdmin", "tenant-a");
+        var harness = new TariffHarness();
 
-        var resBody = await client.PostAsJsonAsync("/api/v1/usage/tariffs/pg-main/versions", new
-        {
-            tenantId = "tenant-b",
-            validFrom = Tomorrow.ToString("yyyy-MM-dd"),
-            basePerQuery = 0.5m,
-            unitLabel = "credits",
-            reason = "cross-tenant write attempt"
-        });
-        resBody.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        var ctxBody = harness.CreateHttpContext("TenantAdmin", "tenant-a");
+        var resBody = await UsageEndpoints.HandleAddTariffVersionAsync(
+            "pg-main",
+            new UsageEndpoints.CreateTariffVersionHttpRequest(
+                ValidFrom: Tomorrow,
+                BasePerQuery: 0.5m,
+                UnitLabel: "credits",
+                Reason: "cross-tenant write attempt",
+                TenantId: "tenant-b"),
+            ctxBody,
+            harness.Service);
+        (await ExecuteAsync(resBody, ctxBody)).Status.ShouldBe(StatusCodes.Status403Forbidden);
 
-        var resQuery = await client.PostAsJsonAsync("/api/v1/usage/tariffs/pg-main/versions?tenant=tenant-b", new
-        {
-            validFrom = Tomorrow.ToString("yyyy-MM-dd"),
-            basePerQuery = 0.5m,
-            unitLabel = "credits",
-            reason = "cross-tenant query attempt"
-        });
-        resQuery.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        var ctxQuery = harness.CreateHttpContext("TenantAdmin", "tenant-a");
+        var resQuery = await UsageEndpoints.HandleAddTariffVersionAsync(
+            "pg-main",
+            new UsageEndpoints.CreateTariffVersionHttpRequest(
+                ValidFrom: Tomorrow,
+                BasePerQuery: 0.5m,
+                UnitLabel: "credits",
+                Reason: "cross-tenant query attempt"),
+            ctxQuery,
+            harness.Service,
+            tenant: "tenant-b");
+        (await ExecuteAsync(resQuery, ctxQuery)).Status.ShouldBe(StatusCodes.Status403Forbidden);
 
-        var resRead = await client.GetAsync("/api/v1/usage/tariffs?tenant=tenant-b");
-        resRead.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        var ctxRead = harness.CreateHttpContext("TenantAdmin", "tenant-a");
+        var resRead = await UsageEndpoints.HandleGetTariffsAsync(
+            ctxRead,
+            harness.Service,
+            tenant: "tenant-b");
+        (await ExecuteAsync(resRead, ctxRead)).Status.ShouldBe(StatusCodes.Status403Forbidden);
 
-        host.Repo.Versions.ShouldBeEmpty();
+        harness.Repo.Versions.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Consumer_gets_403_on_tariff_routes()
     {
-        await using var host = await TariffTestHost.CreateAsync();
-        var client = host.CreateClient("Consumer", "tenant-a");
+        var services = new ServiceCollection()
+            .AddLogging()
+            .AddAuthorization(options => options.AddGatewayAuthorizationPolicies())
+            .BuildServiceProvider();
+        var builder = new RecordingRouteBuilder(services);
+        UsageEndpoints.MapUsageEndpoints(builder);
 
-        (await client.GetAsync("/api/v1/usage/tariffs")).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-        (await client.GetAsync("/api/v1/usage/tariffs/pg-main/versions")).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        var endpoints = builder.DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>().ToList();
+        AssertPolicy(endpoints, "/api/v1/usage/tariffs", "GET", GatewayPolicies.UsageAdmin);
+        AssertPolicy(endpoints, "/api/v1/usage/tariffs/{dataSource}/versions", "GET", GatewayPolicies.UsageAdmin);
+        AssertPolicy(endpoints, "/api/v1/usage/tariffs/{dataSource}/versions", "POST", GatewayPolicies.UsageAdmin);
 
-        var postRes = await client.PostAsJsonAsync("/api/v1/usage/tariffs/pg-main/versions", new
-        {
-            validFrom = Tomorrow.ToString("yyyy-MM-dd"),
-            basePerQuery = 0.5m,
-            unitLabel = "credits",
-            reason = "consumer attempt"
-        });
-        postRes.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-        host.Repo.Versions.ShouldBeEmpty();
+        var authService = services.GetRequiredService<IAuthorizationService>();
+        var consumer = TariffHarness.BuildPrincipal("Consumer", "tenant-a", "S-1-5-21-CONSUMER");
+        (await authService.AuthorizeAsync(consumer, null, GatewayPolicies.UsageAdmin)).Succeeded.ShouldBeFalse();
+        GatewayPolicies.HasAnyRole(consumer, GatewayPolicies.UsageAdminRoles).ShouldBeFalse();
     }
 
     [Fact]
-    public async Task Put_and_delete_tariff_return_405()
+    public void Put_and_delete_tariff_return_405()
     {
-        await using var host = await TariffTestHost.CreateAsync();
-        var client = host.CreateClient("ClusterAdmin", "tenant-a");
+        var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        var builder = new RecordingRouteBuilder(services);
+        UsageEndpoints.MapUsageEndpoints(builder);
 
-        (await client.PutAsJsonAsync("/api/v1/usage/tariffs/pg-main/versions", new { })).StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
-        (await client.DeleteAsync("/api/v1/usage/tariffs/pg-main/versions")).StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
-        (await client.PutAsJsonAsync("/api/v1/usage/tariffs", new { })).StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
-        (await client.DeleteAsync("/api/v1/usage/tariffs")).StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
+        var endpoints = builder.DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>().ToList();
+        var tariffEndpoints = endpoints
+            .Where(e => string.Equals(e.RoutePattern.RawText, "/api/v1/usage/tariffs", StringComparison.Ordinal))
+            .ToList();
+        tariffEndpoints.SelectMany(e => e.Metadata.OfType<HttpMethodMetadata>().SelectMany(m => m.HttpMethods))
+            .ShouldBe(["GET"], ignoreOrder: true);
+
+        var versionEndpoints = endpoints
+            .Where(e => string.Equals(e.RoutePattern.RawText, "/api/v1/usage/tariffs/{dataSource}/versions", StringComparison.Ordinal))
+            .ToList();
+        versionEndpoints.SelectMany(e => e.Metadata.OfType<HttpMethodMetadata>().SelectMany(m => m.HttpMethods))
+            .ShouldBe(["GET", "POST"], ignoreOrder: true);
     }
 
     [Theory]
@@ -138,177 +158,178 @@ public sealed class UsageTariffSecurityTests
     [InlineData("ClusterAdmin", "*")]
     public async Task Retroactive_tariff_rejected_for_all_roles(string role, string? targetTenant)
     {
-        await using var host = await TariffTestHost.CreateAsync();
-        var client = host.CreateClient(role, "tenant-a");
+        var harness = new TariffHarness();
 
-        var todayRes = await client.PostAsJsonAsync("/api/v1/usage/tariffs/pg-main/versions", new
-        {
-            tenantId = targetTenant,
-            validFrom = Today.ToString("yyyy-MM-dd"),
-            basePerQuery = 1.0m,
-            unitLabel = "credits",
-            reason = "retroactive today"
-        });
-        todayRes.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        var ctxToday = harness.CreateHttpContext(role, "tenant-a");
+        var todayRes = await UsageEndpoints.HandleAddTariffVersionAsync(
+            "pg-main",
+            new UsageEndpoints.CreateTariffVersionHttpRequest(
+                ValidFrom: Today,
+                BasePerQuery: 1.0m,
+                UnitLabel: "credits",
+                Reason: "retroactive today",
+                TenantId: targetTenant),
+            ctxToday,
+            harness.Service);
+        (await ExecuteAsync(todayRes, ctxToday)).Status.ShouldBe(StatusCodes.Status400BadRequest);
 
-        var pastRes = await client.PostAsJsonAsync("/api/v1/usage/tariffs/pg-main/versions", new
-        {
-            tenantId = targetTenant,
-            validFrom = Today.AddDays(-5).ToString("yyyy-MM-dd"),
-            basePerQuery = 1.0m,
-            unitLabel = "credits",
-            reason = "retroactive past"
-        });
-        pastRes.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        var ctxPast = harness.CreateHttpContext(role, "tenant-a");
+        var pastRes = await UsageEndpoints.HandleAddTariffVersionAsync(
+            "pg-main",
+            new UsageEndpoints.CreateTariffVersionHttpRequest(
+                ValidFrom: Today.AddDays(-5),
+                BasePerQuery: 1.0m,
+                UnitLabel: "credits",
+                Reason: "retroactive past",
+                TenantId: targetTenant),
+            ctxPast,
+            harness.Service);
+        (await ExecuteAsync(pastRes, ctxPast)).Status.ShouldBe(StatusCodes.Status400BadRequest);
 
-        host.Repo.Versions.ShouldBeEmpty();
-        host.Audit.Entries.ShouldBeEmpty();
+        harness.Repo.Versions.ShouldBeEmpty();
+        harness.Audit.Entries.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Tariff_change_audited_and_fails_closed_503_without_audit()
     {
-        await using var host = await TariffTestHost.CreateAsync();
-        var admin = host.CreateClient("TenantAdmin", "tenant-a");
+        var harness = new TariffHarness();
 
         // Fail audit store -> 503 USAGE_AUDIT_UNAVAILABLE, no repository write.
-        host.Audit.ShouldFail = true;
-        var failRes = await admin.PostAsJsonAsync("/api/v1/usage/tariffs/pg-main/versions", new
-        {
-            validFrom = Tomorrow.ToString("yyyy-MM-dd"),
-            basePerQuery = 0.5m,
-            unitLabel = "credits",
-            reason = "audit outage test"
-        });
-        failRes.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
-        var problemBody = await failRes.Content.ReadAsStringAsync();
-        problemBody.ShouldContain(ApiErrorCodes.UsageAuditUnavailable);
-        host.Repo.Versions.ShouldBeEmpty();
+        harness.Audit.ShouldFail = true;
+        var ctxFail = harness.CreateHttpContext("TenantAdmin", "tenant-a");
+        var failRes = await UsageEndpoints.HandleAddTariffVersionAsync(
+            "pg-main",
+            new UsageEndpoints.CreateTariffVersionHttpRequest(
+                ValidFrom: Tomorrow,
+                BasePerQuery: 0.5m,
+                UnitLabel: "credits",
+                Reason: "audit outage test"),
+            ctxFail,
+            harness.Service);
+        var (failStatus, failBody) = await ExecuteAsync(failRes, ctxFail);
+        failStatus.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+        failBody.ShouldContain(ApiErrorCodes.UsageAuditUnavailable);
+        harness.Repo.Versions.ShouldBeEmpty();
 
         // Restore audit store -> 201 Created, UsageTariffVersionAdded audited before write.
-        host.Audit.ShouldFail = false;
-        var okRes = await admin.PostAsJsonAsync("/api/v1/usage/tariffs/pg-main/versions", new
-        {
-            validFrom = Tomorrow.ToString("yyyy-MM-dd"),
-            basePerQuery = 0.5m,
-            unitLabel = "credits",
-            reason = "approved tariff"
-        });
-        okRes.StatusCode.ShouldBe(HttpStatusCode.Created);
-        host.Repo.Versions.Count.ShouldBe(1);
-        host.Audit.Entries.Count.ShouldBe(1);
-        host.Audit.Entries[0].EventType.ShouldBe(AuditEventTypes.UsageTariffVersionAdded);
-        host.Audit.Entries[0].DetailsJson.ShouldContain("\"oldVersion\":0");
-        host.Audit.Entries[0].DetailsJson.ShouldContain("\"newVersion\":1");
-        host.Audit.Entries[0].DetailsJson.ShouldContain("approved tariff");
+        harness.Audit.ShouldFail = false;
+        var ctxOk = harness.CreateHttpContext("TenantAdmin", "tenant-a");
+        var okRes = await UsageEndpoints.HandleAddTariffVersionAsync(
+            "pg-main",
+            new UsageEndpoints.CreateTariffVersionHttpRequest(
+                ValidFrom: Tomorrow,
+                BasePerQuery: 0.5m,
+                UnitLabel: "credits",
+                Reason: "approved tariff"),
+            ctxOk,
+            harness.Service);
+        (await ExecuteAsync(okRes, ctxOk)).Status.ShouldBe(StatusCodes.Status201Created);
+        harness.Repo.Versions.Count.ShouldBe(1);
+        harness.Audit.Entries.Count.ShouldBe(1);
+        harness.Audit.Entries[0].EventType.ShouldBe(AuditEventTypes.UsageTariffVersionAdded);
+        harness.Audit.Entries[0].DetailsJson.ShouldContain("\"oldVersion\":0");
+        harness.Audit.Entries[0].DetailsJson.ShouldContain("\"newVersion\":1");
+        harness.Audit.Entries[0].DetailsJson.ShouldContain("approved tariff");
     }
 
     [Fact]
     public async Task Cluster_admin_can_add_wildcard_tariff()
     {
-        await using var host = await TariffTestHost.CreateAsync();
-        var cluster = host.CreateClient("ClusterAdmin", "tenant-a");
+        var harness = new TariffHarness();
+        var ctx = harness.CreateHttpContext("ClusterAdmin", "tenant-a");
 
-        var res = await cluster.PostAsJsonAsync("/api/v1/usage/tariffs/*/versions", new
-        {
-            tenantId = "*",
-            validFrom = Tomorrow.ToString("yyyy-MM-dd"),
-            basePerQuery = 0.1m,
-            unitLabel = "credits",
-            reason = "cluster default"
-        });
+        var res = await UsageEndpoints.HandleAddTariffVersionAsync(
+            "*",
+            new UsageEndpoints.CreateTariffVersionHttpRequest(
+                ValidFrom: Tomorrow,
+                BasePerQuery: 0.1m,
+                UnitLabel: "credits",
+                Reason: "cluster default",
+                TenantId: "*"),
+            ctx,
+            harness.Service);
 
-        res.StatusCode.ShouldBe(HttpStatusCode.Created);
-        host.Repo.Versions.ShouldContain(v => v.TenantId == "*" && v.DataSource == "*" && v.Version == 1);
+        (await ExecuteAsync(res, ctx)).Status.ShouldBe(StatusCodes.Status201Created);
+        harness.Repo.Versions.ShouldContain(v => v.TenantId == "*" && v.DataSource == "*" && v.Version == 1);
     }
 
     // Helper types placed after all [Fact]/[Theory] methods so SecurityTestInventoryTests records outer class FQN cleanly.
-    private sealed class TariffTestHost : IAsyncDisposable
+    private static async Task<(int Status, string Body)> ExecuteAsync(IResult result, HttpContext httpContext)
     {
-        private readonly WebApplication _app;
-        public InMemorySecurityTariffRepo Repo { get; }
-        public ToggleableAuditWriter Audit { get; }
-
-        private TariffTestHost(WebApplication app, InMemorySecurityTariffRepo repo, ToggleableAuditWriter audit)
-        {
-            _app = app;
-            Repo = repo;
-            Audit = audit;
-        }
-
-        public static async Task<TariffTestHost> CreateAsync()
-        {
-            var repo = new InMemorySecurityTariffRepo();
-            var audit = new ToggleableAuditWriter();
-            var clock = new FakeTimeProvider(Now);
-
-            var builder = WebApplication.CreateBuilder();
-            builder.WebHost.UseTestServer();
-            builder.Services.AddSingleton<TimeProvider>(clock);
-            builder.Services.AddSingleton<IUsageRepository>(repo);
-            builder.Services.AddSingleton<IAuditWriter>(audit);
-            builder.Services.AddSingleton<IUsageTariffService>(new UsageTariffService(
-                repo,
-                audit,
-                Options.Create(new UsageAccountingOptions()),
-                NullLogger<UsageTariffService>.Instance,
-                clock,
-                ds => ds == "pg-main"));
-            builder.Services.AddAuthentication("Test")
-                .AddScheme<AuthenticationSchemeOptions, HeaderAuthHandler>("Test", _ => { });
-            builder.Services.AddAuthorization(options => options.AddGatewayAuthorizationPolicies());
-
-            var app = builder.Build();
-            app.UseAuthentication();
-            app.UseAuthorization();
-            app.MapUsageEndpoints();
-            await app.StartAsync();
-
-            return new TariffTestHost(app, repo, audit);
-        }
-
-        public HttpClient CreateClient(string role, string tenantId)
-        {
-            var client = _app.GetTestClient();
-            client.DefaultRequestHeaders.Add("X-Test-Role", role);
-            client.DefaultRequestHeaders.Add("X-Test-Tenant", tenantId);
-            client.DefaultRequestHeaders.Add("X-Test-Sid", "S-1-5-21-TEST-ADMIN");
-            return client;
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            await _app.DisposeAsync();
-        }
+        await result.ExecuteAsync(httpContext);
+        httpContext.Response.Body.Position = 0;
+        using var reader = new StreamReader(httpContext.Response.Body);
+        return (httpContext.Response.StatusCode, await reader.ReadToEndAsync());
     }
 
-    private sealed class HeaderAuthHandler(
-        IOptionsMonitor<AuthenticationSchemeOptions> options,
-        ILoggerFactory logger,
-        UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+    private static void AssertPolicy(List<RouteEndpoint> endpoints, string pattern, string method, string expectedPolicy)
     {
-        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+        var endpoint = endpoints.FirstOrDefault(e =>
+            string.Equals(e.RoutePattern.RawText, pattern, StringComparison.Ordinal) &&
+            e.Metadata.OfType<HttpMethodMetadata>().Any(m => m.HttpMethods.Contains(method, StringComparer.OrdinalIgnoreCase)));
+        endpoint.ShouldNotBeNull($"Expected {method} {pattern} to be mapped.");
+        endpoint!.Metadata.GetOrderedMetadata<IAuthorizeData>()
+            .Select(a => a.Policy)
+            .ShouldContain(expectedPolicy);
+        var ingress = endpoint.Metadata.GetMetadata<IngressTransportMetadata>();
+        ingress.ShouldNotBeNull();
+        ingress!.Transport.ShouldBe(DataSourceTransportFlags.Rest);
+    }
+
+    private sealed class TariffHarness
+    {
+        public InMemorySecurityTariffRepo Repo { get; } = new();
+        public ToggleableAuditWriter Audit { get; } = new();
+        public FakeTimeProvider Clock { get; } = new(Now);
+        public IUsageTariffService Service { get; }
+        public IServiceProvider RequestServices { get; }
+
+        public TariffHarness()
         {
-            if (!Request.Headers.TryGetValue("X-Test-Role", out var roleValues))
-            {
-                return Task.FromResult(AuthenticateResult.NoResult());
-            }
+            Service = new UsageTariffService(
+                Repo,
+                Audit,
+                Options.Create(new UsageAccountingOptions()),
+                NullLogger<UsageTariffService>.Instance,
+                Clock,
+                ds => ds == "pg-main");
 
-            string role = roleValues.ToString();
-            string tenant = Request.Headers.TryGetValue("X-Test-Tenant", out var t) ? t.ToString() : "default";
-            string sid = Request.Headers.TryGetValue("X-Test-Sid", out var s) ? s.ToString() : "S-1-5-21-USER";
+            RequestServices = new ServiceCollection()
+                .AddLogging()
+                .AddSingleton<TimeProvider>(Clock)
+                .BuildServiceProvider();
+        }
 
+        public static ClaimsPrincipal BuildPrincipal(string role, string tenantId, string sid)
+        {
             var claims = new List<Claim>
             {
                 new(ClaimTypes.PrimarySid, sid),
                 new("sub", sid),
-                new("tenant_id", tenant),
+                new("tenant_id", tenantId),
                 new(ClaimTypes.Role, role)
             };
-            var identity = new ClaimsIdentity(claims, "Test");
-            var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), "Test");
-            return Task.FromResult(AuthenticateResult.Success(ticket));
+            return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
         }
+
+        public DefaultHttpContext CreateHttpContext(string role, string tenantId, string sid = "S-1-5-21-TEST-ADMIN")
+        {
+            var context = new DefaultHttpContext
+            {
+                RequestServices = RequestServices,
+                User = BuildPrincipal(role, tenantId, sid)
+            };
+            context.Response.Body = new MemoryStream();
+            return context;
+        }
+    }
+
+    private sealed class RecordingRouteBuilder(IServiceProvider serviceProvider) : IEndpointRouteBuilder
+    {
+        public IServiceProvider ServiceProvider { get; } = serviceProvider;
+        public ICollection<EndpointDataSource> DataSources { get; } = [];
+        public IApplicationBuilder CreateApplicationBuilder() => throw new NotSupportedException();
     }
 
     private sealed class InMemorySecurityTariffRepo : IUsageRepository

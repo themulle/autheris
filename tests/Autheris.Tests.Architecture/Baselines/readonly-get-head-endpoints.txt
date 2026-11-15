@@ -58,8 +58,6 @@
 /api/v1/envoy/check/{**originalPath}|DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT|no side effect: evaluates Envoy ext_authz authorization check
 /api/v1/envoy/export/envoyfilter.yaml|GET|no side effect: exports EnvoyFilter YAML configuration template
 /api/v1/envoy/export/wasmplugin.yaml|GET|no side effect: exports Envoy WasmPlugin YAML configuration template
-/api/v1/finops/budget/{tenantId}|GET|no side effect: reads tenant FinOps budget
-/api/v1/finops/focus|GET|no side effect: reads FinOps FOCUS cost export
 /api/v1/governance/audit|GET|no side effect: queries governance audit log entries
 /api/v1/governance/caller-attributes/service-sets|GET|no side effect: lists caller attribute service sets
 /api/v1/governance/caller-attributes/|GET|no side effect: lists caller attribute definitions

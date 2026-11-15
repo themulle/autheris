@@ -118,7 +118,7 @@ If the Redis cluster becomes unavailable:
 ### 3.1.1 Cluster State Contract (absent vs unavailable)
 The shared cluster state (`IDistributedClusterStateProvider`) distinguishes "key absent" from "store unavailable":
 - A read of a missing key returns no value. An infrastructure failure (connection loss, timeout, Redis error) throws `ClusterStateUnavailableException` for reads, writes, deletes, event publishing and lock acquisition. A `null` lock lease only ever means "lock busy". Counters return `null` and budgets return `StoreUnavailable` when the store cannot be reached.
-- Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, FinOps budget enforcement fails closed, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
+- Consumers decide explicitly: TOTP secret reads and TOTP replay consumption fail closed (a valid code is rejected while the store is down), MCP session reads and HitL ticket reads treat the remote entry as not found, HitL locks honour `HitLStepUp:FailClosedOnClusterPartition`, federation nonce replay checks reject requests when the topology is cluster-wide. Background singletons (catalog sync, CDC, ITSM) skip the cycle.
 - Every store failure increments `autheris_cluster_state_failure_total{operation}`; failed event handlers increment `autheris_cluster_state_handler_failure_total`. Alert on a sustained rate of the first.
 - Cluster singletons (catalog sync, OpenMetadata sync, MSSQL change tracking) run under renewed, fenced leases (`TryAcquireLeaseAsync`). A replica that cannot confirm its lease for two thirds of the TTL cancels its job. Watch `autheris_scheduled_job_last_success_timestamp_seconds{job}`, `autheris_scheduled_job_skipped_total{job,reason}` and `autheris_cluster_lease_lost_total{reason}` (see F-OPS-02).
 - Multi-replica deployments require an external Redis with AOF persistence; without it a store restart drops leases and fence counters.
@@ -208,10 +208,6 @@ SELECT COALESCE(tenant_id, ''), itsm_ticket_id, COUNT(*)
 FROM CONSENT_REQUESTS WHERE itsm_ticket_id IS NOT NULL
 GROUP BY 1, 2 HAVING COUNT(*) > 1;
 ```
-
-### 4.z FinOps budget in multi-replica deployments (review E-14)
-
-The monthly FinOps budget is enforced against a cluster-wide counter in the shared state store (Redis when `Caching.Redis.Enabled`, otherwise in-memory = per process). Run Redis in every multi-replica deployment; without it each replica enforces the budget on its own. `ResetSpendAsync` clears the shared counter for the current month. Redis outages degrade to local accounting and are logged as `shared FinOps counter unavailable`.
 
 ### 4.aa Health probe caching (review R3-4)
 
@@ -505,3 +501,10 @@ CDC webhook delivery is enabled by default (`Gateway:CdcWebhooks:Enabled`; chang
 * **Provisioning:** provide the secret `cdc-webhook-kek` of at least 32 bytes through the configured secret provider (environment variable `CDC_WEBHOOK_KEK`, a mounted `file:` secret or the vault). Without it, outside Development, `POST /api/v1/cdc/subscriptions` answers `503 CDC_SECRET_STORE_UNAVAILABLE` and the gateway logs a startup warning. Subscriptions are also rejected with `400 CDC_SECRET_REQUIRED` unless they carry a signing secret of 32 to 512 characters.
 * **Rotation:** v1 ciphertexts carry no key id. Provision the new KEK, restart the gateway, then delete and re-create every subscription (existing ones can no longer be decrypted and their deliveries are dead-lettered). All replicas must use the same KEK.
 * **Creator snapshot:** a subscription delivers events as the principal that created it (roles and groups are frozen at creation, `Gateway:CdcWebhooks:CreatorSnapshotMaxAgeDays`, default 90, then delivery stops). Delete and re-create it after the creator's group membership changes.
+
+## 11. Usage Accounting Retention, Purge & Erasure
+
+Usage accounting is configured under `Gateway:UsageAccounting` (`Enabled`, `FlushIntervalSeconds`, `MaxBuckets`, `IncludeGroupPrefixes`, `BillingGroups`, `GroupDisplayNames`, `RetentionDays`, `PurgeBatchSize`, `DefaultPageSize`, `MaxReportRangeDays`, `FailOpenOnStoreFailure`).
+
+* **Retention & automated purge:** daily aggregated rows older than `Gateway:UsageAccounting:RetentionDays` are purged in bounded batches (`Gateway:UsageAccounting:PurgeBatchSize`) by the background usage flush worker without holding long table locks.
+* **User erasure (GDPR Art. 17):** `TenantAdmin` and `ClusterAdmin` callers can erase a user's stored usage attribution records via `DELETE /api/v1/usage/users/{userSid}?tenant=<tenantId>` (cross-tenant requires canonical `ClusterAdmin`). Every erasure and every administrative report read is fail-closed audited (`USAGE_DATA_ERASED` / `USAGE_REPORT_READ`) before returning `204`/`200` (`503 USAGE_AUDIT_UNAVAILABLE` if the audit sink fails).
