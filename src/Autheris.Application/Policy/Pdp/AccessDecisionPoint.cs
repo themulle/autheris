@@ -279,8 +279,11 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             ? sourceColumns
                 .Select(c =>
                 {
-                    var level = decision.GetEffectiveColumnAccess(c.ColumnName, request.Object);
-                    var maskType = level == ColumnAccessLevel.Mask
+                    var rawLevel = decision.GetColumnAccess(c.ColumnName);
+                    var level = rawLevel == ColumnAccessLevel.RowDependent
+                        ? ColumnAccessLevel.RowDependent
+                        : decision.GetEffectiveColumnAccess(c.ColumnName, request.Object);
+                    var maskType = level is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent
                         ? ResolveMaskType(c.ColumnName, decision, request.Object)
                         : null;
                     return new ColumnStateExplanation(c.ColumnName, level, maskType);
@@ -291,7 +294,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 .Select(kv => new ColumnStateExplanation(
                     kv.Key,
                     kv.Value,
-                    kv.Value == ColumnAccessLevel.Mask ? ResolveMaskType(kv.Key, decision, request.Object) : null))
+                    kv.Value is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent ? ResolveMaskType(kv.Key, decision, request.Object) : null))
                 .ToList();
 
         var groups = new EffectiveGroupsExplanation(

@@ -649,6 +649,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
                 var lvl = decision.GetEffectiveColumnAccess(col.ColumnName, tableMeta);
                 // A masked column is joinable only when its typed mask is the keyed HMAC pseudonym (deterministic, so joins stay meaningful).
                 bool isEffectiveHmac = lvl == ColumnAccessLevel.Mask &&
+                    decision.GetColumnAccess(col.ColumnName) != ColumnAccessLevel.RowDependent &&
                     decision.ColumnMasks is ColumnMaskPolicy typedMasks &&
                     typedMasks.TryGetSpec(col.ColumnName, out var maskSpec) &&
                     maskSpec.Kind == MaskKind.Hmac;

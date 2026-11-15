@@ -689,7 +689,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 continue; // completely omitted!
             }
 
-            var access = level == ColumnAccessLevel.Mask ? "mask" : "clear";
+            var access = level is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent ? "mask" : "clear";
             projectedColumns.Add(new McpDatasetColumn(
                 Name: col.ColumnName,
                 Type: col.DataType,

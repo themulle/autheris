@@ -230,6 +230,22 @@ public sealed partial class TableAccessPolicy
         if (query.Claims is null && decision.IsAllowed && RestrictedScopeClearance.Unknown(_restrictedScopes) is { } unknown)
         {
             decision = decision with { ScopeClearance = unknown };
+            if (decision.PerCellColumns is { } perCell)
+            {
+                var restricted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var col in query.Metadata.Columns)
+                {
+                    if ((col.IsSensitive || query.Metadata.ColumnMaskingRules.ContainsKey(col.ColumnName)) && !unknown.Permits(col.ColumnName))
+                    {
+                        restricted.Add(col.ColumnName);
+                    }
+                }
+
+                if (restricted.Count > 0)
+                {
+                    decision = NarrowPerCellDecision(decision, restricted);
+                }
+            }
         }
 
         if (profiles.Count > 0 && decision.IsAllowed)
@@ -456,5 +472,56 @@ public sealed partial class TableAccessPolicy
         }
 
         return decision;
+    }
+
+    private static TableAccessDecision NarrowPerCellDecision(TableAccessDecision decision, IReadOnlySet<string> restrictedToMask)
+    {
+        if (decision.PerCellColumns is null)
+        {
+            return decision;
+        }
+
+        var narrowed = decision.PerCellColumns.Narrow(decision.ColumnAccess, restrictedToMask);
+        if (narrowed is null)
+        {
+            var flattened = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
+            foreach (var sig in decision.PerCellColumns.Signatures)
+            {
+                foreach (var (col, lvl) in sig.ColumnAccess)
+                {
+                    if (!flattened.TryGetValue(col, out var cur) || cur == ColumnAccessLevel.RowDependent)
+                    {
+                        flattened[col] = restrictedToMask.Contains(col) && lvl == ColumnAccessLevel.Clear
+                            ? ColumnAccessLevel.Mask
+                            : lvl;
+                    }
+                }
+            }
+
+            return decision with
+            {
+                ColumnAccess = flattened,
+                RowDependentColumns = null,
+                ColumnSignatures = null,
+                PerCellColumns = null
+            };
+        }
+
+        var updatedCols = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
+        foreach (var col in updatedCols.Keys.ToList())
+        {
+            if (updatedCols[col] == ColumnAccessLevel.RowDependent && !narrowed.RowDependentColumns.Contains(col))
+            {
+                updatedCols[col] = narrowed.Signatures[0].ColumnAccess.GetValueOrDefault(col, ColumnAccessLevel.Deny);
+            }
+        }
+
+        return decision with
+        {
+            ColumnAccess = updatedCols,
+            RowDependentColumns = narrowed.RowDependentColumns,
+            ColumnSignatures = narrowed.Signatures,
+            PerCellColumns = narrowed
+        };
     }
 }

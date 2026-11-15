@@ -33,6 +33,18 @@ public sealed class SecurityCoverageException : SecurityException
 /// <param name="CatalogColumns">Canonical names of the cataloged columns; a secured derived table may project only these (CR-ADG-06). Null: any named column.</param>
 /// <param name="TenantColumn">Canonical tenant column (DML writes must carry the bound tenant there), or null.</param>
 /// <param name="PolicyColumns">Lower-case names of the columns the applicable row-policy predicate references; an assignment to one of them is rejected.</param>
+public sealed record PerCellColumnCoverage(
+    bool CanBeClear,
+    bool CanBeMasked,
+    string? ClearConditionFingerprint,
+    string? MaskConditionFingerprint);
+
+public sealed record PerCellTableCoverage(
+    bool AnySignatureUnfiltered,
+    bool HasNarrowingPredicate,
+    ImmutableDictionary<string, PerCellColumnCoverage> Columns,
+    int ExpectedFlagJoinCount);
+
 public sealed record TableCoverageRequirement(
     string Identity,
     string Schema,
@@ -44,7 +56,8 @@ public sealed record TableCoverageRequirement(
     ImmutableHashSet<string>? CatalogColumns = null,
     string? TenantColumn = null,
     ImmutableHashSet<string>? PolicyColumns = null,
-    ImmutableDictionary<string, string>? ColumnTypes = null);
+    ImmutableDictionary<string, string>? ColumnTypes = null,
+    PerCellTableCoverage? PerCell = null);
 
 /// <summary>
 /// Production post-condition of the compiler (runs on every compile). It walks the final AST and proves that every physical
@@ -215,7 +228,11 @@ public sealed partial class SecurityCoverageVerifier
 
             if (spec.From is NamedTableSource named && !IsCte(named, cte))
             {
-                Physical(named, spec, enclosing, policyScope);
+                Physical(named, null, spec, enclosing, policyScope);
+            }
+            else if (!policyScope && spec.From is JoinedTableSource && TryExtractFlagJoins(spec.From, cte, out var targetNamed, out var flagJoins))
+            {
+                Physical(targetNamed, flagJoins, spec, enclosing, policyScope);
             }
             else if (spec.From != null)
             {
@@ -287,7 +304,8 @@ public sealed partial class SecurityCoverageVerifier
                     CollectMaskedSources(join.Left, cte, ref into);
                     CollectMaskedSources(join.Right, cte, ref into);
                     break;
-                case SubqueryTableSource { Alias: var alias, Subquery.Body: QuerySpecification { From: NamedTableSource named } } when !IsCte(named, cte):
+                case SubqueryTableSource { Alias: var alias, Subquery.Body: QuerySpecification { From: var innerFrom } }
+                    when LeftmostNamedSource(innerFrom) is { } named && !IsCte(named, cte):
                     if (owner._requirementOf(named.Name) is { MaskedColumns.Count: > 0 } requirement)
                     {
                         (into ??= new()).Add((alias.Value, requirement.CatalogColumns));
@@ -295,6 +313,54 @@ public sealed partial class SecurityCoverageVerifier
 
                     break;
             }
+        }
+
+        private static NamedTableSource? LeftmostNamedSource(TableSource? source)
+        {
+            while (source is JoinedTableSource join)
+            {
+                source = join.Left;
+            }
+
+            return source as NamedTableSource;
+        }
+
+        private static bool TryExtractFlagJoins(
+            TableSource source,
+            ImmutableHashSet<string> cte,
+            out NamedTableSource target,
+            out List<(SubqueryTableSource Subquery, OnJoinCondition On)> joins)
+        {
+            target = null!;
+            joins = new List<(SubqueryTableSource, OnJoinCondition)>();
+            var stack = new Stack<(SubqueryTableSource, OnJoinCondition)>();
+            var current = source;
+            while (current is JoinedTableSource join)
+            {
+                if (join.Type != JoinType.LeftOuter ||
+                    join.Right is not SubqueryTableSource sub ||
+                    join.Condition is not OnJoinCondition on ||
+                    !sub.Alias.Value.StartsWith(PerCellFlagDecomposition.FlagAliasPrefix, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                stack.Push((sub, on));
+                current = join.Left;
+            }
+
+            if (current is not NamedTableSource named || IsCte(named, cte) || stack.Count == 0)
+            {
+                return false;
+            }
+
+            while (stack.Count > 0)
+            {
+                joins.Add(stack.Pop());
+            }
+
+            target = named;
+            return true;
         }
 
         private static bool IsCte(NamedTableSource named, ImmutableHashSet<string> cte) =>
@@ -330,7 +396,12 @@ public sealed partial class SecurityCoverageVerifier
             Exit();
         }
 
-        private void Physical(NamedTableSource table, QuerySpecification spec, SelectStatement? enclosing, bool policyScope)
+        private void Physical(
+            NamedTableSource table,
+            List<(SubqueryTableSource Subquery, OnJoinCondition On)>? flagJoins,
+            QuerySpecification spec,
+            SelectStatement? enclosing,
+            bool policyScope)
         {
             var where = spec.Where;
             var projections = spec.Projections;
@@ -339,11 +410,25 @@ public sealed partial class SecurityCoverageVerifier
 
             VerifyCanonicalName(table.Name, requirement);
 
+            if (flagJoins is { Count: > 0 })
+            {
+                if (policyScope || requirement.PerCell is null || flagJoins.Count != requirement.PerCell.ExpectedFlagJoinCount)
+                {
+                    throw new SecurityCoverageException("A secured derived table contains unpermitted flag joins.");
+                }
+
+                VerifyFlagJoins(flagJoins, table.Alias?.Value, requirement);
+            }
+            else if (!policyScope && requirement.PerCell is { ExpectedFlagJoinCount: > 0 })
+            {
+                throw new SecurityCoverageException("A per-cell secured derived table is missing required flag joins.");
+            }
+
             VerifyShape(requirement, spec, enclosing, policyScope);
 
             if (!policyScope && requirement.MaskedColumns is { Count: > 0 } masked)
             {
-                VerifyMasks(masked, projections);
+                VerifyMasks(masked, requirement.PerCell, projections);
             }
 
             var required = policyScope ? requirement.PolicySubqueryPredicates : requirement.RootPredicates;
@@ -362,6 +447,60 @@ public sealed partial class SecurityCoverageVerifier
             if (++_securedReferences > owner._maxSecuredTableReferences)
             {
                 throw new SqlLimitExceededException(SqlLimitKind.SecuredTableReferences, owner._dialect, _securedReferences, owner._maxSecuredTableReferences);
+            }
+        }
+
+        private void VerifyFlagJoins(
+            List<(SubqueryTableSource Subquery, OnJoinCondition On)> flagJoins,
+            string? targetAlias,
+            TableCoverageRequirement requirement)
+        {
+            foreach (var (sub, on) in flagJoins)
+            {
+                if (sub.Subquery.With is not null || sub.Subquery.OrderBy is not null || sub.Subquery.Pagination is not null ||
+                    sub.Subquery.Body is not QuerySpecification { Distinct: true, GroupBy: null, Having: null })
+                {
+                    throw new SecurityCoverageException("A per-cell flag join must be a plain SELECT DISTINCT subquery.");
+                }
+
+                VerifyFlagJoinOnPredicate(on.Predicate, sub.Alias.Value, targetAlias, requirement.CatalogColumns);
+                Select(sub.Subquery, ImmutableHashSet<string>.Empty, policyScope: true);
+            }
+        }
+
+        private static void VerifyFlagJoinOnPredicate(
+            Expression predicate,
+            string flagAlias,
+            string? targetAlias,
+            ImmutableHashSet<string>? catalogColumns)
+        {
+            var stack = new Stack<Expression>();
+            stack.Push(predicate);
+            while (stack.Count > 0)
+            {
+                var cur = stack.Pop();
+                while (cur is ParenthesizedExpression p) cur = p.Expression;
+
+                if (cur is BinaryExpression { Operator: BinaryOperator.And } andExpr)
+                {
+                    stack.Push(andExpr.Right);
+                    stack.Push(andExpr.Left);
+                    continue;
+                }
+
+                if (cur is BinaryExpression { Operator: BinaryOperator.Equal, Left: ColumnReference left, Right: ColumnReference right } &&
+                    left.Name.Parts.Count == 2 &&
+                    string.Equals(left.Name.Parts[0].Value, flagAlias, StringComparison.Ordinal) &&
+                    left.Name.Parts[1].Value.StartsWith(PerCellFlagDecomposition.FlagKeyPrefix, StringComparison.Ordinal) &&
+                    right.Name.Parts.Count == 2 &&
+                    targetAlias is not null &&
+                    string.Equals(right.Name.Parts[0].Value, targetAlias, StringComparison.OrdinalIgnoreCase) &&
+                    (catalogColumns is null || catalogColumns.Contains(right.Name.Parts[1].Value)))
+                {
+                    continue;
+                }
+
+                throw new SecurityCoverageException("A per-cell flag join ON condition must equate flag keys to target columns.");
             }
         }
 
@@ -414,6 +553,14 @@ public sealed partial class SecurityCoverageVerifier
                     throw new SecurityCoverageException("A secured derived table may only project cataloged columns under their own name.");
                 }
 
+                if (!policyScope &&
+                    requirement.PerCell is { } perCell &&
+                    perCell.Columns.TryGetValue(alias.Value, out var colCov))
+                {
+                    VerifyPerCellColumnProjection(column.Expression, alias.Value, colCov, requirement);
+                    continue;
+                }
+
                 var reference = column.Expression switch
                 {
                     ColumnReference r => r,
@@ -427,6 +574,66 @@ public sealed partial class SecurityCoverageVerifier
                 {
                     throw new SecurityCoverageException("A secured derived table projects a column that is not a cataloged column.");
                 }
+            }
+        }
+
+        private static void VerifyPerCellColumnProjection(
+            Expression expression,
+            string aliasName,
+            PerCellColumnCoverage colCov,
+            TableCoverageRequirement requirement)
+        {
+            if (requirement.CatalogColumns is not null && !requirement.CatalogColumns.Contains(aliasName))
+            {
+                throw new SecurityCoverageException("A secured derived table projects a column that is not a cataloged column.");
+            }
+
+            if (expression is not CaseExpression { Operand: null, ElseResult: LiteralExpression { Type: LiteralType.Null } } cs ||
+                cs.WhenClauses.Count is < 1 or > 2)
+            {
+                throw new SecurityCoverageException("A row-dependent column must be projected as a CASE WHEN ... ELSE NULL expression.");
+            }
+
+            bool seenClear = false;
+            bool seenMask = false;
+            foreach (var when in cs.WhenClauses)
+            {
+                if (when.Condition is not SecurityPredicateExpression sp)
+                {
+                    throw new SecurityCoverageException("A row-dependent CASE branch condition must be a security predicate expression.");
+                }
+
+                string condFingerprint = AstReflection.Fingerprint(sp.Predicate);
+                switch (when.Result)
+                {
+                    case ColumnReference r when !seenClear && colCov.CanBeClear:
+                        if (r.Name.Parts.Count != 1 || !r.Name.Parts[0].IsQuoted ||
+                            !string.Equals(r.Name.Parts[0].Value, aliasName, StringComparison.Ordinal) ||
+                            !string.Equals(condFingerprint, colCov.ClearConditionFingerprint, StringComparison.Ordinal))
+                        {
+                            throw new SecurityCoverageException("A row-dependent clear branch does not match the authorized clear signature condition.");
+                        }
+
+                        seenClear = true;
+                        break;
+                    case MaskExpression m when !seenMask && colCov.CanBeMasked:
+                        if (m.Column.Name.Parts.Count != 1 || !m.Column.Name.Parts[0].IsQuoted ||
+                            !string.Equals(m.Column.Name.Parts[0].Value, aliasName, StringComparison.Ordinal) ||
+                            !string.Equals(condFingerprint, colCov.MaskConditionFingerprint, StringComparison.Ordinal))
+                        {
+                            throw new SecurityCoverageException("A row-dependent mask branch does not match the authorized mask signature condition.");
+                        }
+
+                        seenMask = true;
+                        break;
+                    default:
+                        throw new SecurityCoverageException("A row-dependent CASE branch contains an unauthorized expression.");
+                }
+            }
+
+            if ((colCov.CanBeClear && !seenClear) || (colCov.CanBeMasked && !seenMask))
+            {
+                throw new SecurityCoverageException("A row-dependent CASE expression is missing an expected branch.");
             }
         }
 
@@ -460,7 +667,7 @@ public sealed partial class SecurityCoverageVerifier
             }
         }
 
-        private static void VerifyMasks(ImmutableHashSet<string> masked, IReadOnlyList<SelectItem> projections)
+        private static void VerifyMasks(ImmutableHashSet<string> masked, PerCellTableCoverage? perCell, IReadOnlyList<SelectItem> projections)
         {
             foreach (var item in projections)
             {
@@ -480,18 +687,39 @@ public sealed partial class SecurityCoverageVerifier
                     continue;
                 }
 
-                bool leaksRaw = false;
-                AstReflection.Walk(column.Expression, node =>
+                if (perCell is not null &&
+                    column.Alias is { } colAlias &&
+                    perCell.Columns.ContainsKey(colAlias.Value) &&
+                    column.Expression is CaseExpression cs)
                 {
-                    if (node is MaskExpression) return false;
-                    if (node is ColumnReference reference && masked.Contains(reference.Name.SimpleName)) leaksRaw = true;
-                    return true;
-                });
-                if (leaksRaw)
+                    foreach (var when in cs.WhenClauses)
+                    {
+                        if (ContainsRawMaskedColumn(when.Condition, masked))
+                        {
+                            throw new SecurityCoverageException("A masked column is referenced inside a CASE branch condition.");
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (ContainsRawMaskedColumn(column.Expression, masked))
                 {
                     throw new SecurityCoverageException("A masked column is projected without its mask expression.");
                 }
             }
+        }
+
+        private static bool ContainsRawMaskedColumn(SqlNode root, ImmutableHashSet<string> masked)
+        {
+            bool leaksRaw = false;
+            AstReflection.Walk(root, node =>
+            {
+                if (node is MaskExpression) return false;
+                if (node is ColumnReference reference && masked.Contains(reference.Name.SimpleName)) leaksRaw = true;
+                return !leaksRaw;
+            });
+            return leaksRaw;
         }
 
         private static void Conjuncts(Expression? where, List<SecurityPredicateId> into)

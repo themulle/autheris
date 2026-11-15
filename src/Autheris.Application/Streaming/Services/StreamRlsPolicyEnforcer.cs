@@ -237,25 +237,78 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             return StreamSecurityDecision.Denied("Virtual filters cannot be enforced on change events");
         }
 
-        // A row filter the consent chain did not already produce narrows further (never widens).
-        if (!string.IsNullOrWhiteSpace(pdpDecision.CombinedRowFilterSql) &&
-            !string.Equals(pdpDecision.CombinedRowFilterSql, decision.CombinedRowFilterSql, StringComparison.Ordinal))
+        if (pdpDecision.PerCellColumns is not null)
+        {
+            decision = decision with
+            {
+                ColumnAccess = pdpDecision.ColumnAccess,
+                RowDependentColumns = pdpDecision.RowDependentColumns,
+                ColumnSignatures = pdpDecision.ColumnSignatures,
+                PerCellColumns = pdpDecision.PerCellColumns,
+                RowPolicy = pdpDecision.RowPolicy,
+                CombinedRowFilterSql = pdpDecision.CombinedRowFilterSql,
+                RowFilterParameters = pdpDecision.RowFilterParameters
+            };
+        }
+        else if (pdpDecision.RowPolicy is not Autheris.Application.Policy.PolicyPredicateRowPolicy &&
+                 !string.IsNullOrWhiteSpace(pdpDecision.CombinedRowFilterSql) &&
+                 !string.Equals(pdpDecision.CombinedRowFilterSql, decision.CombinedRowFilterSql, StringComparison.Ordinal))
         {
             decision = decision.WithAdditionalRowFilter(pdpDecision.CombinedRowFilterSql);
         }
 
         // 7. In-Stream Row-Level Security Filtering (Fail-Closed, SQL three-valued logic)
-        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+        List<int>? matchedPerCellSignatures = null;
+        if (decision.PerCellColumns is Autheris.Application.Policy.RowScopes.PerCellColumnPolicy perCellPolicy)
         {
-            // 129 (A-8, BC-129-14): a consent filter with caller attributes is evaluated typed, per event, from the recipe; the text of such a
-            // decision is only a constant. Null: no attribute leaves (or the feature is off), the text evaluator decides as before.
-            bool? attributeVerdict = await EvaluateAttributeFilterAsync(decision, subscriber, tenantId, metadata, rawPayload, ct).ConfigureAwait(false);
-            if (!(attributeVerdict ?? MatchesStreamingRowFilter(rawPayload, decision.CombinedRowFilterSql, metadata.Dialect)))
+            if (!perCellPolicy.TryEvaluateNarrowing(rawPayload, metadata))
+            {
+                return StreamSecurityDecision.Denied("Filtered by row-level security");
+            }
+
+            matchedPerCellSignatures = new List<int>(perCellPolicy.Signatures.Count);
+            for (int i = 0; i < perCellPolicy.Signatures.Count; i++)
+            {
+                if (perCellPolicy.TryEvaluateRowForSignature(i, rawPayload, metadata))
+                {
+                    matchedPerCellSignatures.Add(i);
+                }
+            }
+
+            if (matchedPerCellSignatures.Count == 0)
             {
                 _logger.LogDebug(
-                    "Streaming event '{EventId}' filtered out by in-stream row filter for subscriber '{UserSid}'",
+                    "Streaming event '{EventId}' filtered out by per-cell signature filter for subscriber '{UserSid}'",
                     cdcEvent.EventId, userSid.Value);
                 return StreamSecurityDecision.Denied("Filtered by row-level security");
+            }
+        }
+        else
+        {
+            if (pdpDecision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy pdpTypedPolicy)
+            {
+                var rows = new List<IReadOnlyDictionary<string, object?>> { rawPayload };
+                if (Autheris.Application.Services.PolicyPredicateRowEvaluator.Filter(rows, pdpTypedPolicy.Predicate, metadata).Count != 1)
+                {
+                    _logger.LogDebug(
+                        "Streaming event '{EventId}' filtered out by typed PDP row filter for subscriber '{UserSid}'",
+                        cdcEvent.EventId, userSid.Value);
+                    return StreamSecurityDecision.Denied("Filtered by row-level security");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+            {
+                // 129 (A-8, BC-129-14): a consent filter with caller attributes is evaluated typed, per event, from the recipe; the text of such a
+                // decision is only a constant. Null: no attribute leaves (or the feature is off), the text evaluator decides as before.
+                bool? attributeVerdict = await EvaluateAttributeFilterAsync(decision, subscriber, tenantId, metadata, rawPayload, ct).ConfigureAwait(false);
+                if (!(attributeVerdict ?? MatchesStreamingRowFilter(rawPayload, decision.CombinedRowFilterSql, metadata.Dialect)))
+                {
+                    _logger.LogDebug(
+                        "Streaming event '{EventId}' filtered out by in-stream row filter for subscriber '{UserSid}'",
+                        cdcEvent.EventId, userSid.Value);
+                    return StreamSecurityDecision.Denied("Filtered by row-level security");
+                }
             }
         }
 
@@ -272,7 +325,10 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
                 continue;
             }
 
-            var accessLevel = decision.GetEffectiveColumnAccess(catalogColumn.ColumnName, metadata);
+            var accessLevel = matchedPerCellSignatures is not null &&
+                              decision.PerCellColumns is Autheris.Application.Policy.RowScopes.PerCellColumnPolicy activePerCell
+                ? activePerCell.ResolveColumnForSignatures(catalogColumn.ColumnName, matchedPerCellSignatures)
+                : decision.GetEffectiveColumnAccess(catalogColumn.ColumnName, metadata);
 
             switch (accessLevel)
             {

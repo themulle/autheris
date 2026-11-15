@@ -87,6 +87,16 @@ public record TableAccessDecision(
     public IReadOnlySet<string>? RowDependentColumns { get; init; }
 
     /// <summary>
+    /// Contributing grant signatures paired with their unioned row scopes when multiple distinct signatures apply.
+    /// </summary>
+    public IReadOnlyList<GrantSignatureScope>? ColumnSignatures { get; init; }
+
+    /// <summary>
+    /// Typed per-cell column state compiled from <see cref="ColumnSignatures"/> for SQL CASE compilation and streaming evaluation.
+    /// </summary>
+    public IPerCellColumnPolicy? PerCellColumns { get; init; }
+
+    /// <summary>
     /// Typed variant of <see cref="WithAdditionalRowFilter"/>: AND-merges <paramref name="policy"/> into <see cref="RowPolicy"/> and
     /// re-projects the text. On a decision that carries only a string filter the text is composed and the decision stays string-only
     /// (and is therefore denied by <see cref="RequireTypedRowPolicy"/>).
@@ -102,7 +112,7 @@ public record TableAccessDecision(
         }
 
         var next = RowPolicy == null ? policy : RowPolicy.And(policy);
-        var typed = WithPolicy(next);
+        var typed = WithPolicy(next) with { PerCellColumns = PerCellColumns?.WithNarrowing(policy) };
         return MandatoryRowPredicateSql == null
             ? typed
             : typed with
@@ -137,6 +147,7 @@ public record TableAccessDecision(
         var next = RowPolicy == null ? policy : RowPolicy.And(policy);
         return WithPolicy(next) with
         {
+            PerCellColumns = PerCellColumns?.WithNarrowing(policy),
             MandatoryRowPredicateSql = projection.Sql,
             MandatoryRowPolicy = policy,
             AppliedVirtualFilters = appliedFilters,
@@ -194,7 +205,7 @@ public record TableAccessDecision(
         var masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (column, level) in ColumnAccess)
         {
-            if (level == ColumnAccessLevel.Mask)
+            if (level is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent)
             {
                 masked.Add(column);
             }
@@ -464,6 +475,11 @@ public record TableAccessDecision(
         if (access == ColumnAccessLevel.Deny)
         {
             return ColumnAccessLevel.Deny;
+        }
+
+        if (access == ColumnAccessLevel.RowDependent)
+        {
+            return ColumnAccessLevel.Mask;
         }
 
         // a restricted-scope caller also needs the scope-specific clearance, not only the base Clear.

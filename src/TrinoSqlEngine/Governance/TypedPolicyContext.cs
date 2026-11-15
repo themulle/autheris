@@ -53,6 +53,7 @@ public sealed class TypedPolicyContext
     /// <summary>DML guard switches of the request (the verifier proves what they require).</summary>
     public DmlGuardOptions Dml { get; init; } = DmlGuardOptions.Strict;
     public DmlWritePermit? Write { get; init; }
+    public IPerCellColumnProvider PerCellColumns { get; init; } = EmptyPerCellColumnProvider.Instance;
 
     /// <summary>Values to bind, by parameter name (tenant, policy and mask parameters of every applied table).</summary>
     public IReadOnlyDictionary<string, PolicyValue> PolicyValues => _values;
@@ -150,7 +151,8 @@ public sealed class TypedPolicyContext
         // Every part is a fixed-format token (hex digest, flag, "-" or a digest) joined by a separator that none of them contains,
         // so the concatenation identifies the same state as the former digest of the serialized parts did.
         string maskPart = masks is null ? "-" : AstReflection.Fingerprint(masks);
-        return string.Concat(AstReflection.FingerprintMemoized(entry), applies ? "|1|" : "|0|", predicate, "|", maskPart);
+        string perCellPart = PerCellColumns.GetPolicy(id)?.Fingerprint ?? "-";
+        return string.Concat(AstReflection.FingerprintMemoized(entry), applies ? "|1|" : "|0|", predicate, "|", maskPart, "|", perCellPart);
     }
 
     /// <summary>
@@ -170,12 +172,33 @@ public sealed class TypedPolicyContext
             AddValues(RowFilters.GetPredicate(id).Parameters);
         }
 
+        var perCell = PerCellColumns.GetPolicy(id);
+        if (perCell is not null)
+        {
+            foreach (var sig in perCell.Signatures)
+            {
+                AddValues(sig.Scope.Parameters);
+            }
+
+            if (perCell.NarrowingPredicate is not null)
+            {
+                AddValues(perCell.NarrowingPredicate.Parameters);
+            }
+        }
+
         foreach (var column in entry.Columns)
         {
-            if (Masks.HasMask(id, column.Name))
+            if (!Masks.HasMask(id, column.Name))
             {
-                AddValues(GetMaskSpec(id, column.Name).Parameters);
+                continue;
             }
+
+            if (perCell is not null && perCell.Columns.TryGetValue(column.Name, out var rule) && rule.MaskedSignatures.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+
+            AddValues(GetMaskSpec(id, column.Name).Parameters);
         }
     }
 
@@ -222,7 +245,40 @@ public sealed class TypedPolicyContext
         var tenant = entry.TenantColumn is null
             ? ImmutableArray<SecurityPredicateId>.Empty
             : ImmutableArray.Create(new SecurityPredicateId(id.ToString(), 0));
-        var root = RowFilters.ShouldApplyPolicy(id) ? tenant.Add(new SecurityPredicateId(id.ToString(), 1)) : tenant;
+        var perCellPolicy = PerCellColumns.GetPolicy(id);
+        PerCellTableCoverage? perCellCoverage = null;
+        bool requiresRowFilterWhere;
+        if (perCellPolicy is not null)
+        {
+            var decomposed = PerCellFlagDecomposition.Decompose(
+                perCellPolicy,
+                entry,
+                expr => (Expression)new PolicySubqueryTenantRewriter(this).Visit(expr),
+                stmt => (SelectStatement)new PolicySubqueryTenantRewriter(this).Visit(stmt));
+            var colCoverages = ImmutableDictionary.CreateBuilder<string, PerCellColumnCoverage>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (colName, rule) in perCellPolicy.Columns)
+            {
+                var branches = decomposed.Columns[colName];
+                colCoverages[colName] = new PerCellColumnCoverage(
+                    CanBeClear: !rule.ClearSignatures.IsDefaultOrEmpty,
+                    CanBeMasked: !rule.MaskedSignatures.IsDefaultOrEmpty,
+                    branches.ClearConditionFingerprint,
+                    branches.MaskConditionFingerprint);
+            }
+
+            perCellCoverage = new PerCellTableCoverage(
+                perCellPolicy.AnySignatureUnfiltered,
+                perCellPolicy.NarrowingPredicate is not null,
+                colCoverages.ToImmutable(),
+                decomposed.FlagJoins.Count);
+            requiresRowFilterWhere = !perCellPolicy.AnySignatureUnfiltered || perCellPolicy.NarrowingPredicate is not null;
+        }
+        else
+        {
+            requiresRowFilterWhere = RowFilters.ShouldApplyPolicy(id);
+        }
+
+        var root = requiresRowFilterWhere ? tenant.Add(new SecurityPredicateId(id.ToString(), 1)) : tenant;
         var masked = entry.Columns.Where(c => Masks.HasMask(id, c.Name)).Select(c => c.Name).ToImmutableHashSet(StringComparer.Ordinal);
         var columns = entry.Columns.Select(c => c.Name).ToImmutableHashSet(StringComparer.Ordinal);
         var policyColumns = RowFilters.ShouldApplyPolicy(id)
@@ -230,6 +286,7 @@ public sealed class TypedPolicyContext
             : ImmutableHashSet<string>.Empty;
         return new TableCoverageRequirement(id.ToString(), id.Schema, id.Table, root, tenant, masked, id.Catalog, columns,
             entry.TenantColumn, policyColumns,
-            ColumnTypesOf(entry));
+            ColumnTypesOf(entry),
+            perCellCoverage);
     }
 }

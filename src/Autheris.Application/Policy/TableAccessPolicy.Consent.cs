@@ -78,8 +78,13 @@ public sealed partial class TableAccessPolicy
             ? activeConsents.Where(c => c.Effect == ConsentEffect.Allow && contributingIds.Contains(c.Id.ToString("D"))).ToList()
             : [];
         bool hasGrantRowScopes = contributingAllows.Any(c => c.RowScope.Count > 0);
+        bool hasMultiSignatureLegacy = !hasGrantRowScopes &&
+            contributingAllows.Count > 1 &&
+            contributingAllows.Any(c => c.RowFilters.Count > 0) &&
+            HasDistinctGrantColumnRules(contributingAllows) &&
+            (_rowScopeCompiler != null || (_rowPolicyFactory != null && query.Metadata.DataSourceType == DataSourceType.Sql && !query.Metadata.IsDelegatedSource));
 
-        if (useCache && !hasGrantRowScopes)
+        if (useCache && !hasGrantRowScopes && !hasMultiSignatureLegacy)
         {
             // SEC: TTL bounded by the earliest consent ValidTo; shorter for highly sensitive tables.
             var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(query.Metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
@@ -96,6 +101,12 @@ public sealed partial class TableAccessPolicy
         if (hasGrantRowScopes)
         {
             return await ApplyCompiledConsentRowScopesAsync(decision, query, activeConsents, contributingAllows, _rowScopeCompiler, _callerAttributes, ct).ConfigureAwait(false);
+        }
+
+        if (hasMultiSignatureLegacy)
+        {
+            var compiler = _rowScopeCompiler ?? new Autheris.Application.Policy.RowScopes.RowScopeCompiler(rowPolicyFactory: _rowPolicyFactory);
+            return await ApplyCompiledConsentRowScopesAsync(decision, query, activeConsents, contributingAllows, compiler, _callerAttributes, ct).ConfigureAwait(false);
         }
 
         return await WithTypedConsentPolicyAsync(decision, query, ct).ConfigureAwait(false);
@@ -140,56 +151,42 @@ public sealed partial class TableAccessPolicy
             };
         }
 
-        var now = TimeProvider.System.GetUtcNow();
-        var denyRowFilters = activeConsents
-            .Where(c => c.Effect == ConsentEffect.Deny && c.RowFilters.Count > 0 &&
-                        ConsentResolutionService.IsApplicable(c, table, now, query.UserSid, query.GroupSids, query.Roles, query.AllUserSids))
-            .Select(static c => c.RowFilters)
-            .ToList();
+        var result = await compiler.CompilePerCellConsentsAsync(
+            decision, query, activeConsents, contributingAllows, callerAttributes, ct).ConfigureAwait(false);
 
-        var grantInputs = contributingAllows
-            .Select(Autheris.Application.Policy.RowScopes.RowScopeCompileRequest.FromConsent)
-            .ToList();
+        return result.CallerAttributes.Count > 0 && result.Decision.IsAllowed
+            ? result.Decision with { CallerAttributes = Merge(result.Decision.CallerAttributes, result.CallerAttributes) }
+            : result.Decision;
+    }
 
-        var compileRequest = new Autheris.Application.Policy.RowScopes.RowScopeCompileRequest(
-            query.Tenant,
-            query.UserSid,
-            query.GroupSids,
-            query.Metadata,
-            grantInputs,
-            DenyRowFilters: denyRowFilters,
-            ObjectKind: query.ObjectKind,
-            AllUserSids: query.AllUserSids,
-            IncludeHardPolicies: false);
-
-        var outcome = await compiler.CompileGrantsOnlyAsync(compileRequest, ct).ConfigureAwait(false);
-        if (outcome.IsDenied)
+    private static bool HasDistinctGrantColumnRules(IReadOnlyList<Consent> allows)
+    {
+        if (allows.Count <= 1)
         {
-            return TableAccessDecision.Denied(table, outcome.DenyReason ?? "Denied by row scope.") with
+            return false;
+        }
+
+        string? baseline = null;
+        foreach (var allow in allows)
+        {
+            var sig = allow.ColumnRules.Count == 0
+                ? "*"
+                : string.Join(
+                    ';',
+                    allow.ColumnRules
+                        .OrderBy(static r => r.ColumnName, StringComparer.OrdinalIgnoreCase)
+                        .Select(static r => $"{r.ColumnName.ToLowerInvariant()}:{(int)r.AccessLevel}"));
+            if (baseline is null)
             {
-                DenialKind = TableAccessDenialKind.Policy,
-                Reasons = [new DecisionReason(outcome.DenyStep ?? DecisionStep.DefaultDeny, outcome.DenyCode ?? "ROW_SCOPE_DENIED", "RowScope", null)]
-            };
+                baseline = sig;
+            }
+            else if (!string.Equals(baseline, sig, StringComparison.Ordinal))
+            {
+                return true;
+            }
         }
 
-        var cleared = decision with { CombinedRowFilterSql = null, RowFilterParameters = null, ConsentFilterRecipe = null };
-        if (outcome.Predicate == null)
-        {
-            return cleared;
-        }
-
-        var predicate = outcome.Predicate;
-        IReadOnlyList<CallerAttributeAuditEntry>? audit = null;
-        if (outcome.CallerAttributes.Count > 0)
-        {
-            (predicate, audit) = await BindVirtualFilterAttributesCoreAsync(predicate, outcome.CallerAttributes, query, callerAttributes, ct).ConfigureAwait(false);
-        }
-
-        var policy = compiler.BuildRowPolicy(predicate, query.Metadata.Dialect);
-        var updated = cleared.WithAdditionalRowPolicy(policy);
-        return audit is { Count: > 0 }
-            ? updated with { CallerAttributes = Merge(updated.CallerAttributes, audit) }
-            : updated;
+        return false;
     }
 
     internal static async Task<TableAccessDecision> ApplyAccessProfileRowScopesAsync(
@@ -437,6 +434,18 @@ public sealed partial class TableAccessPolicy
     /// </summary>
     private static TableAccessDecision ApplyProfileMasking(TableAccessDecision consent, MaskingPolicyMode mode, TableMetadata metadata)
     {
+        if (consent.PerCellColumns is Autheris.Application.Policy.RowScopes.PerCellColumnPolicy perCell)
+        {
+            var (access, rowDeps, sigs, nextPerCell) = perCell.ReprojectForProfile(mode, metadata);
+            return consent with
+            {
+                ColumnAccess = access,
+                RowDependentColumns = rowDeps is { Count: > 0 } ? rowDeps : null,
+                ColumnSignatures = sigs,
+                PerCellColumns = nextPerCell
+            };
+        }
+
         var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
         foreach (var col in metadata.Columns)
         {

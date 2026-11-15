@@ -316,7 +316,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         {
             var lvl = decision.GetEffectiveColumnAccess(col.ColumnName, tableMeta);
             bool isEffectiveHmac = false;
-            if (lvl == ColumnAccessLevel.Mask && tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule))
+            if (lvl == ColumnAccessLevel.Mask &&
+                decision.GetColumnAccess(col.ColumnName) != ColumnAccessLevel.RowDependent &&
+                tableMeta.ColumnMaskingRules != null &&
+                tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule))
             {
                 if (string.Equals(rule.RuleType, "HMAC", StringComparison.OrdinalIgnoreCase))
                 {

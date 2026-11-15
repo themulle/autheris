@@ -48,7 +48,7 @@ public sealed class ColumnMaskPolicyFactory
         // denied on the compiler path for a column that is never projected.
         foreach (var (name, level) in decision.ColumnAccess)
         {
-            if (level == ColumnAccessLevel.Mask && !specs.ContainsKey(name))
+            if (level is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent && !specs.ContainsKey(name))
             {
                 specs[name] = _masks.GetMaskSpec(null, name, null, metadata.Dialect, tenant);
             }
