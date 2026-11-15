@@ -1,21 +1,28 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.Linq;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 
 public static class DataSourceDialectValidator
 {
-    public static readonly string[] AdmittedDialects =
+    private static readonly FrozenSet<DatabaseDialect> Admitted = FrozenSet.ToFrozenSet(
     [
-        nameof(DatabaseDialect.PostgreSql),
-        nameof(DatabaseDialect.SqlServer),
-        nameof(DatabaseDialect.Oracle),
-        nameof(DatabaseDialect.Databricks),
-        nameof(DatabaseDialect.Sqlite)
-    ];
+        DatabaseDialect.PostgreSql,
+        DatabaseDialect.SqlServer,
+        DatabaseDialect.Oracle,
+        DatabaseDialect.Databricks,
+        DatabaseDialect.Sqlite
+    ]);
+
+    public static readonly string[] AdmittedDialects = Admitted
+        .Select(static d => d.ToString())
+        .OrderBy(static n => n, StringComparer.Ordinal)
+        .ToArray();
 
     public static void Validate(GatewayOptions options)
     {
@@ -29,12 +36,12 @@ public static class DataSourceDialectValidator
         {
             if (connection is null)
             {
-                continue;
+                throw new ValidationException($"Data source '{name}' configuration cannot be null.");
             }
 
             string provider = connection.Provider ?? string.Empty;
             if (!DataSourceProvider.TryResolveDialect(provider, out var dialect) ||
-                dialect is not (DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Oracle or DatabaseDialect.Databricks or DatabaseDialect.Sqlite))
+                !Admitted.Contains(dialect))
             {
                 throw new UnsupportedDataSourceDialectException(name, provider, AdmittedDialects);
             }

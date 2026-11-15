@@ -233,6 +233,27 @@ public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejection
         _connectionCounter.Count.ShouldBe(beforeConnections, "An OData $batch containing a write must be rejected as a whole without touching the data source.");
     }
 
+    [Fact]
+    public async Task Get_batch_returns_405_batch_message()
+    {
+        await EnsureSeededAsync();
+        using var client = CreateClient();
+
+        var beforeConnections = _connectionCounter.Count;
+
+        foreach (var batchPath in new[] { "/odata/v4/$batch", "/odata/$batch" })
+        {
+            using var response = await client.GetAsync(batchPath);
+
+            response.StatusCode.ShouldBe(HttpStatusCode.MethodNotAllowed);
+            response.Headers.GetValues("OData-Version").ShouldContain("4.0");
+            var body = await response.Content.ReadAsStringAsync();
+            body.ShouldContain("$batch");
+        }
+
+        _connectionCounter.Count.ShouldBe(beforeConnections, "GET $batch must be rejected without opening a data source connection.");
+    }
+
     internal sealed class SourceConnectionCounter
     {
         private int _count;

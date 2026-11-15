@@ -44,14 +44,19 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     /// client (WP-X0j); without it a Databricks data source is refused (fail closed).
     /// </summary>
     public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets, IServiceProvider? services = null, TimeProvider? timeProvider = null)
+        : this(environment, secrets, services, timeProvider, requireOracleTcps: environment is null || !environment.IsDevelopment())
+    {
+    }
+
+    internal SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets, IServiceProvider? services, TimeProvider? timeProvider, bool requireOracleTcps)
     {
         _environment = environment;
         _secrets = secrets;
         _services = services;
         _logger = services?.GetService<Microsoft.Extensions.Logging.ILogger<SqlConnectionFactory>>();
         _loginBreaker = new SqlLoginCircuitBreaker(timeProvider, _logger);
-        _requireOracleTcps = environment is null || !environment.IsDevelopment();
-        _productionSecrets = _requireOracleTcps;
+        _requireOracleTcps = requireOracleTcps;
+        _productionSecrets = environment is null || !environment.IsDevelopment();
     }
 
     /// <summary>RR-L5-01: Session settings required by the literal escaping in <c>DatabaseDialect.EscapeSqlLiteral</c>.</summary>
@@ -326,7 +331,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     /// </summary>
     private string ResolvePassword(DatabaseDialect dialect, DataSourceConnectionOptions options, string connectionString)
     {
-        bool plaintext = ConnectionSecretPolicy.HasPlaintextPassword(dialect, connectionString);
+        bool plaintext = ConnectionSecretPolicy.HasPlaintextPassword(dialect, connectionString, _logger);
         if (_productionSecrets && plaintext)
         {
             string message = dialect == DatabaseDialect.Oracle

@@ -226,6 +226,11 @@ public static class GatewayStartupValidator
 
         foreach (var (name, connection) in options.DataSources.Connections)
         {
+            if (connection is null)
+            {
+                throw new ValidationException($"Data source '{name}' configuration cannot be null.");
+            }
+
             if (!DataSourceProvider.Is(connection.Provider, DatabaseDialect.Databricks))
             {
                 continue;
@@ -410,6 +415,11 @@ public static class GatewayStartupValidator
 
         foreach (var (name, connection) in options.DataSources.Connections)
         {
+            if (connection is null)
+            {
+                throw new ValidationException($"Data source '{name}' configuration cannot be null.");
+            }
+
             if (string.IsNullOrWhiteSpace(connection.ConnectionString) ||
                 !DataSourceProvider.TryResolveDialect(connection.Provider, out var dialect) ||
                 !ConnectionSecretPolicy.AppliesTo(dialect))
@@ -476,6 +486,11 @@ public static class GatewayStartupValidator
 
         foreach (var (name, connection) in options.DataSources.Connections)
         {
+            if (connection is null)
+            {
+                throw new ValidationException($"Data source '{name}' configuration cannot be null.");
+            }
+
             if (!DataSourceProvider.Is(connection.Provider, DatabaseDialect.SqlServer) || string.IsNullOrWhiteSpace(connection.ConnectionString))
             {
                 continue;
@@ -708,6 +723,11 @@ public static class GatewayStartupValidator
 
         foreach (var (name, connection) in options.DataSources.Connections)
         {
+            if (connection is null)
+            {
+                throw new ValidationException($"Data source '{name}' configuration cannot be null.");
+            }
+
             if (connection.DefaultSchema is not null && !DefaultSchemaPolicy.IsValid(connection.DefaultSchema))
             {
                 throw new ValidationException(

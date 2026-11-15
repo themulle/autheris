@@ -2,8 +2,10 @@ namespace Autheris.Tests.Unit.Configuration;
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Hosting;
 using Shouldly;
 using Xunit;
 
@@ -51,5 +53,27 @@ public sealed class DialectConfigurationTests
     {
         var options = CreateOptions(provider);
         Should.NotThrow(() => DataSourceDialectValidator.Validate(options));
+    }
+
+    [Fact]
+    public void Null_connection_entry_fails_startup()
+    {
+        var options = new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["broken_source"] = null!
+                }
+            }
+        };
+
+        var dialectEx = Should.Throw<ValidationException>(() => DataSourceDialectValidator.Validate(options));
+        dialectEx.Message.ShouldContain("broken_source");
+
+        var secretsEx = Should.Throw<ValidationException>(() =>
+            GatewayStartupValidator.ValidateDataSourceSecrets(options, new Security.FakeHostEnvironment(Environments.Production)));
+        secretsEx.Message.ShouldContain("broken_source");
     }
 }

@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Security;
 
 using System;
 using Autheris.Infrastructure.Persistence;
+using Microsoft.Extensions.Configuration;
 using Shouldly;
 using Xunit;
 
@@ -236,5 +237,83 @@ public sealed class ConnectionPolicyTests
 
         Should.Throw<InvalidOperationException>(() =>
             ConnectionTlsPolicy.ValidateGovernanceConnectionTls(null, "Host=db.internal;Database=gov", isDevelopment: false));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Parse_failure_has_no_inner_exception()
+    {
+        var malformed = "not a valid connection string = ;;; " + SecretCanary;
+        var logger = new RecordingLogger();
+
+        var ex = Should.Throw<System.Security.SecurityException>(() =>
+            ConnectionSecretPolicy.HasPlaintextPassword(Autheris.Domain.Common.DatabaseDialect.PostgreSql, malformed, logger));
+
+        ex.InnerException.ShouldBeNull();
+        ex.Message.ShouldNotContain(SecretCanary);
+        logger.Entries.Count.ShouldBe(1);
+        logger.Entries[0].ShouldNotContain(SecretCanary);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async System.Threading.Tasks.Task Production_secrets_independent_of_oracle_tcps()
+    {
+        var factory = new SqlConnectionFactory(
+            new ProdEnvironment(),
+            secrets: null,
+            services: null,
+            timeProvider: null,
+            requireOracleTcps: false);
+
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
+            factory.CreateOpenConnectionAsync(new Autheris.Domain.Options.DataSourceConnectionOptions
+            {
+                Provider = "Oracle",
+                DefaultSchema = "APP",
+                ConnectionString = "User Id=app;Password=plaintext-secret;Data Source=db.internal:1521/APP"
+            }));
+
+        ex.Message.ShouldContain("PasswordKeyVaultRef");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Governance_connection_without_tls_fails_startup_in_production()
+    {
+        var cfg = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
+            {
+                ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
+                ["Gateway:GovernanceDb:ConnectionString"] = $"Host=db.internal;Database=gov;Username=app;Password={SecretCanary};SSL Mode=Require"
+            })
+            .Build();
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            Autheris.Api.Configuration.GovernanceProviderGuard.ThrowIfUnsupported(cfg, new ProdEnvironment()));
+
+        ex.Message.ShouldContain("SSL Mode=VerifyFull");
+        ex.Message.ShouldNotContain(SecretCanary);
+    }
+
+    private sealed class ProdEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Microsoft.Extensions.Hosting.Environments.Production;
+        public string ApplicationName { get; set; } = "Autheris.Tests";
+        public string ContentRootPath { get; set; } = ".";
+        public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = null!;
+    }
+
+    private sealed class RecordingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public System.Collections.Generic.List<string> Entries { get; } = [];
+        public System.IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) => Entries.Add(formatter(state, exception));
     }
 }

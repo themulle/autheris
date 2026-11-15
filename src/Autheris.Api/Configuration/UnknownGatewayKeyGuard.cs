@@ -110,7 +110,7 @@ public static class UnknownGatewayKeyGuard
 
         foreach (var entry in configuration.GetSection(GatewayConfigurationSchema.Root).AsEnumerable(makePathsRelative: true))
         {
-            if (string.IsNullOrEmpty(entry.Key) || entry.Value is null)
+            if (string.IsNullOrEmpty(entry.Key))
             {
                 continue;
             }

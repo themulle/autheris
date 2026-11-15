@@ -92,7 +92,9 @@
 /modules/lakehouse/iceberg/v1/{prefix}/namespaces/{namespace}/tables/{table}|GET|no side effect: reads Iceberg table metadata
 /modules/lakehouse/iceberg/v1/{prefix}/namespaces/{namespace}/tables|GET|no side effect: lists Iceberg namespace tables
 /modules/lakehouse/iceberg/v1/{prefix}/namespaces|GET|no side effect: lists Iceberg catalog namespaces
+/odata/$batch|GET|no side effect: rejects OData $batch requests with 405 Method Not Allowed
 /odata/$metadata|GET|no side effect: serves OData v4 EDMX metadata document
+/odata/v4/$batch|GET|no side effect: rejects OData v4 $batch requests with 405 Method Not Allowed
 /odata/v4/$metadata|GET|no side effect: serves OData v4 EDMX metadata document
 /odata/v4/$openapi/index|GET|no side effect: serves OData OpenAPI index
 /odata/v4/$openapi/schemas/{domain}/{schema}/{tableName}|GET|no side effect: serves OData table OpenAPI schema

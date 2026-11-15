@@ -65,8 +65,10 @@ src/Autheris.Api/Endpoints/McpEndpoints.cs|/.well-known/openid-configuration
 src/Autheris.Api/Endpoints/ODataEndpoints.cs|/api/v1/openapi/index
 src/Autheris.Api/Endpoints/ODataEndpoints.cs|/docs
 src/Autheris.Api/Endpoints/ODataEndpoints.cs|/odata
+src/Autheris.Api/Endpoints/ODataEndpoints.cs|/odata/$batch
 src/Autheris.Api/Endpoints/ODataEndpoints.cs|/odata/$metadata
 src/Autheris.Api/Endpoints/ODataEndpoints.cs|/odata/v4
+src/Autheris.Api/Endpoints/ODataEndpoints.cs|/odata/v4/$batch
 src/Autheris.Api/Endpoints/ODataEndpoints.cs|/odata/v4/$metadata
 src/Autheris.Api/Endpoints/ODataEndpoints.cs|/odata/v4/$openapi
 src/Autheris.Api/Endpoints/ODataEndpoints.cs|/odata/v4/$openapi/index

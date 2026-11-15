@@ -357,4 +357,18 @@ public sealed class UnknownGatewayKeyGuardTests
         ex.Message.ShouldContain("Gateway:Foo");
         ex.Message.ShouldNotContain("Gateway:Lakehouse");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Null_valued_uninstalled_module_key_is_flagged()
+    {
+        using var json = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes("""{"Gateway":{"Lakehouse":{"X":null}}}"""));
+        var configuration = new ConfigurationBuilder().AddJsonStream(json).Build();
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            UnknownGatewayKeyGuard.ThrowIfUnknownKeys(configuration, Array.Empty<string>()));
+
+        ex.Message.ShouldContain("Gateway:Lakehouse");
+        ex.Message.ShouldContain("lakehouse");
+    }
 }

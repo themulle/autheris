@@ -30,19 +30,19 @@ public static partial class ODataEndpoints
         HttpMethods.IsDelete(method ?? string.Empty) ||
         string.Equals(method, "MERGE", StringComparison.OrdinalIgnoreCase);
 
+    internal static IResult HandleBatchMethodNotAllowed(HttpContext context)
+    {
+        context.Response.Headers["OData-Version"] = "4.0";
+        context.Response.Headers.Allow = "GET, HEAD, OPTIONS";
+        return ODataError(StatusCodes.Status405MethodNotAllowed, "MethodNotAllowed", "OData $batch requests are not permitted. The gateway OData surface is strictly read-only.");
+    }
+
     internal static async Task<IResult> HandleFlatEntitySetRequestAsync(
         string entitySetName,
         IODataHandler odataHandler,
         ITableMetadataRepository metadataRepo,
         HttpContext context)
     {
-        if (IsWriteMethod(context.Request.Method) || string.Equals(entitySetName, "$batch", StringComparison.OrdinalIgnoreCase))
-        {
-            context.Response.Headers["OData-Version"] = "4.0";
-            context.Response.Headers.Allow = "GET, HEAD, OPTIONS";
-            return ODataError(StatusCodes.Status405MethodNotAllowed, "MethodNotAllowed", "OData write operations and $batch write requests are not permitted. The gateway OData surface is strictly read-only.");
-        }
-
         if (entitySetName.StartsWith('$'))
         {
             return Results.NotFound();
@@ -104,11 +104,6 @@ public static partial class ODataEndpoints
         HttpContext context)
     {
         context.Response.Headers["OData-Version"] = "4.0";
-        if (IsWriteMethod(context.Request.Method))
-        {
-            context.Response.Headers.Allow = "GET, HEAD, OPTIONS";
-            return ODataError(StatusCodes.Status405MethodNotAllowed, "MethodNotAllowed", "OData write operations and $batch write requests are not permitted. The gateway OData surface is strictly read-only.");
-        }
 
         var serviceRoot = ResolveServiceRoot(context);
         var tableId = new TableIdentifier(domain, schema, tableName);

@@ -59,6 +59,14 @@ public static partial class ODataEndpoints
             .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
+        ingress.MapGet("/odata/$batch", HandleBatchMethodNotAllowed)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        ingress.MapGet("/odata/v4/$batch", HandleBatchMethodNotAllowed)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
         ingress.MapGet("/odata/$metadata", HandleMetadataAsync)
             .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
