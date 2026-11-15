@@ -38,6 +38,7 @@ public sealed class TableMetadataDto
     public DiscoveryTableStatistics? Statistics { get; init; }
     public bool SamplesAvailable { get; init; }
     public bool IsHidden { get; init; }
+    public DiscoveryWriteState? Write { get; init; }
     public string? DataOwner { get; init; }
     public IReadOnlyList<string>? Delegates { get; init; }
     public string? Language { get; init; }

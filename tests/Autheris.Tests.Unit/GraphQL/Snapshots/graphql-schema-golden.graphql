@@ -88,6 +88,7 @@ type DiscoveryColumn {
   pii: Boolean!
   state: DiscoveryColumnState!
   statistics: DiscoveryColumnStatistics
+  writeProtected: Boolean!
 }
 
 type DiscoveryColumnStatistics {
@@ -112,6 +113,16 @@ type DiscoveryTableStatistics {
   partitionColumns: [String!]
   sizeBytes: Long
   uploadedAt: DateTime!
+}
+
+type DiscoveryWriteState {
+  canDelete: Boolean!
+  canInsert: Boolean!
+  canUpdate: Boolean!
+  insertColumns: [String!]!
+  requestable: Boolean!
+  updateColumns: [String!]!
+  updateRowScope: WriteRowScope
 }
 
 type DownstreamConsumerEntity {
@@ -312,6 +323,7 @@ type TableMetadataDto {
   statistics: DiscoveryTableStatistics
   tableName: String!
   tags: [String!]!
+  write: DiscoveryWriteState
 }
 
 type TableRecordPayload {

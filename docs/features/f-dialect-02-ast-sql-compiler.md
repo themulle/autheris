@@ -299,7 +299,7 @@ The client message is always the fixed message of the code; it never contains `E
 
 - `SQL_POLICY_DENIED` is the one code for "table not usable": not registered, inactive, no columns, case-spelling conflict, governance column missing in the database, catalog load failure, unparsable or conflicting policy, access-decision deny. A denied (hidden) column and a column that does not exist produce the same code and message, so a response never tells whether a table or column exists.
 - A recursive statement that is not stopped by a depth or cycle error ends at `Gateway:WebSql:ExecutionTimeoutSeconds` as 504 `SQL_TIMEOUT` (PostgreSQL, SQLite through the execution guard, Oracle when the database does not raise ORA-32044). The driver text of a 530 or ORA-32044 error is never part of the response, the audit record or the log message.
-- `SQL_POLICY_VIOLATION` is reserved for statement-level rules that do not depend on a table: DDL, a function that is not permitted, a read-only token, a missing writer role, a table-less statement.
+- `SQL_POLICY_VIOLATION` is reserved for statement-level rules that do not depend on a table: DDL, a function that is not permitted, a read-only token, a missing write grant or DML transport gate, a table-less statement.
 - `SQL_COMPILER_INVARIANT` and `DML_CHECKED_EXECUTION_REQUIRED` are counted by `autheris_sql_compiler_invariant_failures_total`.
 - Other codes of the tenant middleware: 403 `TENANT_UNKNOWN`, 429 `TENANT_REGISTRATION_RATE_LIMITED`, 503 `TENANT_REGISTRY_UNAVAILABLE`, 403 `CROSS_TENANT_ACCESS_FORBIDDEN`, 401 `UNAUTHORIZED_NO_SID`.
 - GitOps declaration endpoints (for example `/consents/apply`) answer a curated 400 without the JSON parser message.

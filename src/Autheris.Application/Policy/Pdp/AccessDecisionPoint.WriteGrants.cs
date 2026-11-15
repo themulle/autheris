@@ -31,7 +31,7 @@ public sealed partial class AccessDecisionPoint
             return PreconditionDenied(table, "IDENTITY_INCOMPLETE", "Identity", null, "Access denied: write operations require an authenticated caller.");
         }
 
-        if (request.Transport != AccessTransport.WebSql)
+        if (request.Transport is not (AccessTransport.WebSql or AccessTransport.Discovery))
         {
             return PreconditionDenied(
                 table,
@@ -211,7 +211,7 @@ public sealed partial class AccessDecisionPoint
             .Select(id => new DecisionReason(DecisionStep.Grant, "WRITE_GRANT_ALLOW", "WriteGrant", id))
             .ToList();
 
-        var writableColumns = grantDecision.WritableColumns;
+        var writableColumns = FilterWritableColumns(grantDecision.WritableColumns, metadata, writeOp);
         if (decision.ColumnAccess.Count > 0 && authOpt?.Enabled == true && _authPluginHost?.HasAuthorizationHooks == true)
         {
             // Preserve hook-denied column restrictions if any hook explicitly narrowed writable columns.
@@ -516,6 +516,39 @@ public sealed partial class AccessDecisionPoint
         }
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "AccessDecisionPoint"));
+    }
+
+    private static IReadOnlySet<string> FilterWritableColumns(
+        IReadOnlySet<string> grantedColumns,
+        TableMetadata metadata,
+        WriteOperation writeOp)
+    {
+        if (grantedColumns.Count == 0)
+        {
+            return grantedColumns;
+        }
+
+        var protectedCols = metadata.Columns
+            .Where(static c => c.WriteProtected)
+            .Select(static c => c.ColumnName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (writeOp == WriteOperation.Update && metadata.PrimaryKeyColumns.Count > 0)
+        {
+            foreach (var pk in metadata.PrimaryKeyColumns)
+            {
+                protectedCols.Add(pk);
+            }
+        }
+
+        if (protectedCols.Count == 0)
+        {
+            return grantedColumns;
+        }
+
+        return grantedColumns
+            .Where(c => !protectedCols.Contains(c))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed record LoadedWriteConsents(

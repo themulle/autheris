@@ -458,6 +458,21 @@ public sealed class DiscoveryService : IDiscoveryService
             throw new InvalidOperationException("AccessDecisionPoint returned mismatched decision count.");
         }
 
+        // Evaluate write capabilities sequentially on the shared scoped repositories via the canonical PDP path (zero data reads).
+        var insertDecisions = await _decisionPoint.DecideManyAsync(
+            subject, uncachedTables, AccessOperation.Insert, AccessTransport.Discovery, ct).ConfigureAwait(false);
+        var updateDecisions = await _decisionPoint.DecideManyAsync(
+            subject, uncachedTables, AccessOperation.Update, AccessTransport.Discovery, ct).ConfigureAwait(false);
+        var deleteDecisions = await _decisionPoint.DecideManyAsync(
+            subject, uncachedTables, AccessOperation.Delete, AccessTransport.Discovery, ct).ConfigureAwait(false);
+
+        if (insertDecisions.Count != uncachedTables.Count ||
+            updateDecisions.Count != uncachedTables.Count ||
+            deleteDecisions.Count != uncachedTables.Count)
+        {
+            throw new InvalidOperationException("AccessDecisionPoint returned mismatched write decision count.");
+        }
+
         var maxSampleRows = Math.Clamp(_discoveryOptions.Discovery.MaxSampleRows, 1, CatalogDiscoverySettings.HardMaxSampleRows);
 
         for (var i = 0; i < uncached.Count; i++)
@@ -479,7 +494,10 @@ public sealed class DiscoveryService : IDiscoveryService
                 isExpired,
                 artifacts,
                 language,
-                isHidden: table.Table.DiscoveryHidden);
+                isHidden: table.Table.DiscoveryHidden,
+                insertDecision: insertDecisions[i],
+                updateDecision: updateDecisions[i],
+                deleteDecision: deleteDecisions[i]);
 
             results[targetIdx] = mapped;
             lock (_memoLock)

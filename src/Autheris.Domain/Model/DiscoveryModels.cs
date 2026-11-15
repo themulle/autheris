@@ -7,6 +7,25 @@ public enum DiscoveryColumnState { NoAccess, Masked, Clear }
 
 public sealed record DiscoveryOwner(string DisplayName, string? Email);
 
+public sealed record DiscoveryWriteState(
+    bool CanInsert,
+    bool CanUpdate,
+    bool CanDelete,
+    WriteRowScope? UpdateRowScope,
+    IReadOnlyList<string> InsertColumns,
+    IReadOnlyList<string> UpdateColumns,
+    bool Requestable)
+{
+    public static readonly DiscoveryWriteState None = new(
+        CanInsert: false,
+        CanUpdate: false,
+        CanDelete: false,
+        UpdateRowScope: null,
+        InsertColumns: [],
+        UpdateColumns: [],
+        Requestable: false);
+}
+
 public sealed record DiscoveryColumn(
     string Name,
     string? DisplayName,
@@ -16,7 +35,8 @@ public sealed record DiscoveryColumn(
     bool ClearAccessRequiresSeparateApproval,
     DiscoveryColumnState State,
     DiscoveryColumnStatistics? Statistics,
-    bool ClearInSomeRows = false);
+    bool ClearInSomeRows = false,
+    bool WriteProtected = false);
 
 public sealed record DiscoveryObject(
     DiscoveryObjectKind Kind,
@@ -33,7 +53,8 @@ public sealed record DiscoveryObject(
     IReadOnlyList<DiscoveryColumn> Columns,
     DiscoveryTableStatistics? Statistics,
     bool SamplesAvailable,
-    bool IsHidden);
+    bool IsHidden,
+    DiscoveryWriteState? Write = null);
 
 public sealed record DiscoveryTableStatistics(
     long? ApproxRowCount,

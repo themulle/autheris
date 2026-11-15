@@ -354,6 +354,7 @@ public sealed partial class Query
             Statistics = obj.Statistics,
             SamplesAvailable = obj.SamplesAvailable,
             IsHidden = obj.IsHidden,
+            Write = obj.Write,
             DataOwner = obj.Owners.FirstOrDefault()?.DisplayName,
             Language = language
         };
@@ -404,7 +405,8 @@ public sealed partial class Query
                     c.IsSensitive,
                     false,
                     c.IsSensitive ? DiscoveryColumnState.Masked : DiscoveryColumnState.Clear,
-                    null);
+                    null,
+                    WriteProtected: c.WriteProtected);
             }).ToList();
 
         return new TableMetadataDto

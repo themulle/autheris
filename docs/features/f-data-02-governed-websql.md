@@ -27,7 +27,7 @@ Ad-hoc SQL queries are compiled by the governed AST compiler ([F-DIALECT-02](f-d
 - **Deep AST SQL Injection Protection**: Prevents multi-statement attacks, system function execution, and comment-based evasion.
 - **Granular Transport Row Limits & Truncation Accuracy**: Configurable row limits per egress transport (`RowLimits:Trino`, `RowLimits:Parquet`, `RowLimits:ArrowExport`) with accurate truncation reporting (only reported as truncated when rows were actually cut by the limit).
 - **Cross-Channel Virtual Filters Pushdown**: Seamlessly integrates relation-scoped Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)) into the AST compiler along with data-owner consents.
-- **Controlled DML Guardrails**: High-risk statements (`UPDATE`, `DELETE`) require special writer roles, are bounded by max affected row limits, and are logged to the cryptographic WORM audit chain.
+- **Controlled DML Guardrails**: High-risk statements (`INSERT`, `UPDATE`, `DELETE`) require explicit approved write grants (`WriteRules` with operation and column scope), are bounded by max affected row limits and write budgets, and are logged to the cryptographic WORM audit chain.
 
 ---
 

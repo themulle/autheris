@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
+using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -24,7 +25,10 @@ public static class DiscoveryAccessMapper
         bool isRecentlyExpired,
         DiscoveryArtifacts? artifacts,
         string? language,
-        bool isHidden)
+        bool isHidden,
+        TableAccessDecision? insertDecision = null,
+        TableAccessDecision? updateDecision = null,
+        TableAccessDecision? deleteDecision = null)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(decision);
@@ -71,7 +75,8 @@ public static class DiscoveryAccessMapper
                 ClearAccessRequiresSeparateApproval: pii,
                 State: colState,
                 Statistics: stats,
-                ClearInSomeRows: clearInSomeRows));
+                ClearInSomeRows: clearInSomeRows,
+                WriteProtected: col.WriteProtected));
         }
 
         var tableLocalized = !string.IsNullOrWhiteSpace(language) ? table.Table.Texts.Resolve(language) : null;
@@ -91,6 +96,7 @@ public static class DiscoveryAccessMapper
             .ToList();
 
         var samplesAvailable = !table.Table.SamplesDisabled && HasSamples(artifacts?.SamplesJson);
+        var writeState = MapWriteState(table, visibleCols, insertDecision, updateDecision, deleteDecision);
 
         return new DiscoveryObject(
             Kind: table.Table.ObjectKind,
@@ -107,7 +113,101 @@ public static class DiscoveryAccessMapper
             Columns: mappedCols,
             Statistics: tableStats,
             SamplesAvailable: samplesAvailable,
-            IsHidden: isHidden);
+            IsHidden: isHidden,
+            Write: writeState);
+    }
+
+    private static DiscoveryWriteState MapWriteState(
+        TableMetadata table,
+        IReadOnlyList<TableColumn> visibleCols,
+        TableAccessDecision? insertDecision,
+        TableAccessDecision? updateDecision,
+        TableAccessDecision? deleteDecision)
+    {
+        if (insertDecision is null && updateDecision is null && deleteDecision is null)
+        {
+            return DiscoveryWriteState.None;
+        }
+
+        var visibleNonProtected = visibleCols
+            .Where(static c => !c.WriteProtected)
+            .Select(static c => c.ColumnName)
+            .ToList();
+        var pkSet = table.PrimaryKeyColumns.Count > 0
+            ? new HashSet<string>(table.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        IReadOnlyList<string> insertColumns = [];
+        if (insertDecision is { IsAllowed: true, WriteGrant: { } insertGrant } && insertGrant.WritableColumns.Count > 0)
+        {
+            var writable = new HashSet<string>(insertGrant.WritableColumns, StringComparer.OrdinalIgnoreCase);
+            insertColumns = visibleNonProtected.Where(writable.Contains).ToList();
+        }
+
+        IReadOnlyList<string> updateColumns = [];
+        if (updateDecision is { IsAllowed: true, WriteGrant: { } updateGrant } && updateGrant.WritableColumns.Count > 0)
+        {
+            var writable = new HashSet<string>(updateGrant.WritableColumns, StringComparer.OrdinalIgnoreCase);
+            updateColumns = visibleNonProtected
+                .Where(c => writable.Contains(c) && (pkSet == null || !pkSet.Contains(c)))
+                .ToList();
+        }
+
+        var canInsert = insertDecision is { IsAllowed: true, WriteGrant: not null } && insertColumns.Count > 0;
+        var canUpdate = updateDecision is { IsAllowed: true, WriteGrant: not null } && updateColumns.Count > 0;
+        var canDelete = deleteDecision is { IsAllowed: true, WriteGrant: not null };
+        var updateRowScope = canUpdate ? updateDecision!.WriteGrant!.RowScope : (WriteRowScope?)null;
+        var requestable = IsWriteRequestable(table, visibleNonProtected, insertDecision, updateDecision);
+
+        return new DiscoveryWriteState(
+            CanInsert: canInsert,
+            CanUpdate: canUpdate,
+            CanDelete: canDelete,
+            UpdateRowScope: updateRowScope,
+            InsertColumns: insertColumns,
+            UpdateColumns: updateColumns,
+            Requestable: requestable);
+    }
+
+    private static bool IsWriteRequestable(
+        TableMetadata table,
+        IReadOnlyList<string> visibleNonProtected,
+        TableAccessDecision? insertDecision,
+        TableAccessDecision? updateDecision)
+    {
+        if (!table.Table.IsActive ||
+            table.Table.ObjectKind == DiscoveryObjectKind.Procedure ||
+            visibleNonProtected.Count == 0 ||
+            string.Equals(table.Table.DocumentationSource, SemanticVirtualTables.SourceMarker, StringComparison.Ordinal) ||
+            string.Equals(table.Identifier.Domain, SemanticVirtualTables.Domain, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !IsBlockedForWriteRequest(insertDecision) && !IsBlockedForWriteRequest(updateDecision);
+    }
+
+    private static bool IsBlockedForWriteRequest(TableAccessDecision? decision)
+    {
+        if (decision is null || decision.IsAllowed)
+        {
+            return false;
+        }
+
+        if (string.Equals(decision.WriteGrant?.DenyCode, "write_grant_policy_dependency", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return decision.Reasons.Any(static r => r.Code is
+            "write_grant_policy_dependency" or
+            "CONTRACT_DENY" or
+            "TABLE_INACTIVE" or
+            "POLICY_UNAVAILABLE" or
+            "IDENTITY_INCOMPLETE" or
+            "TENANT_UNRESOLVED" or
+            "CONSENT_DENY" or
+            "WRITE_TRANSPORT_NOT_WIRED");
     }
 
     private static (DiscoveryAccessState Access, DiscoveryRowScope? RowScope) MapAccessAndRowScope(
