@@ -146,8 +146,8 @@ public sealed class Issue271SecurityAuditVerificationTests
     public async Task SEC_TEST_271_05_McpDocTools_GlobalApp_RequiresClusterAdmin_AndScrubsFilePath()
     {
         var docStore = Substitute.For<IUniversalDocStore>();
-        docStore.DepositDocumentAsync(Arg.Any<DepositDocRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new DepositDocResult(true, null, "/var/data/internal/runbook.md", "Created"));
+        docStore.CreateAsync(Arg.Any<Autheris.Application.Docs.Services.DocWriter>(), Arg.Any<DepositDocRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new DepositDocResult(true, null, "Created", Version: 1));
 
         // 1. Tenant admin (GovernanceAdmin without ClusterAdmin) cannot deposit for global app
         var tenantSession = CreateSession("session-1", "user-1", "tenant-a", roles: ["GovernanceAdmin"]);
@@ -161,11 +161,11 @@ public sealed class Issue271SecurityAuditVerificationTests
         var forbiddenResult = await McpDocTools.ExecuteDepositDocumentationAsync(docStore, jsonArgs, tenantSession, CancellationToken.None);
         forbiddenResult.ShouldContain("Forbidden");
 
-        // 2. ClusterAdmin is permitted, but FilePath is scrubbed from output
+        // 2. ClusterAdmin is permitted, and no filesystem path is returned
         var clusterSession = CreateSession("session-2", "admin-1", "system", roles: ["ClusterAdmin"]);
         var allowedResult = await McpDocTools.ExecuteDepositDocumentationAsync(docStore, jsonArgs, clusterSession, CancellationToken.None);
         allowedResult.ShouldContain("\"success\": true");
-        allowedResult.ShouldNotContain("/var/data/internal");
+        allowedResult.ShouldNotContain("filePath", Case.Insensitive);
     }
 
     [Fact]

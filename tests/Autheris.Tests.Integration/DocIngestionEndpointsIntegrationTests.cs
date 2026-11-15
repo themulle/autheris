@@ -76,8 +76,8 @@ public sealed class DocIngestionEndpointsIntegrationTests : IClassFixture<DocIng
         responseJson.ShouldContain("\"success\":true");
         using (var resultDoc = JsonDocument.Parse(responseJson))
         {
-            // No absolute server path in the response.
-            Path.IsPathRooted(resultDoc.RootElement.GetProperty("filePath").GetString()!).ShouldBeFalse();
+            // No server filesystem path field in the response.
+            resultDoc.RootElement.TryGetProperty("filePath", out _).ShouldBeFalse();
         }
 
         // Act: Search for the uploaded document via the new search REST endpoint

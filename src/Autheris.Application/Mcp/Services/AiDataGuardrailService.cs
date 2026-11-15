@@ -55,6 +55,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureRegistry? _procedureRegistry;
     private readonly Autheris.Application.Catalog.Semantic.ISemanticCatalogService? _semanticCatalog;
     private readonly Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? _catalogVisibility;
+    private readonly Autheris.Application.Docs.Interfaces.IDocIndexReadiness? _docIndexReadiness;
+    private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly Regex EmailRegex = new(@"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, DefaultRegexTimeout);
@@ -85,7 +87,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         Autheris.Application.Governance.Interfaces.IDatasetCatalogAdminService? datasetCatalogAdmin = null,
         Autheris.Application.Procedures.Interfaces.IProcedureRegistry? procedureRegistry = null,
         Autheris.Application.Catalog.Semantic.ISemanticCatalogService? semanticCatalog = null,
-        Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null)
+        Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null,
+        Autheris.Application.Docs.Interfaces.IDocIndexReadiness? docIndexReadiness = null,
+        Autheris.Application.Audit.IAuditWriter? auditWriter = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -110,6 +114,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _procedureRegistry = procedureRegistry;
         _semanticCatalog = semanticCatalog;
         _catalogVisibility = catalogVisibility;
+        _docIndexReadiness = docIndexReadiness;
+        _auditWriter = auditWriter;
     }
 
     /// <summary>Closed tag set for <c>autheris_disabled_path_requests_total</c> (no tool names, no ids).</summary>
@@ -236,7 +242,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
         if (McpDocTools.IsDocTool(tool.Name))
         {
-            var rawDocJson = await McpDocTools.ExecuteDocToolAsync(tool.Name, request.ArgumentsJson ?? "{}", _docSearchService, _docStore, sessionContext, cancellationToken).ConfigureAwait(false);
+            var rawDocJson = await McpDocTools.ExecuteDocToolAsync(tool.Name, request.ArgumentsJson ?? "{}", _docSearchService, _docStore, sessionContext, _auditWriter, _docIndexReadiness, cancellationToken).ConfigureAwait(false);
             bool docWasMasked = false;
             string scrubbedDocJson = !_options.Value.IsMcpUnmaskedAllowed ? ScrubPiiAndSensitiveData(rawDocJson, out docWasMasked) : rawDocJson;
             bool isError = TryGetExecutorError(rawDocJson, out var docErr);

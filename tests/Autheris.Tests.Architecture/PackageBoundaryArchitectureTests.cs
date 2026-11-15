@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 using Autheris.Extensions;
-using Autheris.Infrastructure.Docs;
+using Autheris.Application.Docs.Services;
 using NetArchTest.Rules;
 using Shouldly;
 using Xunit;
@@ -38,9 +38,9 @@ public sealed class PackageBoundaryArchitectureTests
     }
 
     [Fact]
-    public void FileSystemUniversalDocStore_ShouldResideInInfrastructureAssembly()
+    public void GovernanceDocStore_ShouldResideInApplicationAssembly()
     {
-        typeof(FileSystemUniversalDocStore).Assembly.ShouldBe(typeof(Autheris.Infrastructure.Persistence.GovernanceRepository).Assembly);
+        typeof(GovernanceDocStore).Assembly.ShouldBe(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly);
     }
 
     [Fact]

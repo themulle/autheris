@@ -93,6 +93,7 @@ route /api/v1/docs/errors/{errorCode} | catalog integration, lineage, schema-reg
 route /api/v1/docs/procedures/{*identifier} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/search | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
+route /api/v1/docs/tenants/{tenantId} | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/topics | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/envoy/check/{**originalPath} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/envoy/export/envoyfilter.yaml | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
