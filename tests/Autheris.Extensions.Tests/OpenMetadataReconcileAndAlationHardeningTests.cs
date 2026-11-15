@@ -214,8 +214,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         var result = await f.Service.SyncPermissionsAsync();
 
         result.Success.ShouldBeTrue();
-        f.Revoked.ShouldBe(new[] { rawOmRole.Id, deletedUser.Id, legacyRoleAllow.Id }, ignoreOrder: true);
-        f.Created.ShouldBeEmpty(); // the still granted consent is refreshed, not duplicated
+        f.Revoked.ShouldBe(new[] { rawOmRole.Id, deletedUser.Id, legacyRoleAllow.Id, stillGranted.Id }, ignoreOrder: true);
+        f.Created.Count.ShouldBe(1); // the still granted consent is refreshed via fail-closed revoke + recreate, not duplicated
         await f.ConsentRepo.Received(1).GetActiveConsentsByConsentRequestIdAsync(
             OpenMetadataSyncService.OpenMetadataSyncConsentMarker, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
         await f.ConsentRepo.DidNotReceive().RevokeConsentAsync(Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(), Arg.Any<CancellationToken>());
@@ -238,8 +238,6 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         result.Success.ShouldBeTrue();
         f.Revoked.ShouldHaveSingleItem().ShouldBe(formerAutoGrant.Id);
         f.Created.ShouldBeEmpty();
-        // The deny stays (long-lived, still far from expiry -> no refresh needed).
-        await f.ConsentRepo.DidNotReceive().ExtendConsentExpiryAsync(syncedDeny.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -282,7 +280,6 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         f.Revoked.ShouldBeEmpty();
         f.Created.ShouldBeEmpty();
         await f.ConsentRepo.DidNotReceive().GetActiveConsentsByConsentRequestIdAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
-        await f.ConsentRepo.DidNotReceive().ExtendConsentExpiryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
         f.Upserted.Count.ShouldBe(1); // table metadata sync is independent of the consent block
     }
 
@@ -320,8 +317,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
 
         await f.Service.SyncPermissionsAsync();
 
-        // PERS-04: an extension never shortens; the long-lived consent is revoked (audited) and recreated with the refresh window.
-        await f.ConsentRepo.DidNotReceive().ExtendConsentExpiryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        // Fail-closed refresh revokes the existing consent (audited) and recreates a fresh grant with the refresh window.
         f.Revoked.ShouldHaveSingleItem().ShouldBe(existing.Id);
         var created = f.Created.ShouldHaveSingleItem();
         created.ConsentRequestId.ShouldBe(OpenMetadataSyncService.OpenMetadataSyncConsentMarker);
@@ -338,25 +334,7 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
 
         await f.Service.SyncPermissionsAsync();
 
-        await f.ConsentRepo.DidNotReceive().ExtendConsentExpiryAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
         f.Created.ShouldHaveSingleItem().ConsentRequestId.ShouldBe(OpenMetadataSyncService.OpenMetadataSyncConsentMarker);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task PERS_04_Sync_ExtendRejectedByRace_CreatesOnce()
-    {
-        var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, validTo: DateTimeOffset.UtcNow.AddMinutes(5));
-        var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
-        f.ConsentRepo.ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns<Task>(_ => throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(existing.Id));
-
-        var result = await f.Service.SyncPermissionsAsync();
-
-        result.Success.ShouldBeTrue();
-        await f.ConsentRepo.Received(1).ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
-        f.Created.ShouldHaveSingleItem().GranteeSid!.Value.Value.ShouldBe(OrderTeamSid);
-        f.Revoked.ShouldBeEmpty();
     }
 
     [Fact]
@@ -365,21 +343,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     {
         var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, validTo: DateTimeOffset.UtcNow.AddMinutes(5));
         var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
-        f.ConsentRepo.ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
-            .Returns<Task>(_ => throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(existing.Id));
-        f.ConsentRepo.GetConsentByIdAsync(existing.Id, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<Consent?>(new Consent
-            {
-                TenantId = Autheris.Tests.Common.TestTenants.Default,
-                Id = existing.Id,
-                TableIdentifier = existing.TableIdentifier,
-                GranteeType = existing.GranteeType,
-                GranteeSid = existing.GranteeSid,
-                ConsentRequestId = existing.ConsentRequestId,
-                ValidFrom = existing.ValidFrom,
-                ValidTo = existing.ValidTo,
-                IsRevoked = true,
-            }));
+        f.ConsentRepo.RevokeSystemConsentAsync(existing.Id, Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(false));
 
         await f.Service.SyncPermissionsAsync();
 
@@ -401,17 +366,16 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     }
 
     [Fact]
-    [Trait("Category", "Security")]
-    public async Task PERS_04_Sync_ActiveSyncConsent_IsStillExtended()
+    public async Task EX02_ShortSyncConsent_IsRefreshedViaRevokeAndCreate()
     {
         var existing = SyncConsent(OrdersId, GranteeType.Group, OrderTeamSid, validTo: DateTimeOffset.UtcNow.AddMinutes(5));
         var f = CreateOm(Om(), [Orders()], teams: [OrderTeam()], existingSyncConsents: [existing]);
 
         await f.Service.SyncPermissionsAsync();
 
-        await f.ConsentRepo.Received(1).ExtendConsentExpiryAsync(existing.Id, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
-        f.Created.ShouldBeEmpty();
-        f.Revoked.ShouldBeEmpty();
+        f.Revoked.ShouldHaveSingleItem().ShouldBe(existing.Id);
+        var created = f.Created.ShouldHaveSingleItem();
+        created.ConsentRequestId.ShouldBe(OpenMetadataSyncService.OpenMetadataSyncConsentMarker);
     }
 
     // ------------------------------------------------------------------ E-06

@@ -3,24 +3,27 @@ namespace Autheris.Infrastructure.Persistence;
 using System.Data;
 using System.Data.Common;
 using Autheris.Application.Governance.Grants.Records;
+using Autheris.Domain.Common;
 using Autheris.Domain.Grants;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence.Dialects;
 
-public sealed class GrantRecordSqlCore(GovernanceRepository repository) : IGrantRecordStore
+public sealed class GrantRecordSqlCore(IGovernanceSqlDialect dialect) : IGrantRecordStore
 {
     private const string PgLockHeadSql = "INSERT INTO GRANT_RECORD_HEADS (tenant_id, last_seq, last_hash) VALUES (@tenant_id, 0, @genesis) ON CONFLICT (tenant_id) DO NOTHING; SELECT last_seq, last_hash FROM GRANT_RECORD_HEADS WHERE tenant_id = @tenant_id FOR UPDATE;";
     private const string SqlServerLockHeadSql = "IF NOT EXISTS (SELECT 1 FROM dbo.GRANT_RECORD_HEADS WITH (UPDLOCK, HOLDLOCK) WHERE tenant_id = @tenant_id) INSERT INTO dbo.GRANT_RECORD_HEADS (tenant_id, last_seq, last_hash) VALUES (@tenant_id, 0, @genesis); SELECT last_seq, last_hash FROM dbo.GRANT_RECORD_HEADS WITH (UPDLOCK, ROWLOCK) WHERE tenant_id = @tenant_id;";
     private const string InsertRecordSql = "INSERT INTO GRANT_RECORDS (tenant_id, seq, id, record_type, consent_id, request_id, grant_source, profile_assignment_id, grantee_type, grantee_ref, object_id, scope_json, valid_from, valid_until, requested_by, decision_json, decided_at, recorded_at, prev_hash, record_hash, signature, key_id) VALUES (@tenant_id, @seq, @id, @record_type, @consent_id, @request_id, @grant_source, @profile_assignment_id, @grantee_type, @grantee_ref, @object_id, @scope_json, @valid_from, @valid_until, @requested_by, @decision_json, @decided_at, @recorded_at, @prev_hash, @record_hash, @signature, @key_id);";
+    private const string InsertConsentSql = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, role_id, role_name, valid_from, valid_to, is_revoked, tenant_id, description, grant_source, grant_record_seq, profile_assignment_id, expiry_notice_sent_at)
+                                VALUES (@id, @tid, @reqId, @effect, @granteeType, @granteeSid, @sidNorm, @roleId, @roleName, @validFrom, @validTo, 0, @tenantId, @description, @grantSource, @grantRecordSeq, @profileAssignmentId, @expiryNoticeSentAt)";
     private const string AdvanceHeadSql = "UPDATE GRANT_RECORD_HEADS SET last_seq = @seq, last_hash = @record_hash WHERE tenant_id = @tenant_id;";
     private const string UpdateConsentSeqSql = "UPDATE CONSENTS SET grant_record_seq = @seq WHERE tenant_id = @tenant_id AND id = @id;";
     private const string SelectTenantChainSql = "SELECT tenant_id, seq, id, record_type, consent_id, request_id, grant_source, profile_assignment_id, grantee_type, grantee_ref, object_id, scope_json, valid_from, valid_until, requested_by, decision_json, decided_at, recorded_at, prev_hash, record_hash, signature, key_id FROM GRANT_RECORDS WHERE tenant_id = @tenant_id ORDER BY seq ASC;";
-    private readonly GovernanceRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+    private readonly IGovernanceSqlDialect _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
 
     public async Task<(long LastSeq, string LastHash)> LockAndReadHeadAsync(DbTransaction transaction, string tenantId, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
-        using var cmd = CreateTxCommand(transaction, _repository.Dialect is PostgreSqlGovernanceDialect ? PgLockHeadSql : SqlServerLockHeadSql);
+        using var cmd = CreateTxCommand(transaction, _dialect is PostgreSqlGovernanceDialect ? PgLockHeadSql : SqlServerLockHeadSql);
         cmd.AddBound("@tenant_id", tenantId); cmd.AddBound("@genesis", GrantRecordChain.GenesisHash);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         return await reader.ReadAsync(ct).ConfigureAwait(false) ? (reader.GetInt64(0), reader.GetString(1)) : (0L, GrantRecordChain.GenesisHash);
@@ -43,13 +46,37 @@ public sealed class GrantRecordSqlCore(GovernanceRepository repository) : IGrant
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task InsertConsentRowAsync(DbTransaction transaction, Consent consent, long grantRecordSeq, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(consent);
+        var tenantIdStr = StoredTenant.RequireWritable(consent.TenantId);
+        using var cmd = CreateTxCommand(transaction, InsertConsentSql);
+        cmd.AddBound("@id", consent.Id.ToString());
+        cmd.AddBound("@tid", consent.TableId.ToString());
+        cmd.AddBound("@reqId", consent.ConsentRequestId.HasValue ? consent.ConsentRequestId.Value.ToString() : (object)DBNull.Value);
+        cmd.AddBound("@effect", consent.Effect.ToString());
+        cmd.AddBound("@granteeType", consent.GranteeType.ToString());
+        cmd.AddBound("@granteeSid", consent.GranteeSid.HasValue ? consent.GranteeSid.Value.Value : (object)DBNull.Value);
+        cmd.AddBound("@sidNorm", ConsentSubjectFilter.NormalizeParameter(consent.GranteeSid?.Value));
+        cmd.AddBound("@roleId", consent.RoleId.HasValue ? consent.RoleId.Value.ToString() : (object)DBNull.Value);
+        cmd.AddBound("@roleName", (object?)consent.RoleName ?? DBNull.Value);
+        cmd.AddBound("@validFrom", consent.ValidFrom.ToUniversalTime().ToString("O"));
+        cmd.AddBound("@validTo", consent.ValidTo.ToUniversalTime().ToString("O"));
+        cmd.AddBound("@tenantId", tenantIdStr);
+        cmd.AddBound("@description", (object?)consent.Description ?? DBNull.Value);
+        ConsentWorkflowSql.BindConsentParameters(cmd, consent.GrantSource, grantRecordSeq, consent.ProfileAssignmentId, consent.ExpiryNoticeSentAt);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<GrantRecord>> ReadTenantChainAsync(string tenantId, CancellationToken ct = default)
     {
-        await using var conn = await _repository.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = _dialect.CreateConnection();
+        await conn.OpenAsync(ct).ConfigureAwait(false);
         using var cmd = conn.CreateCommand();
         (cmd.CommandText, var items) = (SelectTenantChainSql, new List<GrantRecord>());
         cmd.AddBound("@tenant_id", tenantId);
-        await using var reader = await _repository.ExecuteReaderAsync(cmd, "GrantRecords.ReadTenantChain", ct).ConfigureAwait(false);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false)) items.Add(ReadRecord(reader));
         return items;
     }

@@ -11,6 +11,15 @@ public sealed class GrantWriter(IGrantRecordStore store, IGrantRecordSigner sign
     private readonly IGrantRecordSigner _signer = signer ?? throw new ArgumentNullException(nameof(signer));
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
+    public async Task<GrantRecord> InsertAndGrantAsync(DbTransaction transaction, Consent consent, GrantRecordInput input, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(consent);
+        var type = input?.RecordType is GrantRecordType.Renewed ? GrantRecordType.Renewed : GrantRecordType.Issued;
+        var signed = await AppendAsync(transaction, BuildRecord(consent, input, type), null, ct).ConfigureAwait(false);
+        await _store.InsertConsentRowAsync(transaction, consent, signed.Seq, ct).ConfigureAwait(false);
+        return signed;
+    }
+
     public Task<GrantRecord> GrantAsync(DbTransaction transaction, Consent consent, GrantRecordInput input, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(consent);
@@ -48,9 +57,9 @@ public sealed class GrantWriter(IGrantRecordStore store, IGrantRecordSigner sign
 
     private GrantRecord BuildRecord(Consent? consent, GrantRecordInput? input, GrantRecordType recordType)
     {
-        var tenantId = consent?.TenantId.Value ?? input?.TenantId ?? string.Empty;
+        var tenantId = !string.IsNullOrWhiteSpace(consent?.TenantId.Value) ? consent!.TenantId.Value : input?.TenantId ?? string.Empty;
         var objectId = !string.IsNullOrWhiteSpace(input?.ObjectId) ? input.ObjectId : consent is not null ? (!string.IsNullOrWhiteSpace(consent.TableIdentifier.TableName) ? consent.TableIdentifier.ToString() : consent.TableId.ToString("D")) : null;
-        var (granteeType, granteeRef) = (input?.GranteeType ?? consent?.GranteeType.ToString(), input?.GranteeRef ?? consent?.GranteeSid);
+        var (granteeType, granteeRef) = (input?.GranteeType ?? consent?.GranteeType.ToString(), input?.GranteeRef ?? consent?.GranteeSid?.Value ?? consent?.RoleName);
         if (string.IsNullOrWhiteSpace(objectId) || string.IsNullOrWhiteSpace(granteeType) || string.IsNullOrWhiteSpace(granteeRef))
             throw new ArgumentException("ObjectId, GranteeType, and GranteeRef are required.", nameof(input));
         return new GrantRecord(tenantId, 0, Guid.CreateVersion7(), recordType, consent?.Id, input?.RequestId ?? consent?.ConsentRequestId,

@@ -576,16 +576,6 @@ public abstract class ConsentContract : GovernanceContractBase
         await Store.ConsentApprovals.ActivateConsentAsync(req2.Id, Owner2Sid);
         var active = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], table.Identifier, DateTimeOffset.UtcNow, Store.TenantA);
         active.Should().ContainSingle();
-
-        var consent = active[0];
-        var shortenAct = () => Store.Consents.ExtendConsentExpiryAsync(consent.Id, consent.ValidTo.AddHours(-1));
-        await shortenAct.Should().ThrowAsync<ConsentNotExtendableException>();
-
-        var extendedValidTo = consent.ValidTo.AddDays(10);
-        await Store.Consents.ExtendConsentExpiryAsync(consent.Id, extendedValidTo);
-        var afterExtend = await Store.Consents.GetConsentByIdAsync(consent.Id);
-        afterExtend!.ValidTo.Should().BeCloseTo(extendedValidTo, TimeSpan.FromSeconds(1));
-        afterExtend.RenewalCount.Should().Be(1);
     }
 }
 

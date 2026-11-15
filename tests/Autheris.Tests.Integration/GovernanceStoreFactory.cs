@@ -2,8 +2,10 @@ namespace Autheris.Tests.Integration;
 
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Grants.Records;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Dialects;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -14,6 +16,12 @@ using NSubstitute;
 /// </summary>
 internal static class GovernanceStoreFactory
 {
+    private static readonly Lazy<IGrantRecordSigner> TestGrantSigner = new(() =>
+        EcdsaGrantRecordSigner.CreateEphemeral("test-grant-key"));
+
+    private static IGrantWriter CreateGrantWriter(IGovernanceSqlDialect dialect) =>
+        new GrantWriter(new GrantRecordSqlCore(dialect), TestGrantSigner.Value);
+
     public static PostgreSqlGovernanceRepository CreatePostgreSql(
         IEpochValidationService epochValidationService,
         IOptions<GatewayOptions> options,
@@ -24,6 +32,8 @@ internal static class GovernanceStoreFactory
     {
         var env = environment ?? DefaultEnvironment();
         var secrets = NSubstitute.Substitute.For<IKeyVaultSecretProvider>();
+        var connStr = options.Value.GovernanceDb.ConnectionString;
+        var dialect = new PostgreSqlGovernanceDialect(connStr);
         var repository = new PostgreSqlGovernanceRepository(
             epochValidationService,
             options,
@@ -32,7 +42,8 @@ internal static class GovernanceStoreFactory
             auditAnchorStore ?? AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, WormSigner(options.Value), null),
             NSubstitute.Substitute.For<ICallerContextProvider>(),
             logger,
-            eventBus);
+            eventBus,
+            grantWriter: CreateGrantWriter(dialect));
         try
         {
             new PostgreSqlGovernanceMigrationRunner(repository, options).RunAsync().GetAwaiter().GetResult();
@@ -63,13 +74,15 @@ internal static class GovernanceStoreFactory
     {
         var env = environment ?? DefaultEnvironment();
         var secrets = NSubstitute.Substitute.For<IKeyVaultSecretProvider>();
+        var dialect = new SqlServerGovernanceDialect(options.Value.GovernanceDb.ConnectionString);
         var repository = new SqlServerGovernanceRepository(
             epochValidationService,
             options,
             env,
             secrets,
             AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null),
-            NSubstitute.Substitute.For<ICallerContextProvider>());
+            NSubstitute.Substitute.For<ICallerContextProvider>(),
+            grantWriter: CreateGrantWriter(dialect));
         try
         {
             new SqlServerGovernanceMigrationRunner(repository, options).RunAsync().GetAwaiter().GetResult();

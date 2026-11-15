@@ -548,43 +548,19 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService
     }
 
     /// <summary>
-    /// PERS-04: an extension only ever moves an active consent to a later expiry. A consent that is already valid longer than the refresh
-    /// window is shortened by an audited revoke followed by a new consent (same marker, principal and tenant); when the extension is
-    /// rejected because the consent expired or was changed concurrently, exactly one new consent is created (no retry loop).
-    /// A failing create leaves the old consent revoked (fail closed); the next run recreates it.
+    /// Refreshes an OpenMetadata-synced consent via an audited fail-closed revoke followed by a new consent (same marker,
+    /// principal and tenant). A failing create leaves the old consent revoked (fail closed); the next run recreates it.
     /// </summary>
     private async Task RefreshSyncConsentAsync(
         Consent existing, DateTimeOffset newValidTo, Consent replacement, HashSet<TableIdentifier> affectedTables, CancellationToken ct)
     {
-        if (newValidTo > existing.ValidTo)
-        {
-            try
-            {
-                await _consentRepo.ExtendConsentExpiryAsync(existing.Id, newValidTo, ct);
-                return;
-            }
-            catch (ConsentNotExtendableException)
-            {
-                // a consent revoked concurrently by a user or admin must stay revoked; only an expired or changed consent is recreated.
-                var current = await _consentRepo.GetConsentByIdAsync(existing.Id, ct);
-                if (current is { IsRevoked: true })
-                {
-                    _logger.LogWarning("Extension of OpenMetadata-synced consent {ConsentId} was rejected and the consent is revoked; not recreating it.", existing.Id);
-                    return;
-                }
-
-                _logger.LogWarning("Extension of OpenMetadata-synced consent {ConsentId} was rejected; creating a new consent.", existing.Id);
-                await _consentRepo.CreateConsentAsync(replacement, ct);
-                affectedTables.Add(replacement.TableIdentifier);
-                return;
-            }
-        }
-
         var revoked = await _consentRepo.RevokeSystemConsentAsync(
             existing.Id,
             OpenMetadataSyncConsentMarker,
             SyncActorSid,
-            "OpenMetadata sync shortens this consent to the refresh window (revoked and recreated).",
+            newValidTo > existing.ValidTo
+                ? "OpenMetadata sync refreshes this consent to the extended window (revoked and recreated)."
+                : "OpenMetadata sync shortens this consent to the refresh window (revoked and recreated).",
             ct);
         if (!revoked)
         {

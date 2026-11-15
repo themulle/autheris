@@ -40,6 +40,7 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
     private readonly Action<DbTransaction>? _onTransactionCommitted;
     private readonly Action<DbTransaction>? _onTransactionRolledBack;
     private readonly Microsoft.Extensions.Hosting.IHostEnvironment? _environment;
+    private readonly Autheris.Application.Governance.Grants.Records.IGrantWriter? _grantWriter;
     private int _initialized;
     private volatile bool _ready;
 
@@ -57,7 +58,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         ICallerContextProvider callerContextProvider,
         ILogger<GovernanceRepository>? logger = null,
         IEventBus? eventBus = null,
-        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null,
+        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null)
         : this(
             ResolveDialectForLegacyCtor(options),
             epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService)),
@@ -68,7 +70,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
             callerContextProvider ?? throw new ArgumentNullException(nameof(callerContextProvider)),
             logger,
             eventBus,
-            materializationGuard)
+            materializationGuard,
+            grantWriter)
     {
     }
 
@@ -91,7 +94,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         ICallerContextProvider callerContextProvider,
         ILogger<GovernanceRepository>? logger = null,
         IEventBus? eventBus = null,
-        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null)
+        Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null,
+        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null)
         : this(dialect,
                epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService)),
                options ?? throw new ArgumentNullException(nameof(options)),
@@ -105,7 +109,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
                auditAnchorStore ?? throw new ArgumentNullException(nameof(auditAnchorStore)),
                secretProvider ?? throw new ArgumentNullException(nameof(secretProvider)),
                environment ?? throw new ArgumentNullException(nameof(environment)),
-               callerContextProvider ?? throw new ArgumentNullException(nameof(callerContextProvider)))
+               callerContextProvider ?? throw new ArgumentNullException(nameof(callerContextProvider)),
+               grantWriter)
     {
     }
 
@@ -123,7 +128,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         Autheris.Application.Audit.IAuditChainAnchorStore? auditAnchorStore = null,
         IKeyVaultSecretProvider? secretProvider = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-        ICallerContextProvider? callerContextProvider = null)
+        ICallerContextProvider? callerContextProvider = null,
+        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null)
     {
         _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
         _eventBus = eventBus;
@@ -136,6 +142,7 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         _onTransactionCommitted = onTransactionCommitted;
         _onTransactionRolledBack = onTransactionRolledBack;
         _environment = environment;
+        _grantWriter = grantWriter;
         _ready = environment == null;
         InitializeAuditFields(options, auditAnchorStore, secretProvider, environment, callerContextProvider);
     }

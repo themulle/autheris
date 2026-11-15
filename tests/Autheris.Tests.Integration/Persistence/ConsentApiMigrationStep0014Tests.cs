@@ -1,5 +1,8 @@
+using System.Data.Common;
+using Autheris.Application.Governance.Grants.Records;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Grants;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
@@ -122,7 +125,8 @@ public sealed class ConsentApiMigrationStep0014Tests
             dialect,
             options: Options.Create(new GatewayOptions()),
             logger: NullLogger<GovernanceRepository>.Instance,
-            auditAnchorStore: new InMemoryAuditChainAnchorStore());
+            auditAnchorStore: new InMemoryAuditChainAnchorStore(),
+            grantWriter: new DirectConsentGrantWriter(new GrantRecordSqlCore(dialect)));
         repo.InitializeAudit();
 
         var tableId = Guid.NewGuid();
@@ -376,5 +380,20 @@ public sealed class ConsentApiMigrationStep0014Tests
         using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
+    }
+
+    private sealed class DirectConsentGrantWriter(IGrantRecordStore store) : IGrantWriter
+    {
+        public async Task<GrantRecord> InsertAndGrantAsync(DbTransaction transaction, Consent consent, GrantRecordInput input, CancellationToken ct = default)
+        {
+            var seq = consent.GrantRecordSeq > 0 ? consent.GrantRecordSeq : 1L;
+            await store.InsertConsentRowAsync(transaction, consent, seq, ct).ConfigureAwait(false);
+            return new GrantRecord(input.TenantId, seq, Guid.NewGuid(), GrantRecordType.Issued, consent.Id, input.RequestId, consent.GrantSource, consent.ProfileAssignmentId, input.GranteeType ?? "User", input.GranteeRef ?? "u", input.ObjectId ?? "t", input.ScopeJson, input.ValidFrom, input.ValidUntil, input.RequestedBy, input.DecisionJson, input.DecidedAt, input.DecidedAt, GrantRecordChain.GenesisHash);
+        }
+
+        public Task<GrantRecord> GrantAsync(DbTransaction transaction, Consent consent, GrantRecordInput input, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<GrantRecord> RevokeAsync(DbTransaction transaction, Consent consent, GrantRecordInput input, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<GrantRecord> RecordRejectionAsync(DbTransaction transaction, GrantRecordInput input, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<GrantRecord> RecordExpiryAsync(DbTransaction transaction, Consent? consent, GrantRecordInput input, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

@@ -11,7 +11,7 @@ namespace Autheris.Tests.Architecture;
 public class IndividualGrantPolicyArchitectureTests
 {
     private static readonly Regex GrantWriter = new(
-        @"\.(CreateConsentAsync|ExtendConsentExpiryAsync|ReplaceConsentsAsync|UpsertProfileAsync|ActivateConsentAsync|ActivateConsentForAutoApproveAsync|CreateConsentRequestAsync)\(",
+        @"\.(CreateConsentAsync|ReplaceConsentsAsync|UpsertProfileAsync|ActivateConsentAsync|ActivateConsentForAutoApproveAsync|CreateConsentRequestAsync)\(",
         RegexOptions.Compiled);
 
     /// <summary>Files that write grants without calling the policy, each with the reason it is safe.</summary>
@@ -64,27 +64,6 @@ public class IndividualGrantPolicyArchitectureTests
 
         offenders.ShouldBeEmpty("These files write grants but never consult IGrantPolicy (WP-SC-16). Call the policy or allowlist with a reason.");
         seenAllowlisted.Count.ShouldBe(Allowlist.Count, "A stale allowlist entry no longer writes grants; remove it.");
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void SEC_P4R_5_OnlyWorkflowAndOpenMetadataSync_CallExtendConsentExpiry()
-    {
-        var src = Path.Combine(FindRepositoryRoot(), "src");
-        var callers = EnumerateSources(src)
-            .Select(file => Path.GetRelativePath(src, file).Replace('\\', '/'))
-            .Where(rel => !rel.Contains("/Persistence/", StringComparison.Ordinal) && !rel.EndsWith("IGovernanceRepository.cs", StringComparison.Ordinal))
-            .Where(rel => File.ReadAllText(Path.Combine(src, rel)).Contains(".ExtendConsentExpiryAsync(", StringComparison.Ordinal))
-            .ToList();
-
-        callers.ShouldBe(
-            [
-                "Autheris.Application/Identity/Attributes/AttributeValidatingConsentRepository.cs",
-                "Autheris.Application/Governance/Workflows/ConsentRecertificationWorkflowService.cs",
-                "Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs"
-            ],
-            ignoreOrder: true,
-            "Extensions go through the workflow (grant policy cap) or the OpenMetadata sync; the decorator only delegates.");
     }
 
     [Fact]

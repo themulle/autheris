@@ -41,3 +41,24 @@ Autheris.Tests.Unit.Procedures.InvokerHarness.T_PROC152I2_10_Catalog_ValidateAsy
 Autheris.Tests.Unit.Security.SqlProcedureRowScopeResolverTests.NonUniqueKey_IsRejected	#WP-SIMPL-44	Removed source-catalog unique-index probe in WP-SIMPL-44 PR 3; replaced by declared key-closure enforcement in ProcedureRowScopeKeyClosureTests
 Autheris.Tests.Unit.Security.SqlProcedureRowScopeResolverTests.UniqueIndexMatch_ComparesColumnSetsPerDialect	#WP-SIMPL-44	Removed source-catalog unique-index probe in WP-SIMPL-44 PR 3; replaced by declared key-closure SQL shape tests in ProcedureRowScopeKeyClosureTests
 Autheris.Tests.Unit.Security.SqlProcedureRowScopeResolverTests.UniqueIndexQuery_UsesTheDialectCatalog	#WP-SIMPL-44	Removed source-catalog unique-index probe in WP-SIMPL-44 PR 3; no dialect catalog query is issued under key closure
+Autheris.Extensions.Tests.OmFixture.PERS_04_Sync_ActiveSyncConsent_IsStillExtended	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in favor of immutable append-only GrantWriter revoke+recreate
+Autheris.Extensions.Tests.OmFixture.PERS_04_Sync_ExtendRejectedByRace_CreatesOnce	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in favor of immutable append-only GrantWriter revoke+recreate
+Autheris.Tests.Architecture.IndividualGrantPolicyArchitectureTests.SEC_P4R_5_OnlyWorkflowAndOpenMetadataSync_CallExtendConsentExpiry	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync completely from src/
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.PERS_04_Extend_EqualOrEarlierValidTo_IsRejected	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.PERS_04_Extend_ExpiredConsent_IsRejected_RowAndRenewalCountUnchanged	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.PERS_04_Extend_ExpiryAtExactNow_IsRejected	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.PERS_04_Extend_NonUtcStoredValidTo_ComparesCorrectly	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.PERS_04_Extend_Rejection_DoesNotBumpEpoch	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.PERS_04_Extend_RevokedConsent_IsRejected	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.PERS_04_Extend_UnknownId_IsRejected_NoAuditNoEpoch	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.PERS_04_Extend_UsesServerTimeInTheUpdatePredicate	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Seed.PERS_04_Extend_EqualOrEarlierValidTo_IsRejected	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Seed.PERS_04_Extend_ExpiredConsent_IsRejected_RowAndRenewalCountUnchanged	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Seed.PERS_04_Extend_ExpiryAtExactNow_IsRejected	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Seed.PERS_04_Extend_NonUtcStoredValidTo_ComparesCorrectly	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Seed.PERS_04_Extend_Rejection_DoesNotBumpEpoch	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Seed.PERS_04_Extend_RevokedConsent_IsRejected	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Seed.PERS_04_Extend_UnknownId_IsRejected_NoAuditNoEpoch	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Seed.PERS_04_Extend_UsesServerTimeInTheUpdatePredicate	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.SEC_SC_20_RenewalCount_StartsAtZero_AndIsIncrementedByEveryExtension	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation
+Autheris.Tests.Integration.Governance.ConsentReplaceRepositoryTests.SEC_SC_20_Renewal_RestartsTheClampPeriod_AtDay150	#WP-SIMPL-47	Removed ExtendConsentExpiryAsync in-place validity mutation

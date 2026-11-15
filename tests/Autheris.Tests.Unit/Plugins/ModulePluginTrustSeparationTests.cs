@@ -94,9 +94,6 @@ internal sealed class FixedConsentRepository(IReadOnlyList<Consent> consents) : 
     public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>());
 
-    public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default) =>
-        Task.CompletedTask;
-
     public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>());
 

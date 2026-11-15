@@ -14,9 +14,11 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
+using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Policy.WriteGrants;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Grants;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Types;
@@ -428,15 +430,17 @@ public sealed class WriteConsentWorkflowTests
         rwIncludeRead.ShouldBeTrue();
         rwRules.ShouldHaveSingleItem().Id.ShouldBe(ruleId);
 
-        // Activation via TryActivateConsentRowsAsync + Hydration via HydrateConsentsBatchAsync
+        // Activation via TryClaimConsentRequestActivationAsync + InsertActivatedColumnAndWriteRulesAsync + Hydration via HydrateConsentsBatchAsync
         var store = new FakeGovernanceStore(writeOnlyReq.TableId);
         await using var conn = new FakeGovernanceDbConnection(store);
         conn.Open();
 
         await using (var tx = await conn.BeginTransactionAsync())
         {
-            var (activated, _) = await ConsentSqlCore.TryActivateConsentRowsAsync(conn, tx, writeOnlyReq, true, "ALLOW", DateTimeOffset.UtcNow, CancellationToken.None);
-            activated.ShouldBeTrue();
+            var (claimed, consentId, draft) = await ConsentSqlCore.TryClaimConsentRequestActivationAsync(conn, tx, writeOnlyReq, true, "ALLOW", DateTimeOffset.UtcNow, CancellationToken.None);
+            claimed.ShouldBeTrue();
+            draft.ShouldNotBeNull();
+            await ConsentSqlCore.InsertActivatedColumnAndWriteRulesAsync(conn, tx, writeOnlyReq, consentId, CancellationToken.None);
             await tx.CommitAsync();
         }
 
@@ -475,7 +479,8 @@ public sealed class WriteConsentWorkflowTests
             dialect,
             options: Options.Create(new GatewayOptions()),
             logger: NullLogger<GovernanceRepository>.Instance,
-            auditAnchorStore: new InMemoryAuditChainAnchorStore());
+            auditAnchorStore: new InMemoryAuditChainAnchorStore(),
+            grantWriter: new DirectConsentGrantWriter(new GrantRecordSqlCore(dialect)));
         repo.InitializeAudit();
 
         var rule = new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["status", "amount"], WriteRowScope.OwnRows, null, 40);
@@ -742,5 +747,19 @@ public sealed class WriteConsentWorkflowTests
         public override DateTime GetDateTime(int ordinal) => Convert.ToDateTime(rows[_index][ordinal]);
         public override int GetValues(object[] values) => 0;
         public override IEnumerator GetEnumerator() => rows.GetEnumerator();
+    }
+
+    private sealed class DirectConsentGrantWriter(IGrantRecordStore store) : IGrantWriter
+    {
+        public async Task<GrantRecord> InsertAndGrantAsync(DbTransaction transaction, Consent consent, GrantRecordInput input, CancellationToken ct = default)
+        {
+            await store.InsertConsentRowAsync(transaction, consent, 1L, ct).ConfigureAwait(false);
+            return new GrantRecord(input.TenantId, 1L, Guid.NewGuid(), GrantRecordType.Issued, consent.Id, input.RequestId, consent.GrantSource, consent.ProfileAssignmentId, input.GranteeType ?? "User", input.GranteeRef ?? "u", input.ObjectId ?? "t", input.ScopeJson, input.ValidFrom, input.ValidUntil, input.RequestedBy, input.DecisionJson, input.DecidedAt, input.DecidedAt, GrantRecordChain.GenesisHash);
+        }
+
+        public Task<GrantRecord> GrantAsync(DbTransaction transaction, Consent consent, GrantRecordInput input, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<GrantRecord> RevokeAsync(DbTransaction transaction, Consent consent, GrantRecordInput input, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<GrantRecord> RecordRejectionAsync(DbTransaction transaction, GrantRecordInput input, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<GrantRecord> RecordExpiryAsync(DbTransaction transaction, Consent? consent, GrantRecordInput input, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

@@ -677,9 +677,6 @@ public sealed class WriteGrantEvaluatorTests
         public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Consent>>([]);
 
-        public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default) =>
-            Task.CompletedTask;
-
         public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Consent>>([]);
 

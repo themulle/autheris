@@ -73,8 +73,6 @@ public sealed class ConsentAuditAnchorAckTests : IDisposable
     {
         await EnsureTableAsync();
         var consent = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Alice"));
-        // PERS-04: the extend needs its own active consent; the revoke below leaves Alice's consent revoked (not extendable).
-        var extendable = await _repo.CreateConsentAsync(UserConsent("S-1-5-21-Dave"));
 
         var adminAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
             new System.Security.Claims.ClaimsIdentity(
@@ -88,7 +86,6 @@ public sealed class ConsentAuditAnchorAckTests : IDisposable
         await Should.ThrowAsync<AuditUnavailableException>(() => _repo.CreateConsentAsync(UserConsent("S-1-5-21-Bob")));
         await Should.ThrowAsync<AuditUnavailableException>(() => _repo.RevokeConsentAsync(consent.Id, Admin, "test", adminAuth));
         await Should.ThrowAsync<AuditUnavailableException>(() => _repo.ReplaceConsentsAsync([], [UserConsent("S-1-5-21-Carl")], Admin, "apply", adminAuth));
-        await Should.ThrowAsync<AuditUnavailableException>(() => _repo.ExtendConsentExpiryAsync(extendable.Id, DateTimeOffset.UtcNow.AddDays(60)));
 
         // the chain stays linear and re-anchors once the store is back
         _anchors.FailSave = false;

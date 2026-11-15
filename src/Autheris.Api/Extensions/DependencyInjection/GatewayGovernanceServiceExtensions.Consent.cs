@@ -56,7 +56,7 @@ public static partial class GatewayGovernanceServiceExtensions
     private static void AddConsentRequests(IServiceCollection services)
     {
         services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantRecordStore>(sp =>
-            new GrantRecordSqlCore(sp.GetRequiredService<GovernanceRepository>()));
+            new GrantRecordSqlCore(sp.GetRequiredService<Autheris.Infrastructure.Persistence.Dialects.IGovernanceSqlDialect>()));
         services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantRecordSigner>(sp =>
             GrantRecordKeyStartupCheck.CreateSigner(
                 sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),

@@ -10,11 +10,4 @@ public interface IConsentRecertificationService
     Task<int> ScanAndTriggerExpiringConsentRecertificationsAsync(
         TimeSpan? warningWindow = null,
         CancellationToken ct = default);
-
-    Task<bool> ExtendConsentExpiryAsync(
-        Guid consentId,
-        TimeSpan extensionDuration,
-        Sid approverSid,
-        string justification,
-        CancellationToken ct = default);
 }

@@ -145,19 +145,6 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
     public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<Consent>>(_consents.Where(c => !c.IsRevoked && c.ValidTo <= threshold).ToList());
 
-    public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default)
-    {
-        // PERS-04: same rule as the providers.
-        var i = _consents.FindIndex(c => c.Id == consentId);
-        if (i < 0 || _consents[i].IsRevoked || _consents[i].ValidTo <= DateTimeOffset.UtcNow || newValidTo <= _consents[i].ValidTo)
-        {
-            throw new Autheris.Domain.Exceptions.ConsentNotExtendableException(consentId);
-        }
-
-        _consents[i] = Clone(_consents[i], revoked: false, validTo: newValidTo, renewalCountDelta: 1);
-        return Task.CompletedTask;
-    }
-
     public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<Consent>>([]);
 

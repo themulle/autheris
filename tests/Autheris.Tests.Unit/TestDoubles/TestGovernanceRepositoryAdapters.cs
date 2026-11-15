@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Model;
@@ -26,7 +27,8 @@ public class PostgreSqlGovernanceRepository : GovernanceRepository
         ICallerContextProvider callerContextProvider,
         ILogger<GovernanceRepository>? logger = null,
         IEventBus? eventBus = null,
-        IConsentMaterializationGuard? materializationGuard = null)
+        IConsentMaterializationGuard? materializationGuard = null,
+        IGrantWriter? grantWriter = null)
         : base(
             epochValidationService,
             options,
@@ -36,7 +38,8 @@ public class PostgreSqlGovernanceRepository : GovernanceRepository
             callerContextProvider,
             logger,
             eventBus,
-            materializationGuard)
+            materializationGuard,
+            grantWriter)
     {
     }
 
@@ -77,7 +80,8 @@ public class SqlServerGovernanceRepository : GovernanceRepository
         ICallerContextProvider callerContextProvider,
         ILogger<GovernanceRepository>? logger = null,
         IEventBus? eventBus = null,
-        IConsentMaterializationGuard? materializationGuard = null)
+        IConsentMaterializationGuard? materializationGuard = null,
+        IGrantWriter? grantWriter = null)
         : base(
             epochValidationService,
             options,
@@ -87,7 +91,8 @@ public class SqlServerGovernanceRepository : GovernanceRepository
             callerContextProvider,
             logger,
             eventBus,
-            materializationGuard)
+            materializationGuard,
+            grantWriter)
     {
     }
 
