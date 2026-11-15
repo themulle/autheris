@@ -75,7 +75,7 @@ public sealed class McpRowCapTests
             });
 
         var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .Returns(ci => new McpDatasetSample("a.b.c", producedRows,
                 Enumerable.Range(0, producedRows).Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i }).ToList()));
 
@@ -173,7 +173,7 @@ public sealed class McpRowCapTests
 
         root.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
         await f.Handler.DidNotReceiveWithAnyArgs().ExecuteToolAsync(default!, default!, default!, default);
-        await f.Catalog.DidNotReceiveWithAnyArgs().SampleRowsAsync(default!, default!, default, default, default);
+        await f.Catalog.DidNotReceiveWithAnyArgs().SampleRowsAsync(default!, default!, default, default);
     }
 
     [Fact]
@@ -225,7 +225,7 @@ public sealed class McpRowCapTests
 
         await RunAsync(f, "sample_rows", ArgsFor("sample_rows", "2"));
 
-        await f.Catalog.Received(1).SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "a.b.c", 2, Arg.Any<bool>(), Arg.Any<CancellationToken>());
+        await f.Catalog.Received(1).SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "a.b.c", 2, Arg.Any<CancellationToken>());
     }
 
     [Fact]

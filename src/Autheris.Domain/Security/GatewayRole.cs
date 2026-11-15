@@ -29,7 +29,10 @@ public enum GatewayRole
     // Caller attributes (BC-129-03, BC-129-13): approving data-granting changes and revealing attribute values are separate roles;
     // neither is implied by GovernanceAdmin or TenantAdmin, only by ClusterAdmin.
     CallerAttributeApprover = 32,
-    CallerAttributeInspector = 33
+    CallerAttributeInspector = 33,
+
+    // Discovery artifact ingestion: uploading or deleting pre-computed discovery artifacts for tables in the caller's tenant.
+    CatalogArtifactUploader = 34
 }
 
 public static class GatewayRoleExtensions
@@ -49,6 +52,7 @@ public static class GatewayRoleExtensions
         ["FilterSync"] = GatewayRole.FilterSync,
         ["CallerAttributeApprover"] = GatewayRole.CallerAttributeApprover,
         ["CallerAttributeInspector"] = GatewayRole.CallerAttributeInspector,
+        ["CatalogArtifactUploader"] = GatewayRole.CatalogArtifactUploader,
         ["Analyst"] = GatewayRole.Consumer
     };
 

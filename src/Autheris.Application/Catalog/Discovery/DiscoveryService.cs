@@ -54,13 +54,14 @@ public sealed class DiscoveryService : IDiscoveryService
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<DiscoveryService> _logger;
     private readonly IClassificationRepository? _classificationRepository;
+    private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
     private readonly Dictionary<ObjectMemoKey, DiscoveryObject> _objectMemo = [];
 
     private readonly record struct ScopeMemoKey(string Subject, string ClaimsHash, string Tenant, CatalogChannel Channel);
-    private readonly record struct ObjectMemoKey(ScopeMemoKey ScopeKey, TableIdentifier TableId, string LanguageKey);
+    private readonly record struct ObjectMemoKey(ScopeMemoKey ScopeKey, DiscoveryObjectKind Kind, TableIdentifier TableId, string LanguageKey);
     private sealed record ScopedCatalog(
         IReadOnlyList<TableMetadata> VisibleTables,
         IReadOnlySet<TableIdentifier> OwnedTables);
@@ -79,7 +80,8 @@ public sealed class DiscoveryService : IDiscoveryService
         ICatalogSearchEngine? searchEngine = null,
         TimeProvider? timeProvider = null,
         ILogger<DiscoveryService>? logger = null,
-        IClassificationRepository? classificationRepository = null)
+        IClassificationRepository? classificationRepository = null,
+        Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null)
     {
         ArgumentNullException.ThrowIfNull(gatewayOptions);
         _metadataRepository = metadataRepository;
@@ -96,6 +98,7 @@ public sealed class DiscoveryService : IDiscoveryService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<DiscoveryService>.Instance;
         _classificationRepository = classificationRepository;
+        _procedureCatalog = procedureCatalog;
     }
 
     public async ValueTask<DiscoveryPage> ListAsync(
@@ -146,19 +149,36 @@ public sealed class DiscoveryService : IDiscoveryService
                 filtered = filtered.Where(t => MatchesNonHiddenText(t, q));
             }
 
-            var matched = filtered.ToList();
+            var matchedTables = filtered.ToList();
+            var eligibleProcedures = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
+                .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, query.Domain, query.Schema, query.Tag, query.Search))
+                .ToList();
+
+            var totalCount = matchedTables.Count + eligibleProcedures.Count;
             var first = Math.Clamp(query.First <= 0 ? 50 : query.First, 1, MaxPageSize);
             var after = Math.Max(0, query.After);
-            var pageTables = matched.Skip(after).Take(first).ToList();
-            var hasNext = after + pageTables.Count < matched.Count;
 
-            var objects = await ResolveObjectsBatchAsync(
+            var pageTables = matchedTables.Skip(after).Take(first).ToList();
+            var remainingSlots = Math.Max(0, first - pageTables.Count);
+            var procSkip = Math.Max(0, after - matchedTables.Count);
+            var pageProcedures = remainingSlots > 0
+                ? eligibleProcedures.Skip(procSkip).Take(remainingSlots).ToList()
+                : [];
+            var hasNext = after + pageTables.Count + pageProcedures.Count < totalCount;
+
+            var tableObjects = await ResolveObjectsBatchAsync(
                 caller, sid, scopeKey, pageTables, query.Language, ct).ConfigureAwait(false);
+            var procObjects = await ResolveProceduresBatchAsync(
+                caller, sid, scopeKey, pageProcedures, ct).ConfigureAwait(false);
+
+            var objects = new List<DiscoveryObject>(tableObjects.Count + procObjects.Count);
+            objects.AddRange(tableObjects);
+            objects.AddRange(procObjects);
 
             await WriteDiscoveryAuditAsync(
                 caller.Tenant, sid, query.Surface, objects, queryText: query.Search, ct).ConfigureAwait(false);
 
-            return new DiscoveryPage(objects, matched.Count, hasNext);
+            return new DiscoveryPage(objects, totalCount, hasNext);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -209,6 +229,23 @@ public sealed class DiscoveryService : IDiscoveryService
 
             if (match is null)
             {
+                if (string.Equals(id.Schema, "procedure", StringComparison.OrdinalIgnoreCase))
+                {
+                    var matchedProc = (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
+                        .FirstOrDefault(p =>
+                            string.Equals(p.Procedure.Definition.CatalogDomain, id.Domain, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(p.Procedure.Definition.Name, id.TableName, StringComparison.OrdinalIgnoreCase));
+
+                    if (matchedProc is not null)
+                    {
+                        var procObjects = await ResolveProceduresBatchAsync(
+                            caller, sid, scopeKey, [matchedProc], ct).ConfigureAwait(false);
+                        await WriteDiscoveryAuditAsync(
+                            caller.Tenant, sid, DiscoverySurfaceOf(caller.Channel), procObjects, queryText: null, ct).ConfigureAwait(false);
+                        return procObjects.Count > 0 ? procObjects[0] : null;
+                    }
+                }
+
                 await WriteDiscoveryAuditAsync(
                     caller.Tenant, sid, DiscoverySurfaceOf(caller.Channel), [], queryText: null, ct).ConfigureAwait(false);
                 return null;
@@ -308,8 +345,22 @@ public sealed class DiscoveryService : IDiscoveryService
                 matchedTables = q.Take(limit).ToList();
             }
 
-            var objects = await ResolveObjectsBatchAsync(
+            var remainingForProcs = Math.Max(0, limit - matchedTables.Count);
+            var matchedProcedures = remainingForProcs > 0
+                ? (await LoadEligibleProceduresAsync(caller, scoped.VisibleTables, ct).ConfigureAwait(false))
+                    .Where(p => DiscoveryProcedureResolver.MatchesQuery(p.Procedure, options.Domain, schema: null, tag: null, trimmed))
+                    .Take(remainingForProcs)
+                    .ToList()
+                : [];
+
+            var tableObjects = await ResolveObjectsBatchAsync(
                 caller, sid, scopeKey, matchedTables, options.Language, ct).ConfigureAwait(false);
+            var procObjects = await ResolveProceduresBatchAsync(
+                caller, sid, scopeKey, matchedProcedures, ct).ConfigureAwait(false);
+
+            var objects = new List<DiscoveryObject>(tableObjects.Count + procObjects.Count);
+            objects.AddRange(tableObjects);
+            objects.AddRange(procObjects);
 
             await WriteDiscoveryAuditAsync(
                 caller.Tenant, sid, options.Surface == DiscoverySurface.Rest ? DiscoverySurface.Search : options.Surface, objects, trimmed, ct).ConfigureAwait(false);
@@ -333,6 +384,22 @@ public sealed class DiscoveryService : IDiscoveryService
             RecordFailure(ex, "Discovery SearchAsync failed closed.");
             return [];
         }
+    }
+
+    private async ValueTask<List<EligibleDiscoveryProcedure>> LoadEligibleProceduresAsync(
+        CatalogCaller caller,
+        IReadOnlyList<TableMetadata> visibleTables,
+        CancellationToken ct)
+    {
+        if (_procedureCatalog is null || visibleTables.Count == 0 || caller.Principal is not { } principal)
+        {
+            return [];
+        }
+
+        var visibleProcedures = await _procedureCatalog
+            .ListVisibleAsync(principal, caller.Tenant, ct)
+            .ConfigureAwait(false);
+        return DiscoveryProcedureResolver.FilterEligible(visibleProcedures, visibleTables);
     }
 
     private async Task<ScopedCatalog> LoadScopedCatalogAsync(
@@ -419,7 +486,7 @@ public sealed class DiscoveryService : IDiscoveryService
         {
             for (var i = 0; i < tables.Count; i++)
             {
-                var objKey = new ObjectMemoKey(scopeKey, tables[i].Identifier, langKey);
+                var objKey = new ObjectMemoKey(scopeKey, DiscoveryObjectKind.Table, tables[i].Identifier, langKey);
                 if (_objectMemo.TryGetValue(objKey, out var cached))
                 {
                     results[i] = cached;
@@ -480,7 +547,6 @@ public sealed class DiscoveryService : IDiscoveryService
         var defs = _classificationRepository is null
             ? ClassificationAccessResolver.BuiltInCatalog(caller.Tenant.Value).Definitions
             : ClassificationHierarchyValidator.ResolveEffective(await _classificationRepository.GetClassificationsAsync(caller.Tenant.Value, includeInactive: true, ct).ConfigureAwait(false), caller.Tenant.Value);
-        var maxSampleRows = Math.Clamp(_discoveryOptions.Discovery.MaxSampleRows, 1, CatalogDiscoverySettings.HardMaxSampleRows);
 
         for (var i = 0; i < uncached.Count; i++)
         {
@@ -507,7 +573,74 @@ public sealed class DiscoveryService : IDiscoveryService
             results[targetIdx] = mapped;
             lock (_memoLock)
             {
-                _objectMemo[new ObjectMemoKey(scopeKey, table.Identifier, langKey)] = mapped;
+                _objectMemo[new ObjectMemoKey(scopeKey, DiscoveryObjectKind.Table, table.Identifier, langKey)] = mapped;
+            }
+        }
+
+        return results.Where(static r => r is not null).Select(static r => r!).ToList();
+    }
+
+    private async Task<IReadOnlyList<DiscoveryObject>> ResolveProceduresBatchAsync(
+        CatalogCaller caller,
+        Sid sid,
+        ScopeMemoKey scopeKey,
+        IReadOnlyList<EligibleDiscoveryProcedure> items,
+        CancellationToken ct)
+    {
+        if (items.Count == 0)
+        {
+            return [];
+        }
+
+        var results = new DiscoveryObject?[items.Count];
+        var uncached = new List<(int Index, EligibleDiscoveryProcedure Item)>(items.Count);
+
+        lock (_memoLock)
+        {
+            for (var i = 0; i < items.Count; i++)
+            {
+                var def = items[i].Procedure.Definition;
+                var procId = new TableIdentifier(def.CatalogDomain, "procedure", def.Name);
+                var objKey = new ObjectMemoKey(scopeKey, DiscoveryObjectKind.Procedure, procId, string.Empty);
+                if (_objectMemo.TryGetValue(objKey, out var cached))
+                {
+                    results[i] = cached;
+                }
+                else
+                {
+                    uncached.Add((i, items[i]));
+                }
+            }
+        }
+
+        if (uncached.Count == 0)
+        {
+            return results.Where(static r => r is not null).Select(static r => r!).ToList();
+        }
+
+        var pendingTask = LoadPendingRequestTablesAsync(sid, ct);
+        var expiredTask = LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct);
+        await Task.WhenAll(pendingTask, expiredTask).ConfigureAwait(false);
+
+        var subject = SecurityPrincipalContext.FromPrincipal(caller.Principal!, caller.Tenant);
+        var resolved = await DiscoveryProcedureResolver.ResolveBatchAsync(
+            _decisionPoint!,
+            _ownershipRepository,
+            subject,
+            uncached.Select(static x => x.Item).ToList(),
+            await pendingTask.ConfigureAwait(false),
+            await expiredTask.ConfigureAwait(false),
+            ct).ConfigureAwait(false);
+
+        lock (_memoLock)
+        {
+            for (var i = 0; i < uncached.Count; i++)
+            {
+                var (targetIdx, item) = uncached[i];
+                var mapped = resolved[i];
+                results[targetIdx] = mapped;
+                var procId = new TableIdentifier(item.Procedure.Definition.CatalogDomain, "procedure", item.Procedure.Definition.Name);
+                _objectMemo[new ObjectMemoKey(scopeKey, DiscoveryObjectKind.Procedure, procId, string.Empty)] = mapped;
             }
         }
 

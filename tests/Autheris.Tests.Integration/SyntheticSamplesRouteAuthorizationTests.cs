@@ -41,32 +41,48 @@ public sealed class SyntheticSamplesRouteAuthorizationTests : IClassFixture<Synt
     }
 
     [Theory]
-    [InlineData("/api/catalog/datasets/{id}/synthetic-samples")]
-    public void GetSyntheticSamples_RequiresGovernanceAdminPolicy(string pattern)
+    [InlineData("/api/v1/catalog/datasets/{id}/discovery-artifacts", "PUT")]
+    [InlineData("/api/v1/catalog/datasets/{id}/discovery-artifacts", "DELETE")]
+    public void DiscoveryArtifactMutation_RequiresCatalogArtifactUploaderPolicy(string pattern, string method)
     {
-        // Creating a client starts the host so that all endpoint data sources are registered.
         using var client = _factory.CreateClient();
         var endpoints = _factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>();
 
         var matches = endpoints
             .Where(e => string.Equals(e.RoutePattern.RawText, pattern, StringComparison.OrdinalIgnoreCase) &&
-                        (e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains("GET", StringComparer.OrdinalIgnoreCase) ?? false))
+                        (e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(method, StringComparer.OrdinalIgnoreCase) ?? false))
             .ToList();
 
         matches.ShouldNotBeEmpty();
-        matches.ShouldAllBe(e => e.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(a => a.Policy == GatewayPolicies.GovernanceAdmin));
+        matches.ShouldAllBe(e => e.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(a => a.Policy == GatewayPolicies.CatalogArtifactUploader));
     }
 
     [Fact]
-    public async Task GetSyntheticSamples_NonAdmin_IsForbidden()
+    public async Task DiscoveryArtifactPut_NonUploader_IsForbidden()
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-USER");
         client.DefaultRequestHeaders.Add("X-Test-Roles", "AiAgent");
         client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-default");
 
-        var response = await client.GetAsync("/api/catalog/datasets/sales.public.orders/synthetic-samples");
+        using var content = new StringContent("""{"schemaVersion":1,"samples":[],"statistics":{}}""", System.Text.Encoding.UTF8, "application/json");
+        var response = await client.PutAsync("/api/v1/catalog/datasets/sales.public.orders/discovery-artifacts", content);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Theory]
+    [InlineData("/api/catalog/datasets/sales.public.orders/synthetic-samples")]
+    [InlineData("/api/v1/catalog/datasets/sales.public.orders/synthetic-samples")]
+    public async Task LegacySyntheticSamplesRoutes_AreRemoved(string route)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-default");
+
+        var response = await client.GetAsync(route);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 }

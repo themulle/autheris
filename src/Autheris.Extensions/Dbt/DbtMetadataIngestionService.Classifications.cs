@@ -11,14 +11,13 @@ using Autheris.Domain.Model;
 public sealed partial class DbtMetadataIngestionService
 {
     private readonly IClassificationRepository? _classificationRepository;
-    private readonly TimeProvider _timeProvider = TimeProvider.System;
 
-    private async Task SyncColumnClassificationsAsync(IReadOnlyList<(TableMetadata Metadata, IReadOnlyList<string> Tags)> pendingModelUpdates, List<string> warnings, CancellationToken ct)
+    private async Task SyncColumnClassificationsAsync(IReadOnlyList<TableMetadata> tables, List<string> warnings, CancellationToken ct)
     {
-        if (_classificationRepository is null || pendingModelUpdates.Count == 0) return;
+        if (_classificationRepository is null || tables.Count == 0) return;
         var activeCodes = await IngestionClassificationMapper.LoadActiveCodesAsync(_classificationRepository, ct).ConfigureAwait(false);
         var now = _timeProvider.GetUtcNow();
-        foreach (var (metadata, _) in pendingModelUpdates)
+        foreach (var metadata in tables)
         {
             foreach (var col in metadata.Columns)
             {

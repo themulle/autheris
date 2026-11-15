@@ -14,13 +14,12 @@ src/Autheris.Api/Endpoints/CatalogApiEndpoints.External.cs|/changes
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.External.cs|/external.json
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.External.cs|/objects
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.External.cs|/objects/{id}
-src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/api/catalog/datasets/{id}/synthetic-samples
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/api/governance/principals
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{*datasetId}
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{id}/catalog-settings
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{id}/row-filter-strategy
-src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{id}/synthetic-samples
+src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasets/{id}/samples
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/datasources
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/domains
 src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/search

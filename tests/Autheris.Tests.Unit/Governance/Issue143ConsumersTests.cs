@@ -230,13 +230,9 @@ public sealed class Issue143ConsumersTests
 
         Json(restricted).ShouldNotContain("SENTINEL_");
 
-        var sample = await catalog.SampleRowsAsync(WithScopes(Restricted), "sales.public.orders", count: 3, synthetic: true);
-        Json(sample).ShouldNotContain("SENTINEL_");
-
-        // Positive control (a plain column of the same shape shows its values), so the assertions above are not vacuous. A catalog-sensitive
-        // column never carries values in describe_dataset (profile service), the scope restriction only adds the data-path level on top.
+        // Positive control: raw meta accepted_values is stripped unconditionally on legacy MCP describe_dataset.
         var plain = await CreateCatalog(CreateTable(), BaseClear()).DescribeDatasetAsync(WithScopes(Restricted), "sales.public.orders");
-        Json(plain).ShouldContain(SentinelOne);
+        Json(plain).ShouldNotContain("SENTINEL_");
     }
 
     // ---------------------------------------------------------------- parity (unit seams; AC-7, T-GOV143-17)

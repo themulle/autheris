@@ -271,8 +271,14 @@ internal sealed class FakeDiscoveryArtifactStore : IDiscoveryArtifactStore
         return Task.FromResult(Artifacts.TryGetValue(tableId, out var a) ? a : null);
     }
 
-    public Task<bool> UpsertAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default) => throw new NotSupportedException();
-    public Task<bool> DeleteAsync(Guid tableId, Sid actor, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<bool> UpsertAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
+    {
+        Artifacts[artifacts.TableId] = artifacts;
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> DeleteAsync(Guid tableId, Sid actor, CancellationToken ct = default)
+        => Task.FromResult(Artifacts.Remove(tableId));
 }
 
 internal sealed class FakeAuditWriter : IAuditWriter

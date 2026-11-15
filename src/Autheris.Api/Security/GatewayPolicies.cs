@@ -42,6 +42,7 @@ public static class GatewayPolicies
     public const string ConsentDecide = "ConsentDecide";
     public const string GrantRevoke = "GrantRevoke";
     public const string GrantVerify = "GrantVerify";
+    public const string CatalogArtifactUploader = "CatalogArtifactUploader";
 
     /// <summary>
     /// Security review: SCIM provisioning endpoints. Authenticates only with the SCIM secret scheme and requires the
@@ -65,6 +66,7 @@ public static class GatewayPolicies
     public static readonly string[] McpCallerRoles = ["AiAgent", "McpCaller", "Developer", "Consumer", "DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
     public static readonly string[] UsageAdminRoles = ["TenantAdmin", "ClusterAdmin"];
     public static readonly string[] ScimProvisionerRoles = [ScimProvisionerRole];
+    public static readonly string[] CatalogArtifactUploaderRoles = ["CatalogArtifactUploader", "GovernanceAdmin", "ClusterAdmin"];
 
     /// <summary>
     /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRole requirements,
@@ -152,6 +154,20 @@ public static class GatewayPolicies
             .RequireAuthenticatedUser()
             .RequireAssertion(ctx => ExternalApiPermissions.AllowsGrantVerify(ctx.User)));
 
+        options.AddPolicy(CatalogArtifactUploader, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx =>
+            {
+                var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(ctx.User);
+                if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+                {
+                    return false;
+                }
+
+                var tenantId = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null;
+                return Evaluator.HasRole(ctx.User, GatewayRole.CatalogArtifactUploader, tenantId);
+            }));
+
         // Security review: previously RequireAuthorization(GatewayAuthSchemes.Scim) referenced a non-existent policy.
         // Only an identity issued by the SCIM scheme carrying the provisioner role is accepted, so a user token with a
         // forged or mapped "SCIM_PROVISIONER" role from another scheme does not satisfy it.
@@ -207,6 +223,7 @@ public static class GatewayPolicies
             McpCaller => McpCallerRoles,
             UsageAdmin => UsageAdminRoles,
             Scim => ScimProvisionerRoles,
+            CatalogArtifactUploader => CatalogArtifactUploaderRoles,
             _ => []
         };
         return roles.Length > 0;

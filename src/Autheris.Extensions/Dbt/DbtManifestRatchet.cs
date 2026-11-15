@@ -205,29 +205,6 @@ internal static class DbtManifestRatchet
         return result;
     }
 
-    public static IReadOnlyList<IReadOnlyDictionary<string, object?>> MergeSyntheticSamples(
-        TableIdentifier tableId,
-        IReadOnlyList<IReadOnlyDictionary<string, object?>>? stored,
-        IReadOnlyList<IReadOnlyDictionary<string, object?>>? incoming,
-        List<DbtSuppressedRelaxation> suppressedRelaxations,
-        ILogger? logger)
-    {
-        if (stored != null && stored.Count > 0)
-        {
-            if (incoming != null && incoming.Count > 0)
-            {
-                logger?.LogWarning("Table {Table}: manifest sync attempted to replace PredefinedSyntheticSamples; stored samples preserved.", tableId);
-                suppressedRelaxations.Add(new DbtSuppressedRelaxation(
-                    tableId,
-                    "predefined_synthetic_samples",
-                    "Stored predefined synthetic samples cannot be replaced via manifest sync."));
-            }
-            return stored;
-        }
-
-        return incoming ?? Array.Empty<IReadOnlyDictionary<string, object?>>();
-    }
-
     private static bool IsPii(IReadOnlyDictionary<string, string>? meta)
     {
         if (meta == null) return false;

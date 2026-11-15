@@ -64,4 +64,36 @@ public sealed class DiscoveryArchitectureTests
             }
         }
     }
+
+    [Fact]
+    public void NoProfileOrSampleGeneratorTypesExist()
+    {
+        var assemblies = new[]
+        {
+            typeof(Autheris.Domain.Model.Table).Assembly,
+            typeof(Autheris.Application.Catalog.Discovery.DiscoveryService).Assembly,
+            typeof(Autheris.Api.Errors.ApiErrorCodes).Assembly,
+            typeof(Autheris.GraphQL.Types.Query).Assembly,
+            typeof(Autheris.Extensions.Dbt.DbtArtifactStreamingParser).Assembly
+        };
+
+        var forbidden = new[]
+        {
+            "SyntheticSampleRowGenerator",
+            "ColumnValueProfileService",
+            "IColumnValueProfileService",
+            "ISyntheticSampleRowGenerator",
+            "ComputeDatasetProfileHttpRequest"
+        };
+
+        var existingNames = assemblies
+            .SelectMany(static a => a.GetTypes())
+            .Select(static t => t.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var typeName in forbidden)
+        {
+            existingNames.Contains(typeName).ShouldBeFalse($"Removed type '{typeName}' must not exist in production assemblies.");
+        }
+    }
 }

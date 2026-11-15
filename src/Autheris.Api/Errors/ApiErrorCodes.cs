@@ -139,6 +139,7 @@ public static class ApiErrorCodes
     public const string GrantAlreadyEnded = "GRANT_ALREADY_ENDED";
     public const string RateLimited = "RATE_LIMITED";
     public const string DecisionExceedsRequest = "DECISION_EXCEEDS_REQUEST";
+    public const string InvalidArtifact = "INVALID_ARTIFACT";
 
     private static readonly Regex CodeFormat = new("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 

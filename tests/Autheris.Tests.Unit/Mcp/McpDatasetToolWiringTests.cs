@@ -303,7 +303,7 @@ public sealed class McpDatasetToolWiringTests
     {
         var catalog = Substitute.For<IMcpDatasetCatalog>();
         ClaimsPrincipal? caller = null;
-        catalog.SampleRowsAsync(Arg.Do<ClaimsPrincipal>(p => caller = p), "sales.public.orders", 3, false, Arg.Any<CancellationToken>())
+        catalog.SampleRowsAsync(Arg.Do<ClaimsPrincipal>(p => caller = p), "sales.public.orders", 3, Arg.Any<CancellationToken>())
             .Returns(new McpDatasetSample("sales.public.orders", 0, []));
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders","count":3}""", Session());
@@ -316,37 +316,23 @@ public sealed class McpDatasetToolWiringTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task SampleRows_SyntheticTrue_CallsSyntheticPath_NoTableQuery()
+    public async Task SampleRows_NoSyntheticArgument_ExecutesGovernedReadOnly()
     {
-        // MCP-06: the synthetic flag reaches the catalog; the real-row overload is never used.
+        var tool = Tool("sample_rows");
+        tool.InputJsonSchema.Contains("\"synthetic\"", StringComparison.OrdinalIgnoreCase).ShouldBeFalse();
+
         var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", 3, true, Arg.Any<CancellationToken>())
-            .Returns(new McpDatasetSample("sales.public.orders", 0, [], IsSynthetic: true));
+        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", 3, Arg.Any<CancellationToken>())
+            .Returns(new McpDatasetSample("sales.public.orders", 0, [], IsSynthetic: false));
         var gateway = Substitute.For<IGatewayExecutionService>();
         var executor = new GatewayMcpQueryExecutor(
             Substitute.For<IRequestExecutorProvider>(), gateway, NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), datasetCatalog: catalog, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
-        var json = await executor.ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders","count":3,"synthetic":true}""", Session());
+        var json = await executor.ExecuteOperationAsync(tool, """{"dataset":"sales.public.orders","count":3}""", Session());
 
-        json.ShouldContain("\"isSynthetic\":true");
-        await catalog.Received(1).SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", 3, true, Arg.Any<CancellationToken>());
-        await catalog.DidNotReceive().SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>());
+        json.ShouldContain("\"isSynthetic\":false");
+        await catalog.Received(1).SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), "sales.public.orders", 3, Arg.Any<CancellationToken>());
         gateway.ReceivedCalls().ShouldBeEmpty();
-    }
-
-    [Theory]
-    [Trait("Category", "Security")]
-    [InlineData("""{"dataset":"sales.public.orders","synthetic":"true"}""")]
-    [InlineData("""{"dataset":"sales.public.orders","synthetic":1}""")]
-    public async Task SampleRows_SyntheticNonBoolean_InvalidParams(string args)
-    {
-        // MCP-06: a non-boolean synthetic flag is rejected and never falls back to real rows.
-        var catalog = Substitute.For<IMcpDatasetCatalog>();
-
-        var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), args, Session());
-
-        json.ShouldContain(McpErrorCodes.InvalidParams);
-        catalog.ReceivedCalls().ShouldBeEmpty();
     }
 
     [Fact]
@@ -407,7 +393,7 @@ public sealed class McpDatasetToolWiringTests
     public async Task Executor_InvalidDatasetId_IsAnInvalidParamsError()
     {
         var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .Returns<McpDatasetSample>(_ => throw new ArgumentException("The dataset id must have the form 'domain.schema.table'."));
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"orders"}""", Session());
@@ -420,7 +406,7 @@ public sealed class McpDatasetToolWiringTests
     public async Task Executor_DeniedRead_IsForbidden()
     {
         var catalog = Substitute.For<IMcpDatasetCatalog>();
-        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+        catalog.SampleRowsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>())
             .Returns<McpDatasetSample>(_ => throw new GatewayForbiddenException());
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders"}""", Session());

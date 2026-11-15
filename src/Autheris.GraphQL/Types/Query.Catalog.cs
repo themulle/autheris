@@ -316,6 +316,69 @@ public sealed partial class Query
         }
     }
 
+    public async Task<CatalogSamplesPayload> GetCatalogSamplesAsync(
+        string domain,
+        string schema,
+        string name,
+        int? limit = null,
+        [Service] IDiscoveryArtifactService? artifactService = null,
+        [Service] IHttpContextAccessor httpContextAccessor = default!,
+        CancellationToken ct = default)
+    {
+        if (!TableIdentifier.TryCreate(domain, schema, name, out var tableId))
+        {
+            throw InvalidTableArgument();
+        }
+
+        var httpContext = httpContextAccessor?.HttpContext;
+        var principal = httpContext?.User;
+        if (principal?.Identity?.IsAuthenticated != true || principal.GetUserSid() == null)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage("Authentication is required for catalog queries.")
+                .Build());
+        }
+
+        if (artifactService == null)
+        {
+            return new CatalogSamplesPayload { Available = false, Samples = [] };
+        }
+
+        var read = await artifactService.GetSamplesAsync(
+            principal,
+            tableId.ToString(),
+            limit,
+            DiscoverySurface.GraphQl,
+            ct).ConfigureAwait(false);
+
+        switch (read.Outcome)
+        {
+            case DiscoveryArtifactOutcome.Unauthenticated:
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode(read.ErrorCode ?? "UNAUTHORIZED")
+                    .SetMessage(read.Message ?? "Authentication is required.")
+                    .Build());
+            case DiscoveryArtifactOutcome.Forbidden:
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode(read.ErrorCode ?? "DISCOVERY_NOT_PERMITTED")
+                    .SetMessage(read.Message ?? "Catalog discovery is not permitted.")
+                    .Build());
+            case DiscoveryArtifactOutcome.Unavailable:
+                throw new GraphQLException(ErrorBuilder.New()
+                    .SetCode(read.ErrorCode ?? "SERVICE_UNAVAILABLE")
+                    .SetMessage(read.Message ?? "Catalog discovery is temporarily unavailable.")
+                    .Build());
+            default:
+                var payload = read.Payload ?? new DiscoverySamplesResponse(Available: false, Samples: []);
+                return new CatalogSamplesPayload
+                {
+                    Available = payload.Available,
+                    Samples = payload.Samples.Select(r => System.Text.Json.JsonSerializer.Serialize(r)).ToList()
+                };
+        }
+    }
+
     private static GraphQLException MapDiscoveryGraphQlError(DiscoveryStatusException ex)
     {
         var code = ex.Kind switch

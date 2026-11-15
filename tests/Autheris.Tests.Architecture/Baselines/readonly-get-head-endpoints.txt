@@ -7,7 +7,6 @@
 /api/auth/login|GET|no side effect: returns authenticated principal claims snapshot
 /api/auth/session|GET|no side effect: returns effective request session identity
 /api/catalog/datasets/{id}/catalog-settings|GET|no side effect: reads dataset catalog settings
-/api/catalog/datasets/{id}/synthetic-samples|GET|no side effect: reads dataset synthetic sample rows
 /api/dev/info|GET|no side effect: reads Development diagnostic configuration summary
 /api/dev/personas|GET|no side effect: lists Development login personas without signing in
 /api/extensions/dbt/exposures|GET|no side effect: lists dbt exposures metadata
@@ -40,7 +39,7 @@
 /api/v1/catalog/datasets/{dataset}/sample-rows|GET|no side effect: reads governed sample rows for dataset
 /api/v1/catalog/datasets/{id}/catalog-settings|GET|no side effect: reads dataset catalog settings
 /api/v1/catalog/datasets/{id}/row-filter-strategy|GET|no side effect: reads dataset row filter strategy
-/api/v1/catalog/datasets/{id}/synthetic-samples|GET|no side effect: reads dataset synthetic sample rows
+/api/v1/catalog/datasets/{id}/samples|GET|no side effect: reads uploaded non-sensitive discovery sample rows
 /api/v1/catalog/datasets|GET|no side effect: lists catalog datasets
 /api/v1/catalog/datasources|GET|no side effect: lists catalog datasources
 /api/v1/catalog/domains|GET|no side effect: lists catalog domains

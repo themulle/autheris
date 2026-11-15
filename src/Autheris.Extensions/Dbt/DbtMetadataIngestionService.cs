@@ -34,7 +34,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly ITableRelationRepository? _relationRepository;
     private readonly VirtualFilterAdministrationService? _virtualFilterAdmin;
     private readonly Autheris.Application.Governance.Interfaces.IDatasetTagImportService? _tagImport;
-    private readonly Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? _syntheticRowGenerator;
+    private readonly Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? _artifactStore;
+    private readonly Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? _discoveryOptions;
+    private readonly TimeProvider _timeProvider = TimeProvider.System;
     private readonly IDbtTestTargetMap? _testTargetMap;
     private readonly IDataOwnerAssignmentRepository? _ownerAssignments;
     private readonly IAuditLogRepository? _auditLog;
@@ -159,9 +161,9 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? artifactStore,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, syntheticRowGenerator, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, artifactStore, null, logger)
     {
     }
 
@@ -175,10 +177,10 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? artifactStore,
         IDbtTestTargetMap? testTargetMap,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, tagImport, artifactStore, testTargetMap, null, logger)
     {
     }
 
@@ -374,7 +376,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
         }
 
-        var pendingModelUpdates = new List<(TableMetadata Metadata, IReadOnlyList<string> Tags)>();
+        var pendingModelUpdates = new List<(TableMetadata Metadata, IReadOnlyList<string> Tags, IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples)>();
         foreach (var model in models)
         {
             ct.ThrowIfCancellationRequested();
@@ -651,13 +653,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         });
                     }
 
-                    var mergedSamples = DbtManifestRatchet.MergeSyntheticSamples(
-                        existingMeta.Identifier,
-                        existingMeta.PredefinedSyntheticSamples,
-                        model.SyntheticSamples,
-                        suppressedRelaxations,
-                        _logger);
-
                     var updatedMetadata = new TableMetadata
                     {
                         Table = updatedTableObj,
@@ -667,7 +662,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         PrimaryKeyColumns = existingMeta.PrimaryKeyColumns,
                         PrimaryKeyDirections = existingMeta.PrimaryKeyDirections,
                         Indexes = existingMeta.Indexes,
-                        PredefinedSyntheticSamples = mergedSamples,
                         MinGroupSize = existingMeta.MinGroupSize,
                         NonPersonal = existingMeta.NonPersonal,
                         SmallGroupStrategy = existingMeta.SmallGroupStrategy,
@@ -683,12 +677,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
                     if (!dryRun)
                     {
-                        if (mergedSamples != null)
-                        {
-                            _syntheticRowGenerator?.RegisterSyntheticSamples(updatedMetadata.Identifier, mergedSamples);
-                        }
-
-                        pendingModelUpdates.Add((updatedMetadata, model.Tags));
+                        pendingModelUpdates.Add((updatedMetadata, model.Tags, model.SyntheticSamples));
                     }
                 }
             }

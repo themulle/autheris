@@ -47,7 +47,7 @@ public sealed class SemanticManifestImportTests
     {
         var options = SemanticCatalogTestKit.Mode(mode);
         catalog ??= new InMemorySemanticCatalog(options);
-        var repository = Substitute.For<ITableMetadataRepository>();
+        var repository = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         var orders = SemanticManifestValidatorTests.Orders();
         repository.GetTableMetadataAsync(orders.Identifier, Arg.Any<CancellationToken>()).Returns(orders);
         repository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([orders]);
@@ -168,7 +168,7 @@ public sealed class SemanticManifestImportTests
         await rig.Service.ParseAndIngestAsync(Manifest("status = 'x'"), TenantA);
         var virtualTable = rig.Upserts.Single();
         // Only the tenant's own virtual table is in the repository now; a second import must not resolve it as the base table.
-        var onlyVirtual = Substitute.For<ITableMetadataRepository>();
+        var onlyVirtual = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         onlyVirtual.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([virtualTable]);
         var resolver = new SemanticBaseTableResolver(onlyVirtual);
 

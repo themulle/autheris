@@ -29,13 +29,12 @@ public sealed class CatalogVisibilityTierTests
     private static readonly TableIdentifier Other = new("crm", "public", "other_t");
     private static readonly string[] SharedList = ["shared.public.catalog_t"];
 
-    private static TableMetadata Table(TableIdentifier id, DatasetVisibility visibility, bool releaseProfile = false, IReadOnlyDictionary<string, MaskingRule>? masking = null) => new()
+    private static TableMetadata Table(TableIdentifier id, DatasetVisibility visibility, IReadOnlyDictionary<string, MaskingRule>? masking = null) => new()
     {
         Identifier = id,
         Table = new Table { SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, DisplayName = id.TableName, Visibility = visibility },
         Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "secret_col", DataType = "varchar" }],
-        ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>(),
-        ReleaseProfileToCatalogViewers = releaseProfile
+        ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
     };
 
     private static Consent Allow(TableIdentifier id, string tenant = TenantA, ConsentEffect effect = ConsentEffect.Allow) => new()
@@ -106,9 +105,9 @@ public sealed class CatalogVisibilityTierTests
     }
 
     [Fact]
-    public void Discovery_Summary_IgnoresReleaseProfileToCatalogViewers()
+    public void Discovery_Summary_HasNoColumns()
     {
-        var visible = Filter([Table(Shared, DatasetVisibility.Summary, releaseProfile: true)], shared: SharedList);
+        var visible = Filter([Table(Shared, DatasetVisibility.Summary)], shared: SharedList);
 
         visible.ShouldHaveSingleItem().Columns.ShouldBeEmpty();
     }

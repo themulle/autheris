@@ -235,7 +235,7 @@ public sealed class DbtSyncCatalogEventCountTests
             relationRepository: null,
             virtualFilterAdmin: null,
             tagImport: null,
-            syntheticRowGenerator: null,
+            artifactStore: null,
             testTargetMap: null,
             logger: NullLogger<DbtMetadataIngestionService>.Instance,
             auditLog: new NullAuditLogRepository(),

@@ -184,22 +184,19 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        // Predefined Synthetic Samples
-        group.MapPut("/datasets/{id}/synthetic-samples", SetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        // Discovery Artifacts (samples + column/table statistics)
+        group.MapPut("/datasets/{id}/discovery-artifacts", PutDiscoveryArtifactsHandler)
+        .WithRequestBodyLimit(Autheris.Application.Catalog.Services.CatalogDiscoverySettings.HardMaxArtifactBytes)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Delegated, AuditEventTypes.CatalogDiscoveryArtifactsChanged);
 
-        app.MapPut("/api/catalog/datasets/{id}/synthetic-samples", SetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        group.MapDelete("/datasets/{id}/discovery-artifacts", DeleteDiscoveryArtifactsHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Delegated, AuditEventTypes.CatalogDiscoveryArtifactsChanged);
 
-        group.MapGet("/datasets/{id}/synthetic-samples", GetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-
-        app.MapGet("/api/catalog/datasets/{id}/synthetic-samples", GetDatasetSyntheticSamplesHandler)
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        group.MapGet("/datasets/{id}/samples", GetDiscoverySamplesHandler)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Delegated, AuditEventTypes.MetadataSampleRead);
 
         // Issue #111: dataset tags and catalog visibility tier. RequireAuthorization() only: owners must reach the routes, so the
         // decision (admin class, owner or delegate, Full only for administrators) is taken inside DatasetCatalogAdminService.
@@ -642,101 +639,115 @@ public static partial class CatalogApiEndpoints
         });
     }
 
-    internal static async Task<IResult> SetDatasetSyntheticSamplesHandler(
+    internal static async Task<IResult> PutDiscoveryArtifactsHandler(
         string id,
-        System.Collections.Generic.IReadOnlyList<System.Collections.Generic.Dictionary<string, object?>>? request,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService artifactService,
+        [Microsoft.AspNetCore.Mvc.FromServices] Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions,
         HttpContext httpContext,
         CancellationToken ct)
     {
-        var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
-        if (tableId is null)
+        var configuredMax = discoveryOptions?.Value.Discovery.MaxArtifactBytes ?? Autheris.Application.Catalog.Services.CatalogDiscoverySettings.HardMaxArtifactBytes;
+        var hardCap = Math.Clamp(configuredMax, 1L, Autheris.Application.Catalog.Services.CatalogDiscoverySettings.HardMaxArtifactBytes);
+        var (rawBytes, limitExceeded) = await ReadBoundedBodyAsync(httpContext.Request.Body, hardCap, ct).ConfigureAwait(false);
+        if (limitExceeded)
         {
-            return DatasetKeysNotFound();
+            return ApiProblems.BadRequest(
+                ApiErrorCodes.InvalidArtifact,
+                $"Artifact payload exceeds the configured limit of {hardCap} bytes.",
+                httpContext,
+                new Dictionary<string, object?> { ["violation"] = "BODY_TOO_LARGE" });
         }
 
-        var samples = request != null
-            ? System.Linq.Enumerable.ToList(request.Select(r => (System.Collections.Generic.IReadOnlyDictionary<string, object?>)r))
-            : (System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>>)System.Array.Empty<System.Collections.Generic.IReadOnlyDictionary<string, object?>>();
-
-        if (samples.Count > Autheris.Application.Catalog.Profiling.SyntheticSampleRowGenerator.MaxPredefinedSampleRows)
-        {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The number of synthetic sample rows exceeds the allowed maximum.", httpContext);
-        }
-
-        generator.RegisterSyntheticSamples(tableId.Value, samples);
-
-        var existingMeta = await metadataRepository.GetTableMetadataAsync(tableId.Value, ct).ConfigureAwait(false);
-        if (existingMeta != null)
-        {
-            await metadataRepository.UpsertTableMetadataAsync(existingMeta with
-            {
-                PredefinedSyntheticSamples = samples
-            }, ct).ConfigureAwait(false);
-        }
-
-        return Results.Ok(new { dataset = id, registeredRows = samples.Count });
+        var result = await artifactService.UpsertAsync(httpContext.User, id, rawBytes, source: "rest", ct).ConfigureAwait(false);
+        return MapArtifactWriteResult(result, httpContext);
     }
 
-    /// <summary>
-    /// MCP-01: curation counterpart of the PUT. Governance administrators only; the dataset is resolved through the
-    /// visibility service (tenant confinement, tier) and rows are projected onto the table's own columns.
-    /// Invisible, other-tenant and unknown datasets answer identically.
-    /// </summary>
-    internal static async Task<IResult> GetDatasetSyntheticSamplesHandler(
+    internal static async Task<IResult> DeleteDiscoveryArtifactsHandler(
         string id,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
-        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator generator,
-        [Microsoft.AspNetCore.Mvc.FromServices] ICatalogVisibilityService visibility,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService artifactService,
         HttpContext httpContext,
         CancellationToken ct)
     {
-        var tableId = await ResolveActiveDatasetAsync(id, metadataRepository, ct).ConfigureAwait(false);
-        if (tableId is null)
-        {
-            return DatasetKeysNotFound();
-        }
-
-        var caller = new CatalogCaller(httpContext.User, EndpointSecurity.GetRequestTenant(httpContext), CatalogChannel.Rest);
-        var visible = await visibility.FindVisibleAsync(caller, tableId.Value, ct).ConfigureAwait(false);
-        if (visible is not { } row)
-        {
-            return DatasetKeysNotFound();
-        }
-
-        var table = row.Table;
-        var samples = table.PredefinedSyntheticSamples is { Count: > 0 } p
-            ? p
-            : generator.GetRegisteredSyntheticSamples(tableId.Value) ?? (System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>>)System.Array.Empty<System.Collections.Generic.IReadOnlyDictionary<string, object?>>();
-
-        var projected = ProjectSamplesOntoColumns(samples, table);
-        return Results.Ok(new { dataset = id, count = projected.Count, rows = projected });
+        var result = await artifactService.DeleteAsync(httpContext.User, id, source: "rest", ct).ConfigureAwait(false);
+        return MapArtifactWriteResult(result, httpContext);
     }
 
-    /// <summary>Keeps only keys that are columns of the table (case-insensitive), so a sample can never carry foreign fields.</summary>
-    private static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>> ProjectSamplesOntoColumns(
-        System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyDictionary<string, object?>> samples,
-        TableMetadata table)
+    internal static async Task<IResult> GetDiscoverySamplesHandler(
+        string id,
+        [Microsoft.AspNetCore.Mvc.FromQuery] int? limit,
+        [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService artifactService,
+        HttpContext httpContext,
+        CancellationToken ct)
     {
-        var columns = new System.Collections.Generic.HashSet<string>(
-            table.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
-        var result = new System.Collections.Generic.List<System.Collections.Generic.IReadOnlyDictionary<string, object?>>(samples.Count);
-        foreach (var sample in samples)
+        var result = await artifactService.GetSamplesAsync(
+            httpContext.User,
+            id,
+            limit,
+            Autheris.Application.Catalog.Discovery.DiscoverySurface.Rest,
+            ct).ConfigureAwait(false);
+
+        return result.Outcome switch
         {
-            var projected = new System.Collections.Generic.Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kvp in sample)
+            Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Unauthenticated =>
+                ApiProblems.Unauthorized(result.ErrorCode ?? ApiErrorCodes.Unauthorized, result.Message ?? "Authentication is required.", httpContext),
+            Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Forbidden =>
+                ApiProblems.Forbidden(result.ErrorCode ?? ApiErrorCodes.DiscoveryNotPermitted, result.Message ?? "Catalog discovery is not permitted.", httpContext),
+            Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Unavailable =>
+                ApiProblems.ServiceUnavailable(result.ErrorCode ?? ApiErrorCodes.ServiceUnavailable, result.Message ?? "Catalog discovery is temporarily unavailable.", httpContext),
+            _ => Results.Ok(result.Payload ?? new Autheris.Application.Catalog.Discovery.DiscoverySamplesResponse(false, []))
+        };
+    }
+
+    private static IResult MapArtifactWriteResult(
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactWriteResult result,
+        HttpContext httpContext) => result.Outcome switch
+    {
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Ok => Results.Ok(new
+        {
+            dataset = result.DatasetId,
+            contentSha256 = result.ContentSha256,
+            sampleRowCount = result.SampleRowCount,
+            statisticsColumnCount = result.StatisticsColumnCount
+        }),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.NoContent => Results.NoContent(),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Unauthenticated =>
+            ApiProblems.Unauthorized(ApiErrorCodes.Unauthorized, result.Message ?? "Authentication is required.", httpContext),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.NotFound => DatasetKeysNotFound(),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.Forbidden =>
+            ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, result.Message ?? "Access denied.", httpContext),
+        Autheris.Application.Catalog.Discovery.DiscoveryArtifactOutcome.InvalidArtifact =>
+            ApiProblems.BadRequest(
+                ApiErrorCodes.InvalidArtifact,
+                result.Message ?? "Artifact payload is invalid.",
+                httpContext,
+                string.IsNullOrEmpty(result.ViolationCode) ? null : new Dictionary<string, object?> { ["violation"] = result.ViolationCode }),
+        _ => ApiProblems.ServiceUnavailable(ApiErrorCodes.ServiceUnavailable, result.Message ?? "The service is temporarily unavailable.", httpContext)
+    };
+
+    private static async Task<(byte[] Bytes, bool LimitExceeded)> ReadBoundedBodyAsync(
+        System.IO.Stream body,
+        long maxBytes,
+        CancellationToken ct)
+    {
+        using var ms = new System.IO.MemoryStream();
+        var buffer = new byte[Math.Min(16384, (int)Math.Min(maxBytes + 1, int.MaxValue))];
+        long total = 0;
+        while (true)
+        {
+            var read = await body.ReadAsync(buffer, ct).ConfigureAwait(false);
+            if (read == 0)
             {
-                if (columns.Contains(kvp.Key))
-                {
-                    projected[kvp.Key] = kvp.Value;
-                }
+                return (ms.ToArray(), false);
             }
 
-            result.Add(projected);
-        }
+            total += read;
+            if (total > maxBytes)
+            {
+                return ([], true);
+            }
 
-        return result;
+            ms.Write(buffer, 0, read);
+        }
     }
 
     internal static async Task<IResult> SetDatasetStateHandler(

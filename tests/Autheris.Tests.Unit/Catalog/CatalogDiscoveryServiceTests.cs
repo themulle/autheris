@@ -21,7 +21,7 @@ using Xunit;
 
 public sealed class CatalogDiscoveryServiceTests
 {
-    private readonly ITableMetadataRepository _metadataRepository = Substitute.For<ITableMetadataRepository>();
+    private readonly ITableMetadataRepository _metadataRepository = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
     private readonly IAuditLogRepository _auditLogRepository = Substitute.For<IAuditLogRepository>();
     private readonly IKeyVaultSecretProvider _secretProvider = Substitute.For<IKeyVaultSecretProvider>();
     private readonly IOpenApiIngestionService _openApiIngestionService = Substitute.For<IOpenApiIngestionService>();

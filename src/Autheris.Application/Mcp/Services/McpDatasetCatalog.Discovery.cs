@@ -88,6 +88,11 @@ public sealed partial class McpDatasetCatalog
             ct).ConfigureAwait(false);
         foreach (var obj in tablePage.Items)
         {
+            if (obj.Kind == DiscoveryObjectKind.Procedure)
+            {
+                continue;
+            }
+
             candidates.Add(($"{obj.Domain}.{obj.Schema}.{obj.Name}", obj, null));
         }
 

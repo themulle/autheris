@@ -191,7 +191,9 @@ public static class ApiProblems
         // NL-SC-32: privacy-budget 429 figures (typed values of the budget decision, caller's own client id only).
         "clientId", "consumed", "totalBudget",
         // Syntax error position
-        "line", "column"
+        "line", "column",
+        // Discovery artifact validation code
+        "violation"
     };
 
     private static void AddAllowedExtensions(IDictionary<string, object?> target, IEnumerable<KeyValuePair<string, object?>>? source)

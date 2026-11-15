@@ -40,7 +40,7 @@ public sealed partial class DbtMetadataIngestionService
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? artifactStore,
         IDbtTestTargetMap? testTargetMap,
         ILogger<DbtMetadataIngestionService> logger,
         IAuditLogRepository auditLog,
@@ -50,9 +50,10 @@ public sealed partial class DbtMetadataIngestionService
         IDataOwnershipRepository? ownershipRepo = null,
         Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null,
         IClassificationRepository? classificationRepository = null,
+        Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions = null,
         TimeProvider? timeProvider = null)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
-            virtualFilterAdmin, tagImport, syntheticRowGenerator, testTargetMap, auditWriter, logger)
+            virtualFilterAdmin, tagImport, artifactStore, testTargetMap, auditWriter, logger)
     {
         _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
         _ownerAssignments = ownerAssignments;
@@ -60,6 +61,7 @@ public sealed partial class DbtMetadataIngestionService
         _ownershipRepo = ownershipRepo;
         _catalogWriteScopes = catalogWriteScopeFactory;
         _classificationRepository = classificationRepository;
+        _discoveryOptions = discoveryOptions;
         if (timeProvider is not null)
         {
             _timeProvider = timeProvider;
@@ -76,13 +78,13 @@ public sealed partial class DbtMetadataIngestionService
         ITableRelationRepository? relationRepository,
         VirtualFilterAdministrationService? virtualFilterAdmin,
         Autheris.Application.Governance.Interfaces.IDatasetTagImportService? tagImport,
-        Autheris.Application.Catalog.Profiling.ISyntheticSampleRowGenerator? syntheticRowGenerator,
+        Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore? artifactStore,
         IDbtTestTargetMap? testTargetMap,
         Autheris.Application.Audit.IAuditWriter? auditWriter,
         ILogger<DbtMetadataIngestionService> logger)
     {
         _tagImport = tagImport;
-        _syntheticRowGenerator = syntheticRowGenerator;
+        _artifactStore = artifactStore;
         _testTargetMap = testTargetMap;
         _proposalRepository = proposalRepository ?? throw new ArgumentNullException(nameof(proposalRepository));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));

@@ -428,7 +428,9 @@
           "hidden": { "type": "boolean" },
           "writeProtected": { "type": "boolean" },
           "accessState": { "type": "string", "nullable": true },
+          "classifications": { "type": "array", "nullable": true, "items": { "type": "object" } },
           "clearInSomeRows": { "type": "boolean" },
+          "clearRequestable": { "type": "array", "nullable": true, "items": { "type": "string" } },
           "statistics": { "type": "object", "nullable": true }
         }
       },

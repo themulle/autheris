@@ -80,7 +80,7 @@ public sealed class ClassificationIngestionSyncTests
         var svc = new DbtMetadataIngestionService(
             new FakeDbtProposalRepository(), metaRepo, new FakeLineageGraphStore(), epochRepository: null,
             options, sqlEndpointLoader: null, relationRepository: null, virtualFilterAdmin: null,
-            tagImport: null, syntheticRowGenerator: null, testTargetMap: null,
+            tagImport: null, artifactStore: null, testTargetMap: null,
             NullLogger<DbtMetadataIngestionService>.Instance, new NullAuditLogRepository(),
             classificationRepository: classRepo, timeProvider: time);
 
@@ -134,7 +134,7 @@ public sealed class ClassificationIngestionSyncTests
         var dbtSvc = new DbtMetadataIngestionService(
             new FakeDbtProposalRepository(), metaRepo, new FakeLineageGraphStore(), epochRepository: null,
             dbtOptions, sqlEndpointLoader: null, relationRepository: null, virtualFilterAdmin: null,
-            tagImport: null, syntheticRowGenerator: null, testTargetMap: null,
+            tagImport: null, artifactStore: null, testTargetMap: null,
             NullLogger<DbtMetadataIngestionService>.Instance, new NullAuditLogRepository(),
             classificationRepository: classRepo, timeProvider: time);
 

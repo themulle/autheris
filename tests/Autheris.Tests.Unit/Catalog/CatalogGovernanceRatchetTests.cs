@@ -132,9 +132,6 @@ public sealed class CatalogGovernanceRatchetTests
         RowFilterEvaluation = new RowFilterEvaluationSettings(RowFilterEvaluationStrategy.KeySetCache, 60, 100),
         CatalogTags = ["dbt"],
         CatalogView = CatalogView.Summary,
-        ReleaseProfileToCatalogViewers = true,
-        ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FullCoarsenedProfile,
-        PredefinedSyntheticSamples = [new Dictionary<string, object?> { ["a"] = 1 }],
         EstimatedRowCount = 42,
         ExpectedRows = 43,
         MinGroupSize = 7,
@@ -209,9 +206,6 @@ public sealed class CatalogGovernanceRatchetTests
         merged.PrimaryKeyColumns.ShouldBe(["a"]);
         merged.RowFilterEvaluation.ShouldBe(existing.RowFilterEvaluation);
         merged.CatalogTags.ShouldBe(["dbt"]);
-        merged.ReleaseProfileToCatalogViewers.ShouldBeTrue();
-        merged.ProfilePublicationPolicy.ShouldBe(DatasetProfilePublicationPolicy.FullCoarsenedProfile);
-        merged.PredefinedSyntheticSamples.Count.ShouldBe(1);
         merged.EstimatedRowCount.ShouldBe(42);
         merged.ExpectedRows.ShouldBe(43);
         merged.MinGroupSize.ShouldBe(7);
@@ -310,7 +304,7 @@ public sealed class CatalogGovernanceRatchetTests
     }
 
     [Fact]
-    public void Merge_KeepsOwnerTenantAndReleasePolicies()
+    public void Merge_KeepsOwnerTenantAndDeletedKeyPolicy()
     {
         var id = new TableIdentifier("d", "s", "t");
         var existing = FullyPopulatedExisting(id);
@@ -318,8 +312,6 @@ public sealed class CatalogGovernanceRatchetTests
         {
             Identifier = id,
             OwnerTenantId = "tenant-other",
-            ReleaseProfileToCatalogViewers = false,
-            ProfilePublicationPolicy = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly,
             DeletedKeyPolicy = DeletedKeyPolicy.KnownKeysOnly,
             Table = new Table { SourceName = "d", SchemaName = "s", TableName = "t" },
             Columns = [new TableColumn { ColumnName = "a" }]
@@ -328,8 +320,6 @@ public sealed class CatalogGovernanceRatchetTests
         var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
 
         merged.OwnerTenantId.ShouldBe("tenant-a");
-        merged.ReleaseProfileToCatalogViewers.ShouldBeTrue();
-        merged.ProfilePublicationPolicy.ShouldBe(DatasetProfilePublicationPolicy.FullCoarsenedProfile);
         merged.DeletedKeyPolicy.ShouldBe(DeletedKeyPolicy.AllDeletedKeys);
     }
 

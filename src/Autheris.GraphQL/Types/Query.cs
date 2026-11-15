@@ -18,6 +18,12 @@ public sealed class TableRecordPayload
     public IReadOnlyList<string> JsonRows { get; init; } = [];
 }
 
+public sealed class CatalogSamplesPayload
+{
+    public bool Available { get; init; }
+    public IReadOnlyList<string> Samples { get; init; } = [];
+}
+
 public sealed class TableMetadataDto
 {
     public DiscoveryObjectKind Kind { get; init; } = DiscoveryObjectKind.Table;

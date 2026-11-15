@@ -87,7 +87,7 @@ public sealed class DbtSqlEndpointAutoSyncTests : IDisposable
             relationRepository: null,
             virtualFilterAdmin: null,
             tagImport: null,
-            syntheticRowGenerator: null,
+            artifactStore: null,
             logger: log);
         return (service, log);
     }

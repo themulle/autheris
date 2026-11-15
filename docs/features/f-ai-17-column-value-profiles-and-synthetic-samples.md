@@ -4,7 +4,7 @@
 **Category:** AI Agent Grounding & Privacy-Preserving Data Discovery  
 **Components:**
 - Domain: [`McpDatasetModels.cs`](../../src/Autheris.Domain/Model/McpDatasetModels.cs) (`ColumnValueProfile`, `McpDatasetSample.IsSynthetic`), [`TableModels.cs`](../../src/Autheris.Domain/Model/TableModels.cs) (`ReleaseProfileToCatalogViewers`, `DatasetProfilePublicationPolicy`)
-- Application: [`IColumnValueProfileService.cs`](../../src/Autheris.Application/Catalog/Profiling/IColumnValueProfileService.cs), [`ColumnValueProfileService.cs`](../../src/Autheris.Application/Catalog/Profiling/ColumnValueProfileService.cs), [`SyntheticSampleRowGenerator.cs`](../../src/Autheris.Application/Catalog/Profiling/SyntheticSampleRowGenerator.cs), [`McpDatasetCatalog.cs`](../../src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs), [`McpDatasetTools.cs`](../../src/Autheris.Application/Mcp/Services/McpDatasetTools.cs)
+- Application: [`DiscoveryService.cs`](../../src/Autheris.Application/Catalog/Discovery/DiscoveryService.cs), [`DiscoveryArtifactService.cs`](../../src/Autheris.Application/Catalog/Discovery/DiscoveryArtifactService.cs), [`McpDatasetCatalog.cs`](../../src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs), [`McpDatasetTools.cs`](../../src/Autheris.Application/Mcp/Services/McpDatasetTools.cs)
 - API: [`QueryAnalysisAndProfilingEndpoints.cs`](../../src/Autheris.Api/Endpoints/QueryAnalysisAndProfilingEndpoints.cs)
 
 ---

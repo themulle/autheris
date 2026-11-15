@@ -127,7 +127,7 @@ public sealed class CatalogSurfaceCallSiteGuardTests
         [
             "TableModels.cs", "DatasetCatalogStore.cs", "CatalogTablePersistedProjection.cs",
             "McpDatasetCatalog.cs", "Query.Catalog.cs", "CatalogDiscoveryService.cs", "McpDatasetModels.cs",
-            "DiscoveryService.cs", "DiscoveryAccessMapper.cs",
+            "DiscoveryService.cs", "DiscoveryAccessMapper.cs", "ExternalCatalogReader.cs",
             "DatasetCatalogAdminService.cs", "CatalogApiEndpoints.cs"
         ];
 

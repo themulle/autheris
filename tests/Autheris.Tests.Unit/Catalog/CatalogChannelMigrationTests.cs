@@ -105,7 +105,6 @@ public sealed class CatalogChannelMigrationTests
         (await service.FindVisibleAsync(CatalogVisibilityTestFactory.Caller(user), summary.Identifier))!.Value.Shape.ShouldBe(CatalogOutputShape.Summary);
 
         await Should.ThrowAsync<GatewayForbiddenException>(() => mcp.SampleRowsAsync(user, "sales.dbo.sum_t", 3));
-        await Should.ThrowAsync<GatewayForbiddenException>(() => mcp.SampleRowsAsync(user, "sales.dbo.sum_t", 3, synthetic: true));
     }
 
     [Fact]

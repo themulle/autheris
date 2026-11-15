@@ -140,9 +140,10 @@ public static class AuditEventTypes
     public const string GovernedAggregation = AggregateQuery;
     public const string MetricQuery = "METRIC_QUERY";
 
-    // Zero-Read Query Analysis & Metadata Synthetic Sample (#79, #80)
-    public const string MetadataSyntheticSample = "METADATA_SYNTHETIC_SAMPLE";
+    // Zero-Read Query Analysis & Metadata Sample Read (#79, #80)
+    public const string MetadataSampleRead = "METADATA_SYNTHETIC_SAMPLE";
     public const string QueryAnalysisEvaluated = "QUERY_ANALYSIS_EVALUATED";
+    public const string CatalogDiscoveryArtifactsChanged = "CATALOG_DISCOVERY_ARTIFACTS_CHANGED";
 
     // MCP output inspection: a tool or resource result carried a suspected prompt injection and was withheld (MCP-09)
     public const string McpOutputInjectionSuspected = "MCP_OUTPUT_INJECTION_SUSPECTED";

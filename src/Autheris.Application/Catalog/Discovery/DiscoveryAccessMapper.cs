@@ -245,7 +245,7 @@ public static class DiscoveryAccessMapper
         return (DiscoveryAccessState.None, null);
     }
 
-    private static bool HasRowPredicate(TableAccessDecision decision) =>
+    internal static bool HasRowPredicate(TableAccessDecision decision) =>
         decision.RowPolicy is not null ||
         decision.MandatoryRowPolicy is not null ||
         decision.ConsentFilterRecipe is not null ||

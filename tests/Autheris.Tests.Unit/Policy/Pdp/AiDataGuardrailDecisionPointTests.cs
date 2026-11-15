@@ -82,7 +82,7 @@ public sealed class AiDataGuardrailDecisionPointTests
             tableMetadataRepository: tables,
             graphQlCatalogMap: map,
             sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
-            catalogVisibility: Visibility(shape, view, released),
+            catalogVisibility: Visibility(shape, view),
             consentRepository: ConsentsFor(granted),
             eventBus: bus);
         return new Harness(guardrail, pdp, audit, bus, executor);
@@ -99,12 +99,12 @@ public sealed class AiDataGuardrailDecisionPointTests
         return repo;
     }
 
-    private static ICatalogVisibilityService Visibility(CatalogOutputShape? shape, CatalogView view, bool released)
+    private static ICatalogVisibilityService Visibility(CatalogOutputShape? shape, CatalogView view)
     {
         var visibility = Substitute.For<ICatalogVisibilityService>();
         visibility.FindVisibleAsync(Arg.Any<CatalogCaller>(), Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => shape is { } s
-                ? new CatalogVisibleRow(new TableMetadata { Identifier = ci.Arg<TableIdentifier>(), Table = new Table { IsActive = true }, CatalogView = view, ReleaseProfileToCatalogViewers = released }, s)
+                ? new CatalogVisibleRow(new TableMetadata { Identifier = ci.Arg<TableIdentifier>(), Table = new Table { IsActive = true }, CatalogView = view }, s)
                 : (CatalogVisibleRow?)null);
         return visibility;
     }
@@ -273,15 +273,15 @@ public sealed class AiDataGuardrailDecisionPointTests
     }
 
     [Theory]
-    // (shape, view, released, granted) -> decided?
-    [InlineData(CatalogOutputShape.Summary, CatalogView.Summary, false, false, false)]
-    [InlineData(CatalogOutputShape.Summary, CatalogView.Summary, false, true, false)]
-    [InlineData(CatalogOutputShape.Full, CatalogView.Full, false, false, false)]
+    // describe_dataset now omits legacy value profiles and checks PDP unless brief:true is requested.
+    [InlineData(CatalogOutputShape.Summary, CatalogView.Summary, false, false, true)]
+    [InlineData(CatalogOutputShape.Summary, CatalogView.Summary, false, true, true)]
+    [InlineData(CatalogOutputShape.Full, CatalogView.Full, false, false, true)]
     [InlineData(CatalogOutputShape.Full, CatalogView.Full, false, true, true)]
     [InlineData(CatalogOutputShape.Full, CatalogView.Full, true, false, true)]
-    [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, false, false)]
+    [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, false, true)]
     [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, true, true)]
-    public async Task Describe_is_decided_exactly_when_the_shared_predicate_emits_value_profiles(
+    public async Task Describe_non_brief_is_always_decided(
         CatalogOutputShape shape, CatalogView view, bool released, bool granted, bool decided)
     {
         var h = Create(Denied, shape: shape, view: view, released: released, granted: granted);

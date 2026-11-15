@@ -1,4 +1,3 @@
-using Autheris.Application.Catalog.Profiling;
 using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Common;
 namespace Autheris.Extensions.Dbt;
@@ -870,9 +869,10 @@ public static class DbtArtifactStreamingParser
 
         var allowedColumns = new HashSet<string>(modelColumns, StringComparer.OrdinalIgnoreCase);
         var list = new List<IReadOnlyDictionary<string, object?>>();
+        const int maxExtractedSampleRows = 100;
         foreach (var item in sampleElem.EnumerateArray())
         {
-            if (list.Count >= SyntheticSampleRowGenerator.MaxPredefinedSampleRows)
+            if (list.Count >= maxExtractedSampleRows)
             {
                 break;
             }

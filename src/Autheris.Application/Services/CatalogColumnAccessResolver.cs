@@ -59,7 +59,7 @@ internal static class CatalogColumnAccessResolver
     }
 
     /// <summary>
-    /// Level per column for a caller without an Allow consent on the table (feature <c>ReleaseProfileToCatalogViewers</c>):
+    /// Level per column for a caller without an Allow consent on the table:
     /// the catalog baseline (Clear, Mask for catalog-sensitive columns) lowered by every Deny-effect consent. The baseline is
     /// obtained by resolving the Deny-effect consents together with a synthetic unconditional Allow for the caller, so
     /// hard table Deny, column Deny and Deny-effect Mask follow the data-path rules (scope-bound rules apply to scope holders only).

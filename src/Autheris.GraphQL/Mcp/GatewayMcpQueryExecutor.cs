@@ -321,12 +321,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         } : null;
         bool? Bool(string name) => variables.TryGetValue(name, out var v) ? McpDatasetTools.ToBooleanArgument(v) : null;
 
-        // MCP-06: `synthetic` must be a real boolean; anything else is rejected instead of silently reading real rows.
-        if (variables.TryGetValue("synthetic", out var syntheticValue) && syntheticValue is not (null or bool))
-        {
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "The tool arguments are invalid.");
-        }
-
         try
         {
             object result = tool.Name.ToLowerInvariant() switch
@@ -340,7 +334,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     ? await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, Text("language"), Bool("brief") ?? false, cancellationToken).ConfigureAwait(false)
                     : await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
                 McpDatasetTools.DescribeMyAccess => await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table") ?? string.Empty, cancellationToken).ConfigureAwait(false),
-                McpDatasetTools.SampleRows => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables) is { } requestedCount ? McpRowCap.Effective(requestedCount, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows)) : null, Bool("synthetic") ?? false, cancellationToken).ConfigureAwait(false),
+                McpDatasetTools.SampleRows => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables) is { } requestedCount ? McpRowCap.Effective(requestedCount, Math.Min(RowCap(), McpDatasetCatalog.MaxSampleRows)) : null, cancellationToken).ConfigureAwait(false),
                 _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)
             };
 

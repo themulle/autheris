@@ -344,16 +344,6 @@ public sealed record TableKeyDefinition(
 /// <summary>Result of a narrow key definition replacement (audit before/after). <c>BeforeUnavailable</c>: the stored definition was invalid and is not reported.</summary>
 public sealed record TableKeyDefinitionChange(TableKeyDefinition Before, TableKeyDefinition After, bool BeforeUnavailable = false);
 
-/// <summary>Issue #80: Controls how much of a column's value profile is published when active row filters apply to a table.</summary>
-public enum DatasetProfilePublicationPolicy
-{
-    /// <summary>Default when row filters apply: exposes only FormatPattern, TypicalLength and coarsened EmptyShare.</summary>
-    FormatAndEmptyShareOnly = 0,
-
-    /// <summary>Data owner opt-in: exposes the full coarsened value profile even when row filters apply.</summary>
-    FullCoarsenedProfile = 1
-}
-
 public sealed record TableMetadata
 {
     public Table Table { get; init; } = new();
@@ -394,15 +384,6 @@ public sealed record TableMetadata
 
     /// <summary>Write intent: the upsert replaces stored columns atomically (deleting columns not in Columns) when true.</summary>
     public bool ReplaceColumns { get; init; }
-
-    /// <summary>Issue #80: When true, callers with Full catalog visibility may view coarsened value profiles and request synthetic sample rows without an active table consent.</summary>
-    public bool ReleaseProfileToCatalogViewers { get; init; }
-
-    /// <summary>Issue #80: Controls whether full coarsened ranges/distinct counts or only format + empty share are published when row filters apply.</summary>
-    public DatasetProfilePublicationPolicy ProfilePublicationPolicy { get; init; } = DatasetProfilePublicationPolicy.FormatAndEmptyShareOnly;
-
-    /// <summary>Predefined synthetic sample rows (e.g. from dbt meta.synthetic_samples). Kept unmasked at runtime.</summary>
-    public IReadOnlyList<IReadOnlyDictionary<string, object?>> PredefinedSyntheticSamples { get; init; } = Array.Empty<IReadOnlyDictionary<string, object?>>();
 
     /// <summary>Issue #80: Optional estimated row count of the table used for small-table privacy coarsening.</summary>
     public long? EstimatedRowCount { get; init; }

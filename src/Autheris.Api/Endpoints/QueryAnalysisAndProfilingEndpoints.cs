@@ -33,14 +33,8 @@ public sealed record SubmitBundledConsentHttpRequest(
     DateTimeOffset? RequestedUntilUtc = null);
 
 /// <summary>
-/// HTTP request payload for <c>POST /api/v1/catalog/datasets/{dataset}/profile</c> (Issue #80).
-/// </summary>
-public sealed record ComputeDatasetProfileHttpRequest(
-    IReadOnlyList<Dictionary<string, object?>> SampleRows);
-
-/// <summary>
 /// Issues #79 &amp; #80: Zero-read static query analysis, bundled per-Data-Owner consent requests,
-/// privacy-coarsened column value profiles, and synthetic sample rows endpoints.
+/// and governed sample rows endpoint.
 /// </summary>
 public static class QueryAnalysisAndProfilingEndpoints
 {
@@ -71,12 +65,12 @@ public static class QueryAnalysisAndProfilingEndpoints
 
         if (mapSampleRows)
         {
-            // Issue #447: a non-synthetic sample reads rows through the C3 choke point, so the route carries the REST ingress.
+            // Issue #447: sample-rows reads live rows through the C3 choke point, so the route carries the REST ingress.
             var ingress = app.MapGroup("").WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest);
             ingress.MapGet("/api/v1/catalog/datasets/{dataset}/sample-rows", HandleSampleRowsAsync)
-                .WithName("GetDatasetSampleRowsWithSyntheticSupport")
+                .WithName("GetDatasetSampleRows")
                 .RequireAuthorization()
-                .WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataSyntheticSample);
+                .WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataSampleRead);
         }
 
         return app;
@@ -185,7 +179,6 @@ public static class QueryAnalysisAndProfilingEndpoints
     internal static async Task<IResult> HandleSampleRowsAsync(
         string dataset,
         [FromQuery] int? count,
-        [FromQuery] bool? synthetic,
         HttpContext httpContext,
         IMcpDatasetCatalog mcpCatalog,
         CancellationToken ct)
@@ -196,7 +189,6 @@ public static class QueryAnalysisAndProfilingEndpoints
                 httpContext.User,
                 dataset,
                 count ?? 5,
-                synthetic ?? false,
                 ct).ConfigureAwait(false);
 
             return Results.Ok(result);
