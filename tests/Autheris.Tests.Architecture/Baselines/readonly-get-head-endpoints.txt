@@ -86,6 +86,8 @@
 /api/v1/tenants/{tenantId}/governance/recert/campaigns|GET|no side effect: lists recertification campaigns
 /api/v1/tenants/{tenantId}/governance/rights/{realmId}/|GET|no side effect: lists functional rights in realm
 /api/v1/tenants/{tenantId}/lifecycle/locks/{realmId}/{userKey}|GET|no side effect: reads subject lifecycle lock status
+/api/v1/usage/tariffs/{dataSource}/versions|GET|no side effect: lists tariff version history for a data source
+/api/v1/usage/tariffs|GET|no side effect: lists active tariffs effective at a UTC date
 /docs|GET|no side effect: serves API documentation page
 /graphql/{**slug}|ANY|no side effect: GraphQL HTTP GET only executes queries (mutations rejected)
 /health/live|GET|no side effect: liveness probe

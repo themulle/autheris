@@ -228,6 +228,54 @@ public abstract class UsageContract : GovernanceContractBase
         var actors = await Store.Usage.QueryDistinctActorCountsAsync(TableSales, Store.TenantA, Day1.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc), Day2.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc));
         actors["bi-app"].Should().BeGreaterOrEqualTo(1);
     }
+
+    [Fact]
+    public void Tariff_rows_have_no_update_or_delete_path()
+    {
+        var repoMethods = typeof(IUsageRepository).GetMethods()
+            .Select(m => m.Name)
+            .Where(n => n.Contains("Tariff", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToArray();
+
+        repoMethods.Should().BeEquivalentTo(["AddTariffVersionAsync", "GetTariffsAsync"]);
+
+        var storeMethods = typeof(Autheris.Infrastructure.Usage.UsageStore)
+            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Instance)
+            .Select(m => m.Name)
+            .Where(n => n.Contains("Tariff", StringComparison.OrdinalIgnoreCase)
+                        && (n.StartsWith("Update", StringComparison.OrdinalIgnoreCase)
+                            || n.StartsWith("Delete", StringComparison.OrdinalIgnoreCase)
+                            || n.StartsWith("Remove", StringComparison.OrdinalIgnoreCase)));
+
+        storeMethods.Should().BeEmpty("tariff rows are strictly append-only and immutable");
+    }
+
+    [RequiresContainerRuntimeFact]
+    public async Task Historic_report_identical_after_new_tariff_version()
+    {
+        if (!Store.IsAvailable) return;
+
+        await Store.Usage.AccumulateAsync(BuildSnapshot(Store.TenantA, Day1, "S-1-5-21-50-1", [], TableSales.ToString(), "g-hist", rows: 10));
+        await Store.Usage.AddTariffVersionAsync(new UsageTariffVersion(
+            Store.TenantA.Value, "pg-main", 0, Day1, null,
+            2m, 0.1m, 0m, 0m, 0m, 0m, null, "credits", 0, "admin", DateTimeOffset.UtcNow, "v1"));
+
+        var day1TariffsBefore = await Store.Usage.GetTariffsAsync(Store.TenantA, Day1, Day1);
+        var rowsBefore = await Store.Usage.QueryAsync(new UsageReportQuery(Store.TenantA, Day1, Day1, UsageGroupBy.DataSource, DataSource: "pg-main"));
+        var costBefore = UsageTariffCalculator.CalculateRow(UsageTariffRowInput.FromReportRow(Store.TenantA.Value, Day1, rowsBefore.Rows.Single()), day1TariffsBefore);
+
+        await Store.Usage.AddTariffVersionAsync(new UsageTariffVersion(
+            Store.TenantA.Value, "pg-main", 0, Day2, null,
+            99m, 5m, 0m, 0m, 0m, 0m, null, "credits", 0, "admin", DateTimeOffset.UtcNow, "v2"));
+
+        var day1TariffsAfter = await Store.Usage.GetTariffsAsync(Store.TenantA, Day1, Day1);
+        var rowsAfter = await Store.Usage.QueryAsync(new UsageReportQuery(Store.TenantA, Day1, Day1, UsageGroupBy.DataSource, DataSource: "pg-main"));
+        var costAfter = UsageTariffCalculator.CalculateRow(UsageTariffRowInput.FromReportRow(Store.TenantA.Value, Day1, rowsAfter.Rows.Single()), day1TariffsAfter);
+
+        costAfter.CostUnits.Should().Be(costBefore.CostUnits);
+        costAfter.AppliedVersionId.Should().Be(costBefore.AppliedVersionId);
+    }
 }
 
 [Collection(GovernancePostgresCollection.Name)]

@@ -254,6 +254,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapTrustedDocumentAdminEndpointsWhenEnabled(gatewayOptions); // Issue #281
 
         app.MapFinOpsEndpoints();
+        app.MapUsageEndpoints();
         app.MapVirtualFilterEndpoints();
         app.MapCallerAttributeAdminEndpoints();
         app.MapConsentWorkflowAdminEndpoints();

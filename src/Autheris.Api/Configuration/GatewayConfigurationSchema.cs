@@ -53,7 +53,8 @@ public static class GatewayConfigurationSchema
         ("Gateway:TableCache", typeof(TableCacheOptions)),
         ("Gateway:AsyncJobs", typeof(AsyncJobOptions)),
         ("Gateway:Tenancy", typeof(TenancyOptions)),
-        ("Gateway:CustomQueryPoller", typeof(CustomQueryPollerOptions))
+        ("Gateway:CustomQueryPoller", typeof(CustomQueryPollerOptions)),
+        ("Gateway:UsageAccounting", typeof(UsageAccountingOptions))
     ];
 
     /// <summary>

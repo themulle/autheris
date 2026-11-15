@@ -35,6 +35,7 @@ public static class GatewayPolicies
     public const string AuthenticatedCaller = "AuthenticatedCaller";
     public const string MetricsScraper = "MetricsScraper";
     public const string McpCaller = "McpCaller";
+    public const string UsageAdmin = "UsageAdmin";
 
     /// <summary>
     /// Security review: SCIM provisioning endpoints. Authenticates only with the SCIM secret scheme and requires the
@@ -56,6 +57,7 @@ public static class GatewayPolicies
     public static readonly string[] AuditorOrAboveRoles = ["SecurityAuditor", "Auditor", "PrivacyAdmin", "DataProtectionOfficer", "GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "ClusterAdmin"];
     public static readonly string[] DataStewardOrAdminRoles = ["DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
     public static readonly string[] McpCallerRoles = ["AiAgent", "McpCaller", "Developer", "Consumer", "DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
+    public static readonly string[] UsageAdminRoles = ["TenantAdmin", "ClusterAdmin"];
     public static readonly string[] ScimProvisionerRoles = [ScimProvisionerRole];
 
     /// <summary>
@@ -116,6 +118,7 @@ public static class GatewayPolicies
         AddRolePolicy(options, AuditorOrAbove, AuditorOrAboveRoles);
         AddRolePolicy(options, DataStewardOrAdmin, DataStewardOrAdminRoles);
         AddRolePolicy(options, MetricsScraper, MetricsScrapeRoles);
+        AddRolePolicy(options, UsageAdmin, UsageAdminRoles);
         options.AddPolicy(AuthenticatedCaller, policy => policy.RequireAuthenticatedUser());
         options.AddPolicy(McpCaller, policy => policy
             .RequireAuthenticatedUser()
@@ -174,6 +177,7 @@ public static class GatewayPolicies
             AuditorOrAbove => AuditorOrAboveRoles,
             DataStewardOrAdmin => DataStewardOrAdminRoles,
             McpCaller => McpCallerRoles,
+            UsageAdmin => UsageAdminRoles,
             Scim => ScimProvisionerRoles,
             _ => []
         };

@@ -123,6 +123,35 @@ public sealed class UsageAccountingOptionsValidator : IValidateOptions<UsageAcco
 
         _ = options.DataOwnersSeeUsers;
 
+        if (options.InitialTariffs != null)
+        {
+            for (int i = 0; i < options.InitialTariffs.Count; i++)
+            {
+                var entry = options.InitialTariffs[i];
+                if (entry is null)
+                {
+                    failures.Add($"Gateway:UsageAccounting:InitialTariffs[{i}] must not be null.");
+                    continue;
+                }
+
+                UsageTariffValidation.ValidateRatesAndMetadata(
+                    entry.TenantId,
+                    entry.DataSource,
+                    entry.BasePerQuery,
+                    entry.PerRow,
+                    entry.PerMib,
+                    entry.PerComputeSecond,
+                    entry.PerAnalysisCost,
+                    entry.SourceCostFactor,
+                    entry.SourceCostUnit,
+                    entry.UnitLabel,
+                    entry.ComputeBasis,
+                    entry.Reason,
+                    failures,
+                    prefix: $"Gateway:UsageAccounting:InitialTariffs[{i}]:");
+            }
+        }
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;

@@ -203,4 +203,47 @@ public sealed class UsageOptionsValidatorTests
         var result = _validator.Validate(null, options);
         result.Succeeded.ShouldBeTrue();
     }
+
+    [Fact]
+    public void InitialTariffs_with_valid_entry_succeeds()
+    {
+        var options = new UsageAccountingOptions
+        {
+            InitialTariffs =
+            [
+                new InitialTariffConfig
+                {
+                    TenantId = "*",
+                    DataSource = "pg-main",
+                    BasePerQuery = 0.01m,
+                    UnitLabel = "credits",
+                    Reason = "seed"
+                }
+            ]
+        };
+        var result = _validator.Validate(null, options);
+        result.Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void InitialTariffs_with_invalid_entry_fails()
+    {
+        var options = new UsageAccountingOptions
+        {
+            InitialTariffs =
+            [
+                new InitialTariffConfig
+                {
+                    TenantId = "t1",
+                    DataSource = "pg-main",
+                    BasePerQuery = 0m,
+                    UnitLabel = "credits",
+                    Reason = "seed"
+                }
+            ]
+        };
+        var result = _validator.Validate(null, options);
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain("InitialTariffs[0]");
+    }
 }

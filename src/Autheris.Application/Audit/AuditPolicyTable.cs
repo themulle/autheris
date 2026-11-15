@@ -134,6 +134,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.ScimGroupDeleted] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ScimGroupMembershipChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.IdentityCorrelationAmbiguous] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.UsageTariffVersionAdded] = AuditFailurePolicy.FailClosed,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

@@ -340,6 +340,7 @@ public sealed class UnknownGatewayKeyGuardTests
         "Gateway:RateLimiting:ClientTiers:ApiKeys",
         "Gateway:RateLimiting:ClientTiers:RoleTierMappings",
         "Gateway:RateLimiting:ClientTiers:ScopeTierMappings",
+        "Gateway:UsageAccounting:GroupDisplayNames",
         "Gateway:WebSql:DataSourceMappings"
     ];
 

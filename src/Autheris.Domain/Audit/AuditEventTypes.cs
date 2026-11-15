@@ -171,5 +171,8 @@ public static class AuditEventTypes
     public const string ScimGroupDeleted = "SCIM_GROUP_DELETED";
     public const string ScimGroupMembershipChanged = "SCIM_GROUP_MEMBERSHIP_CHANGED";
     public const string IdentityCorrelationAmbiguous = "IDENTITY_CORRELATION_AMBIGUOUS";
+
+    // Usage Accounting & Tariffs (Tier A — Required Audit)
+    public const string UsageTariffVersionAdded = "USAGE_TARIFF_VERSION_ADDED";
 }
 

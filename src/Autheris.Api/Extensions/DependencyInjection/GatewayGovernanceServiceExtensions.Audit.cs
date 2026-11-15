@@ -64,6 +64,18 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
                 timeProvider: sp.GetService<TimeProvider>()));
         services.AddSingleton<Autheris.Application.Usage.IUsageRecorder, Autheris.Application.Usage.UsageRecorder>();
+        services.AddSingleton<Autheris.Application.Usage.IUsageTariffService>(sp =>
+        {
+            var gateway = sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Autheris.Domain.Options.GatewayOptions>>();
+            return new Autheris.Application.Usage.UsageTariffService(
+                sp.GetRequiredService<Autheris.Application.Usage.IUsageRepository>(),
+                sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Usage.UsageTariffService>>(),
+                sp.GetService<TimeProvider>(),
+                dataSource => gateway.CurrentValue.DataSources.Connections.ContainsKey(dataSource));
+        });
         services.AddHostedService<Autheris.Infrastructure.Usage.UsageFlushWorker>();
+        services.AddHostedService<Autheris.Infrastructure.Usage.UsageInitialTariffSeedService>();
     }
 }
