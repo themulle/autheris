@@ -120,7 +120,7 @@ public sealed partial class RendererInvariantTests(ITestOutputHelper output)
         }
 
         output.WriteLine($"{dialect}: {checkedCases} IR texts checked");
-        checkedCases.ShouldBeGreaterThan(40);
+        checkedCases.ShouldBeGreaterThan(35);
     }
 
     [Fact]

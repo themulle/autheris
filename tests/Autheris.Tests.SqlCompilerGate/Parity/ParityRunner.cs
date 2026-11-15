@@ -37,7 +37,7 @@ public static class ParityRunner
         }
         catch (Exception ex)
         {
-            failure = ex.GetType().Name;
+            failure = $"{ex.GetType().Name}: {ex.Message}";
             return null;
         }
     }
