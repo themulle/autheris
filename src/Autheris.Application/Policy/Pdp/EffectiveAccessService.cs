@@ -286,8 +286,15 @@ public sealed class EffectiveAccessService(
         var metadata = await _tables.GetTableMetadataAsync(id, ct).ConfigureAwait(false);
         if (metadata is null)
         {
-            var all = await _tables.GetAllTablesAsync(ct).ConfigureAwait(false);
-            metadata = all.FirstOrDefault(t => t.Identifier == id);
+            metadata = await CatalogTablePageReader.FindFirstAsync(
+                _tables,
+                new CatalogTableQuery(
+                    DataSource: SafeFilter(id.Domain),
+                    Schema: SafeFilter(id.Schema),
+                    NamePrefix: SafeFilter(id.TableName),
+                    IncludeInactive: false),
+                t => t.Table.IsActive && t.Identifier == id,
+                ct: ct).ConfigureAwait(false);
         }
 
         if (metadata is null ||
@@ -306,6 +313,14 @@ public sealed class EffectiveAccessService(
         return (useVisibleMetadata ? visibleTable : metadata, metadata);
     }
 
+    private static string? SafeFilter(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Length <= CatalogTableQuery.MaxFilterLength &&
+        value.Trim().Length == value.Length &&
+        value.IndexOfAny(['\0', '\r', '\n']) < 0
+            ? value
+            : null;
+
     private async Task<List<(TableMetadata Target, TableMetadata Raw)>> FindVisiblePatternTablesAsync(
         SecurityPrincipalContext caller,
         TenantId tenant,
@@ -313,19 +328,19 @@ public sealed class EffectiveAccessService(
         bool useVisibleMetadata,
         CancellationToken ct)
     {
-        var all = await _tables.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var all = await CatalogTablePageReader.ReadAllAsync(
+            _tables,
+            new CatalogTableQuery(IncludeInactive: false),
+            t => t.Table.IsActive &&
+                 !t.Table.DiscoveryHidden &&
+                 (t.OwnerTenantId is not { } ownerTenant || string.Equals(ownerTenant, tenant.Value, StringComparison.Ordinal)) &&
+                 EffectiveAccessAnalyzer.MatchesObjectPattern(normalizedPattern, t.Identifier),
+            ct: ct).ConfigureAwait(false);
         var catalogCaller = new CatalogCaller(caller.Principal, tenant, CatalogChannel.Rest);
         var list = new List<(TableMetadata Target, TableMetadata Raw)>();
 
         foreach (var meta in all)
         {
-            if (meta.Table.DiscoveryHidden ||
-                (meta.OwnerTenantId is { } ownerTenant && !string.Equals(ownerTenant, tenant.Value, StringComparison.Ordinal)) ||
-                !EffectiveAccessAnalyzer.MatchesObjectPattern(normalizedPattern, meta.Identifier))
-            {
-                continue;
-            }
-
             var visible = await _visibility.FindVisibleAsync(catalogCaller, meta.Identifier, ct).ConfigureAwait(false);
             if (visible is { Table: { } visibleTable })
             {

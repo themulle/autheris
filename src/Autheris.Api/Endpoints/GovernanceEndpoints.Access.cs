@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Security;
+using Autheris.Application.Catalog;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.State;
@@ -228,8 +229,11 @@ public static partial class GovernanceEndpoints
         {
             try
             {
-                var allTables = await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-                matchedTables = allTables.Where(t => targetTables.Any(pattern => AccessProfile.MatchesPattern(pattern, t.Identifier))).ToList();
+                matchedTables = (await CatalogTablePageReader.ReadAllAsync(
+                    metaRepo,
+                    new CatalogTableQuery(IncludeInactive: false),
+                    t => t.Table.IsActive && targetTables.Any(pattern => AccessProfile.MatchesPattern(pattern, t.Identifier)),
+                    ct: ct).ConfigureAwait(false)).ToList();
                 tablesMatched = matchedTables.Count;
             }
             catch
@@ -507,9 +511,11 @@ public static partial class GovernanceEndpoints
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable); // fail closed: ownership cannot be verified
             }
 
-            var matched = (await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false))
-                .Where(t => profile.MatchesTable(t.Identifier))
-                .ToList();
+            var matched = await CatalogTablePageReader.ReadAllAsync(
+                metaRepo,
+                new CatalogTableQuery(IncludeInactive: false),
+                t => t.Table.IsActive && profile.MatchesTable(t.Identifier),
+                ct: ct).ConfigureAwait(false);
 
             // EP-01: At least one table must match
             if (matched.Count == 0)

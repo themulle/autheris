@@ -151,7 +151,8 @@ public sealed class TransportGateHardeningTests
     {
         var monitor = new ReloadableMonitor<DataSourceConfigurationOptions>(Options_(DataSourceTransportFlags.OData));
         using var resolver = new HierarchicalDataSourceOptionsResolver(monitor);
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Row()]));
         var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance, transportResolver: resolver);
         var cache = new OpenApiCacheManager(resolver);
@@ -172,7 +173,8 @@ public sealed class TransportGateHardeningTests
     {
         var monitor = new ReloadableMonitor<DataSourceConfigurationOptions>(Options_(DataSourceTransportFlags.OData));
         using var resolver = new HierarchicalDataSourceOptionsResolver(monitor);
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Row()]));
         var exec = Substitute.For<IGatewayExecutionService>();
         exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())

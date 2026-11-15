@@ -33,7 +33,8 @@ public sealed class DefaultTenantOwnerChannelsTests
     private static async Task<string[]> CsdlEntitiesAsync(ClaimsPrincipal user, ITenantResolver? resolver)
     {
         var tables = new[] { Wp0.Table("alpha", "t_alpha"), Wp0.Table("beta", "t_beta"), Wp0.Table("default", "t_shared") };
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         var exec = Substitute.For<IGatewayExecutionService>();
         exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())

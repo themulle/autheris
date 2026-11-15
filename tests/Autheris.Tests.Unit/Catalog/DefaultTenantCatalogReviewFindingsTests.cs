@@ -121,7 +121,8 @@ public sealed class DefaultTenantCatalogReviewFindingsTests
         var ownVirtual = Virtual(D, "own_model");
         var foreignVirtual = Virtual(A, "foreign_model");
         var tables = new[] { Wp0.Table("sales", "orders"), ownVirtual, foreignVirtual };
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         var exec = Substitute.For<IGatewayExecutionService>();
         exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())

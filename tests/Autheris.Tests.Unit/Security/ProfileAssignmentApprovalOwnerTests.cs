@@ -48,7 +48,8 @@ public sealed class ProfileAssignmentApprovalOwnerTests
         Setup(AccessProfile profile)
     {
         var owners = Substitute.For<IDataOwnershipRepository>();
-        var tables = Substitute.For<ITableMetadataRepository>();
+        var tables = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var profiles = Substitute.For<IAccessProfileRepository>();
         var audit = Substitute.For<IAuditWriter>();
 

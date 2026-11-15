@@ -29,21 +29,27 @@ public sealed class ExtensionsSecurityAuditRemediationTests
     {
         // CRIT-05: Unauthenticated access to OData metadata or service doc must return empty/restricted tables
         var metaMock = Substitute.For<ITableMetadataRepository>();
+        var metaTables = new List<TableMetadata>
+        {
+            new()
+            {
+                Identifier = new TableIdentifier("corp", "sales", "invoices"),
+                Table = new Table { SchemaName = "sales", TableName = "invoices" },
+                Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
+            },
+            new()
+            {
+                Identifier = new TableIdentifier("secret", "hr", "salaries"),
+                Table = new Table { SchemaName = "hr", TableName = "salaries" },
+                Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
+            }
+        };
         metaMock.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([
-                new TableMetadata
-                {
-                    Identifier = new TableIdentifier("corp", "sales", "invoices"),
-                    Table = new Table { SchemaName = "sales", TableName = "invoices" },
-                    Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
-                },
-                new TableMetadata
-                {
-                    Identifier = new TableIdentifier("secret", "hr", "salaries"),
-                    Table = new Table { SchemaName = "hr", TableName = "salaries" },
-                    Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
-                }
-            ]));
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(metaTables));
+        metaMock.QueryTablesAsync(
+                Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Autheris.Application.Catalog.CatalogTablePage(metaTables, null)));
 
         var execMock = Substitute.For<IGatewayExecutionService>();
         // SR-M-16: a missing decision is a deny, so the access check must answer explicitly.

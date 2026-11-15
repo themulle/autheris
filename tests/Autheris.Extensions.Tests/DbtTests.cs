@@ -223,6 +223,10 @@ public sealed class DbtTests
         };
 
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(tableList));
+        metadataRepo.QueryTablesAsync(
+                Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Autheris.Application.Catalog.CatalogTablePage(tableList, null)));
 
         var publisher = new DbtExposurePublisher(metadataRepo, logger);
         var yaml = await publisher.GenerateExposuresYamlAsync();

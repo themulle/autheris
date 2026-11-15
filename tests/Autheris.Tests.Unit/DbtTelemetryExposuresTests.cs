@@ -55,7 +55,8 @@ public sealed class DbtTelemetryExposuresTests
     [Fact]
     public async Task DbtExposurePublisher_WithTelemetryProvider_EnrichesExposuresYamlWithLiveMetrics()
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
+        var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var table = CreateSampleTable();
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));

@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.VirtualFilters;
@@ -70,7 +71,11 @@ public sealed class GrantEffectPreviewService(
         IReadOnlyList<TableMetadata> allTables;
         try
         {
-            allTables = await _tables.GetAllTablesAsync(ct).ConfigureAwait(false);
+            allTables = await CatalogTablePageReader.ReadAllAsync(
+                _tables,
+                new CatalogTableQuery(IncludeInactive: false),
+                static t => t.Table.IsActive,
+                ct: ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

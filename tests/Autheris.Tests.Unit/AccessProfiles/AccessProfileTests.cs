@@ -772,7 +772,8 @@ public sealed class AccessProfileTests
         var repo = new InMemoryAccessProfileRepository();
         var auditRepo = Substitute.For<IAuditLogRepository>();
         var clusterState = Substitute.For<IDistributedClusterStateProvider>();
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var metaRepo = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([CreateTelemetryTableMetadata()]));
 

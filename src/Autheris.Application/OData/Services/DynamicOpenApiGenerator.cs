@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Domain.Common;
@@ -50,7 +51,11 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
     /// </summary>
     private async Task<IReadOnlyList<TableMetadata>> GetOpenApiTablesAsync(CancellationToken ct)
     {
-        var all = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var all = await CatalogTablePageReader.ReadAllAsync(
+            _metadataRepo,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         return Autheris.Application.DataSources.TransportDiscoveryFilter.Apply(
             _transportResolver, Autheris.Domain.Options.DataSources.DataSourceTransportFlags.OData, all);
     }

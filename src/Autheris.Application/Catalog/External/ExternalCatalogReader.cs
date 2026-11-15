@@ -239,7 +239,11 @@ public sealed class ExternalCatalogReader(
     private async Task<(IReadOnlyList<TableMetadata> AllTables, IReadOnlyDictionary<string, CatalogObjectVersionRow> Versions, CallerVisibility Visibility)>
         LoadContextAsync(ClaimsPrincipal user, TenantId tenantId, CancellationToken ct)
     {
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await CatalogTablePageReader.ReadAllAsync(
+            _metadataRepository,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         var versions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
         var visibility = await ResolveCallerVisibilityAsync(user, tenantId, allTables, ct).ConfigureAwait(false);
         return (allTables, versions, visibility);
