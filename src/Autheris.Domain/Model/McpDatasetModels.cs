@@ -130,7 +130,7 @@ public sealed record McpGraphQlAccess(
     string FilterType,
     string OrderByType,
     string Arguments,
-    string ExampleQuery,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExampleQuery,
     IReadOnlyList<McpGraphQlRelation> Relations);
 
 /// <summary>A curated example query (golden query) for a dataset.</summary>

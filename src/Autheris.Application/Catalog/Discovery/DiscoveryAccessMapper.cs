@@ -55,15 +55,16 @@ public static class DiscoveryAccessMapper
         foreach (var col in visibleCols)
         {
             var (colState, clearInSomeRows) = MapColumnState(table, decision, col.ColumnName);
+            bool hideText = colState != DiscoveryColumnState.Clear && decision.IsCatalogTextHidden(col.ColumnName);
             IReadOnlyList<ColumnClassification>? overrideRows = null;
             repoColumnClassifications?.TryGetValue(col.ColumnName, out overrideRows);
             var (pii, clearSep, classifications, clearRequestable) = ResolveColumnClassifications(
                 table, col, isHidden, tenantId, defs, overrideRows);
-            var colLocalized = !string.IsNullOrWhiteSpace(language) ? col.Texts.Resolve(language) : null;
-            var colDisplayName = DiscoveryTextSanitizer.SanitizeText(
+            var colLocalized = !hideText && !string.IsNullOrWhiteSpace(language) ? col.Texts.Resolve(language) : null;
+            var colDisplayName = hideText ? null : DiscoveryTextSanitizer.SanitizeText(
                 colLocalized?.Title ?? col.DisplayName,
                 DiscoveryTextSanitizer.MaxDisplayNameRunes);
-            var colDescription = DiscoveryTextSanitizer.SanitizeText(
+            var colDescription = hideText ? null : DiscoveryTextSanitizer.SanitizeText(
                 colLocalized?.Description ?? col.Description,
                 DiscoveryTextSanitizer.MaxDescriptionRunes);
 
@@ -73,7 +74,8 @@ public static class DiscoveryAccessMapper
                 allowNewlinesAndTabs: true);
 
             DiscoveryColumnStatistics? stats = null;
-            if (colState != DiscoveryColumnState.NoAccess &&
+            if (!hideText &&
+                colState != DiscoveryColumnState.NoAccess &&
                 colStatsByName != null &&
                 colStatsByName.TryGetValue(col.ColumnName, out var parsedColStats))
             {
@@ -93,7 +95,8 @@ public static class DiscoveryAccessMapper
                 WriteProtected: col.WriteProtected,
                 Classifications: classifications,
                 ClearRequestable: clearRequestable,
-                LongDescription: colLongDescription));
+                LongDescription: hideText ? null : colLongDescription,
+                CatalogTextHidden: hideText));
         }
 
         var tableLocalized = !string.IsNullOrWhiteSpace(language) ? table.Table.Texts.Resolve(language) : null;

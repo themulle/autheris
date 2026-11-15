@@ -107,10 +107,12 @@ public sealed partial class TableAccessPolicy
                         kv.Value.KeyRef))
                     .ToList();
                 var perCellGrants = await _classificationResolver.BuildGrantAuditEntriesAsync(allowGrants, query.Tenant, ct).ConfigureAwait(false);
+                var perCellHiddenText = CollectHiddenCatalogTextColumns(perCellResult.Decision.ColumnAccess, perGrant, combinedWinners);
                 return perCellResult.Decision with
                 {
                     MaskedColumnsAudit = perCellMasked,
-                    GrantClassificationsAudit = perCellGrants
+                    GrantClassificationsAudit = perCellGrants,
+                    HiddenCatalogTextColumns = perCellHiddenText
                 };
             }
 
@@ -219,8 +221,28 @@ public sealed partial class TableAccessPolicy
             ColumnAccess = updatedColumns,
             ColumnMasks = specs.Count > 0 ? new ColumnMaskPolicy(specs) : decision.ColumnMasks,
             MaskedColumnsAudit = maskedAudit,
-            GrantClassificationsAudit = await _classificationResolver.BuildGrantAuditEntriesAsync(allowGrants, query.Tenant, ct).ConfigureAwait(false)
+            GrantClassificationsAudit = await _classificationResolver.BuildGrantAuditEntriesAsync(allowGrants, query.Tenant, ct).ConfigureAwait(false),
+            HiddenCatalogTextColumns = CollectHiddenCatalogTextColumns(updatedColumns, perGrant, combinedWinners)
         };
+    }
+
+    private static IReadOnlySet<string>? CollectHiddenCatalogTextColumns(
+        IReadOnlyDictionary<string, ColumnAccessLevel> columnAccess,
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<string, ColumnClassificationGrantOutcome>> perGrant,
+        IReadOnlyDictionary<string, ColumnClassificationGrantOutcome> combinedWinners)
+    {
+        HashSet<string>? hidden = null;
+        foreach (var (colName, lvl) in columnAccess)
+        {
+            if (lvl == ColumnAccessLevel.Clear) continue;
+            bool isHidden = (combinedWinners.TryGetValue(colName, out var winner) && winner.CatalogText == CatalogTextVisibility.Hidden) ||
+                            perGrant.Values.Any(g => g.TryGetValue(colName, out var o) && o.AccessLevel != ColumnAccessLevel.Clear && o.CatalogText == CatalogTextVisibility.Hidden);
+            if (isHidden)
+            {
+                (hidden ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(colName);
+            }
+        }
+        return hidden;
     }
 
     private static ColumnAccessLevel GetAdjustedGrantLevel(

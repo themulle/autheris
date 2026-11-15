@@ -43,6 +43,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
     private readonly Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? _graphQlMap;
     private readonly Autheris.Application.Catalog.Discovery.IDiscoveryService? _discovery;
+    private readonly IClassificationRepository? _classificationRepository;
 
     /// <summary>
     /// The gateway options are required: the caller class and the visible set depend on them, so a
@@ -65,8 +66,10 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         TimeProvider? timeProvider = null,
         Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
         Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? graphQlMap = null,
-        Autheris.Application.Catalog.Discovery.IDiscoveryService? discoveryService = null)
+        Autheris.Application.Catalog.Discovery.IDiscoveryService? discoveryService = null,
+        IClassificationRepository? classificationRepository = null)
     {
+        _classificationRepository = classificationRepository;
         _discovery = discoveryService;
         _transportResolver = transportResolver;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -211,13 +214,16 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         var keys = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(metadata, clear);
         var pkSet = new HashSet<string>(keys.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
+        var hiddenCatalogTextCols = await Autheris.Application.Policy.Classification.ClassificationAccessResolver
+            .ResolveIndexingHiddenTextColumnsAsync(metadata, _classificationRepository, ct).ConfigureAwait(false);
         var columnDetails = metadata.Columns.Select(c =>
         {
             var maskingState = MaskingStateOf(metadata, c);
             var (pii, _, classifications, clearRequestable) = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper
                 .ResolveColumnClassifications(metadata, c, metadata.Table.DiscoveryHidden, context.TenantId.Value);
 
-            var colResolved = !string.IsNullOrWhiteSpace(lang) ? c.Texts.Resolve(lang) : null;
+            bool hideText = !callerClear.Contains(c.ColumnName) && hiddenCatalogTextCols.Contains(c.ColumnName);
+            var colResolved = !hideText && !string.IsNullOrWhiteSpace(lang) ? c.Texts.Resolve(lang) : null;
             return new CatalogColumnDetail(
                 Name: c.ColumnName,
                 Type: c.DataType,
@@ -225,8 +231,8 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 MaskingState: maskingState,
                 IsPrimaryKey: pkSet.Contains(c.ColumnName),
                 IsPiiIndicator: pii,
-                DisplayName: colResolved?.Title ?? c.DisplayName ?? c.ColumnName,
-                Description: colResolved?.Description ?? c.Description,
+                DisplayName: hideText ? null : (colResolved?.Title ?? c.DisplayName ?? c.ColumnName),
+                Description: hideText ? null : (colResolved?.Description ?? c.Description),
                 Classifications: classifications,
                 ClearRequestable: clearRequestable
             );

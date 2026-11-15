@@ -13,9 +13,12 @@ using Autheris.Domain.Model;
 /// </summary>
 internal static class CatalogSearchDocumentBuilder
 {
-    public static string BuildScrubbedDocumentText(TableMetadata t) => BuildDocuments(t).CombinedText;
+    public static string BuildScrubbedDocumentText(TableMetadata t, IReadOnlySet<string>? hiddenTextColumns = null) =>
+        BuildDocuments(t, hiddenTextColumns).CombinedText;
 
-    public static (Bm25Document Document, string CombinedText) BuildDocuments(TableMetadata t)
+    public static (Bm25Document Document, string CombinedText) BuildDocuments(
+        TableMetadata t,
+        IReadOnlySet<string>? hiddenTextColumns = null)
     {
         ArgumentNullException.ThrowIfNull(t);
 
@@ -64,6 +67,11 @@ internal static class CatalogSearchDocumentBuilder
             }
 
             Add(Bm25Field.ColumnNames, $"{c.ColumnName} {c.DataType}", scrub: false);
+            if (hiddenTextColumns is not null && hiddenTextColumns.Contains(c.ColumnName))
+            {
+                continue;
+            }
+
             Add(Bm25Field.ColumnNames, c.DisplayName);
             Add(Bm25Field.ColumnDescriptions, c.Description);
 

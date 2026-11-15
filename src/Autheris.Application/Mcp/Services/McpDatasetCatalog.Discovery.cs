@@ -299,7 +299,7 @@ public sealed partial class McpDatasetCatalog
             .Select(c =>
             {
                 graphQlColumns.TryGetValue(c.Name, out var field);
-                var colProfile = !brief && c.Statistics != null
+                var colProfile = !brief && !c.CatalogTextHidden && c.Statistics != null
                     ? new ColumnValueProfile(
                         MinValue: c.Statistics.MinValue,
                         MaxValue: c.Statistics.MaxValue,
@@ -312,29 +312,37 @@ public sealed partial class McpDatasetCatalog
                 return new McpDatasetColumn(
                     c.Name,
                     c.DataType,
-                    DiscoveryTextSanitizer.SanitizeText(c.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
+                    c.CatalogTextHidden ? null : DiscoveryTextSanitizer.SanitizeText(c.Description, DiscoveryTextSanitizer.MaxDescriptionRunes),
                     c.Pii,
                     PrimaryKey: false,
                     GraphQlField: field?.Field,
                     GraphQlType: field?.GraphQlType,
                     ValueProfile: colProfile,
                     Access: c.State == DiscoveryColumnState.Clear ? "clear" : "mask",
-                    DisplayName: DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
+                    DisplayName: c.CatalogTextHidden ? null : DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
                     Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
-                    LongDescription: c.LongDescription);
+                    LongDescription: c.CatalogTextHidden ? null : c.LongDescription);
             })
             .ToList();
+
+        var hiddenCols = obj.Columns
+            .Where(static c => c.CatalogTextHidden)
+            .Select(static c => c.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         IReadOnlyList<McpDatasetExample> examples = [];
         if (!brief && goldenQueryService != null)
         {
             var goldens = await goldenQueryService.GetGoldenQueriesAsync(obj.Domain, obj.Name, ct).ConfigureAwait(false);
-            examples = goldens.Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson)).ToList();
+            var hiddenIds = GoldenQueryService.BuildHiddenIdentifierSet(hiddenCols, graphQlColumns);
+            examples = GoldenQueryService.ExcludeHiddenColumnQueries(goldens, hiddenIds)
+                .Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson))
+                .ToList();
         }
 
         var graphQlAccess = brief || graphQl == null
             ? null
-            : await GraphQlAccessAsync(principal, graphQl, columns, ct).ConfigureAwait(false);
+            : await GraphQlAccessAsync(principal, graphQl, columns, ct, hiddenCols).ConfigureAwait(false);
 
         return new McpDatasetDescription(
             datasetId,

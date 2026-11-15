@@ -461,20 +461,23 @@ public sealed partial class Query
             {
                 var colResolved = !string.IsNullOrWhiteSpace(language) ? c.Texts.Resolve(language) : null;
                 var isSens = ClassificationMetadata.IsColumnSensitive(t, c);
+                bool hideText = isSens && t.ColumnMaskOverrides.TryGetValue(c.ColumnName, out var ovs) &&
+                                ovs.Any(static o => o.CatalogText == CatalogTextVisibility.Hidden);
                 var (pii, clearSep, classifications, clearRequestable) = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper
                     .ResolveColumnClassifications(t, c, t.Table.DiscoveryHidden);
                 return new DiscoveryColumn(
                     c.ColumnName,
-                    colResolved?.Title ?? c.DisplayName,
+                    hideText ? null : (colResolved?.Title ?? c.DisplayName),
                     c.DataType,
-                    colResolved?.Description ?? c.Description,
+                    hideText ? null : (colResolved?.Description ?? c.Description),
                     pii,
                     clearSep,
                     isSens ? DiscoveryColumnState.Masked : DiscoveryColumnState.Clear,
                     null,
                     WriteProtected: c.WriteProtected,
                     Classifications: classifications,
-                    ClearRequestable: clearRequestable);
+                    ClearRequestable: clearRequestable,
+                    CatalogTextHidden: hideText);
             }).ToList();
 
         return new TableMetadataDto
