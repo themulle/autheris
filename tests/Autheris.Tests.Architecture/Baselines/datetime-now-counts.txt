@@ -62,7 +62,7 @@ src/Autheris.Application/Mcp/Services/McpProvenanceEnricher.cs|1
 src/Autheris.Application/Mcp/Services/McpSessionStore.cs|2
 src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs|1
 src/Autheris.Application/Observability/GatewaySystemMetricsService.cs|1
-src/Autheris.Application/Policy/TableAccessPolicy.Consent.cs|3
+src/Autheris.Application/Policy/TableAccessPolicy.Consent.cs|2
 src/Autheris.Application/Policy/TableAccessPolicy.Rls.cs|1
 src/Autheris.Application/Procedures/Services/InMemoryProcedureRegistry.cs|4
 src/Autheris.Application/Procedures/Services/ProcedureRegistrationService.cs|1

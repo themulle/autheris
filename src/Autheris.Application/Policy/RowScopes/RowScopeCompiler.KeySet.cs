@@ -191,12 +191,6 @@ public sealed partial class RowScopeCompiler
             case TargetSqlDialect.DuckDb:
                 return new InListExpression(rowOperand, rows, IsNotIn: false);
 
-            case TargetSqlDialect.Sqlite:
-                return new InSubqueryExpression(
-                    rowOperand,
-                    new SelectStatement(null, new ValuesQueryBody(rows), null, null),
-                    IsNotIn: false);
-
             case TargetSqlDialect.SqlServer:
             case TargetSqlDialect.Ansi:
                 return BuildValuesExistsExpression(mappedTargetColumns, targetCols, rows);

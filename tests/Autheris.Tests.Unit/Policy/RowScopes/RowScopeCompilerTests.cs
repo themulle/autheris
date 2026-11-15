@@ -322,7 +322,6 @@ public sealed class RowScopeCompilerTests
     [InlineData(TargetSqlDialect.DuckDb, "\"autheris_target\".\"tenant_code\", \"autheris_target\".\"client_id\") IN ((@")]
     [InlineData(TargetSqlDialect.SqlServer, "AS [v] (")]
     [InlineData(TargetSqlDialect.Ansi, "AS \"v\" (")]
-    [InlineData(TargetSqlDialect.Sqlite, "IN (VALUES (@")]
     public async Task Composite_key_live_and_keyset_dialects(TargetSqlDialect dialect, string expectedFragment)
     {
         var keySetPolicy = CompositeKeySetPolicy("ks_composite", source: "ref_src");
