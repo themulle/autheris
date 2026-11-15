@@ -37,7 +37,7 @@ public static class ParityRunner
         }
         catch (Exception ex)
         {
-            failure = $"{ex.GetType().Name}: {ex.Message}";
+            failure = $"{ex.GetType().Name}: {ex.Message} @ {ex.StackTrace?.Split((char)10).Take(6).Aggregate((a, b) => a + \" | \" + b.Trim())}";
             return null;
         }
     }
