@@ -188,7 +188,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_WhenAllowed_Returns200WithRows()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var logger = NullLogger<ODataHandler>.Instance;
 
@@ -240,7 +241,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_WhenMoreRowsExistThanTop_EmitsNextLink()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var logger = NullLogger<ODataHandler>.Instance;
 
@@ -292,7 +294,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_WhenDenied_Returns403WithODataError()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var logger = NullLogger<ODataHandler>.Instance;
 
@@ -333,7 +336,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_OutsideDevelopment_DeniedAndNotFoundAreGeneric403()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var decision = TableAccessDecision.Denied(new TableIdentifier("sales", "dbo", "invoices"), "Casbin: sid S-1-5-21-1 tenant acme denied");
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableIdentifier>(t => t.TableName == "invoices"), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
@@ -524,7 +528,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_DefaultPagination_Applies100And0()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var logger = NullLogger<ODataHandler>.Instance;
 
@@ -562,7 +567,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_ClampsLargeTopTo1000()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var logger = NullLogger<ODataHandler>.Instance;
 
@@ -602,7 +608,8 @@ public sealed class ODataTests
     [InlineData(10, -5, "$skip")]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_NegativeTopOrSkip_Returns400(int? top, int? skip, string paramName)
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -626,7 +633,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_SelectParsingAndTrimming()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var decision = TableAccessDecision.Allowed(
             new TableIdentifier("sales", "dbo", "invoices"),
@@ -669,7 +677,8 @@ public sealed class ODataTests
     [InlineData("amount+1")]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_SelectWithInvalidCharacters_Returns400(string invalidSelect)
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -695,7 +704,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_TimeoutException_Returns504()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(
@@ -723,7 +733,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_DbTimeoutException_Returns504()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(
@@ -750,7 +761,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_UnexpectedException_Returns500()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(
@@ -776,7 +788,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_UnauthorizedException_Returns401()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(
@@ -795,7 +808,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_SecurityException_Returns403()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(
@@ -817,7 +831,8 @@ public sealed class ODataTests
     [InlineData("   ")]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_NullOrEmptyServiceRoot_Throws(string? rootUrl)
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -828,7 +843,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_ExecuteEntitySetQueryAsync_ForwardsHeaders()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var decision = TableAccessDecision.Allowed(
             new TableIdentifier("sales", "dbo", "invoices"),
@@ -1002,7 +1018,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_GetMetadataCsdlAsync_ZeroTrust_OmitsDeniedColumns()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var sampleTable = CreateSampleTable();
         var user = CreateAuthenticatedUser("sales");
@@ -1040,7 +1057,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_GetServiceDocumentAsync_ZeroTrust_ExcludesDeniedTables()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var table1 = CreateSampleTable();
         var table2 = new TableMetadata
@@ -1074,7 +1092,8 @@ public sealed class ODataTests
     [Fact]
     public async Task SR_M_16_Metadata_AccessCheckThrows_TableOmitted_AndNotCached()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
         var sampleTable = CreateSampleTable();
@@ -1100,7 +1119,8 @@ public sealed class ODataTests
     [Fact]
     public async Task SR_M_16_Metadata_NullDecision_TableOmitted()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { CreateSampleTable() }));
@@ -1113,7 +1133,8 @@ public sealed class ODataTests
     [Fact]
     public async Task OData_Caching_WithSizeLimitedSharedCache_DoesNotThrow()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
         var sampleTable = CreateSampleTable();
@@ -1187,7 +1208,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_GetMetadataCsdlAsync_UsesFastPathWithoutPerTableAudit_AndCachesResult()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var logger = NullLogger<ODataHandler>.Instance;
         var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
@@ -1237,7 +1259,8 @@ public sealed class ODataTests
     [Fact]
     public async Task ODataHandler_GetServiceDocumentAsync_UsesFastPathWithoutPerTableAudit_AndCachesResult()
     {
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
+            Substitute.For<ITableMetadataRepository>());
         var execService = Substitute.For<IGatewayExecutionService>();
         var logger = NullLogger<ODataHandler>.Instance;
         var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());

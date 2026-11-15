@@ -118,7 +118,11 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
 
     public async Task<int> IndexOnceAsync(CancellationToken ct = default)
     {
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await CatalogTablePageReader.ReadAllAsync(
+            _metadataRepository,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         var tenants = await ResolveTargetTenantsAsync(allTables, ct).ConfigureAwait(false);
         int changesWritten = 0;
 
@@ -135,7 +139,11 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         IReadOnlyList<TableMetadata>? preloadedTables = null,
         CancellationToken ct = default)
     {
-        var allTables = preloadedTables ?? await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = preloadedTables ?? await CatalogTablePageReader.ReadAllAsync(
+            _metadataRepository,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         var virtualFiltered = DiscoveryTenantScope.DropForeignVirtualTables(allTables, tenantId);
         var consentTables = await _consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct).ConfigureAwait(false);
         var consentSet = consentTables as IReadOnlySet<TableIdentifier> ?? consentTables.ToHashSet();

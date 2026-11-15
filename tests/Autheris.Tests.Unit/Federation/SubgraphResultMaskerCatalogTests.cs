@@ -194,6 +194,7 @@ public sealed class SubgraphResultMaskerCatalogTests
             ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["pin"] = new MaskingRule { RuleType = "NULLIFY" } }
         };
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
+        Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
         var options = Options.Create(new GatewayOptions { Federation = new FederationOptions { CatalogMaskingCacheSeconds = 60 } });
         var catalog = new CatalogFederatedMaskingCatalog(repo, options);
 
@@ -203,9 +204,13 @@ public sealed class SubgraphResultMaskerCatalogTests
         map.ShouldContainKey("loyaltycode");
         map["pin"].RuleType.ShouldBe("NULLIFY");
         map.ShouldNotContainKey("note");
-        await repo.Received(1).GetAllTablesAsync(Arg.Any<CancellationToken>());
+        await repo.Received(1).QueryTablesAsync(
+            Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(),
+            Arg.Any<CancellationToken>());
 
         await catalog.GetClassificationsAsync(new TenantId("tenant-b"));
-        await repo.Received(2).GetAllTablesAsync(Arg.Any<CancellationToken>());
+        await repo.Received(2).QueryTablesAsync(
+            Arg.Any<Autheris.Application.Catalog.CatalogTableQuery>(),
+            Arg.Any<CancellationToken>());
     }
 }

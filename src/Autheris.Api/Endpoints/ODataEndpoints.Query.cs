@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Serialization;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Common.Serialization;
 using Autheris.Domain.Common;
@@ -48,7 +49,11 @@ public static partial class ODataEndpoints
             return Results.NotFound();
         }
 
-        var tables = await metadataRepo.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false);
+        var tables = await CatalogTablePageReader.ReadAllAsync(
+            metadataRepo,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: context.RequestAborted).ConfigureAwait(false);
         // DT-A-7: the default tenant (catalog owner) may address every table by its flat name; every other tenant only its own domain and the
         // shared "default" domain. An unresolved tenant addresses nothing.
         var tenantResolver = context.RequestServices?.GetService<Autheris.Application.Tenancy.ITenantResolver>();

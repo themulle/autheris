@@ -6,6 +6,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Semantic;
 using Autheris.Application.Common.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -23,7 +24,11 @@ public sealed class DbtExposurePublisher(
 
     public async Task<string> GenerateExposuresYamlAsync(CancellationToken ct = default)
     {
-        var tables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var tables = await CatalogTablePageReader.ReadAllAsync(
+            _metadataRepository,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         using var writer = new StringWriter(CultureInfo.InvariantCulture);
         var emitter = new Emitter(writer, EmitterSettings.Default);
 
