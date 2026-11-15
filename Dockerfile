@@ -53,6 +53,7 @@ VOLUME /app/scratch
 
 # Copy the artifacts published by the CI/CD runner
 COPY dist/publish/ ./
+COPY dist/modules/ /app/modules/
 
 # Non-root user for container hardening (UID:GID 10001:10001)
 USER 10001:10001
