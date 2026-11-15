@@ -383,7 +383,7 @@ public sealed class ProcedureInvoker : IProcedureInvoker
 
     internal static DbType MapDbType(string sqlType)
     {
-        string baseType = sqlType.Contains('(') ? sqlType[..sqlType.IndexOf('(')] : sqlType;
+        string baseType = sqlType.Contains('(', StringComparison.Ordinal) ? sqlType[..sqlType.IndexOf('(', StringComparison.Ordinal)] : sqlType;
         return baseType switch
         {
             "int" => DbType.Int32,

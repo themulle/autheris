@@ -163,7 +163,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
                 var maxMem = SanitizeMemoryString(_options.MaxMemory);
                 var maxTempSize = SanitizeMemoryString(_options.MaxTempDirectorySize);
                 int threads = Math.Clamp(_options.MaxThreads, 1, 8);
-                var normalizedTempDir = sessionTempDir.Replace('\\', '/').Replace("'", "''");
+                var normalizedTempDir = sessionTempDir.Replace('\\', '/').Replace("'", "''", StringComparison.Ordinal);
 
                 setupCmd.CommandText = BuildSetupSql(normalizedTempDir, maxTempSize, maxMem, threads);
                 await setupCmd.ExecuteNonQueryAsync(cts.Token).ConfigureAwait(false);
@@ -441,12 +441,12 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
     private static string MapDuckDbType(TableColumn column)
     {
         var type = column.DataType?.ToLowerInvariant() ?? "";
-        if (type.Contains("int") || type.Contains("short") || type.Contains("byte")) return "BIGINT";
-        if (type.Contains("float") || type.Contains("double") || type.Contains("real")) return "DOUBLE";
-        if (type.Contains("decimal") || type.Contains("numeric") || type.Contains("money")) return "DECIMAL(38,18)";
-        if (type.Contains("bool")) return "BOOLEAN";
-        if (type.Contains("date") || type.Contains("time")) return "TIMESTAMP";
-        if (type.Contains("binary") || type.Contains("byte[]")) return "BLOB";
+        if (type.Contains("int", StringComparison.Ordinal) || type.Contains("short", StringComparison.Ordinal) || type.Contains("byte", StringComparison.Ordinal)) return "BIGINT";
+        if (type.Contains("float", StringComparison.Ordinal) || type.Contains("double", StringComparison.Ordinal) || type.Contains("real", StringComparison.Ordinal)) return "DOUBLE";
+        if (type.Contains("decimal", StringComparison.Ordinal) || type.Contains("numeric", StringComparison.Ordinal) || type.Contains("money", StringComparison.Ordinal)) return "DECIMAL(38,18)";
+        if (type.Contains("bool", StringComparison.Ordinal)) return "BOOLEAN";
+        if (type.Contains("date", StringComparison.Ordinal) || type.Contains("time", StringComparison.Ordinal)) return "TIMESTAMP";
+        if (type.Contains("binary", StringComparison.Ordinal) || type.Contains("byte[]", StringComparison.Ordinal)) return "BLOB";
         return "VARCHAR";
     }
 
@@ -527,7 +527,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         {
             ValidateDollarMarkers(sql, boundParameterCount.Value);
         }
-        else if (sql.Contains('$'))
+        else if (sql.Contains('$', StringComparison.Ordinal))
         {
             throw new System.Security.SecurityException("Dollar-quoted strings and parameters are prohibited in OLAP queries.");
         }

@@ -49,7 +49,7 @@ public sealed class SpanRedactionProcessor : BaseProcessor<Activity>
                 }
                 else if (key.Equals("url.full", StringComparison.OrdinalIgnoreCase) && tag.Value is string urlStr)
                 {
-                    var queryIdx = urlStr.IndexOf('?');
+                    var queryIdx = urlStr.IndexOf('?', StringComparison.Ordinal);
                     if (queryIdx >= 0)
                     {
                         activity.SetTag(key, urlStr[..queryIdx]);

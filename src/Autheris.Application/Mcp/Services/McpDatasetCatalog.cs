@@ -1272,7 +1272,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             return true;
         }
 
-        if (search.Contains('.') && DatasetId(id).Contains(search, StringComparison.OrdinalIgnoreCase))
+        if (search.Contains('.', StringComparison.Ordinal) && DatasetId(id).Contains(search, StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

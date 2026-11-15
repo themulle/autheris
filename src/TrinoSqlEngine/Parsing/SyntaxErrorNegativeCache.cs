@@ -31,7 +31,7 @@ internal sealed class SyntaxErrorNegativeCache
             return false;
         }
 
-        var key = new Key(string.GetHashCode(sql), ruleKind, options.GetHashCode());
+        var key = new Key(string.GetHashCode(sql, StringComparison.Ordinal), ruleKind, options.GetHashCode());
         if (!_entries.TryGetValue(key, out var entry))
         {
             return false;
@@ -73,7 +73,7 @@ internal sealed class SyntaxErrorNegativeCache
             }
         }
 
-        var key = new Key(string.GetHashCode(sql), ruleKind, options.GetHashCode());
+        var key = new Key(string.GetHashCode(sql, StringComparison.Ordinal), ruleKind, options.GetHashCode());
         _entries[key] = new Entry(sql.ToString(), options, limits, message, line, column, now + (long)ttl.TotalMilliseconds);
     }
 

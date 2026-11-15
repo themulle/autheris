@@ -580,15 +580,15 @@ public static partial class TreeSqlCompiler
     {
         if (string.IsNullOrWhiteSpace(dataType)) return true;
         var dt = dataType.Trim().ToLowerInvariant();
-        if (dt.Contains("interval") || dt.Contains("point") || dt.Contains("polygon") ||
-            dt.Contains("geometry") || dt.Contains("geography") || dt.Contains("line") ||
-            dt.Contains("json") || dt.Contains("xml") || dt.Contains("uuid") || dt.Contains("guid"))
+        if (dt.Contains("interval", StringComparison.Ordinal) || dt.Contains("point", StringComparison.Ordinal) || dt.Contains("polygon", StringComparison.Ordinal) ||
+            dt.Contains("geometry", StringComparison.Ordinal) || dt.Contains("geography", StringComparison.Ordinal) || dt.Contains("line", StringComparison.Ordinal) ||
+            dt.Contains("json", StringComparison.Ordinal) || dt.Contains("xml", StringComparison.Ordinal) || dt.Contains("uuid", StringComparison.Ordinal) || dt.Contains("guid", StringComparison.Ordinal))
         {
             return true;
         }
 
         var baseType = dt.Split('(', '[', ' ')[0].Trim();
-        if (baseType.StartsWith("bit") || baseType.StartsWith("bool")) return false;
+        if (baseType.StartsWith("bit", StringComparison.Ordinal) || baseType.StartsWith("bool", StringComparison.Ordinal)) return false;
         if (baseType is "bigint" or "int8" or "long" or "int" or "integer" or "int4" or "smallint" or "int2" or "tinyint") return false;
         if (baseType is "decimal" or "numeric" or "money" or "smallmoney" or "float" or "double" or "real" or "float4" or "float8") return false;
 

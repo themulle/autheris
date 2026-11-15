@@ -164,7 +164,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         }
 
         // E-13: anonymous probes never pay for cryptographic hashing (and cannot be used as a password oracle).
-        if (Request.Path.StartsWithSegments("/health"))
+        if (Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase))
         {
             return AuthenticateResult.NoResult();
         }

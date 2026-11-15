@@ -1,3 +1,4 @@
+using System;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -134,7 +135,7 @@ public sealed class OpenMetadataClient : IOpenMetadataClient
                     throw new InvalidOperationException($"Duplicate cursor detected '{afterCursor}' while fetching from {baseUrl}. Aborting to prevent partial synchronization.");
                 }
 
-                var separator = baseUrl.Contains('?') ? "&" : "?";
+                var separator = baseUrl.Contains('?', StringComparison.Ordinal) ? "&" : "?";
                 var url = string.IsNullOrEmpty(afterCursor)
                     ? baseUrl
                     : $"{baseUrl}{separator}after={Uri.EscapeDataString(afterCursor)}";

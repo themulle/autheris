@@ -47,7 +47,7 @@ public static class RecertificationEndpoints
                 var campaign = await service.CreateCampaignAsync(new TenantId(tenantId), request.Name, request.RecertClass, request.Deadline, request.AssetType, ct).ConfigureAwait(false);
                 return Results.Created($"/api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaign.CampaignId}", campaign);
             }
-            catch (ArgumentException ex) when (ex.Message.Contains("UNSUPPORTED_ASSET_TYPE"))
+            catch (ArgumentException ex) when (ex.Message.Contains("UNSUPPORTED_ASSET_TYPE", StringComparison.Ordinal))
             {
                 return Results.Problem(
                     detail: "Recertification campaigns requesting the AccessPolicy asset type are not supported.",

@@ -94,7 +94,7 @@ public static class DmlRequestGuard
 
         var key = httpContext.Request.Headers[IdempotencyKeyHeader].ToString();
         if (key.Length is 0 or > MaxIdempotencyKeyLength || !Ascii.IsValid(key) || string.IsNullOrWhiteSpace(key)
-            || key.AsSpan().IndexOfAnyInRange('\0', ' ') >= 0 || key.Contains('\u007f'))
+            || key.AsSpan().IndexOfAnyInRange('\0', ' ') >= 0 || key.Contains('\u007f', StringComparison.Ordinal))
         {
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest,
                 $"Data-changing statements require an '{IdempotencyKeyHeader}' header of 1 to {MaxIdempotencyKeyLength} ASCII characters.", ct);

@@ -113,7 +113,7 @@ public static class DatabaseDialectExtensions
         }
 
         // Enum names or numbers, but no flag combinations ("SqlServer, Sqlite") and no undefined numbers ("99").
-        if (!normalized.Contains(',') &&
+        if (!normalized.Contains(',', StringComparison.Ordinal) &&
             Enum.TryParse<DatabaseDialect>(normalized, true, out var parsed) &&
             Enum.IsDefined(parsed))
         {
@@ -144,13 +144,13 @@ public static class DatabaseDialectExtensions
 
     public static string EscapeSqlLiteral(this DatabaseDialect dialect, string value)
     {
-        if (value.Contains('\0'))
+        if (value.Contains('\0', StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Literal contains a forbidden null byte (\\0). Potential injection attack.");
         }
 
         // Standard single quote doubling
-        var escaped = value.Replace("'", "''");
+        var escaped = value.Replace("'", "''", StringComparison.Ordinal);
 
         // Dialect-specific backslash protection:
         // In Databricks (Spark SQL), backslashes are escape characters in string literals.
@@ -158,7 +158,7 @@ public static class DatabaseDialectExtensions
         // backslashes in standard '...' literals are literal characters and must not be doubled.
         if (dialect is DatabaseDialect.Databricks)
         {
-            escaped = escaped.Replace(@"\", @"\\");
+            escaped = escaped.Replace(@"\", @"\\", StringComparison.Ordinal);
         }
 
         return escaped;

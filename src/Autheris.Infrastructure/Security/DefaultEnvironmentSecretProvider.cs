@@ -137,16 +137,16 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             {
                 var secretName = segments[0];
                 candidates.Add(secretName);
-                candidates.Add(secretName.Replace("-", "_"));
-                candidates.Add(secretName.Replace("-", ":"));
+                candidates.Add(secretName.Replace("-", "_", StringComparison.Ordinal));
+                candidates.Add(secretName.Replace("-", ":", StringComparison.Ordinal));
             }
         }
 
         // 2. Namespaced aliases strictly derived from the requested secretRef
-        var cleanRef = secretRef.Replace(":", "__").Replace("-", "_").ToUpperInvariant();
+        var cleanRef = secretRef.Replace(":", "__", StringComparison.Ordinal).Replace("-", "_", StringComparison.Ordinal).ToUpperInvariant();
         candidates.Add(cleanRef);
-        candidates.Add(secretRef.Replace("-", "_"));
-        candidates.Add(secretRef.Replace("-", ":"));
+        candidates.Add(secretRef.Replace("-", "_", StringComparison.Ordinal));
+        candidates.Add(secretRef.Replace("-", ":", StringComparison.Ordinal));
 
         // 3. Strictly bounded well-known aliases (exact match only, preventing accidental cross-secret collisions)
         // R-DEP-1: well-known aliases apply to exact reference names only. A prefix match ("audit:tenant-x") would
@@ -186,7 +186,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
                 return bytes;
             }
 
-            var envVal = Environment.GetEnvironmentVariable(key.Replace(":", "__").Replace("-", "_"));
+            var envVal = Environment.GetEnvironmentVariable(key.Replace(":", "__", StringComparison.Ordinal).Replace("-", "_", StringComparison.Ordinal));
             if (!string.IsNullOrWhiteSpace(envVal))
             {
                 _logger?.LogDebug("Resolved secret reference '{SecretRef}' using environment variable '{CandidateKey}'.", SanitizeForLog(DescribeReference(secretRef)), SanitizeForLog(key));

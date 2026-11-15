@@ -86,34 +86,34 @@ public static partial class SqlSecurityValidator
             throw new ArgumentException($"SQL predicate in '{fieldName}' exceeds maximum allowed length of {maxLength} characters.", fieldName);
         }
 
-        if (predicate.Contains('\0'))
+        if (predicate.Contains('\0', StringComparison.Ordinal))
         {
             throw new ArgumentException($"SQL predicate in '{fieldName}' contains prohibited null byte.", fieldName);
         }
 
-        if (predicate.Contains(';'))
+        if (predicate.Contains(';', StringComparison.Ordinal))
         {
             throw new ArgumentException($"SQL predicate in '{fieldName}' contains prohibited statement terminator ';'.", fieldName);
         }
 
-        if (predicate.Contains("--") || predicate.Contains("/*") || predicate.Contains("*/"))
+        if (predicate.Contains("--", StringComparison.Ordinal) || predicate.Contains("/*", StringComparison.Ordinal) || predicate.Contains("*/", StringComparison.Ordinal))
         {
             throw new ArgumentException($"SQL predicate in '{fieldName}' contains prohibited comment sequence.", fieldName);
         }
 
-        if (predicate.Contains("@@"))
+        if (predicate.Contains("@@", StringComparison.Ordinal))
         {
             throw new ArgumentException($"SQL predicate in '{fieldName}' contains prohibited SQL token '@@'.", fieldName);
         }
 
         // Fast normalization of query parameters (@p0, @tenant_id) to valid identifiers for AST verification
-        string normalized = predicate.Contains('@')
+        string normalized = predicate.Contains('@', StringComparison.Ordinal)
             ? ParameterTokenRegex().Replace(predicate, "__param_$1")
             : predicate;
 
         // SQL Server bracket identifiers ([dbo].[customers], generated for correlated row filters) are not part of the
         // Trino grammar. They name the same identifier as a double-quoted one, so they are validated as such.
-        if (normalized.Contains('['))
+        if (normalized.Contains('[', StringComparison.Ordinal))
         {
             normalized = NormalizeBracketIdentifiers(normalized);
         }

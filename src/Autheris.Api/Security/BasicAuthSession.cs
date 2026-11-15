@@ -152,7 +152,7 @@ public static class BasicAuthSession
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var user in basic.Users)
         {
-            if (string.IsNullOrWhiteSpace(user.Username) || user.Username.Contains(':'))
+            if (string.IsNullOrWhiteSpace(user.Username) || user.Username.Contains(':', StringComparison.Ordinal))
             {
                 errors.Add("BasicAuth users require a non-empty username without ':'.");
                 continue;
@@ -169,7 +169,7 @@ public static class BasicAuthSession
             }
 
             var sid = BasicAuthPrincipalFactory.ResolveSid(user);
-            if (sid.Contains(':') ||
+            if (sid.Contains(':', StringComparison.Ordinal) ||
                 sid.StartsWith("ITSM", StringComparison.OrdinalIgnoreCase) ||
                 sid.StartsWith("S-1-5-21-ITSM-", StringComparison.OrdinalIgnoreCase))
             {

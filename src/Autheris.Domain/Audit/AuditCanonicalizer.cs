@@ -18,11 +18,11 @@ public static class AuditCanonicalizer
     {
         if (string.IsNullOrEmpty(value)) return string.Empty;
 
-        return value.Replace("\\", "\\\\")
-                    .Replace("\n", "\\n")
-                    .Replace("\r", "\\r")
-                    .Replace("\t", "\\t")
-                    .Replace("|", "\\p");
+        return value.Replace("\\", "\\\\", StringComparison.Ordinal)
+                    .Replace("\n", "\\n", StringComparison.Ordinal)
+                    .Replace("\r", "\\r", StringComparison.Ordinal)
+                    .Replace("\t", "\\t", StringComparison.Ordinal)
+                    .Replace("|", "\\p", StringComparison.Ordinal);
     }
 
     /// <summary>

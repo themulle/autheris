@@ -295,7 +295,7 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
             }
         }
 
-        int at = text.IndexOf('@');
+        int at = text.IndexOf('@', StringComparison.Ordinal);
         return at > 0 && text.IndexOf('.', at) > at + 1;
     }
 
@@ -532,7 +532,7 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
     {
         if (string.IsNullOrWhiteSpace(dataType)) return false;
         var dt = dataType.Trim().ToLowerInvariant();
-        if (dt.Contains('(')) dt = dt[..dt.IndexOf('(')].Trim();
+        if (dt.Contains('(', StringComparison.Ordinal)) dt = dt[..dt.IndexOf('(', StringComparison.Ordinal)].Trim();
         return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
             or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
             or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"

@@ -518,7 +518,7 @@ public sealed class ScimService : IScimService
             {
                 if (!string.IsNullOrWhiteSpace(op.Path) && op.Path.Contains("value eq", StringComparison.OrdinalIgnoreCase))
                 {
-                    var start = op.Path.IndexOf('"');
+                    var start = op.Path.IndexOf('"', StringComparison.Ordinal);
                     var end = op.Path.LastIndexOf('"');
                     if (start >= 0 && end > start)
                     {

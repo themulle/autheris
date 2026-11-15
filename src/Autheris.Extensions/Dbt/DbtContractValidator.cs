@@ -110,7 +110,7 @@ public sealed class DbtContractValidator(
     private static string NormalizeType(string type)
     {
         var t = type.Trim().ToLowerInvariant();
-        var parenIndex = t.IndexOf('(');
+        var parenIndex = t.IndexOf('(', StringComparison.Ordinal);
         if (parenIndex > 0)
         {
             t = t[..parenIndex].Trim();

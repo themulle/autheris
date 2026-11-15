@@ -109,11 +109,11 @@ public static class SqlEndpointRoutes
         if (endpointLoader != null)
         {
             string contentToParse = request.Sql;
-            if (!string.IsNullOrWhiteSpace(request.Summary) && !contentToParse.Contains("-- @summary"))
+            if (!string.IsNullOrWhiteSpace(request.Summary) && !contentToParse.Contains("-- @summary", StringComparison.Ordinal))
             {
                 contentToParse = $"-- @summary {request.Summary}\n" + contentToParse;
             }
-            if (!string.IsNullOrWhiteSpace(request.DataSource) && !contentToParse.Contains("-- @datasource"))
+            if (!string.IsNullOrWhiteSpace(request.DataSource) && !contentToParse.Contains("-- @datasource", StringComparison.Ordinal))
             {
                 contentToParse = $"-- @datasource {request.DataSource}\n" + contentToParse;
             }

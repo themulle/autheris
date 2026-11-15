@@ -222,33 +222,33 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
         var type = (column.DataType ?? "varchar").ToLowerInvariant();
         int seq = rowIndex + 1;
 
-        if (type.Contains("int") || type is "long" or "bigint" or "smallint")
+        if (type.Contains("int", StringComparison.Ordinal) || type is "long" or "bigint" or "smallint")
         {
             return 9000 + seq;
         }
 
-        if (type.Contains("dec") || type.Contains("num") || type.Contains("float") || type.Contains("double") || type.Contains("money"))
+        if (type.Contains("dec", StringComparison.Ordinal) || type.Contains("num", StringComparison.Ordinal) || type.Contains("float", StringComparison.Ordinal) || type.Contains("double", StringComparison.Ordinal) || type.Contains("money", StringComparison.Ordinal))
         {
             return 0.00m;
         }
 
-        if (type.Contains("bool") || type == "bit")
+        if (type.Contains("bool", StringComparison.Ordinal) || type == "bit")
         {
             return false;
         }
 
-        if (type.Contains("date") || type.Contains("time"))
+        if (type.Contains("date", StringComparison.Ordinal) || type.Contains("time", StringComparison.Ordinal))
         {
             return "1970-01-01";
         }
 
-        if (type.Contains("uuid") || type.Contains("uniqueidentifier"))
+        if (type.Contains("uuid", StringComparison.Ordinal) || type.Contains("uniqueidentifier", StringComparison.Ordinal))
         {
             return $"00000000-0000-0000-0000-{seq:D12}";
         }
 
         var colNameLower = column.ColumnName.ToLowerInvariant();
-        if (colNameLower.Contains("email"))
+        if (colNameLower.Contains("email", StringComparison.Ordinal))
         {
             return $"synthetic.redacted.{seq}@example.invalid";
         }
@@ -267,12 +267,12 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
             return ExpandPatternMask(profile.FormatPattern!, seq);
         }
 
-        if (type.Contains("uuid") || type.Contains("uniqueidentifier"))
+        if (type.Contains("uuid", StringComparison.Ordinal) || type.Contains("uniqueidentifier", StringComparison.Ordinal))
         {
             return $"10000000-0000-4000-8000-{seq:D12}";
         }
 
-        if (type.Contains("char") || type.Contains("text") || type.Contains("string"))
+        if (type.Contains("char", StringComparison.Ordinal) || type.Contains("text", StringComparison.Ordinal) || type.Contains("string", StringComparison.Ordinal))
         {
             return $"PK-{seq:D6}";
         }
@@ -349,7 +349,7 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
         var type = (column.DataType ?? "varchar").ToLowerInvariant();
         int seq = rowIndex + 1;
 
-        if (type.Contains("int") || type is "long" or "bigint" or "smallint" or "tinyint")
+        if (type.Contains("int", StringComparison.Ordinal) || type is "long" or "bigint" or "smallint" or "tinyint")
         {
             long min = 10;
             long max = 100;
@@ -373,7 +373,7 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
             return Math.Clamp(candidate, min, max);
         }
 
-        if (type.Contains("dec") || type.Contains("num") || type.Contains("float") || type.Contains("double") || type.Contains("money"))
+        if (type.Contains("dec", StringComparison.Ordinal) || type.Contains("num", StringComparison.Ordinal) || type.Contains("float", StringComparison.Ordinal) || type.Contains("double", StringComparison.Ordinal) || type.Contains("money", StringComparison.Ordinal))
         {
             decimal min = 10.00m;
             decimal max = 500.00m;
@@ -396,17 +396,17 @@ public sealed class SyntheticSampleRowGenerator(IColumnValueProfileService? prof
             return Math.Round(min + ((max - min) * ratio), 2);
         }
 
-        if (type.Contains("bool") || type == "bit")
+        if (type.Contains("bool", StringComparison.Ordinal) || type == "bit")
         {
             return rowIndex % 2 == 0;
         }
 
-        if (type.Contains("date") || type.Contains("time"))
+        if (type.Contains("date", StringComparison.Ordinal) || type.Contains("time", StringComparison.Ordinal))
         {
-            return InterpolateDate(profile?.MinValue, profile?.MaxValue, rowIndex, includeTime: type.Contains("time") && !string.Equals(type, "date", StringComparison.OrdinalIgnoreCase));
+            return InterpolateDate(profile?.MinValue, profile?.MaxValue, rowIndex, includeTime: type.Contains("time", StringComparison.Ordinal) && !string.Equals(type, "date", StringComparison.OrdinalIgnoreCase));
         }
 
-        if (type.Contains("uuid") || type.Contains("uniqueidentifier"))
+        if (type.Contains("uuid", StringComparison.Ordinal) || type.Contains("uniqueidentifier", StringComparison.Ordinal))
         {
             return $"30000000-0000-4000-8000-{seq:D12}";
         }

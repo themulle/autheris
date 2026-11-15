@@ -57,7 +57,7 @@ public sealed partial class GovernedChangeDetectionService
             throw new GatewaySecurityException("Cursor must not be empty.", ChangeDetectionErrorCodes.CursorInvalid);
         }
 
-        int dotIndex = cursor.IndexOf('.');
+        int dotIndex = cursor.IndexOf('.', StringComparison.Ordinal);
         if (dotIndex <= 0 || dotIndex == cursor.Length - 1 || cursor.IndexOf('.', dotIndex + 1) >= 0)
         {
             throw new GatewaySecurityException("Cursor format is invalid.", ChangeDetectionErrorCodes.CursorInvalid);

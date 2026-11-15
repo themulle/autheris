@@ -386,7 +386,7 @@ public static class TrinoMetadataQueryHandler
             return true;
         }
 
-        var regexPattern = "^" + Regex.Escape(likePattern).Replace("%", ".*").Replace("_", ".") + "$";
+        var regexPattern = "^" + Regex.Escape(likePattern).Replace("%", ".*", StringComparison.Ordinal).Replace("_", ".", StringComparison.Ordinal) + "$";
         return Regex.IsMatch(value, regexPattern, RegexOptions.IgnoreCase, RegexTimeout);
     }
 

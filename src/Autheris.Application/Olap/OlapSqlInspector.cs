@@ -113,7 +113,7 @@ public static class OlapSqlInspector
             throw new OlapSqlRejectedException(OlapSqlRejectionReason.InvalidStatement);
         }
 
-        if (sql.Contains('\0') || sql.Contains('\\') || HasEscapeStringPrefix(sql))
+        if (sql.Contains('\0', StringComparison.Ordinal) || sql.Contains('\\', StringComparison.Ordinal) || HasEscapeStringPrefix(sql))
         {
             throw new OlapSqlRejectedException(OlapSqlRejectionReason.EscapeStringsProhibited);
         }

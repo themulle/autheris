@@ -856,7 +856,7 @@ public sealed class CostAndQuotaMiddleware
             if (field != null && !string.IsNullOrWhiteSpace(field.Name.Value))
             {
                 var val = field.Name.Value;
-                if (val.Contains('_'))
+                if (val.Contains('_', StringComparison.Ordinal))
                 {
                     var parts = val.Split('_', 2);
                     if (TableIdentifier.TryCreate(parts[0], "public", parts[1], out var qualified))

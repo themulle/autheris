@@ -80,7 +80,7 @@ public sealed class GatewayExtensibilityMiddleware
             : "/" + _options.GraphQL.EndpointPath;
 
         // Apply to GraphQL endpoint and API endpoints
-        if (!context.Request.Path.StartsWithSegments(endpoint) && !context.Request.Path.StartsWithSegments("/api"))
+        if (!context.Request.Path.StartsWithSegments(endpoint, StringComparison.OrdinalIgnoreCase) && !context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
             return;

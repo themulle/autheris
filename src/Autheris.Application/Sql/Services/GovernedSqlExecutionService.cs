@@ -549,7 +549,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         replacedNames = names;
         bool hasGateway = gatewayParameters is { Count: > 0 };
-        if ((!hasGateway && (parameters == null || parameters.Count == 0)) || sql.IndexOf('@') < 0)
+        if ((!hasGateway && (parameters == null || parameters.Count == 0)) || sql.IndexOf('@', StringComparison.Ordinal) < 0)
         {
             return sql;
         }

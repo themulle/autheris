@@ -101,7 +101,7 @@ public sealed class FederatedParameterContract
             }
 
             // Embedded NUL check on raw strings
-            if (rawValue is string rawStr && rawStr.Contains('\0'))
+            if (rawValue is string rawStr && rawStr.Contains('\0', StringComparison.Ordinal))
             {
                 throw new WebSqlSecurityException("Parameter value contains forbidden control character.");
             }
@@ -109,7 +109,7 @@ public sealed class FederatedParameterContract
             if (rawValue is JsonElement jsonElem && jsonElem.ValueKind == JsonValueKind.String)
             {
                 var s = jsonElem.GetString();
-                if (s != null && s.Contains('\0'))
+                if (s != null && s.Contains('\0', StringComparison.Ordinal))
                 {
                     throw new WebSqlSecurityException("Parameter value contains forbidden control character.");
                 }
@@ -132,7 +132,7 @@ public sealed class FederatedParameterContract
                 // Check embedded NUL in list elements
                 for (int i = 0; i < normalizedList.Count; i++)
                 {
-                    if (normalizedList[i] is string elemStr && elemStr.Contains('\0'))
+                    if (normalizedList[i] is string elemStr && elemStr.Contains('\0', StringComparison.Ordinal))
                     {
                         throw new WebSqlSecurityException("Parameter value contains forbidden control character.");
                     }
@@ -144,7 +144,7 @@ public sealed class FederatedParameterContract
             else
             {
                 var normalizedScalar = WebSqlParameterValues.Normalize(rawValue);
-                if (normalizedScalar is string s && s.Contains('\0'))
+                if (normalizedScalar is string s && s.Contains('\0', StringComparison.Ordinal))
                 {
                     throw new WebSqlSecurityException("Parameter value contains forbidden control character.");
                 }

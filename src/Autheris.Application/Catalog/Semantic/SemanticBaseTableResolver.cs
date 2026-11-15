@@ -29,7 +29,7 @@ public sealed class SemanticBaseTableResolver
         var candidates = new List<TableIdentifier>();
         if (!string.IsNullOrWhiteSpace(model.NodeRelation))
         {
-            var cleaned = model.NodeRelation.Replace("\"", string.Empty).Replace("`", string.Empty).Trim();
+            var cleaned = model.NodeRelation.Replace("\"", string.Empty, StringComparison.Ordinal).Replace("`", string.Empty, StringComparison.Ordinal).Trim();
             if (TableIdentifier.TryParse(cleaned, out var parsed))
             {
                 candidates.Add(parsed);
@@ -80,13 +80,13 @@ public sealed class SemanticBaseTableResolver
         }
 
         var allTables = await _repository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var relLeaf = (model.NodeRelation ?? model.Name).Replace("\"", string.Empty).Split('.').LastOrDefault()?.Trim();
+        var relLeaf = (model.NodeRelation ?? model.Name).Replace("\"", string.Empty, StringComparison.Ordinal).Split('.').LastOrDefault()?.Trim();
         return allTables.FirstOrDefault(t =>
             t.Table.IsActive &&
             !SemanticVirtualTables.IsVirtualTable(t) &&
             (isVisible is null || isVisible(t)) &&
             (string.Equals(t.Identifier.TableName, relLeaf, StringComparison.OrdinalIgnoreCase) ||
              string.Equals(t.Identifier.TableName, model.Name, StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(t.Identifier.ToString(), model.NodeRelation?.Replace("\"", string.Empty), StringComparison.OrdinalIgnoreCase)));
+             string.Equals(t.Identifier.ToString(), model.NodeRelation?.Replace("\"", string.Empty, StringComparison.Ordinal), StringComparison.OrdinalIgnoreCase)));
     }
 }

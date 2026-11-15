@@ -105,7 +105,7 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
                 continue;
             }
 
-            var colonIdx = raw.IndexOf(':');
+            var colonIdx = raw.IndexOf(':', StringComparison.Ordinal);
             if (colonIdx > 0)
             {
                 var roleTenant = raw[..colonIdx];

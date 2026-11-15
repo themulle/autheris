@@ -45,7 +45,7 @@ public sealed class PeriodicTableCacheRefresher
 
         foreach (var target in allTables)
         {
-            var table = TableIdentifier.Parse(target.Table.Contains('.') ? target.Table : $"{target.DataSource}.default.{target.Table}");
+            var table = TableIdentifier.Parse(target.Table.Contains('.', StringComparison.Ordinal) ? target.Table : $"{target.DataSource}.default.{target.Table}");
             int intervalSeconds = target.RefreshIntervalSeconds ?? 300;
 
             if (_catalog.TryGet(table, out var existing) && existing is not null)

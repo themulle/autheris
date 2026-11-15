@@ -33,7 +33,7 @@ public sealed partial class DefaultSqlSecurityValidator : ISqlSecurityValidator
             throw new ArgumentException($"ORDER BY clause in '{fieldName}' exceeds maximum allowed length of 500 characters.", fieldName);
         }
 
-        if (orderBy.Contains('\0') || orderBy.Contains(';') || orderBy.Contains("--") || orderBy.Contains("/*") || orderBy.Contains("*/") || orderBy.Contains("@@"))
+        if (orderBy.Contains('\0', StringComparison.Ordinal) || orderBy.Contains(';', StringComparison.Ordinal) || orderBy.Contains("--", StringComparison.Ordinal) || orderBy.Contains("/*", StringComparison.Ordinal) || orderBy.Contains("*/", StringComparison.Ordinal) || orderBy.Contains("@@", StringComparison.Ordinal))
         {
             throw new ArgumentException($"ORDER BY clause in '{fieldName}' contains prohibited characters or comment sequences.", fieldName);
         }

@@ -69,7 +69,7 @@ public static partial class SqlFilterCompiler
         }
 
         var withoutLiterals = StringLiteral().Replace(fragment, "''");
-        if (withoutLiterals.Contains('?') || withoutLiterals.Contains('@') || withoutLiterals.Contains(':'))
+        if (withoutLiterals.Contains('?', StringComparison.Ordinal) || withoutLiterals.Contains('@', StringComparison.Ordinal) || withoutLiterals.Contains(':', StringComparison.Ordinal))
         {
             throw Reject(filter, "parameters (?, @name, :name) are not allowed.");
         }

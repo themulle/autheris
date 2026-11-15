@@ -1,3 +1,4 @@
+using System;
 using System.Data.Common;
 using System.Globalization;
 using System.Text;
@@ -149,7 +150,7 @@ internal sealed class AccessProfileStore(
         await using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
-            cmd.CommandText = $"SELECT {ProfileColumns.Replace("p.", "")} FROM ACCESS_PROFILES WHERE tenant_id = @tenantId" +
+            cmd.CommandText = $"SELECT {ProfileColumns.Replace("p.", "", StringComparison.Ordinal)} FROM ACCESS_PROFILES WHERE tenant_id = @tenantId" +
                               (profileId != null ? " AND profile_id = @profileId" : "") + " ORDER BY name";
             AddParam(cmd, "@tenantId", tenantId.Value);
             if (profileId != null)
@@ -173,7 +174,7 @@ internal sealed class AccessProfileStore(
 
         await using var assignCmd = conn.CreateCommand();
         assignCmd.Transaction = tx;
-        assignCmd.CommandText = $"SELECT profile_id, {AssignmentColumns.Replace("a.", "")} FROM ACCESS_PROFILE_ASSIGNMENTS WHERE tenant_id = @tenantId AND deactivated_reason IS NULL" +
+        assignCmd.CommandText = $"SELECT profile_id, {AssignmentColumns.Replace("a.", "", StringComparison.Ordinal)} FROM ACCESS_PROFILE_ASSIGNMENTS WHERE tenant_id = @tenantId AND deactivated_reason IS NULL" +
                                 (profileId != null ? " AND profile_id = @profileId" : "");
         AddParam(assignCmd, "@tenantId", tenantId.Value);
         if (profileId != null)

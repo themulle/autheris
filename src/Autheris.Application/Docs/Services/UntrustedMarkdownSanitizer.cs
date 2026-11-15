@@ -48,7 +48,7 @@ public static partial class UntrustedMarkdownSanitizer
         }
 
         // Rule 1: Normalise line endings to \n
-        var text = markdown.Replace("\r\n", "\n").Replace('\r', '\n');
+        var text = markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
         // Rule 2: Unicode NFC normalisation
         if (!text.IsNormalized(NormalizationForm.FormC))
@@ -93,7 +93,7 @@ public static partial class UntrustedMarkdownSanitizer
             return string.Empty;
         }
 
-        var text = title.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
+        var text = title.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\r', ' ').Replace('\n', ' ');
         if (!text.IsNormalized(NormalizationForm.FormC))
         {
             text = text.Normalize(NormalizationForm.FormC);
@@ -123,7 +123,7 @@ public static partial class UntrustedMarkdownSanitizer
                 continue;
             }
 
-            var text = tag.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ');
+            var text = tag.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\r', ' ').Replace('\n', ' ');
             if (!text.IsNormalized(NormalizationForm.FormC))
             {
                 text = text.Normalize(NormalizationForm.FormC);
@@ -184,7 +184,7 @@ public static partial class UntrustedMarkdownSanitizer
             return true;
         }
 
-        var colonIdx = trimmed.IndexOf(':');
+        var colonIdx = trimmed.IndexOf(':', StringComparison.Ordinal);
         if (colonIdx < 0)
         {
             return true;

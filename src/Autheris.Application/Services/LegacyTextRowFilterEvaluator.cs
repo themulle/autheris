@@ -77,12 +77,12 @@ internal static partial class LegacyTextRowFilterEvaluator
             {
                 Type colType = col.DataType.ToLowerInvariant() switch
                 {
-                    var d when d.Contains("bigint") || d.Contains("long") => typeof(long),
-                    var d when d.Contains("int") => typeof(int),
-                    var d when d.Contains("decimal") || d.Contains("numeric") || d.Contains("money") => typeof(decimal),
-                    var d when d.Contains("float") || d.Contains("double") || d.Contains("real") => typeof(double),
-                    var d when d.Contains("bool") => typeof(bool),
-                    var d when d.Contains("date") || d.Contains("time") => typeof(DateTime),
+                    var d when d.Contains("bigint", StringComparison.Ordinal) || d.Contains("long", StringComparison.Ordinal) => typeof(long),
+                    var d when d.Contains("int", StringComparison.Ordinal) => typeof(int),
+                    var d when d.Contains("decimal", StringComparison.Ordinal) || d.Contains("numeric", StringComparison.Ordinal) || d.Contains("money", StringComparison.Ordinal) => typeof(decimal),
+                    var d when d.Contains("float", StringComparison.Ordinal) || d.Contains("double", StringComparison.Ordinal) || d.Contains("real", StringComparison.Ordinal) => typeof(double),
+                    var d when d.Contains("bool", StringComparison.Ordinal) => typeof(bool),
+                    var d when d.Contains("date", StringComparison.Ordinal) || d.Contains("time", StringComparison.Ordinal) => typeof(DateTime),
                     _ => typeof(string)
                 };
                 dt.Columns.Add(col.ColumnName, colType);
@@ -161,7 +161,7 @@ internal static partial class LegacyTextRowFilterEvaluator
                 if (isLike)
                 {
                     // DataTable treats '*' and '[' as wildcards/escapes; in SQL they are plain characters.
-                    if (!textColumn || !quoted || lit.Value.Contains('*') || lit.Value.Contains('['))
+                    if (!textColumn || !quoted || lit.Value.Contains('*', StringComparison.Ordinal) || lit.Value.Contains('[', StringComparison.Ordinal))
                     {
                         return false;
                     }
@@ -297,7 +297,7 @@ internal static partial class LegacyTextRowFilterEvaluator
         // Restore string literals
         for (int i = 0; i < literals.Count; i++)
         {
-            normalized = normalized.Replace($"__STR_LIT_{i}__", literals[i]);
+            normalized = normalized.Replace($"__STR_LIT_{i}__", literals[i], StringComparison.Ordinal);
         }
 
         return normalized;

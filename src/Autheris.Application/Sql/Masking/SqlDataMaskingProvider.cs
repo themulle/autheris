@@ -306,7 +306,7 @@ public sealed class SqlDataMaskingProvider
     {
         if (string.IsNullOrWhiteSpace(dataType)) return false;
         var dt = dataType.Trim().ToLowerInvariant();
-        if (dt.Contains('(')) dt = dt[..dt.IndexOf('(')].Trim();
+        if (dt.Contains('(', StringComparison.Ordinal)) dt = dt[..dt.IndexOf('(', StringComparison.Ordinal)].Trim();
         return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
             or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
             or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"
@@ -323,9 +323,9 @@ public sealed class SqlDataMaskingProvider
         }
 
         var dt = col.DataType.Trim().ToLowerInvariant();
-        if (dt.Contains('('))
+        if (dt.Contains('(', StringComparison.Ordinal))
         {
-            dt = dt[..dt.IndexOf('(')].Trim();
+            dt = dt[..dt.IndexOf('(', StringComparison.Ordinal)].Trim();
         }
 
         return dt switch
@@ -344,11 +344,11 @@ public sealed class SqlDataMaskingProvider
     {
         if (dialect == DatabaseDialect.SqlServer)
         {
-            var col = $"[{columnName.Replace("]", "]]")}]";
+            var col = $"[{columnName.Replace("]", "]]", StringComparison.Ordinal)}]";
             return $"CASE WHEN CHARINDEX('@', CAST({col} AS NVARCHAR(MAX))) > 1 THEN SUBSTRING(CAST({col} AS NVARCHAR(MAX)), 1, 1) + '***@***' ELSE '***@***' END";
         }
 
-        var quotedCol = $"\"{columnName.Replace("\"", "\"\"")}\"";
+        var quotedCol = $"\"{columnName.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
         if (dialect == DatabaseDialect.Oracle)
         {
             // CR-ADG-18: Oracle has no TEXT type and no POSITION function (CAST ... AS TEXT failed on the executable Oracle path).
@@ -368,11 +368,11 @@ public sealed class SqlDataMaskingProvider
     {
         if (dialect == DatabaseDialect.SqlServer)
         {
-            var col = $"[{columnName.Replace("]", "]]")}]";
+            var col = $"[{columnName.Replace("]", "]]", StringComparison.Ordinal)}]";
             return $"CASE WHEN LEN(CAST({col} AS NVARCHAR(MAX))) >= 8 THEN SUBSTRING(CAST({col} AS NVARCHAR(MAX)), 1, 2) + '** **** **** ' + RIGHT(CAST({col} AS NVARCHAR(MAX)), 4) ELSE '****' END";
         }
 
-        var quotedCol = $"\"{columnName.Replace("\"", "\"\"")}\"";
+        var quotedCol = $"\"{columnName.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
         if (dialect == DatabaseDialect.Oracle)
         {
             string text = $"CAST({quotedCol} AS VARCHAR2(4000))";
@@ -447,11 +447,11 @@ public sealed class SqlDataMaskingProvider
         return dialect switch
         {
             DatabaseDialect.PostgreSql =>
-                $"ENCODE(HMAC(CAST(\"{columnName.Replace("\"", "\"\"")}\" AS TEXT), CAST({keyMarker} AS TEXT), 'sha256'), 'hex')",
+                $"ENCODE(HMAC(CAST(\"{columnName.Replace("\"", "\"\"", StringComparison.Ordinal)}\" AS TEXT), CAST({keyMarker} AS TEXT), 'sha256'), 'hex')",
             DatabaseDialect.SqlServer =>
-                $"CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', {outerMarker} + HASHBYTES('SHA2_256', {innerMarker} + CAST(CAST([{columnName.Replace("]", "]]")}] AS NVARCHAR(MAX)) AS VARBINARY(MAX)))), 2)",
+                $"CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', {outerMarker} + HASHBYTES('SHA2_256', {innerMarker} + CAST(CAST([{columnName.Replace("]", "]]", StringComparison.Ordinal)}] AS NVARCHAR(MAX)) AS VARBINARY(MAX)))), 2)",
             DatabaseDialect.Sqlite =>
-                $"gateway_hmac_sha256(CAST(\"{columnName.Replace("\"", "\"\"")}\" AS TEXT), {keyMarker})",
+                $"gateway_hmac_sha256(CAST(\"{columnName.Replace("\"", "\"\"", StringComparison.Ordinal)}\" AS TEXT), {keyMarker})",
             _ => null
         };
     }

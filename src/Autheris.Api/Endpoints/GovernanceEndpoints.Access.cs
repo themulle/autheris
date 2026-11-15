@@ -180,7 +180,7 @@ public static partial class GovernanceEndpoints
         if (!string.IsNullOrWhiteSpace(req.RowFilter))
         {
             var trimmedFilter = req.RowFilter.Trim();
-            if (trimmedFilter.Contains(';') || trimmedFilter.Contains("--") || trimmedFilter.Contains("/*") || trimmedFilter.Contains("*/"))
+            if (trimmedFilter.Contains(';', StringComparison.Ordinal) || trimmedFilter.Contains("--", StringComparison.Ordinal) || trimmedFilter.Contains("/*", StringComparison.Ordinal) || trimmedFilter.Contains("*/", StringComparison.Ordinal))
             {
                 return ApiProblems.BadRequest(ApiErrorCodes.RowFilterSyntaxInvalid, "Row filter predicate contains prohibited SQL constructs (semicolons or comments).", context);
             }
@@ -686,7 +686,7 @@ public static partial class GovernanceEndpoints
         var reqTenant = EndpointSecurity.GetRequestTenant(context).Value;
         var isCanonicalClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
 
-        var colonIdx = clientId.IndexOf(':');
+        var colonIdx = clientId.IndexOf(':', StringComparison.Ordinal);
         if (colonIdx > 0)
         {
             var targetTenant = clientId[..colonIdx];

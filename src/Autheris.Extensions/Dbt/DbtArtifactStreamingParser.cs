@@ -178,7 +178,7 @@ public static class DbtArtifactStreamingParser
                             var childCols = ReadKeyArray(con, "columns");
                             var parentCols = ReadKeyArray(con, "to_columns");
                             var toModel = ExtractModelName(toRaw);
-                            var relName = toModel.StartsWith("stg_") ? toModel[4..] : toModel;
+                            var relName = toModel.StartsWith("stg_", StringComparison.Ordinal) ? toModel[4..] : toModel;
                             if (childCols.Count == 0 && con.TryGetProperty("expression", out _))
                             {
                                 relations.Skip(relName, name, toModel, "UNSUPPORTED_FORM");
@@ -250,7 +250,7 @@ public static class DbtArtifactStreamingParser
                                         }
                                     }
 
-                                    var relName = toModel.StartsWith("stg_") ? toModel[4..] : toModel;
+                                    var relName = toModel.StartsWith("stg_", StringComparison.Ordinal) ? toModel[4..] : toModel;
                                     if (string.IsNullOrWhiteSpace(toRaw))
                                     {
                                         relations.Skip(relName, name, toModel, "MISSING_TARGET");

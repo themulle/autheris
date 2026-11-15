@@ -115,7 +115,7 @@ public sealed class WebSqlPageTokenCodec : IWebSqlPageTokenCodec
             throw new SqlPagingTokenInvalidException();
         }
 
-        int dot = token.IndexOf('.');
+        int dot = token.IndexOf('.', StringComparison.Ordinal);
         if (dot <= 0 || dot == token.Length - 1)
         {
             throw new SqlPagingTokenInvalidException();

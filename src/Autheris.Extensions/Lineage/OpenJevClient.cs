@@ -102,20 +102,20 @@ public sealed partial class OpenJevClient : IOpenJevClient
         var lower = text.ToLowerInvariant();
 
         // Adversarial Injection Patterns
-        if (lower.Contains("ignore previous instructions") ||
-            lower.Contains("disregard all previous") ||
-            lower.Contains("system override") ||
-            lower.Contains("override all") ||
-            lower.Contains("system:") ||
-            lower.Contains("<system>") ||
-            lower.Contains("maintenance mode") ||
-            lower.Contains("grant full access") ||
-            lower.Contains("bypass") ||
-            lower.Contains("jailbreak") ||
-            lower.Contains("you are now") ||
-            lower.Contains("as an administrator") ||
-            lower.Contains("sudo grant") ||
-            lower.Contains("prompt leakage"))
+        if (lower.Contains("ignore previous instructions", StringComparison.Ordinal) ||
+            lower.Contains("disregard all previous", StringComparison.Ordinal) ||
+            lower.Contains("system override", StringComparison.Ordinal) ||
+            lower.Contains("override all", StringComparison.Ordinal) ||
+            lower.Contains("system:", StringComparison.Ordinal) ||
+            lower.Contains("<system>", StringComparison.Ordinal) ||
+            lower.Contains("maintenance mode", StringComparison.Ordinal) ||
+            lower.Contains("grant full access", StringComparison.Ordinal) ||
+            lower.Contains("bypass", StringComparison.Ordinal) ||
+            lower.Contains("jailbreak", StringComparison.Ordinal) ||
+            lower.Contains("you are now", StringComparison.Ordinal) ||
+            lower.Contains("as an administrator", StringComparison.Ordinal) ||
+            lower.Contains("sudo grant", StringComparison.Ordinal) ||
+            lower.Contains("prompt leakage", StringComparison.Ordinal))
         {
             var hashPrefix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..12];
             _logger.LogWarning("Prompt injection detected in justification for user {UserSid}. PatternCategory: SuspiciousExfiltration, TextLength: {Length}, HashPrefix: {Hash}",
@@ -128,7 +128,7 @@ public sealed partial class OpenJevClient : IOpenJevClient
                 GrantedDuration: null));
         }
 
-        if (lower.Contains("exfiltration") || lower.Contains("dump database") || lower.Contains("leak") || lower.Contains("export all credit cards"))
+        if (lower.Contains("exfiltration", StringComparison.Ordinal) || lower.Contains("dump database", StringComparison.Ordinal) || lower.Contains("leak", StringComparison.Ordinal) || lower.Contains("export all credit cards", StringComparison.Ordinal))
         {
             return Task.FromResult(new JustificationTriageResult(
                 JustificationCategory.SuspiciousExfiltration,
@@ -138,7 +138,7 @@ public sealed partial class OpenJevClient : IOpenJevClient
                 GrantedDuration: null));
         }
 
-        if (lower.Contains("audit") || lower.Contains("compliance") || lower.Contains("regulatory") || lower.Contains("sox") || lower.Contains("finma"))
+        if (lower.Contains("audit", StringComparison.Ordinal) || lower.Contains("compliance", StringComparison.Ordinal) || lower.Contains("regulatory", StringComparison.Ordinal) || lower.Contains("sox", StringComparison.Ordinal) || lower.Contains("finma", StringComparison.Ordinal))
         {
             return Task.FromResult(new JustificationTriageResult(
                 JustificationCategory.LegitimateAudit,
@@ -148,7 +148,7 @@ public sealed partial class OpenJevClient : IOpenJevClient
                 GrantedDuration: null));
         }
 
-        if (lower.Contains("incident") || lower.Contains("outage") || lower.Contains("p1") || lower.Contains("sev-1") || lower.Contains("emergency triage"))
+        if (lower.Contains("incident", StringComparison.Ordinal) || lower.Contains("outage", StringComparison.Ordinal) || lower.Contains("p1", StringComparison.Ordinal) || lower.Contains("sev-1", StringComparison.Ordinal) || lower.Contains("emergency triage", StringComparison.Ordinal))
         {
             return Task.FromResult(new JustificationTriageResult(
                 JustificationCategory.IncidentTriage,
@@ -158,7 +158,7 @@ public sealed partial class OpenJevClient : IOpenJevClient
                 GrantedDuration: null));
         }
 
-        if (text.Length < 10 || lower.Contains("test") || lower.Contains("asdf") || lower.Contains("please give access"))
+        if (text.Length < 10 || lower.Contains("test", StringComparison.Ordinal) || lower.Contains("asdf", StringComparison.Ordinal) || lower.Contains("please give access", StringComparison.Ordinal))
         {
             return Task.FromResult(new JustificationTriageResult(
                 JustificationCategory.Unjustified,

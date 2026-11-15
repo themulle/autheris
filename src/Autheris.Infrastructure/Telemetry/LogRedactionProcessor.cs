@@ -136,7 +136,7 @@ public sealed class LogRedactionProcessor : BaseProcessor<LogRecord>
 
     private static string StripQueryString(string uri)
     {
-        var idx = uri.IndexOf('?');
+        var idx = uri.IndexOf('?', StringComparison.Ordinal);
         return idx >= 0 ? uri[..idx] : uri;
     }
 }

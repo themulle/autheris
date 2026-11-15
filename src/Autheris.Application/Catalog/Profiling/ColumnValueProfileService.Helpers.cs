@@ -256,7 +256,7 @@ public sealed partial class ColumnValueProfileService
             return "ISO-8601-DateTime";
         }
 
-        if (samples.All(s => s.Contains('@') && s.Contains('.')))
+        if (samples.All(s => s.Contains('@', StringComparison.Ordinal) && s.Contains('.', StringComparison.Ordinal)))
         {
             return "email";
         }

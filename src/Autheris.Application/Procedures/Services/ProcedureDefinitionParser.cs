@@ -63,11 +63,11 @@ public static partial class ProcedureDefinitionParser
         bool required = string.Equals(m.Groups[3].Value, "required", StringComparison.OrdinalIgnoreCase);
         string? desc = m.Groups[4].Success ? Sanitize(m.Groups[4].Value) : null;
 
-        string baseType = sqlType.Contains('(') ? sqlType[..sqlType.IndexOf('(')] : sqlType;
+        string baseType = sqlType.Contains('(', StringComparison.Ordinal) ? sqlType[..sqlType.IndexOf('(', StringComparison.Ordinal)] : sqlType;
         int? maxLength = null;
-        if (sqlType.Contains('('))
+        if (sqlType.Contains('(', StringComparison.Ordinal))
         {
-            string inner = sqlType[(sqlType.IndexOf('(') + 1)..^1];
+            string inner = sqlType[(sqlType.IndexOf('(', StringComparison.Ordinal) + 1)..^1];
             string first = inner.Split(',')[0];
             if (!string.Equals(first, "max", StringComparison.Ordinal))
             {
@@ -599,7 +599,7 @@ public static partial class ProcedureDefinitionParser
             throw new FormatException($"Invalid output type '{text}'.");
         }
 
-        string baseType = t.Contains('(') ? t[..t.IndexOf('(')] : t;
+        string baseType = t.Contains('(', StringComparison.Ordinal) ? t[..t.IndexOf('(', StringComparison.Ordinal)] : t;
         if (!OutputSqlBaseTypes.Contains(baseType))
         {
             throw new FormatException($"SQL type '{baseType}' is not supported for procedure outputs.");

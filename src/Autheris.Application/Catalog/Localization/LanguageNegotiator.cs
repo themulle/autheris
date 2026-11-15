@@ -179,7 +179,7 @@ public sealed class LanguageNegotiator : ILanguageNegotiator
             return def;
         }
 
-        var isHeader = requestedLanguage != null && (requestedLanguage.Contains(',') || requestedLanguage.Contains(';'));
+        var isHeader = requestedLanguage != null && (requestedLanguage.Contains(',', StringComparison.Ordinal) || requestedLanguage.Contains(';', StringComparison.Ordinal));
         var res = Negotiate(isHeader ? null : requestedLanguage, isHeader ? requestedLanguage : null);
         return res.EffectiveLanguage;
     }

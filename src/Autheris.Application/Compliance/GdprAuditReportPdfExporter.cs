@@ -177,11 +177,11 @@ public sealed class GdprAuditReportPdfExporter(IAuditAnchorSigner? signer = null
     private static string SanitizePdfText(string text)
     {
         return text
-            .Replace("\\", "\\\\")
-            .Replace("(", "\\(")
-            .Replace(")", "\\)")
-            .Replace("\r", " ")
-            .Replace("\n", " ");
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("(", "\\(", StringComparison.Ordinal)
+            .Replace(")", "\\)", StringComparison.Ordinal)
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal);
     }
 
     private static string SanitizeFileName(string value) =>

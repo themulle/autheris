@@ -200,7 +200,7 @@ public static class ODataFilterParser
 
                 // Suffix (L, M, F, D)
                 char suffix = '\0';
-                if (i < len && "lLmMfFdD".Contains(input[i]))
+                if (i < len && "lLmMfFdD".Contains(input[i], StringComparison.Ordinal))
                 {
                     suffix = input[i++];
                 }
@@ -519,7 +519,7 @@ public static class ODataFilterParser
                     {
                         return ParseFunctionCall(token.Text);
                     }
-                    if (token.Text.Contains('/'))
+                    if (token.Text.Contains('/', StringComparison.Ordinal))
                     {
                         // EXT-19: navigation paths are not supported; never reduce them to a base-table column.
                         throw new GatewayInvalidQueryException(
@@ -662,7 +662,7 @@ public static class ODataFilterParser
 
     internal sealed class ColumnNode(string name) : AstNode
     {
-        public string Name { get; } = name.Contains('/') ? name.Split('/')[^1] : name;
+        public string Name { get; } = name.Contains('/', StringComparison.Ordinal) ? name.Split('/')[^1] : name;
 
         public override string ToSql(SqlGenerationContext ctx) => ctx.QuoteColumn(Name);
 
