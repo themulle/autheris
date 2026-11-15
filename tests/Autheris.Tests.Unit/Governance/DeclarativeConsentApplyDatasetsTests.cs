@@ -14,7 +14,7 @@ namespace Autheris.Tests.Unit.Governance;
 public sealed class DeclarativeConsentApplyDatasetsTests
 {
     private static readonly ClaimsPrincipal Caller = new(new ClaimsIdentity(
-        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")], "test"));
+        [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "test"));
 
     private readonly IDatasetCatalogAdminService _datasets = Substitute.For<IDatasetCatalogAdminService>();
     private readonly IConsentRepository _consents = Substitute.For<IConsentRepository>();
@@ -132,7 +132,7 @@ public sealed class DeclarativeConsentApplyDatasetsTests
         var tenantAdmin = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-TA"), new Claim("tenant_id", "tenant-a"),
-            new Claim(ClaimTypes.Role, "GovernanceAdmin"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")
+            new Claim(ClaimTypes.Role, "GovernanceAdmin"), new Claim(ClaimTypes.Role, "GovernanceAdmin")
         ], "test"));
         var apply = new DeclarativeConsentApplyService(Substitute.For<ITableMetadataRepository>(), _consents, Substitute.For<IAuditLogRepository>(), null, service);
 
