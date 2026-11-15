@@ -495,6 +495,7 @@ internal static class CatalogBatchUpsertHelper
         upsertCmd.AddBound("@textsJson", (object?)CatalogLocalizationPersistence.SerializeLocalizedTexts(metadata.Table.Texts) ?? DBNull.Value);
         upsertCmd.AddBound("@minGroupSize", (object?)metadata.Table.MinGroupSize ?? DBNull.Value);
         upsertCmd.AddBound("@nonPersonal", metadata.Table.NonPersonal);
+        upsertCmd.AddBound("@dbtUniqueId", (object?)metadata.Table.DbtUniqueId ?? DBNull.Value);
         await upsertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 

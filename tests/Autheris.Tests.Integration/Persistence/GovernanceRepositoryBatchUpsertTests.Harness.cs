@@ -40,7 +40,8 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
                 required_filter_columns_json TEXT NULL,
                 texts_json TEXT NULL,
                 min_group_size INTEGER NULL,
-                non_personal INTEGER NOT NULL DEFAULT 0
+                non_personal INTEGER NOT NULL DEFAULT 0,
+                dbt_unique_id TEXT NULL
             );
             CREATE UNIQUE INDEX idx_tables_natural ON TABLES (source_name, schema_name, table_name);
             CREATE TABLE TABLE_COLUMNS (

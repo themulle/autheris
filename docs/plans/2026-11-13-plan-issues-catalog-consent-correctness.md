@@ -40,6 +40,7 @@ Recommended order: WP-OI-CAT-2 -> WP-OI-CAT-3 (same caller path, same tests) -> 
 - **Risks:** two logical sources mapping to one physical table collide (test above; second one rejected with a reason code). Existing grants on old logical entries stay attached to the old entry (Q-CAT-2).
 - **Owner questions:** Q-CAT-1, Q-CAT-2.
 - **Size:** S, ~70 src / ~250 test lines, 1 PR.
+- **Delivery:** UNDER REVIEW (draft PR #748), see [`2026-11-14-plan-issue-666-dbt-physical-name.md`](2026-11-14-plan-issue-666-dbt-physical-name.md). Deviations: the catalog entry records the dbt unique id (governance step 0012, internal column) for SEC-OI-666-1; an entry without a recorded id is taken over only by a node without alias or identifier (owner decision 2026-11-14, re-approval requested); 134 net src lines instead of ~70.
 
 ## #667 consents/apply: endpoint requires GovernanceAdmin, service requires GOVERNANCE_ADMIN
 

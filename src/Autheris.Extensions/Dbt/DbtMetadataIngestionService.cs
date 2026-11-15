@@ -265,6 +265,11 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             try
             {
                 tid = m.ToTableIdentifier();
+                // the unique id is stored on the catalog entry (bounded column); an unusable one skips the node like an invalid name.
+                if (!DbtIdentifierSanitizer.IsValidIdentifier(m.UniqueId))
+                {
+                    throw new ArgumentException("Unusable dbt unique id.");
+                }
             }
             catch (ArgumentException)
             {
@@ -293,6 +298,16 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 rejectedSet.Add(m.UniqueId);
                 rejectedSet.Add(idStr);
                 warnings.Add($"Table '{idStr}': tenant '{tid.Domain}' is not the caller's tenant; only a ClusterAdmin may import into another tenant.");
+            }
+        }
+
+        // Issue #666: nodes of one artifact that map to the same catalog identity (case-insensitive) are all rejected, whatever their order.
+        foreach (var group in models.GroupBy(m => m.ToTableIdentifier()).Where(g => g.Skip(1).Any()).ToList())
+        {
+            foreach (var colliding in group)
+            {
+                RejectCollision(creation, colliding, warnings);
+                models.Remove(colliding);
             }
         }
 
@@ -368,6 +383,42 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
 
             var tableId = model.ToTableIdentifier();
             var ownerTeam = model.Meta.GetValueOrDefault("owner");
+
+            // Issue #282: the read also runs in dry run (read only) so that a missing entry can be reported as "would create".
+            // Issue #666: it runs before any write so that a node never touches an entry of another origin.
+            TableMetadata? existingMeta;
+            var metadataUnavailable = false;
+            try
+            {
+                existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+            }
+            catch (TableMetadataUnavailableException)
+            {
+                // no documentation sync (and never an upsert as a new table) for a table whose metadata is unavailable.
+                if (!dryRun)
+                {
+                    warnings.Add($"Table '{tableId}': skipped documentation sync, its stored metadata is unavailable (invalid key or index definition).");
+                }
+
+                existingMeta = null;
+                metadataUnavailable = true;
+            }
+
+            if (existingMeta != null && !OwnsEntry(existingMeta.Table, model))
+            {
+                RejectCollision(creation, model, warnings);
+                continue;
+            }
+
+            if (existingMeta == null && !metadataUnavailable && _gatewayOptions?.Value is { } gatewayValue)
+            {
+                existingMeta = await TryRegisterMissingTableAsync(model, tableId, gatewayValue, dryRun, creation, warnings, ct).ConfigureAwait(false);
+            }
+
+            if (existingMeta != null)
+            {
+                await WarnIfPhysicalNameChangedAsync(model, warnings, ct).ConfigureAwait(false);
+            }
 
             // Deduplication: get existing pending proposals for this table
             var existingPending = dryRun
@@ -503,31 +554,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             ));
 
             // 3. Omnichannel Documentation Sync (F-DOC-01): Synchronize dbt model and column descriptions
-            // Issue #282: the read also runs in dry run (read only) so that a missing entry can be reported as "would create".
+            // (existing entry read above)
             {
-                TableMetadata? existingMeta;
-                var metadataUnavailable = false;
-                try
-                {
-                    existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-                }
-                catch (TableMetadataUnavailableException)
-                {
-                    // no documentation sync (and never an upsert as a new table) for a table whose metadata is unavailable.
-                    if (!dryRun)
-                    {
-                        warnings.Add($"Table '{tableId}': skipped documentation sync, its stored metadata is unavailable (invalid key or index definition).");
-                    }
-
-                    existingMeta = null;
-                    metadataUnavailable = true;
-                }
-
-                if (existingMeta == null && !metadataUnavailable && _gatewayOptions?.Value is { } gatewayValue)
-                {
-                    existingMeta = await TryRegisterMissingTableAsync(model, tableId, gatewayValue, dryRun, creation, warnings, ct).ConfigureAwait(false);
-                }
-
                 if (existingMeta != null)
                 {
                     // EXT-05: Ratchet governance properties rather than overwrite
@@ -575,7 +603,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         SourceName = existingMeta.Table.SourceName,
                         SchemaName = existingMeta.Table.SchemaName,
                         TableName = existingMeta.Table.TableName,
-                        DisplayName = existingMeta.Table.DisplayName,
+                        DisplayName = string.IsNullOrWhiteSpace(existingMeta.Table.DisplayName) && IsAliased(model) ? model.Name : existingMeta.Table.DisplayName,
+                        DbtUniqueId = model.UniqueId,
                         Description = model.Description ?? existingMeta.Table.Description,
                         LongDescription = model.Meta.GetValueOrDefault("long_description") ?? existingMeta.Table.LongDescription,
                         Sensitivity = existingMeta.Table.Sensitivity,
@@ -683,7 +712,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         schema: model.Schema,
                         columns: model.Columns.Keys,
                         summary: model.Description ?? $"dbt model {model.Name}",
-                        dataSource: model.Database);
+                        dataSource: model.Database,
+                        table: model.PhysicalName);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -737,7 +767,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         var importedRelations = 0;
         if (_relationRepository != null && allowedRelationships.Count > 0)
         {
-            importedRelations = await ImportRelationsAsync(models, allowedRelationships, dryRun, warnings, ct).ConfigureAwait(false);
+            importedRelations = await ImportRelationsAsync(models.Where(m => !creation.RejectedIds.Contains(m.UniqueId)).ToList(), allowedRelationships, dryRun, warnings, ct).ConfigureAwait(false);
         }
 
         // Apply lineage updates
@@ -776,6 +806,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
         public List<string> Created { get; } = [];
         public List<DbtSyncSkippedItem> Skipped { get; } = [];
         public HashSet<string> Seen { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> RejectedIds { get; } = new(StringComparer.Ordinal);
         public int SkippedTotal { get; set; }
     }
 
@@ -843,7 +874,13 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             var current = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
             if (current != null)
             {
-                return current;
+                if (OwnsEntry(current.Table, model))
+                {
+                    return current;
+                }
+
+                RejectCollision(run, model, warnings);
+                return null;
             }
 
             var persisted = await _metadataRepository.UpsertTableMetadataAsync(built, ct).ConfigureAwait(false);
@@ -1623,54 +1660,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             AssignedTableOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerAssigned),
             RemovedTableOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerRemoved)
         );
-    }
-
-    private static bool IsRoutine(string tableName, JsonElement item)
-    {
-        if (tableName.StartsWith("sp_", StringComparison.OrdinalIgnoreCase) ||
-            tableName.StartsWith("fn_", StringComparison.OrdinalIgnoreCase) ||
-            tableName.StartsWith("usp_", StringComparison.OrdinalIgnoreCase) ||
-            tableName.StartsWith("ufn_", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (item.TryGetProperty("type", out var typeProp) &&
-            typeProp.GetString() is string typeStr &&
-            (string.Equals(typeStr, "routine", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(typeStr, "procedure", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(typeStr, "function", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        if (item.TryGetProperty("materialization", out var matProp) &&
-            matProp.GetString() is string matStr &&
-            (string.Equals(matStr, "routine", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(matStr, "procedure", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(matStr, "function", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static TableIdentifier ParseTableIdentifier(string raw, string? explicitSchema = null, string? explicitDatabase = null)
-    {
-        var parts = raw.Split('.');
-        if (parts.Length == 1)
-        {
-            var db = !string.IsNullOrWhiteSpace(explicitDatabase) ? explicitDatabase : "default";
-            var sc = !string.IsNullOrWhiteSpace(explicitSchema) ? explicitSchema : "public";
-            return new TableIdentifier(db, sc, parts[0]);
-        }
-        if (parts.Length == 2)
-        {
-            var db = !string.IsNullOrWhiteSpace(explicitDatabase) ? explicitDatabase : "default";
-            return new TableIdentifier(db, parts[0], parts[1]);
-        }
-        return new TableIdentifier(parts[0], parts[1], parts[2]);
     }
 
     public async Task<DbtMetadataProposal> ApproveProposalAsync(Guid proposalId, string reviewedBy, CancellationToken ct = default)
