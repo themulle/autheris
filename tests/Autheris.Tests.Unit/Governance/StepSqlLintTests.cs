@@ -158,7 +158,8 @@ public sealed class StepSqlLintTests
                 (16, "dbt_unique_id"),
                 (17, "usage_accounting"),
                 (18, "consent_row_scopes"),
-                (19, "pattern_grants")
+                (19, "pattern_grants"),
+                (20, "data_classifications")
             ]);
         }
     }
