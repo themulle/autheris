@@ -155,7 +155,8 @@ public sealed class StepSqlLintTests
                 (13, "catalog_discovery"),
                 (14, "consent_api"),
                 (15, "policy_epochs_change_version"),
-                (16, "dbt_unique_id")
+                (16, "dbt_unique_id"),
+                (17, "usage_accounting")
             ]);
         }
     }

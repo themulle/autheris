@@ -37,4 +37,24 @@ public sealed class UsageGrantSeriesCounters
         if (sourceComputeMs.HasValue) Interlocked.Add(ref _sourceComputeMs, sourceComputeMs.Value);
         if (sourceCostMicros.HasValue) Interlocked.Add(ref _sourceCostMicros, sourceCostMicros.Value);
     }
+
+    public void MergeFrom(UsageGrantSeriesCounters source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        AddIfNonZero(ref _accesses, source.Accesses);
+        AddIfNonZero(ref _queries, source.Queries);
+        AddIfNonZero(ref _rows, source.Rows);
+        AddIfNonZero(ref _bytes, source.Bytes);
+        AddIfNonZero(ref _analysisCost, source.AnalysisCost);
+        AddIfNonZero(ref _sourceComputeMs, source.SourceComputeMs);
+        AddIfNonZero(ref _sourceCostMicros, source.SourceCostMicros);
+    }
+
+    private static void AddIfNonZero(ref long target, long delta)
+    {
+        if (delta != 0)
+        {
+            Interlocked.Add(ref target, delta);
+        }
+    }
 }

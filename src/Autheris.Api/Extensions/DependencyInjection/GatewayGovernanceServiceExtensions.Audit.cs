@@ -98,5 +98,15 @@ public static partial class GatewayGovernanceServiceExtensions
         });
         services.AddSingleton<IConsumerUsageRecorder>(sp => sp.GetRequiredService<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>());
         services.AddHostedService<Autheris.Infrastructure.Observability.ConsumerUsageFlushWorker>();
+        services.AddOptions<Autheris.Domain.Options.UsageAccountingOptions>()
+            .BindConfiguration(Autheris.Domain.Options.GatewaySections.UsageAccounting)
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.UsageAccountingOptions>, Autheris.Application.Usage.UsageAccountingOptionsValidator>();
+        services.AddSingleton<Autheris.Application.Usage.IUsageAggregator>(sp =>
+            new Autheris.Application.Usage.UsageAggregator(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                timeProvider: sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Usage.IUsageRecorder, Autheris.Application.Usage.UsageRecorder>();
+        services.AddHostedService<Autheris.Infrastructure.Usage.UsageFlushWorker>();
     }
 }

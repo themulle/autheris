@@ -97,4 +97,61 @@ public sealed class UsageSeriesCounters
                 break;
         }
     }
+
+    public void MergeFrom(UsageSeriesCounters source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        AddIfNonZero(ref _requests, source.Requests);
+        AddIfNonZero(ref _queries, source.Queries);
+        AddIfNonZero(ref _rows, source.Rows);
+        AddIfNonZero(ref _rowsMeasured, source.RowsMeasured);
+        AddIfNonZero(ref _bytes, source.Bytes);
+        AddIfNonZero(ref _durationMs, source.DurationMs);
+        AddIfNonZero(ref _analysisCost, source.AnalysisCost);
+        AddIfNonZero(ref _sourceComputeMs, source.SourceComputeMs);
+        AddIfNonZero(ref _sourceComputeMeasured, source.SourceComputeMeasured);
+        AddIfNonZero(ref _sourceCostMicros, source.SourceCostMicros);
+        AddIfNonZero(ref _sourceCostMeasured, source.SourceCostMeasured);
+        AddIfNonZero(ref _allow, source.Allow);
+        AddIfNonZero(ref _denyAccess, source.DenyAccess);
+        AddIfNonZero(ref _denyRateLimit, source.DenyRateLimit);
+        AddIfNonZero(ref _denyCost, source.DenyCost);
+        AddIfNonZero(ref _denyQuota, source.DenyQuota);
+        AddIfNonZero(ref _denyOther, source.DenyOther);
+        AddIfNonZero(ref _errors, source.Errors);
+    }
+
+    private static void AddIfNonZero(ref long target, long delta)
+    {
+        if (delta != 0)
+        {
+            Interlocked.Add(ref target, delta);
+        }
+    }
+
+    public static UsageSeriesCounters FromTotals(
+        long requests, long queries, long rows, long rowsMeasured, long bytes, long durationMs, long analysisCost,
+        long sourceComputeMs, long sourceComputeMeasured, long sourceCostMicros, long sourceCostMeasured,
+        long allow, long denyAccess, long denyRateLimit, long denyCost, long denyQuota, long denyOther, long errors) =>
+        new()
+        {
+            _requests = requests,
+            _queries = queries,
+            _rows = rows,
+            _rowsMeasured = rowsMeasured,
+            _bytes = bytes,
+            _durationMs = durationMs,
+            _analysisCost = analysisCost,
+            _sourceComputeMs = sourceComputeMs,
+            _sourceComputeMeasured = sourceComputeMeasured,
+            _sourceCostMicros = sourceCostMicros,
+            _sourceCostMeasured = sourceCostMeasured,
+            _allow = allow,
+            _denyAccess = denyAccess,
+            _denyRateLimit = denyRateLimit,
+            _denyCost = denyCost,
+            _denyQuota = denyQuota,
+            _denyOther = denyOther,
+            _errors = errors
+        };
 }

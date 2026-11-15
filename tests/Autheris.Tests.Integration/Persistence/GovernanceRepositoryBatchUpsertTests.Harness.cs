@@ -236,6 +236,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
     private sealed class CustomBudgetDialect(IParameterBudgetProvider budget, Func<DbConnection> connFactory) : IGovernanceSqlDialect
     {
         public string Upsert(GovernanceTable table, ReadOnlySpan<string> keyColumns, ReadOnlySpan<string> valueColumns) => string.Empty;
+        public string UpsertAccumulate(GovernanceTable table, ReadOnlySpan<string> keyColumns, ReadOnlySpan<string> setOnInsertColumns, ReadOnlySpan<string> counterColumns) => string.Empty;
         public string InsertReturning(string column) => string.Empty;
         public string LockRowsForUpdate => string.Empty;
         public string UtcNow => "CURRENT_TIMESTAMP";

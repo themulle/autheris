@@ -39,4 +39,9 @@ public static class UsageDiagnostics
         GatewayDiagnostics.Meter.CreateCounter<long>(
             "autheris_usage_source_unit_mismatch_total",
             description: "Facts whose source cost unit differs from the expected tariff unit");
+
+    public static readonly Counter<long> GrantValidityConflictCounter =
+        GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_usage_grant_validity_conflict_total",
+            description: "Accumulated grants whose validity window differs from the stored reference");
 }

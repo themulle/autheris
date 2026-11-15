@@ -150,7 +150,8 @@ public static partial class GatewayGovernanceServiceExtensions
             Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore,
             IIdentityStoreRepository,
             IFunctionalRightRepository,
-            IRecertificationRepository
+            IRecertificationRepository,
+            Autheris.Application.Usage.IUsageRepository
         where TMigrationRunner : class, IGovernanceMigrationRunner
     {
         services.AddSingleton<TRepository>();
@@ -191,6 +192,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.Usage.IUsageRepository>(sp => sp.GetRequiredService<TRepository>());
         // #112 A-9: per-tenant persisted semantic manifest.
         services.AddSingleton<Autheris.Application.Catalog.Semantic.ISemanticManifestStore>(sp => sp.GetRequiredService<TRepository>());
         // register durable CDC stream store and key store from the governance repository

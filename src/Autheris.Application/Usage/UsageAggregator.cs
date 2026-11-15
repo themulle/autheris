@@ -322,6 +322,39 @@ public sealed class UsageAggregator : IUsageAggregator
         return old.ToSnapshot();
     }
 
+    public void Merge(UsageGenerationSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var gen = _currentGeneration;
+        gen.Enter();
+        try
+        {
+            foreach (var entry in snapshot.GroupSets)
+            {
+                gen.RecordGroupSet(entry.Key.Tenant, entry.Key.GroupSetId, entry.Value);
+            }
+
+            foreach (var entry in snapshot.GrantRefs)
+            {
+                gen.RecordGrantRef(entry.Key.Tenant, entry.Value);
+            }
+
+            foreach (var entry in snapshot.Series)
+            {
+                gen.MergeSeries(entry.Key, entry.Value);
+            }
+
+            foreach (var entry in snapshot.GrantSeries)
+            {
+                gen.MergeGrantSeries(entry.Key, entry.Value);
+            }
+        }
+        finally
+        {
+            gen.Exit();
+        }
+    }
+
     private bool IsSourceUnitValid(string dataSource, string? sourceCostUnit)
     {
         if (_expectedCostUnitResolver == null)
@@ -369,20 +402,48 @@ public sealed class UsageAggregator : IUsageAggregator
             long? sourceCostMicros,
             UsageOutcome outcome)
         {
+            ResolveSeriesTarget(key, dropWeight: 1)?.Add(
+                requests,
+                queries,
+                rows,
+                rowsMeasured,
+                bytes,
+                durationMs,
+                analysisCost,
+                sourceComputeMs,
+                sourceCostMicros,
+                outcome);
+        }
+
+        public void MergeSeries(in UsageSeriesKey key, UsageSeriesCounters source)
+        {
+            long weight = Math.Max(1, source.Requests > 0 ? source.Requests : source.Queries);
+            ResolveSeriesTarget(key, dropWeight: weight)?.MergeFrom(source);
+        }
+
+        public void AddGrantSeries(
+            in UsageGrantSeriesKey key,
+            long accesses,
+            long queries,
+            long rows,
+            long bytes,
+            long analysisCost,
+            long? sourceComputeMs,
+            long? sourceCostMicros)
+        {
+            ResolveGrantSeriesTarget(key)?.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
+        }
+
+        public void MergeGrantSeries(in UsageGrantSeriesKey key, UsageGrantSeriesCounters source)
+        {
+            ResolveGrantSeriesTarget(key)?.MergeFrom(source);
+        }
+
+        private UsageSeriesCounters? ResolveSeriesTarget(in UsageSeriesKey key, long dropWeight)
+        {
             if (_series.TryGetValue(key, out var counters))
             {
-                counters.Add(
-                    requests,
-                    queries,
-                    rows,
-                    rowsMeasured,
-                    bytes,
-                    durationMs,
-                    analysisCost,
-                    sourceComputeMs,
-                    sourceCostMicros,
-                    outcome);
-                return;
+                return counters;
             }
 
             if (_series.Count >= _maxSeries)
@@ -397,71 +458,28 @@ public sealed class UsageAggregator : IUsageAggregator
                 if (_series.TryGetValue(foldedKey, out var foldedCounters))
                 {
                     UsageDiagnostics.SeriesOverflowCounter.Add(1);
-                    foldedCounters.Add(
-                        requests,
-                        queries,
-                        rows,
-                        rowsMeasured,
-                        bytes,
-                        durationMs,
-                        analysisCost,
-                        sourceComputeMs,
-                        sourceCostMicros,
-                        outcome);
-                    return;
+                    return foldedCounters;
                 }
 
                 int headroom = Math.Max(1, _maxSeries / 100);
                 if (_series.Count >= _maxSeries + headroom)
                 {
-                    UsageDiagnostics.DroppedCounter.Add(1);
-                    return;
+                    UsageDiagnostics.DroppedCounter.Add(dropWeight);
+                    return null;
                 }
 
                 UsageDiagnostics.SeriesOverflowCounter.Add(1);
-                foldedCounters = _series.GetOrAdd(foldedKey, _ => new UsageSeriesCounters());
-                foldedCounters.Add(
-                    requests,
-                    queries,
-                    rows,
-                    rowsMeasured,
-                    bytes,
-                    durationMs,
-                    analysisCost,
-                    sourceComputeMs,
-                    sourceCostMicros,
-                    outcome);
-                return;
+                return _series.GetOrAdd(foldedKey, _ => new UsageSeriesCounters());
             }
 
-            counters = _series.GetOrAdd(key, _ => new UsageSeriesCounters());
-            counters.Add(
-                requests,
-                queries,
-                rows,
-                rowsMeasured,
-                bytes,
-                durationMs,
-                analysisCost,
-                sourceComputeMs,
-                sourceCostMicros,
-                outcome);
+            return _series.GetOrAdd(key, _ => new UsageSeriesCounters());
         }
 
-        public void AddGrantSeries(
-            in UsageGrantSeriesKey key,
-            long accesses,
-            long queries,
-            long rows,
-            long bytes,
-            long analysisCost,
-            long? sourceComputeMs,
-            long? sourceCostMicros)
+        private UsageGrantSeriesCounters? ResolveGrantSeriesTarget(in UsageGrantSeriesKey key)
         {
             if (_grantSeries.TryGetValue(key, out var counters))
             {
-                counters.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
-                return;
+                return counters;
             }
 
             if (_grantSeries.Count >= _maxSeries)
@@ -470,25 +488,21 @@ public sealed class UsageAggregator : IUsageAggregator
                 if (_grantSeries.TryGetValue(foldedKey, out var foldedCounters))
                 {
                     UsageDiagnostics.SeriesOverflowCounter.Add(1);
-                    foldedCounters.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
-                    return;
+                    return foldedCounters;
                 }
 
                 int headroom = Math.Max(1, _maxSeries / 100);
                 if (_grantSeries.Count >= _maxSeries + headroom)
                 {
                     UsageDiagnostics.DroppedCounter.Add(1);
-                    return;
+                    return null;
                 }
 
                 UsageDiagnostics.SeriesOverflowCounter.Add(1);
-                foldedCounters = _grantSeries.GetOrAdd(foldedKey, _ => new UsageGrantSeriesCounters());
-                foldedCounters.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
-                return;
+                return _grantSeries.GetOrAdd(foldedKey, _ => new UsageGrantSeriesCounters());
             }
 
-            counters = _grantSeries.GetOrAdd(key, _ => new UsageGrantSeriesCounters());
-            counters.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
+            return _grantSeries.GetOrAdd(key, _ => new UsageGrantSeriesCounters());
         }
 
         public void RecordGroupSet(TenantId tenant, string groupSetId, IReadOnlyList<Sid> groups)

@@ -11,6 +11,7 @@ using Autheris.Domain.Interfaces;
 public interface IGovernanceSqlDialect
 {
     string Upsert(GovernanceTable table, ReadOnlySpan<string> keyColumns, ReadOnlySpan<string> valueColumns);
+    string UpsertAccumulate(GovernanceTable table, ReadOnlySpan<string> keyColumns, ReadOnlySpan<string> setOnInsertColumns, ReadOnlySpan<string> counterColumns);
     string InsertReturning(string column);
     string LockRowsForUpdate { get; }
     string UtcNow { get; }

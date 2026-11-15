@@ -19,7 +19,9 @@ internal static class GovernanceSqlAllowlist
         [("GovernanceRepository.WebhookOutbox.cs", "FencedUpdate")] = "interpolates validated set clause into constant UPDATE statement",
         [("GovernanceRepository.WebhookOutbox.cs", "ListDeadLetters")] = "interpolates validated owner scope predicate into constant SELECT statement",
         [("PostgreSqlGovernanceDialect.cs", "Upsert")] = "identifiers pass GovernanceSqlInput.Identifier (SEC-SIMPL-21) before being appended",
+        [("PostgreSqlGovernanceDialect.cs", "UpsertAccumulate")] = "identifiers pass GovernanceSqlInput.Identifier (SEC-SIMPL-21) before being appended",
         [("SqlServerGovernanceDialect.cs", "Upsert")] = "identifiers pass GovernanceSqlInput.Identifier (SEC-SIMPL-21) before being appended",
+        [("SqlServerGovernanceDialect.cs", "UpsertAccumulate")] = "identifiers pass GovernanceSqlInput.Identifier (SEC-SIMPL-21) before being appended",
         [("SqlServerGovernanceDialect.cs", "LimitWithoutOrder")] = "appends a validated positive int",
     };
 }

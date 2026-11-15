@@ -136,5 +136,66 @@ public sealed class PostgreSqlGovernanceDialect : IGovernanceSqlDialect
         return sb.ToString();
     }
 
+    public string UpsertAccumulate(
+        GovernanceTable table,
+        ReadOnlySpan<string> keyColumns,
+        ReadOnlySpan<string> setOnInsertColumns,
+        ReadOnlySpan<string> counterColumns)
+    {
+        if (keyColumns.IsEmpty)
+        {
+            throw new ArgumentException("Key columns cannot be empty for upsert.", nameof(keyColumns));
+        }
+
+        string tableName = Quote(table.ToSqlName().ToLowerInvariant());
+        var sb = new StringBuilder();
+        sb.Append("INSERT INTO ").Append(tableName).Append(" (");
+        AppendQuotedColumns(sb, keyColumns, prependComma: false);
+        AppendQuotedColumns(sb, setOnInsertColumns, prependComma: true);
+        AppendQuotedColumns(sb, counterColumns, prependComma: true);
+        sb.Append(") VALUES (");
+        AppendParameterColumns(sb, keyColumns, prependComma: false);
+        AppendParameterColumns(sb, setOnInsertColumns, prependComma: true);
+        AppendParameterColumns(sb, counterColumns, prependComma: true);
+        sb.Append(") ON CONFLICT (");
+        AppendQuotedColumns(sb, keyColumns, prependComma: false);
+        sb.Append(')');
+
+        if (counterColumns.IsEmpty)
+        {
+            sb.Append(" DO NOTHING");
+        }
+        else
+        {
+            sb.Append(" DO UPDATE SET ");
+            for (int i = 0; i < counterColumns.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                string col = Quote(counterColumns[i]);
+                sb.Append(col).Append(" = ").Append(tableName).Append('.').Append(col).Append(" + EXCLUDED.").Append(col);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static void AppendQuotedColumns(StringBuilder sb, ReadOnlySpan<string> columns, bool prependComma)
+    {
+        for (int i = 0; i < columns.Length; i++)
+        {
+            if (prependComma || i > 0) sb.Append(", ");
+            sb.Append(Quote(columns[i]));
+        }
+    }
+
+    private static void AppendParameterColumns(StringBuilder sb, ReadOnlySpan<string> columns, bool prependComma)
+    {
+        for (int i = 0; i < columns.Length; i++)
+        {
+            if (prependComma || i > 0) sb.Append(", ");
+            sb.Append('@').Append(GovernanceSqlInput.Identifier(columns[i], nameof(columns)));
+        }
+    }
+
     private static string Quote(string identifier) => "\"" + GovernanceSqlInput.Identifier(identifier, nameof(identifier)) + "\"";
 }

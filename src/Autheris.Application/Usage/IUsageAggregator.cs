@@ -45,4 +45,7 @@ public interface IUsageAggregator
         in UsageFact fact);
 
     UsageGenerationSnapshot Swap();
+
+    /// <summary>Merges a previously swapped generation back into the current generation after a transient flush failure.</summary>
+    void Merge(UsageGenerationSnapshot snapshot);
 }

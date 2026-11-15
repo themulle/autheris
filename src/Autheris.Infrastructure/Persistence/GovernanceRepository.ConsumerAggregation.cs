@@ -65,29 +65,7 @@ public partial class GovernanceRepository : IConsumerAggregationRepository
             conn, ConsumerDialect, null, tableId, tenantId, day, application, queryName, calls, ct).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<ConsumerAppDailySummary>> QueryConsumerAppDailyAsync(
-        TableIdentifier tableId,
-        TenantId tenantId,
-        DateTimeOffset fromUtc,
-        DateTimeOffset toUtc,
-        CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await ConsumerAggregationStore.QueryConsumerAppDailyAsync(
-            conn, null, tableId, tenantId, fromUtc, toUtc, ct).ConfigureAwait(false);
-    }
-
-    public async Task<IReadOnlyDictionary<string, int>> QueryDistinctActorCountsAsync(
-        TableIdentifier tableId,
-        TenantId tenantId,
-        DateTimeOffset fromUtc,
-        DateTimeOffset toUtc,
-        CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await ConsumerAggregationStore.QueryDistinctActorCountsAsync(
-            conn, null, tableId, tenantId, fromUtc, toUtc, ct).ConfigureAwait(false);
-    }
+    // QueryConsumerAppDailyAsync and QueryDistinctActorCountsAsync moved to GovernanceRepository.Usage.cs (over USAGE_DAILY).
 
     public async Task<int> PurgeExpiredConsumerMetricsAsync(
         int retentionDays,

@@ -14,6 +14,7 @@ using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
+using Autheris.Application.Usage;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -81,6 +82,7 @@ public sealed class GovernanceTestStore : IAsyncDisposable
         _serviceProvider ?? throw new InvalidOperationException($"GovernanceTestStore ({Engine}) is not available.");
 
     public IGovernanceRepository Repository => Services.GetRequiredService<IGovernanceRepository>();
+    public IUsageRepository Usage => Services.GetRequiredService<IUsageRepository>();
     public IGovernanceStoreInitializer StoreInitializer => Services.GetRequiredService<IGovernanceStoreInitializer>();
     public IGovernanceMigrationRunner MigrationRunner => Services.GetRequiredService<IGovernanceMigrationRunner>();
     public ITableMetadataRepository TableMetadata => Services.GetRequiredService<ITableMetadataRepository>();
