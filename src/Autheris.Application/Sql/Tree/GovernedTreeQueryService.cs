@@ -759,7 +759,7 @@ public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService
             _auditWriter, access.Tenant, access.UserSid, table, access.Decision.IsAllowed,
             GovernedQueryStages.DecisionDetails(access.Decision, path: "graphql_tree"), ct,
             usageRecorder: access.Decision.IsAllowed ? null : _usageRecorder,
-            dataSource: access.Decision.IsAllowed ? null : access.Metadata.Table.SourceName).ConfigureAwait(false);
+            dataSource: access.Decision.IsAllowed ? null : access.Metadata.Table.SourceName, grants: access.Decision.Grants).ConfigureAwait(false);
     }
 
     private IDisposable? AcquireLease(ResolvedTableAccess rootAccess)

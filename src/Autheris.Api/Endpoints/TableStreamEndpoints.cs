@@ -642,7 +642,7 @@ public static class TableStreamEndpoints
                 // 9. Post-Stream Settlement & Response Metadata
                 int actualCost = rateLimiter != null ? baseCost + (rowsEmitted * costPerRow) : 0;
                 usageRecorder?.Record(
-                    new UsageFact(tableId, metadata.Table.SourceName ?? string.Empty, UsageOutcome.Allow, rowsEmitted, RowsMeasured: true, actualCost, Array.Empty<GrantRef>(), sourceStats),
+                    new UsageFact(tableId, metadata.Table.SourceName ?? string.Empty, UsageOutcome.Allow, rowsEmitted, RowsMeasured: true, actualCost, GovernedQueryStages.ToGrantRefs(decision), sourceStats),
                     tenant,
                     userSid);
                 SetResponseMetadata(httpContext.Response, "X-Rows-Streamed", rowsEmitted.ToString(CultureInfo.InvariantCulture));

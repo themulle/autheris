@@ -214,74 +214,45 @@ public sealed class UsageAggregator : IUsageAggregator
                 {
                     if (fact.Grants == null || fact.Grants.Count == 0)
                     {
-                        UsageDiagnostics.AllowWithoutGrantCounter.Add(1);
-                        gen.RecordGrantRef(identity.Tenant, GrantRef.Invalid);
-                        var grantKey = new UsageGrantSeriesKey(
+                        RecordGrantEntry(
+                            gen,
                             identity.Tenant,
                             dayUtc,
-                            GrantRef.Invalid.GrantId,
                             dataSource,
-                            tableId);
-
-                        gen.AddGrantSeries(
-                            grantKey,
-                            accesses: 1,
-                            queries: factQueries,
-                            rows: factRows,
-                            bytes: factBytes,
-                            analysisCost: factAnalysisCost,
-                            sourceComputeMs: computeMs,
-                            sourceCostMicros: costMicros);
+                            tableId,
+                            GrantRef.Invalid,
+                            isInvalid: true,
+                            factQueries,
+                            factRows,
+                            factBytes,
+                            factAnalysisCost,
+                            computeMs,
+                            costMicros);
                     }
                     else
                     {
-                        var grantNow = _timeProvider.GetUtcNow();
                         foreach (var grant in fact.Grants)
                         {
-                            bool isExpired = (grant.ValidUntil.HasValue && grant.ValidUntil.Value < grantNow) ||
-                                             (grant.ValidFrom.HasValue && grant.ValidFrom.Value > grantNow);
+                            bool isInvalid =
+                                string.IsNullOrWhiteSpace(grant.GrantId) ||
+                                string.Equals(grant.GrantId, GrantRef.Invalid.GrantId, StringComparison.OrdinalIgnoreCase) ||
+                                (grant.ValidUntil.HasValue && grant.ValidUntil.Value < now) ||
+                                (grant.ValidFrom.HasValue && grant.ValidFrom.Value > now);
 
-                            if (isExpired)
-                            {
-                                UsageDiagnostics.AllowWithoutGrantCounter.Add(1);
-                                gen.RecordGrantRef(identity.Tenant, GrantRef.Invalid);
-                                var grantKey = new UsageGrantSeriesKey(
-                                    identity.Tenant,
-                                    dayUtc,
-                                    GrantRef.Invalid.GrantId,
-                                    dataSource,
-                                    tableId);
-
-                                gen.AddGrantSeries(
-                                    grantKey,
-                                    accesses: 1,
-                                    queries: factQueries,
-                                    rows: factRows,
-                                    bytes: factBytes,
-                                    analysisCost: factAnalysisCost,
-                                    sourceComputeMs: computeMs,
-                                    sourceCostMicros: costMicros);
-                            }
-                            else
-                            {
-                                gen.RecordGrantRef(identity.Tenant, grant);
-                                var grantKey = new UsageGrantSeriesKey(
-                                    identity.Tenant,
-                                    dayUtc,
-                                    grant.GrantId,
-                                    dataSource,
-                                    tableId);
-
-                                gen.AddGrantSeries(
-                                    grantKey,
-                                    accesses: 1,
-                                    queries: factQueries,
-                                    rows: factRows,
-                                    bytes: factBytes,
-                                    analysisCost: factAnalysisCost,
-                                    sourceComputeMs: computeMs,
-                                    sourceCostMicros: costMicros);
-                            }
+                            RecordGrantEntry(
+                                gen,
+                                identity.Tenant,
+                                dayUtc,
+                                dataSource,
+                                tableId,
+                                isInvalid ? GrantRef.Invalid : grant,
+                                isInvalid,
+                                factQueries,
+                                factRows,
+                                factBytes,
+                                factAnalysisCost,
+                                computeMs,
+                                costMicros);
                         }
                     }
                 }
@@ -304,6 +275,45 @@ public sealed class UsageAggregator : IUsageAggregator
             bytes: 0,
             statusCode: 200,
             facts: [fact]);
+    }
+
+    private static void RecordGrantEntry(
+        UsageGeneration gen,
+        TenantId tenant,
+        DateOnly dayUtc,
+        string dataSource,
+        string tableId,
+        GrantRef grant,
+        bool isInvalid,
+        long factQueries,
+        long factRows,
+        long factBytes,
+        long factAnalysisCost,
+        long? computeMs,
+        long? costMicros)
+    {
+        if (isInvalid)
+        {
+            UsageDiagnostics.AllowWithoutGrantCounter.Add(1);
+        }
+
+        gen.RecordGrantRef(tenant, grant);
+        var grantKey = new UsageGrantSeriesKey(
+            tenant,
+            dayUtc,
+            grant.GrantId,
+            dataSource,
+            tableId);
+
+        gen.AddGrantSeries(
+            grantKey,
+            accesses: 1,
+            queries: factQueries,
+            rows: factRows,
+            bytes: factBytes,
+            analysisCost: factAnalysisCost,
+            sourceComputeMs: computeMs,
+            sourceCostMicros: costMicros);
     }
 
     public UsageGenerationSnapshot Swap()

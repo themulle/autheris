@@ -295,7 +295,14 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 traceId,
                 ct).ConfigureAwait(false);
 
-            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.Allow, governed.Rows.Count, true);
+            RecordProcedureUsage(
+                definition,
+                tenantId,
+                userSid,
+                Autheris.Application.Usage.UsageOutcome.Allow,
+                governed.Rows.Count,
+                true,
+                ExtractDecisionGrants(decisions.Values.Select(d => d.Decision)));
             return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, truncated, sw.ElapsedMilliseconds);
         }
         finally

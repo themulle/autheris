@@ -1,9 +1,12 @@
 namespace Autheris.Application.Procedures.Services;
 
 using System;
+using System.Collections.Generic;
 using System.Security.Claims;
+using Autheris.Application.Policy;
 using Autheris.Application.Usage;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
 public sealed partial class GovernedProcedureExecutionService
@@ -31,13 +34,39 @@ public sealed partial class GovernedProcedureExecutionService
             sid.Value);
     }
 
+    private static IReadOnlyList<GrantRef> ExtractDecisionGrants(IEnumerable<TableAccessDecision> decisions)
+    {
+        List<GrantRef>? grants = null;
+        HashSet<string>? seen = null;
+        foreach (var decision in decisions)
+        {
+            if (!decision.IsAllowed || decision.Grants.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var g in GovernedQueryStages.ToGrantRefs(decision))
+            {
+                seen ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (seen.Add(g.GrantId))
+                {
+                    grants ??= [];
+                    grants.Add(g);
+                }
+            }
+        }
+
+        return grants ?? (IReadOnlyList<GrantRef>)Array.Empty<GrantRef>();
+    }
+
     private void RecordProcedureUsage(
         ProcedureDefinition definition,
         TenantId tenantId,
         Sid userSid,
         UsageOutcome outcome,
         long rows,
-        bool rowsMeasured)
+        bool rowsMeasured,
+        IReadOnlyList<GrantRef>? grants = null)
     {
         if (_usageRecorder == null)
         {
@@ -49,7 +78,7 @@ public sealed partial class GovernedProcedureExecutionService
             : definition.DataSource;
         var tableId = ResolveProcedureTableId(dataSource, definition.ProcedureName);
         _usageRecorder.Record(
-            new UsageFact(tableId, dataSource, outcome, rows, rowsMeasured, 0, Array.Empty<GrantRef>(), default),
+            new UsageFact(tableId, dataSource, outcome, rows, rowsMeasured, 0, grants ?? Array.Empty<GrantRef>(), default),
             tenantId,
             userSid);
     }

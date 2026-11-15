@@ -118,6 +118,8 @@ public static class GovernedQueryStages
             details["virtual_filters"] = decision.AppliedVirtualFilters;
         }
 
+        details["grants"] = decision.IsAllowed ? ToAuditGrants(decision.Grants) : Array.Empty<AuditGrantEntry>();
+
         return details;
     }
 
@@ -205,10 +207,13 @@ public static class GovernedQueryStages
         string eventType = AuditEventTypes.TableQuery,
         string? traceId = null,
         Autheris.Application.Usage.IUsageRecorder? usageRecorder = null,
-        string? dataSource = null)
+        string? dataSource = null,
+        IReadOnlyList<DecisionGrantRef>? grants = null)
     {
-        RecordUsageFact(usageRecorder, tenant, actor, table, allowed, dataSource);
-        return WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, details, traceId), tier, ct);
+        var effectiveGrants = allowed ? grants : null;
+        RecordUsageFact(usageRecorder, tenant, actor, table, allowed, dataSource, effectiveGrants);
+        var enrichedDetails = WithGrantsDetails(details, allowed, effectiveGrants);
+        return WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, enrichedDetails, traceId), tier, ct);
     }
 
     /// <summary>Builds and writes a <c>TABLE_QUERY</c>-family entry through the unified audit contract.</summary>
@@ -224,10 +229,94 @@ public static class GovernedQueryStages
         string eventType = AuditEventTypes.TableQuery,
         string? traceId = null,
         Autheris.Application.Usage.IUsageRecorder? usageRecorder = null,
-        string? dataSource = null)
+        string? dataSource = null,
+        IReadOnlyList<DecisionGrantRef>? grants = null)
     {
-        RecordUsageFact(usageRecorder, tenant, actor, table, allowed, dataSource);
-        return WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, details, traceId), tier, ct);
+        var effectiveGrants = allowed ? grants : null;
+        RecordUsageFact(usageRecorder, tenant, actor, table, allowed, dataSource, effectiveGrants);
+        var enrichedDetails = WithGrantsDetails(details, allowed, effectiveGrants);
+        return WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, enrichedDetails, traceId), tier, ct);
+    }
+
+    /// <summary>Maps all contributing PDP decision grants of an allowed decision into usage <see cref="Autheris.Application.Usage.GrantRef"/> values.</summary>
+    public static IReadOnlyList<Autheris.Application.Usage.GrantRef> ToGrantRefs(TableAccessDecision? decision) =>
+        decision is { IsAllowed: true }
+            ? ToGrantRefs(decision.Grants)
+            : Array.Empty<Autheris.Application.Usage.GrantRef>();
+
+    /// <summary>Maps PDP <see cref="DecisionGrantRef"/> entries into usage <see cref="Autheris.Application.Usage.GrantRef"/> values.</summary>
+    public static IReadOnlyList<Autheris.Application.Usage.GrantRef> ToGrantRefs(IReadOnlyList<DecisionGrantRef>? grants)
+    {
+        if (grants is null || grants.Count == 0)
+        {
+            return Array.Empty<Autheris.Application.Usage.GrantRef>();
+        }
+
+        var mapped = new Autheris.Application.Usage.GrantRef[grants.Count];
+        for (int i = 0; i < grants.Count; i++)
+        {
+            var grant = grants[i];
+            mapped[i] = new Autheris.Application.Usage.GrantRef(grant.GrantId, grant.ValidFrom, grant.ValidUntil);
+        }
+
+        return mapped;
+    }
+
+    private readonly record struct AuditGrantEntry(
+        [property: System.Text.Json.Serialization.JsonPropertyName("grantId")] string GrantId,
+        [property: System.Text.Json.Serialization.JsonPropertyName("grantValidFrom")] DateTimeOffset? GrantValidFrom,
+        [property: System.Text.Json.Serialization.JsonPropertyName("grantValidUntil")] DateTimeOffset? GrantValidUntil);
+
+    private static AuditGrantEntry[] ToAuditGrants(IReadOnlyList<DecisionGrantRef>? grants)
+    {
+        if (grants is null || grants.Count == 0)
+        {
+            return Array.Empty<AuditGrantEntry>();
+        }
+
+        var mapped = new AuditGrantEntry[grants.Count];
+        for (int i = 0; i < grants.Count; i++)
+        {
+            var grant = grants[i];
+            mapped[i] = new AuditGrantEntry(grant.GrantId, grant.ValidFrom, grant.ValidUntil);
+        }
+
+        return mapped;
+    }
+
+    private static object WithGrantsDetails(object? details, bool allowed, IReadOnlyList<DecisionGrantRef>? grants)
+    {
+        if (details is IReadOnlyDictionary<string, object?> dict)
+        {
+            if (allowed && grants is null && dict.ContainsKey("grants"))
+            {
+                return details;
+            }
+
+            var copy = new Dictionary<string, object?>(dict, StringComparer.Ordinal);
+            copy["grants"] = allowed ? ToAuditGrants(grants) : Array.Empty<AuditGrantEntry>();
+            return copy;
+        }
+
+        var auditGrants = allowed ? ToAuditGrants(grants) : Array.Empty<AuditGrantEntry>();
+        if (details is null)
+        {
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["grants"] = auditGrants
+            };
+        }
+
+        if (JsonSerializer.SerializeToNode(details) is System.Text.Json.Nodes.JsonObject jsonObj)
+        {
+            jsonObj["grants"] = JsonSerializer.SerializeToNode(auditGrants);
+            return jsonObj;
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["grants"] = auditGrants
+        };
     }
 
     private static void RecordUsageFact(
@@ -236,7 +325,8 @@ public static class GovernedQueryStages
         Sid actor,
         TableIdentifier table,
         bool allowed,
-        string? dataSource)
+        string? dataSource,
+        IReadOnlyList<DecisionGrantRef>? grants)
     {
         if (usageRecorder is null)
         {
@@ -250,7 +340,7 @@ public static class GovernedQueryStages
             Rows: 0,
             RowsMeasured: false,
             AnalysisCost: 0,
-            Grants: [],
+            Grants: allowed ? ToGrantRefs(grants) : Array.Empty<Autheris.Application.Usage.GrantRef>(),
             Source: default);
         usageRecorder.Record(fact, tenant, actor);
     }

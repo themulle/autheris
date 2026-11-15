@@ -285,7 +285,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         // SR15-32: ALLOW audit is recorded only after successful validation of all query parameters
         await GovernedQueryStages.RecordTableReadAsync(
             _auditWriter, tenantId, userSid, table, allowed: true,
-            GovernedQueryStages.WithQueryShape(GovernedQueryStages.DecisionDetails(decision), filter, orderBy), ct).ConfigureAwait(false);
+            GovernedQueryStages.WithQueryShape(GovernedQueryStages.DecisionDetails(decision), filter, orderBy), ct,
+            grants: decision.Grants).ConfigureAwait(false);
 
         // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
         var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
@@ -388,7 +389,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 processedRows.Count,
                 RowsMeasured: true,
                 AnalysisCost: 0,
-                Grants: [],
+                Grants: GovernedQueryStages.ToGrantRefs(decision),
                 Source: sourceStats),
             tenantId,
             userSid);
@@ -769,7 +770,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 GovernedQueryStages.DecisionDetails(decision, includeVirtualFilters: false), ct,
                 eventType: "CHILD_RELATION_CHECK",
                 usageRecorder: _usageRecorder,
-                dataSource: metadata.Table.SourceName).ConfigureAwait(false);
+                dataSource: metadata.Table.SourceName,
+                grants: decision.Grants).ConfigureAwait(false);
         }
 
         return decision;

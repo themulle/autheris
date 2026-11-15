@@ -358,7 +358,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             ["exposed_suppressed_counts"] = exposedSuppressedCounts,
             ["merged_into_other"] = mergedIntoOther,
             ["returned_groups_count"] = visibleGroupRows.Count
-        }, ct).ConfigureAwait(false);
+        }, ct, decision.Grants).ConfigureAwait(false);
 
         return new AggregationResult(
             Table: query.Table,

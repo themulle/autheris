@@ -2,6 +2,7 @@ namespace Autheris.Application.Sql.Tree;
 
 using System;
 using System.Data.Common;
+using Autheris.Application.Policy;
 using Autheris.Application.Usage;
 
 public sealed partial class GovernedTreeQueryService
@@ -36,7 +37,7 @@ public sealed partial class GovernedTreeQueryService
                 rows,
                 rowsMeasured,
                 AnalysisCost: 0,
-                Grants: Array.Empty<GrantRef>(),
+                Grants: outcome == UsageOutcome.Allow ? GovernedQueryStages.ToGrantRefs(access.Decision) : Array.Empty<GrantRef>(),
                 Source: source),
             access.Tenant,
             access.UserSid);
