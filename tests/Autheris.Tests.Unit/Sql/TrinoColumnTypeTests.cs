@@ -13,8 +13,8 @@ using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -108,13 +108,10 @@ public sealed class TrinoColumnTypeTests
     }
 
     [Fact]
-    public async Task BufferedResult_FromSqlite_DescribesColumnsAndNamesUnnamedColumns()
+    public void BufferedResult_FromSqlite_DescribesColumnsAndNamesUnnamedColumns()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*), 1.5 AS x, 'a' AS x";
-        await using var reader = await command.ExecuteReaderAsync();
+        using var reader = new StubDbDataReader(["COUNT(*)", "x", "x"], [[0L, 1.5m, "a"]]);
+        reader.Read().ShouldBeTrue();
 
         var columns = SqlResultColumns.Describe(reader);
 

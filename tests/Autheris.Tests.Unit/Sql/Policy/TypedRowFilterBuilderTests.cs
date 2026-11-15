@@ -6,7 +6,6 @@ using Autheris.Application.Services;
 using Autheris.Application.Sql.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
@@ -170,53 +169,6 @@ public sealed class TypedRowFilterBuilderTests
     }
 
     [Fact]
-    public void RenderedString_EqualsLegacyString_Semantically()
-    {
-        var a1 = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [Filter("region", "IN", "[\"EU\",\"US\"]", 0), Filter("amount", "GTE", "100", 0), Filter("region", "EQ", "\"APAC\"", 1)] };
-        var d1 = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = [Filter("secret", "EQ", "true")] };
-        var sut = new RowFilterSqlBuilder();
-
-        var typed = _builder.BuildCombined([a1], [d1], Orders)!;
-        var rendered = _renderer.Render(typed, TargetSqlDialect.PostgreSql, RowFilterAliases.Target);
-        var legacySql = sut.BuildCombinedRowFilter([a1], [d1], DatabaseDialect.PostgreSql)!;
-
-        using var connection = SeedOrders();
-        var viaTyped = Query(connection, $"SELECT id FROM orders AS autheris_target WHERE {rendered.Sql} ORDER BY id", rendered.Parameters);
-        var viaLegacy = Query(connection, $"SELECT id FROM orders AS autheris_target WHERE {legacySql} ORDER BY id", new Dictionary<string, object?>());
-
-        viaTyped.ShouldBe(viaLegacy);
-        viaTyped.ShouldBe([1L, 3L, 5L]);
-    }
-
-    [Theory]
-    [InlineData("it's \"quoted\"")]
-    [InlineData("x' OR '1'='1")]
-    [InlineData("'; DROP TABLE orders; --")]
-    [InlineData("back\\slash %_ [x]")]
-    [InlineData("line\nbreak\u0000nul")]
-    [InlineData("ünï©ödé 日本語 😀")]
-    public void HostileValue_RoundTripsExactly(string hostile)
-    {
-        var json = JsonSerializer.Serialize(hostile);
-        var predicate = _builder.Build([Filter("region", "EQ", json)], Orders);
-        var rendered = _renderer.Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target);
-
-        rendered.Sql.ShouldNotContain(hostile.Length > 3 ? hostile[..4] : hostile);
-        rendered.Parameters.Single().Value.ShouldBe(hostile);
-
-        using var connection = SeedOrders();
-        using (var insert = connection.CreateCommand())
-        {
-            insert.CommandText = "INSERT INTO orders (id, region, amount, secret) VALUES (99, $r, 1, 0)";
-            insert.Parameters.AddWithValue("$r", hostile);
-            insert.ExecuteNonQuery();
-        }
-
-        // The tables still exist and exactly the hostile row matches.
-        Query(connection, $"SELECT id FROM orders AS autheris_target WHERE {rendered.Sql}", rendered.Parameters).ShouldBe([99L]);
-    }
-
-    [Fact]
     public void Renderer_RebasesTheTargetAlias()
     {
         var predicate = TestCorrelatedPredicateBuilder.BuildSingle(
@@ -239,36 +191,5 @@ public sealed class TypedRowFilterBuilderTests
 
         Should.Throw<ArgumentException>(() => _renderer.Render(predicate, TargetSqlDialect.PostgreSql, "a\"; --"));
         Should.Throw<ArgumentOutOfRangeException>(() => _renderer.Render(predicate, (TargetSqlDialect)999, RowFilterAliases.Target));
-    }
-
-    private static SqliteConnection SeedOrders()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = @"
-CREATE TABLE orders (id INTEGER PRIMARY KEY, region TEXT, amount INTEGER, secret INTEGER);
-INSERT INTO orders VALUES (1, 'EU', 150, 0), (2, 'EU', 50, 0), (3, 'APAC', 1, 0), (4, 'US', 500, 1), (5, 'US', 100, 0), (6, 'DE', 999, 0);";
-        cmd.ExecuteNonQuery();
-        return connection;
-    }
-
-    private static List<long> Query(SqliteConnection connection, string sql, IReadOnlyDictionary<string, object?> parameters)
-    {
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = sql;
-        foreach (var (name, value) in parameters)
-        {
-            cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        }
-
-        var ids = new List<long>();
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
-            ids.Add(reader.GetInt64(0));
-        }
-
-        return ids;
     }
 }

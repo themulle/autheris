@@ -1,5 +1,7 @@
-namespace Autheris.Tests.Unit.Sql.TimeZones;
+namespace Autheris.Tests.Integration.Sql.TimeZones;
 
+using System;
+using System.IO;
 using Autheris.Application.Olap;
 using DuckDB.NET.Data;
 using Shouldly;
@@ -10,14 +12,14 @@ using Xunit;
 /// (autoload off, external access off, configuration locked), and the sandbox itself is unchanged by the probe.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class DuckDbIcuSandboxTests
+public sealed class DuckDbIcuSandboxIntegrationTests
 {
     private static DuckDBConnection OpenSandbox()
     {
         var connection = new DuckDBConnection("DataSource=:memory:");
         connection.Open();
         using var setup = connection.CreateCommand();
-        setup.CommandText = DuckDbOlapEngine.BuildSetupSql(System.IO.Path.GetTempPath().Replace('\\', '/'), "256MB", "256MB", 1);
+        setup.CommandText = DuckDbOlapEngine.BuildSetupSql(Path.GetTempPath().Replace('\\', '/'), "256MB", "256MB", 1);
         setup.ExecuteNonQuery();
         return connection;
     }

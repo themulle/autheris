@@ -63,6 +63,7 @@
     <Compile Include="..\Autheris.Tests.Unit\Catalog\Wp0CatalogFixtures.cs" Link="Catalog\Wp0CatalogFixtures.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Identity\Attributes\CallerAttributeTestSupport.cs" Link="Identity\CallerAttributeTestSupport.cs" />
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\AuditWriterTestServices.cs" Link="TestDoubles\AuditWriterTestServices.cs" />
+    <Compile Include="..\Autheris.Tests.Unit\Sql\Policy\TestCorrelatedPredicateBuilder.cs" Link="Sql\Policy\TestCorrelatedPredicateBuilder.cs" />
     <Compile Include="..\Autheris.Tests.Unit\DefaultTenantCaller.cs" Link="DefaultTenantCaller.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Masking\MaskSemanticsCorpus.cs" Link="Masking\MaskSemanticsCorpus.cs" />
     <Compile Include="..\Autheris.Tests.Unit\GraphQL\TypedTreeRowPolicy.cs" Link="GraphQL\TypedTreeRowPolicy.cs" />

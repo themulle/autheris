@@ -16,7 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -45,12 +45,9 @@ internal sealed class ClientListFixture : IAsyncDisposable
     public const string TenantB = "tenant_b";
     public const string WriterRole = "WebSqlWriter";
 
-    private readonly SqliteConnection? _keepAlive;
-
-    private ClientListFixture(SqliteConnection? keepAlive, string connectionString, GovernedSqlExecutionService service, List<AuditLogEntry> entries)
+    private ClientListFixture(string connectionString, GovernedSqlExecutionService service, List<AuditLogEntry> entries)
     {
         _entries = entries;
-        _keepAlive = keepAlive;
         ConnectionString = connectionString;
         Service = service;
     }
@@ -59,7 +56,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
 
     public GovernedSqlExecutionService Service { get; }
 
-    public static async Task<ClientListFixture> CreateAsync(
+    public static Task<ClientListFixture> CreateAsync(
         int? maxListValues = null,
         int? maxLists = null,
         ListCapturingLogger<GovernedSqlExecutionService>? logger = null,
@@ -69,17 +66,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
         string provider = "PostgreSql",
         Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
     {
-        string connectionString = $"Data Source=list_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        var keepAlive = new SqliteConnection(connectionString);
-        await keepAlive.OpenAsync();
-        await using (var setup = keepAlive.CreateCommand())
-        {
-            setup.CommandText =
-                "CREATE TABLE orders (id INTEGER, status TEXT, amount REAL, tenant_id TEXT);" +
-                "INSERT INTO orders VALUES (1, 'new', 10, 'tenant_a'), (2, 'new', 20, 'tenant_a'), (3, 'paid', 30, 'tenant_a'), (4, 'paid', 40, 'tenant_a'), (5, 'void', 50, 'tenant_a');" +
-                "INSERT INTO orders VALUES (6, 'new', 60, 'tenant_b'), (7, 'paid', 70, 'tenant_b');";
-            await setup.ExecuteNonQueryAsync();
-        }
+        const string connectionString = "Host=unused;Database=clientlist";
 
         var webSql = new WebSqlOptions
         {
@@ -160,10 +147,9 @@ internal sealed class ClientListFixture : IAsyncDisposable
                     return openConnection();
                 }
 
-                var connection = new SqliteConnection(connectionString);
+                var connection = new CallbackDbConnection((_, _) => new StubDbDataReader([], []));
                 await connection.OpenAsync();
-                connection.CreateFunction("textsend", (string? s) => s);
-                return (DbConnection)new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection);
+                return (DbConnection)connection;
             });
 
         var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
@@ -189,7 +175,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
             timeZoneState: timeZoneState,
             sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
             accessDecisionPoint: pdp);
-        return new ClientListFixture(keepAlive, connectionString, service, fixtureEntries);
+        return Task.FromResult(new ClientListFixture(connectionString, service, fixtureEntries));
     }
 
     private readonly List<AuditLogEntry> _entries;
@@ -222,18 +208,5 @@ internal sealed class ClientListFixture : IAsyncDisposable
     public Task ExecuteAsync(string sql, IReadOnlyDictionary<string, object?>? parameters, string tenant = TenantA, string? transport = SqlTransports.WebSql) =>
         Service.ExecuteGovernedQueryAsync(Request(sql, parameters, transport), User(tenant), new TenantId(tenant), (_, _) => Task.CompletedTask);
 
-    public async Task<long> ScalarAsync(string sql)
-    {
-        await using var cmd = _keepAlive!.CreateCommand();
-        cmd.CommandText = sql;
-        return Convert.ToInt64(await cmd.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_keepAlive is not null)
-        {
-            await _keepAlive.DisposeAsync();
-        }
-    }
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

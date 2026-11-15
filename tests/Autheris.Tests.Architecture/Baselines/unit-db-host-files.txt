@@ -4,13 +4,4 @@ tests/Autheris.Tests.Unit/BypassSemanticsAndDmlGuardrailTests.cs
 tests/Autheris.Tests.Unit/DevExperienceTests.cs
 tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
 tests/Autheris.Tests.Unit/IntegrationGapATests.cs
-tests/Autheris.Tests.Unit/Sql/AstCompilerDuckDbExecutionTests.cs
-tests/Autheris.Tests.Unit/Sql/ClientListFixture.cs
-tests/Autheris.Tests.Unit/Sql/DuckDbBindingProbeTests.cs
-tests/Autheris.Tests.Unit/Sql/Policy/GovernancePolicyEndToEndTests.cs
-tests/Autheris.Tests.Unit/Sql/Policy/GovernancePolicyFactoryTests.cs
-tests/Autheris.Tests.Unit/Sql/Policy/RowFilterKeySetGeneratedSqlTests.cs
-tests/Autheris.Tests.Unit/Sql/Policy/TypedRowFilterBuilderTests.cs
-tests/Autheris.Tests.Unit/Sql/TimeZones/DuckDbIcuSandboxTests.cs
-tests/Autheris.Tests.Unit/Sql/TrinoColumnTypeTests.cs
 tests/Autheris.Tests.Unit/TestDoubles/SqliteGovernedSqlService.cs

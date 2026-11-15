@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Sql;
+namespace Autheris.Tests.Integration.Sql;
 
 using System.Data;
 using DuckDB.NET.Data;
@@ -6,7 +6,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>Pins how DuckDB.NET binds <c>$n</c> markers (the governed compiler's DuckDB marker style).</summary>
-public sealed class DuckDbBindingProbeTests
+public sealed class DuckDbBindingProbeIntegrationTests
 {
     private static object? Scalar(string sql, params (string Name, object Value)[] parameters)
     {

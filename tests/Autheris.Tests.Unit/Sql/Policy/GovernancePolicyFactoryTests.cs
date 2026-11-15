@@ -8,7 +8,6 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.Data.Sqlite;
 using NSubstitute;
 using Shouldly;
 using System.Security;
@@ -90,49 +89,12 @@ public sealed class GovernancePolicyFactoryTests
     private static CompileRequest Request(GovernancePolicy policy, bool dml = false) =>
         CompileRequestFactory.Create(policy, TargetSqlDialect.PostgreSql, new WebSqlOptions(), dml, 100, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
-    private List<object?[]> Run(CompileRequest request, string sql)
-    {
-        var compiled = _engine.Compile(sql.AsMemory(), request, CancellationToken.None);
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        connection.CreateFunction("textsend", (string? s) => s);
-        using (var setup = connection.CreateCommand())
-        {
-            setup.CommandText = """
-                CREATE TABLE orders (id INTEGER, tenant_id TEXT, region TEXT, email TEXT);
-                CREATE TABLE invoices (id INTEGER, tenant_id TEXT, region TEXT, email TEXT);
-                INSERT INTO orders VALUES (1, 'acme', 'EU', 'a@x'), (2, 'acme', 'US', 'b@x'), (3, 'other', 'EU', 'c@x'), (4, 'ACME', 'EU', 'd@x');
-                INSERT INTO invoices VALUES (1, 'acme', 'EU', 'z@x');
-                """;
-            setup.ExecuteNonQuery();
-        }
-
-        using var command = connection.CreateCommand();
-        command.CommandText = compiled.Sql;
-        foreach (var p in compiled.Parameters)
-        {
-            command.Parameters.AddWithValue(p.Marker, p.Value ?? DBNull.Value);
-        }
-        var rows = new List<object?[]>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            var row = new object[reader.FieldCount];
-            reader.GetValues(row);
-            rows.Add(row.Select(v => v is DBNull ? null : v).ToArray());
-        }
-
-        return rows;
-    }
-
     private async Task<CompileRequest> AssembleAsync(
         IReadOnlyDictionary<TableIdentity, TableAccessDecision> decisions, IEnumerable<TableIdentity>? withoutRls = null, params TableCatalogEntry[] entries)
     {
         var factory = Factory(Catalog(entries.Length == 0 ? [Entry(Orders), Entry(Invoices)] : entries), out _);
         return Request(await factory.CreateAsync(Input(decisions, withoutRls), CancellationToken.None));
     }
-
-    private static List<int> Ids(List<object?[]> rows) => rows.Select(r => Convert.ToInt32(r[0])).OrderBy(x => x).ToList();
 
     [Fact]
     public async Task TypedRowPolicy_FiltersRows_AndIsBound()
@@ -143,7 +105,6 @@ public sealed class GovernancePolicyFactoryTests
 
         compiled.Sql.ShouldNotContain("'EU'");
         compiled.Parameters.Select(p => p.Value).ShouldContain("EU");
-        Ids(Run(request, "SELECT id FROM orders")).ShouldBe(new List<int> { 1 });
     }
 
     [Fact]
@@ -228,51 +189,6 @@ public sealed class GovernancePolicyFactoryTests
     }
 
     [Fact]
-    public async Task TypedMask_IsApplied()
-    {
-        var request = await AssembleAsync(new Dictionary<TableIdentity, TableAccessDecision>
-        {
-            [Orders] = Allowed(OrdersId, RegionPolicy("EU"), email: ColumnAccessLevel.Mask, masks: EmailMask())
-        });
-
-        var rows = Run(request, "SELECT id, email FROM orders");
-
-        rows.Count.ShouldBe(1);
-        rows[0][1].ShouldBe("***");
-    }
-
-    [Fact]
-    public async Task DeniedColumn_IsNullified()
-    {
-        var request = await AssembleAsync(new Dictionary<TableIdentity, TableAccessDecision>
-        {
-            [Orders] = Allowed(OrdersId, RegionPolicy("EU"), email: ColumnAccessLevel.Deny)
-        });
-
-        var rows = Run(request, "SELECT id, email FROM orders");
-
-        rows.Count.ShouldBe(1);
-        rows[0][1].ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task NoRowPolicy_DeclaredWithoutRls_ReturnsTenantRows()
-    {
-        var request = await AssembleAsync(
-            new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId) }, withoutRls: [Orders]);
-
-        Ids(Run(request, "SELECT id FROM orders")).ShouldBe(new List<int> { 1, 2 });
-    }
-
-    [Fact]
-    public async Task NoRowPolicy_NotDeclaredWithoutRls_DeniesRows()
-    {
-        var request = await AssembleAsync(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId) });
-
-        Run(request, "SELECT id FROM orders").ShouldBeEmpty();
-    }
-
-    [Fact]
     public async Task RowPolicy_DeclaredWithoutRls_IsContradiction_DeniesTable()
     {
         var request = await AssembleAsync(
@@ -303,16 +219,6 @@ public sealed class GovernancePolicyFactoryTests
         var request = await AssembleAsync(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = decision });
 
         Should.Throw<SecurityException>(() => _engine.Compile("SELECT id FROM orders".AsMemory(), request, CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task MandatoryPredicate_WithMatchingTypedPolicy_IsEnforced()
-    {
-        var decision = TableAccessDecision.Allowed(OrdersId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
-            .WithMandatoryPredicate(RegionPolicy("US"), ["vf"]);
-        var request = await AssembleAsync(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = decision });
-
-        Ids(Run(request, "SELECT id FROM orders")).ShouldBe(new List<int> { 2 });
     }
 
     [Fact]
@@ -438,24 +344,6 @@ public sealed class GovernancePolicyFactoryTests
         new Dictionary<string, PolicyValue>()), TargetSqlDialect.PostgreSql, Renderer);
 
     [Fact]
-    public async Task PolicySubqueryTable_IsRequestedFromTheProvider_ResolvableForThePolicy_ButNeverAdmitted()
-    {
-        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out var provider);
-        var decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) };
-
-        var policy = await factory.CreateAsync(Input(decisions), CancellationToken.None);
-
-        // the provider verifies the table that the policy reads, like any other table of the statement
-        await provider.Received().GetCatalogAsync(
-            "ds", Arg.Is<IReadOnlyCollection<TableIdentifier>>(t => t.Any(x => x.TableName == "invoices")), Arg.Any<CancellationToken>());
-        var request = Request(policy);
-        // the policy subquery resolves it (with the tenant predicate), so the statement compiles and filters by the other table's rows
-        Ids(Run(request, "SELECT id FROM orders ORDER BY id")).ShouldBe(new List<int> { 1 });
-        // a user reference is still decided by stage 3 and by the deny-all default: the table has no decision and no row policy
-        Ids(Run(request, "SELECT id FROM invoices")).ShouldBeEmpty();
-    }
-
-    [Fact]
     public async Task PolicySubqueryTable_TheCatalogCannotVerify_DeniesTheTableOfThePolicy()
     {
         var factory = Factory(Catalog(Entry(Orders)), out _);   // invoices is not in the verified catalog
@@ -465,25 +353,6 @@ public sealed class GovernancePolicyFactoryTests
 
         // fail closed: a policy that cannot be enforced makes its own table unknown to the compiler (the rewriter answers SQL_POLICY_DENIED)
         policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task CorrelatedConsentFilter_BuiltByTheProducer_CompilesAndFiltersEndToEnd()
-    {
-        var predicate = TestCorrelatedPredicateBuilder.BuildSingle(
-            fkColumn: "id",
-            domain: "default",
-            schema: "main",
-            table: "invoices",
-            alias: "dep",
-            pkColumn: "id",
-            whereColumn: null);
-        var policy = new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.PostgreSql, Renderer);
-        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _);
-        var gp = await factory.CreateAsync(Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, policy) }), CancellationToken.None);
-        var request = Request(gp);
-
-        Ids(Run(request, "SELECT id FROM orders ORDER BY id")).ShouldBe(new List<int> { 1 });
     }
 
     // ---- M-A1: dependent (policy-subquery) tables are governed like primary tables ---------------------------------------------

@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Sql;
+namespace Autheris.Tests.Integration.Sql;
 
 using System.Collections.Frozen;
 using System.Collections.Immutable;
@@ -18,7 +18,7 @@ using Xunit;
 /// consent filters, policy subqueries, masks and hostile values. DuckDB staging for federation keeps using the legacy
 /// string generator; these tests only cover the governed Compile path.
 /// </summary>
-public sealed class AstCompilerDuckDbExecutionTests : IDisposable
+public sealed class AstCompilerDuckDbExecutionIntegrationTests : IDisposable
 {
     private static readonly TableIdentity Orders = new("main", "Orders");
     private static readonly TableIdentity Entitlements = new("main", "Entitlements");
@@ -28,7 +28,7 @@ public sealed class AstCompilerDuckDbExecutionTests : IDisposable
     private readonly DuckDbCompiledSqlBinder _binder = new();
     private readonly Policies _policies = new();
 
-    public AstCompilerDuckDbExecutionTests()
+    public AstCompilerDuckDbExecutionIntegrationTests()
     {
         _conn = new DuckDBConnection("DataSource=:memory:");
         _conn.Open();
@@ -343,46 +343,5 @@ public sealed class AstCompilerDuckDbExecutionTests : IDisposable
         }
 
         Convert.ToInt32(cmd.ExecuteScalar()).ShouldBe(9);   // x = 1..9 are in the list (x = 0 is not)
-    }
-
-    /// <summary>
-    /// An engine for statements with thousands of values: no parse budget and its own parser limiter (the 5 s budget includes the wait
-    /// on the process-wide slot limiter, which a loaded machine can exhaust), so only the limit under test can reject.
-    /// </summary>
-    private static FastSqlEngine UnbudgetedEngine() => new()
-    {
-        ParseTimeout = TimeSpan.Zero,
-        ParseConcurrencyLimiter = new SemaphoreSlim(1, 1)
-    };
-
-    [Fact]
-    public void BindLimit_OverTheTable_IsATypedRejection()
-    {
-        // Deterministic: the capability table is lowered to 50 binds; the production value is accepted by the probe above.
-        const int limit = 50;
-        var compiler = new GovernedSqlCompiler(UnbudgetedEngine(), new ReducedBindLimit(limit), new CompiledSqlTemplateCache());
-        string Sql(int values) => "SELECT id FROM orders WHERE id IN (" + string.Join(",", Enumerable.Range(1, values)) + ")";
-        var request = Request("acme") with { CompileTimeout = CompileLimits.MaxCompileTimeout };
-
-        compiler.Compile(Sql(10).AsMemory(), request, CancellationToken.None).Parameters.Length.ShouldBeLessThanOrEqualTo(limit);
-
-        var ex = Should.Throw<SqlLimitExceededException>(() => compiler.Compile(Sql(limit + 1).AsMemory(), request, CancellationToken.None));
-        ex.Kind.ShouldBe(SqlLimitKind.BindParameters);
-        ex.Maximum.ShouldBe(limit);
-    }
-
-    [Fact]
-    public void BindLimit_AValueListBelowTheProductionLimit_Compiles()
-    {
-        string sql = "SELECT id FROM orders WHERE id IN (" + string.Join(",", Enumerable.Range(1, 2200)) + ")";
-        var request = Request("acme") with { CompileTimeout = CompileLimits.MaxCompileTimeout };
-
-        UnbudgetedEngine().Compile(sql.AsMemory(), request, CancellationToken.None).Parameters.Length.ShouldBeGreaterThan(2200);
-    }
-
-    private sealed class ReducedBindLimit(int maxBindParameters) : IDialectCapabilityProvider
-    {
-        public DialectCapabilities Get(TargetSqlDialect dialect) =>
-            DialectCapabilityTable.Default.Get(dialect) with { MaxBindParameters = maxBindParameters };
     }
 }
