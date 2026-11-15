@@ -510,6 +510,11 @@ public sealed partial class AccessDecisionPoint
             claims.Add(new Claim(ClaimTypes.GroupSid, groupSid.Value));
         }
 
+        if (subject.ResolvedTenant is { Value: { Length: > 0 } resolvedTenant })
+        {
+            claims.Add(new Claim("tenant_id", resolvedTenant));
+        }
+
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "AccessDecisionPoint"));
     }
 

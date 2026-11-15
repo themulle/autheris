@@ -67,9 +67,9 @@ public static class ScimGroupsEndpoints
                 var created = await scimService.CreateGroupAsync(tenantId, realmId, groupModel, ct).ConfigureAwait(false);
                 return Results.Created($"/scim/v2/{realmId}/Groups/{created.GroupId}", created);
             }
-            catch (ScimTooManyException ex)
+            catch (ScimTooManyException)
             {
-                return ScimErrorResult.TooMany(ex.Message);
+                return ScimErrorResult.TooMany();
             }
             catch (ValidationException)
             {
@@ -95,9 +95,9 @@ public static class ScimGroupsEndpoints
                 var updated = await scimService.UpdateGroupAsync(tenantId, realmId, id, groupModel, ct).ConfigureAwait(false);
                 return updated != null ? Results.Ok(updated) : Results.NotFound();
             }
-            catch (ScimTooManyException ex)
+            catch (ScimTooManyException)
             {
-                return ScimErrorResult.TooMany(ex.Message);
+                return ScimErrorResult.TooMany();
             }
             catch (ValidationException)
             {
@@ -127,9 +127,9 @@ public static class ScimGroupsEndpoints
                 var patched = await scimService.PatchGroupAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
                 return patched != null ? Results.Ok(patched) : Results.NotFound();
             }
-            catch (ScimTooManyException ex)
+            catch (ScimTooManyException)
             {
-                return ScimErrorResult.TooMany(ex.Message);
+                return ScimErrorResult.TooMany();
             }
             catch (ValidationException)
             {

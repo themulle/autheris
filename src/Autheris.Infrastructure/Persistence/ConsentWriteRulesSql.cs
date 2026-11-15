@@ -124,13 +124,13 @@ internal static class ConsentWriteRulesSql
         return new WriteRule(id, (WriteOperation)rawOp, columns, (WriteRowScope)rawScope, rowFilter, maxRows);
     }
 
-    public static AuditLogEntry BuildWriteGrantChangedAudit(Consent consent, Sid approverSid, string decision = "ALLOW")
+    public static AuditLogEntry BuildWriteGrantChangedAudit(Consent consent, Sid approverSid, string decision = "ALLOW", TimeProvider? timeProvider = null)
     {
         return new AuditLogEntry
         {
             Id = Guid.NewGuid(),
             TenantId = consent.TenantId,
-            OccurredAt = DateTimeOffset.UtcNow,
+            OccurredAt = (timeProvider ?? TimeProvider.System).GetUtcNow(),
             EventType = AuditEventTypes.WriteGrantChanged,
             ActorSid = approverSid,
             TargetTable = consent.TableIdentifier.ToString(),

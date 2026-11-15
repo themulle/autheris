@@ -122,9 +122,9 @@ public static class SqlEndpointRoutes
             {
                 definition = endpointLoader.ParseSqlContent(contentToParse, trimmedName, request.HttpMethod);
             }
-            catch (ArgumentException ex)
+            catch (ArgumentException)
             {
-                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, ex.Message, context);
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The SQL endpoint definition is invalid.", context);
             }
             catch (Exception ex) when (ex is FormatException or SecurityException or Antlr4.Runtime.RecognitionException or Antlr4.Runtime.Misc.ParseCanceledException)
             {
@@ -149,9 +149,9 @@ public static class SqlEndpointRoutes
             {
                 resolvedMethod = SqlEndpointLoader.NormalizeAndValidateMethod(request.HttpMethod, statementClass);
             }
-            catch (ArgumentException ex)
+            catch (ArgumentException)
             {
-                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, ex.Message, context);
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The SQL endpoint HTTP method is invalid.", context);
             }
 
             definition = new Autheris.Domain.Model.SqlEndpointDefinition(

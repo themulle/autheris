@@ -67,9 +67,9 @@ public static class ScimUsersEndpoints
                 var created = await scimService.CreateUserAsync(tenantId, realmId, user, ct).ConfigureAwait(false);
                 return Results.Created($"/scim/v2/{realmId}/Users/{created.UserKey}", created);
             }
-            catch (ScimTooManyException ex)
+            catch (ScimTooManyException)
             {
-                return ScimErrorResult.TooMany(ex.Message);
+                return ScimErrorResult.TooMany();
             }
             catch (ValidationException)
             {
@@ -95,9 +95,9 @@ public static class ScimUsersEndpoints
                 var updated = await scimService.UpdateUserAsync(tenantId, realmId, id, user, ct).ConfigureAwait(false);
                 return updated != null ? Results.Ok(updated) : Results.NotFound();
             }
-            catch (ScimTooManyException ex)
+            catch (ScimTooManyException)
             {
-                return ScimErrorResult.TooMany(ex.Message);
+                return ScimErrorResult.TooMany();
             }
             catch (ValidationException)
             {
@@ -127,9 +127,9 @@ public static class ScimUsersEndpoints
                 var patched = await scimService.PatchUserAsync(tenantId, realmId, id, patch, ct).ConfigureAwait(false);
                 return patched != null ? Results.Ok(patched) : Results.NotFound();
             }
-            catch (ScimTooManyException ex)
+            catch (ScimTooManyException)
             {
-                return ScimErrorResult.TooMany(ex.Message);
+                return ScimErrorResult.TooMany();
             }
             catch (ValidationException)
             {
