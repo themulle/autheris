@@ -1,16 +1,7 @@
 # WP-SIMPL-22 baseline: unit test files opening database connections or test hosts (ratchet: shrink-only)
 tests/Autheris.Tests.Unit/AsyncJobEndpointMappingTests.cs
 tests/Autheris.Tests.Unit/BypassSemanticsAndDmlGuardrailTests.cs
-tests/Autheris.Tests.Unit/Catalog/CatalogApiEndpointsTests.cs
-tests/Autheris.Tests.Unit/Catalog/CatalogTagsVisibilityEndpointTests.cs
-tests/Autheris.Tests.Unit/Catalog/DatasourceTestingServiceSqlTests.cs
-tests/Autheris.Tests.Unit/CdcStream/CdcStreamAdminEndpointsTests.cs
-tests/Autheris.Tests.Unit/ConnectorSpiTests.cs
-tests/Autheris.Tests.Unit/Data/GovernedCrossSourceRowReaderTests.cs
-tests/Autheris.Tests.Unit/DataApi/Issue390ReadOrderDirectionTests.cs
 tests/Autheris.Tests.Unit/DevExperienceTests.cs
-tests/Autheris.Tests.Unit/Governance/ReadPathSwitchesMetricsAndAnalyzeTests.cs
-tests/Autheris.Tests.Unit/Governance/TrustedDocuments/TrustedDocumentAdminEndpointsTests.cs
 tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
 tests/Autheris.Tests.Unit/IntegrationGapATests.cs
 tests/Autheris.Tests.Unit/Security/AccessPlanningTenantBindingTests.cs
@@ -22,7 +13,6 @@ tests/Autheris.Tests.Unit/Security/OlapSqlInspectorTests.cs
 tests/Autheris.Tests.Unit/Security/ProcedureLobBudgetRSql8Tests.cs
 tests/Autheris.Tests.Unit/Security/ReadOnlyTokenProcedureRouteTests.cs
 tests/Autheris.Tests.Unit/Security/SqlProcedureRowScopeResolverTests.cs
-tests/Autheris.Tests.Unit/Services/SqlTableReadExecutorTests.cs
 tests/Autheris.Tests.Unit/Sql/AstCompilerDuckDbExecutionTests.cs
 tests/Autheris.Tests.Unit/Sql/ClientListFixture.cs
 tests/Autheris.Tests.Unit/Sql/DuckDbBindingProbeTests.cs

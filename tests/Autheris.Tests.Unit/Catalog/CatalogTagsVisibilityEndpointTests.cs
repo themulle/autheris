@@ -10,8 +10,8 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -155,20 +155,13 @@ public sealed class CatalogTagsVisibilityEndpointTests
     [InlineData("/api/catalog/datasets/{id}/catalog-settings", "GET")]
     public void Route_RequiresAuthentication_ButNotTheGovernanceAdminPolicy_AndIsAuditedFull(string pattern, string method)
     {
-        var builder = WebApplication.CreateBuilder();
-        builder.Services.AddRouting();
-        builder.Services.AddAuthorization();
-        builder.Services.AddSingleton(Substitute.For<Autheris.Application.Catalog.Interfaces.ICatalogDiscoveryService>());
-        builder.Services.AddSingleton(Substitute.For<Autheris.Application.Catalog.Interfaces.IPrincipalResolverService>());
-        builder.Services.AddSingleton(Substitute.For<Autheris.Application.Catalog.Interfaces.IDatasourceTestingService>());
-        builder.Services.AddSingleton(Substitute.For<IAccessPlanningService>());
-        builder.Services.AddSingleton(Substitute.For<ITableMetadataRepository>());
-        builder.Services.AddSingleton(Substitute.For<IAuditWriter>());
-        builder.Services.AddSingleton(_service);
-        var app = builder.Build();
-        app.MapCatalogEndpoints();
+        using var routes = new TestEndpointRouteBuilder(services =>
+        {
+            services.AddSingleton(_service);
+        }, permissiveServices: true);
+        routes.MapCatalogEndpoints();
 
-        var endpoint = ((IEndpointRouteBuilder)app).DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>()
+        var endpoint = routes.DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>()
             .Single(e => e.RoutePattern.RawText == pattern && e.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains(method));
 
         endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().ShouldNotBeEmpty();

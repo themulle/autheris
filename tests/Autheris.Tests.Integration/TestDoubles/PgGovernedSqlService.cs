@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Integration.TestDoubles;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -45,6 +46,12 @@ internal sealed class PgCompileEnv(string defaultSchema = "public")
     public PgCompileEnv Policy(string table, PolicyPredicate predicate)
     {
         _policies.Predicates[new TableIdentity(defaultSchema, table)] = predicate;
+        return this;
+    }
+
+    public PgCompileEnv Mask(string table, string column, MaskSpec spec)
+    {
+        _policies.Masks[(new TableIdentity(defaultSchema, table), column.ToLowerInvariant())] = spec;
         return this;
     }
 
@@ -145,4 +152,9 @@ internal sealed class PgGovernedSqlService(string connectionString, PgCompileEnv
             BinaryOperator.Equal,
             new PolicyParameterExpression("__pol_" + column, SqlParameterType.String)),
         new Dictionary<string, PolicyValue> { ["__pol_" + column] = new(value, SqlParameterType.String) });
+
+    public static MaskSpec Redact(string column, string replacement) => new(
+        MaskKind.Redact,
+        new MaskArguments(Constant: new PolicyParameterExpression("__mask_" + column, SqlParameterType.String, ParameterOrigin.Mask)),
+        new Dictionary<string, PolicyValue> { ["__mask_" + column] = new(replacement, SqlParameterType.String) }.ToFrozenDictionary());
 }

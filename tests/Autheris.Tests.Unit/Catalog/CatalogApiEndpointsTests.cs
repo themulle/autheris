@@ -9,10 +9,9 @@ using Autheris.Api.Endpoints;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Microsoft.AspNetCore.Builder;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -44,13 +43,11 @@ public sealed class CatalogApiEndpointsTests
     [Fact]
     public void MapCatalogEndpoints_RegistersRoutesWithoutException()
     {
-        var builder = WebApplication.CreateBuilder();
-        builder.Services.AddRouting();
-        builder.Services.AddAuthorization();
-        var app = builder.Build();
+        using var routes = new TestEndpointRouteBuilder(permissiveServices: true);
 
         // Should map without throwing
-        app.MapCatalogEndpoints();
+        routes.MapCatalogEndpoints();
+        routes.DataSources.ShouldNotBeEmpty();
     }
 
     [Fact]

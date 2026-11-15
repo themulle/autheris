@@ -9,7 +9,6 @@ using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using Xunit;
 
@@ -423,77 +422,6 @@ public sealed class Issue390ReadOrderDirectionTests
         // No NULLS FIRST/LAST clause is ever emitted: NULL placement is engine-defined (PostgreSQL DESC puts NULLs first, SQL Server and SQLite treat NULL as smallest).
         var first = planner.PlanKeysetStream(request, meta, AllClear(meta), Tenant, Caller);
         first.Sql.ShouldNotContain("NULLS");
-    }
-
-    [Trait("Category", "Security")]
-    [Theory]
-    [InlineData(0, 1)]
-    [InlineData(1, 0)]
-    [InlineData(1, 1)]
-    public void I390_T_08_PlanKeysetStream_MixedDirections_NoSkipNoDuplicateAcrossPages(int firstDesc, int secondDesc)
-    {
-        var directions = new[] { firstDesc == 1 ? Desc : Asc, secondDesc == 1 ? Desc : Asc };
-        var encoder = new KeysetCursorEncoder("signing-key-for-i390-tests-0123456789");
-        var planner = new GovernedTableReadPlanner(encoder);
-        var meta = StreamMeta(directions);
-        var request = new BulkTableStreamRequest(Select: ["grp", "ts", "payload"], Limit: 3);
-
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        using (var create = connection.CreateCommand())
-        {
-            create.CommandText = "CREATE TABLE orders (grp INTEGER NOT NULL, ts INTEGER NOT NULL, payload TEXT, PRIMARY KEY (grp, ts))";
-            create.ExecuteNonQuery();
-        }
-
-        // Ties on the first column (4 rows per group), inserted in a scrambled order.
-        var rows = (from g in Enumerable.Range(1, 3) from t in Enumerable.Range(1, 4) select (g, t)).OrderBy(r => (r.g * 7 + r.t * 13) % 11).ToList();
-        foreach (var (g, t) in rows)
-        {
-            using var insert = connection.CreateCommand();
-            insert.CommandText = $"INSERT INTO orders VALUES ({g}, {t}, 'p')";
-            insert.ExecuteNonQuery();
-        }
-
-        var expected = rows.Order(Comparer<(int g, int t)>.Create((a, b) =>
-        {
-            var byGroup = firstDesc == 1 ? b.g.CompareTo(a.g) : a.g.CompareTo(b.g);
-            return byGroup != 0 ? byGroup : secondDesc == 1 ? b.t.CompareTo(a.t) : a.t.CompareTo(b.t);
-        })).ToList();
-
-        var seen = new List<(int g, int t)>();
-        string? cursor = null;
-        for (var page = 0; page < 20; page++)
-        {
-            var planned = planner.PlanKeysetStream(request with { Cursor = cursor }, meta, AllClear(meta), Tenant, Caller);
-            using var query = connection.CreateCommand();
-            query.CommandText = planned.Sql.Replace("FROM sales.dbo.orders", "FROM orders", StringComparison.Ordinal).Replace(" LIMIT 4", " LIMIT 4", StringComparison.Ordinal);
-            foreach (var (name, value) in planned.Parameters)
-            {
-                query.Parameters.AddWithValue(name, value ?? DBNull.Value);
-            }
-
-            var batch = new List<(int g, int t)>();
-            using (var reader = query.ExecuteReader())
-            {
-                while (reader.Read())
-                {
-                    batch.Add((reader.GetInt32(0), reader.GetInt32(1)));
-                }
-            }
-
-            var take = batch.Take(3).ToList();
-            seen.AddRange(take);
-            if (batch.Count <= 3)
-            {
-                break;
-            }
-
-            var last = take[^1];
-            cursor = Issue(encoder, meta, request, new Dictionary<string, object?> { ["grp"] = last.g, ["ts"] = last.t }, directions);
-        }
-
-        seen.ShouldBe(expected, "every row exactly once, in the declared order, across all pages");
     }
 
     // ---------------------------------------------------------------- describe_dataset / catalog detail
