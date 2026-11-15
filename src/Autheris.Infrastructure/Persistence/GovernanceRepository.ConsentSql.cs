@@ -148,7 +148,7 @@ internal static class ConsentSqlCore
         cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                   c.tenant_id, " + ConsentWorkflowSql.ConsentColumns + @"
+                                   c.tenant_id, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.is_revoked = 0 AND c.consent_request_id = @reqId";
@@ -190,7 +190,7 @@ internal static class ConsentSqlCore
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                    c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
                                    t.source_name, t.schema_name, t.table_name, c.tenant_id, c.renewal_count,
-                                   " + ConsentWorkflowSql.ConsentColumns + @"
+                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.id = @id";

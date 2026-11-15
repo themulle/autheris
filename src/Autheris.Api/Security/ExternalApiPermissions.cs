@@ -68,7 +68,7 @@ public static class ExternalApiPermissions
         }
 
         if (!string.IsNullOrWhiteSpace(GetClientId(principal))
-            && TokenAccessScope.GetScopes(principal).Count == 0
+            && TokenAccessScope.GetScopeSet(principal.Claims).Count == 0
             && !HasAnyClaim(principal, PersonIdClaimTypes))
         {
             return true;
@@ -113,7 +113,7 @@ public static class ExternalApiPermissions
             return false;
         }
 
-        return TokenAccessScope.GetScopes(principal).Contains(permission);
+        return TokenAccessScope.GetScopeSet(principal.Claims).Contains(permission);
     }
 
     public static bool HasAnyExternalScope(ClaimsPrincipal? principal)
@@ -123,7 +123,7 @@ public static class ExternalApiPermissions
             return false;
         }
 
-        foreach (var scope in TokenAccessScope.GetScopes(principal))
+        foreach (var scope in TokenAccessScope.GetScopeSet(principal.Claims))
         {
             if (scope.StartsWith("Autheris.", StringComparison.OrdinalIgnoreCase))
             {

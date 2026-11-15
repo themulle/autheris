@@ -83,8 +83,9 @@ public sealed class IdentityPipelineArchitectureTests
     [
         "Autheris.Application.Identity.GroupSidResolver",
         "Autheris.Domain.Identity.GroupResolutionClaims",
-        // Not claim reads: a query-string key, a GraphQL result field and a dbt owner-spec key.
+        // Not claim reads: a query-string key, a GraphQL result field, a dbt owner-spec key, and usage report kind "groups".
         "Autheris.Api.Endpoints.VirtualFilterEndpoints",
+        "Autheris.Api.Endpoints.UsageEndpoints",
         "Autheris.GraphQL.Catalog.AggregateGraphQlTypes",
         "Autheris.GraphQL.Catalog.MetricGraphQlTypes",
         "Autheris.Extensions.Dbt.DbtOwnerSpecValidator"

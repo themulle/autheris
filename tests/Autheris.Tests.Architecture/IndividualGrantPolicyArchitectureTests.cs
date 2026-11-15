@@ -21,6 +21,8 @@ public class IndividualGrantPolicyArchitectureTests
             "Decorator of IConsentRepository (REQ-GOV-129): validates caller attribute row filters and forwards unchanged; it neither creates nor extends a validity window.",
         ["Autheris.Extensions/OpenMetadata/OpenMetadataSyncService.cs"] =
             "System reconcile of consents derived from OpenMetadata rules; short validity refreshed on each run and covered by the read-time clamp.",
+        ["Autheris.Application/Policy/RowScopes/PatternCoverageMonitor.cs"] =
+            "Submits pending consent request items for newly discovered object owners under an existing approved pattern grant; never activates a grant or extends its validity window.",
     };
 
     [Fact]

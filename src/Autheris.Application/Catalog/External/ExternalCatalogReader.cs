@@ -730,7 +730,7 @@ public sealed class ExternalCatalogReader(
         }
 
         return !string.IsNullOrWhiteSpace(GetClientId(user))
-            && TokenAccessScope.GetScopes(user).Count == 0
+            && TokenAccessScope.GetScopeSet(user.Claims).Count == 0
             && user.GetUserSid() is null;
     }
 

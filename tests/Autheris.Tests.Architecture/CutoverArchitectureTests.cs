@@ -426,6 +426,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.CdcStreamSqlCore", "CDC durable stream store (Issue #99, SEC-CDC-05): fixed event and row-image statements over engine-specific schemas, bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.WebhookOutboxSqlCore", "webhook outbox (ARCH-MNT-22): the dialect repositories hand in fixed statements, the core binds values only; owner scope predicate stays in the SQL, no client text"),
         ("Autheris.Infrastructure.Persistence.ConsentGrantSqlCore", "consent grant statements (ARCH-MNT-22, SC-04): tenant-scoped statements plus the row-locked revoke by id; fixed SQL, bound values, no client text"),
+        ("Autheris.Infrastructure.Persistence.ConsentPatternSqlCore", "pattern grant store (WP-SIMPL-48 PR 5): fixed pattern consent and approving-owner statements with bound values, no client text"),
         ("Autheris.Infrastructure.Persistence.AuditSqlCore", "audit statement execution (ARCH-MNT-22 Step 2): the dialect repositories hand in fixed statements, the core binds values and maps rows only; no client text"),
         ("Autheris.Infrastructure.Persistence.ConsentSqlCore", "consent statement execution (ARCH-MNT-22 Step 4): the dialect repositories hand in dialect statements, the core binds values and maps rows only; no client text"),
         ("Autheris.Infrastructure.Persistence.GrantRecordSqlCore", "grant record store: fixed statements with bound values, no client text"),

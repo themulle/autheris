@@ -177,23 +177,23 @@ public sealed class PostgreSqlGovernanceDialect : IGovernanceSqlDialect
         }
 
         return sb.ToString();
-    }
 
-    private static void AppendQuotedColumns(StringBuilder sb, ReadOnlySpan<string> columns, bool prependComma)
-    {
-        for (int i = 0; i < columns.Length; i++)
+        static void AppendQuotedColumns(StringBuilder builder, ReadOnlySpan<string> columns, bool prependComma)
         {
-            if (prependComma || i > 0) sb.Append(", ");
-            sb.Append(Quote(columns[i]));
+            for (int i = 0; i < columns.Length; i++)
+            {
+                if (prependComma || i > 0) builder.Append(", ");
+                builder.Append(Quote(columns[i]));
+            }
         }
-    }
 
-    private static void AppendParameterColumns(StringBuilder sb, ReadOnlySpan<string> columns, bool prependComma)
-    {
-        for (int i = 0; i < columns.Length; i++)
+        static void AppendParameterColumns(StringBuilder builder, ReadOnlySpan<string> columns, bool prependComma)
         {
-            if (prependComma || i > 0) sb.Append(", ");
-            sb.Append('@').Append(GovernanceSqlInput.Identifier(columns[i], nameof(columns)));
+            for (int i = 0; i < columns.Length; i++)
+            {
+                if (prependComma || i > 0) builder.Append(", ");
+                builder.Append('@').Append(GovernanceSqlInput.Identifier(columns[i], nameof(columns)));
+            }
         }
     }
 

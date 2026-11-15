@@ -33,7 +33,7 @@ public partial class GovernanceRepository
         public const string SelectExpiringConsentsSql = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                   c.tenant_id, c.renewal_count, " + ConsentWorkflowSql.ConsentColumns + @"
+                                   c.tenant_id, c.renewal_count, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.is_revoked = 0 AND c.valid_to > @now AND c.valid_to <= @threshold
@@ -44,7 +44,7 @@ public partial class GovernanceRepository
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        t.source_name, t.schema_name, t.table_name, r.itsm_ticket_id, r.tenant_id,
                                        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
-                                       " + ConsentWorkflowSql.RequestColumns + @"
+                                       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.id = @id";
@@ -52,7 +52,7 @@ public partial class GovernanceRepository
         public const string SelectRequestsByRequesterBaseSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
-                                       " + ConsentWorkflowSql.RequestColumns + @"
+                                       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.requester_sid = @reqSid";
@@ -60,7 +60,7 @@ public partial class GovernanceRepository
         public const string SelectPendingRequestsForApproverSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                    r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                    t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
-                                   " + ConsentWorkflowSql.RequestColumns + @"
+                                   r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
                             FROM CONSENT_REQUESTS r
                             JOIN TABLES t ON r.table_id = t.id
                             WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
