@@ -277,7 +277,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository
                 Convert.ToInt32(reader.GetValue(7), CultureInfo.InvariantCulture),
                 Convert.ToInt32(reader.GetValue(8), CultureInfo.InvariantCulture) == 1,
                 reader.GetString(9),
-                ConsentWorkflowSql.ReadOptionalTimestamp(reader, 10) ?? DateTimeOffset.UtcNow));
+                ConsentWorkflowSql.ReadOptionalTimestamp(reader, 10) ?? TimeProvider.System.GetUtcNow()));
         }
 
         var dataSourceRoute = routes.FirstOrDefault(
@@ -325,7 +325,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository
             reader.GetString(5),
             Convert.ToInt32(reader.GetValue(6), CultureInfo.InvariantCulture) == 1,
             reader.GetString(7),
-            ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? DateTimeOffset.UtcNow,
+            ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? TimeProvider.System.GetUtcNow(),
             ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9));
     }
 
