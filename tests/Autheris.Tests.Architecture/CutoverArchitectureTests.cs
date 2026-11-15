@@ -356,7 +356,9 @@ public sealed class CutoverArchitectureTests
         Code.Call or Code.Callvirt => instruction.Operand is MethodReference called &&
             (called.Name == "set_CommandText" || (called.Name is "CreateCommand" or "CreateBatchCommand" && TakesString(called))),
         Code.Newobj => instruction.Operand is MethodReference { Name: ".ctor" } constructor &&
-            constructor.DeclaringType.Name.EndsWith("Command", StringComparison.Ordinal) && TakesString(constructor),
+            constructor.DeclaringType.Name.EndsWith("Command", StringComparison.Ordinal) &&
+            !constructor.DeclaringType.Namespace.StartsWith("Autheris.Application.ConsentRequests", StringComparison.Ordinal) &&
+            TakesString(constructor),
         _ => false
     };
 

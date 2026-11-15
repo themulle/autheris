@@ -973,35 +973,22 @@ public class GovernanceSecurityTests : IDisposable
         var req = await CreateExternalRequestAsync("S-1-5-21-REQ-R25");
         var guard = new Autheris.Application.ConsentRequests.ExternalDecisionGuard();
         var cmd = new Autheris.Application.ConsentRequests.ConsentDecisionCommand(
-            req.Id,
-            Autheris.Application.ConsentRequests.ConsentDecisionKind.Approve,
-            Autheris.Application.ConsentRequests.ConsentDecisionChannel.External,
-            null,
-            ExternalAttribution: new ExternalDecisionAttribution(
-                req.ExternalSystemId!.Value, req.ExternalReference!, "APPROVED", null, DateTimeOffset.UtcNow));
-        var system = new ExternalWorkflowSystem(
-            req.ExternalSystemId.Value, req.TenantId.Value, "Sys", "client-1", "https://ext.local/hook", "sec", true, "admin", DateTimeOffset.UtcNow, null);
-        var route = new ConsentWorkflowRoute(
-            req.TenantId.Value, WorkflowRouteScopeKind.Tenant, req.TenantId.Value, ConsentWorkflowMode.External,
-            req.ExternalSystemId, 30, 30, 72, false, "admin", DateTimeOffset.UtcNow);
+            req.Id, Autheris.Application.ConsentRequests.ConsentDecisionKind.Approve, Autheris.Application.ConsentRequests.ConsentDecisionChannel.External, null,
+            ExternalAttribution: new ExternalDecisionAttribution(req.ExternalSystemId!.Value, req.ExternalReference!, "APPROVED", null, DateTimeOffset.UtcNow));
+        var system = new ExternalWorkflowSystem(req.ExternalSystemId.Value, req.TenantId.Value, "Sys", "client-1", "https://ext.local/hook", "sec", true, "admin", DateTimeOffset.UtcNow, null);
+        var route = new ConsentWorkflowRoute(req.TenantId.Value, WorkflowRouteScopeKind.Tenant, req.TenantId.Value, ConsentWorkflowMode.External, req.ExternalSystemId, 30, 30, 72, false, "admin", DateTimeOffset.UtcNow);
 
-        await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentDecisionException>(() =>
-            guard.ValidateAsync(cmd, req, route, system));
+        await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentDecisionException>(() => guard.ValidateAsync(cmd, req, route, system));
     }
 
     [Fact]
     public async Task R3_1_ItsmApprovalWithOwnerAccount_IsAccepted_AndForeignApproverIsRejected()
     {
         var req = await CreateExternalRequestAsync("S-1-5-21-REQ-R31B");
-        var attr = new ExternalDecisionAttribution(
-            req.ExternalSystemId!.Value,
-            req.ExternalReference!,
-            "APPROVED",
-            new AssertedApprover("dataowner@corp.local", ResolvedSid: "S-1-5-21-1000-1000-1000-1001"),
-            DateTimeOffset.UtcNow);
+        var attr = new ExternalDecisionAttribution(req.ExternalSystemId!.Value, req.ExternalReference!, "APPROVED",
+            new AssertedApprover("dataowner@corp.local", ResolvedSid: "S-1-5-21-1000-1000-1000-1001"), DateTimeOffset.UtcNow);
 
-        var approved = await _repository.ApproveExternalConsentRequestStepAsync(
-            req.Id, attr, new Sid("S-1-5-21-1000-1000-1000-1001"));
+        var approved = await _repository.ApproveExternalConsentRequestStepAsync(req.Id, attr, new Sid("S-1-5-21-1000-1000-1000-1001"));
         approved.Status.ShouldBe("APPROVED");
     }
 
@@ -1012,23 +999,13 @@ public class GovernanceSecurityTests : IDisposable
         var meta = await _repository.GetTableMetadataAsync(table);
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = meta!.Table.Id,
-            TableIdentifier = table,
-            RequesterSid = new Sid("S-1-5-21-REQ-E9B"),
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = "S-1-5-21-REQ-E9B",
-            BusinessJustification = "internal request",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            WorkflowMode = ConsentWorkflowMode.Internal
+            TenantId = Autheris.Tests.Common.TestTenants.Default, TableId = meta!.Table.Id, TableIdentifier = table,
+            RequesterSid = new Sid("S-1-5-21-REQ-E9B"), RequestedGranteeType = GranteeType.User, RequestedGranteeRef = "S-1-5-21-REQ-E9B",
+            BusinessJustification = "internal request", RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7), WorkflowMode = ConsentWorkflowMode.Internal
         });
 
-        var attr = new ExternalDecisionAttribution(
-            Guid.NewGuid(),
-            "EXT-INTERNAL",
-            "APPROVED",
-            new AssertedApprover("dataowner@corp.local", ResolvedSid: "S-1-5-21-1000-1000-1000-1001"),
-            DateTimeOffset.UtcNow);
+        var attr = new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-INTERNAL", "APPROVED",
+            new AssertedApprover("dataowner@corp.local", ResolvedSid: "S-1-5-21-1000-1000-1000-1001"), DateTimeOffset.UtcNow);
         await Should.ThrowAsync<InvalidOperationException>(() =>
             _repository.ApproveExternalConsentRequestStepAsync(req.Id, attr, new Sid("S-1-5-21-1000-1000-1000-1001")));
     }
