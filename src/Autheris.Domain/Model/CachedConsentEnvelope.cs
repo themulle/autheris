@@ -108,8 +108,9 @@ public partial class CachedConsentEnvelope
         var colMap = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
         foreach (var (col, levelVal) in ColumnAccess)
         {
-            colMap[col] = Enum.IsDefined((ColumnAccessLevel)levelVal)
-                ? (ColumnAccessLevel)levelVal
+            var candidate = (ColumnAccessLevel)levelVal;
+            colMap[col] = candidate is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
+                ? candidate
                 : ColumnAccessLevel.Deny;
         }
 

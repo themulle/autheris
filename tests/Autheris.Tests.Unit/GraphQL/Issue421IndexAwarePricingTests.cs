@@ -20,6 +20,7 @@ using Xunit;
 /// <summary>
 /// Issue #421 (WP-D of #417): GraphQL cost model: index-aware pricing for root-list plans.
 /// </summary>
+[Collection("CatalogRelation")]
 public sealed class Issue421IndexAwarePricingTests
 {
     public sealed class OrderItem

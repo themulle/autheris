@@ -26,12 +26,13 @@ public sealed class WebSqlDataSourceMappingTests
     private const string Tenant = "tenant_finance";
 
     private static ClaimsPrincipal CreateUser() =>
-        new(new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),
-                new Claim("tenant_id", Tenant)
-            ],
-            "Test"));
+        global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),
+                    new Claim("tenant_id", Tenant)
+                ],
+                "Test")));
 
     private static TableMetadata CreateTable(string table)
     {

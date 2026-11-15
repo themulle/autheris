@@ -18,6 +18,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.GraphQL;
 
+[Collection("CatalogRelation")]
 public sealed class CatalogGraphQlTypeModuleScaleTests
 {
     public sealed class Query

@@ -23,6 +23,7 @@ namespace Autheris.Tests.Unit.GraphQL;
 /// F-GOV-16: the catalog-based GraphQL schema reports the response path of every selected column that is masked for
 /// the caller in <c>extensions.maskedFields</c>; clear columns produce no entry, requests do not share entries.
 /// </summary>
+[Collection("CatalogRelation")]
 public sealed class CatalogMaskedFieldsExtensionTests
 {
     private static readonly TableIdentifier Customers = new("sales", "dbo", "customers");

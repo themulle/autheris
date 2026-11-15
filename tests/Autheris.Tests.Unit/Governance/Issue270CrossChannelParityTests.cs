@@ -25,6 +25,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Collection("CatalogRelation")]
 public sealed class Issue270CrossChannelParityTests
 {
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();

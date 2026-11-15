@@ -89,6 +89,11 @@ public sealed class CatalogVisibilityCompositionTests
         services.AddSingleton(Substitute.For<IDataOwnershipRepository>());
         services.AddSingleton(accessor);
         services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(options));
+        services.AddSingleton<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>(sp =>
+            new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+                Options.Create(options),
+                new Autheris.Application.Services.ConsentResolutionService(),
+                sp.GetRequiredService<IConsentRepository>()));
         services.AddAutherisCatalog();
         services.AddGraphQLServer().AddQueryType<Query>();
 

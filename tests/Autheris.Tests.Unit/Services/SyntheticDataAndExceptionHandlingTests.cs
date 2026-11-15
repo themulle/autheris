@@ -86,10 +86,11 @@ public sealed class SyntheticDataAndExceptionHandlingTests
             drainController: null,
             dataSourceExecutors: []); // explicitly empty
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity([
-            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-123"),
-            new Claim("tenant_id", "tenant-1")
-        ], "TestAuth"));
+        var principal = global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([
+                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-123"),
+                new Claim("tenant_id", "tenant-1")
+            ], "TestAuth")));
 
         await Assert.ThrowsAsync<GatewayNotImplementedException>(() =>
             service.ExecuteTableQueryAsync(principal, _testTableId));
@@ -111,10 +112,11 @@ public sealed class SyntheticDataAndExceptionHandlingTests
             tableRepository: _metadataRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(_metadataRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             environment: null); // null environment
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity([
-            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-123"),
-            new Claim("tenant_id", "tenant-1")
-        ], "TestAuth"));
+        var principal = global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity([
+                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-123"),
+                new Claim("tenant_id", "tenant-1")
+            ], "TestAuth")));
 
         var request = new GovernedSqlQueryRequest("SELECT id, name FROM dbo.customers", DataSourceName: "crm_db");
 

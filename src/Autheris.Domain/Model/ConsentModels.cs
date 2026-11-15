@@ -11,7 +11,9 @@ public sealed class ConsentColumnRule
     public ColumnAccessLevel AccessLevel
     {
         get => _accessLevel;
-        init => _accessLevel = Enum.IsDefined(value) ? value : ColumnAccessLevel.Deny;
+        init => _accessLevel = value is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
+            ? value
+            : ColumnAccessLevel.Deny;
     }
     public IReadOnlyList<string> ApplicableScopes { get; init; } = Array.Empty<string>();
 }

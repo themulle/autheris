@@ -113,7 +113,8 @@ public sealed class WebSqlMaskingExpressionsTests
             new(ClaimTypes.Name, "alice"),
             new("tenant_id", "tenant-1")
         };
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
+        return global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")));
     }
 
     [Fact]

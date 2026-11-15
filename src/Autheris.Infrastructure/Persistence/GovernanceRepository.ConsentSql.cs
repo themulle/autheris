@@ -376,13 +376,16 @@ internal static class ConsentSqlCore
             ? Array.Empty<string>()
             : scopesRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        var parsedLevel = (ColumnAccessLevel)rawLevel;
         return new ConsentColumnRule
         {
             Id = Guid.Parse(reader.GetString(0)),
             ConsentId = Guid.Parse(consentIdStr),
             TableColumnId = Guid.Parse(reader.GetString(2)),
             ColumnName = reader.GetString(3),
-            AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel) ? (ColumnAccessLevel)rawLevel : ColumnAccessLevel.Deny,
+            AccessLevel = parsedLevel is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
+                ? parsedLevel
+                : ColumnAccessLevel.Deny,
             ApplicableScopes = scopes
         };
     }

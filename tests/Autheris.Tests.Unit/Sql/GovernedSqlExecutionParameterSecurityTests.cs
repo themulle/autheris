@@ -605,7 +605,7 @@ public sealed class GovernedSqlExecutionParameterSecurityTests
             .ToList();
 
         visibleTo.ShouldBe(
-            new[] { "Autheris.Tests.Unit", "Autheris.Tests.SqlCompilerGate", "Autheris.Benchmarks" },
+            new[] { "Autheris.Tests.Unit", "Autheris.Tests.Integration", "Autheris.Tests.SqlCompilerGate", "Autheris.Benchmarks" },
             ignoreOrder: true);
     }
 

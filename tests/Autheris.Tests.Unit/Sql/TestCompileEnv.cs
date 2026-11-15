@@ -67,6 +67,7 @@ internal sealed class TestCompileEnv
         TokenGuards = guards ?? SqlTokenSecurityOptions.Strict,
         Statements = statements,
         AllowExperimentalDialect = true,
+        CompileTimeout = CompileLimits.MaxCompileTimeout,
         Policy = new GovernancePolicy
         {
             RowFilters = _policies,

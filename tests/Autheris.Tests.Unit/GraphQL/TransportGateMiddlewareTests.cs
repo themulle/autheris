@@ -24,6 +24,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 
+[Collection("CatalogRelation")]
 [Trait("Category", "Security")]
 public sealed class TransportGateMiddlewareTests
 {

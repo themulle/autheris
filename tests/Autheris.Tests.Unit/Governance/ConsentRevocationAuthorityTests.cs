@@ -208,6 +208,8 @@ public sealed class ConsentRevocationAuthorityTests
         var deniedId = Guid.NewGuid();
         // First revoke target: self-revokable in TenantA
         conn.EnqueueReader(RevokeTargetRows(("Sales", "Crm", "Orders", TenantA.Value, "User", Actor.Value, 0)));
+        // Event metadata lookup for first revoked consent (empty -> Internal workflow, no external system)
+        conn.EnqueueReader(new DataTable());
         // Second revoke target: owned by someone else in TenantA; owner/delegate scalar checks both return 0
         conn.EnqueueReader(RevokeTargetRows(("Sales", "Crm", "Secrets", TenantA.Value, "User", Other.Value, 0)));
 
@@ -251,6 +253,34 @@ public sealed class ConsentRevocationAuthorityTests
         return table;
     }
 
+    private sealed class StubGrantWriter : Autheris.Application.Governance.Grants.Records.IGrantWriter
+    {
+        private static Autheris.Domain.Grants.GrantRecord StubRecord(
+            Autheris.Domain.Grants.GrantRecordType type,
+            Consent? consent,
+            Autheris.Application.Governance.Grants.Records.GrantRecordInput input) =>
+            new(input.TenantId, 1L, Guid.NewGuid(), type, consent?.Id, input.RequestId,
+                consent?.GrantSource ?? ConsentGrantSource.Declarative, consent?.ProfileAssignmentId,
+                input.GranteeType ?? "User", input.GranteeRef ?? string.Empty, input.ObjectId ?? string.Empty,
+                input.ScopeJson, input.ValidFrom, input.ValidUntil, input.RequestedBy,
+                input.DecisionJson, input.DecidedAt, input.DecidedAt, Autheris.Application.Governance.Grants.Records.GrantRecordChain.GenesisHash);
+
+        public Task<Autheris.Domain.Grants.GrantRecord> InsertAndGrantAsync(System.Data.Common.DbTransaction transaction, Consent consent, Autheris.Application.Governance.Grants.Records.GrantRecordInput input, CancellationToken ct = default) =>
+            Task.FromResult(StubRecord(Autheris.Domain.Grants.GrantRecordType.Issued, consent, input));
+
+        public Task<Autheris.Domain.Grants.GrantRecord> GrantAsync(System.Data.Common.DbTransaction transaction, Consent consent, Autheris.Application.Governance.Grants.Records.GrantRecordInput input, CancellationToken ct = default) =>
+            Task.FromResult(StubRecord(Autheris.Domain.Grants.GrantRecordType.Issued, consent, input));
+
+        public Task<Autheris.Domain.Grants.GrantRecord> RevokeAsync(System.Data.Common.DbTransaction transaction, Consent consent, Autheris.Application.Governance.Grants.Records.GrantRecordInput input, CancellationToken ct = default) =>
+            Task.FromResult(StubRecord(Autheris.Domain.Grants.GrantRecordType.Revoked, consent, input));
+
+        public Task<Autheris.Domain.Grants.GrantRecord> RecordRejectionAsync(System.Data.Common.DbTransaction transaction, Autheris.Application.Governance.Grants.Records.GrantRecordInput input, CancellationToken ct = default) =>
+            Task.FromResult(StubRecord(Autheris.Domain.Grants.GrantRecordType.Rejected, null, input));
+
+        public Task<Autheris.Domain.Grants.GrantRecord> RecordExpiryAsync(System.Data.Common.DbTransaction transaction, Consent? consent, Autheris.Application.Governance.Grants.Records.GrantRecordInput input, CancellationToken ct = default) =>
+            Task.FromResult(StubRecord(Autheris.Domain.Grants.GrantRecordType.Expired, consent, input));
+    }
+
     private static GovernanceRepository CreateRepo(RecordingDbConnection conn, List<AuditLogEntry>? recordedAudits = null) =>
         new(
             new PostgreSqlGovernanceDialect(() => conn),
@@ -263,5 +293,6 @@ public sealed class ConsentRevocationAuthorityTests
                     recordedAudits.Add(entry);
                     return Task.CompletedTask;
                 },
-            auditAnchorStore: new InMemoryAuditChainAnchorStore());
+            auditAnchorStore: new InMemoryAuditChainAnchorStore(),
+            grantWriter: new StubGrantWriter());
 }

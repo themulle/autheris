@@ -162,7 +162,7 @@ public sealed class GovernedCatalogProviderMappingTests
     public async Task LoadAsync_DenialReason_NamesBothNames()
     {
         var logger = new CapturingLogger();
-        var sut = Build(Gateway("lite", Pg, ("lite", "Sqlite")), Governance(Logical), logger);
+        var sut = Build(Gateway("lite", Pg, ("lite", "SqlServer")), Governance(Logical), logger);
 
         (await Catalog(sut, Logical, "lite")).ShouldBeNull();
 

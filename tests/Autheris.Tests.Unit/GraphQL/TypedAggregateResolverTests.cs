@@ -14,6 +14,7 @@ using static Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost;
 namespace Autheris.Tests.Unit.GraphQL;
 
 /// <summary>#112 WP-5: the typed <c>T_aggregate</c> field end to end through HotChocolate (T-5.4..T-5.8, T-5.12, T-5.14, T-5.15, T-S-14, T-S-18).</summary>
+[Collection("CatalogRelation")]
 public sealed class TypedAggregateResolverTests
 {
     private const string Field = "sales_dbo_orders_aggregate";

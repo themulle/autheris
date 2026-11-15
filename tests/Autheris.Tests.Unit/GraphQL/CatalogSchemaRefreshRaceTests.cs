@@ -20,6 +20,7 @@ using Xunit;
 /// (no dropped check while another one runs), and the served schema converges to the catalog even when the
 /// change lands while an executor build is in flight. All gates are explicit; nothing relies on timing.
 /// </summary>
+[Collection("CatalogRelation")]
 public sealed class CatalogSchemaRefreshRaceTests
 {
     public sealed class PingQuery

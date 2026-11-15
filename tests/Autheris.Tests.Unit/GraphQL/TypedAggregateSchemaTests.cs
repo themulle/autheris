@@ -9,6 +9,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.GraphQL;
 
 /// <summary>#112 A1-11 / SEC-112-27: the typed aggregate names join the collision set of the #157 schema model.</summary>
+[Collection("CatalogRelation")]
 public sealed class TypedAggregateSchemaTests
 {
     internal static TableMetadata Table(string domain, string schema, string name, params (string Name, string Type)[] columns) =>

@@ -376,6 +376,7 @@ enum ColumnAccessLevel {
   CLEAR
   DENY
   MASK
+  ROW_DEPENDENT
 }
 
 enum DiscoveryAccessState {

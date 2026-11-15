@@ -29,7 +29,9 @@ public sealed class DeclarativeConsentDescriptionTests
     }
 
     private static DeclarativeConsentPolicy Policy(string? description, string table = "orders") =>
-        new("default", "sales", table, "Group", "S-1-5-21-GROUP-AN", "Allow", Description: description);
+        new("default", "sales", table, "Group", "S-1-5-21-GROUP-AN", "Allow",
+            Description: description,
+            ValidUntil: DateTimeOffset.UtcNow.AddDays(10));
 
     private static (DeclarativeConsentApplyService Svc, FakeConsentRepository Repo) Create()
     {

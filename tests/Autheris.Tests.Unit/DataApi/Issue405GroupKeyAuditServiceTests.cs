@@ -33,7 +33,7 @@ public sealed class Issue405GroupKeyAuditServiceTests
     private const string Sentinel = "SENTINEL_9f";
     private static readonly TableIdentifier TableId = new("sales", "dbo", "orders");
 
-    private static readonly string[] RefusalKeyOrder = ["is_allowed", "reasons", "group_by", "filter", "refusal_reason", "group_key_type_family"];
+    private static readonly string[] RefusalKeyOrder = ["is_allowed", "reasons", "group_by", "filter", "refusal_reason", "group_key_type_family", "grants"];
 
     private sealed class Harness
     {

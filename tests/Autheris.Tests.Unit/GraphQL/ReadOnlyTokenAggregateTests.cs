@@ -22,6 +22,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.GraphQL;
 
 /// <summary>#112 FR-112-7 / C-9 / T-S-10: a read-only token runs the typed aggregate fields through the real middleware pair, and nothing else.</summary>
+[Collection("CatalogRelation")]
 public sealed class ReadOnlyTokenAggregateTests
 {
     private const string Aggregate = "{ sales_dbo_orders_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } }";

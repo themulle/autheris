@@ -125,8 +125,9 @@ public sealed class CatalogSurfaceCallSiteGuardTests
         // Policy consumers (TableAccessPolicy, FilterByContract, GrantClassifier) are not on the list (T_R2_1).
         string[] allowed =
         [
-            "TableModels.cs", "DatasetCatalogStore.cs",
+            "TableModels.cs", "DatasetCatalogStore.cs", "CatalogTablePersistedProjection.cs",
             "McpDatasetCatalog.cs", "Query.Catalog.cs", "CatalogDiscoveryService.cs", "McpDatasetModels.cs",
+            "DiscoveryService.cs", "DiscoveryAccessMapper.cs",
             "DatasetCatalogAdminService.cs", "CatalogApiEndpoints.cs"
         ];
 

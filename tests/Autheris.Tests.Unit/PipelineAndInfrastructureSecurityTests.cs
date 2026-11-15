@@ -139,10 +139,11 @@ public class PipelineAndInfrastructureSecurityTests
             null,
             dataSourceExecutors: [sqlExecutor]);
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        { DefaultTenantCaller.Claim,
-            new Claim("objectSid", "S-1-5-21-USER-1")
-        }, "TestAuth"));
+        var principal = global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(new[]
+            { DefaultTenantCaller.Claim,
+                new Claim("objectSid", "S-1-5-21-USER-1")
+            }, "TestAuth")));
 
         var (rows, _) = await executionService.ExecuteTableQueryAsync(principal, tableId, first: 10);
 
@@ -201,10 +202,11 @@ public class PipelineAndInfrastructureSecurityTests
             maskingProvider,
             null);
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        { DefaultTenantCaller.Claim,
-            new Claim("objectSid", "S-1-5-21-AUDIT-TEST")
-        }, "TestAuth"));
+        var principal = global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(new[]
+            { DefaultTenantCaller.Claim,
+                new Claim("objectSid", "S-1-5-21-AUDIT-TEST")
+            }, "TestAuth")));
 
         // Act: Must throw GatewaySecurityException because access is denied, but audit log is recorded before throw
         await Should.ThrowAsync<GatewaySecurityException>(async () =>

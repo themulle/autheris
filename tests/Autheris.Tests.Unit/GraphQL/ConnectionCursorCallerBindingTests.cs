@@ -25,6 +25,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Collection("CatalogRelation")]
 [Trait("Category", "Security")]
 public sealed class ConnectionCursorCallerBindingTests
 {

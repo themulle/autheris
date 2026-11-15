@@ -128,7 +128,6 @@ public static class ApiErrorCodes
     public const string TokenRevoked = "TOKEN_REVOKED";
     public const string CdcRestrictedScopeForbidden = "CDC_RESTRICTED_SCOPE_FORBIDDEN";
     public const string DiscoveryNotPermitted = "DISCOVERY_NOT_PERMITTED";
-    public const string NotFound = "NOT_FOUND";
     public const string UsageAuditUnavailable = "USAGE_AUDIT_UNAVAILABLE";
     public const string UsageReportInvalidRange = "USAGE_REPORT_INVALID_RANGE";
     public const string UsageQuotaExceeded = "USAGE_QUOTA_EXCEEDED";

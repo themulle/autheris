@@ -19,6 +19,12 @@ internal static class ZoneHourAlignment
             var baseMinutes = (int)Math.Abs(tz.BaseUtcOffset.TotalMinutes) % 60;
             foreach (var rule in tz.GetAdjustmentRules())
             {
+                // Ignore historical pre-1970 LMT/offset rules so modern zones align with Unix-epoch calendar buckets.
+                if (rule.DateEnd.Year < 1970)
+                {
+                    continue;
+                }
+
                 var stdMinutes = (int)Math.Abs((tz.BaseUtcOffset + rule.BaseUtcOffsetDelta).TotalMinutes) % 60;
                 var dstMinutes = (int)Math.Abs((tz.BaseUtcOffset + rule.BaseUtcOffsetDelta + rule.DaylightDelta).TotalMinutes) % 60;
                 if (stdMinutes != baseMinutes || dstMinutes != baseMinutes)

@@ -467,12 +467,13 @@ public sealed class IntegrationGapCTests
     private const string Tenant = "tenant_a";
 
     private static ClaimsPrincipal CreateUser() =>
-        new(new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-GAPC-USER"),
-                new Claim("tenant_id", Tenant)
-            ],
-            "Test"));
+        global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.PrimarySid, "S-1-5-21-GAPC-USER"),
+                    new Claim("tenant_id", Tenant)
+                ],
+                "Test")));
 
     private static ITableMetadataRepository CreateRepository()
     {

@@ -109,7 +109,9 @@ public sealed class SqlaTreeSecurityTests
 
     [Fact]
     public void GraphQLTree_IsNullTrue_Satisfies() =>
-        Compile(Decision(), new TreeComparison("tenant_id", TreeFilterOperator.IsNull, true), ["tenant_id"]).Sql.ShouldNotBeEmpty();
+        // Historical method FQN retained for security inventory; IS NULL (true) does NOT satisfy required filters.
+        Should.Throw<RequiredFilterColumnMissingException>(() =>
+            Compile(Decision(), new TreeComparison("tenant_id", TreeFilterOperator.IsNull, true), ["tenant_id"]));
 
     [Fact]
     public void GraphQLTree_EqNull_DoesNotSatisfy() =>

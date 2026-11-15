@@ -54,7 +54,7 @@ internal static class CatalogDiscoveryApiHelpers
             var detail = await discoveryService.GetDatasetDetailAsync(tableId, context, ct).ConfigureAwait(false);
             if (detail is null)
             {
-                return ApiProblems.NotFound(ApiErrorCodes.NotFound, "Requested dataset was not found.", httpContext);
+                return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "Requested dataset was not found.", httpContext);
             }
 
             var isBrief = httpContext.Request.Query.TryGetValue("brief", out var briefVal) &&

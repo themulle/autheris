@@ -55,7 +55,8 @@ public sealed class Issue143ScopeBlindPathTests
             claims.Add(new Claim("scp", scp));
         }
 
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
+        return global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer")));
     }
 
     /// <summary>The Iceberg service over one consent; <paramref name="seen"/> records the scope set the resolver was given.</summary>
@@ -148,8 +149,9 @@ public sealed class Issue143ScopeBlindPathTests
         // SEC-GOV143-15: the claims overload also reads a plain 'scope' claim (GetScopes would not); an empty set maps to null.
         var seen = new List<IReadOnlySet<string>?>();
         var service = IcebergWith(seen, sensitive: false);
-        var plainScope = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com"), new Claim("scope", Restricted)], "Bearer"));
+        var plainScope = global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.Name, "analyst@corp.com"), new Claim(ClaimTypes.PrimarySid, "analyst@corp.com"), new Claim("scope", Restricted)], "Bearer")));
 
         await LoadAsync(service, plainScope);
         await LoadAsync(service, Analyst());

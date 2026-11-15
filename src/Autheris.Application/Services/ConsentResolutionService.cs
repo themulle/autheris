@@ -537,7 +537,9 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         {
             // Rows outside every row filter are visible only through the unconstrained consents.
             var maxLevel = unconstrainedConsents.Max(c => GetConsentColumnLevel(c, column, callerScopes));
-            return Enum.IsDefined(maxLevel) ? maxLevel : ColumnAccessLevel.Deny;
+            return maxLevel is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
+                ? maxLevel
+                : ColumnAccessLevel.Deny;
         }
 
         if (rowConstrainedGroups.Count == 0)
@@ -549,7 +551,9 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         foreach (var group in rowConstrainedGroups)
         {
             var rawGroupLevel = group.Max(c => GetConsentColumnLevel(c, column, callerScopes));
-            var groupLevel = Enum.IsDefined(rawGroupLevel) ? rawGroupLevel : ColumnAccessLevel.Deny;
+            var groupLevel = rawGroupLevel is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
+                ? rawGroupLevel
+                : ColumnAccessLevel.Deny;
             if (groupLevel < result)
             {
                 result = groupLevel;

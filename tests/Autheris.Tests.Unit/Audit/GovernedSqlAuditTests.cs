@@ -29,13 +29,14 @@ public sealed class GovernedSqlAuditTests
     private const string DataSource = "pg_audit";
 
     private static ClaimsPrincipal CreateUser() =>
-        new(new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.PrimarySid, "S-1-5-21-AUDIT-USER"),
-                new Claim("tenant_id", Tenant),
-                new Claim(ClaimTypes.Role, "Analyst")
-            ],
-            "Test"));
+        global::Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(
+            new(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.PrimarySid, "S-1-5-21-AUDIT-USER"),
+                    new Claim("tenant_id", Tenant),
+                    new Claim(ClaimTypes.Role, "Analyst")
+                ],
+                "Test")));
 
     private static TableMetadata CreateTable(TableIdentifier id) => new()
     {

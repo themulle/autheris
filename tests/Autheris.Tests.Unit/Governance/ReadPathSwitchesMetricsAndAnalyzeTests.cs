@@ -35,6 +35,7 @@ using Xunit;
 /// Gating queryMetrics (Gateway:GraphQL:Metrics:Enabled) and
 /// POST /api/v1/governance/queries/analyze (Gateway:Governance:QueryAnalysis:Enabled).
 /// </summary>
+[Collection("CatalogRelation")]
 public sealed class ReadPathSwitchesMetricsAndAnalyzeTests
 {
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
