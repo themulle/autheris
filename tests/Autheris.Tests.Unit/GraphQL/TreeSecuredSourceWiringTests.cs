@@ -21,7 +21,7 @@ public sealed class TreeSecuredSourceWiringTests
     [Trait("Category", "Security")]
     public async Task SQLA06F_AutherisExecution_RegistersABuilderThatCanBuildASecuredSource()
     {
-        using var harness = new SecuredTreeHarness();
+        var harness = new SecuredTreeHarness();
         var options = new GatewayOptions();
         var services = new ServiceCollection();
         services.AddLogging();

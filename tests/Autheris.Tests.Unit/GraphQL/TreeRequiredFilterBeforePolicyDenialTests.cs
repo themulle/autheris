@@ -18,15 +18,13 @@ namespace Autheris.Tests.Unit.GraphQL;
 /// SQLA-06 follow-up ordering: a client error that does not depend on the row policy (a missing required filter column) is reported with
 /// its stable code before the row-policy support check, and the policy refusal stays fixed and free of policy details.
 /// </summary>
-public sealed class TreeRequiredFilterBeforePolicyDenialTests : IDisposable
+public sealed class TreeRequiredFilterBeforePolicyDenialTests
 {
     private readonly SecuredTreeHarness _h;
 
     public TreeRequiredFilterBeforePolicyDenialTests() =>
         // An empty catalog makes the secured-source builder deny the typed subquery policy (the case the builder cannot serve).
         _h = new SecuredTreeHarness(catalogTables: []);
-
-    public void Dispose() => _h.Dispose();
 
     private GovernedTreeQueryService CreateService()
     {

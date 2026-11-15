@@ -1,7 +1,5 @@
-using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Security.Claims;
-using System.Text.Json;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Catalog;
@@ -11,7 +9,6 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.Data.Sqlite;
 using NSubstitute;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
@@ -21,11 +18,11 @@ using TrinoSqlEngine.Governance;
 namespace Autheris.Tests.Unit.GraphQL;
 
 /// <summary>
-/// SQLA-06 follow-up: a real SQLite database, the real engine, the real <see cref="GovernancePolicyFactory"/> and the real
-/// <see cref="TreeSecuredSourceBuilder"/>. The tree runs through the builder, the WebSQL path through the same factory and engine, so the two
-/// can be compared row by row. Consent rows of tenant t2 deliberately point at orders and items of tenant t1.
+/// SQLA-06 follow-up: the real engine, the real <see cref="GovernancePolicyFactory"/> and the real
+/// <see cref="TreeSecuredSourceBuilder"/> for building and compiling secured tree sources in unit tests.
+/// Real database row-parity execution runs in <c>Autheris.Tests.Integration.GraphQL</c>.
 /// </summary>
-internal sealed class SecuredTreeHarness : IDisposable
+internal sealed class SecuredTreeHarness
 {
     public const string DataSource = "shop";
 
@@ -43,25 +40,6 @@ internal sealed class SecuredTreeHarness : IDisposable
         Func<TableIdentifier, TableMetadata?>? dependentMetadata = null,
         IEnumerable<string>? catalogTables = null)
     {
-        Connection = new SqliteConnection("Data Source=:memory:");
-        Connection.Open();
-        Connection.CreateFunction("textsend", (string? s) => s);
-        using (var cmd = Connection.CreateCommand())
-        {
-            cmd.CommandText = """
-                CREATE TABLE orders (id INTEGER PRIMARY KEY, email TEXT, amount INTEGER, tenant_id TEXT);
-                INSERT INTO orders VALUES (1, 'a@x.example', 5, 't1'), (2, 'b@x.example', 10, 't1'), (3, 'c@x.example', 20, 't1'),
-                                          (4, 'd@x.example', 30, 't2'), (5, 'e@x.example', 40, 't2');
-                CREATE TABLE consents (id INTEGER PRIMARY KEY, order_id INTEGER, purpose TEXT, tenant_id TEXT);
-                INSERT INTO consents VALUES (1, 1, 'analytics', 't1'), (2, 3, 'marketing', 't1'), (3, 4, 'analytics', 't2'), (4, 2, 'analytics', 't2');
-                CREATE TABLE items (id INTEGER PRIMARY KEY, order_id INTEGER, label TEXT, tenant_id TEXT);
-                INSERT INTO items VALUES (1, 1, 'x', 't1'), (2, 1, 'y', 't1'), (3, 2, 'z', 't1'), (4, 4, 'w', 't2');
-                CREATE TABLE item_consents (id INTEGER PRIMARY KEY, item_id INTEGER, tenant_id TEXT);
-                INSERT INTO item_consents VALUES (1, 1, 't1'), (2, 3, 't1'), (3, 4, 't2'), (4, 2, 't2');
-                """;
-            cmd.ExecuteNonQuery();
-        }
-
         _dependentMetadata = dependentMetadata ?? (id => DependentMetadata(id));
         var names = catalogTables?.ToHashSet(StringComparer.OrdinalIgnoreCase)
             ?? new HashSet<string>(["orders", "consents", "items", "item_consents"], StringComparer.OrdinalIgnoreCase);
@@ -81,8 +59,6 @@ internal sealed class SecuredTreeHarness : IDisposable
         Builder = new TreeSecuredSourceBuilder(Factory, Engine);
     }
 
-    public SqliteConnection Connection { get; }
-
     public IGovernedCatalogProvider CatalogProvider { get; }
 
     public ITableMetadataRepository MetadataRepository { get; }
@@ -92,8 +68,6 @@ internal sealed class SecuredTreeHarness : IDisposable
     public GovernancePolicyFactory Factory { get; }
 
     public TreeSecuredSourceBuilder Builder { get; }
-
-    public void Dispose() => Connection.Dispose();
 
     public static TableCatalogEntry Entry(string table) => new(
         new TableIdentity("main", table),
@@ -232,64 +206,5 @@ internal sealed class SecuredTreeHarness : IDisposable
         }
 
         return new TreeTableAccess(meta, decision, "tenant_id", tenant, source);
-    }
-
-    public string RunTree(TreeQueryNode root, IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access)
-    {
-        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql);
-        using var cmd = Connection.CreateCommand();
-        cmd.CommandText = Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection.TranslateSql(compiled.Sql);
-        foreach (var (name, value) in compiled.Parameters)
-        {
-            cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        }
-
-        return (string)cmd.ExecuteScalar()!;
-    }
-
-    public async Task<List<long>> TreeOrderIdsAsync(IRowPolicy policy, string tenant)
-    {
-        var access = new Dictionary<TableIdentifier, TreeTableAccess> { [OrdersId] = await TreeAccessAsync(OrdersId, policy, tenant) };
-        var root = new TreeQueryNode(OrdersId, ["id", "email"]) { OrderBy = [new TreeOrder("id")], Limit = 100 };
-        using var doc = JsonDocument.Parse(RunTree(root, access));
-        return [.. doc.RootElement.EnumerateArray().Select(e => e.GetProperty("id").GetInt64())];
-    }
-
-    /// <summary>The WebSQL path: the same factory and engine, user statement <c>SELECT id FROM orders</c>, bound through the SQLite binder.</summary>
-    public Task<List<long>> CompileOrderIdsAsync(IRowPolicy policy, string tenant) => CompileIdsAsync(OrdersId, policy, tenant);
-
-    public Task<List<long>> CompileItemIdsAsync(IRowPolicy policy, string tenant) => CompileIdsAsync(ItemsId, policy, tenant);
-
-    private async Task<List<long>> CompileIdsAsync(TableIdentifier table, IRowPolicy policy, string tenant)
-    {
-        var meta = Meta(table);
-        var identity = new TableIdentity("main", table.TableName);
-        var input = new GovernedPolicyInput(
-            DataSource,
-            new TenantId(tenant),
-            new Dictionary<TableIdentity, TableAccessDecision> { [identity] = Decision(table, policy) },
-            new HashSet<TableIdentity>(),
-            GovernedSubqueryStrategy.Correlated)
-        {
-            Metadata = new Dictionary<TableIdentity, TableMetadata> { [identity] = meta }
-        };
-        var governed = await Factory.CreateAsync(input, CancellationToken.None);
-        var request = CompileRequestFactory.Create(governed, TargetSqlDialect.PostgreSql, new WebSqlOptions(), false, 0, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-        var compiled = Engine.Compile($"SELECT id FROM {table.TableName} ORDER BY id".AsMemory(), request, CancellationToken.None);
-
-        using var cmd = Connection.CreateCommand();
-        cmd.CommandText = compiled.Sql;
-        foreach (var p in compiled.Parameters)
-        {
-            cmd.Parameters.AddWithValue(p.Marker, p.Value ?? DBNull.Value);
-        }
-        using var reader = cmd.ExecuteReader();
-        var ids = new List<long>();
-        while (reader.Read())
-        {
-            ids.Add(reader.GetInt64(0));
-        }
-
-        return ids;
     }
 }

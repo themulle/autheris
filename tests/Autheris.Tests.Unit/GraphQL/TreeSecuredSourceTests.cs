@@ -20,12 +20,10 @@ using Xunit;
 namespace Autheris.Tests.Unit.GraphQL;
 
 /// <summary>SQLA-06 follow-up (SQLA06F-C1..C9): the secured source of a tree table, its marker remap and its fail-closed rules.</summary>
-public sealed class TreeSecuredSourceTests : IDisposable
+public sealed class TreeSecuredSourceTests
 {
     private static readonly TableIdentity Orders = new("main", "orders");
     private readonly SecuredTreeHarness _h = new();
-
-    public void Dispose() => _h.Dispose();
 
     private static BoundParameter Param(string marker, object? value, ParameterOrigin origin = ParameterOrigin.Policy) =>
         new(marker, marker.TrimStart('@', '$'), 0, value, SqlParameterType.String, origin);
@@ -218,8 +216,6 @@ public sealed class TreeSecuredSourceTests : IDisposable
             }
 
             compiled.Parameters.Values.ShouldContain(value);
-            using var doc = JsonDocument.Parse(_h.RunTree(root, map));
-            doc.RootElement.GetArrayLength().ShouldBe(0);
         }
     }
 
@@ -308,20 +304,20 @@ public sealed class TreeSecuredSourceTests : IDisposable
     [Fact]
     public async Task SQLA06F_UncatalogedSubqueryTable_DeniesRequest()
     {
-        using var h = new SecuredTreeHarness(catalogTables: ["orders"]);
+        var h = new SecuredTreeHarness(catalogTables: ["orders"]);
 
-        await Should.ThrowAsync<GatewaySecurityException>(() => h.TreeOrderIdsAsync(SecuredTreeHarness.ExistsPolicy(), "t1"));
+        await Should.ThrowAsync<GatewaySecurityException>(() => h.TreeAccessAsync(SecuredTreeHarness.OrdersId, SecuredTreeHarness.ExistsPolicy(), "t1"));
     }
 
     [Trait("Category", "Security")]
     [Fact]
     public async Task SQLA06F_DependentWithoutTenantColumn_DeniesRequest()
     {
-        using var h = new SecuredTreeHarness(
+        var h = new SecuredTreeHarness(
             new GatewayOptions { DataSources = new SqlDataSourceOptions { RequireTenantColumn = true } },
             id => SecuredTreeHarness.DependentMetadata(id, withTenant: false));
 
-        await Should.ThrowAsync<GatewaySecurityException>(() => h.TreeOrderIdsAsync(SecuredTreeHarness.ExistsPolicy(), "t1"));
+        await Should.ThrowAsync<GatewaySecurityException>(() => h.TreeAccessAsync(SecuredTreeHarness.OrdersId, SecuredTreeHarness.ExistsPolicy(), "t1"));
     }
 
     [Trait("Category", "Security")]
