@@ -408,7 +408,7 @@ public sealed class ConsentRequestService : IConsentRequestService
             throw new ConsentRequestException("FORBIDDEN", "Only the requester can withdraw their access request.");
         }
 
-        if (req.Status != "PENDING" && req.Status != "PENDING_SECOND_APPROVAL")
+        if (req.Status != "PENDING" && req.Status != "PENDING_SECOND_APPROVAL" && req.Status != "PENDING_EXTERNAL_APPROVAL")
         {
             throw new ConsentRequestException("INVALID_STATE", "The consent request is no longer pending.");
         }
@@ -417,6 +417,24 @@ public sealed class ConsentRequestService : IConsentRequestService
         if (!success)
         {
             throw new ConsentRequestException("INVALID_STATE", "The consent request could not be withdrawn.");
+        }
+
+        if (_eventOutbox != null)
+        {
+            req.Status = "WITHDRAWN";
+            var now = _timeProvider.GetUtcNow();
+            var payload = ConsentEventPayloads.ForRequest(req, now);
+            await _eventOutbox.AppendAsync(
+                new ConsentEventWrite(
+                    req.TenantId.Value,
+                    Guid.NewGuid(),
+                    ConsentEventTypes.RequestUpdated,
+                    req.Id.ToString("D"),
+                    ConsentEventPayloads.Serialize(payload),
+                    now,
+                    req.ExternalSystemId),
+                transaction: null,
+                ct: ct).ConfigureAwait(false);
         }
 
         return true;

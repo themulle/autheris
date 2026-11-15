@@ -3,6 +3,7 @@ namespace Autheris.Application.Governance.Grants.Records;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -20,7 +21,25 @@ public interface IGrantRecordExportService
 {
     Task<GrantRecordExportBundle?> ExportForGrantAsync(TenantId tenantId, Guid grantId, CancellationToken ct = default);
     Task<GrantChainVerificationResult?> VerifyAsync(TenantId tenantId, GrantRecordVerifyRequest request, CancellationToken ct = default);
+    Task<GrantRecord?> GetRecordBySeqAsync(TenantId tenantId, long seq, CancellationToken ct = default) => Task.FromResult<GrantRecord?>(null);
+    Task<GrantProofEvaluationResult> EvaluateProofAsync(
+        TenantId tenantId,
+        string? granteeRef = null,
+        string? tableRef = null,
+        string? scopeHash = null,
+        DateTimeOffset? atTime = null,
+        CancellationToken ct = default) => Task.FromResult(new GrantProofEvaluationResult(false, tenantId.Value, null, null, 0, "Not implemented.", Array.Empty<GrantRecord>()));
+    IReadOnlyList<GrantPublicKeyJwk> GetPublicKeys() => Array.Empty<GrantPublicKeyJwk>();
 }
+
+public sealed record GrantProofEvaluationResult(
+    bool Verified,
+    string TenantId,
+    long? HeadSeq,
+    string? HeadHash,
+    int CheckedCount,
+    string? FailureReason,
+    IReadOnlyList<GrantRecord> EvaluatedRecords);
 
 public sealed record GrantRecordAuditEntry(
     Guid AuditId,
@@ -45,7 +64,9 @@ public sealed record GrantRecordExportBundle(
 public sealed record GrantRecordVerifyRequest(
     Guid? GrantId = null,
     string? TenantId = null,
-    IReadOnlyList<GrantRecord>? Records = null);
+    IReadOnlyList<GrantRecord>? Records = null,
+    long? FromSeq = null,
+    long? ToSeq = null);
 
 public sealed class GrantRecordExportService(
     IGrantRecordStore store,
@@ -133,7 +154,146 @@ public sealed class GrantRecordExportService(
             return VerifySubsetRecords(stored, tenantId.Value, storedGrantId);
         }
 
+        if (request.FromSeq.HasValue || request.ToSeq.HasValue)
+        {
+            var fromSeq = Math.Max(1L, request.FromSeq ?? 1L);
+            if (request.ToSeq.HasValue && request.ToSeq.Value < fromSeq)
+            {
+                return new GrantChainVerificationResult(false, 0, 0, GrantRecordChain.GenesisHash, fromSeq, "Invalid sequence range: toSeq must be greater than or equal to fromSeq.");
+            }
+
+            var slice = await _store.ReadRangeAsync(tenantId.Value, fromSeq, request.ToSeq, ct).ConfigureAwait(false);
+            if (slice.Count == 0)
+            {
+                return null;
+            }
+
+            var anchorPrevHash = GrantRecordChain.GenesisHash;
+            if (fromSeq > 1)
+            {
+                var predecessor = await _store.ReadBySeqAsync(tenantId.Value, fromSeq - 1, ct).ConfigureAwait(false);
+                if (predecessor is null)
+                {
+                    return new GrantChainVerificationResult(false, 0, fromSeq - 1, GrantRecordChain.GenesisHash, fromSeq, "Missing predecessor grant record for range anchor.");
+                }
+
+                anchorPrevHash = predecessor.RecordHash;
+            }
+
+            return VerifyContiguousRange(slice, fromSeq, anchorPrevHash);
+        }
+
         return await _chainVerifier.VerifyTenantChainAsync(tenantId.Value, ct).ConfigureAwait(false);
+    }
+
+    public Task<GrantRecord?> GetRecordBySeqAsync(TenantId tenantId, long seq, CancellationToken ct = default) =>
+        seq <= 0 ? Task.FromResult<GrantRecord?>(null) : _store.ReadBySeqAsync(tenantId.Value, seq, ct);
+
+    public IReadOnlyList<GrantPublicKeyJwk> GetPublicKeys() => _signer.GetPublicKeys();
+
+    public async Task<GrantProofEvaluationResult> EvaluateProofAsync(
+        TenantId tenantId,
+        string? granteeRef = null,
+        string? tableRef = null,
+        string? scopeHash = null,
+        DateTimeOffset? atTime = null,
+        CancellationToken ct = default)
+    {
+        var chain = await _store.ReadTenantChainAsync(tenantId.Value, ct).ConfigureAwait(false);
+        var verification = GrantRecordChain.VerifyOrderedRecords(chain, _signer);
+
+        var latestPerConsent = new Dictionary<Guid, GrantRecord>();
+        var matchingRecords = new List<GrantRecord>();
+        foreach (var r in chain)
+        {
+            if (r.ConsentId is { } cid)
+            {
+                latestPerConsent[cid] = r;
+            }
+
+            if (!string.IsNullOrWhiteSpace(granteeRef) && !string.Equals(r.GranteeRef, granteeRef.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(tableRef) && !string.Equals(r.ObjectId, tableRef.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(scopeHash))
+            {
+                var computedScopeHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(r.ScopeJson)));
+                if (!string.Equals(computedScopeHash, scopeHash.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+            }
+
+            if (atTime is { } checkAt)
+            {
+                var inWindow = (!r.ValidFrom.HasValue || r.ValidFrom.Value <= checkAt)
+                    && (!r.ValidUntil.HasValue || checkAt < r.ValidUntil.Value);
+                if (!inWindow)
+                {
+                    continue;
+                }
+            }
+
+            matchingRecords.Add(r);
+        }
+
+        var head = chain.Count > 0 ? chain[^1] : null;
+        if (!verification.IsValid)
+        {
+            return new GrantProofEvaluationResult(false, tenantId.Value, verification.LastSeq, verification.LastHash, matchingRecords.Count, verification.FailureReason, matchingRecords);
+        }
+
+        var activeMatches = matchingRecords.Where(r =>
+            (r.RecordType is GrantRecordType.Issued or GrantRecordType.Renewed)
+            && (!r.ConsentId.HasValue || (latestPerConsent.TryGetValue(r.ConsentId.Value, out var latest) && (latest.RecordType is GrantRecordType.Issued or GrantRecordType.Renewed)))).ToList();
+
+        var verified = activeMatches.Count > 0 && (string.IsNullOrWhiteSpace(granteeRef) && string.IsNullOrWhiteSpace(tableRef) && !atTime.HasValue ? chain.Count > 0 : true);
+        if (string.IsNullOrWhiteSpace(granteeRef) && string.IsNullOrWhiteSpace(tableRef) && string.IsNullOrWhiteSpace(scopeHash) && !atTime.HasValue)
+        {
+            verified = verification.IsValid;
+            return new GrantProofEvaluationResult(verified, tenantId.Value, head?.Seq ?? 0, head?.RecordHash ?? GrantRecordChain.GenesisHash, chain.Count, null, chain);
+        }
+
+        return new GrantProofEvaluationResult(
+            verified,
+            tenantId.Value,
+            head?.Seq ?? 0,
+            head?.RecordHash ?? GrantRecordChain.GenesisHash,
+            activeMatches.Count,
+            activeMatches.Count > 0 ? null : "No active verified grant matched the proof criteria.",
+            activeMatches);
+    }
+
+    private GrantChainVerificationResult VerifyContiguousRange(IReadOnlyList<GrantRecord> records, long expectedStartSeq, string expectedPrevHash)
+    {
+        var expectedSeq = expectedStartSeq;
+        var expectedPrev = expectedPrevHash;
+        var verifiedCount = 0;
+
+        foreach (var r in records)
+        {
+            var reason = r.Seq != expectedSeq ? "Sequence gap or out-of-order grant record."
+                : !string.Equals(r.PrevHash, expectedPrev, StringComparison.Ordinal) ? "Previous hash link mismatch."
+                : !string.Equals(r.RecordHash, GrantRecordChain.ComputeRecordHash(r), StringComparison.Ordinal) ? "Record hash mismatch."
+                : string.IsNullOrWhiteSpace(r.KeyId) || string.IsNullOrWhiteSpace(r.Signature) || !_signer.Verify(Encoding.UTF8.GetBytes(r.RecordHash), r.Signature, r.KeyId) ? "Invalid grant record signature."
+                : null;
+            if (reason is not null)
+            {
+                return new GrantChainVerificationResult(false, verifiedCount, expectedSeq - 1, expectedPrev, r.Seq, reason);
+            }
+
+            verifiedCount++;
+            expectedPrev = r.RecordHash;
+            expectedSeq++;
+        }
+
+        return new GrantChainVerificationResult(true, verifiedCount, expectedSeq - 1, expectedPrev);
     }
 
     private GrantChainVerificationResult VerifyFullTenantBundle(IReadOnlyList<GrantRecord> records, string expectedTenantId)

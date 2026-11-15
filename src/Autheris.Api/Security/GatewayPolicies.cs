@@ -36,6 +36,12 @@ public static class GatewayPolicies
     public const string MetricsScraper = "MetricsScraper";
     public const string McpCaller = "McpCaller";
     public const string UsageAdmin = "UsageAdmin";
+    public const string CatalogRead = "CatalogRead";
+    public const string CatalogReadAdmin = "CatalogReadAdmin";
+    public const string ConsentRead = "ConsentRead";
+    public const string ConsentDecide = "ConsentDecide";
+    public const string GrantRevoke = "GrantRevoke";
+    public const string GrantVerify = "GrantVerify";
 
     /// <summary>
     /// Security review: SCIM provisioning endpoints. Authenticates only with the SCIM secret scheme and requires the
@@ -123,6 +129,28 @@ public static class GatewayPolicies
         options.AddPolicy(McpCaller, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(ctx => ctx.User.Identity?.IsAuthenticated == true));
+        options.AddPolicy(CatalogRead, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ExternalApiPermissions.AllowsCatalogRead(ctx.User)));
+        options.AddPolicy(CatalogReadAdmin, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ExternalApiPermissions.AllowsCatalogReadAdmin(ctx.User)));
+        options.AddPolicy(ConsentRead, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ExternalApiPermissions.AllowsConsentRead(ctx.User)));
+        options.AddPolicy(ConsentDecide, policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.Requirements.Add(new ExternalSystemRequirement(ExternalSystemOperation.ConsentDecide));
+        });
+        options.AddPolicy(GrantRevoke, policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.Requirements.Add(new ExternalSystemRequirement(ExternalSystemOperation.GrantRevoke));
+        });
+        options.AddPolicy(GrantVerify, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ExternalApiPermissions.AllowsGrantVerify(ctx.User)));
 
         // Security review: previously RequireAuthorization(GatewayAuthSchemes.Scim) referenced a non-existent policy.
         // Only an identity issued by the SCIM scheme carrying the provisioner role is accepted, so a user token with a

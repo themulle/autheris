@@ -86,4 +86,10 @@ public interface IConsentWorkflowConfigRepository
         TenantId tenantId,
         Guid systemId,
         CancellationToken ct = default);
+
+    Task<ExternalWorkflowSystem?> GetExternalWorkflowSystemByClientIdAsync(
+        TenantId tenantId,
+        string clientId,
+        CancellationToken ct = default)
+        => Task.FromResult<ExternalWorkflowSystem?>(null);
 }

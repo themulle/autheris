@@ -45,6 +45,14 @@
 /api/v1/catalog/search|GET|no side effect: searches catalog metadata
 /api/v1/cdc/streams|GET|no side effect: lists CDC streams
 /api/v1/cdc/subscriptions|GET|no side effect: lists CDC webhook subscriptions
+/api/v1/consent/events|GET|no side effect: reads tenant consent event feed page
+/api/v1/consent/grant-records/keys|GET|no side effect: returns ECDSA P-256 public verification keys as JWKS
+/api/v1/consent/grant-records/proof|GET|no side effect: evaluates cryptographic grant proof chain state
+/api/v1/consent/grant-records/{seq:long}|GET|no side effect: reads signed grant record by sequence number
+/api/v1/consent/grants/{id:guid}|GET|no side effect: reads consent grant by id
+/api/v1/consent/grants|GET|no side effect: lists tenant consent grants
+/api/v1/consent/requests/{id:guid}|GET|no side effect: reads consent request by id with ETag
+/api/v1/consent/requests|GET|no side effect: lists tenant consent requests
 /api/v1/data/{datasetId}|GET|no side effect: executes governed read query on dataset
 /api/v1/data/{domain}/{schema}/{table}/change-token|GET|no side effect: computes governed change-detection token
 /api/v1/data/{domain}/{schema}/{table}/{id}|GET|no side effect: reads single governed row by id

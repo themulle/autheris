@@ -441,7 +441,28 @@ public interface IConsentApprovalRepository
         IReadOnlyList<ConsentColumnRule> columnRules,
         CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement atomic approval.");
+
+    Task<ConsentRequestPage> QueryTenantConsentRequestsAsync(
+        ConsentRequestPageQuery query,
+        CancellationToken ct = default)
+        => Task.FromResult(new ConsentRequestPage(Array.Empty<ConsentRequest>(), null));
 }
+
+public sealed record ConsentRequestPageQuery(
+    TenantId TenantId,
+    string? Status = null,
+    Guid? ExternalSystemId = null,
+    DateTimeOffset? UpdatedSince = null,
+    string? Cursor = null,
+    int Limit = 50,
+    string? Domain = null,
+    string? Schema = null,
+    string? TableName = null,
+    string? RequesterSid = null);
+
+public sealed record ConsentRequestPage(
+    IReadOnlyList<ConsentRequest> Items,
+    string? NextCursor);
 
 public interface IDataOwnershipRepository
 {

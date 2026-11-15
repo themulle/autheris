@@ -70,6 +70,27 @@ public sealed class EcdsaGrantRecordSigner : IGrantRecordSigner, IDisposable
         catch (Exception ex) when (ex is FormatException or CryptographicException) { return false; }
     }
 
+    public IReadOnlyList<GrantPublicKeyJwk> GetPublicKeys()
+    {
+        if (_verificationKeys.Count == 0) return Array.Empty<GrantPublicKeyJwk>();
+        var list = new List<GrantPublicKeyJwk>(_verificationKeys.Count);
+        if (!string.IsNullOrEmpty(ActiveKeyId) && _verificationKeys.TryGetValue(ActiveKeyId, out var activeKey))
+            list.Add(ToJwk(ActiveKeyId, activeKey));
+        foreach (var (keyId, key) in _verificationKeys)
+            if (!string.Equals(keyId, ActiveKeyId, StringComparison.Ordinal))
+                list.Add(ToJwk(keyId, key));
+        return list;
+    }
+
+    private static GrantPublicKeyJwk ToJwk(string keyId, ECDsa key)
+    {
+        var p = key.ExportParameters(false);
+        return new GrantPublicKeyJwk("EC", "P-256", "sig", "ES256", keyId, ToBase64Url(p.Q.X), ToBase64Url(p.Q.Y));
+    }
+
+    private static string ToBase64Url(byte[]? bytes) =>
+        bytes is null ? string.Empty : Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
     public void Dispose() { _activePrivateKey?.Dispose(); foreach (var k in _verificationKeys.Values) k.Dispose(); _verificationKeys.Clear(); }
 
     private static ECDsa ImportKey(string pem, bool requirePrivate)

@@ -131,6 +131,13 @@ public static class ApiErrorCodes
     public const string NotFound = "NOT_FOUND";
     public const string UsageAuditUnavailable = "USAGE_AUDIT_UNAVAILABLE";
     public const string UsageReportInvalidRange = "USAGE_REPORT_INVALID_RANGE";
+    public const string IdempotencyKeyRequired = "IDEMPOTENCY_KEY_REQUIRED";
+    public const string PreconditionRequired = "PRECONDITION_REQUIRED";
+    public const string IdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED";
+    public const string CursorExpired = "CURSOR_EXPIRED";
+    public const string GrantAlreadyEnded = "GRANT_ALREADY_ENDED";
+    public const string RateLimited = "RATE_LIMITED";
+    public const string DecisionExceedsRequest = "DECISION_EXCEEDS_REQUEST";
 
     private static readonly Regex CodeFormat = new("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 

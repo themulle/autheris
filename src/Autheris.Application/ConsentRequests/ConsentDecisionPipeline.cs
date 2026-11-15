@@ -144,7 +144,7 @@ public sealed class ConsentDecisionPipeline(
         if (denialRecorder != null)
         {
             var claim = TenantClaimReader.Read(effectivePrincipal);
-            var tenantId = claim.Kind == ClaimTenantKind.Valid ? claim.Tenant : (fallbackTenantId ?? new TenantId("default"));
+            var tenantId = claim.Kind == ClaimTenantKind.Valid ? claim.Tenant : (fallbackTenantId ?? TenantId.Platform);
             await denialRecorder.RecordAsync(effectivePrincipal, verdict.ReasonClass, tenantId, ct).ConfigureAwait(false);
         }
 
@@ -188,7 +188,7 @@ public sealed class ConsentDecisionPipeline(
             return (sid, claim.Tenant, isClusterAdmin);
         }
 
-        return (sid, fallbackTenantId ?? new TenantId("default"), isClusterAdmin);
+        return (sid, fallbackTenantId ?? TenantId.Platform, isClusterAdmin);
     }
 
     private void EnsureReviewScope(ClaimsPrincipal? principal)
@@ -513,9 +513,9 @@ public sealed class ConsentDecisionPipeline(
                     req.Id, approvalStep, finalConsent, rowFilters, columnRules, ct).ConfigureAwait(false);
             }
 
-            req.Status = "APPROVED";
-            await EmitRequestEventAsync(req, ConsentEventTypes.RequestDecided, now, ct).ConfigureAwait(false);
-            return new ConsentDecisionResult(req, activated);
+            var approvedReq = CloneWithStatus(req, "APPROVED", now);
+            await EmitRequestEventAsync(approvedReq, ConsentEventTypes.RequestDecided, now, ct).ConfigureAwait(false);
+            return new ConsentDecisionResult(approvedReq, activated);
         }
         catch (ConsentRequestStatusConflictException ex)
         {
@@ -671,14 +671,52 @@ public sealed class ConsentDecisionPipeline(
 
     private static bool IsUnmaskedApproval(IReadOnlyList<ConsentColumnRule> columnRules, TableMetadata? meta)
     {
-        if (columnRules.Count > 0)
+        if (columnRules.Count == 0)
+        {
+            return false;
+        }
+
+        if (meta is null)
         {
             return columnRules.Any(r => r.AccessLevel == ColumnAccessLevel.Clear);
         }
 
-        return meta != null && meta.Columns.Any(col =>
-            ConsentColumnSnapshot.AccessLevelFor(col.IsSensitive, meta.ColumnMaskingRules.ContainsKey(col.ColumnName)) == ColumnAccessLevel.Clear);
+        var maskedByDefault = meta.Columns
+            .Where(col => col.IsSensitive || meta.ColumnMaskingRules.ContainsKey(col.ColumnName))
+            .Select(col => col.ColumnName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return columnRules.Any(r => r.AccessLevel == ColumnAccessLevel.Clear && maskedByDefault.Contains(r.ColumnName));
     }
+
+    private static ConsentRequest CloneWithStatus(ConsentRequest req, string status, DateTimeOffset updatedAt) => new()
+    {
+        Id = req.Id,
+        TableId = req.TableId,
+        TableIdentifier = req.TableIdentifier,
+        RequesterSid = req.RequesterSid,
+        RequestedGranteeType = req.RequestedGranteeType,
+        RequestedGranteeRef = req.RequestedGranteeRef,
+        BusinessJustification = req.BusinessJustification,
+        Status = status,
+        RequestedAt = req.RequestedAt,
+        RequestedValidTo = req.RequestedValidTo,
+        ItsmTicketId = req.ItsmTicketId,
+        TenantId = req.TenantId,
+        ContextJson = req.ContextJson,
+        RequesterIdentifiers = [.. req.RequesterIdentifiers],
+        ApprovalSteps = [.. req.ApprovalSteps],
+        RequestedWriteRules = req.RequestedWriteRules,
+        IncludeReadAccess = req.IncludeReadAccess,
+        Version = req.Version,
+        WorkflowMode = req.WorkflowMode,
+        ExternalSystemId = req.ExternalSystemId,
+        ExternalReference = req.ExternalReference,
+        RequestedValidFrom = req.RequestedValidFrom,
+        UpdatedAt = updatedAt,
+        RequestKind = req.RequestKind,
+        ProfileId = req.ProfileId
+    };
 
     private sealed record ColumnMaskInput(string ColumnName, string AccessLevel, List<string>? ApplicableScopes);
 }

@@ -70,6 +70,18 @@ route /api/v1/cdc/streams/{id}/resync | CDC stream restart (consumer restart and
 route /api/v1/cdc/streams/{id}/rotate-image-key | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/subscriptions | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/subscriptions/{id} | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
+route /api/v1/consent/events | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grant-records/keys | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grant-records/proof | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grant-records/verify | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grant-records/{seq:long} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grants/{id:guid} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grants/{id:guid}/revoke | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/requests | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/requests/{id:guid} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/requests/{id:guid}/decision | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/requests/{id:guid}/withdraw | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consents/bulk | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/docs/apps | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/bundle | catalog integration, lineage, schema-registry, webhook or docs route; metadata only

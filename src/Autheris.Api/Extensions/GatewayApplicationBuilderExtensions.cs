@@ -257,6 +257,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapVirtualFilterEndpoints();
         app.MapCallerAttributeAdminEndpoints();
         app.MapConsentWorkflowAdminEndpoints();
+        app.MapConsentApiEndpoints();
         app.MapScimUsersEndpoints();
         app.MapScimGroupsEndpoints();
         app.MapScimDiscoveryEndpoints();
