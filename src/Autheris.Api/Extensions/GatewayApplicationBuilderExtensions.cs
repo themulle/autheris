@@ -235,6 +235,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapDocIngestionEndpoints();
         app.MapGovernanceClassificationEndpoints();
         app.MapCatalogEndpoints();
+        app.MapExternalCatalogApiEndpoints();
         app.MapSystemEndpoints();
         if (gatewayOptions.OData.Enabled)
         {

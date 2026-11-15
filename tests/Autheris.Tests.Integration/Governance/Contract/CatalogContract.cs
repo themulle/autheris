@@ -12,7 +12,7 @@ using Xunit;
 namespace Autheris.Tests.Integration.Governance.Contract;
 
 /// <summary>
-/// Engine-agnostic contract suite for <c>ITableMetadataRepository</c>, <c>ICatalogVersionFlusher</c>, and <c>IPolicyEpochRepository</c>.
+/// Engine-agnostic contract suite for <c>ITableMetadataRepository</c>, <c>ICatalogVersionFlusher</c>, <c>IPolicyEpochRepository</c>, and <c>ICatalogChangeStore</c>.
 /// </summary>
 public abstract class CatalogContract : GovernanceContractBase
 {
@@ -397,6 +397,38 @@ public abstract class CatalogContract : GovernanceContractBase
 
         after.StructureVersion.Should().BeGreaterOrEqualTo(before.StructureVersion + 2);
         after.ContentVersion.Should().BeGreaterOrEqualTo(before.ContentVersion + 3);
+    }
+
+    [RequiresContainerRuntimeFact]
+    public async Task CatalogChangeStore_RoundTripsVersionsAndFeed()
+    {
+        if (!Store.IsAvailable) return;
+
+        var changeStore = (Autheris.Application.Catalog.External.ICatalogChangeStore)Store.PolicyEpochs;
+        var objectId = $"catalog.dbo.chg_{Guid.NewGuid():N}";
+        var now = new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero);
+        var hash1 = new string('a', 64);
+        var hash2 = new string('b', 64);
+
+        var seq1 = await changeStore.ApplyVersionChangesAsync(
+            TestTenants.Default,
+            [new Autheris.Application.Catalog.External.CatalogVersionUpsert(objectId, hash1, Removed: false)],
+            now);
+        seq1.Should().BeGreaterThan(0);
+
+        var versions = await changeStore.GetObjectVersionsAsync(TestTenants.Default);
+        versions.Should().ContainKey(objectId);
+        versions[objectId].Removed.Should().BeFalse();
+
+        var seq2 = await changeStore.ApplyVersionChangesAsync(
+            TestTenants.Default,
+            [new Autheris.Application.Catalog.External.CatalogVersionUpsert(objectId, hash2, Removed: true)],
+            now.AddMinutes(1));
+        seq2.Should().BeGreaterThan(seq1);
+
+        var feed = await changeStore.ReadCatalogChangesAsync(TestTenants.Default, seq1 - 1, 10);
+        feed.Changes.Should().Contain(c => c.ObjectId == objectId && c.Kind == "UPSERT" && c.Seq == seq1);
+        feed.Changes.Should().Contain(c => c.ObjectId == objectId && c.Kind == "REMOVED" && c.Seq == seq2);
     }
 }
 

@@ -112,6 +112,9 @@ public static class GatewayCatalogServiceExtensions
         services.TryAddScoped<IQueryAnalysisService, QueryAnalysisService>();
         services.TryAddScoped<IGraphQlCostAnalysisEngine, Autheris.GraphQL.Analysis.HotChocolateGraphQlCostAnalysisEngine>();
         services.TryAddScoped<IBundledConsentRequestService, BundledConsentRequestService>();
+        services.TryAddSingleton<Autheris.Application.Catalog.External.ICatalogChangedSignal, Autheris.Application.Catalog.External.CatalogChangedSignal>();
+        services.TryAddScoped<Autheris.Application.Catalog.External.ExternalCatalogReader>();
+        services.AddHostedService<Autheris.Application.Catalog.External.CatalogChangeIndexerHostedService>();
         return services;
     }
 }

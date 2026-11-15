@@ -34,6 +34,7 @@
 /api/v1/admin/datasources/{name}/required-write-privileges|GET|no side effect: computes least-privilege GRANT report without mutations
 /api/v1/analytics/metrics|GET|no side effect: reads gateway analytics metrics
 /api/v1/authz/objects/{objectName}/grants|GET|no side effect: reads effective object grants
+/api/v1/catalog/changes|GET|no side effect: reads incremental catalog change feed
 /api/v1/catalog/datasets/{*datasetId}|GET|no side effect: reads catalog dataset metadata
 /api/v1/catalog/datasets/{dataset}/sample-rows|GET|no side effect: reads governed sample rows for dataset
 /api/v1/catalog/datasets/{id}/catalog-settings|GET|no side effect: reads dataset catalog settings
@@ -42,6 +43,8 @@
 /api/v1/catalog/datasets|GET|no side effect: lists catalog datasets
 /api/v1/catalog/datasources|GET|no side effect: lists catalog datasources
 /api/v1/catalog/domains|GET|no side effect: lists catalog domains
+/api/v1/catalog/objects|GET|no side effect: lists external catalog objects with visibility filtering
+/api/v1/catalog/objects/{id}|GET|no side effect: reads external catalog object metadata by id or identifier
 /api/v1/catalog/search|GET|no side effect: searches catalog metadata
 /api/v1/cdc/streams|GET|no side effect: lists CDC streams
 /api/v1/cdc/subscriptions|GET|no side effect: lists CDC webhook subscriptions
@@ -78,6 +81,7 @@
 /api/v1/governance/virtual-filters|GET|no side effect: lists virtual filters
 /api/v1/jobs/{jobId}/result|GET|no side effect: streams completed async query job result
 /api/v1/jobs/{jobId}/status|GET|no side effect: reads async query job status
+/api/v1/openapi/external.json|GET|no side effect: serves external API OpenAPI v1 specification JSON
 /api/v1/openapi/index|GET|no side effect: serves OpenAPI index JSON
 /api/v1/procedures/openapi.json|GET|no side effect: serves stored procedure endpoints OpenAPI spec
 /api/v1/procedures/{name}|GET|no side effect: executes read-only governed stored procedure
