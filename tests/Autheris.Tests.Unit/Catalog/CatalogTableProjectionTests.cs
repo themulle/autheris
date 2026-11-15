@@ -106,4 +106,96 @@ public sealed class CatalogTableProjectionTests
 
         Diff(before, after).Classification.ShouldBe(CatalogWriteClassification.Restrictive);
     }
+
+    [Fact]
+    public void GlobalColumnClassificationsAndOverrides_AreProjectedAndClassifiedAsRestrictive()
+    {
+        var fixedTime = new System.DateTimeOffset(2026, 11, 15, 0, 0, 0, System.TimeSpan.Zero);
+        var baseline = Meta();
+
+        var withClassification = baseline with
+        {
+            ColumnClassifications = new Dictionary<string, IReadOnlyList<ColumnClassification>>
+            {
+                ["name"] =
+                [
+                    new ColumnClassification
+                    {
+                        Scope = "*",
+                        TableColumnId = "col-name",
+                        Code = "PII",
+                        Source = "INGESTION",
+                        AssignedBy = "dbt",
+                        AssignedAt = fixedTime
+                    }
+                ]
+            }
+        };
+
+        Diff(baseline, withClassification).Classification.ShouldBe(CatalogWriteClassification.Restrictive);
+        Diff(withClassification, withClassification).Classification.ShouldBe(CatalogWriteClassification.Unchanged);
+
+        var withOverride = withClassification with
+        {
+            ColumnMaskOverrides = new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>
+            {
+                ["name"] =
+                [
+                    new ColumnMaskOverride
+                    {
+                        Id = System.Guid.NewGuid(),
+                        Scope = "*",
+                        TableColumnId = "col-name",
+                        Code = "PII",
+                        MaskFunction = MaskFunction.Hash,
+                        KeyRef = "kv-key",
+                        CatalogText = CatalogTextVisibility.Visible,
+                        UpdatedBy = "owner",
+                        UpdatedAt = fixedTime
+                    }
+                ]
+            }
+        };
+
+        Diff(withClassification, withOverride).Classification.ShouldBe(CatalogWriteClassification.Restrictive);
+
+        // Surrogate Id difference or tenant-scoped override does not change global projection.
+        var reorderedEquivalent = withOverride with
+        {
+            ColumnMaskOverrides = new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>
+            {
+                ["name"] =
+                [
+                    withOverride.ColumnMaskOverrides["name"][0] with { Id = System.Guid.NewGuid() },
+                    new ColumnMaskOverride
+                    {
+                        Id = System.Guid.NewGuid(),
+                        Scope = "tenant-a",
+                        TableColumnId = "col-name",
+                        Code = "PII",
+                        MaskFunction = MaskFunction.Nullify,
+                        CatalogText = CatalogTextVisibility.Hidden,
+                        UpdatedBy = "tenant-admin",
+                        UpdatedAt = fixedTime
+                    }
+                ]
+            }
+        };
+
+        Diff(withOverride, reorderedEquivalent).Classification.ShouldBe(CatalogWriteClassification.Unchanged);
+
+        // Switching catalog_text to Hidden on global override is restrictive.
+        var hiddenOverride = withOverride with
+        {
+            ColumnMaskOverrides = new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>
+            {
+                ["name"] =
+                [
+                    withOverride.ColumnMaskOverrides["name"][0] with { CatalogText = CatalogTextVisibility.Hidden }
+                ]
+            }
+        };
+
+        Diff(withOverride, hiddenOverride).Classification.ShouldBe(CatalogWriteClassification.Restrictive);
+    }
 }

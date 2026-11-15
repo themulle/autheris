@@ -57,7 +57,9 @@ public sealed class CatalogTablePersistedProjection
         "TableColumn.IsSensitive", "TableColumn.Description", "TableColumn.LongDescription", "TableColumn.Texts", "TableColumn.DocumentationSource",
         "TableColumn.Meta",
         "MaskingRule.RuleType", "MaskingRule.PatternOrFormat", "MaskingRule.Replacement", "MaskingRule.HmacKeyId",
-        "TableMetadata.Table", "TableMetadata.Columns", "TableMetadata.ColumnMaskingRules", "TableMetadata.PrimaryKeyColumns",
+        "TableMetadata.Table", "TableMetadata.Columns", "TableMetadata.ColumnMaskingRules",
+        "TableMetadata.ColumnClassifications", "TableMetadata.ColumnMaskOverrides",
+        "TableMetadata.PrimaryKeyColumns",
         "TableMetadata.PrimaryKeyDirections", "TableMetadata.Indexes"
     };
 
@@ -188,6 +190,9 @@ public sealed class CatalogTablePersistedProjection
                 values[prefix + ".mask.replacement"] = rule.Replacement;
                 values[prefix + ".mask.hmac_key_id"] = rule.HmacKeyId;
             }
+
+            ProjectColumnClassifications(values, prefix, column.ColumnName, metadata.ColumnClassifications);
+            ProjectColumnMaskOverrides(values, prefix, column.ColumnName, metadata.ColumnMaskOverrides);
         }
 
         foreach (var ruleColumn in metadata.ColumnMaskingRules.Keys)
@@ -197,6 +202,9 @@ public sealed class CatalogTablePersistedProjection
                 throw new InvalidOperationException("A masking rule refers to a column that is not part of the table.");
             }
         }
+
+        ValidateGlobalColumnKeysExist(metadata.Columns, metadata.ColumnClassifications, c => ClassificationScopes.IsGlobal(c.Scope), "classification");
+        ValidateGlobalColumnKeysExist(metadata.Columns, metadata.ColumnMaskOverrides, o => ClassificationScopes.IsGlobal(o.Scope), "mask override");
 
         return new CatalogTablePersistedProjection(values);
     }
@@ -310,6 +318,69 @@ public sealed class CatalogTablePersistedProjection
             values[$"{prefix}[{Escape(language)}].display_name"] = entry?.DisplayName;
             values[$"{prefix}[{Escape(language)}].description"] = entry?.Description;
             values[$"{prefix}[{Escape(language)}].long_description"] = entry?.LongDescription;
+        }
+    }
+
+    private static void ProjectColumnClassifications(
+        SortedDictionary<string, string?> values,
+        string prefix,
+        string columnName,
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> allClassifications)
+    {
+        if (!allClassifications.TryGetValue(columnName, out var list) || list.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var item in list.Where(c => ClassificationScopes.IsGlobal(c.Scope)).OrderBy(c => c.Code, StringComparer.Ordinal))
+        {
+            var key = $"{prefix}.classification[{Escape(item.Code)}]";
+            if (!values.TryAdd(key, item.Source))
+            {
+                throw new InvalidOperationException("A column contains duplicate global classification codes.");
+            }
+        }
+    }
+
+    private static void ProjectColumnMaskOverrides(
+        SortedDictionary<string, string?> values,
+        string prefix,
+        string columnName,
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>> allOverrides)
+    {
+        if (!allOverrides.TryGetValue(columnName, out var list) || list.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var item in list.Where(o => ClassificationScopes.IsGlobal(o.Scope)).OrderBy(o => o.Code ?? string.Empty, StringComparer.Ordinal))
+        {
+            var slot = item.Code is null ? "_all" : Escape(item.Code);
+            var overridePrefix = $"{prefix}.override[{slot}]";
+            if (!values.TryAdd(overridePrefix + ".present", "1"))
+            {
+                throw new InvalidOperationException("A column contains duplicate global mask override targets.");
+            }
+
+            values[overridePrefix + ".mask_function"] = ClassificationMaskFunctions.ToCode(item.MaskFunction);
+            values[overridePrefix + ".params_json"] = item.ParamsJson;
+            values[overridePrefix + ".key_ref"] = item.KeyRef;
+            values[overridePrefix + ".catalog_text"] = ClassificationCatalogTextVisibilities.ToCode(item.CatalogText);
+        }
+    }
+
+    private static void ValidateGlobalColumnKeysExist<T>(
+        IReadOnlyList<TableColumn> columns,
+        IReadOnlyDictionary<string, IReadOnlyList<T>> map,
+        Func<T, bool> isGlobal,
+        string kind)
+    {
+        foreach (var (colName, items) in map)
+        {
+            if (items.Any(isGlobal) && !columns.Any(c => string.Equals(c.ColumnName, colName, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException($"A column {kind} refers to a column that is not part of the table.");
+            }
         }
     }
 

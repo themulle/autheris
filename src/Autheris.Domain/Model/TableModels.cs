@@ -363,6 +363,14 @@ public sealed record TableMetadata
     public string? OwnerTenantId { get; init; }
     public IReadOnlyList<TableColumn> Columns { get; init; } = Array.Empty<TableColumn>();
     public IReadOnlyDictionary<string, MaskingRule> ColumnMaskingRules { get; init; } = new Dictionary<string, MaskingRule>();
+
+    /// <summary>Persisted global column classifications keyed by column name.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> ColumnClassifications { get; init; } =
+        new Dictionary<string, IReadOnlyList<ColumnClassification>>();
+
+    /// <summary>Persisted global per-column mask overrides keyed by column name.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>> ColumnMaskOverrides { get; init; } =
+        new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>();
     /// <summary>Declared primary key (ordered). Empty when none was declared; no key is ever inferred.</summary>
     public IReadOnlyList<string> PrimaryKeyColumns { get; init; } = Array.Empty<string>();
 
