@@ -15,7 +15,12 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
         => throw new NotSupportedException($"{GetType().Name} does not implement delta table queries.");
 
     /// <summary>
-    /// Batch-loads active table metadata only for the requested <paramref name="identifiers"/>.
+    /// Unfiltered raw internal batch read for active table metadata matching <paramref name="identifiers"/>.
+    /// Intended strictly for internal Application and Infrastructure services; callers MUST NOT map results directly to
+    /// endpoint DTOs and MUST enforce tenant, visibility, masking, and consent filtering before returning data.
+    /// Unknown and hidden identifiers are omitted identically without raising existence errors. Internal callers may pass
+    /// arbitrarily sized batches (chunked by DB parameter budget); external request-derived lists must call
+    /// <see cref="GetTablesForRequestAsync"/> so the 500-item cap applies.
     /// </summary>
     async Task<IReadOnlyList<TableMetadata>> GetTablesAsync(IReadOnlyCollection<TableIdentifier> identifiers, CancellationToken ct = default)
     {
@@ -28,6 +33,50 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
         var wanted = identifiers as IReadOnlySet<TableIdentifier> ?? new HashSet<TableIdentifier>(identifiers);
         var all = await GetAllTablesAsync(ct).ConfigureAwait(false);
         return all.Where(t => wanted.Contains(t.Identifier)).ToList();
+    }
+
+    /// <summary>
+    /// Request-capped wrapper over <see cref="GetTablesAsync"/> for identifier lists derived from external request input
+    /// (enforces <see cref="Autheris.Application.Catalog.CatalogTableQuery.MaxRequestIdentifiers"/> = 500).
+    /// Unfiltered raw internal read; callers MUST apply tenant, visibility, masking, and consent filtering before returning DTOs.
+    /// </summary>
+    Task<IReadOnlyList<TableMetadata>> GetTablesForRequestAsync(IReadOnlyCollection<TableIdentifier> identifiers, CancellationToken ct = default)
+    {
+        Autheris.Application.Catalog.CatalogTableQuery.ValidateRequestIdentifiers(identifiers);
+        return GetTablesAsync(identifiers, ct);
+    }
+
+    /// <summary>
+    /// Unfiltered raw internal keyset-paged catalog table query for Application and Infrastructure services only.
+    /// Never map returned <see cref="TableMetadata"/> directly to endpoint DTOs; callers MUST apply tenant, visibility,
+    /// masking, and consent filtering before determining page boundaries, counts, or visible continuation cursors.
+    /// The repository has no tenant concept and clamps <see cref="Autheris.Application.Catalog.CatalogTableQuery.Limit"/> to 1..500.
+    /// </summary>
+    async Task<Autheris.Application.Catalog.CatalogTablePage> QueryTablesAsync(
+        Autheris.Application.Catalog.CatalogTableQuery query,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        query.EnsureValid(out var domain, out var schema, out var namePrefix, out var after);
+        var limit = query.EffectiveLimit;
+
+        var all = await GetAllTablesAsync(ct).ConfigureAwait(false);
+        var matched = all
+            .Where(t => query.IncludeInactive || t.Table.IsActive)
+            .Where(t => domain is null || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase))
+            .Where(t => schema is null || string.Equals(t.Identifier.Schema, schema, StringComparison.OrdinalIgnoreCase))
+            .Where(t => namePrefix is null || t.Identifier.TableName.StartsWith(namePrefix, StringComparison.OrdinalIgnoreCase))
+            .Where(t => after is null || Autheris.Application.Catalog.CatalogTableCursor.Compare(t.Identifier, after.Value) > 0)
+            .OrderBy(t => t.Identifier.Domain, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(t => t.Identifier.Schema, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(t => t.Identifier.TableName, StringComparer.OrdinalIgnoreCase)
+            .Take(limit + 1)
+            .ToList();
+
+        var hasMore = matched.Count > limit;
+        var items = hasMore ? matched.Take(limit).ToList() : matched;
+        var nextAfter = hasMore ? Autheris.Application.Catalog.CatalogTableCursor.Encode(items[^1].Identifier) : null;
+        return new Autheris.Application.Catalog.CatalogTablePage(items, nextAfter);
     }
 
     Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default);

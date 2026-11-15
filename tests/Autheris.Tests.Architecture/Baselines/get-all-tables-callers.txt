@@ -1,0 +1,41 @@
+# Shrink-only baseline of production files in src/ and modules/ allowed to call GetAllTablesAsync(.
+# Excluded by definition: GovernanceRepository*.cs, ITableMetadataRepository declaration, and module test projects.
+# Removing an entry when migrating callers to GetTablesAsync/QueryTablesAsync/CatalogSnapshot is encouraged; adding a new file fails the ratchet.
+modules/Autheris.Modules.Lakehouse/Services/IcebergRestCatalogFederationService.cs
+src/Autheris.Api/Configuration/Validation/DataSourceTransportConfigurationReporter.cs
+src/Autheris.Api/Endpoints/AdminWritePrivilegesEndpoints.cs
+src/Autheris.Api/Endpoints/GovernanceEndpoints.Access.cs
+src/Autheris.Api/Endpoints/ODataEndpoints.Query.cs
+src/Autheris.Api/Extensions/DependencyInjection/DeniedTablesStartupReporter.cs
+src/Autheris.Application/Catalog/CatalogSnapshotProvider.cs
+src/Autheris.Application/Catalog/Discovery/DiscoveryService.cs
+src/Autheris.Application/Catalog/External/CatalogChangeIndexerHostedService.cs
+src/Autheris.Application/Catalog/External/ExternalCatalogReader.cs
+src/Autheris.Application/Catalog/Search/CatalogSearchWarmupService.cs
+src/Autheris.Application/Catalog/Semantic/SemanticBaseTableResolver.cs
+src/Autheris.Application/Catalog/Services/CatalogVisibilityService.cs
+src/Autheris.Application/Catalog/Services/DatasourceTestingService.cs
+src/Autheris.Application/Catalog/TenantCatalogLookup.cs
+src/Autheris.Application/DataSources/Connectors/Adapters/LegacyDataSourceExecutorAdapter.cs
+src/Autheris.Application/Federation/Services/CatalogFederatedMaskingCatalog.cs
+src/Autheris.Application/Governance/Analysis/BundledConsentRequestService.cs
+src/Autheris.Application/Governance/Analysis/QueryAnalysisService.cs
+src/Autheris.Application/Mcp/Services/AiDataGuardrailService.cs
+src/Autheris.Application/Mcp/Services/McpDatasetCatalog.cs
+src/Autheris.Application/Mcp/Services/SemanticMcpCompiler.cs
+src/Autheris.Application/OData/ODataHandler.cs
+src/Autheris.Application/OData/Services/DynamicOpenApiGenerator.cs
+src/Autheris.Application/Olap/OlapStagingService.cs
+src/Autheris.Application/Policy/Pdp/EffectiveAccessService.cs
+src/Autheris.Application/Policy/Pdp/GrantEffectPreviewService.cs
+src/Autheris.Application/Policy/RowScopes/PatternCoverageMonitor.cs
+src/Autheris.Application/Sql/Services/DmlPolicyDependencyGuard.cs
+src/Autheris.Application/Sql/Services/TrinoMetadataQueryHandler.cs
+src/Autheris.Application/VirtualFilters/EffectiveFilterInspector.cs
+src/Autheris.Application/VirtualFilters/VirtualFilterAdministrationService.Evaluation.cs
+src/Autheris.Extensions/Dbt/DbtExposurePublisher.cs
+src/Autheris.Extensions/Dbt/DbtMetadataIngestionService.cs
+src/Autheris.GraphQL/Catalog/CatalogSchemaModel.cs
+src/Autheris.GraphQL/Interceptors/DbtHealthExecutionMiddleware.cs
+src/Autheris.Infrastructure/Connectors/SqlConnector.cs
+src/Autheris.Infrastructure/Health/GatewayHealthCheckService.cs

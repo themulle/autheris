@@ -8,12 +8,14 @@ using System.Globalization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Chunked batch helpers for delta catalog queries and deferred <c>POLICY_EPOCHS.change_version</c> reconciliation.
-/// Lives under <c>Persistence/Catalog</c> with parameterized tuple predicates bounded by DB parameter limits.
+/// Chunked batch helpers for delta catalog queries, stale-only catalog loads, keyset-paged catalog reads,
+/// and deferred <c>POLICY_EPOCHS.change_version</c> reconciliation.
+/// Lives under <c>Persistence/Catalog</c> with parameterized predicates bounded by DB parameter limits.
 /// </summary>
 internal static class CatalogDeltaQueryHelper
 {
@@ -88,17 +90,176 @@ internal static class CatalogDeltaQueryHelper
             cmd.CommandText = sb.ToString();
 
             var chunkTables = await repo.LoadActiveTablesAsync(cmd, ct).ConfigureAwait(false);
+            foreach (var row in chunkTables)
+            {
+                if (seen.Contains(row.Identifier))
+                {
+                    activeTables.Add(row);
+                }
+            }
+        }
+
+        var result = await HydrateTablesAsync(repo, conn, activeTables, epochs: null, ct).ConfigureAwait(false);
+        return await repo.ApplyDatasetCatalogOverlayAsync(result, ct).ConfigureAwait(false);
+    }
+
+    internal static async Task<List<TableMetadata>> LoadTablesByIdsAsync(
+        GovernanceRepository repo,
+        IReadOnlyList<Guid> tableIds,
+        Dictionary<Guid, long>? epochs,
+        CancellationToken ct)
+    {
+        if (tableIds.Count == 0)
+        {
+            return new List<TableMetadata>();
+        }
+
+        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
+        var activeTables = new List<(Guid Id, TableIdentifier Identifier, Table Table)>(tableIds.Count);
+        for (var offset = 0; offset < tableIds.Count; offset += MaxIdentifiersPerChunk)
+        {
+            var count = Math.Min(MaxIdentifiersPerChunk, tableIds.Count - offset);
+            var idStrings = new string[count];
+            for (var i = 0; i < count; i++)
+            {
+                idStrings[i] = tableIds[offset + i].ToString();
+            }
+
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = GovernanceRepository.CatalogSql.SelectTablesWherePrefix
+                + "is_active = 1 AND id IN ("
+                + ConsentSqlCore.BindIdInClause(cmd, "tid", idStrings)
+                + ")";
+
+            var chunkTables = await repo.LoadActiveTablesAsync(cmd, ct).ConfigureAwait(false);
             activeTables.AddRange(chunkTables);
         }
 
+        return await HydrateTablesAsync(repo, conn, activeTables, epochs, ct).ConfigureAwait(false);
+    }
+
+    internal static async Task<CatalogTablePage> QueryTablesAsync(
+        GovernanceRepository repo,
+        CatalogTableQuery query,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        query.EnsureValid(out var domain, out var schema, out var namePrefix, out var after);
+        var limit = query.EffectiveLimit;
+
+        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+
+        var sb = new StringBuilder(GovernanceRepository.CatalogSql.SelectTablesWherePrefix.Length + 512);
+        sb.Append(GovernanceRepository.CatalogSql.SelectTablesWherePrefix);
+        var hasWhere = false;
+
+        void AppendAnd()
+        {
+            if (hasWhere)
+            {
+                sb.Append(" AND ");
+            }
+
+            hasWhere = true;
+        }
+
+        if (!query.IncludeInactive)
+        {
+            AppendAnd();
+            sb.Append("is_active = 1");
+        }
+
+        if (domain is not null)
+        {
+            AppendAnd();
+            sb.Append("LOWER(source_name) = LOWER(@dataSource)");
+            cmd.AddBound("@dataSource", domain);
+        }
+
+        if (schema is not null)
+        {
+            AppendAnd();
+            sb.Append("LOWER(schema_name) = LOWER(@schema)");
+            cmd.AddBound("@schema", schema);
+        }
+
+        if (namePrefix is not null)
+        {
+            AppendAnd();
+            sb.Append("LOWER(table_name) LIKE LOWER(@namePrefix) ESCAPE '\\'");
+            cmd.AddBound("@namePrefix", EscapeLikePrefix(namePrefix) + "%");
+        }
+
+        if (after is { } afterId)
+        {
+            AppendAnd();
+            sb.Append(
+                "(LOWER(source_name) > LOWER(@afterDomain) "
+                + "OR (LOWER(source_name) = LOWER(@afterDomain) AND LOWER(schema_name) > LOWER(@afterSchema)) "
+                + "OR (LOWER(source_name) = LOWER(@afterDomain) AND LOWER(schema_name) = LOWER(@afterSchema) AND LOWER(table_name) > LOWER(@afterTable)))");
+            cmd.AddBound("@afterDomain", afterId.Domain);
+            cmd.AddBound("@afterSchema", afterId.Schema);
+            cmd.AddBound("@afterTable", afterId.TableName);
+        }
+
+        if (!hasWhere)
+        {
+            sb.Append("1 = 1");
+        }
+
+        sb.Append(repo.IsPostgreSql
+            ? " ORDER BY LOWER(source_name), LOWER(schema_name), LOWER(table_name) LIMIT @take"
+            : " ORDER BY LOWER(source_name), LOWER(schema_name), LOWER(table_name) OFFSET 0 ROWS FETCH NEXT @take ROWS ONLY");
+        cmd.AddBound("@take", limit + 1, DbType.Int32);
+        cmd.CommandText = sb.ToString();
+
+        var fetched = await repo.LoadActiveTablesAsync(cmd, ct).ConfigureAwait(false);
+        var hasMore = fetched.Count > limit;
+        var pageRows = hasMore ? fetched.GetRange(0, limit) : fetched;
+
+        var items = await HydrateTablesAsync(repo, conn, pageRows, epochs: null, ct).ConfigureAwait(false);
+        items = await repo.ApplyDatasetCatalogOverlayAsync(items, ct).ConfigureAwait(false);
+
+        var nextAfter = hasMore && items.Count > 0
+            ? CatalogTableCursor.Encode(items[^1].Identifier)
+            : null;
+        return new CatalogTablePage(items, nextAfter);
+    }
+
+    internal static string EscapeLikePrefix(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var sb = new StringBuilder(value.Length + 4);
+        foreach (var ch in value)
+        {
+            if (ch is '\\' or '%' or '_' or '[')
+            {
+                sb.Append('\\');
+            }
+
+            sb.Append(ch);
+        }
+
+        return sb.ToString();
+    }
+
+    private static async Task<List<TableMetadata>> HydrateTablesAsync(
+        GovernanceRepository repo,
+        DbConnection conn,
+        List<(Guid Id, TableIdentifier Identifier, Table Table)> activeTables,
+        Dictionary<Guid, long>? epochs,
+        CancellationToken ct)
+    {
         if (activeTables.Count == 0)
         {
-            return Array.Empty<TableMetadata>();
+            return new List<TableMetadata>();
         }
 
         var columnsByTable = new Dictionary<Guid, List<TableColumn>>();
         var maskingRulesByTable = new Dictionary<Guid, Dictionary<string, MaskingRule>>();
         var corruptedTableIds = new HashSet<Guid>();
+        var loadedIds = new List<Guid>(activeTables.Count);
 
         for (var offset = 0; offset < activeTables.Count; offset += MaxIdentifiersPerChunk)
         {
@@ -106,7 +267,9 @@ internal static class CatalogDeltaQueryHelper
             var idStrings = new string[count];
             for (var i = 0; i < count; i++)
             {
-                idStrings[i] = activeTables[offset + i].Id.ToString();
+                var id = activeTables[offset + i].Id;
+                loadedIds.Add(id);
+                idStrings[i] = id.ToString();
             }
 
             await using var cmd = conn.CreateCommand();
@@ -129,17 +292,19 @@ internal static class CatalogDeltaQueryHelper
             corruptedTableIds.UnionWith(chunkCorrupt);
         }
 
-        var result = await repo.AssembleTableMetadataListAsync(
+        var rowFilterStrategies = await RowFilterEvaluationStore.ReadBatchObjectByIdsAsync(
+            conn, null, repo.KeyDialect, loadedIds, ct).ConfigureAwait(false);
+
+        return await repo.AssembleTableMetadataListAsync(
             conn,
             activeTables,
             columnsByTable,
             maskingRulesByTable,
             corruptedTableIds,
-            epochs: null,
+            epochs,
             tryGetCached: null,
-            ct).ConfigureAwait(false);
-
-        return await repo.ApplyDatasetCatalogOverlayAsync(result, ct).ConfigureAwait(false);
+            ct,
+            rowFilterStrategies).ConfigureAwait(false);
     }
 
     internal static async Task StampDeferredChangeVersionsAsync(

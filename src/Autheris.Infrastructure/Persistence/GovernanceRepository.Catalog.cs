@@ -158,29 +158,8 @@ public partial class GovernanceRepository
 
     public async Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
     {
-        var tables = new List<(Guid Id, TableIdentifier Identifier)>();
-
-        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
-        {
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = CatalogSql.SelectActiveTableSummariesSql;
-                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                while (await reader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    try
-                    {
-                        tables.Add((Guid.Parse(reader.GetString(0)), new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3))));
-                    }
-                    catch (ArgumentException)
-                    {
-                        LogCatalogNotice("Catalog table has an invalid identifier and was skipped.");
-                    }
-                }
-            }
-        }
-
-        // PERS-17: all epochs in one query; a cached entry is valid only while its epoch is unchanged (unreadable epochs bypass the cache).
+        // PERS-17 / epoch-before-data: read all table epochs before reading any table summary or metadata so a
+        // concurrent write can only make a newly populated cache entry look stale, never falsely fresh.
         Dictionary<Guid, long>? epochs = null;
         try
         {
@@ -190,6 +169,25 @@ public partial class GovernanceRepository
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogCatalogNotice("The table epochs could not be read; the metadata cache is bypassed (fail-closed).");
+        }
+
+        var tables = new List<(Guid Id, TableIdentifier Identifier)>();
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = CatalogSql.SelectActiveTableSummariesSql;
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                try
+                {
+                    tables.Add((Guid.Parse(reader.GetString(0)), new TableIdentifier(reader.GetString(1), reader.GetString(2), reader.GetString(3))));
+                }
+                catch (ArgumentException)
+                {
+                    LogCatalogNotice("Catalog table has an invalid identifier and was skipped.");
+                }
+            }
         }
 
         bool TryGetValidCached(Guid tableId, string key, out TableMetadata? metadata)
@@ -208,64 +206,24 @@ public partial class GovernanceRepository
             return false;
         }
 
-        var uncached = tables
-            .Where(t => !TryGetValidCached(t.Id, t.Identifier.ToString().ToLowerInvariant(), out _))
-            .Select(t => t.Id)
-            .ToList();
-
-        List<TableMetadata> result;
-        if (uncached.Count == 0)
+        var result = new List<TableMetadata>(tables.Count);
+        var uncachedIds = new List<Guid>();
+        foreach (var (tid, identifier) in tables)
         {
-            result = new List<TableMetadata>(tables.Count);
-            foreach (var (tid, t) in tables)
+            if (TryGetValidCached(tid, identifier.ToString().ToLowerInvariant(), out var cachedMetadata))
             {
-                if (TryGetValidCached(tid, t.ToString().ToLowerInvariant(), out var cachedMetadata))
-                {
-                    result.Add(cachedMetadata!);
-                }
+                result.Add(cachedMetadata!);
+            }
+            else
+            {
+                uncachedIds.Add(tid);
             }
         }
-        else
+
+        if (uncachedIds.Count > 0)
         {
-            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-
-            List<(Guid Id, TableIdentifier Identifier, Table Table)> activeTables;
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = CatalogSql.SelectActiveTableEntitiesSql;
-                activeTables = await LoadActiveTablesAsync(cmd, ct).ConfigureAwait(false);
-            }
-
-            Dictionary<Guid, List<TableColumn>> columnsByTable;
-            Dictionary<Guid, Dictionary<string, MaskingRule>> maskingRulesByTable;
-            HashSet<Guid> corruptedTableIds;
-
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = SelectActiveBatchTableColumnsSql;
-                (columnsByTable, maskingRulesByTable, corruptedTableIds) = await LoadBatchTableColumnsAsync(cmd, ct).ConfigureAwait(false);
-            }
-
-            Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys = null;
-            var allActiveTableIds = activeTables.Select(t => t.Id).ToList();
-            if (await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, KeyDialect, ct, _keyTables).ConfigureAwait(false))
-            {
-                prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
-            }
-
-            var rowFilterStrategies = await RowFilterEvaluationStore.ReadBatchObjectAsync(
-                conn, null, KeyDialect, ct).ConfigureAwait(false);
-
-            result = await AssembleTableMetadataListAsync(
-                conn,
-                activeTables,
-                columnsByTable,
-                maskingRulesByTable,
-                corruptedTableIds,
-                epochs,
-                (tid, cacheKey) => TryGetValidCached(tid, cacheKey, out var hit) ? (true, hit) : (false, null),
-                ct,
-                rowFilterStrategies).ConfigureAwait(false);
+            var loaded = await CatalogDeltaQueryHelper.LoadTablesByIdsAsync(this, uncachedIds, epochs, ct).ConfigureAwait(false);
+            result.AddRange(loaded);
         }
 
         return await ApplyDatasetCatalogOverlayAsync(result, ct).ConfigureAwait(false);
@@ -276,6 +234,9 @@ public partial class GovernanceRepository
 
     public Task<IReadOnlyList<TableMetadata>> GetTablesAsync(IReadOnlyCollection<TableIdentifier> identifiers, CancellationToken ct = default)
         => CatalogDeltaQueryHelper.GetTablesAsync(this, identifiers, ct);
+
+    public Task<CatalogTablePage> QueryTablesAsync(CatalogTableQuery query, CancellationToken ct = default)
+        => CatalogDeltaQueryHelper.QueryTablesAsync(this, query, ct);
 
     internal async Task<List<TableMetadata>> AssembleTableMetadataListAsync(
         DbConnection conn,
@@ -297,6 +258,11 @@ public partial class GovernanceRepository
 
         var rowFilterStrategies = prefetchedRowFilterStrategies
             ?? await RowFilterEvaluationStore.ReadBatchObjectAsync(conn, null, KeyDialect, ct).ConfigureAwait(false);
+
+        if (epochs != null && AfterMetadataSnapshotForTesting is { } hook)
+        {
+            await hook(ct).ConfigureAwait(false);
+        }
 
         var result = new List<TableMetadata>(activeTables.Count);
         foreach (var (tid, identifier, tableEntity) in activeTables)

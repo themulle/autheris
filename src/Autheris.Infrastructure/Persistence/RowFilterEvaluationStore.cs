@@ -60,6 +60,50 @@ internal static class RowFilterEvaluationStore
         return result;
     }
 
+    /// <summary>Chunked batch read of stored settings from <c>TABLE_ROW_FILTER_STRATEGIES</c> for specific table ids.</summary>
+    internal static async Task<Dictionary<Guid, RowFilterEvaluationSettings>> ReadBatchObjectByIdsAsync(
+        DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, IReadOnlyList<Guid> tableIds, CancellationToken ct)
+    {
+        var result = new Dictionary<Guid, RowFilterEvaluationSettings>();
+        if (tableIds.Count == 0)
+        {
+            return result;
+        }
+
+        const int ChunkSize = 500;
+        try
+        {
+            for (var offset = 0; offset < tableIds.Count; offset += ChunkSize)
+            {
+                var count = Math.Min(ChunkSize, tableIds.Count - offset);
+                var idStrings = new string[count];
+                for (var i = 0; i < count; i++)
+                {
+                    idStrings[i] = tableIds[offset + i].ToString();
+                }
+
+                await using var cmd = conn.CreateCommand();
+                Enlist(cmd, tx);
+                cmd.CommandText = $"SELECT table_id, strategy, duration_seconds, max_keys FROM {dialect.Prefix}{StrategyTable} WHERE table_id IN ({ConsentSqlCore.BindIdInClause(cmd, "tid", idStrings)})";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var idObj = reader.GetValue(0);
+                    if (idObj is not null && Guid.TryParse(Convert.ToString(idObj, CultureInfo.InvariantCulture), out var tid))
+                    {
+                        result[tid] = ReadSettings(reader, 1);
+                    }
+                }
+            }
+        }
+        catch (DbException)
+        {
+            // Table may not exist in unmigrated or testing environments; fail safely with empty result.
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Replaces the object-level settings of one table (null or all-null deletes the row) and bumps the table epoch through
     /// <paramref name="bumpEpoch"/> inside the caller's transaction. Null when the table is unknown.
