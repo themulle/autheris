@@ -673,8 +673,11 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
             combinedScore = Math.Round(visibleRatio, 1);
         }
 
+        // A restricted table is scored from its table-level fields only, so a visible column the query names is not in MatchedTerms;
+        // it is still reported, because only visible columns are ever listed here.
+        IEnumerable<string> columnTerms = restricted ? matchedTerms.Concat(queryTerms) : matchedTerms;
         var relevantColumns = visible.Columns
-            .Where(c => matchedTerms.Any(term => c.ColumnName.Contains(term, StringComparison.OrdinalIgnoreCase)))
+            .Where(c => columnTerms.Any(term => c.ColumnName.Contains(term, StringComparison.OrdinalIgnoreCase)))
             .Select(c => c.ColumnName)
             .Take(5)
             .ToList();
