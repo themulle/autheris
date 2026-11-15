@@ -1,4 +1,4 @@
--- phase3: MIG-0015
+-- phase3: MIG-0014
 -- External consent API schema and workflow foundation.
 
 IF COL_LENGTH(N'dbo.CONSENT_REQUESTS', N'version') IS NULL

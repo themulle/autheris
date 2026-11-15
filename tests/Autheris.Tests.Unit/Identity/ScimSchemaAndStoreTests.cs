@@ -54,8 +54,8 @@ public sealed class ScimSchemaAndStoreTests
         var rawSql = File.ReadAllText(sqlPath);
         var rawShape = File.ReadAllText(shapePath);
 
-        var step = SqlMigrationStep.Parse(engine, 12, "scim_identity_correlation", rawSql, rawShape);
-        step.Version.ShouldBe(12);
+        var step = SqlMigrationStep.Parse(engine, 13, "scim_identity_correlation", rawSql, rawShape);
+        step.Version.ShouldBe(13);
         step.Name.ShouldBe("scim_identity_correlation");
         StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
 
@@ -80,9 +80,9 @@ public sealed class ScimSchemaAndStoreTests
 
         // Verify all embedded steps compose cleanly from v0001 through 0012
         var embeddedSteps = SqlMigrationStep.LoadEmbedded(engine);
-        embeddedSteps.Select(s => s.Version).ShouldContain(12);
+        embeddedSteps.Select(s => s.Version).ShouldContain(13);
         var deltas = embeddedSteps.ToDictionary(s => s.Version, s => s.ShapeDelta);
-        var composed = GovernanceSchemaShapeLoader.LoadAt(engine, 12, deltas);
+        var composed = GovernanceSchemaShapeLoader.LoadAt(engine, 13, deltas);
 
         var users = composed.Tables.First(t => t.Name.Equals("IDENTITY_USERS", StringComparison.OrdinalIgnoreCase));
         users.Columns.Select(c => c.Name.ToLowerInvariant()).ShouldContain("object_sid");

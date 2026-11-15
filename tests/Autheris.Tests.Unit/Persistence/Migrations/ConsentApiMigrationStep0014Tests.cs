@@ -20,7 +20,7 @@ public sealed class ConsentApiMigrationStep0014Tests
         {
             var steps = SqlMigrationStep.LoadEmbedded(engine);
             var step = steps.Single(s => s.Version == 15 && s.Name == "consent_api");
-            step.Phase3Marker.ShouldBe("MIG-0015");
+            step.Phase3Marker.ShouldBe("MIG-0014");
 
             StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
 
@@ -34,7 +34,7 @@ public sealed class ConsentApiMigrationStep0014Tests
 
             var shape = GovernanceSchemaShapeLoader.LoadAt(
                 engine,
-                14,
+                15,
                 steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
 
             var expectedTables = new[]

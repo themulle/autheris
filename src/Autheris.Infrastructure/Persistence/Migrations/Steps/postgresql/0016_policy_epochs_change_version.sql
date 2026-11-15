@@ -1,4 +1,4 @@
--- phase3: MIG-0016
+-- phase3: MIG-0015
 -- Add catalog change_version watermark and index to POLICY_EPOCHS for delta snapshot reloads.
 
 ALTER TABLE POLICY_EPOCHS ADD COLUMN IF NOT EXISTS change_version BIGINT NOT NULL DEFAULT 0;

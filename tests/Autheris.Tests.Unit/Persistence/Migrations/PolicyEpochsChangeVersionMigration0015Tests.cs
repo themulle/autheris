@@ -15,7 +15,7 @@ public sealed class PolicyEpochsChangeVersionMigration0015Tests
         {
             var steps = SqlMigrationStep.LoadEmbedded(engine);
             var step = steps.Single(s => s.Version == 16 && s.Name == "policy_epochs_change_version");
-            step.Phase3Marker.ShouldBe("MIG-0016");
+            step.Phase3Marker.ShouldBe("MIG-0015");
 
             StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
 
@@ -29,7 +29,7 @@ public sealed class PolicyEpochsChangeVersionMigration0015Tests
 
             var shape = GovernanceSchemaShapeLoader.LoadAt(
                 engine,
-                15,
+                16,
                 steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
 
             var policyEpochs = shape.Tables.Single(t =>
