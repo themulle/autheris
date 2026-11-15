@@ -8,13 +8,20 @@ using Autheris.Application.Sql.Services;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
 /// <summary>#668: <c>WebSql:DataSourceMappings</c> is one hop to an existing connection; a dbt mapping WebSQL cannot reach is reported.</summary>
 public sealed class DataSourceMappingStartupTests
 {
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<LogLevel> Levels { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Levels.Add(logLevel);
+    }
     private static GatewayOptions Gateway(Dictionary<string, string> mappings, params string[] connections)
     {
         var gateway = new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true } };
@@ -79,12 +86,11 @@ public sealed class DataSourceMappingStartupTests
         var gateway = Gateway(new(), "pgdata");
         gateway.Dbt.DatabaseMappings["sales"] = "pgdata";
         gateway.WebSql.AllowedDataSources.Add("sales");
-        var logger = Substitute.For<ILogger>();
-        logger.IsEnabled(Arg.Any<LogLevel>()).Returns(true);
+        var logger = new CapturingLogger();
 
         GatewayStartupValidator.ValidateDataSourceMappings(gateway, logger);
 
-        logger.ReceivedCalls().ShouldContain(c => c.GetMethodInfo().Name == nameof(ILogger.Log) && (LogLevel)c.GetArguments()[0]! == LogLevel.Warning);
+        logger.Levels.ShouldContain(LogLevel.Warning);
     }
 
     [Fact]
@@ -95,12 +101,11 @@ public sealed class DataSourceMappingStartupTests
         mapped.WebSql.AllowedDataSources.Add("sales");
         var notAllowed = Gateway(new(), "pgdata");
         notAllowed.Dbt.DatabaseMappings["sales"] = "pgdata";
-        var logger = Substitute.For<ILogger>();
-        logger.IsEnabled(Arg.Any<LogLevel>()).Returns(true);
+        var logger = new CapturingLogger();
 
         GatewayStartupValidator.ValidateDataSourceMappings(mapped, logger);
         GatewayStartupValidator.ValidateDataSourceMappings(notAllowed, logger);
 
-        logger.ReceivedCalls().ShouldNotContain(c => c.GetMethodInfo().Name == nameof(ILogger.Log));
+        logger.Levels.ShouldBeEmpty();
     }
 }

@@ -1,3 +1,4 @@
+using System.Reflection;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Common;
@@ -6,7 +7,6 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence.Catalog;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Nodes;
@@ -53,16 +53,27 @@ public sealed class GovernedCatalogProviderMappingTests
 
     private static readonly (string, string) Pg = (Key, "PostgreSql");
 
+    public class GovernanceRepoProxy : DispatchProxy
+    {
+        public TableMetadata? Metadata { get; set; }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) =>
+            targetMethod?.Name == nameof(ITableMetadataRepository.GetTableMetadataAsync)
+                && args is [TableIdentifier id, ..] && id == Orders
+                ? Task.FromResult(Metadata)
+                : throw new NotSupportedException(targetMethod?.Name);
+    }
+
     // A catalog entry does not record its connection: its SourceName is the logical name (the identifier domain).
     private static IGovernanceRepository Governance(string sourceName)
     {
-        var repo = Substitute.For<IGovernanceRepository>();
-        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(_ => new TableMetadata
+        var repo = DispatchProxy.Create<IGovernanceRepository, GovernanceRepoProxy>();
+        ((GovernanceRepoProxy)(object)repo).Metadata = new TableMetadata
         {
             Table = new Table { SourceType = "PostgreSql", SourceName = sourceName, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
             Identifier = Orders,
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
-        });
+        };
         return repo;
     }
 

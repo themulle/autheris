@@ -2,8 +2,8 @@ namespace Autheris.Tests.Unit.Sql;
 
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Data.Common;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,13 +11,14 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -31,7 +32,13 @@ public sealed class WebSqlMappedConnectionTests
     private const string Secret = "crmdb_secret_key";
 
     private static ClaimsPrincipal User() =>
-        new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"), new Claim("tenant_id", Tenant)], "Test"));
+        new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),
+            new Claim("tenant_id", Tenant),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+        ], "Test"));
 
     private static TableMetadata Table(string domain, string table, string sourceName) => new()
     {
@@ -41,24 +48,73 @@ public sealed class WebSqlMappedConnectionTests
         ColumnMaskingRules = new Dictionary<string, MaskingRule>()
     };
 
-    private sealed record Rig(IGovernedSqlExecutionService Service, ISqlConnectionFactory Factory);
+    private sealed class FakeMetadataRepo(IReadOnlyList<TableMetadata> tables) : ITableMetadataRepository
+    {
+        public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult(tables.FirstOrDefault(t => t.Identifier == table));
+        public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) => Task.FromResult(tables);
+        public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) => Task.FromResult(metadata);
+        public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default) =>
+            Task.FromResult<TableKeyDefinitionChange?>(null);
+    }
+
+    private sealed class EmptyConsentRepo : IConsentRepository
+    {
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default) => Task.FromResult(consent);
+        public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) => Task.FromResult<Consent?>(null);
+        public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, ConsentRevocationAuthority authority, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task ExtendConsentExpiryAsync(Guid consentId, DateTimeOffset newValidTo, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default) => Task.FromResult(false);
+        public Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class AllowIdConsentResolution : IConsentResolutionService
+    {
+        public TableAccessDecision ResolveAccess(Sid userSid, IReadOnlySet<Sid> subjectGroupSids, IReadOnlySet<string> userRoles, TableIdentifier table, IReadOnlyList<Consent> activeConsents, DatabaseDialect dialect = DatabaseDialect.SqlServer, IReadOnlySet<Sid>? allUserSids = null, IReadOnlySet<string>? callerScopes = null) =>
+            TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }, null, hasUnconstrainedColumnAllow: false);
+    }
+
+    private sealed class RecordingConnectionFactory : ISqlConnectionFactory
+    {
+        public List<string> OpenedConnectionStrings { get; } = [];
+        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
+        {
+            OpenedConnectionStrings.Add(options.ConnectionString);
+            return Task.FromResult<DbConnection>(new FakeDbConnection());
+        }
+    }
+
+    private sealed class NoopSessionInitializer : IDbSessionContextInitializer
+    {
+        public Task<DbTransaction?> InitializeSessionAsync(DbConnection connection, DatabaseDialect dialect, TenantId tenantId, string? userSid = null, string? purpose = null, bool requireTransaction = true, CancellationToken ct = default) =>
+            Task.FromResult<DbTransaction?>(null);
+        public Task<DbTransaction?> InitializeSessionAsync(DbConnection connection, string? provider, TenantId tenantId, string? userSid = null, string? purpose = null, bool requireTransaction = true, CancellationToken ct = default) =>
+            Task.FromResult<DbTransaction?>(null);
+        public Task InitializeSessionAsync(DbConnection connection, DbTransaction? tx, DatabaseDialect dialect, TenantId tenantId, string? userSid = null, string? purpose = null, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed record Rig(IGovernedSqlExecutionService Service, RecordingConnectionFactory Factory);
 
     private static Rig Build(Dictionary<string, string> mappings, string[] connections, params TableMetadata[] tables) =>
         Build(mappings, connections, "PostgreSql", tables);
 
     private static Rig Build(Dictionary<string, string> mappings, string[] connections, string connectionProvider, params TableMetadata[] tables)
     {
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult<TableMetadata?>(tables.FirstOrDefault(t => t.Identifier == call.Arg<TableIdentifier>())));
-
-        var consents = Substitute.For<IConsentRepository>();
-        consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
-        var resolution = Substitute.For<IConsentResolutionService>();
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3),
-                new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }, null, hasUnconstrainedColumnAllow: false));
+        var repo = new FakeMetadataRepo(tables);
+        var consents = new EmptyConsentRepo();
+        var resolution = new AllowIdConsentResolution();
 
         var options = new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultDataSourceName = "default" } };
         foreach (var (key, value) in mappings)
@@ -71,24 +127,14 @@ public sealed class WebSqlMappedConnectionTests
             options.DataSources.Connections[name] = new DataSourceConnectionOptions { Provider = connectionProvider, ConnectionString = $"Host=localhost;Database={name}" };
         }
 
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        var dbConn = Substitute.For<DbConnection>();
-        var dbCmd = Substitute.For<DbCommand>();
-        dbCmd.WireParameters();
-        var dbReader = Substitute.For<DbDataReader>();
-        dbReader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        dbReader.FieldCount.Returns(0);
-        dbCmd.ExecuteReaderAsync(Arg.Any<CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbReader));
-        dbConn.CreateCommand().Returns(dbCmd);
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(dbConn));
-
+        var factory = new RecordingConnectionFactory();
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executionGuard: GovernedTestSupport.Guard,
             consentResolution: resolution,
             tableRepository: repo, policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies(),
             connectionFactory: factory, clientIpResolver: null, environment: null,
             logger: NullLogger<GovernedSqlExecutionService>.Instance, consentRepository: consents, secretProvider: null,
-            sessionInitializer: Substitute.For<IDbSessionContextInitializer>());
+            sessionInitializer: new NoopSessionInitializer());
         return new Rig(service, factory);
     }
 
@@ -103,8 +149,7 @@ public sealed class WebSqlMappedConnectionTests
 
         await Query(rig, "SELECT id FROM finance.dbo.invoices", "finance");
 
-        await rig.Factory.Received(1).CreateOpenConnectionAsync(
-            Arg.Is<DataSourceConnectionOptions>(o => o.ConnectionString == "Host=localhost;Database=crmdb"), Arg.Any<CancellationToken>());
+        rig.Factory.OpenedConnectionStrings.ShouldBe(["Host=localhost;Database=crmdb"]);
     }
 
     [Fact]
@@ -116,7 +161,7 @@ public sealed class WebSqlMappedConnectionTests
         var ex = await Should.ThrowAsync<WebSqlTableDeniedException>(() => Query(rig, "SELECT id FROM finance.dbo.invoices", "finance"));
 
         ex.Message.ShouldNotContain(Secret);
-        await rig.Factory.DidNotReceiveWithAnyArgs().CreateOpenConnectionAsync(default!, default);
+        rig.Factory.OpenedConnectionStrings.ShouldBeEmpty();
     }
 
     [Fact]
@@ -129,7 +174,7 @@ public sealed class WebSqlMappedConnectionTests
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => Query(rig, "SELECT id FROM finance.dbo.invoices", "finance"));
 
         ex.Message.ShouldNotContain(Secret);
-        await rig.Factory.DidNotReceiveWithAnyArgs().CreateOpenConnectionAsync(default!, default);
+        rig.Factory.OpenedConnectionStrings.ShouldBeEmpty();
     }
 
     [Fact]
@@ -156,7 +201,7 @@ public sealed class WebSqlMappedConnectionTests
         var rig = Build(new() { ["finance"] = target }, ["finance"], Table("finance", "invoices", "finance"));
 
         await Should.ThrowAsync<WebSqlPolicyException>(() => Query(rig, "SELECT id FROM finance.dbo.invoices", "finance"));
-        await rig.Factory.DidNotReceiveWithAnyArgs().CreateOpenConnectionAsync(default!, default);
+        rig.Factory.OpenedConnectionStrings.ShouldBeEmpty();
     }
 
     [Fact]
@@ -166,6 +211,6 @@ public sealed class WebSqlMappedConnectionTests
         var rig = Build(new() { ["finance"] = "crmdb", ["crmdb"] = "other" }, ["crmdb", "other"], Table("finance", "invoices", "finance"));
 
         await Should.ThrowAsync<WebSqlPolicyException>(() => Query(rig, "SELECT id FROM finance.dbo.invoices", "finance"));
-        await rig.Factory.DidNotReceiveWithAnyArgs().CreateOpenConnectionAsync(default!, default);
+        rig.Factory.OpenedConnectionStrings.ShouldBeEmpty();
     }
 }

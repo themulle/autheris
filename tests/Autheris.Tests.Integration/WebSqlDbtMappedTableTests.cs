@@ -133,7 +133,13 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
         using var scope = host.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<IIngressTransportContext>().Set(DataSourceTransportFlags.WebSql);
         var service = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
-        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-668"), new Claim("tenant_id", "acme")], "Test"));
+        var user = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-668"),
+            new Claim("tenant_id", "acme"),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
+        ], "Test"));
         return await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, null, Logical), user, new TenantId("acme"));
     }
 

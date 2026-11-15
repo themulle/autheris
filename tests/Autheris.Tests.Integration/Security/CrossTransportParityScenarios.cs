@@ -329,7 +329,7 @@ internal sealed partial class CrossTransportParityHarness
 
     private sealed class InMemoryCatalogProvider(ITableMetadataRepository repo) : IGovernedCatalogProvider
     {
-        public async ValueTask<ITableCatalog> GetCatalogAsync(string dataSourceName, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
+        public async ValueTask<ITableCatalog> GetCatalogAsync(GovernedDataSource dataSource, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
         {
             var meta = await repo.GetTableMetadataAsync(OrdersId, ct);
             var cols = meta?.Columns.Select(c => new CatalogColumn(c.ColumnName, c.DataType)).ToImmutableArray() ?? [];
