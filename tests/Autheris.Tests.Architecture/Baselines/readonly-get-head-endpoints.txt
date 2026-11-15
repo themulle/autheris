@@ -34,6 +34,7 @@
 /api/v1/admin/datasources/{name}/required-write-privileges|GET|no side effect: computes least-privilege GRANT report without mutations
 /api/v1/analytics/metrics|GET|no side effect: reads gateway analytics metrics
 /api/v1/authz/objects/{objectName}/grants|GET|no side effect: reads effective object grants
+/api/v1/authz/subjects/{subject}/effective-access|GET|no side effect: reads subject effective access report
 /api/v1/catalog/changes|GET|no side effect: reads incremental catalog change feed
 /api/v1/catalog/datasets/{*datasetId}|GET|no side effect: reads catalog dataset metadata
 /api/v1/catalog/datasets/{dataset}/sample-rows|GET|no side effect: reads governed sample rows for dataset

@@ -13,6 +13,8 @@ public static class AuditEventTypes
     public const string AuthzEndpointDenied = "AUTHZ_ENDPOINT_DENIED";
     public const string AuthzExplain = "AUTHZ_EXPLAIN";
     public const string AuthzGrantsList = "AUTHZ_GRANTS_LIST";
+    public const string AuthzEffectiveAccessReport = "AUTHZ_EFFECTIVE_ACCESS_REPORT";
+    public const string AuthzEffectPreview = "AUTHZ_EFFECT_PREVIEW";
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
     public const string TokenRevoked = "TOKEN_REVOKED";
     public const string TokenRevokedHit = "TOKEN_REVOKED_HIT";

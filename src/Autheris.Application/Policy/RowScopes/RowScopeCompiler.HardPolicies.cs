@@ -192,7 +192,7 @@ public sealed partial class RowScopeCompiler
         return (null, combined, names, appliedBindings);
     }
 
-    private static (bool Applies, IReadOnlyList<string> Missing) CheckHardBinding(
+    internal static (bool Applies, IReadOnlyList<string> Missing) CheckHardBinding(
         VirtualFilter filter,
         FilterBinding binding,
         VirtualFilterAccessProfile profile,
@@ -250,7 +250,7 @@ public sealed partial class RowScopeCompiler
         return missing.Count == 0 ? (true, Array.Empty<string>()) : (false, missing);
     }
 
-    private static bool MatchesScope(string pattern, TableIdentifier table) =>
+    internal static bool MatchesScope(string pattern, TableIdentifier table) =>
         TargetPatternMatcher.IsRegex(pattern)
             ? TargetPatternMatcher.IsMatch(pattern, table)
             : ObjectPattern.Parse(pattern).MatchesObject(table);
@@ -258,7 +258,7 @@ public sealed partial class RowScopeCompiler
     private static bool MatchesTarget(FilterBinding binding, TableIdentifier table) =>
         binding.TargetPattern == null || binding.MatchesTarget(table);
 
-    private static List<(VirtualFilter Filter, FilterBinding Binding, VirtualFilterAccessProfile Profile)> ApplySupersedes(
+    internal static List<(VirtualFilter Filter, FilterBinding Binding, VirtualFilterAccessProfile Profile)> ApplySupersedes(
         List<(VirtualFilter Filter, FilterBinding Binding, VirtualFilterAccessProfile Profile)> applying)
     {
         var superseded = new HashSet<(string ProfileName, string FilterName, string? TargetPattern)>();

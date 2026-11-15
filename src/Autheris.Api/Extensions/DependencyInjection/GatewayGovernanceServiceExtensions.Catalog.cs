@@ -88,6 +88,8 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
         services.AddSingleton<Autheris.Application.Policy.Pdp.IExplainSubjectResolver, Autheris.Application.Policy.Pdp.DegradedExplainSubjectResolver>();
         services.AddScoped<Autheris.Application.Policy.Pdp.IAccessExplanationService, Autheris.Application.Policy.Pdp.AccessExplanationService>();
+        services.AddScoped<Autheris.Application.Policy.Pdp.IEffectiveAccessService, Autheris.Application.Policy.Pdp.EffectiveAccessService>();
+        services.AddScoped<Autheris.Application.Policy.Pdp.IGrantEffectPreview, Autheris.Application.Policy.Pdp.GrantEffectPreviewService>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
         services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // 16
