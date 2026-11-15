@@ -423,6 +423,113 @@ public sealed partial class CiWorkflowArchitectureTests
         JobIf(Job("integration-nightly.yml", "report-failure")).ShouldBe(ScheduledWorkflowFailureReportTests.CanonicalIf);
     }
 
+    private const string G9Workflow = "sql-compiler-gate-nightly.yml";
+    private const string G9JobName = "sql-compiler-gate-databricks-g9";
+    private const string G9TestStep = "Live Databricks suites";
+
+    /// <summary>Splits a job body into its job-level lines and its steps (a step starts at a six-space <c>- </c> item).</summary>
+    private static (string[] JobLevel, List<string[]> Steps) SplitSteps(string[] job)
+    {
+        int firstStep = Array.FindIndex(job, l => l.StartsWith("      - ", StringComparison.Ordinal));
+        firstStep.ShouldBeGreaterThanOrEqualTo(0, "job has no steps");
+        var steps = new List<string[]>();
+        var current = new List<string>();
+        foreach (var line in job.Skip(firstStep))
+        {
+            if (line.StartsWith("      - ", StringComparison.Ordinal) && current.Count > 0)
+            {
+                steps.Add(current.ToArray());
+                current = [];
+            }
+
+            current.Add(line);
+        }
+
+        steps.Add(current.ToArray());
+        return (job.Take(firstStep).ToArray(), steps);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Databricks_secrets_only_in_the_test_step_env()
+    {
+        // SEC-OI-609-1/2: the Databricks secrets are declared only in the step-level env of the single live-test step.
+        // Checkout, setup and restore see none, and no workflow forwards all secrets.
+        foreach (var path in Directory.EnumerateFiles(Path.Combine(RepositoryScan.RepoRoot, ".github", "workflows"), "*.yml"))
+        {
+            string name = Path.GetFileName(path);
+            string text = File.ReadAllText(path);
+            text.ShouldNotContain("secrets: inherit", customMessage: name);
+            text.ShouldNotContain("toJSON(secrets)", customMessage: name);
+            if (name != G9Workflow)
+            {
+                text.ShouldNotContain("secrets.DATABRICKS_", customMessage: $"{name} must not read Databricks secrets");
+            }
+        }
+
+        var job = Job(G9Workflow, G9JobName);
+        job.ShouldContain(l => l.StartsWith("    environment: databricks-g9", StringComparison.Ordinal), "G9 stays bound to the protected environment");
+        var (jobLevel, steps) = SplitSteps(job);
+        jobLevel.ShouldNotContain(l => l.Contains("secrets.", StringComparison.Ordinal), "no job-level env or other job-level secret reference");
+
+        var withSecrets = steps.Where(step => step.Any(l => l.Contains("secrets.DATABRICKS_", StringComparison.Ordinal))).ToList();
+        withSecrets.Count.ShouldBe(1, "exactly one step may reference the Databricks secrets");
+        var testStep = withSecrets[0];
+        testStep[0].ShouldContain(G9TestStep);
+
+        int envAt = Array.FindIndex(testStep, l => l == "        env:");
+        int runAt = Array.FindIndex(testStep, l => l == "        run: |");
+        envAt.ShouldBeGreaterThan(0, "the live-test step declares its secrets in a step-level env block");
+        runAt.ShouldBeGreaterThan(envAt, "the secrets are declared before the run block");
+        for (int i = 0; i < testStep.Length; i++)
+        {
+            if (testStep[i].Contains("secrets.DATABRICKS_", StringComparison.Ordinal))
+            {
+                (i > envAt && i < runAt).ShouldBeTrue($"secret reference outside the step env block: {testStep[i].Trim()}");
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void G9_job_is_main_only()
+    {
+        // SEC-OI-609-1: a manual run of a branch other than main never reaches the secrets.
+        JobIf(Job(G9Workflow, G9JobName)).ShouldNotBeNull().ShouldContain("github.ref == 'refs/heads/main'");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void G9_job_uploads_no_artifacts()
+    {
+        // SEC-OI-609-3: the live log stays in RUNNER_TEMP, is never uploaded and never carries detailed verbosity.
+        string job = string.Join('\n', Job(G9Workflow, G9JobName));
+        job.ShouldNotContain("upload-artifact");
+        job.ShouldNotContain("--verbosity detailed");
+        job.ShouldContain("--verbosity normal");
+        Regex.Count(job, @"g9\.log").ShouldBeGreaterThan(0);
+        foreach (Match match in Regex.Matches(job, @"\S*g9\.log"))
+        {
+            match.Value.ShouldStartWith("\"$RUNNER_TEMP/", Case.Sensitive, "g9.log must be written under RUNNER_TEMP");
+        }
+    }
+
+    [Fact]
+    public void Every_ci_job_has_a_timeout()
+    {
+        // WP-OI-CI-6 (#523): keeps the #517 guarantee that no ci.yml job can hang for the 6 h default.
+        var lines = Read("ci.yml").Split('\n');
+        int jobsAt = Array.FindIndex(lines, l => l.TrimEnd() == "jobs:");
+        jobsAt.ShouldBeGreaterThanOrEqualTo(0);
+        var jobs = lines.Skip(jobsAt + 1).TakeWhile(l => l.Length == 0 || l[0] == ' ' || l[0] == '#').ToArray();
+        var names = jobs.Where(l => JobHeader().IsMatch(l)).Select(l => JobHeader().Match(l).Groups[1].Value).ToList();
+        names.ShouldNotBeEmpty();
+        foreach (var name in names)
+        {
+            Job("ci.yml", name).ShouldContain(l => Regex.IsMatch(l, @"^    timeout-minutes:\s*\d+"), $"ci.yml job '{name}' must declare timeout-minutes");
+        }
+    }
+
     private static string ReadBaseFilter()
     {
         string script = RepositoryScan.ReadText(".github/scripts/integration-shard-filter.py");
