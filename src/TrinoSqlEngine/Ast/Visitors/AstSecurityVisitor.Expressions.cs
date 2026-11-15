@@ -4,12 +4,19 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security;
+using TrinoSqlEngine.Ast.Buffer;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Governance;
 
 public sealed partial class AstSecurityVisitor : SqlAstRewriter
 {
+    public override SqlNode VisitLikeExpression(LikeExpression node)
+    {
+        var visited = (LikeExpression)base.VisitLikeExpression(node);
+        return LikePatternEscaper.NormalizeUserLike(visited, _options.TargetDialect, _options.MaxQueryLength);
+    }
+
     public override SqlNode VisitExistsExpression(ExistsExpression node) =>
         WithScope(SecurityScope.ExistsSubquery, () => base.VisitExistsExpression(node));
 

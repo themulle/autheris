@@ -91,7 +91,7 @@ public class PostgreSqlGeneratorTests
     public void PostgreSqlEmissionPaths_PassCheckerInBoundMode(string sql)
     {
         var c = Gen(sql);
-        Assert.DoesNotContain('\'', c.Sql.Replace("'1 day'", string.Empty).Replace("'day'", string.Empty));
+        Assert.DoesNotContain('\'', c.Sql.Replace("'1 day'", string.Empty).Replace("'day'", string.Empty).Replace(" ESCAPE '\\'", string.Empty));
         Assert.DoesNotContain(';', c.Sql);
     }
 

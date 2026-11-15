@@ -33,9 +33,9 @@ public class TypedGuardMutationTests
     private void MaskEmail() =>
         _masks.Masks[(Orders, "email")] = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
 
-    private CompiledSql Compile(string sql) => _engine.Compile(sql.AsMemory(), new CompileRequest
+    private CompiledSql Compile(string sql, TargetSqlDialect dialect = TargetSqlDialect.SqlServer) => _engine.Compile(sql.AsMemory(), new CompileRequest
     {
-        TargetDialect = TargetSqlDialect.SqlServer,
+        TargetDialect = dialect,
         AllowRecursiveCte = true,
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Statements = StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete,
@@ -73,7 +73,7 @@ public class TypedGuardMutationTests
         "id = 5 OR NOT (1 = 2 OR true)", "id = 5 OR (1 = 1) = false",
         "id = 'a' OR 'a' = amount");
 
-    public static IEnumerable<object[]> ColumnInOneChild() => Rows("'a' LIKE id", "id LIKE 'a'", "'a' LIKE 'b' ESCAPE id", "1 IN (1, amount)", "amount IN (1, 2)", "1 IN (SELECT amount FROM entitlements)", "amount IN (SELECT 1 FROM entitlements WHERE 1 = 1)",
+    public static IEnumerable<object[]> ColumnInOneChild() => Rows("id LIKE 'a'", "1 IN (1, amount)", "amount IN (1, 2)", "1 IN (SELECT amount FROM entitlements)", "amount IN (SELECT 1 FROM entitlements WHERE 1 = 1)",
         "EXISTS (SELECT amount FROM entitlements)", "(SELECT max(amount) FROM entitlements) = 1", "1 BETWEEN 0 AND id", "1 BETWEEN id AND 2", "id BETWEEN 0 AND 2",
         "CASE id WHEN 1 THEN 2 END = 2", "CASE WHEN id = 1 THEN 2 END = 2", "CASE WHEN true THEN id END = 2", "CASE WHEN true THEN 1 ELSE id END = 1",
         "coalesce(id, 1) = 1", "coalesce(1, id) = 1", "substring('abc', 1, id) = 'a'", "substring(id, 1) = 'a'", "substring('abc', id) = 'a'", "substring('abc', 1, 2) = id",
@@ -201,5 +201,16 @@ public class TypedGuardMutationTests
         string sql = Compile("TABLE entitlements").Sql;
         Assert.DoesNotContain("DISTINCT", sql, StringComparison.Ordinal);
         Assert.Contains("TenantId", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ColumnInLikePatternAndEscape_RespectDialectAndLiteralRules()
+    {
+        var pg = Compile("DELETE FROM orders WHERE 'a' LIKE id", TargetSqlDialect.PostgreSql);
+        Assert.Equal(SqlStatementClass.Delete, pg.StatementClass);
+        Assert.Contains("ESCAPE ''", pg.Sql, StringComparison.Ordinal);
+
+        Assert.Throws<SqlCompileNotSupportedException>(() => Compile("DELETE FROM orders WHERE 'a' LIKE id", TargetSqlDialect.SqlServer));
+        Assert.Throws<SqlCompileNotSupportedException>(() => Compile("DELETE FROM orders WHERE 'a' LIKE 'b' ESCAPE id", TargetSqlDialect.PostgreSql));
     }
 }

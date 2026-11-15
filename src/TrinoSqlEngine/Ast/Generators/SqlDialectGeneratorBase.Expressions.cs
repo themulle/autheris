@@ -84,11 +84,26 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                     break;
                 }
 
-                GeneratePredicateOperand(lk.Pattern, ref builder, context);
-                if (lk.Escape != null)
+                var normalized = LikePatternEscaper.NormalizeUserLike(lk, TargetDialect, maxQueryLength: null);
+                GeneratePredicateOperand(normalized.Pattern, ref builder, context);
+                if (normalized.Escape != null)
                 {
                     builder.Append(" ESCAPE ");
-                    GeneratePredicateOperand(lk.Escape, ref builder, context);
+                    GeneratePredicateOperand(normalized.Escape, ref builder, context);
+                }
+                else if (TargetDialect is TargetSqlDialect.PostgreSql or TargetSqlDialect.Databricks)
+                {
+                    builder.Append(" ESCAPE ");
+                    int escapeStart = builder.Length;
+                    builder.Append(normalized.Pattern is LiteralExpression { Type: LiteralType.String } ? "'\\'" : "''");
+                    context.RegisterConstantFragment(escapeStart, builder.Length - escapeStart);
+                }
+                else if (TargetDialect == TargetSqlDialect.SqlServer)
+                {
+                    builder.Append(" ESCAPE ");
+                    int escapeStart = builder.Length;
+                    builder.Append("'\\'");
+                    context.RegisterConstantFragment(escapeStart, builder.Length - escapeStart);
                 }
                 break;
             case InListExpression inL:

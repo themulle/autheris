@@ -1,6 +1,9 @@
 namespace TrinoSqlEngine.Ast.Buffer;
 
 using System;
+using System.Text;
+using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
@@ -12,7 +15,7 @@ internal static class LikePatternEscaper
     public static string Escape(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
-        var sb = new System.Text.StringBuilder(text.Length + 4);
+        var sb = new StringBuilder(text.Length + 4);
         foreach (char c in text)
         {
             if (c is '\\' or '%' or '_' or '[') sb.Append('\\');
@@ -30,4 +33,131 @@ internal static class LikePatternEscaper
         ParenthesizedExpression p => ContainsPolicyParameter(p.Expression),
         _ => false
     };
+
+    /// <summary>
+    /// Validates user LIKE escape clauses and normalizes dialect-sensitive user LIKE patterns in a single idempotent pass.
+    /// Preserves SQL pattern wildcards (<c>%</c> and <c>_</c>) while neutralizing dialect-specific metacharacters.
+    /// </summary>
+    public static LikeExpression NormalizeUserLike(LikeExpression like, TargetSqlDialect? dialect, int? maxQueryLength)
+    {
+        char? userEscape = ValidateUserEscape(like.Escape);
+        if (like.IsPatternNormalized || ContainsPolicyParameter(like.Pattern))
+        {
+            return like;
+        }
+
+        if (dialect == TargetSqlDialect.SqlServer && like.Pattern is not LiteralExpression { Type: LiteralType.String })
+        {
+            throw new SqlCompileNotSupportedException(
+                SqlCompileNotSupportedReason.Construct,
+                "SQL Server LIKE requires a string literal pattern");
+        }
+
+        if (like.Pattern is not LiteralExpression { Type: LiteralType.String, Value: string patternText } patternLiteral)
+        {
+            return like with { IsPatternNormalized = true };
+        }
+
+        string? rewritten = RewriteUserLiteralPattern(patternText, dialect, userEscape);
+        if (rewritten == null)
+        {
+            return like with { IsPatternNormalized = true };
+        }
+
+        if (maxQueryLength is int ceiling && rewritten.Length > ceiling)
+        {
+            throw new SqlLimitExceededException(
+                SqlLimitKind.QueryLength,
+                dialect ?? TargetSqlDialect.Ansi,
+                rewritten.Length,
+                ceiling);
+        }
+
+        return like with
+        {
+            Pattern = patternLiteral with { Value = rewritten },
+            IsPatternNormalized = true
+        };
+    }
+
+    private static char? ValidateUserEscape(Expression? escape)
+    {
+        if (escape == null)
+        {
+            return null;
+        }
+
+        if (escape is not LiteralExpression { Type: LiteralType.String, Value: string text } ||
+            text.Length != 1 ||
+            text[0] is < ' ' or > '~' ||
+            text[0] is '%' or '_')
+        {
+            throw new SqlCompileNotSupportedException(
+                SqlCompileNotSupportedReason.Construct,
+                "LIKE ESCAPE requires a single printable ASCII character literal excluding % and _");
+        }
+
+        return text[0];
+    }
+
+    private static string? RewriteUserLiteralPattern(string pattern, TargetSqlDialect? dialect, char? userEscape)
+    {
+        if (dialect == TargetSqlDialect.SqlServer)
+        {
+            return userEscape is char esc
+                ? EscapeSqlServerBracketsWithUserEscape(pattern, esc)
+                : EscapeLiteralDefault(pattern, escapeBracket: true);
+        }
+
+        if (dialect is TargetSqlDialect.PostgreSql or TargetSqlDialect.Databricks && userEscape == null)
+        {
+            return EscapeLiteralDefault(pattern, escapeBracket: false);
+        }
+
+        return null;
+    }
+
+    private static string EscapeLiteralDefault(string pattern, bool escapeBracket)
+    {
+        var sb = new StringBuilder(pattern.Length + 4);
+        foreach (char c in pattern)
+        {
+            if (c == '\\' || (escapeBracket && c == '['))
+            {
+                sb.Append('\\');
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
+    }
+
+    private static string EscapeSqlServerBracketsWithUserEscape(string pattern, char esc)
+    {
+        var sb = new StringBuilder(pattern.Length + 4);
+        for (int i = 0; i < pattern.Length; i++)
+        {
+            char c = pattern[i];
+            if (c == esc)
+            {
+                sb.Append(c);
+                if (i + 1 < pattern.Length)
+                {
+                    sb.Append(pattern[++i]);
+                }
+
+                continue;
+            }
+
+            if (c == '[')
+            {
+                sb.Append(esc);
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
+    }
 }

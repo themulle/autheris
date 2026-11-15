@@ -65,4 +65,10 @@ internal sealed record AstSecurityVisitorOptions
 
     /// <summary>When true, the root pagination offset is emitted as a bind slot (ParameterOrigin.PageOffset).</summary>
     public bool BindPageOffset { get; init; }
+
+    /// <summary>Target SQL dialect used to validate and normalize dialect-sensitive expressions.</summary>
+    public TargetSqlDialect? TargetDialect { get; init; }
+
+    /// <summary>Maximum rewritten pattern length ceiling.</summary>
+    public int MaxQueryLength { get; init; } = 65_536;
 }

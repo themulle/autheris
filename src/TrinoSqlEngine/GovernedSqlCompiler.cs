@@ -212,7 +212,7 @@ internal sealed class GovernedSqlCompiler
         Pass("inject");
         var typedLiterals = (SqlStatement)new LiteralColumnTypeAnnotator(policy.Catalog) { CancellationToken = token }.Visit(simplified);
         typedLiterals = (SqlStatement)new IntegralOperandClassifier(policy.Catalog) { CancellationToken = token }.Visit(typedLiterals);
-        var visitor = new AstSecurityVisitor(BuildOptions(request, typed), typed)
+        var visitor = new AstSecurityVisitor(BuildOptions(request, typed, _engine.MaxQueryLength), typed)
         {
             CancellationToken = token
         };
@@ -396,7 +396,7 @@ internal sealed class GovernedSqlCompiler
         return null;
     }
 
-    private static AstSecurityVisitorOptions BuildOptions(CompileRequest request, TypedPolicyContext typed)
+    private static AstSecurityVisitorOptions BuildOptions(CompileRequest request, TypedPolicyContext typed, int maxQueryLength)
     {
         var guards = typed.Dml;
         return new AstSecurityVisitorOptions
@@ -408,6 +408,8 @@ internal sealed class GovernedSqlCompiler
             EnforcedMaxRows = request.EnforcedMaxRows,
             AllowRecursiveCte = request.AllowRecursiveCte,
             BindPageOffset = request.BindPageOffset,
+            TargetDialect = request.TargetDialect,
+            MaxQueryLength = maxQueryLength,
             TablesWithConsentRowFilter = CaseInsensitive(request.Policy.TablesWithConsentRowFilter),
             WritePermit = request.Policy.Write,
             RejectMaskedColumnsInPredicates = true,

@@ -13,7 +13,7 @@ public class LiteralParameterizationTests
     {
         var c = GenerateSqlServer("SELECT id FROM t WHERE name = 'O''Brien'");
 
-        Assert.DoesNotContain('\'', c.Sql);
+        Assert.DoesNotContain('\'', c.Sql.Replace(" ESCAPE '\\'", string.Empty));
         var p = Assert.Single(c.Parameters);
         Assert.Equal("O'Brien", p.Value);
         Assert.Equal(SqlParameterType.String, p.Type);
@@ -48,7 +48,7 @@ public class LiteralParameterizationTests
     {
         var c = GenerateSqlServer("SELECT id FROM t WHERE d = DATE '2024-01-15' AND ts > TIMESTAMP '2024-01-15 10:30:00'");
 
-        Assert.DoesNotContain('\'', c.Sql);
+        Assert.DoesNotContain('\'', c.Sql.Replace(" ESCAPE '\\'", string.Empty));
         Assert.Contains("CAST(@p0 AS date)", c.Sql);
         Assert.Equal(SqlParameterType.Date, c.Parameters[0].Type);
         Assert.Equal(new DateTime(2024, 1, 15), c.Parameters[0].Value);
@@ -100,7 +100,7 @@ public class LiteralParameterizationTests
 
         var c = GenerateSqlServer(stmt);
 
-        Assert.DoesNotContain('\'', c.Sql);
+        Assert.DoesNotContain('\'', c.Sql.Replace(" ESCAPE '\\'", string.Empty));
         Assert.DoesNotContain("--", c.Sql);
         Assert.DoesNotContain(';', c.Sql);
         Assert.Equal(hostile, c.Parameters[0].Value);
@@ -145,7 +145,7 @@ public class LiteralParameterizationTests
     public void SqlServerEmissionPaths_PassCheckerInBoundMode(string sql)
     {
         var c = GenerateSqlServer(sql);
-        Assert.DoesNotContain('\'', c.Sql);
+        Assert.DoesNotContain('\'', c.Sql.Replace(" ESCAPE '\\'", string.Empty));
         Assert.DoesNotContain(';', c.Sql);
     }
 
