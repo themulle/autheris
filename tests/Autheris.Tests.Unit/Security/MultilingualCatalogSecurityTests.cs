@@ -19,7 +19,6 @@ using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Catalog;
 using Autheris.Tests.Common;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;

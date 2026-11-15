@@ -21,7 +21,6 @@ using Autheris.Extensions.Dbt;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Security;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;

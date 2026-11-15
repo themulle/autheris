@@ -7,7 +7,6 @@ using Autheris.Application.Sql.Masking;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;

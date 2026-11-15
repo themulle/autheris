@@ -918,11 +918,8 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
         public override string ServerVersion => "16.0";
         public override void Open() { }
 
-        protected override DbCommand CreateDbCommand()
-        {
-            using var sqliteCmd = new Microsoft.Data.Sqlite.SqliteCommand();
-            return new StrictDriverDbCommand(sqliteCmd, this);
-        }
+        protected override DbCommand CreateDbCommand() =>
+            new StrictDriverDbCommand(new Autheris.Tests.Unit.FakeDbCommand(), this);
     }
 
     private sealed class StrictDriverDbTransaction : DbTransaction

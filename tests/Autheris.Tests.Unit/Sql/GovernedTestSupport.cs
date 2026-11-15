@@ -80,9 +80,9 @@ internal static class DbCommandTestExtensions
 {
     public static System.Data.Common.DbCommand WireParameters(this System.Data.Common.DbCommand command)
     {
-        var inner = new Microsoft.Data.Sqlite.SqliteCommand();
-        command.Parameters.Returns(inner.Parameters);
-        command.CreateParameter().Returns(_ => inner.CreateParameter());
+        var parameters = new FakeDbParameterCollection();
+        command.Parameters.Returns(parameters);
+        command.CreateParameter().Returns(_ => new FakeDbParameter());
         return command;
     }
 
@@ -199,10 +199,10 @@ internal sealed class FakeDbTransaction(FakeDbConnection connection, System.Data
     }
 }
 
-/// <summary>A command with real parameters (a throwaway <see cref="Microsoft.Data.Sqlite.SqliteCommand"/> owns the collection).</summary>
+/// <summary>A command backed by in-memory <see cref="FakeDbParameterCollection"/> parameters (no SQLite provider dependency).</summary>
 internal class FakeDbCommand : System.Data.Common.DbCommand
 {
-    private readonly Microsoft.Data.Sqlite.SqliteCommand _parameters = new();
+    private readonly FakeDbParameterCollection _parameters = new();
     private System.Data.Common.DbConnection? _connection;
 
     public Func<System.Data.CommandBehavior, CancellationToken, Task<System.Data.Common.DbDataReader>>? OnExecuteReader { get; set; }
@@ -213,7 +213,7 @@ internal class FakeDbCommand : System.Data.Common.DbCommand
 
     internal void AttachTo(System.Data.Common.DbConnection connection) => _connection = connection;
 
-    public IEnumerable<object?> BoundValues => _parameters.Parameters.Cast<System.Data.Common.DbParameter>().Select(p => p.Value);
+    public IEnumerable<object?> BoundValues => _parameters.Cast<System.Data.Common.DbParameter>().Select(p => p.Value);
 
     [System.Diagnostics.CodeAnalysis.AllowNull]
     public override string CommandText { get; set; } = string.Empty;
@@ -228,7 +228,7 @@ internal class FakeDbCommand : System.Data.Common.DbCommand
 
     protected override System.Data.Common.DbConnection? DbConnection { get => _connection; set => _connection = value; }
 
-    protected override System.Data.Common.DbParameterCollection DbParameterCollection => _parameters.Parameters;
+    protected override System.Data.Common.DbParameterCollection DbParameterCollection => _parameters;
 
     protected override System.Data.Common.DbTransaction? DbTransaction { get; set; }
 
@@ -243,7 +243,7 @@ internal class FakeDbCommand : System.Data.Common.DbCommand
     public override Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken) =>
         OnExecuteNonQuery is { } f ? f(cancellationToken) : Task.FromResult(NonQueryResult);
 
-    protected override System.Data.Common.DbParameter CreateDbParameter() => _parameters.CreateParameter();
+    protected override System.Data.Common.DbParameter CreateDbParameter() => new FakeDbParameter();
 
     protected override System.Data.Common.DbDataReader ExecuteDbDataReader(System.Data.CommandBehavior behavior) =>
         new System.Data.DataTable().CreateDataReader();
@@ -256,4 +256,62 @@ internal class FakeDbCommand : System.Data.Common.DbCommand
 internal sealed class FakeBindByNameCommand : FakeDbCommand
 {
     public bool BindByName { get; set; }
+}
+
+internal sealed class FakeDbParameter : System.Data.Common.DbParameter
+{
+    public override System.Data.DbType DbType { get; set; }
+    public override System.Data.ParameterDirection Direction { get; set; } = System.Data.ParameterDirection.Input;
+    public override bool IsNullable { get; set; }
+    [System.Diagnostics.CodeAnalysis.AllowNull]
+    public override string ParameterName { get; set; } = string.Empty;
+    public override int Size { get; set; }
+    [System.Diagnostics.CodeAnalysis.AllowNull]
+    public override string SourceColumn { get; set; } = string.Empty;
+    public override bool SourceColumnNullMapping { get; set; }
+    public override object? Value { get; set; }
+    public override void ResetDbType() { }
+}
+
+internal sealed class FakeDbParameterCollection : System.Data.Common.DbParameterCollection
+{
+    private readonly List<System.Data.Common.DbParameter> _items = [];
+
+    public override int Count => _items.Count;
+    public override object SyncRoot => ((System.Collections.ICollection)_items).SyncRoot;
+
+    public override int Add(object value)
+    {
+        _items.Add((System.Data.Common.DbParameter)value);
+        return _items.Count - 1;
+    }
+
+    public override void AddRange(Array values)
+    {
+        foreach (System.Data.Common.DbParameter value in values)
+        {
+            _items.Add(value);
+        }
+    }
+
+    public override void Clear() => _items.Clear();
+    public override bool Contains(object value) => _items.Contains((System.Data.Common.DbParameter)value);
+    public override bool Contains(string value) => IndexOf(value) >= 0;
+    public override void CopyTo(Array array, int index) => ((System.Collections.ICollection)_items).CopyTo(array, index);
+    public override System.Collections.IEnumerator GetEnumerator() => _items.GetEnumerator();
+    public override int IndexOf(object value) => _items.IndexOf((System.Data.Common.DbParameter)value);
+    public override int IndexOf(string parameterName) => _items.FindIndex(p => string.Equals(p.ParameterName, parameterName, StringComparison.Ordinal));
+    public override void Insert(int index, object value) => _items.Insert(index, (System.Data.Common.DbParameter)value);
+    public override void Remove(object value) => _items.Remove((System.Data.Common.DbParameter)value);
+    public override void RemoveAt(int index) => _items.RemoveAt(index);
+    public override void RemoveAt(string parameterName)
+    {
+        var idx = IndexOf(parameterName);
+        if (idx >= 0) _items.RemoveAt(idx);
+    }
+
+    protected override System.Data.Common.DbParameter GetParameter(int index) => _items[index];
+    protected override System.Data.Common.DbParameter GetParameter(string parameterName) => _items[IndexOf(parameterName)];
+    protected override void SetParameter(int index, System.Data.Common.DbParameter value) => _items[index] = value;
+    protected override void SetParameter(string parameterName, System.Data.Common.DbParameter value) => _items[IndexOf(parameterName)] = value;
 }
