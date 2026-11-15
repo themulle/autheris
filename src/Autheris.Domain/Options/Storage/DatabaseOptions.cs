@@ -34,7 +34,7 @@ public sealed class SqlDataSourceOptions
 
 public sealed class DataSourceConnectionOptions
 {
-    public string Provider { get; init; } = "Sqlite"; // "Sqlite", "SqlServer", "PostgreSql"
+    public string Provider { get; init; } = string.Empty; // "SqlServer", "PostgreSql", "Oracle", "Databricks"
     public string ConnectionString { get; init; } = string.Empty;
 
     /// <summary>

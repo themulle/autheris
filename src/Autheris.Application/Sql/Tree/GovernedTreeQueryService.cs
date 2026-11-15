@@ -959,13 +959,9 @@ public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService
     private static long SaturatingAdd(long a, long b) => a > long.MaxValue - b ? long.MaxValue : a + b;
 
     /// <summary>
-    /// R-GQL-10: Microsoft.Data.Sqlite binds DateTimeOffset as "yyyy-MM-dd HH:mm:ss+00:00" (space). ISO-8601 text values
-    /// ("...T...Z") then compare wrongly, so SQLite receives the UTC value in ISO-8601 form; other providers bind natively.
+    /// R-GQL-10: Returns parameter values for native provider binding.
     /// </summary>
-    internal static object? ToProviderValue(object? value, DatabaseDialect dialect) =>
-        dialect == DatabaseDialect.Sqlite && value is DateTimeOffset dto
-            ? dto.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", System.Globalization.CultureInfo.InvariantCulture)
-            : value;
+    internal static object? ToProviderValue(object? value, DatabaseDialect dialect) => value;
 
     private static object? JsonNodeToObject(JsonNode? node)
     {

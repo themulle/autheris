@@ -278,13 +278,6 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider
                 return (null, string.Empty);
             }
 
-            // With NUMERIC or INTEGER affinity '007' and '7' compare equal: such a column cannot isolate tenants.
-            if (dialect == DatabaseDialect.Sqlite && SqliteTypeAffinity.Of(tenantCol.DataType) != SqliteAffinity.TextAffinity)
-            {
-                LogAdmissionDenied(dataSourceName, table, $"The tenant column '{governedTenant}' in SQLite must have text affinity.");
-                return (null, string.Empty);
-            }
-
             tenantColumn = tenantCol.ColumnName;
         }
 

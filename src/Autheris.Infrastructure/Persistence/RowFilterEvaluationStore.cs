@@ -98,9 +98,7 @@ internal static class RowFilterEvaluationStore
         }
         else
         {
-            var now = ReferenceEquals(dialect, CatalogKeyDefinitionStore.Sqlite)
-                ? (object)DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
-                : DateTimeOffset.UtcNow;
+            var now = DateTimeOffset.UtcNow;
             var parameters = new (string, object)[]
             {
                 ("@tid", tableId.ToString()),

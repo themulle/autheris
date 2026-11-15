@@ -51,7 +51,7 @@ public sealed class CustomQueryPollerReadOnlyTests
         codec.SerializeChange(Arg.Any<CdcChangePayload>()).Returns(new byte[16]);
         codec.SerializeImage(Arg.Any<IReadOnlyDictionary<string, object?>>()).Returns(new byte[16]);
 
-        var gatewayMonitor = CreateGatewayMonitor("src", "Sqlite");
+        var gatewayMonitor = CreateGatewayMonitor("src", "PostgreSql");
         _builder = new CdcChangeEventBuilder(_streamStore, crypto, codec, gatewayMonitor);
     }
 
@@ -152,7 +152,7 @@ public sealed class CustomQueryPollerReadOnlyTests
     {
         var initialValid = ValidPoller("src");
         var monitor = new MutableOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [initialValid] });
-        var gateway = CreateGatewayMonitor("src", "Sqlite", "Data Source=:memory:");
+        var gateway = CreateGatewayMonitor("src", "PostgreSql", "Host=localhost");
         var conn = new TrackingDbConnection("Data Source=:memory:");
         var factory = Substitute.For<IDataSourceConnectionFactory>();
         factory.CreateConnectionAsync("src", Arg.Any<CancellationToken>()).Returns(conn);
@@ -188,7 +188,7 @@ public sealed class CustomQueryPollerReadOnlyTests
     {
         var validPoller = ValidPoller("src", "SELECT id, updated_at FROM customers WHERE id > @p_wm_id");
         var monitor = new MutableOptionsMonitor<CustomQueryPollerOptions>(new CustomQueryPollerOptions { Enabled = true, Pollers = [validPoller] });
-        var gateway = CreateGatewayMonitor("src", "Sqlite", "Data Source=:memory:");
+        var gateway = CreateGatewayMonitor("src", "PostgreSql", "Host=localhost");
 
         var conn = new TrackingDbConnection("Data Source=:memory:");
         var factory = Substitute.For<IDataSourceConnectionFactory>();

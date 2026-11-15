@@ -19,7 +19,7 @@ public sealed class DialectAdmissionTests
     [Fact]
     public void Admission_ExactSet()
     {
-        // The admitted set is exactly these four. DuckDB, Sqlite, and Ansi are not admitted: a change of this list is a
+        // The admitted set is exactly these four. DuckDB and Ansi are not admitted: a change of this list is a
         // security decision (CODEOWNERS on DialectCapabilityTable.cs) and must change this test in the same commit.
         Enum.GetValues<DatabaseDialect>().Where(SqlDialectMapper.IsExecutable)
             .ShouldBe([DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Oracle, DatabaseDialect.Databricks], ignoreOrder: true);
@@ -33,8 +33,6 @@ public sealed class DialectAdmissionTests
                 .Where(d => SqlDialectMapper.TryToTargetDialect(d, out var t) && t == target)
                 .ShouldAllBe(d => !SqlDialectMapper.IsExecutable(d));
         }
-
-        SqlDialectMapper.IsExecutable(DatabaseDialect.Sqlite).ShouldBeFalse();
     }
 
     [Fact]

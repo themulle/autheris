@@ -180,7 +180,7 @@ public sealed class Issue390ReadOrderDirectionTests
     [Fact]
     public void UndeclaredDirection_SqlByteIdentical()
     {
-        foreach (var dialect in new[] { DatabaseDialect.SqlServer, DatabaseDialect.PostgreSql, DatabaseDialect.Sqlite })
+        foreach (var dialect in new[] { DatabaseDialect.SqlServer, DatabaseDialect.PostgreSql })
         {
             var baseline = Compile(Meta(["device_id", "ts"]), dialect);
             Compile(Meta(["device_id", "ts"], [Asc, Asc]), dialect).ShouldBe(baseline);

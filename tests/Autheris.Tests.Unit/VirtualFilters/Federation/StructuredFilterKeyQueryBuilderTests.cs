@@ -42,18 +42,6 @@ public sealed class StructuredFilterKeyQueryBuilderTests
     };
 
     [Fact]
-    public void Sqlite_DavidCase_SelectsDistinctKeysWithJoinConditionAndLimit()
-    {
-        var query = StructuredFilterKeyQueryBuilder.Build(David(), DatabaseDialect.Sqlite, NoTenantColumns, "tenant_lwe", maxRows: 11);
-
-        query.Sql.ShouldBe(
-            "SELECT DISTINCT \"client\".\"client_id\" AS \"client_id\" FROM \"client\" AS \"client\" " +
-            "INNER JOIN \"crane\" AS \"crane\" ON \"crane\".\"serial_number\" = \"client\".\"crane_serial_number\" " +
-            "WHERE \"crane\".\"is_delivered\" IS NULL AND \"client\".\"client_id\" IS NOT NULL LIMIT 11");
-        query.Parameters.ShouldBeEmpty();
-    }
-
-    [Fact]
     public void SqlServer_DavidCase_UsesTopAndBrackets()
     {
         var query = StructuredFilterKeyQueryBuilder.Build(David(), DatabaseDialect.SqlServer, NoTenantColumns, "tenant_lwe", maxRows: 50_001);
@@ -95,7 +83,7 @@ public sealed class StructuredFilterKeyQueryBuilderTests
             Structured = AllOperators().Structured! with { Where = [new FilterCondition("a.owner", FilterConditionOperator.Eq, "x' OR '1'='1")] }
         };
 
-        foreach (var dialect in new[] { DatabaseDialect.Sqlite, DatabaseDialect.SqlServer, DatabaseDialect.PostgreSql })
+        foreach (var dialect in new[] { DatabaseDialect.SqlServer, DatabaseDialect.PostgreSql })
         {
             var query = StructuredFilterKeyQueryBuilder.Build(filter, dialect, new Dictionary<string, string> { ["a"] = "tenant_id" }, "tenant_secret_value", 10);
 

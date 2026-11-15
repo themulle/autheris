@@ -74,7 +74,7 @@ public sealed class OracleRuntimeTests
     [InlineData(DatabaseDialect.Oracle, "gql_limit", ":gql_limit", "gql_limit")]
     [InlineData(DatabaseDialect.SqlServer, "gql_limit", "@gql_limit", "@gql_limit")]
     [InlineData(DatabaseDialect.PostgreSql, "gql_limit", "@gql_limit", "@gql_limit")]
-    [InlineData(DatabaseDialect.Sqlite, "gql_limit", "@gql_limit", "@gql_limit")]
+    [InlineData(DatabaseDialect.Databricks, "gql_limit", "@gql_limit", "@gql_limit")]
     public void ParameterMarker_IsDialectAware(DatabaseDialect dialect, string name, string marker, string parameterName)
     {
         dialect.FormatParameterMarker(name).ShouldBe(marker);

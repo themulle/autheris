@@ -44,7 +44,7 @@ public sealed class TreeRequiredFilterBeforePolicyDenialTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    [SecuredTreeHarness.DataSource] = new() { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" }
+                    [SecuredTreeHarness.DataSource] = new() { Provider = "PostgreSql", ConnectionString = "Host=localhost;Database=test;" }
                 }
             }
         };

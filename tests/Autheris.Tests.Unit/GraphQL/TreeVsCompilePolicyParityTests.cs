@@ -44,7 +44,7 @@ public sealed class TreeVsCompilePolicyParityTests : IDisposable
     private static TableMetadata OrdersMeta(bool masked) => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "shop", SchemaName = "main", TableName = "orders", SourceType = "Sqlite" },
+        Table = new Table { SourceName = "shop", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql" },
         PrimaryKeyColumns = ["id"],
         Columns =
         [
@@ -81,10 +81,10 @@ public sealed class TreeVsCompilePolicyParityTests : IDisposable
             [Orders] = new(OrdersMeta(masked), decision, "tenant_id", tenant)
         };
         var root = new TreeQueryNode(Orders, ["id", "email"]) { OrderBy = [new TreeOrder("id")], Limit = 100 };
-        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql);
 
         using var cmd = _connection.CreateCommand();
-        cmd.CommandText = compiled.Sql;
+        cmd.CommandText = Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection.TranslateSql(compiled.Sql);
         foreach (var (name, value) in compiled.Parameters)
         {
             cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);

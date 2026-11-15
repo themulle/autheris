@@ -53,7 +53,6 @@ public sealed class StructuredFilterSqlTests : IDisposable
 
     [Theory]
     [InlineData(DatabaseDialect.PostgreSql, "EXISTS (SELECT 1 FROM \"conf\".\"client\" AS \"client\" INNER JOIN \"md\".\"crane\" AS \"crane\" ON \"crane\".\"serial_number\" = \"client\".\"crane_serial_number\" WHERE \"crane\".\"is_delivered\" IS NULL AND \"client\".\"client_id\" = \"autheris_target\".\"client_id\")")]
-    [InlineData(DatabaseDialect.Sqlite, "EXISTS (SELECT 1 FROM \"client\" AS \"client\" INNER JOIN \"crane\" AS \"crane\" ON \"crane\".\"serial_number\" = \"client\".\"crane_serial_number\" WHERE \"crane\".\"is_delivered\" IS NULL AND \"client\".\"client_id\" = \"autheris_target\".\"client_id\")")]
     public void OtherDialects_UseExists(DatabaseDialect dialect, string expected)
     {
         Build(dialect).ShouldBe(expected);
@@ -149,6 +148,12 @@ public sealed class StructuredFilterSqlTests : IDisposable
     {
         await using var conn = new SqliteConnection($"Data Source={_dbPath}");
         await conn.OpenAsync();
+        foreach (var schema in new[] { "conf", "md" })
+        {
+            await using var attach = conn.CreateCommand();
+            attach.CommandText = $"ATTACH DATABASE '{_dbPath.Replace("'", "''")}' AS {schema};";
+            await attach.ExecuteNonQueryAsync();
+        }
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $"SELECT id FROM air1 AS autheris_target WHERE ({predicate})";
         var ids = new List<long>();
@@ -180,22 +185,22 @@ INSERT INTO air1 VALUES
     }
 
     [Fact]
-    public async Task Sqlite_OnlyRowsOfUndeliveredCranesAreVisible()
+    public async Task PostgreSql_OnlyRowsOfUndeliveredCranesAreVisible()
     {
         Seed();
 
-        var ids = await ReadAir1IdsAsync(Build(DatabaseDialect.Sqlite));
+        var ids = await ReadAir1IdsAsync(Build(DatabaseDialect.PostgreSql));
 
         ids.ShouldBe([11L, 12L, 13L]);   // client 2 and 3 (undelivered); never client 1 (delivered), 4 (no crane) or NULL
     }
 
     [Fact]
-    public async Task Sqlite_ValidityWindow_CutsAtTheDeliveryDate()
+    public async Task PostgreSql_ValidityWindow_CutsAtTheDeliveryDate()
     {
         Seed();
         var window = David with { ValidToColumn = "crane.date_of_delivery" };
 
-        var ids = await ReadAir1IdsAsync(Build(DatabaseDialect.Sqlite, window, Binding with { TimeColumn = "ts" }));
+        var ids = await ReadAir1IdsAsync(Build(DatabaseDialect.PostgreSql, window, Binding with { TimeColumn = "ts" }));
 
         ids.ShouldBe([11L, 12L]);   // client 3: the row one minute after 2026-06-01 is cut off
     }

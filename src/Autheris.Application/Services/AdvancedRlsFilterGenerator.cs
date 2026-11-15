@@ -97,7 +97,6 @@ public static partial class AdvancedRlsFilterGenerator
         {
             DatabaseDialect.SqlServer => $"[{table.Schema}].[{table.TableName}]",
             DatabaseDialect.PostgreSql => $"\"{table.Schema}\".\"{table.TableName}\"",
-            DatabaseDialect.Sqlite => $"\"{table.TableName}\"",
             DatabaseDialect.Databricks => $"`{table.Schema}`.`{table.TableName}`",
             DatabaseDialect.Oracle => $"\"{table.Schema}\".\"{table.TableName}\"",
             _ => $"\"{table.Schema}\".\"{table.TableName}\""

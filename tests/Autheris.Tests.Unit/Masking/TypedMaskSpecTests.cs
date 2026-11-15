@@ -115,7 +115,7 @@ public sealed class TypedMaskSpecTests
     [InlineData("MASK_IBAN", "****")]
     public void MaskSpec_EmailAndIban_AreConstantRedact_NeverRevealingCharactersOrLength(string ruleType, string constant)
     {
-        foreach (var dialect in new[] { DatabaseDialect.Sqlite, DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Oracle })
+        foreach (var dialect in new[] { DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Oracle })
         {
             var spec = Spec(new MaskingRule { RuleType = ruleType }, dialect: dialect);
 
@@ -123,15 +123,6 @@ public sealed class TypedMaskSpecTests
             Value(spec, spec.Arguments.Constant).ShouldBe(constant);
             EveryParameterIsDeclaredMaskValue(spec);
         }
-    }
-
-    [Fact]
-    public void MaskSpec_PartialMask_OnSqlite_IsRedactedBecauseTheLegacyOutputHadConstantLength()
-    {
-        var spec = Spec(new MaskingRule { RuleType = "PARTIAL_MASK", KeepPrefix = 2, KeepSuffix = 3, MaskChar = '#' }, dialect: DatabaseDialect.Sqlite);
-
-        spec.Kind.ShouldBe(MaskKind.Redact);
-        Value(spec, spec.Arguments.Constant).ShouldBe("#####");
     }
 
     [Theory]

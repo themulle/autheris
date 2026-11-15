@@ -314,3 +314,4 @@ Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_ParameterTypeIsPa
 Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_SameDecision_SameFingerprint,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
 Autheris.Tests.Unit.Analytics.NoisyCacheKeyTests.NoisyCacheKey_SameInputs_SameKey,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
 Autheris.Tests.Unit.Security.Issue112SecurityConditionsTests.T_SEC_DATA112_08_NoisyCacheKeyParameterAndDecisionBinding,feature deleted (WP-SIMPL-50; NoisyCacheKey DP leftover deleted),Security
+Autheris.Tests.Unit.DataApi.FixedExecutor.I405_T_11_Sqlite_NeverRefused_NoFamily,feature deleted (WP-SIMPL-31; SQLite data source dialect removed),Security

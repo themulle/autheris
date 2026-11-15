@@ -13,7 +13,6 @@ using Npgsql;
 
 internal enum IdentityStoreDialect
 {
-    Sqlite,
     PostgreSql,
     SqlServer
 }
@@ -36,7 +35,6 @@ internal sealed partial class IdentityStore(
 
     private SqlDialect Sql => dialect switch
     {
-        IdentityStoreDialect.Sqlite => SqlDialect.Sqlite,
         IdentityStoreDialect.PostgreSql => SqlDialect.PostgreSql,
         _ => SqlDialect.SqlServer
     };
@@ -367,7 +365,7 @@ internal sealed partial class IdentityStore(
         await using var scope = await open(true, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
         var now = DialectValueCodec.Ts(Sql, DateTimeOffset.UtcNow);
-        if (dialect == IdentityStoreDialect.Sqlite || dialect == IdentityStoreDialect.PostgreSql)
+        if (dialect == IdentityStoreDialect.PostgreSql)
         {
             cmd.CommandText = "INSERT INTO IDENTITY_GROUP_MEMBERS (tenant_id, realm_id, group_id, user_key, created_at) VALUES (@tenantId, @realmId, @groupId, @userKey, @createdAt) ON CONFLICT DO NOTHING";
         }
@@ -540,7 +538,7 @@ LEFT JOIN IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
-        if (dialect == IdentityStoreDialect.Sqlite || dialect == IdentityStoreDialect.PostgreSql)
+        if (dialect == IdentityStoreDialect.PostgreSql)
         {
             cmd.CommandText = "INSERT INTO IDENTITY_GROUP_NESTING (tenant_id, realm_id, parent_group_id, child_group_id) VALUES (@tenantId, @realmId, @parentGroupId, @childGroupId) ON CONFLICT DO NOTHING";
         }
@@ -634,7 +632,7 @@ INSERT INTO dbo.IDENTITY_GROUP_NESTING (tenant_id, realm_id, parent_group_id, ch
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
-        if (dialect == IdentityStoreDialect.Sqlite || dialect == IdentityStoreDialect.PostgreSql)
+        if (dialect == IdentityStoreDialect.PostgreSql)
         {
             cmd.CommandText = @"INSERT INTO SCIM_REALM_SYNC_STATE (tenant_id, realm_id, last_contact_at, last_write_at, deprovision_epoch)
 VALUES (@tenantId, @realmId, @lastContactAt, @lastWriteAt, 0)
@@ -683,7 +681,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, last_contact_at, last_write_a
     {
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        if (dialect == IdentityStoreDialect.Sqlite || dialect == IdentityStoreDialect.PostgreSql)
+        if (dialect == IdentityStoreDialect.PostgreSql)
         {
             cmd.CommandText = @"INSERT INTO SCIM_REALM_SYNC_STATE (tenant_id, realm_id, deprovision_epoch)
 VALUES (@tenantId, @realmId, 1)
@@ -715,7 +713,7 @@ OUTPUT INSERTED.deprovision_epoch;";
         var createdAt = user.CreatedAt ?? now;
         var updatedAt = user.UpdatedAt ?? now;
 
-        if (dialect == IdentityStoreDialect.Sqlite || dialect == IdentityStoreDialect.PostgreSql)
+        if (dialect == IdentityStoreDialect.PostgreSql)
         {
             cmd.CommandText = @"INSERT INTO IDENTITY_USERS (tenant_id, realm_id, user_key, external_id, user_name, email, display_name, active, deactivated_at, created_at, updated_at, object_sid, immutable_id, upn, entra_object_id)
 VALUES (@tenantId, @realmId, @userKey, @externalId, @userName, @email, @displayName, @active, @deactivatedAt, @createdAt, @updatedAt, @objectSid, @immutableId, @upn, @entraObjectId)
@@ -779,7 +777,7 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, user_key, external_id, user_n
         var createdAt = group.CreatedAt ?? DateTimeOffset.UtcNow;
         var updatedAt = group.UpdatedAt ?? createdAt;
 
-        if (dialect == IdentityStoreDialect.Sqlite || dialect == IdentityStoreDialect.PostgreSql)
+        if (dialect == IdentityStoreDialect.PostgreSql)
         {
             cmd.CommandText = @"INSERT INTO IDENTITY_GROUPS (tenant_id, realm_id, group_id, external_id, display_name, created_at, updated_at, object_sid)
 VALUES (@tenantId, @realmId, @groupId, @externalId, @displayName, @createdAt, @updatedAt, @objectSid)

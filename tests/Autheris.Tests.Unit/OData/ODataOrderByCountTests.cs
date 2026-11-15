@@ -43,7 +43,7 @@ public sealed class ODataOrderByCountTests : IDisposable
     private static TableMetadata InvoiceMetadata(DataSourceType type = DataSourceType.Sql) => new()
     {
         Identifier = Invoices,
-        Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "invoices", DataSourceType = type, SourceType = "Sqlite" },
+        Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "invoices", DataSourceType = type, SourceType = "PostgreSql" },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "integer" },

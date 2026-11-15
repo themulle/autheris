@@ -226,7 +226,7 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
     {
         public int Calls { get; private set; }
         public int GetMaxParameters(DatabaseDialect dialect) => chunkSize * 3 + 50;
-        public int CalculateEffectiveChunkSize(int defaultChunkSize, int keyColumnCount, int contextParameterCount = 0, DatabaseDialect dialect = DatabaseDialect.Sqlite, int safetyBuffer = 50)
+        public int CalculateEffectiveChunkSize(int defaultChunkSize, int keyColumnCount, int contextParameterCount = 0, DatabaseDialect dialect = DatabaseDialect.SqlServer, int safetyBuffer = 50)
         {
             Calls++;
             return Math.Min(defaultChunkSize, chunkSize);

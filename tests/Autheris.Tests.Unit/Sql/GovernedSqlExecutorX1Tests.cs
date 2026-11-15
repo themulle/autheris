@@ -388,42 +388,6 @@ public sealed class GovernedSqlExecutorX1Tests
         guard.Timeouts.ShouldBe([TimeSpan.FromSeconds(7), TimeSpan.FromSeconds(7)]);
     }
 
-    [Fact]
-    public async Task AnExpensiveStatement_OnRealSqlite_IsInterruptedWithinTheTimeoutPlusOneSecond_AsATimeout()
-    {
-        // A three-way cross join of 1500 rows (3.4 billion row combinations): without the guard the statement runs for minutes
-        // (SQLite has no server-side timeout; CommandTimeout is only a busy timeout). The guard interrupts it after the 1 s budget.
-        const string Sql = "SELECT count(*) FROM orders a, orders b, orders c WHERE a.id + b.id + c.id > 0";
-        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "x1-guard-" + Guid.NewGuid().ToString("N") + ".db");
-        try
-        {
-            var connectionString = $"Data Source={path}";
-            await using (var setup = new Microsoft.Data.Sqlite.SqliteConnection(connectionString))
-            {
-                await setup.OpenAsync();
-                await using var create = setup.CreateCommand();
-                create.CommandText = "CREATE TABLE orders (id INTEGER, amount REAL, tenant_id TEXT); " +
-                    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1500) INSERT INTO orders SELECT i, 1, 'tenant_a' FROM n;";
-                await create.ExecuteNonQueryAsync();
-            }
-
-            await using var conn = new Microsoft.Data.Sqlite.SqliteConnection(connectionString);
-            await conn.OpenAsync();
-            var guard = new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard();
-            await Should.ThrowAsync<TimeoutException>(() => guard.RunAsync(conn, TimeSpan.FromSeconds(1), async () =>
-            {
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandText = Sql;
-                return await cmd.ExecuteScalarAsync(CancellationToken.None);
-            }, CancellationToken.None)).WaitAsync(WaitHelper.HangGuard);
-        }
-        finally
-        {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-            try { System.IO.File.Delete(path); } catch { /* best effort */ }
-        }
-    }
-
     // -------------------------------------------------------------------------------------------------------------------
     // X1.2: provider errors
     // -------------------------------------------------------------------------------------------------------------------

@@ -45,7 +45,7 @@ public sealed class ODataFilterPushdownTests : IDisposable
     private static TableMetadata OrderMetadata(DataSourceType type = DataSourceType.Sql) => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", DataSourceType = type, SourceType = "Sqlite" },
+        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", DataSourceType = type, SourceType = "PostgreSql" },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "integer" },
@@ -106,7 +106,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task SqlExecutor_PushesDownFilter_AndFiltersRowsInDatabase()
     {
         CreateDatabase();
-        var filter = ODataFilterParser.Parse("status eq 'completed' and amount gt 300", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("status eq 'completed' and amount gt 300", DatabaseDialect.PostgreSql);
         var context = Context(filter, count: true);
 
         var rows = await CreateSqliteExecutor().ExecuteAsync(context);
@@ -122,7 +122,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task SqlExecutor_FilterWithContains_TranslatesToLike()
     {
         CreateDatabase();
-        var filter = ODataFilterParser.Parse("contains(status, 'com')", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("contains(status, 'com')", DatabaseDialect.PostgreSql);
         var context = Context(filter);
 
         var rows = await CreateSqliteExecutor().ExecuteAsync(context);
@@ -136,7 +136,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task SqlExecutor_FilteringOnMaskedColumn_ZeroTrust_ThrowsSecurityException()
     {
         CreateDatabase();
-        var filter = ODataFilterParser.Parse("card_number eq '4111-1111'", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("card_number eq '4111-1111'", DatabaseDialect.PostgreSql);
         var context = Context(filter);
 
         var ex = await Should.ThrowAsync<ArgumentException>(() => CreateSqliteExecutor().ExecuteAsync(context));
@@ -172,7 +172,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task Gateway_PassesFilterToExecutor_WhenColumnIsClear()
     {
         var (service, executor) = Gateway();
-        var filter = ODataFilterParser.Parse("status eq 'completed'", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("status eq 'completed'", DatabaseDialect.PostgreSql);
 
         await service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter));
@@ -186,7 +186,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task Gateway_FilteringOnMaskedColumn_ZeroTrust_ThrowsGatewayInvalidQueryException()
     {
         var (service, executor) = Gateway();
-        var filter = ODataFilterParser.Parse("card_number eq '4111'", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("card_number eq '4111'", DatabaseDialect.PostgreSql);
 
         var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() => service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter)));
@@ -199,7 +199,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task Gateway_FilteringOnNonExistentColumn_ThrowsGatewayInvalidQueryException()
     {
         var (service, executor) = Gateway();
-        var filter = ODataFilterParser.Parse("non_existent eq 'foo'", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("non_existent eq 'foo'", DatabaseDialect.PostgreSql);
 
         var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() => service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter)));
@@ -212,7 +212,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     public async Task Gateway_NonSqlSource_ThrowsGatewayNotImplementedException()
     {
         var (service, _) = Gateway(DataSourceType.HttpDeclarative);
-        var filter = ODataFilterParser.Parse("status eq 'completed'", DatabaseDialect.Sqlite);
+        var filter = ODataFilterParser.Parse("status eq 'completed'", DatabaseDialect.PostgreSql);
 
         await Should.ThrowAsync<GatewayNotImplementedException>(() => service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter)));

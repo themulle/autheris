@@ -11,7 +11,6 @@ namespace Autheris.Tests.Unit.Audit;
 public sealed class ConsumerAggregationSqlTests
 {
     [Theory]
-    [InlineData("Sqlite")]
     [InlineData("PostgreSql")]
     [InlineData("SqlServer")]
     [Trait("Category", "Security")]
@@ -59,15 +58,6 @@ public sealed class ConsumerAggregationSqlTests
         sql.QueryNameUpsert.ShouldContain("MERGE dbo.CONSUMER_APP_");
         sql.QueryNameUpsert.ShouldContain("WITH (HOLDLOCK)");
         sql.QueryNameUpsert.ShouldNotContain("ON CONFLICT");
-    }
-
-    [Fact]
-    public void Upsert_Sqlite_IsUnchanged()
-    {
-        var sql = ConsumerAggregationSql.For(ConsumerAggregationDialect.Sqlite);
-
-        sql.QueryNameUpsert.ShouldContain("calls = calls + excluded.calls");
-        sql.QueryNameUpsert.ShouldNotContain("CONSUMER_APP_QUERYNAME_DAILY.calls");
     }
 
     [Fact]

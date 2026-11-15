@@ -49,9 +49,6 @@ public sealed class ProcedureRowScopeKeyClosureTests
     [InlineData(
         DatabaseDialect.PostgreSql,
         "SELECT \"order_id\" FROM \"sales\".\"orders\" AS \"autheris_target\" WHERE ((\"order_id\" = @rs_0_0) OR (\"order_id\" = @rs_1_0)) GROUP BY \"order_id\" HAVING COUNT(*) = SUM(CASE WHEN \"tenant_id\" = @rs_tenant AND (\"autheris_target\".\"status\" = 'open') THEN 1 ELSE 0 END)")]
-    [InlineData(
-        DatabaseDialect.Sqlite,
-        "SELECT \"order_id\" FROM \"orders\" AS \"autheris_target\" WHERE ((\"order_id\" = @rs_0_0) OR (\"order_id\" = @rs_1_0)) GROUP BY \"order_id\" HAVING COUNT(*) = SUM(CASE WHEN \"tenant_id\" = @rs_tenant AND (\"autheris_target\".\"status\" = 'open') THEN 1 ELSE 0 END)")]
     public void BuildKeyQuery_GroupsByKey_HavingAllRowsPassFilterAndTenant(DatabaseDialect dialect, string expectedSql)
     {
         string filter = dialect switch

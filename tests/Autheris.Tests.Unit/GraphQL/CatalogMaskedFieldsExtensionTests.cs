@@ -208,7 +208,7 @@ public sealed class CatalogMaskedFieldsExtensionTests
         var customers = new TableMetadata
         {
             Identifier = Customers,
-            Table = new Table { SourceName = "sales", SchemaName = "dbo", TableName = "customers", SourceType = "Sqlite" },
+            Table = new Table { SourceName = "sales", SchemaName = "dbo", TableName = "customers", SourceType = "PostgreSql" },
             PrimaryKeyColumns = ["id"],
             Columns =
             [
@@ -219,7 +219,7 @@ public sealed class CatalogMaskedFieldsExtensionTests
         var orders = new TableMetadata
         {
             Identifier = Orders,
-            Table = new Table { SourceName = "sales", SchemaName = "dbo", TableName = "orders", SourceType = "Sqlite" },
+            Table = new Table { SourceName = "sales", SchemaName = "dbo", TableName = "orders", SourceType = "PostgreSql" },
             PrimaryKeyColumns = ["order_id"],
             Columns =
             [

@@ -58,7 +58,7 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
         var metadata = new TableMetadata
         {
             Identifier = new TableIdentifier("erp", "main", "invoices"),
-            Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "invoices", DataSourceType = DataSourceType.Sql, SourceType = "Sqlite" },
+            Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "invoices", DataSourceType = DataSourceType.Sql, SourceType = "PostgreSql" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "integer" },

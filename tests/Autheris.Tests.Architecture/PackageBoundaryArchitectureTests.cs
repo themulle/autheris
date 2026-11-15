@@ -167,4 +167,27 @@ public sealed class PackageBoundaryArchitectureTests
         accessDecisionPointCallers.ShouldNotBeEmpty(
             "Positive control: IcebergRestCatalogFederationService in Autheris.Modules.Lakehouse must invoke IAccessDecisionPoint.DecideAsync.");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void No_Microsoft_Data_Sqlite_reference()
+    {
+        var files = RepositoryScan.EnumerateFiles("", "*.csproj")
+            .Concat(RepositoryScan.EnumerateFiles("", "packages.lock.json"))
+            .Where(path => path.StartsWith("src/", StringComparison.Ordinal) ||
+                           path.StartsWith("modules/", StringComparison.Ordinal));
+        var violations = new System.Collections.Generic.List<string>();
+
+        foreach (var relativePath in files)
+        {
+            var content = System.IO.File.ReadAllText(System.IO.Path.Combine(RepositoryScan.RepoRoot, relativePath));
+            if (content.Contains("Microsoft.Data.Sqlite", StringComparison.OrdinalIgnoreCase) ||
+                content.Contains("SQLitePCLRaw", StringComparison.OrdinalIgnoreCase))
+            {
+                violations.Add($"{relativePath}: references Microsoft.Data.Sqlite");
+            }
+        }
+
+        violations.ShouldBeEmpty("Production projects under src/ and modules/ must not reference Microsoft.Data.Sqlite.");
+    }
 }

@@ -109,7 +109,6 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     [Theory]
     [InlineData("PostgreSQL")]
     [InlineData("SqlServer")]
-    [InlineData("Sqlite")]
     public async Task UnsupportedConstruct_IsAClientError_NotServerError(string sourceType)
     {
         // X1: the engine's typed exception propagates and every error surface maps it (422 SQL_CONSTRUCT_NOT_SUPPORTED, fixed message).
@@ -124,7 +123,6 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     [Theory]
     [InlineData("PostgreSQL")]
     [InlineData("SqlServer")]
-    [InlineData("Sqlite")]
     public async Task ReservedIdentifier_IsAStableClientError_NotADefect(string sourceType)
     {
         // Phase 5 L3: a column named like a gateway alias is a 400 with its own code and raises no invariant alarm.
@@ -140,7 +138,6 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     [Theory]
     [InlineData("PostgreSQL", "COALESCE(\"amount\", ")]
     [InlineData("SqlServer", "COALESCE([amount], ")]
-    [InlineData("Sqlite", "COALESCE(\"amount\", ")]
     public async Task Aggregates_AndBuiltins_AreEmittedUnquoted(string sourceType, string coalesce)
     {
         var compiled = await CompileAsync(sourceType, "SELECT dept, COUNT(*) AS n, SUM(COALESCE(amount, 0)) FROM orders GROUP BY dept HAVING COUNT(*) > 1");
@@ -157,7 +154,6 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     [Theory]
     [InlineData("PostgreSQL")]
     [InlineData("SqlServer")]
-    [InlineData("Sqlite")]
     public async Task ClientParameters_AreCompiledAsNamedClientBinds(string sourceType)
     {
         // Wunsch 4, Phase 2: @name → __param_name → AST → a ClientNamed bind that the binder fills by its own source name per request.
@@ -192,7 +188,6 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     [Theory]
     [InlineData("PostgreSQL")]
     [InlineData("SqlServer")]
-    [InlineData("Sqlite")]
     public async Task ParameterizedConsentRowFilter_IsApplied(string sourceType)
     {
         var service = CreateService(sourceType, new ConsentRowFilter { ColumnName = "dept", Operator = "EQ", ValueType = "string", ValueJson = "\"Sales\"" });

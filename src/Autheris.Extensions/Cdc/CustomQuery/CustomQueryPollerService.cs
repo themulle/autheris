@@ -629,14 +629,6 @@ public class CustomQueryPollerService : ClusterPartitionedService
                 return transaction;
             }
 
-            case DatabaseDialect.Sqlite:
-            {
-                await using var pragma = conn.CreateCommand();
-                pragma.CommandText = "PRAGMA query_only = ON;";
-                await pragma.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                return null;
-            }
-
             case DatabaseDialect.Databricks:
             default:
                 throw new NotSupportedException($"Database dialect '{dialect}' is not supported for read-only custom query polling.");

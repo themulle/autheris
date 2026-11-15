@@ -17,7 +17,7 @@ public sealed class TreeSqlCompilerDefaultOrderingTests
     private static TableMetadata Meta(TableIdentifier id, IReadOnlyList<string> pk, params string[] cols) => new()
     {
         Identifier = id,
-        Table = new Table { SourceName = "d", SchemaName = "main", TableName = id.TableName, SourceType = "Sqlite" },
+        Table = new Table { SourceName = "d", SchemaName = "main", TableName = id.TableName, SourceType = "PostgreSql" },
         PrimaryKeyColumns = pk,
         Columns = cols.Select(c => new TableColumn { ColumnName = c, DataType = "integer" }).ToList()
     };
@@ -29,7 +29,7 @@ public sealed class TreeSqlCompilerDefaultOrderingTests
             hasUnconstrainedColumnAllow: true));
 
     private static string Compile(TreeQueryNode root, params TreeTableAccess[] access) =>
-        TreeSqlCompiler.Compile(root, access.ToDictionary(a => a.Metadata.Identifier), DatabaseDialect.Sqlite).Sql;
+        TreeSqlCompiler.Compile(root, access.ToDictionary(a => a.Metadata.Identifier), DatabaseDialect.PostgreSql).Sql;
 
     [Fact]
     public void MaskedKey_SkippedToNextCandidate()

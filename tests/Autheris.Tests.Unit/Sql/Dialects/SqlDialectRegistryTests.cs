@@ -28,7 +28,6 @@ public sealed class SqlDialectRegistryTests
 
         all.Count.ShouldBe(4);
         registry.TryGetByName("sqlite", out _).ShouldBeFalse();
-        Should.Throw<NotSupportedException>(() => registry.GetProvider(DatabaseDialect.Sqlite));
 
         foreach (var dialect in new[] { DatabaseDialect.SqlServer, DatabaseDialect.PostgreSql, DatabaseDialect.Oracle, DatabaseDialect.Databricks })
         {

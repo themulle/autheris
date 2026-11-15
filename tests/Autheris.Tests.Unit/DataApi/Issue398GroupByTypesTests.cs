@@ -89,10 +89,6 @@ public sealed class Issue398GroupByTypesTests
     [InlineData(DatabaseDialect.Databricks, "MAP<STRING,INT>", false)]
     [InlineData(DatabaseDialect.Databricks, "binary", false)]
     [InlineData(DatabaseDialect.Databricks, "mystery", false)]
-    [InlineData(DatabaseDialect.Sqlite, "TEXT", true)]
-    [InlineData(DatabaseDialect.Sqlite, "BLOB", true)]
-    [InlineData(DatabaseDialect.Sqlite, "mystery", true)]
-    [InlineData(DatabaseDialect.Sqlite, "", true)]
     public void I398_T_01_IsGroupableType_Matrix_PerDialect_AllowsOnlyDocumentedTypes(DatabaseDialect dialect, string? type, bool expected) =>
         DefaultReadOrdering.IsGroupableType(type, dialect).ShouldBe(expected);
 

@@ -30,7 +30,7 @@ public sealed class SqlaTreeSecurityTests
             SourceName = "analytics",
             SchemaName = "main",
             TableName = "audit_logs",
-            SourceType = "Sqlite",
+            SourceType = "PostgreSql",
             RequiredFilterColumns = [.. (requiredFilterColumns ?? [])]
         },
         PrimaryKeyColumns = ["id"],
@@ -46,7 +46,7 @@ public sealed class SqlaTreeSecurityTests
     {
         var access = new Dictionary<TableIdentifier, TreeTableAccess> { [Logs] = new(LogsMeta(required), decision) };
         var root = new TreeQueryNode(Logs, ["id", "action"]) { Where = where, Limit = 10 };
-        return TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite);
+        return TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql);
     }
 
     private static TableAccessDecision Decision() =>

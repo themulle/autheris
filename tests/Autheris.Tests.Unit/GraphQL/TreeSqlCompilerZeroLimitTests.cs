@@ -19,7 +19,7 @@ public sealed class TreeSqlCompilerZeroLimitTests
             new TableMetadata
             {
                 Identifier = Logs,
-                Table = new Table { SourceName = "analytics", SchemaName = "main", TableName = "audit_logs", SourceType = "Sqlite" },
+                Table = new Table { SourceName = "analytics", SchemaName = "main", TableName = "audit_logs", SourceType = "PostgreSql" },
                 PrimaryKeyColumns = ["id"],
                 Columns =
                 [
@@ -47,7 +47,7 @@ public sealed class TreeSqlCompilerZeroLimitTests
     }
 
     [Theory]
-    [InlineData(DatabaseDialect.Sqlite)]
+    [InlineData(DatabaseDialect.PostgreSql)]
     [InlineData(DatabaseDialect.SqlServer)]
     public void LimitZero_IsAccepted_NegativeIsRejected(DatabaseDialect dialect)
     {

@@ -27,7 +27,7 @@ public sealed class ConnectionTlsPolicyDep7Tests
     [InlineData("SqlServer", "Server=db;Database=x;Encrypt=False", false)]
     [InlineData("SqlServer", "Server=db;Database=x;Encrypt=Mandatory", true)]
     [InlineData("SqlServer", "Server=db;Database=x;Encrypt=Strict", true)]
-    [InlineData("Sqlite", "Data Source=/app/data/x.db", true)]
+    [InlineData("Sqlite", "Data Source=/app/data/x.db", false)]
     public void Validate_RequiresCertificateVerification(string provider, string connectionString, bool expectedValid)
     {
         (ConnectionTlsPolicy.Validate(provider, connectionString) == null).ShouldBe(expectedValid);

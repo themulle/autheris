@@ -235,10 +235,7 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
             throw new InvalidOperationException($"Alias '{alias}' of the virtual filter collides with the target alias or another alias.");
         }
 
-        // Like the legacy FormatTableIdentifier: a SQLite table is addressed without its schema.
-        var name = dialect == DatabaseDialect.Sqlite
-            ? new SqlQualifiedName(new[] { new SqlIdentifier(table.TableName, true) })
-            : new SqlQualifiedName(new[] { new SqlIdentifier(table.Schema, true), new SqlIdentifier(table.TableName, true) });
+        var name = new SqlQualifiedName(new[] { new SqlIdentifier(table.Schema, true), new SqlIdentifier(table.TableName, true) });
         return new NamedTableSource(name, new SqlIdentifier(alias, true));
     }
 

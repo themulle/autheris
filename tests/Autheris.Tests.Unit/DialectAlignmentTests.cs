@@ -28,7 +28,6 @@ public sealed class DialectAlignmentTests
     [InlineData("Microsoft SQL Server", DatabaseDialect.SqlServer)]
     [InlineData("PostgreSQL", DatabaseDialect.PostgreSql)]
     [InlineData("npgsql", DatabaseDialect.PostgreSql)]
-    [InlineData("sqlite3", DatabaseDialect.Sqlite)]
     [InlineData("Oracle", DatabaseDialect.Oracle)]
     [InlineData("databricks", DatabaseDialect.Databricks)]
     [InlineData("2", DatabaseDialect.SqlServer)]

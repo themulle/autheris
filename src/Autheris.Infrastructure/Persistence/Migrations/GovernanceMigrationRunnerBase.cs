@@ -540,7 +540,6 @@ public abstract class GovernanceMigrationRunnerBase : IGovernanceMigrationRunner
     {
         DbException db when !string.IsNullOrEmpty(db.SqlState) => "SQLSTATE " + SanitizeLabel(db.SqlState),
         Microsoft.Data.SqlClient.SqlException sql => "error " + sql.Number.ToString(CultureInfo.InvariantCulture),
-        Microsoft.Data.Sqlite.SqliteException lite => "SQLite error " + lite.SqliteErrorCode.ToString(CultureInfo.InvariantCulture),
         DbException db => "database error " + db.ErrorCode.ToString(CultureInfo.InvariantCulture),
         _ => failure.GetType().Name
     };

@@ -121,7 +121,6 @@ tests/Autheris.Tests.Unit/SqlEndpointScalarDefaultTests.cs
 tests/Autheris.Tests.Unit/SqlEndpointTimeoutTests.cs
 tests/Autheris.Tests.Unit/SqlEndpointsTests.cs
 tests/Autheris.Tests.Unit/SqlParameterPagingTests.cs
-tests/Autheris.Tests.Unit/SqliteExecutionHardeningTests.cs
 tests/Autheris.Tests.Unit/SrM02BearerIpRateLimitTests.cs
 tests/Autheris.Tests.Unit/SrM22SqlEndpointLoaderTests.cs
 tests/Autheris.Tests.Unit/StreamRlsPolicyEnforcerTests.cs

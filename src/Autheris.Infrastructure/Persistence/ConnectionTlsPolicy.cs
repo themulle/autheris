@@ -47,8 +47,6 @@ public static class ConnectionTlsPolicy
         DatabaseDialect.Oracle => OracleConnectionStringPolicy.ValidateTcps(connectionString),
         // Databricks has no ADO.NET driver or connection string; every statement goes through the hardened HTTPS REST client.
         DatabaseDialect.Databricks => null,
-        // SQLite is a local in-process database file (data-source dialect only); there is no network transport to encrypt.
-        DatabaseDialect.Sqlite => null,
         _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, $"Unsupported database dialect '{dialect}'.")
     };
 

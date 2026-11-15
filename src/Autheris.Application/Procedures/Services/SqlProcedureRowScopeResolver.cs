@@ -81,9 +81,9 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
         }
 
         if (!DataSourceProvider.TryResolveDialect(connOptions.Provider, out var dialect) ||
-            dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite))
+            dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql))
         {
-            throw new InvalidOperationException("Row scope filtering of procedure results supports SQL Server, PostgreSQL and SQLite only.");
+            throw new InvalidOperationException("Row scope filtering of procedure results supports SQL Server and PostgreSQL only.");
         }
 
         // The row filter was generated with the catalog dialect; another backend would read it differently.
@@ -224,11 +224,10 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
         return allowed;
     }
 
-    /// <summary>Parameter limits per command: SQL Server 2100, SQLite 999 on older builds, PostgreSQL 65535.</summary>
+    /// <summary>Parameter limits per command: SQL Server 2100, PostgreSQL 65535.</summary>
     internal static int MaxParameters(DatabaseDialect dialect) => dialect switch
     {
         DatabaseDialect.SqlServer => 2000,
-        DatabaseDialect.Sqlite => 900,
         _ => 30000
     };
 

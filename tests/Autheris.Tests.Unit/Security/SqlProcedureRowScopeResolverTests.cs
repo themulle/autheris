@@ -55,8 +55,18 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
         try { File.Delete(_dbPath); } catch { /* best effort */ }
     }
 
-    private SqlProcedureRowScopeResolver Resolver(string connectionName = "erp", string provider = "Sqlite") => new(
-        new SqlConnectionFactory(),
+    private sealed class SqliteFixtureConnectionFactory(string dbPath) : ISqlConnectionFactory
+    {
+        public Task<System.Data.Common.DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
+        {
+            var conn = new SqliteConnection($"Data Source={dbPath}");
+            conn.Open();
+            return Task.FromResult<System.Data.Common.DbConnection>(new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(conn));
+        }
+    }
+
+    private SqlProcedureRowScopeResolver Resolver(string connectionName = "erp", string provider = "PostgreSql") => new(
+        new SqliteFixtureConnectionFactory(_dbPath),
         Options.Create(new GatewayOptions
         {
             DataSources = new SqlDataSourceOptions
@@ -68,7 +78,7 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
             }
         }));
 
-    private static TableMetadata Table(string name, string sourceType = "Sqlite", params string[] columns) => new()
+    private static TableMetadata Table(string name, string sourceType = "PostgreSql", params string[] columns) => new()
     {
         Identifier = new TableIdentifier("erp", "main", name),
         Table = new Table { SourceName = "erp", SchemaName = "main", TableName = name, SourceType = sourceType, DataSourceType = DataSourceType.Sql },
@@ -126,7 +136,7 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
                 Where = [new FilterCondition("c.region", FilterConditionOperator.Eq, "DE")]
             }
         };
-        string correlated = new StructuredFilterSqlBuilder().Build(vf, new FilterBinding { FilterName = "client_de" }, table, DatabaseDialect.Sqlite);
+        string correlated = new StructuredFilterSqlBuilder().Build(vf, new FilterBinding { FilterName = "client_de" }, table, DatabaseDialect.PostgreSql);
 
         var allowed = await Resolver().GetAllowedKeysAsync(
             Definition(), table, Decision(table, correlated), ["serial_number"], [["100"], ["200"]], Caller, CancellationToken.None);
@@ -179,7 +189,6 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     [Theory]
     [InlineData(DatabaseDialect.SqlServer, "SELECT [serial_number] FROM [main].[crane] AS [autheris_target] WHERE (([serial_number] = @rs_0_0) OR ([serial_number] = @rs_1_0)) GROUP BY [serial_number] HAVING COUNT(*) = SUM(CASE WHEN [tenant_id] = @rs_tenant AND (f) THEN 1 ELSE 0 END)")]
     [InlineData(DatabaseDialect.PostgreSql, "SELECT \"serial_number\" FROM \"main\".\"crane\" AS \"autheris_target\" WHERE ((\"serial_number\" = @rs_0_0) OR (\"serial_number\" = @rs_1_0)) GROUP BY \"serial_number\" HAVING COUNT(*) = SUM(CASE WHEN \"tenant_id\" = @rs_tenant AND (f) THEN 1 ELSE 0 END)")]
-    [InlineData(DatabaseDialect.Sqlite, "SELECT \"serial_number\" FROM \"crane\" AS \"autheris_target\" WHERE ((\"serial_number\" = @rs_0_0) OR (\"serial_number\" = @rs_1_0)) GROUP BY \"serial_number\" HAVING COUNT(*) = SUM(CASE WHEN \"tenant_id\" = @rs_tenant AND (f) THEN 1 ELSE 0 END)")]
     public void KeyQuery_IsQuotedPerDialect(DatabaseDialect dialect, string expected)
     {
         SqlProcedureRowScopeResolver.BuildKeyQuery(dialect, Table("crane"), ["serial_number"], "tenant_id", "f", 2).ShouldBe(expected);
@@ -189,7 +198,6 @@ INSERT INTO client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
     public void ParameterBudget_RespectsTheDialectLimits()
     {
         SqlProcedureRowScopeResolver.MaxParameters(DatabaseDialect.SqlServer).ShouldBeLessThan(2100);
-        SqlProcedureRowScopeResolver.MaxParameters(DatabaseDialect.Sqlite).ShouldBeLessThan(999);
         SqlProcedureRowScopeResolver.MaxParameters(DatabaseDialect.PostgreSql).ShouldBeLessThan(65535);
     }
 }

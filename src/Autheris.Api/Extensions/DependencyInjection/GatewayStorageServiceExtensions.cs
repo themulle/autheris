@@ -83,8 +83,8 @@ public static class GatewayStorageServiceExtensions
         services.AddDatabricksStatementExecution();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
         services.AddSingleton<ISqlSourceDescriber, Autheris.Infrastructure.Persistence.SqlSourceDescriber>();
-        // SQLite statements are interrupted at the execution timeout and on cancellation.
-        services.AddSingleton<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard, SqliteProviderExecutionGuard>();
+        services.AddSingleton<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard>(
+            Autheris.Application.Sql.Interfaces.PassThroughExecutionGuard.Instance);
 
         // WP-X0c (CR-ADG-47): column types and collations from database metadata. The TTL is validated here, so a value above
         // the 300 s maximum fails the startup. Nothing consumes the provider before X1.

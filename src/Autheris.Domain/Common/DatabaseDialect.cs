@@ -6,7 +6,6 @@ public enum DatabaseDialect
 {
     PostgreSql = 1,
     SqlServer = 2,
-    Sqlite = 3,
     Databricks = 4,
     Oracle = 5
 }
@@ -31,7 +30,7 @@ public static class DatabaseDialectExtensions
         {
             DatabaseDialect.SqlServer => $"[{identifier}]",
             DatabaseDialect.Databricks => $"`{identifier}`",
-            DatabaseDialect.Oracle or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite => $"\"{identifier}\"",
+            DatabaseDialect.Oracle or DatabaseDialect.PostgreSql => $"\"{identifier}\"",
             _ => $"\"{identifier}\""
         };
     }
@@ -71,11 +70,6 @@ public static class DatabaseDialectExtensions
         var schemaQuoted = dialect.QuoteIdentifier(table.Schema);
         var tableQuoted = dialect.QuoteIdentifier(table.TableName);
 
-        if (dialect == DatabaseDialect.Sqlite)
-        {
-            return tableQuoted;
-        }
-
         return $"{schemaQuoted}.{tableQuoted}";
     }
 
@@ -100,7 +94,6 @@ public static class DatabaseDialectExtensions
         DatabaseDialect? mapped = normalized switch
         {
             "mssql" or "sqlserver" or "sql_server" or "microsoft sql server" => DatabaseDialect.SqlServer,
-            "sqlite" or "sqlite3" => DatabaseDialect.Sqlite,
             "postgres" or "postgresql" or "pgsql" or "npgsql" => DatabaseDialect.PostgreSql,
             "databricks" or "spark" or "sparksql" => DatabaseDialect.Databricks,
             "oracle" or "oracledb" or "odp" => DatabaseDialect.Oracle,
@@ -112,7 +105,7 @@ public static class DatabaseDialectExtensions
             return true;
         }
 
-        // Enum names or numbers, but no flag combinations ("SqlServer, Sqlite") and no undefined numbers ("99").
+        // Enum names or numbers, but no flag combinations ("SqlServer, PostgreSql") and no undefined numbers ("99").
         if (!normalized.Contains(',', StringComparison.Ordinal) &&
             Enum.TryParse<DatabaseDialect>(normalized, true, out var parsed) &&
             Enum.IsDefined(parsed))
@@ -203,13 +196,12 @@ public static class DatabaseDialectExtensions
 /// <summary>
 /// Architecture 5 / SQL2-22: the one mapping from a data source provider name (<c>DataSources:Connections:*:Provider</c>,
 /// <c>GovernanceDb:Provider</c>) to a dialect. The connection factory, the TLS policy, WebSQL, procedures and the tree
-/// path all resolve through here, so an alias is either accepted everywhere or nowhere. An empty provider means SQLite,
-/// the option default.
+/// path all resolve through here, so an alias is either accepted everywhere or nowhere. Empty/whitespace fails closed.
 /// </summary>
 public static class DataSourceProvider
 {
     public static bool TryResolveDialect(string? provider, out DatabaseDialect dialect) =>
-        DatabaseDialectExtensions.TryParseDialect(string.IsNullOrWhiteSpace(provider) ? "sqlite" : provider, out dialect);
+        DatabaseDialectExtensions.TryParseDialect(provider, out dialect);
 
     public static bool Is(string? provider, DatabaseDialect expected) =>
         TryResolveDialect(provider, out var dialect) && dialect == expected;

@@ -37,9 +37,9 @@ internal static class StructuredFilterKeyQueryBuilder
         ArgumentNullException.ThrowIfNull(tenantColumnsByAlias);
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxRows, 1);
-        if (dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite))
+        if (dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql))
         {
-            throw new NotSupportedException($"Virtual Filter key sources support SQL Server, PostgreSQL and SQLite, not {dialect}.");
+            throw new NotSupportedException($"Virtual Filter key sources support SQL Server and PostgreSQL, not {dialect}.");
         }
 
         var definition = filter.Structured ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no structured definition.");

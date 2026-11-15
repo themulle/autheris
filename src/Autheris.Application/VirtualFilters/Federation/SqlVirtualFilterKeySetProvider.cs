@@ -228,7 +228,7 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
             }
         }
 
-        if (dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite))
+        if (dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql))
         {
             throw Unsupported(filter, "its data source dialect is not supported");
         }

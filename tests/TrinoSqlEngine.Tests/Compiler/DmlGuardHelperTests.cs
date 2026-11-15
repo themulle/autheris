@@ -7,8 +7,8 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>
-/// Mutation gate (M-12) tests for <see cref="DmlMaskedReadGuard"/>, <see cref="MergeAliasGuard"/>, <see cref="InsertCheckOption"/> and
-/// <see cref="SqliteTypeAffinity"/>: the typed violation texts, the first violation wins, injected predicates and masks are not reads.
+/// Mutation gate (M-12) tests for <see cref="DmlMaskedReadGuard"/>, <see cref="MergeAliasGuard"/> and <see cref="InsertCheckOption"/>:
+/// the typed violation texts, the first violation wins, injected predicates and masks are not reads.
 /// </summary>
 [Trait("Category", "SqlGate")]
 public class DmlGuardHelperTests

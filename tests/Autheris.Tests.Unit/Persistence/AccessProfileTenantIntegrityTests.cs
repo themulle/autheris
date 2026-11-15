@@ -26,7 +26,7 @@ public sealed class AccessProfileTenantIntegrityTests
     {
         await using var conn = new SqliteConnection("Data Source=:memory:");
         await conn.OpenAsync();
-        var store = new AccessProfileStore(AccessProfileDialect.Sqlite, (_, _) => throw new InvalidOperationException("not used"));
+        var store = new AccessProfileStore(AccessProfileDialect.PostgreSql, (_, _) => throw new InvalidOperationException("not used"));
 
         await using var bad = await ReaderForAsync(conn, "bad tenant!");
         var ex = Should.Throw<AccessProfileTenantIntegrityException>(() => store.ReadProfile(bad, 0));

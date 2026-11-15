@@ -41,7 +41,9 @@ public sealed class WebSqlParserGatewaySecurityTests
         new(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-R4-USER"),
-                new Claim("tenant_id", Tenant)
+                new Claim("tenant_id", Tenant),
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+                Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
             ],
             "Test"));
 

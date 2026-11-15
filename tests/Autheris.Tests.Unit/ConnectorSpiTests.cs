@@ -297,7 +297,7 @@ public class ConnectorSpiTests
         var meta = new TableMetadata
         {
             Identifier = table,
-            Table = new Table { SchemaName = "main", TableName = "orders", SourceName = "sqlite_ds", SourceType = "Sqlite" },
+            Table = new Table { SchemaName = "main", TableName = "orders", SourceName = "sqlite_ds", SourceType = "PostgreSql" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "tenant_id", DataType = "text" }]
         };
 

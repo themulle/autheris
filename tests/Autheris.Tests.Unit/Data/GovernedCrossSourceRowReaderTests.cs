@@ -93,7 +93,7 @@ public sealed class GovernedCrossSourceRowReaderTests
         {
             var connection = new SqliteConnection(connectionString);
             connection.Open();
-            return Task.FromResult<DbConnection>(connection);
+            return Task.FromResult<DbConnection>(new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection));
         }
     }
 
@@ -115,16 +115,16 @@ public sealed class GovernedCrossSourceRowReaderTests
         {
             DataSources = new SqlDataSourceOptions
             {
-                Connections = new Dictionary<string, DataSourceConnectionOptions> { ["crm"] = new() { ConnectionString = cs } }
+                Connections = new Dictionary<string, DataSourceConnectionOptions> { ["crm"] = new() { Provider = "PostgreSql", ConnectionString = cs } }
             }
         });
         var reader = new GovernedCrossSourceRowReader(new SharedConnectionFactory(cs), options, initializer);
-        var target = Target("Sqlite") with { Identifier = new TableIdentifier("crm", "main", "Customers") };
+        var target = Target("PostgreSql") with { Identifier = new TableIdentifier("crm", "main", "Customers") };
 
         var rows = await reader.ReadRowsByKeysAsync(Request(target));
 
         rows.Select(r => r["Name"]).ShouldBe(new object?[] { "own" });
         await initializer.Received(1).InitializeSessionAsync(
-            Arg.Any<DbConnection>(), Arg.Any<DbTransaction?>(), DatabaseDialect.Sqlite, Tenant, "S-1-5-1", null, Arg.Any<CancellationToken>());
+            Arg.Any<DbConnection>(), Arg.Any<DbTransaction?>(), DatabaseDialect.PostgreSql, Tenant, "S-1-5-1", null, Arg.Any<CancellationToken>());
     }
 }

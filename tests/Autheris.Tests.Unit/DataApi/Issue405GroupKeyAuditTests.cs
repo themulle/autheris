@@ -115,8 +115,6 @@ public sealed class Issue405GroupKeyAuditTests
     [InlineData(DatabaseDialect.Oracle, "text", true)]
     [InlineData(DatabaseDialect.Databricks, "string", false)]
     [InlineData(DatabaseDialect.Databricks, "ARRAY<INT>", true)]
-    [InlineData(DatabaseDialect.Sqlite, "BLOB", false)]
-    [InlineData(DatabaseDialect.Sqlite, "mystery", false)]
     public void I405_T_04_EnsureGroupable_AgreesWithIsGroupableType(DatabaseDialect dialect, string? type, bool throws)
     {
         DefaultReadOrdering.IsGroupableType(type, dialect).ShouldBe(!throws);

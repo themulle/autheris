@@ -435,25 +435,6 @@ public sealed class SecurityReviewRemediationCoverageTests
     // IDbSessionContextInitializer: Centralized session & rollback safety
     // =========================================================================
 
-    [Fact]
-    public async Task DbSessionContextInitializer_SqliteDialect_ReturnsNullTransaction()
-    {
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-
-        var initializer = new DbSessionContextInitializer();
-
-        // SQLite dialect returns null because SQLite does not use ambient session variables
-        var tx = await initializer.InitializeSessionAsync(
-            connection,
-            DatabaseDialect.Sqlite,
-            new TenantId("tenant-test"),
-            requireTransaction: true);
-
-        tx.ShouldBeNull();
-    }
-
-
     private sealed class FailingRollbackDbTransaction : DbTransaction
     {
         public bool RollbackAttempted { get; private set; }

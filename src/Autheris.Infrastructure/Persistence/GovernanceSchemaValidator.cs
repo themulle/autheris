@@ -28,27 +28,13 @@ public sealed class GovernanceSchemaValidator
 
         var existingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Try SQLite first
-        if (connection.GetType().Name.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        // PostgreSQL / SQL Server standard information_schema
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT table_name FROM information_schema.tables";
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table'";
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                existingTables.Add(reader.GetString(0));
-            }
-        }
-        else
-        {
-            // PostgreSQL / SQL Server standard information_schema
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT table_name FROM information_schema.tables";
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                existingTables.Add(reader.GetString(0));
-            }
+            existingTables.Add(reader.GetString(0));
         }
 
         var missing = new List<string>();

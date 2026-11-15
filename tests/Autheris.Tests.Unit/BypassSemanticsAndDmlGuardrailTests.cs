@@ -411,7 +411,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
         connection.CreateFunction("textsend", (string? s) => s);
-        return new Autheris.Tests.Unit.TestDoubles.SqliteAsPostgresConnection(connection);
+        return new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection);
     }
 
     internal static ClaimsPrincipal CreateWriter(bool withWriteScope = true)

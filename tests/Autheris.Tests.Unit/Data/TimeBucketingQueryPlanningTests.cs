@@ -108,47 +108,4 @@ public sealed class TimeBucketingQueryPlanningTests
         ex.Message.ShouldNotContain(zone, Case.Insensitive);
         ex.Message.ShouldNotContain("DROP", Case.Insensitive);
     }
-
-    [Fact]
-    public void PlanAggregate_Sqlite_WithNonUtcTimeZone_AppliesOffset()
-    {
-        var metadata = CreateTableForDialect("Sqlite");
-        var decision = TableAccessDecision.Allowed(LogsTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-
-        var planner = new GovernedTableReadPlanner();
-        var intent = new TableAggregateIntent(
-            LogsTableId,
-            GroupBy: ["created_at"],
-            Aggregates: [new AggregateSelection(AggregateFunction.Count, Alias: "cnt")],
-            Filter: null,
-            OrderBy: null,
-            Limit: 100,
-            TimeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Day, "Europe/Berlin")]);
-
-        var planned = planner.PlanAggregate(intent, metadata, decision);
-
-        planned.Sql.ShouldContain("strftime('%Y-%m-%d', datetime(\"created_at\", ");
-    }
-
-    [Fact]
-    public void PlanAggregate_Sqlite_EmitsStrftime()
-    {
-        var metadata = CreateTableForDialect("Sqlite");
-        var decision = TableAccessDecision.Allowed(LogsTableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-
-        var planner = new GovernedTableReadPlanner();
-        var intent = new TableAggregateIntent(
-            LogsTableId,
-            GroupBy: ["created_at"],
-            Aggregates: [new AggregateSelection(AggregateFunction.Count, Alias: "cnt")],
-            Filter: null,
-            OrderBy: null,
-            Limit: 100,
-            TimeBuckets: [new TimeBucketSpecification("created_at", TimeBucketInterval.Day, "UTC")]);
-
-        var planned = planner.PlanAggregate(intent, metadata, decision);
-
-        planned.Sql.ShouldContain("strftime('%Y-%m-%d', datetime(\"created_at\")) AS \"created_at\"");
-        planned.Sql.ShouldContain("GROUP BY strftime('%Y-%m-%d', datetime(\"created_at\"))");
-    }
 }

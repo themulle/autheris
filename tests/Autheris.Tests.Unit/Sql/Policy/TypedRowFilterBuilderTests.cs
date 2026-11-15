@@ -178,7 +178,7 @@ public sealed class TypedRowFilterBuilderTests
 
         var typed = _builder.BuildCombined([a1], [d1], Orders)!;
         var rendered = _renderer.Render(typed, TargetSqlDialect.PostgreSql, RowFilterAliases.Target);
-        var legacySql = sut.BuildCombinedRowFilter([a1], [d1], DatabaseDialect.Sqlite)!;
+        var legacySql = sut.BuildCombinedRowFilter([a1], [d1], DatabaseDialect.PostgreSql)!;
 
         using var connection = SeedOrders();
         var viaTyped = Query(connection, $"SELECT id FROM orders AS autheris_target WHERE {rendered.Sql} ORDER BY id", rendered.Parameters);

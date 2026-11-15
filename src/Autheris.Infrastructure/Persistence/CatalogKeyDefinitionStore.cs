@@ -20,12 +20,6 @@ internal static class CatalogKeyDefinitionStore
     internal const string IndexTable = "TABLE_INDEXES";
     internal const string IndexColumnTable = "TABLE_INDEX_COLUMNS";
 
-    internal static readonly KeyDefinitionDialect Sqlite = new(
-        string.Empty,
-        "SELECT CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @name) THEN 1 ELSE 0 END",
-        false,
-        "SELECT id FROM TABLES WHERE source_name = @domain COLLATE NOCASE AND schema_name = @schema COLLATE NOCASE AND table_name = @table COLLATE NOCASE");
-
     internal static readonly KeyDefinitionDialect PostgreSql = new(
         string.Empty,
         "SELECT CASE WHEN to_regclass(@name) IS NOT NULL THEN 1 ELSE 0 END",

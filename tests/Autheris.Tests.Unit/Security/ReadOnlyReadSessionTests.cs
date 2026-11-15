@@ -261,7 +261,6 @@ public sealed class ReadOnlyReadSessionTests
     [InlineData(DatabaseDialect.PostgreSql)]
     [InlineData(DatabaseDialect.Oracle)]
     [InlineData(DatabaseDialect.SqlServer)]
-    [InlineData(DatabaseDialect.Sqlite)]
     [InlineData(DatabaseDialect.Databricks)]
     public async Task Read_only_mode_not_set_without_explicit_request(DatabaseDialect dialect)
     {

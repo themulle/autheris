@@ -55,7 +55,7 @@ internal sealed class KeySourceSqliteFixture : IDisposable
     public KeySourceSqliteFixture()
     {
         _path = Path.Combine(Path.GetTempPath(), $"vf_keys_{Guid.NewGuid():N}.db");
-        Execute(Schema);
+        Execute("PRAGMA journal_mode=WAL;\n" + Schema);
         Catalog = Substitute.For<ITableMetadataRepository>();
         foreach (var table in Tables)
         {
@@ -63,7 +63,7 @@ internal sealed class KeySourceSqliteFixture : IDisposable
         }
     }
 
-    public string ConnectionString => $"Data Source={_path}";
+    public string ConnectionString => $"Data Source={_path};Pooling=False";
 
     public ITableMetadataRepository Catalog { get; }
 
@@ -80,7 +80,7 @@ internal sealed class KeySourceSqliteFixture : IDisposable
     internal static TableMetadata Sql(string schema, string table, params string[] columns) => new()
     {
         Identifier = new TableIdentifier(Domain, schema, table),
-        Table = new Table { SourceName = Domain, SchemaName = schema, TableName = table, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql },
+        Table = new Table { SourceName = Domain, SchemaName = schema, TableName = table, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
         Columns = columns.Select(c => new TableColumn { ColumnName = c, DataType = "integer" }).ToList()
     };
 
@@ -126,15 +126,38 @@ internal sealed class KeySourceSqliteFixture : IDisposable
         {
             RequireTenantColumn = requireTenantColumn,
             TenantColumnExemptTables = exempt?.ToList() ?? [],
-            Connections = { [Domain] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = connectionString ?? ConnectionString } }
+            Connections = { [Domain] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = connectionString ?? ConnectionString } }
         },
         VirtualFilters = new VirtualFilterOptions { Federation = new VirtualFilterFederationOptions { MaxAuthorizedKeys = maxKeys } }
     };
 
+    internal ISqlConnectionFactory CreateFactory() => new SqliteKeySourceConnectionFactory();
+
     internal SqlVirtualFilterKeySetProvider Provider(GatewayOptions? options = null, ISqlConnectionFactory? factory = null, VirtualFilterKeySetCache? cache = null)
     {
         var opts = Microsoft.Extensions.Options.Options.Create(options ?? Options());
-        return new SqlVirtualFilterKeySetProvider(Catalog, factory ?? new SqlConnectionFactory(), opts, cache ?? new VirtualFilterKeySetCache(opts));
+        return new SqlVirtualFilterKeySetProvider(Catalog, factory ?? CreateFactory(), opts, cache ?? new VirtualFilterKeySetCache(opts));
+    }
+
+    internal sealed class SqliteKeySourceConnectionFactory : ISqlConnectionFactory
+    {
+        public async Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
+        {
+            var connection = new SqliteConnection(options.ConnectionString);
+            await connection.OpenAsync(ct);
+            var ds = connection.DataSource;
+            if (!string.IsNullOrEmpty(ds))
+            {
+                foreach (var schema in new[] { "conf", "md", "auth", "fms" })
+                {
+                    await using var attach = connection.CreateCommand();
+                    attach.CommandText = $"ATTACH DATABASE '{ds.Replace("'", "''")}' AS {schema};";
+                    await attach.ExecuteNonQueryAsync(ct);
+                }
+            }
+
+            return new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection);
+        }
     }
 
     internal void Execute(string sql)
@@ -150,6 +173,12 @@ internal sealed class KeySourceSqliteFixture : IDisposable
     {
         using var connection = new SqliteConnection(ConnectionString);
         connection.Open();
+        foreach (var schema in new[] { "conf", "md", "auth", "fms" })
+        {
+            using var attach = connection.CreateCommand();
+            attach.CommandText = $"ATTACH DATABASE '{connection.DataSource.Replace("'", "''")}' AS {schema};";
+            attach.ExecuteNonQuery();
+        }
         using var cmd = connection.CreateCommand();
         cmd.CommandText = sql;
         using var reader = cmd.ExecuteReader();

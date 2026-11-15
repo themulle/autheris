@@ -1,0 +1,6 @@
+# Allowlisted guard and denylist files under src/ and modules/ permitted to contain "sqlite" string literals (OD-2 / WP-SIMPL-31)
+src/Autheris.Api/Configuration/GovernanceProviderGuard.cs
+src/Autheris.Application/Olap/DuckDbOlapEngine.cs
+src/Autheris.Application/Olap/OlapSqlPolicy.cs
+src/Autheris.Infrastructure/Persistence/Migrations/SqlServerBaselineSchema.cs
+src/TrinoSqlEngine/SqlFunctionPolicy.cs

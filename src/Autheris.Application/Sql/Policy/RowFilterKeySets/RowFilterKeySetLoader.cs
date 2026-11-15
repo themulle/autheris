@@ -113,7 +113,6 @@ public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
         await using DbTransaction? tx = dialect is DatabaseDialect.PostgreSql or DatabaseDialect.Oracle
             ? await connection.BeginTransactionAsync(ct).ConfigureAwait(false)
             : null;
-        bool queryOnly = false;
         try
         {
             if (tx != null)
@@ -124,11 +123,6 @@ public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
             {
                 // ReadUncommitted of the source applies to user statements; a cached key set must never hold dirty rows.
                 await ExecuteAsync(connection, null, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED", ct).ConfigureAwait(false);
-            }
-            else if (dialect == DatabaseDialect.Sqlite)
-            {
-                await ExecuteAsync(connection, null, "PRAGMA query_only = ON", ct).ConfigureAwait(false);
-                queryOnly = true;
             }
 
             // 01 b: principal independent; the session carries the tenant only.
@@ -168,12 +162,6 @@ public sealed class RowFilterKeySetLoader : IRowFilterKeySetLoader
             if (tx != null)
             {
                 await TryAsync(() => tx.RollbackAsync(CancellationToken.None)).ConfigureAwait(false);
-            }
-
-            if (queryOnly)
-            {
-                // A pooled SQLite connection keeps its pragmas; later users must not inherit a read-only session.
-                await TryAsync(() => ExecuteAsync(connection, null, "PRAGMA query_only = OFF", CancellationToken.None)).ConfigureAwait(false);
             }
         }
     }

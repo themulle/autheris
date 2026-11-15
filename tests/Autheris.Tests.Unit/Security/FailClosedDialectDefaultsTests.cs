@@ -19,18 +19,17 @@ public sealed class FailClosedDialectDefaultsTests
     private static readonly TenantId Tenant = Autheris.Tests.Common.TestTenants.Default;
 
     [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Sqlite")]
+    [InlineData("sqlite3")]
     [InlineData("mysql")]
     [InlineData("nonsense")]
     [InlineData("99")]
-    public void DbSessionContextInitializer_UnknownProvider_Throws(string provider)
+    public void DbSessionContextInitializer_UnknownOrEmptyProvider_Throws(string? provider)
     {
         Should.Throw<NotSupportedException>(() => DbSessionContextInitializer.ResolveDialect(provider));
-    }
-
-    [Fact]
-    public void DbSessionContextInitializer_EmptyProvider_IsSqliteOptionDefault()
-    {
-        DbSessionContextInitializer.ResolveDialect(null).ShouldBe(DatabaseDialect.Sqlite);
     }
 
     [Theory]
@@ -47,7 +46,6 @@ public sealed class FailClosedDialectDefaultsTests
     }
 
     [Theory]
-    [InlineData(DatabaseDialect.Sqlite)]
     [InlineData(DatabaseDialect.Databricks)]
     public async Task DbSessionContextInitializer_ExplicitNoSessionStateDialects_ReturnNull(DatabaseDialect dialect)
     {

@@ -281,11 +281,6 @@ public static class AdminWritePrivilegesEndpoints
         var statements = new List<string>();
         var notes = new List<string>();
 
-        if (dialect == DatabaseDialect.Sqlite)
-        {
-            notes.Add("SQLite enforces access via OS file permissions rather than per-principal SQL GRANT statements.");
-        }
-
         foreach (TableWriteAccumulator acc in orderedTables)
         {
             var tableGrants = GenerateGrantStatements(acc, dialect);
@@ -368,13 +363,6 @@ public static class AdminWritePrivilegesEndpoints
     {
         var grants = new List<string>();
         string qualifiedTable = QuoteQualifiedTable(acc.Table.Schema, acc.Table.TableName, dialect);
-
-        if (dialect == DatabaseDialect.Sqlite)
-        {
-            string ops = string.Join(", ", acc.Operations.Select(o => o.ToString().ToUpperInvariant()));
-            grants.Add($"-- SQLite requires write file-system access on {qualifiedTable} for {ops}.");
-            return grants;
-        }
 
         string principal = DefaultPrincipalPlaceholder;
 

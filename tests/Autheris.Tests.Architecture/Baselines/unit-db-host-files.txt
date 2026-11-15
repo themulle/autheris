@@ -14,7 +14,6 @@ tests/Autheris.Tests.Unit/CdcStream/CdcStreamAdminEndpointsTests.cs
 tests/Autheris.Tests.Unit/Configuration/RemovedConfigKeysTests.cs
 tests/Autheris.Tests.Unit/ConnectorSpiTests.cs
 tests/Autheris.Tests.Unit/Data/GovernedCrossSourceRowReaderTests.cs
-tests/Autheris.Tests.Unit/DataApi/GovernedTableReadPlannerSqliteBucketTests.cs
 tests/Autheris.Tests.Unit/DataApi/Issue390ReadOrderDirectionTests.cs
 tests/Autheris.Tests.Unit/DevExperienceTests.cs
 tests/Autheris.Tests.Unit/Governance/BaselineSchemaShapeParityTests.cs

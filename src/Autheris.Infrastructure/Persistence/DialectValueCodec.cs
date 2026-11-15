@@ -4,23 +4,21 @@ using System;
 using System.Data.Common;
 using System.Globalization;
 
-/// <summary>The three governance database engines (PERS-16): bool and timestamp columns are typed differently on each.</summary>
+/// <summary>The governance database engines (PERS-16): bool and timestamp columns are typed differently on each.</summary>
 internal enum SqlDialect
 {
-    Sqlite,
     PostgreSql,
     SqlServer
 }
 
 /// <summary>
-/// PERS-16: one place that maps booleans and timestamps to and from the column types of each engine. SQLite stores integers and ISO
-/// strings, SQL Server stores BIT and ISO strings (NVARCHAR), PostgreSQL stores BOOLEAN and TIMESTAMPTZ. Binding an ISO string to a
+/// PERS-16: one place that maps booleans and timestamps to and from the column types of each engine.
+/// SQL Server stores BIT and ISO strings (NVARCHAR), PostgreSQL stores BOOLEAN and TIMESTAMPTZ. Binding an ISO string to a
 /// TIMESTAMPTZ parameter or reading a BOOLEAN with GetInt32 fails on PostgreSQL, which broke SCIM and recertification there.
 /// </summary>
 internal static class DialectValueCodec
 {
-    internal static object Bool(SqlDialect dialect, bool value) =>
-        dialect == SqlDialect.Sqlite ? (object)(value ? 1 : 0) : value;
+    internal static object Bool(SqlDialect dialect, bool value) => value;
 
     /// <summary>UTC-normalised timestamp parameter value; null becomes <see cref="DBNull"/>.</summary>
     internal static object Ts(SqlDialect dialect, DateTimeOffset? value)
@@ -35,7 +33,7 @@ internal static class DialectValueCodec
     }
 
     internal static bool ReadBool(SqlDialect dialect, DbDataReader reader, int ordinal) =>
-        dialect == SqlDialect.Sqlite ? reader.GetInt64(ordinal) != 0 : reader.GetBoolean(ordinal);
+        reader.GetBoolean(ordinal);
 
     internal static DateTimeOffset? ReadTs(SqlDialect dialect, DbDataReader reader, int ordinal)
     {

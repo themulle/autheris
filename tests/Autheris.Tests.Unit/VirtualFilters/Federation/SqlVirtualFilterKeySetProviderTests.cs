@@ -50,7 +50,7 @@ public sealed class SqlVirtualFilterKeySetProviderTests : IDisposable
         var filter = Parity();
         var binding = new FilterBinding { FilterName = "parity" };
         var air1 = Tables.Single(t => t.Identifier.TableName == "air1");
-        var predicate = new StructuredFilterSqlBuilder().Build(filter, binding, air1, Autheris.Domain.Common.DatabaseDialect.Sqlite);
+        var predicate = new StructuredFilterSqlBuilder().Build(filter, binding, air1, Autheris.Domain.Common.DatabaseDialect.PostgreSql);
         var sqlChannel = _db.Query($"SELECT DISTINCT \"client_id\" FROM \"air1\" AS \"autheris_target\" WHERE {predicate}")
             .Select(v => Convert.ToInt64(v)).OrderBy(v => v).ToArray();
 
@@ -218,7 +218,7 @@ public sealed class SqlVirtualFilterKeySetProviderTests : IDisposable
     [Fact]
     public async Task Get_SecondCall_CacheHit_NoQuery()
     {
-        var factory = new CountingConnectionFactory(new SqlConnectionFactory());
+        var factory = new CountingConnectionFactory(_db.CreateFactory());
         var provider = _db.Provider(factory: factory);
         await provider.GetAsync(David(), IntegerKey, TenantA);
         _db.Execute("DELETE FROM client");
@@ -233,7 +233,7 @@ public sealed class SqlVirtualFilterKeySetProviderTests : IDisposable
     [Fact]
     public async Task Get_DefinitionChanged_CacheMiss()
     {
-        var factory = new CountingConnectionFactory(new SqlConnectionFactory());
+        var factory = new CountingConnectionFactory(_db.CreateFactory());
         var provider = _db.Provider(factory: factory);
         var david = David();
         await provider.GetAsync(david, IntegerKey, TenantA);
@@ -250,7 +250,7 @@ public sealed class SqlVirtualFilterKeySetProviderTests : IDisposable
     public async Task Get_ConcurrentColdCalls_LoadOnce_FailureNotCached()
     {
         // ST-20
-        var factory = new CountingConnectionFactory(new SqlConnectionFactory()) { Delay = TimeSpan.FromMilliseconds(150) };
+        var factory = new CountingConnectionFactory(_db.CreateFactory()) { Delay = TimeSpan.FromMilliseconds(150) };
         var provider = _db.Provider(factory: factory);
 
         var results = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => provider.GetAsync(David(), IntegerKey, TenantA).AsTask()));
@@ -258,7 +258,7 @@ public sealed class SqlVirtualFilterKeySetProviderTests : IDisposable
         factory.Calls.ShouldBe(1);
         results.ShouldAllBe(r => r.Count == 3);
 
-        var failing = new CountingConnectionFactory(new SqlConnectionFactory()) { FailNext = 1 };
+        var failing = new CountingConnectionFactory(_db.CreateFactory()) { FailNext = 1 };
         var second = _db.Provider(factory: failing);
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => second.GetAsync(David(), IntegerKey, TenantA).AsTask());
         ex.ErrorCode.ShouldBe("VIRTUAL_FILTER_SOURCE_UNAVAILABLE");

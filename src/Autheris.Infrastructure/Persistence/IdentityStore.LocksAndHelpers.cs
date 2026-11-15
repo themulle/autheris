@@ -17,7 +17,7 @@ internal sealed partial class IdentityStore
     {
         await using var scope = await open(true, ct).ConfigureAwait(false);
         await using var cmd = scope.Connection.CreateCommand();
-        if (dialect == IdentityStoreDialect.Sqlite || dialect == IdentityStoreDialect.PostgreSql)
+        if (dialect == IdentityStoreDialect.PostgreSql)
         {
             cmd.CommandText = @"INSERT INTO IDENTITY_LOCKS (tenant_id, realm_id, user_key, reason, source, locked_at)
 VALUES (@tenantId, @realmId, @userKey, @reason, @source, @lockedAt)

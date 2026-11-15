@@ -100,9 +100,9 @@ public sealed class WriteGrantStartupTests
                 {
                     ["default"] = new DataSourceConnectionOptions
                     {
-                        Provider = "Sqlite",
-                        ConnectionString = "Data Source=read",
-                        WriteConnectionString = "Data Source=write"
+                        Provider = "SqlServer",
+                        ConnectionString = "Server=read;Database=db;",
+                        WriteConnectionString = "Server=write;Database=db;"
                     }
                 }
             },

@@ -11,7 +11,6 @@ using Autheris.Domain.Interfaces;
 
 internal enum RecertificationDialect
 {
-    Sqlite,
     PostgreSql,
     SqlServer
 }
@@ -30,7 +29,6 @@ internal sealed class RecertificationStore(
 
     private SqlDialect Sql => dialect switch
     {
-        RecertificationDialect.Sqlite => SqlDialect.Sqlite,
         RecertificationDialect.PostgreSql => SqlDialect.PostgreSql,
         _ => SqlDialect.SqlServer
     };

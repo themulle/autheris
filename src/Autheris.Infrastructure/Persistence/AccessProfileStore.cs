@@ -12,7 +12,6 @@ namespace Autheris.Infrastructure.Persistence;
 
 internal enum AccessProfileDialect
 {
-    Sqlite,
     PostgreSql,
     SqlServer
 }
@@ -392,22 +391,16 @@ internal sealed class AccessProfileStore(
                 expires_at = excluded.expires_at, created_by = excluded.created_by, approved_by = excluded.approved_by, approved_at = excluded.approved_at,
                 justification = excluded.justification, kind = excluded.kind, renewal_count = excluded.renewal_count, deactivated_reason = NULL";
 
-    /// <summary>The database value of a timestamp: ISO-8601 text on SQLite, a UTC <see cref="DateTimeOffset"/> elsewhere.</summary>
+    /// <summary>The database value of a timestamp: a UTC <see cref="DateTimeOffset"/>.</summary>
     private object Ts(DateTimeOffset? value) => value is not { } v
         ? DBNull.Value
-        : dialect == AccessProfileDialect.Sqlite ? v.ToString("O", CultureInfo.InvariantCulture) : v.ToUniversalTime();
+        : v.ToUniversalTime();
 
     private DateTimeOffset? ReadTs(DbDataReader reader, int ordinal)
     {
         if (reader.IsDBNull(ordinal))
         {
             return null;
-        }
-
-        if (dialect == AccessProfileDialect.Sqlite)
-        {
-            var text = reader.GetString(ordinal);
-            return string.IsNullOrWhiteSpace(text) ? null : DateTimeOffset.Parse(text, CultureInfo.InvariantCulture);
         }
 
         return reader.GetFieldValue<DateTimeOffset>(ordinal);

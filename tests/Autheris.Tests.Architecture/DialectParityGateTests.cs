@@ -26,7 +26,6 @@ public sealed class DialectGateTests
     [
         DatabaseDialect.PostgreSql,
         DatabaseDialect.SqlServer,
-        DatabaseDialect.Sqlite,
         DatabaseDialect.Databricks,
         DatabaseDialect.Oracle
     ];

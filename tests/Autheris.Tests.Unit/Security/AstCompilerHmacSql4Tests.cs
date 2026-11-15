@@ -82,7 +82,6 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
     [Theory]
     [InlineData("PostgreSQL")]
     [InlineData("SqlServer")]
-    [InlineData("Sqlite")]
     public async Task AstCompiler_HmacMaskedColumn_IsRewritten(string sourceType)
     {
         var service = CreateService(sourceType);

@@ -173,9 +173,9 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
         }
     }
 
-    /// <summary>Explicit "no session state" dialects: SQLite is a file-local engine, Databricks is stateless over HTTP.</summary>
+    /// <summary>Explicit "no session state" dialects: Databricks is stateless over HTTP.</summary>
     private static bool HasNoSessionState(DatabaseDialect dialect) =>
-        dialect is DatabaseDialect.Sqlite or DatabaseDialect.Databricks;
+        dialect == DatabaseDialect.Databricks;
 
     private static NotSupportedException UnsupportedSessionDialect(DatabaseDialect dialect) =>
         new($"Session initialization for dialect '{dialect}' is not supported (fail closed).");

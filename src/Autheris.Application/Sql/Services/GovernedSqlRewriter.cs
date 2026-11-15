@@ -433,7 +433,6 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 
                 string? backendDefaultSchema = targetDatabaseDialect switch
                 {
-                    DatabaseDialect.Sqlite => "main",
                     DatabaseDialect.SqlServer => "dbo",
                     _ => null
                 };

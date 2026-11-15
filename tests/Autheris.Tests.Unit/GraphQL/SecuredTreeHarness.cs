@@ -109,7 +109,7 @@ internal sealed class SecuredTreeHarness : IDisposable
 
     public static TableMetadata DependentMetadata(TableIdentifier id, bool withTenant = true, bool active = true) => new()
     {
-        Table = new Table { SourceName = DataSource, SchemaName = id.Schema, TableName = id.TableName, IsActive = active, SourceType = "Sqlite" },
+        Table = new Table { SourceName = DataSource, SchemaName = id.Schema, TableName = id.TableName, IsActive = active, SourceType = "PostgreSql" },
         Identifier = id,
         Columns = withTenant
             ? [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "tenant_id" }]
@@ -127,7 +127,7 @@ internal sealed class SecuredTreeHarness : IDisposable
         return new TableMetadata
         {
             Identifier = id,
-            Table = new Table { SourceName = DataSource, SchemaName = "main", TableName = id.TableName, SourceType = "Sqlite" },
+            Table = new Table { SourceName = DataSource, SchemaName = "main", TableName = id.TableName, SourceType = "PostgreSql" },
             PrimaryKeyColumns = ["id"],
             Columns = [.. columns.Select(c => new TableColumn { ColumnName = c, DataType = c is "id" or "amount" or "order_id" ? "integer" : "text" })],
             ColumnMaskingRules = maskEmail && id.TableName == "orders"
@@ -236,9 +236,9 @@ internal sealed class SecuredTreeHarness : IDisposable
 
     public string RunTree(TreeQueryNode root, IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access)
     {
-        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql);
         using var cmd = Connection.CreateCommand();
-        cmd.CommandText = compiled.Sql;
+        cmd.CommandText = Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection.TranslateSql(compiled.Sql);
         foreach (var (name, value) in compiled.Parameters)
         {
             cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);

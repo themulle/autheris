@@ -111,9 +111,9 @@ public static class AttributeTableQuery
         ArgumentException.ThrowIfNullOrEmpty(tenant);
         ArgumentException.ThrowIfNullOrEmpty(subjectKey);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxValues, 1);
-        if (dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite))
+        if (dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql))
         {
-            throw new NotSupportedException("Attribute tables support SQL Server, PostgreSQL and SQLite.");
+            throw new NotSupportedException("Attribute tables support SQL Server and PostgreSQL.");
         }
 
         string Q(string id) => dialect.QuoteIdentifier(id);
@@ -125,7 +125,7 @@ public static class AttributeTableQuery
         {
             DatabaseDialect.SqlServer => " COLLATE Latin1_General_100_BIN2",
             DatabaseDialect.PostgreSql => " COLLATE \"C\"",
-            _ => " COLLATE BINARY",
+            _ => throw new NotSupportedException($"Attribute tables do not support dialect '{dialect}'.")
         };
 
         var select = new List<string> { Q(spec.ValueColumn) };

@@ -670,59 +670,6 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
                 var truncExpr = $"date_trunc('{unit}', {src})";
                 return ($"{truncExpr} AS {quoted}", truncExpr, TimeBucketKeyShape.ZoneWall);
             }
-            case DatabaseDialect.Sqlite:
-            {
-                if (ColumnValueKinds.IsDateOnly(dataType))
-                {
-                    string expr = unit switch
-                    {
-                        "year" => $"strftime('%Y-01-01', {quotedCol})",
-                        "month" => $"strftime('%Y-%m-01', {quotedCol})",
-                        "quarter" => $"date({quotedCol}, 'start of month', CASE WHEN strftime('%m', {quotedCol}) IN ('02', '05', '08', '11') THEN '-1 months' WHEN strftime('%m', {quotedCol}) IN ('03', '06', '09', '12') THEN '-2 months' ELSE '-0 months' END)",
-                        "week" => $"date({quotedCol}, '-6 days', 'weekday 1')",
-                        _ => $"strftime('%Y-%m-%d', {quotedCol})"
-                    };
-                    return ($"{expr} AS {quotedCol}", expr, TimeBucketKeyShape.Date);
-                }
-
-                string utc = $"datetime({quotedCol})";
-                string local = string.Equals(timeZone, "UTC", StringComparison.OrdinalIgnoreCase)
-                    ? utc
-                    : $"datetime({quotedCol}, {SqliteZoneOffsetTable.OffsetModifier(timeZone, utc)})";
-
-                if (spec.Interval == TimeBucketInterval.Hour)
-                {
-                    if (ZoneHourAlignment.TryGetMinutePart(timeZone, out int m))
-                    {
-                        string hourExpr;
-                        if (m == 0)
-                        {
-                            hourExpr = $"strftime('%Y-%m-%d %H:00:00', {utc})";
-                        }
-                        else
-                        {
-                            hourExpr = $"datetime(strftime('%Y-%m-%d %H:00:00', datetime({utc}, '+{m} minutes')), '{-m} minutes')";
-                        }
-                        return ($"{hourExpr} AS {quotedCol}", hourExpr, TimeBucketKeyShape.UtcInstant);
-                    }
-
-                    string wallHourExpr = $"strftime('%Y-%m-%d %H:00:00', {local})";
-                    return ($"{wallHourExpr} AS {quotedCol}", wallHourExpr, TimeBucketKeyShape.ZoneWall);
-                }
-
-                string dateOrWallExpr = unit switch
-                {
-                    "day" => $"strftime('%Y-%m-%d', {local})",
-                    "week" => $"date({local}, '-6 days', 'weekday 1')",
-                    "month" => $"strftime('%Y-%m-01', {local})",
-                    "quarter" => $"date({local}, 'start of month', CASE WHEN strftime('%m', {local}) IN ('02', '05', '08', '11') THEN '-1 months' WHEN strftime('%m', {local}) IN ('03', '06', '09', '12') THEN '-2 months' ELSE '-0 months' END)",
-                    "year" => $"strftime('%Y-01-01', {local})",
-                    _ => $"strftime('%Y-%m-%d', {local})"
-                };
-
-                var shape = unit == "week" ? TimeBucketKeyShape.Date : TimeBucketKeyShape.ZoneWall;
-                return ($"{dateOrWallExpr} AS {quotedCol}", dateOrWallExpr, shape);
-            }
             default:
             {
                 if (!string.Equals(timeZone, "UTC", StringComparison.OrdinalIgnoreCase))

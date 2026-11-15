@@ -52,8 +52,8 @@ public sealed class CustomQueryPollerServiceTests
         var gateway = new GatewayOptions();
         gateway.DataSources.Connections["crm_db"] = new DataSourceConnectionOptions
         {
-            Provider = "Sqlite",
-            ConnectionString = "Data Source=:memory:"
+            Provider = "PostgreSql",
+            ConnectionString = "Host=localhost"
         };
         _gatewayOpt = Substitute.For<IOptionsMonitor<GatewayOptions>>();
         _gatewayOpt.CurrentValue.Returns(gateway);

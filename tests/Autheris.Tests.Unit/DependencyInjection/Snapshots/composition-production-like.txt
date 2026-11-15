@@ -162,7 +162,7 @@
 0161 Microsoft.Extensions.Options.IConfigureOptions<Microsoft.Extensions.Http.HttpClientFactoryOptions> Singleton key=- instance:Microsoft.Extensions.Options.ConfigureNamedOptions<Microsoft.Extensions.Http.HttpClientFactoryOptions>
 0162 Autheris.Application.Common.Interfaces.ISqlConnectionFactory Singleton key=- type:Autheris.Infrastructure.Persistence.SqlConnectionFactory
 0163 Autheris.Application.Common.Interfaces.ISqlSourceDescriber Singleton key=- type:Autheris.Infrastructure.Persistence.SqlSourceDescriber
-0164 Autheris.Application.Sql.Interfaces.IProviderExecutionGuard Singleton key=- type:Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard
+0164 Autheris.Application.Sql.Interfaces.IProviderExecutionGuard Singleton key=- instance:Autheris.Application.Sql.Interfaces.PassThroughExecutionGuard
 0165 Autheris.Application.Sql.Catalog.GovernedCatalogOptions Singleton key=- instance:Autheris.Application.Sql.Catalog.GovernedCatalogOptions
 0166 Autheris.Infrastructure.Persistence.Catalog.GovernedCatalogProvider Singleton key=- type:Autheris.Infrastructure.Persistence.Catalog.GovernedCatalogProvider
 0167 Autheris.Application.Sql.Catalog.IGovernedCatalogProvider Singleton key=- factory:Autheris.Application.Sql.Catalog.IGovernedCatalogProvider

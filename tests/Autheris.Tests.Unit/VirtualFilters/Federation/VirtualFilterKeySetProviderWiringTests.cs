@@ -43,6 +43,7 @@ public sealed class VirtualFilterKeySetProviderWiringTests : IDisposable
         services.AddLogging();
         services.AddHttpContextAccessor();
         services.AddGatewayInfrastructure(options);
+        services.AddSingleton(_db.CreateFactory());
         services.AddSingleton(_db.Catalog);
         await using var provider = services.BuildServiceProvider();
 

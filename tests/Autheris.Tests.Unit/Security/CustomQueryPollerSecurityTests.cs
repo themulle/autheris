@@ -254,7 +254,7 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var gateway = new GatewayOptions();
-        gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" };
+        gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Data Source=:memory:" };
         var gwMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
         gwMonitor.CurrentValue.Returns(gateway);
 
@@ -266,7 +266,7 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         var service = new CustomQueryPollerService(monitor, _streamStore, _builder, factory, _signal, _clusterState, NullLogger<CustomQueryPollerService>.Instance, gatewayOptions: gwMonitor);
         await service.PollStreamBatchAsync(poller, fencingToken: 1);
 
-        executedCommands.ShouldContain(c => c.Contains("PRAGMA query_only = ON"));
+        executedCommands.ShouldContain(c => c.Contains("SET TRANSACTION READ ONLY"));
     }
 
     [Fact]
@@ -330,7 +330,7 @@ public sealed class CustomQueryPollerSecurityTests : IDisposable
         monitor.CurrentValue.Returns(new CustomQueryPollerOptions { Enabled = true, Pollers = [poller] });
 
         var gateway = new GatewayOptions();
-        gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" };
+        gateway.DataSources.Connections["sqlite_src"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Data Source=:memory:" };
         var gwMonitor = Substitute.For<IOptionsMonitor<GatewayOptions>>();
         gwMonitor.CurrentValue.Returns(gateway);
 

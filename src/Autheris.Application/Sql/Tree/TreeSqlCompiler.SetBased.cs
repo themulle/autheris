@@ -279,18 +279,7 @@ public static partial class TreeSqlCompiler
                 break;
 
             default:
-                var sqliteChunks = pairs.Chunk(ObjectChunkSize).ToList();
-                var sqliteObj = "json_object()";
-                if (sqliteChunks.Count > 0)
-                {
-                    sqliteObj = "json_object(" + string.Join(", ", sqliteChunks[0].Select(p => $"'{p.Key}', {p.Expression}")) + ")";
-                    foreach (var chunk in sqliteChunks.Skip(1))
-                    {
-                        sqliteObj = $"json_set({sqliteObj}, " + string.Join(", ", chunk.Select(p => $"'$.\"{p.Key}\"', {p.Expression}")) + ")";
-                    }
-                }
-                rootQuery = $"SELECT json_group_array(json({sqliteObj}){(outerOrder.Length > 0 ? " ORDER BY " + outerOrder : string.Empty)}) FROM {fromBuilder}";
-                break;
+                throw new NotSupportedException($"Set-based tree SQL compiler does not support dialect '{context.Dialect}'.");
         }
 
         var allCtes = new List<string> { pageCteSql };
@@ -441,8 +430,7 @@ public static partial class TreeSqlCompiler
                 $"CAST((SELECT {SqlServerSelectList(child, context)} FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS nvarchar(max))",
             DatabaseDialect.PostgreSql =>
                 PostgresObject(child, context),
-            _ =>
-                $"json({SqliteObject(child, context)})"
+            _ => throw new NotSupportedException($"Set-based tree SQL compiler does not support dialect '{context.Dialect}'.")
         };
         level2Cols.Add($"{rowJsonExpr} AS {Q(context, "autheris_row")}");
 
@@ -462,8 +450,7 @@ public static partial class TreeSqlCompiler
                 $"N'[' + STRING_AGG({xAlias}.{Q(context, "autheris_row")}, N',') WITHIN GROUP (ORDER BY {xAlias}.{Q(context, "autheris_rn")}) + N']'",
             DatabaseDialect.PostgreSql =>
                 $"jsonb_agg({xAlias}.{Q(context, "autheris_row")} ORDER BY {xAlias}.{Q(context, "autheris_rn")})",
-            _ =>
-                $"json_group_array(json({xAlias}.{Q(context, "autheris_row")}) ORDER BY {xAlias}.{Q(context, "autheris_rn")})"
+            _ => throw new NotSupportedException($"Set-based tree SQL compiler does not support dialect '{context.Dialect}'.")
         };
         level3Cols.Add($"{aggExpr} AS {Q(context, "autheris_json")}");
 

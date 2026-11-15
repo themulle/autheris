@@ -58,14 +58,14 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             Opened++;
             var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync(ct);
-            return stubReaderJson is null ? connection : new Autheris.Tests.Unit.TestDoubles.SqliteAsPostgresConnection(connection, stubReaderJson);
+            return new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection, stubReaderJson);
         }
     }
 
     private static TableMetadata Meta(TableIdentifier id, string sourceName, params (string Name, string Type)[] columns) => new()
     {
         Identifier = id,
-        Table = new Table { SourceName = sourceName, SchemaName = id.Schema, TableName = id.TableName, SourceType = "Sqlite" },
+        Table = new Table { SourceName = sourceName, SchemaName = id.Schema, TableName = id.TableName, SourceType = "PostgreSql" },
         PrimaryKeyColumns = ["id"],
         Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type }).ToList()
     };
@@ -100,7 +100,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         IColumnMaskingProvider? masking = null,
         Microsoft.Extensions.Logging.ILogger<GovernedTreeQueryService>? logger = null,
         bool unbackedBlogSource = false,
-        string provider = "Sqlite",
+        string provider = "PostgreSql",
         string? stubReaderJson = null)
     {
         var access = new Dictionary<TableIdentifier, ResolvedTableAccess>
@@ -339,8 +339,8 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         var titleMask = new Dictionary<string, MaskingRule> { ["title"] = new MaskingRule { RuleType = "REDACT" } };
         var fixture = Create(a =>
         {
-            a[Authors] = Allowed(MetaOf(Authors, "blog", "Sqlite", DataSourceType.Sql, null, AuthorColumns));
-            var articles = MetaOf(Articles, "BLOG", "Sqlite", DataSourceType.Sql, titleMask, ArticleColumns);
+            a[Authors] = Allowed(MetaOf(Authors, "blog", "PostgreSql", DataSourceType.Sql, null, AuthorColumns));
+            var articles = MetaOf(Articles, "BLOG", "PostgreSql", DataSourceType.Sql, titleMask, ArticleColumns);
             a[Articles] = Allowed(articles) with
             {
                 Decision = TypedTreeRowPolicy.Allowed(
@@ -380,7 +380,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     {
         var fixture = Create(a =>
         {
-            var child = MetaOf(CrmArticles, "blog", "Sqlite", DataSourceType.Sql, null, ArticleColumns);
+            var child = MetaOf(CrmArticles, "blog", "PostgreSql", DataSourceType.Sql, null, ArticleColumns);
             a[CrmArticles] = Allowed(child) with { Decision = TableAccessDecision.Denied(CrmArticles, "no consent") };
         });
 
@@ -396,7 +396,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         var titleMask = new Dictionary<string, MaskingRule> { ["title"] = new MaskingRule { RuleType = "REDACT" } };
         var fixture = Create(a =>
         {
-            var child = MetaOf(CrmArticles, "blog", "Sqlite", DataSourceType.Sql, titleMask, ArticleColumns);
+            var child = MetaOf(CrmArticles, "blog", "PostgreSql", DataSourceType.Sql, titleMask, ArticleColumns);
             a[CrmArticles] = Allowed(child) with
             {
                 Decision = TypedTreeRowPolicy.Allowed(

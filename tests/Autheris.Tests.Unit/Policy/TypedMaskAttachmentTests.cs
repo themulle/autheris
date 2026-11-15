@@ -29,7 +29,7 @@ public sealed class TypedMaskAttachmentTests
     private static TableMetadata Meta(params (string Name, bool Sensitive, MaskingRule? Rule)[] columns) => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "SQLite" },
+        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "PostgreSQL" },
         Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = "TEXT", IsSensitive = c.Sensitive }).ToList(),
         ColumnMaskingRules = columns.Where(c => c.Rule != null).ToDictionary(c => c.Name, c => c.Rule!)
     };
@@ -64,8 +64,8 @@ public sealed class TypedMaskAttachmentTests
 
         decision.ColumnMasks.ShouldNotBeNull();
         decision.ColumnMasks!.HasMask("email").ShouldBeTrue();
-        // SQLite: the typed partial mask is the constant-length redact of the legacy SQLite output.
-        ((ColumnMaskPolicy)decision.ColumnMasks).Specs["email"].Kind.ShouldBe(MaskKind.Redact);
+        // PostgreSQL: the typed partial mask preserves the KeepPrefix/KeepSuffix Partial spec.
+        ((ColumnMaskPolicy)decision.ColumnMasks).Specs["email"].Kind.ShouldBe(MaskKind.PartialMask);
         decision.RequireTypedColumnMasks(meta).ShouldBeSameAs(decision);
     }
 

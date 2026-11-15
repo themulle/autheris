@@ -52,7 +52,6 @@ public sealed class CustomQueryPollerValidator
 
         return dialect is DatabaseDialect.PostgreSql
             or DatabaseDialect.SqlServer
-            or DatabaseDialect.Sqlite
             or DatabaseDialect.Oracle;
     }
 

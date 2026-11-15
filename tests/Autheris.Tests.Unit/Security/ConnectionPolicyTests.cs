@@ -186,7 +186,7 @@ public sealed class ConnectionPolicyTests
             };
 
             var result = ConnectionTlsPolicy.ValidateDialect(dialect, probe);
-            if (dialect is Autheris.Domain.Common.DatabaseDialect.Sqlite or Autheris.Domain.Common.DatabaseDialect.Databricks)
+            if (dialect is Autheris.Domain.Common.DatabaseDialect.Databricks)
             {
                 result.ShouldBeNull();
             }

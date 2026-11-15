@@ -198,7 +198,6 @@ public class DomainAndModelEdgeCasesTests
     [Theory]
     [InlineData(DatabaseDialect.SqlServer, "amount", "[amount]")]
     [InlineData(DatabaseDialect.PostgreSql, "amount", "\"amount\"")]
-    [InlineData(DatabaseDialect.Sqlite, "amount", "\"amount\"")]
     [InlineData(DatabaseDialect.Oracle, "amount", "\"amount\"")]
     [InlineData(DatabaseDialect.Databricks, "amount", "`amount`")]
     public void DatabaseDialect_QuoteIdentifier_QuotesAccordingToDialectSpecification(
@@ -212,7 +211,6 @@ public class DomainAndModelEdgeCasesTests
     [InlineData(DatabaseDialect.PostgreSql, "dbo.invoices", "\"dbo\".\"invoices\"")]
     [InlineData(DatabaseDialect.Databricks, "dbo.invoices", "`dbo`.`invoices`")]
     [InlineData(DatabaseDialect.Oracle, "dbo.invoices", "\"dbo\".\"invoices\"")]
-    [InlineData(DatabaseDialect.Sqlite, "dbo.invoices", "\"dbo\".\"invoices\"")]
     public void DatabaseDialect_QuoteQualifiedColumn_QuotesEachSegmentAccordingToDialect(
         DatabaseDialect dialect, string qualifiedCol, string expectedQuoted)
     {
@@ -224,8 +222,6 @@ public class DomainAndModelEdgeCasesTests
     [InlineData("  sqlserver  ", DatabaseDialect.SqlServer)]
     [InlineData("SQL_SERVER", DatabaseDialect.SqlServer)]
     [InlineData("Microsoft SQL Server", DatabaseDialect.SqlServer)]
-    [InlineData("sqlite", DatabaseDialect.Sqlite)]
-    [InlineData("sqlite3", DatabaseDialect.Sqlite)]
     [InlineData("postgres", DatabaseDialect.PostgreSql)]
     [InlineData("postgresql", DatabaseDialect.PostgreSql)]
     [InlineData("pgsql", DatabaseDialect.PostgreSql)]

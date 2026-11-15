@@ -52,7 +52,7 @@ public sealed class FederatedSameTableNameTests
                 Id = id,
                 TableName = "parity_sales",
                 SchemaName = "main",
-                SourceType = "Sqlite",
+                SourceType = "PostgreSQL",
                 SourceName = source,
                 DataSourceType = DataSourceType.Sql,
                 IsActive = true

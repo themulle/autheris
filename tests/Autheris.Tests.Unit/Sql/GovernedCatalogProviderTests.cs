@@ -287,54 +287,6 @@ public sealed class GovernedCatalogProviderTests
         Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
     }
 
-    [Theory]
-    [InlineData("INTEGER")]
-    [InlineData("NUMERIC")]
-    [InlineData("DECIMAL(10,2)")]
-    [InlineData("REAL")]
-    [InlineData("BLOB")]
-    [InlineData("")]
-    [InlineData("BOOLEAN")]
-    public async Task Sqlite_TenantColumnNonTextAffinity_DeniesTable(string declaredType)
-    {
-        var columns = new[] { Col("id", "INTEGER"), Col("tenant_id", declaredType) };
-        var (sut, _, _) = Build("Sqlite", columns, tenantColumn: "tenant_id");
-
-        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
-    }
-
-    [Theory]
-    [InlineData("TEXT")]
-    [InlineData("VARCHAR(64)")]
-    [InlineData("nvarchar(10)")]
-    [InlineData("CLOB")]
-    public async Task Sqlite_TenantColumnTextAffinity_IsAdmitted_WithNullCollation(string declaredType)
-    {
-        var columns = new[] { Col("id", "INTEGER"), Col("tenant_id", declaredType) };
-        var (sut, _, _) = Build("Sqlite", columns, tenantColumn: "tenant_id");
-
-        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
-        entry.ShouldNotBeNull();
-        entry.Columns.ShouldAllBe(c => c.Collation == null);
-    }
-
-    [Theory]
-    [InlineData("INT", SqliteAffinity.IntegerAffinity)]
-    [InlineData("BIGINT", SqliteAffinity.IntegerAffinity)]
-    [InlineData("CHARACTER(20)", SqliteAffinity.TextAffinity)]
-    [InlineData("TEXT", SqliteAffinity.TextAffinity)]
-    [InlineData("CLOB", SqliteAffinity.TextAffinity)]
-    [InlineData("BLOB", SqliteAffinity.BlobAffinity)]
-    [InlineData("", SqliteAffinity.BlobAffinity)]
-    [InlineData("DOUBLE PRECISION", SqliteAffinity.RealAffinity)]
-    [InlineData("FLOAT", SqliteAffinity.RealAffinity)]
-    [InlineData("NUMERIC", SqliteAffinity.NumericAffinity)]
-    [InlineData("BOOLEAN", SqliteAffinity.NumericAffinity)]
-    [InlineData("DATETIME", SqliteAffinity.NumericAffinity)]
-    [InlineData("POINT", SqliteAffinity.IntegerAffinity)]
-    public void SqliteAffinity_FollowsTheDocumentedRules(string declared, SqliteAffinity expected) =>
-        SqliteTypeAffinity.Of(declared).ShouldBe(expected);
-
     [Fact]
     public async Task CatalogCollation_NeverAppearsInEmittedSql()
     {

@@ -85,7 +85,6 @@ public sealed class SqlRewritePipelineTests
     [Theory]
     [InlineData(DatabaseDialect.SqlServer, "[email]", "NVARCHAR(MAX)")]
     [InlineData(DatabaseDialect.PostgreSql, "\"email\"", "TEXT")]
-    [InlineData(DatabaseDialect.Sqlite, "\"email\"", "TEXT")]
     public void SqlDataMaskingProvider_GeneratesEmailMasksPerDialect(DatabaseDialect dialect, string expectedColumn, string expectedCast)
     {
         var expr = SqlDataMaskingProvider.BuildEmailMaskExpression("email", dialect);

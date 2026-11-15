@@ -171,7 +171,7 @@ public sealed class IntegrationGapATests
             SchemaName = "main",
             TableName = "employees",
             DataSourceType = DataSourceType.Sql,
-            SourceType = "Sqlite"
+            SourceType = "PostgreSql"
         },
         Columns =
         [

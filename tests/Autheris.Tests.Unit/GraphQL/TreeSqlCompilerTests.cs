@@ -44,7 +44,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
     private static TableMetadata AuthorsMeta() => new()
     {
         Identifier = Authors,
-        Table = new Table { SourceName = "blog", SchemaName = "main", TableName = "authors", SourceType = "Sqlite" },
+        Table = new Table { SourceName = "blog", SchemaName = "main", TableName = "authors", SourceType = "PostgreSql" },
         PrimaryKeyColumns = ["id"],
         Columns =
         [
@@ -60,7 +60,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
     private static TableMetadata ArticlesMeta() => new()
     {
         Identifier = Articles,
-        Table = new Table { SourceName = "blog", SchemaName = "main", TableName = "articles", SourceType = "Sqlite" },
+        Table = new Table { SourceName = "blog", SchemaName = "main", TableName = "articles", SourceType = "PostgreSql" },
         PrimaryKeyColumns = ["id"],
         Columns =
         [
@@ -96,7 +96,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
     private JsonElement Execute(CompiledTreeQuery compiled)
     {
         using var cmd = _connection.CreateCommand();
-        cmd.CommandText = compiled.Sql;
+        cmd.CommandText = Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection.TranslateSql(compiled.Sql);
         foreach (var (name, value) in compiled.Parameters)
         {
             cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
@@ -115,7 +115,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
             Limit = 2
         };
 
-        var compiled = TreeSqlCompiler.Compile(root, Access(articlesRowFilter: TypedTreeRowPolicy.Int("published", BinaryOperator.Equal, 1)), DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, Access(articlesRowFilter: TypedTreeRowPolicy.Int("published", BinaryOperator.Equal, 1)), DatabaseDialect.PostgreSql);
         var result = Execute(compiled);
 
         result.GetArrayLength().ShouldBe(2);
@@ -131,7 +131,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
     {
         var root = new TreeQueryNode(Authors, ["id", "email"]) { OrderBy = [new TreeOrder("id")], Limit = 1 };
 
-        var result = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.Sqlite));
+        var result = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.PostgreSql));
 
         result[0].GetProperty("email").GetString().ShouldBe("***");
     }
@@ -141,7 +141,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
     {
         var root = new TreeQueryNode(Articles, ["id", "secret"]);
 
-        Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.Sqlite))
+        Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.PostgreSql))
             .Message.ShouldContain("secret");
     }
 
@@ -149,9 +149,9 @@ public sealed class TreeSqlCompilerTests : IDisposable
     public void UnknownColumn_IsRejected_WithTheSameMessageShapeAsDenied()
     {
         var denied = Should.Throw<GatewayInvalidQueryException>(() =>
-            TreeSqlCompiler.Compile(new TreeQueryNode(Articles, ["secret"]), Access(), DatabaseDialect.Sqlite));
+            TreeSqlCompiler.Compile(new TreeQueryNode(Articles, ["secret"]), Access(), DatabaseDialect.PostgreSql));
         var unknown = Should.Throw<GatewayInvalidQueryException>(() =>
-            TreeSqlCompiler.Compile(new TreeQueryNode(Articles, ["nope"]), Access(), DatabaseDialect.Sqlite));
+            TreeSqlCompiler.Compile(new TreeQueryNode(Articles, ["nope"]), Access(), DatabaseDialect.PostgreSql));
 
         denied.Message.Replace("secret", "X").ShouldBe(unknown.Message.Replace("nope", "X"));
     }
@@ -166,16 +166,16 @@ public sealed class TreeSqlCompilerTests : IDisposable
 
         if (isMasked)
         {
-            var exFilter = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(filtered, Access(), DatabaseDialect.Sqlite));
+            var exFilter = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(filtered, Access(), DatabaseDialect.PostgreSql));
             exFilter.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
-            var exSort = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(sorted, Access(), DatabaseDialect.Sqlite));
+            var exSort = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(sorted, Access(), DatabaseDialect.PostgreSql));
             exSort.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
         }
         else
         {
-            var exFilter = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(filtered, Access(), DatabaseDialect.Sqlite));
+            var exFilter = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(filtered, Access(), DatabaseDialect.PostgreSql));
             exFilter.ErrorCode.ShouldBe("INVALID_QUERY");
-            var exSort = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(sorted, Access(), DatabaseDialect.Sqlite));
+            var exSort = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(sorted, Access(), DatabaseDialect.PostgreSql));
             exSort.ErrorCode.ShouldBe("INVALID_QUERY");
         }
     }
@@ -192,7 +192,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
             ])
         };
 
-        var compiled = TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.PostgreSql);
         var result = Execute(compiled);
 
         compiled.Sql.ShouldNotContain("O'Brien");
@@ -216,7 +216,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
             OrderBy = [new TreeOrder("id")]
         };
 
-        var result = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.Sqlite));
+        var result = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.PostgreSql));
 
         result.EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe(new[] { 1, 4 }, ignoreOrder: false);
     }
@@ -226,7 +226,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
     {
         var root = new TreeQueryNode(Authors, ["id"]) { OrderBy = [new TreeOrder("rating", Descending: true), new TreeOrder("id")], Limit = 2, Offset = 1 };
 
-        var result = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.Sqlite));
+        var result = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.PostgreSql));
 
         // rating desc, id asc: 1(5), 4(5), 3(4), 2(3) -> skip 1, take 2
         result.EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe(new[] { 4, 3 }, ignoreOrder: false);
@@ -242,7 +242,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
             Limit = 1
         };
 
-        var result = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.Sqlite));
+        var result = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.PostgreSql));
 
         result[0].GetProperty("articles").EnumerateArray().Select(a => a.GetProperty("id").GetInt32()).ShouldBe(new[] { 12 });
     }
@@ -257,8 +257,8 @@ public sealed class TreeSqlCompilerTests : IDisposable
             Limit = 1
         };
 
-        var withAuthor = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.Sqlite));
-        var hiddenAuthor = Execute(TreeSqlCompiler.Compile(root, Access(authorsRowFilter: TypedTreeRowPolicy.Int("id", BinaryOperator.NotEqual, 1)), DatabaseDialect.Sqlite));
+        var withAuthor = Execute(TreeSqlCompiler.Compile(root, Access(), DatabaseDialect.PostgreSql));
+        var hiddenAuthor = Execute(TreeSqlCompiler.Compile(root, Access(authorsRowFilter: TypedTreeRowPolicy.Int("id", BinaryOperator.NotEqual, 1)), DatabaseDialect.PostgreSql));
 
         withAuthor[0].GetProperty("author").GetProperty("name").GetString().ShouldBe("Ann");
         hiddenAuthor[0].GetProperty("author").ValueKind.ShouldBe(JsonValueKind.Null);
@@ -269,7 +269,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
     {
         var root = new TreeQueryNode(Authors, ["id"]) { OrderBy = [new TreeOrder("id")] };
 
-        var compiled = TreeSqlCompiler.Compile(root, Access(tenant: "t2"), DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, Access(tenant: "t2"), DatabaseDialect.PostgreSql);
         var result = Execute(compiled);
 
         compiled.Sql.ShouldNotContain("'t2'");
@@ -283,7 +283,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
 
         var result = Execute(TreeSqlCompiler.Compile(root,
             Access(authorsRowFilter: TypedTreeRowPolicy.Int("rating", BinaryOperator.Equal, 5)),
-            DatabaseDialect.Sqlite));
+            DatabaseDialect.PostgreSql));
 
         result.EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe(new[] { 1, 4 }, ignoreOrder: false);
     }
@@ -302,7 +302,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
             authorsRowFilter: TypedTreeRowPolicy.Int("rating", BinaryOperator.Equal, 5),
             articlesRowFilter: TypedTreeRowPolicy.Int("published", BinaryOperator.Equal, 1));
 
-        var result = Execute(TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite));
+        var result = Execute(TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql));
 
         var authors = result.EnumerateArray().ToList();
         authors.Select(a => a.GetProperty("id").GetInt32()).ShouldBe(new[] { 1, 4 });
@@ -332,7 +332,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
         };
         var root = new TreeQueryNode(Authors, ["id"]) { Relations = [ArticlesOf(new TreeQueryNode(Articles, ["id"]))] };
 
-        Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite));
+        Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql));
     }
 
     [Fact]
@@ -351,7 +351,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
         {
             Where = new TreeComparison("email", TreeFilterOperator.Eq, "test@example.com")
         };
-        var exFilter = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(filtered, access, DatabaseDialect.Sqlite));
+        var exFilter = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(filtered, access, DatabaseDialect.PostgreSql));
         exFilter.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
         exFilter.ColumnName.ShouldBe("email");
 
@@ -359,7 +359,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
         {
             OrderBy = [new TreeOrder("email", Descending: false)]
         };
-        var exSort = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(sorted, access, DatabaseDialect.Sqlite));
+        var exSort = Should.Throw<FilterOnMaskedColumnException>(() => TreeSqlCompiler.Compile(sorted, access, DatabaseDialect.PostgreSql));
         exSort.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
     }
 
@@ -371,7 +371,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
         {
             Where = new TreeComparison("nonexistent", TreeFilterOperator.Eq, "val")
         };
-        var exUnknown = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(unknown, access, DatabaseDialect.Sqlite));
+        var exUnknown = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(unknown, access, DatabaseDialect.PostgreSql));
         exUnknown.ErrorCode.ShouldBe("INVALID_QUERY");
 
         var authors = access[Authors];
@@ -385,7 +385,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
         {
             Where = new TreeComparison("email", TreeFilterOperator.Eq, "val")
         };
-        var exDenied = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(denied, access, DatabaseDialect.Sqlite));
+        var exDenied = Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(denied, access, DatabaseDialect.PostgreSql));
         exDenied.ErrorCode.ShouldBe("INVALID_QUERY");
     }
 
@@ -396,11 +396,11 @@ public sealed class TreeSqlCompilerTests : IDisposable
         access.Remove(Articles);
         var root = new TreeQueryNode(Authors, ["id"]) { Relations = [ArticlesOf(new TreeQueryNode(Articles, ["id"]))] };
 
-        Should.Throw<GatewayForbiddenException>(() => TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite));
+        Should.Throw<GatewayForbiddenException>(() => TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql));
 
         var denied = Access();
         denied[Articles] = denied[Articles] with { Decision = TableAccessDecision.Denied(Articles, "no consent") };
-        Should.Throw<GatewayForbiddenException>(() => TreeSqlCompiler.Compile(root, denied, DatabaseDialect.Sqlite));
+        Should.Throw<GatewayForbiddenException>(() => TreeSqlCompiler.Compile(root, denied, DatabaseDialect.PostgreSql));
     }
 
     [Fact]
@@ -412,7 +412,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
             node = new TreeQueryNode(Authors, ["id"]) { Relations = [ArticlesOf(node, $"r{i}")] };
         }
 
-        Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(node, Access(), DatabaseDialect.Sqlite));
+        Should.Throw<GatewayInvalidQueryException>(() => TreeSqlCompiler.Compile(node, Access(), DatabaseDialect.PostgreSql));
     }
 
     [Fact]
@@ -438,7 +438,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
             Limit = 1
         };
 
-        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql);
         var result = Execute(compiled);
 
         compiled.HmacColumns.ShouldHaveSingleItem();
@@ -491,7 +491,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
         var meta = new TableMetadata
         {
             Identifier = wide,
-            Table = new Table { SourceName = "blog", SchemaName = "main", TableName = "wide", SourceType = "Sqlite" },
+            Table = new Table { SourceName = "blog", SchemaName = "main", TableName = "wide", SourceType = "PostgreSql" },
             Columns = columns.Select(c => new TableColumn { ColumnName = c, DataType = "integer" }).ToList()
         };
         using (var cmd = _connection.CreateCommand())
@@ -504,7 +504,7 @@ public sealed class TreeSqlCompilerTests : IDisposable
             [wide] = new(meta, TableAccessDecision.Allowed(wide, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true))
         };
 
-        var result = Execute(TreeSqlCompiler.Compile(new TreeQueryNode(wide, columns), access, DatabaseDialect.Sqlite));
+        var result = Execute(TreeSqlCompiler.Compile(new TreeQueryNode(wide, columns), access, DatabaseDialect.PostgreSql));
 
         result[0].GetProperty("c0").GetInt32().ShouldBe(1);
         result[0].GetProperty("c119").GetInt32().ShouldBe(119);

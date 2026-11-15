@@ -26,7 +26,7 @@ public sealed class GraphQlTreeBuilderNullTests
             SourceName = "analytics",
             SchemaName = "main",
             TableName = "audit_logs",
-            SourceType = "Sqlite",
+            SourceType = "PostgreSql",
             RequiredFilterColumns = ["tenant_id"]
         },
         PrimaryKeyColumns = ["id"],
@@ -130,7 +130,7 @@ public sealed class GraphQlTreeBuilderNullTests
             Limit = 10
         };
 
-        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql);
 
         compiled.Sql.ShouldContain("\"tenant_id\" = ");
         compiled.Parameters.Values.ShouldContain("tenant-1");

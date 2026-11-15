@@ -310,19 +310,19 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
     /// as the registered service and inside the governed service that every door uses.
     /// </summary>
     [Fact]
-    public void ProviderExecutionGuard_IsTheSqliteGuard_InTheRealHost()
+    public void ProviderExecutionGuard_IsThePassThroughGuard_InTheRealHost()
     {
         using var scope = _factory.Services.CreateScope();
 
         var registered = scope.ServiceProvider.GetRequiredService<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard>();
-        registered.ShouldBeOfType<Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard>();
+        registered.ShouldBeOfType<Autheris.Application.Sql.Interfaces.PassThroughExecutionGuard>();
 
         var service = scope.ServiceProvider.GetRequiredService<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>();
         var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
         var executor = service.GetType().GetField("_executor", flags)!.GetValue(service)!;
         var guard = executor.GetType().GetField("_executionGuard", flags)!.GetValue(executor);
-        guard.ShouldBeOfType<Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard>(
-            "the governed service must run provider calls under the SQLite guard, not the pass-through fallback");
+        guard.ShouldBeOfType<Autheris.Application.Sql.Interfaces.PassThroughExecutionGuard>(
+            "the governed service must use the pass-through guard now that the SQLite guard is removed");
     }
 
     [Fact]

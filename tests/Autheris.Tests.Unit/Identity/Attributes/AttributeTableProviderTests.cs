@@ -62,13 +62,14 @@ public sealed class AttributeTableProviderTests : IDisposable
         {
             var connection = new SqliteConnection($"Data Source={name}");
             connection.Open();
-            return Task.FromResult<DbConnection>(connection);
+            connection.CreateCollation("C", StringComparer.Ordinal.Compare);
+            return Task.FromResult<DbConnection>(new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection));
         }
     }
 
     private AttributeTableProvider Provider(
         bool lookupAllowed = true, bool dedicated = true, bool acknowledged = false, string environment = "Production",
-        IEnumerable<string>? exempt = null, IDbSessionContextInitializer? session = null, string provider = "Sqlite")
+        IEnumerable<string>? exempt = null, IDbSessionContextInitializer? session = null, string provider = "PostgreSql")
     {
         var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
         {
@@ -169,7 +170,7 @@ public sealed class AttributeTableProviderTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["hr_db"] = new() { Provider = "Sqlite", ConnectionString = "ignored", CallerAttributeLookupAllowed = true, CallerAttributeDedicatedLogin = true }
+                    ["hr_db"] = new() { Provider = "PostgreSql", ConnectionString = "ignored", CallerAttributeLookupAllowed = true, CallerAttributeDedicatedLogin = true }
                 }
             }
         });
@@ -200,8 +201,16 @@ public sealed class AttributeTableProviderTests : IDisposable
         public override void ChangeDatabase(string databaseName) { }
         public override void Close() { }
         public override void Open() { }
-        protected override DbTransaction BeginDbTransaction(System.Data.IsolationLevel isolationLevel) => throw new NotSupportedException();
+        protected override DbTransaction BeginDbTransaction(System.Data.IsolationLevel isolationLevel) => new FakeTransaction(this);
         protected override DbCommand CreateDbCommand() => new FakeCommand(table);
+
+        private sealed class FakeTransaction(DbConnection connection) : DbTransaction
+        {
+            public override System.Data.IsolationLevel IsolationLevel => System.Data.IsolationLevel.ReadCommitted;
+            protected override DbConnection DbConnection => connection;
+            public override void Commit() { }
+            public override void Rollback() { }
+        }
     }
 
     private sealed class FakeCommand(System.Data.DataTable table) : DbCommand
@@ -324,7 +333,7 @@ public sealed class AttributeTableProviderTests : IDisposable
         var session = Substitute.For<IDbSessionContextInitializer>();
         await Provider(session: session).ResolveAsync(UserSubject(), Definition(), default);
         await session.Received(1).InitializeSessionAsync(
-            Arg.Any<DbConnection>(), Arg.Any<DbTransaction?>(), DatabaseDialect.Sqlite, Tenant, null, null, Arg.Any<CancellationToken>());
+            Arg.Any<DbConnection>(), Arg.Any<DbTransaction?>(), DatabaseDialect.PostgreSql, Tenant, null, null, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -358,7 +367,7 @@ public sealed class AttributeTableDefinitionValidatorTests
             TenantColumnExemptTables = (exempt ?? []).ToList(),
             Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["hr_db"] = new() { Provider = "Sqlite", ConnectionString = "x", CallerAttributeLookupAllowed = lookup }
+                ["hr_db"] = new() { Provider = "PostgreSql", ConnectionString = "x", CallerAttributeLookupAllowed = lookup }
             }
         }
     }));

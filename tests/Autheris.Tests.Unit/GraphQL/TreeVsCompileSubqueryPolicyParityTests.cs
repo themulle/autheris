@@ -143,7 +143,7 @@ public sealed class TreeVsCompileSubqueryPolicyParityTests : IDisposable
         var map = new Dictionary<TableIdentifier, TreeTableAccess> { [SecuredTreeHarness.OrdersId] = access };
         var root = new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id", "email"]) { Limit = 100 };
 
-        var compiled = TreeSqlCompiler.Compile(root, map, Autheris.Domain.Common.DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, map, Autheris.Domain.Common.DatabaseDialect.PostgreSql);
         compiled.Sql.ShouldNotContain("autheris_target.*");
         compiled.Sql.ShouldNotContain("\"autheris_target\".*");
 
@@ -174,7 +174,7 @@ public sealed class TreeVsCompileSubqueryPolicyParityTests : IDisposable
             .ShouldBe(await _h.CompileOrderIdsAsync(SecuredTreeHarness.ExistsPolicy(), "t1"));
         doc.RootElement.GetRawText().ShouldNotContain("@x.example");
         Should.Throw<Exception>(() => TreeSqlCompiler.Compile(
-            new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id", "amount"]) { Limit = 10 }, map, Autheris.Domain.Common.DatabaseDialect.Sqlite));
+            new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id", "amount"]) { Limit = 10 }, map, Autheris.Domain.Common.DatabaseDialect.PostgreSql));
     }
 
     [Trait("Category", "Security")]

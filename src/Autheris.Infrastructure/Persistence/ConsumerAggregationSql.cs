@@ -5,7 +5,6 @@ using System;
 /// <summary>SQL dialect of the governance store a consumer aggregation statement runs against (Issue #286).</summary>
 internal enum ConsumerAggregationDialect
 {
-    Sqlite,
     PostgreSql,
     SqlServer
 }
@@ -17,7 +16,6 @@ internal enum ConsumerAggregationDialect
 /// </summary>
 internal sealed class ConsumerAggregationSql
 {
-    private static readonly ConsumerAggregationSql SqliteSql = Build(ConsumerAggregationDialect.Sqlite);
     private static readonly ConsumerAggregationSql PostgreSqlSql = Build(ConsumerAggregationDialect.PostgreSql);
     private static readonly ConsumerAggregationSql SqlServerSql = Build(ConsumerAggregationDialect.SqlServer);
 
@@ -30,7 +28,6 @@ internal sealed class ConsumerAggregationSql
 
     public static ConsumerAggregationSql For(ConsumerAggregationDialect dialect) => dialect switch
     {
-        ConsumerAggregationDialect.Sqlite => SqliteSql,
         ConsumerAggregationDialect.PostgreSql => PostgreSqlSql,
         ConsumerAggregationDialect.SqlServer => SqlServerSql,
         _ => throw new ArgumentOutOfRangeException(nameof(dialect), dialect, "Unknown consumer aggregation dialect.")
@@ -38,7 +35,6 @@ internal sealed class ConsumerAggregationSql
 
     private static ConsumerAggregationSql Build(ConsumerAggregationDialect dialect) => dialect switch
     {
-        ConsumerAggregationDialect.Sqlite => BuildOnConflict(qualify: false),
         ConsumerAggregationDialect.PostgreSql => BuildOnConflict(qualify: true),
         _ => BuildMerge()
     };

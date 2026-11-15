@@ -42,7 +42,7 @@ public static class SqlDialectMapper
     /// throws for every other value; <c>SqlDialectConsistencyTests</c> pins this list against it.
     /// </summary>
     public static bool ConnectionFactorySupports(DatabaseDialect dialect) =>
-        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite or DatabaseDialect.Oracle or DatabaseDialect.Databricks;
+        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Oracle or DatabaseDialect.Databricks;
 
     /// <summary>
     /// X1.3, WebSQL admission: a dialect is executable when it maps to an AST dialect, the connection factory supports it and its
@@ -87,7 +87,6 @@ public static class SqlDialectMapper
     {
         DatabaseDialect.PostgreSql => "PostgreSQL",
         DatabaseDialect.SqlServer => "SQL Server",
-        DatabaseDialect.Sqlite => "SQLite",
         DatabaseDialect.Oracle => "Oracle",
         DatabaseDialect.Databricks => "Databricks",
         _ => dialect.ToString()

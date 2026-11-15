@@ -29,7 +29,7 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class CrossSourceRelationsSecurityTests : IDisposable
 {
-    private static readonly TableIdentifier OrdersTableId = new("sales", "dbo", "orders");
+    private static readonly TableIdentifier OrdersTableId = new("sales", "public", "orders");
     private static readonly TableIdentifier CustomersTableId = new("crm", "public", "customers");
     private static readonly TenantId DefaultTenant = new("tenant-gold");
 
@@ -69,9 +69,9 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
         Table = new Table
         {
             SourceName = "OrdersSource",
-            SchemaName = "dbo",
+            SchemaName = "public",
             TableName = "orders",
-            SourceType = "Sqlite",
+            SourceType = "PostgreSQL",
             DataSourceType = DataSourceType.Sql,
             IsActive = true
         },
@@ -110,7 +110,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
         {
             var connection = new SqliteConnection(connectionString);
             connection.Open();
-            return Task.FromResult<DbConnection>(connection);
+            return Task.FromResult<DbConnection>(new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection));
         }
     }
 
@@ -198,7 +198,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -273,7 +273,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -348,7 +348,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -423,7 +423,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -499,7 +499,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -588,7 +588,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };
@@ -679,7 +679,7 @@ public sealed class CrossSourceRelationsSecurityTests : IDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["OrdersSource"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["OrdersSource"] = new() { Provider = "PostgreSQL", ConnectionString = _connectionString }
                 }
             }
         };

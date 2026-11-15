@@ -71,7 +71,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
     };
 
     private static CompiledTreeQuery CompileTree(TreeSecuredSource source, TreeQueryNode? root = null) =>
-        TreeSqlCompiler.Compile(root ?? new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id"]) { Limit = 10 }, Access(source), DatabaseDialect.Sqlite);
+        TreeSqlCompiler.Compile(root ?? new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id"]) { Limit = 10 }, Access(source), DatabaseDialect.PostgreSql);
 
     private static TreeSecuredSource Source(string sql, params BoundParameter[] parameters) =>
         new(sql, [.. parameters], TargetSqlDialect.SqlServer);
@@ -84,7 +84,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
         var access = await _h.TreeAccessAsync(SecuredTreeHarness.OrdersId, SecuredTreeHarness.ExistsPolicy(), "t1");
         var map = new Dictionary<TableIdentifier, TreeTableAccess> { [SecuredTreeHarness.OrdersId] = access };
 
-        var compiled = TreeSqlCompiler.Compile(new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id"]) { Limit = 10 }, map, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(new TreeQueryNode(SecuredTreeHarness.OrdersId, ["id"]) { Limit = 10 }, map, DatabaseDialect.PostgreSql);
 
         access.SecuredSource.ShouldNotBeNull();
         compiled.Sql.ShouldContain("FROM (SELECT");
@@ -129,7 +129,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
                 b)
         };
 
-        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(root, access, DatabaseDialect.PostgreSql);
 
         compiled.Sql.ShouldNotContain("@p0");
         compiled.Parameters.Values.Count(v => Equals(v, "other")).ShouldBe(1);
@@ -210,7 +210,7 @@ public sealed class TreeSecuredSourceTests : IDisposable
                 Where = new TreeComparison("email", TreeFilterOperator.Eq, value)
             };
 
-            var compiled = TreeSqlCompiler.Compile(root, map, DatabaseDialect.Sqlite);
+            var compiled = TreeSqlCompiler.Compile(root, map, DatabaseDialect.PostgreSql);
 
             if (value != "@gq1")
             {

@@ -27,7 +27,7 @@ public static partial class TreeSqlCompiler
     public const int MaxParameters = 2_000;
     public const int MaxFilterDepth = 15;
 
-    /// <summary>Key/value pairs per JSON object function call (PostgreSQL allows 100 arguments, SQLite 127).</summary>
+    /// <summary>Key/value pairs per JSON object function call (PostgreSQL allows 100 arguments).</summary>
     private const int ObjectChunkSize = 50;
 
     private static readonly string TargetAlias = TrinoSqlEngine.RowFilterAliases.Target;
@@ -38,7 +38,7 @@ public static partial class TreeSqlCompiler
     /// as flat tables through the governed compile path but offer no nested relation fields.
     /// </summary>
     public static bool SupportsTreeCompile(DatabaseDialect dialect) =>
-        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite;
+        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql;
 
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
     private static partial Regex SafeNameRegex();
@@ -763,7 +763,6 @@ public static partial class TreeSqlCompiler
             {
                 DatabaseDialect.SqlServer => $"{quoted}.STAsText()",
                 DatabaseDialect.PostgreSql => $"ST_AsGeoJSON({quoted})",
-                DatabaseDialect.Sqlite => $"AsGeoJSON({quoted})",
                 _ => quoted
             };
         }
@@ -774,10 +773,6 @@ public static partial class TreeSqlCompiler
         if (dataType is "bytea" && context.Dialect == DatabaseDialect.PostgreSql)
         {
             return $"encode({quoted}, 'base64')";
-        }
-        if (dataType is "blob" && context.Dialect == DatabaseDialect.Sqlite)
-        {
-            return $"hex({quoted})";
         }
         return quoted;
     }
@@ -823,8 +818,7 @@ public static partial class TreeSqlCompiler
                 " FOR JSON PATH, INCLUDE_NULL_VALUES), N'[]')",
             DatabaseDialect.PostgreSql =>
                 $"SELECT coalesce(jsonb_agg({PostgresObject(plan, context)}{(order.Length > 0 ? " ORDER BY " + order : string.Empty)}), '[]'::jsonb)::text FROM ({inner}) AS {alias}",
-            _ =>
-                $"SELECT json_group_array(json({SqliteObject(plan, context)}){(order.Length > 0 ? " ORDER BY " + order : string.Empty)}) FROM ({inner}) AS {alias}"
+            _ => throw new NotSupportedException($"Tree SQL compiler does not support dialect '{context.Dialect}'.")
         };
     }
 
@@ -851,10 +845,7 @@ public static partial class TreeSqlCompiler
                     : $"(SELECT {PostgresObject(plan, context)} FROM ({inner}) AS {alias})";
 
             default:
-                // SQLite: values of scalar subqueries lose the JSON subtype; json() restores it.
-                return relation.IsList
-                    ? $"json((SELECT json_group_array(json({SqliteObject(plan, context)}){(order.Length > 0 ? " ORDER BY " + order : string.Empty)}) FROM ({inner}) AS {alias}))"
-                    : $"json((SELECT {SqliteObject(plan, context)} FROM ({inner}) AS {alias}))";
+                throw new NotSupportedException($"Tree SQL compiler does not support dialect '{context.Dialect}'.");
         }
     }
 
@@ -868,23 +859,6 @@ public static partial class TreeSqlCompiler
             .Select(chunk => "jsonb_build_object(" + string.Join(", ", chunk.Select(p => $"'{p.Key}', {p.Expression}")) + ")")
             .ToList();
         return chunks.Count == 0 ? "'{}'::jsonb" : string.Join(" || ", chunks);
-    }
-
-    private static string SqliteObject(NodePlan plan, CompileContext context)
-    {
-        var chunks = ObjectPairs(plan, context).Chunk(ObjectChunkSize).ToList();
-        if (chunks.Count == 0)
-        {
-            return "json_object()";
-        }
-
-        // json_set instead of json_patch: a merge patch would drop keys whose value is null.
-        var expression = "json_object(" + string.Join(", ", chunks[0].Select(p => $"'{p.Key}', {p.Expression}")) + ")";
-        foreach (var chunk in chunks.Skip(1))
-        {
-            expression = $"json_set({expression}, " + string.Join(", ", chunk.Select(p => $"'$.\"{p.Key}\"', {p.Expression}")) + ")";
-        }
-        return expression;
     }
 
     // ---------------------------------------------------------------- filters

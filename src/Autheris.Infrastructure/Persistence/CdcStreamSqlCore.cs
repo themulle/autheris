@@ -17,7 +17,6 @@ using Autheris.Infrastructure.Streaming;
 
 internal enum CdcSqlDialect
 {
-    Sqlite,
     PostgreSql,
     SqlServer
 }
@@ -43,7 +42,6 @@ internal sealed class CdcStreamSqlCore(CdcSqlDialect dialect)
 
     public static bool IsUniqueViolation(Exception ex) => ex switch
     {
-        Microsoft.Data.Sqlite.SqliteException s => s.SqliteErrorCode == 19 && s.SqliteExtendedErrorCode is 1555 or 2067,
         Npgsql.PostgresException p => p.SqlState == "23505",
         Microsoft.Data.SqlClient.SqlException q => q.Number is 2627 or 2601,
         _ => false
@@ -252,16 +250,6 @@ internal sealed class CdcStreamSqlCore(CdcSqlDialect dialect)
         const string insertColumns = "source, domain_name, schema_name, table_name, watermark, fencing_token, updated_at, updated_by, watermark_state";
         string sql = dialect switch
         {
-            CdcSqlDialect.Sqlite => $@"
-                INSERT INTO {_watermarks} ({insertColumns})
-                VALUES (@source, @domain, @schema, @table, @watermark, @token, @updatedAt, @updatedBy, @watermarkState)
-                ON CONFLICT(source, domain_name, schema_name, table_name) DO UPDATE SET
-                    watermark = MAX(watermark, excluded.watermark),
-                    fencing_token = excluded.fencing_token,
-                    updated_at = excluded.updated_at,
-                    updated_by = excluded.updated_by,
-                    watermark_state = COALESCE(excluded.watermark_state, {_watermarks}.watermark_state)
-                WHERE excluded.fencing_token >= {_watermarks}.fencing_token;",
             CdcSqlDialect.PostgreSql => $@"
                 INSERT INTO {_watermarks} AS t ({insertColumns})
                 VALUES (@source, @domain, @schema, @table, @watermark, @token, @updatedAt, @updatedBy, @watermarkState)
@@ -272,7 +260,7 @@ internal sealed class CdcStreamSqlCore(CdcSqlDialect dialect)
                     updated_by = EXCLUDED.updated_by,
                     watermark_state = COALESCE(EXCLUDED.watermark_state, t.watermark_state)
                 WHERE EXCLUDED.fencing_token >= t.fencing_token;",
-            _ => $@"
+            CdcSqlDialect.SqlServer => $@"
                 DECLARE @affected INT = 0;
                 UPDATE {_watermarks} WITH (UPDLOCK, HOLDLOCK)
                    SET watermark = IIF(watermark > @watermark, watermark, @watermark),
@@ -289,7 +277,8 @@ internal sealed class CdcStreamSqlCore(CdcSqlDialect dialect)
                                         WHERE source = @source AND domain_name = @domain AND schema_name = @schema AND table_name = @table);
                     SET @affected = @@ROWCOUNT;
                 END
-                SELECT @affected;"
+                SELECT @affected;",
+            _ => throw new NotSupportedException($"Unsupported dialect: {dialect}"),
         };
 
         await using var cmd = Cmd(conn, tx, sql);
@@ -564,7 +553,7 @@ internal sealed class CdcStreamSqlCore(CdcSqlDialect dialect)
         {
             CdcSqlDialect.SqlServer => $"DELETE TOP (@n) FROM {_images} WHERE stream_id = @sid",
             CdcSqlDialect.PostgreSql => $@"DELETE FROM {_images} WHERE ctid IN (SELECT ctid FROM {_images} WHERE stream_id = @sid LIMIT @n)",
-            _ => $@"DELETE FROM {_images} WHERE rowid IN (SELECT rowid FROM {_images} WHERE stream_id = @sid LIMIT @n)"
+            _ => throw new NotSupportedException($"Unsupported CDC SQL dialect '{dialect}'.")
         };
         await using var cmd = Cmd(conn, null, sql);
         P(cmd, "@sid", id.Value ?? string.Empty);

@@ -271,17 +271,6 @@ public sealed class Issue405GroupKeyAuditServiceTests
         h.Entries.ShouldAllBe(e => e.Decision == "ALLOW" && !e.DetailsJson!.Contains("group_key_type_family"));
     }
 
-    [Fact]
-    public async Task I405_T_11_Sqlite_NeverRefused_NoFamily()
-    {
-        IReadOnlyDictionary<string, object?> row = new Dictionary<string, object?> { ["grp"] = "a", [GovernedTableReadPlanner.GroupCountColumnAlias] = 3L, ["n"] = 3L };
-        var h = Create(Metadata("sqlite", DataSourceType.Sql, ("id", "int"), ("grp", "BLOB"), ("amount", "decimal")), new GovernedTableReadPlanner(), [row]);
-
-        var result = await h.Service.ExecuteAggregationAsync(Principal(), Query(["grp"], AllClear()));
-
-        result.Groups.ShouldNotBeEmpty();
-        h.Entries.ShouldAllBe(e => e.Decision == "ALLOW" && !e.DetailsJson!.Contains("group_key_type_family"));
-    }
 
     [Fact]
     public void I405_T_12_Planner_DefenseInDepth_ThrowsTypedException()

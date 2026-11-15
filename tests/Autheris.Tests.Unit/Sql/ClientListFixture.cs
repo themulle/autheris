@@ -163,7 +163,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
                 var connection = new SqliteConnection(connectionString);
                 await connection.OpenAsync();
                 connection.CreateFunction("textsend", (string? s) => s);
-                return (DbConnection)new Autheris.Tests.Unit.TestDoubles.SqliteAsPostgresConnection(connection);
+                return (DbConnection)new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection);
             });
 
         var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(

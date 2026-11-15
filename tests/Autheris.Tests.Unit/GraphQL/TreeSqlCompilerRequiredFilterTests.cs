@@ -22,7 +22,7 @@ public sealed class TreeSqlCompilerRequiredFilterTests
             SourceName = "analytics",
             SchemaName = "main",
             TableName = "audit_logs",
-            SourceType = "Sqlite",
+            SourceType = "PostgreSql",
             RequiredFilterColumns = [.. (requiredFilterColumns ?? ["tenant_id"])]
         },
         PrimaryKeyColumns = ["id"],
@@ -53,7 +53,7 @@ public sealed class TreeSqlCompilerRequiredFilterTests
         };
 
         var ex = Should.Throw<RequiredFilterColumnMissingException>(() =>
-            TreeSqlCompiler.Compile(rootNode, access, DatabaseDialect.Sqlite));
+            TreeSqlCompiler.Compile(rootNode, access, DatabaseDialect.PostgreSql));
 
         ex.Message.ShouldBe(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing));
     }
@@ -75,7 +75,7 @@ public sealed class TreeSqlCompilerRequiredFilterTests
             Limit = 10
         };
 
-        var compiled = TreeSqlCompiler.Compile(rootNode, access, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(rootNode, access, DatabaseDialect.PostgreSql);
         compiled.ShouldNotBeNull();
         compiled.Sql.ShouldNotBeEmpty();
     }
@@ -97,7 +97,7 @@ public sealed class TreeSqlCompilerRequiredFilterTests
             Limit = 10
         };
 
-        var compiled = TreeSqlCompiler.Compile(rootNode, access, DatabaseDialect.Sqlite);
+        var compiled = TreeSqlCompiler.Compile(rootNode, access, DatabaseDialect.PostgreSql);
         compiled.ShouldNotBeNull();
         compiled.Sql.ShouldNotBeEmpty();
     }
@@ -126,7 +126,7 @@ public sealed class TreeSqlCompilerRequiredFilterTests
         };
 
         var ex = Should.Throw<RequiredFilterColumnMissingException>(() =>
-            TreeSqlCompiler.Compile(rootNode, access, DatabaseDialect.Sqlite));
+            TreeSqlCompiler.Compile(rootNode, access, DatabaseDialect.PostgreSql));
 
         ex.Message.ShouldBe(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RequiredFilterColumnMissing));
     }

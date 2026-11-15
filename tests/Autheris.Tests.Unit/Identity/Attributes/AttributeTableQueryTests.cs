@@ -42,8 +42,6 @@ public sealed class AttributeTableQueryTests
     {
         var pg = AttributeTableQuery.Build(Spec(Config()), DatabaseDialect.PostgreSql, "tenant_a", "oid-1", null, 50);
         pg.Sql.ShouldBe("SELECT \"cost_center\", \"tenant_id\" FROM \"hr\".\"person_attributes\" WHERE \"person_oid\" = @ca_subject AND \"tenant_id\" COLLATE \"C\" = @ca_tenant AND \"cost_center\" IS NOT NULL LIMIT 51");
-        var lite = AttributeTableQuery.Build(Spec(Config(schema: null!)), DatabaseDialect.Sqlite, "tenant_a", "oid-1", null, 5);
-        lite.Sql.ShouldBe("SELECT \"cost_center\", \"tenant_id\" FROM \"person_attributes\" WHERE \"person_oid\" = @ca_subject AND \"tenant_id\" COLLATE BINARY = @ca_tenant AND \"cost_center\" IS NOT NULL LIMIT 6");
     }
 
     [Fact]

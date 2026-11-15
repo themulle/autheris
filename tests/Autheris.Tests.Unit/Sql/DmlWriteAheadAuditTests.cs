@@ -17,11 +17,11 @@ public sealed class DmlWriteAheadAuditTests
     [Fact]
     public async Task Intent_row_is_written_before_transaction_begins()
     {
-        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("Sqlite", Update);
+        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("PostgreSql", Update);
         GovernedSqlExecutorX1Tests.Harness? h = null;
         var connectionsAtIntent = -1;
         var transactionsAtIntent = -1;
-        h = GovernedSqlExecutorX1Tests.CreateHarness("Sqlite", auditSink: (e, _) =>
+        h = GovernedSqlExecutorX1Tests.CreateHarness("PostgreSql", auditSink: (e, _) =>
         {
             if (e.EventType == AuditEventTypes.WebSqlDmlIntent)
             {
@@ -42,8 +42,8 @@ public sealed class DmlWriteAheadAuditTests
     [Fact]
     public async Task Dml_is_not_executed_when_intent_audit_fails()
     {
-        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("Sqlite", Update);
-        var h = GovernedSqlExecutorX1Tests.CreateHarness("Sqlite", auditSink: (_, _) => throw new InvalidOperationException("audit store down"));
+        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("PostgreSql", Update);
+        var h = GovernedSqlExecutorX1Tests.CreateHarness("PostgreSql", auditSink: (_, _) => throw new InvalidOperationException("audit store down"));
 
         await Should.ThrowAsync<AuditUnavailableException>(() => GovernedSqlExecutorX1Tests.ExecuteAsync(h, compiled, dml: GovernedSqlExecutorX1Tests.Dml()));
 
@@ -54,8 +54,8 @@ public sealed class DmlWriteAheadAuditTests
     [Fact]
     public async Task Completion_audit_failure_does_not_alter_response_and_increments_counter()
     {
-        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("Sqlite", Update);
-        var h = GovernedSqlExecutorX1Tests.CreateHarness("Sqlite", auditSink: (e, _) =>
+        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("PostgreSql", Update);
+        var h = GovernedSqlExecutorX1Tests.CreateHarness("PostgreSql", auditSink: (e, _) =>
             e.EventType == AuditEventTypes.WebSqlDmlExecuted ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
 
         await Should.ThrowAsync<AuditUnavailableException>(() =>
@@ -69,8 +69,8 @@ public sealed class DmlWriteAheadAuditTests
     [Fact]
     public async Task Dml_audit_failure_after_commit_is_logged_critical()
     {
-        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("Sqlite", Update);
-        var h = GovernedSqlExecutorX1Tests.CreateHarness("Sqlite", auditSink: (e, _) =>
+        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("PostgreSql", Update);
+        var h = GovernedSqlExecutorX1Tests.CreateHarness("PostgreSql", auditSink: (e, _) =>
             e.EventType == AuditEventTypes.WebSqlDmlExecuted ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
 
         await Should.ThrowAsync<AuditUnavailableException>(() =>
@@ -83,8 +83,8 @@ public sealed class DmlWriteAheadAuditTests
     public async Task Intent_row_contains_no_literal_values()
     {
         const string literal = "zz-literal-77";
-        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("Sqlite", $"UPDATE orders SET amount = '{literal}' WHERE id = 1");
-        var h = GovernedSqlExecutorX1Tests.CreateHarness("Sqlite");
+        var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("PostgreSql", $"UPDATE orders SET amount = '{literal}' WHERE id = 1");
+        var h = GovernedSqlExecutorX1Tests.CreateHarness("PostgreSql");
 
         await GovernedSqlExecutorX1Tests.ExecuteAsync(h, compiled, dml: GovernedSqlExecutorX1Tests.Dml());
 

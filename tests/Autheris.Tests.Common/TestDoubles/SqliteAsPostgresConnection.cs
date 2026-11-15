@@ -4,20 +4,33 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Autheris.Tests.Unit.TestDoubles;
+namespace Autheris.Tests.Common.TestDoubles;
 
 /// <summary>
 /// Wraps a <see cref="DbConnection"/> (such as an in-memory SQLite connection) so governed PostgreSQL
 /// queries (positional <c>$1</c> parameters, <c>SET standard_conforming_strings</c>, <c>"public".</c>
-/// schema qualification) can execute against it during unit tests.
+/// schema qualification, <c>jsonb_*</c> tree projections) can execute against it during unit tests.
 /// </summary>
-internal sealed class SqliteAsPostgresConnection(DbConnection inner, string? stubReaderJson = null) : DbConnection
+public sealed class SqliteAsPostgresConnection : DbConnection
 {
-    private readonly DbConnection _inner = inner;
+    private readonly DbConnection _inner;
+    private readonly string? _stubReaderJson;
+
+    public SqliteAsPostgresConnection(DbConnection inner, string? stubReaderJson = null)
+    {
+        _inner = inner;
+        _stubReaderJson = stubReaderJson;
+        if (inner is Microsoft.Data.Sqlite.SqliteConnection sqlite)
+        {
+            sqlite.CreateFunction("set_config", (string _, string value, bool _) => value);
+            sqlite.CreateFunction("textsend", (string? value) => value);
+        }
+    }
+
+    public static string TranslateSql(string sql) => WrappedCmd.TranslateSql(sql);
 
     [AllowNull]
     public override string ConnectionString
@@ -35,10 +48,14 @@ internal sealed class SqliteAsPostgresConnection(DbConnection inner, string? stu
     public override void Open() => _inner.Open();
 
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) =>
-        new WrappedTx(this, _inner.BeginTransaction(isolationLevel));
+        new WrappedTx(
+            this,
+            _inner is Microsoft.Data.Sqlite.SqliteConnection sqlite
+                ? sqlite.BeginTransaction(isolationLevel, deferred: true)
+                : _inner.BeginTransaction(isolationLevel));
 
     protected override DbCommand CreateDbCommand() =>
-        new WrappedCmd(this, _inner.CreateCommand(), stubReaderJson);
+        new WrappedCmd(this, _inner.CreateCommand(), _stubReaderJson);
 
     protected override void Dispose(bool disposing)
     {
@@ -46,6 +63,7 @@ internal sealed class SqliteAsPostgresConnection(DbConnection inner, string? stu
         {
             _inner.Dispose();
         }
+
         base.Dispose(disposing);
     }
 
@@ -57,6 +75,7 @@ internal sealed class SqliteAsPostgresConnection(DbConnection inner, string? stu
 
     private sealed class WrappedTx(SqliteAsPostgresConnection owner, DbTransaction innerTx) : DbTransaction
     {
+        internal DbTransaction Inner => innerTx;
         public override IsolationLevel IsolationLevel => innerTx.IsolationLevel;
         protected override DbConnection DbConnection => owner;
         public override void Commit() => innerTx.Commit();
@@ -153,7 +172,8 @@ internal sealed class SqliteAsPostgresConnection(DbConnection inner, string? stu
 
         private void SyncCommand()
         {
-            innerCmd.CommandText = CommandText.Replace("\"public\".", string.Empty, StringComparison.Ordinal);
+            innerCmd.Transaction = _tx?.Inner;
+            innerCmd.CommandText = TranslateSql(CommandText);
             innerCmd.Parameters.Clear();
             for (int i = 0; i < _params.Count; i++)
             {
@@ -163,6 +183,172 @@ internal sealed class SqliteAsPostgresConnection(DbConnection inner, string? stu
                 p.Value = src.Value ?? DBNull.Value;
                 innerCmd.Parameters.Add(p);
             }
+        }
+
+        internal static string TranslateSql(string sql)
+        {
+            var translated = sql;
+            if (translated.StartsWith("SET standard_conforming_strings = on;", StringComparison.OrdinalIgnoreCase))
+            {
+                translated = translated["SET standard_conforming_strings = on;".Length..].TrimStart();
+            }
+
+            translated = translated
+                .Replace("\"public\".", string.Empty, StringComparison.Ordinal)
+                .Replace("'[]'::jsonb", "json('[]')", StringComparison.Ordinal)
+                .Replace("'{}'::jsonb", "json('{}')", StringComparison.Ordinal)
+                .Replace("::jsonb", string.Empty, StringComparison.Ordinal)
+                .Replace("::text", string.Empty, StringComparison.Ordinal)
+                .Replace("jsonb_agg(", "json_group_array(", StringComparison.Ordinal);
+
+            translated = System.Text.RegularExpressions.Regex.Replace(
+                translated,
+                @"json_group_array\(([^()]+\.""autheris_row"")",
+                "json_group_array(json($1)",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+            translated = RewriteJsonObjects(translated);
+            translated = WrapCoalesceArraysInJson(translated);
+            translated = WrapNestedSelectsInJson(translated);
+            return translated;
+        }
+
+        private static string WrapCoalesceArraysInJson(string sql)
+        {
+            const string token = "coalesce(";
+            var sb = new System.Text.StringBuilder(sql.Length + 32);
+            int i = 0;
+            while (i < sql.Length)
+            {
+                int idx = sql.IndexOf(token, i, StringComparison.OrdinalIgnoreCase);
+                if (idx < 0)
+                {
+                    sb.Append(sql, i, sql.Length - i);
+                    break;
+                }
+
+                sb.Append(sql, i, idx - i);
+                int open = idx + token.Length - 1;
+                int close = FindMatchingParen(sql, open);
+                string inside = WrapCoalesceArraysInJson(sql[(open + 1)..close]);
+                if (inside.Contains("json(", StringComparison.Ordinal) ||
+                    inside.Contains("json_group_array(", StringComparison.Ordinal))
+                {
+                    sb.Append("json(coalesce(").Append(inside).Append("))");
+                }
+                else
+                {
+                    sb.Append("coalesce(").Append(inside).Append(')');
+                }
+
+                i = close + 1;
+            }
+
+            return sb.ToString();
+        }
+
+        private static string RewriteJsonObjects(string sql)
+        {
+            const string token = "jsonb_build_object(";
+            var sb = new System.Text.StringBuilder(sql.Length);
+            int i = 0;
+            while (i < sql.Length)
+            {
+                int idx = sql.IndexOf(token, i, StringComparison.Ordinal);
+                if (idx < 0)
+                {
+                    sb.Append(sql, i, sql.Length - i);
+                    break;
+                }
+
+                sb.Append(sql, i, idx - i);
+                var chunks = new List<string>();
+                int pos = idx;
+                while (true)
+                {
+                    int open = pos + token.Length - 1;
+                    int close = FindMatchingParen(sql, open);
+                    string inner = RewriteJsonObjects(sql[(open + 1)..close]);
+                    chunks.Add($"json_object({inner})");
+                    pos = close + 1;
+                    if (sql.AsSpan(pos).StartsWith(" || jsonb_build_object(", StringComparison.Ordinal))
+                    {
+                        pos += 4;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+
+                string expr = chunks.Count == 1
+                    ? chunks[0]
+                    : "json('{' || " + string.Join(" || ',' || ", chunks.ConvertAll(c => $"substr({c}, 2, length({c}) - 2)")) + " || '}')";
+
+                sb.Append(expr);
+                i = pos;
+            }
+
+            return sb.ToString();
+        }
+
+        private static string WrapNestedSelectsInJson(string sql)
+        {
+            const string marker = "', (SELECT ";
+            var sb = new System.Text.StringBuilder(sql.Length);
+            int i = 0;
+            while (i < sql.Length)
+            {
+                int idx = sql.IndexOf(marker, i, StringComparison.Ordinal);
+                if (idx < 0)
+                {
+                    sb.Append(sql, i, sql.Length - i);
+                    break;
+                }
+
+                sb.Append(sql, i, idx - i + 3);
+                int open = idx + 3;
+                int close = FindMatchingParen(sql, open);
+                string sub = WrapNestedSelectsInJson(sql[open..(close + 1)]);
+                sb.Append("json(").Append(sub).Append(')');
+                i = close + 1;
+            }
+
+            return sb.ToString();
+        }
+
+        private static int FindMatchingParen(string sql, int openIndex)
+        {
+            int depth = 0;
+            bool inQuote = false;
+            for (int i = openIndex; i < sql.Length; i++)
+            {
+                char ch = sql[i];
+                if (ch == '\'')
+                {
+                    if (inQuote && i + 1 < sql.Length && sql[i + 1] == '\'')
+                    {
+                        i++;
+                        continue;
+                    }
+                    inQuote = !inQuote;
+                    continue;
+                }
+
+                if (inQuote)
+                {
+                    continue;
+                }
+
+                if (ch == '(') depth++;
+                else if (ch == ')')
+                {
+                    depth--;
+                    if (depth == 0) return i;
+                }
+            }
+
+            throw new InvalidOperationException("Unbalanced parenthesis in SQL translation.");
         }
 
         private sealed class ParamCollection : DbParameterCollection

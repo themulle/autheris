@@ -1642,7 +1642,6 @@
           "Autheris.Domain": "[0.0.0-dev, )",
           "MemoryPack": "[1.21.4, )",
           "Microsoft.Data.SqlClient": "[7.1.1, )",
-          "Microsoft.Data.Sqlite": "[10.0.14, )",
           "Microsoft.Extensions.Caching.Memory": "[10.0.14, )",
           "Npgsql": "[10.0.3, )",
           "OpenTelemetry": "[1.20.1, )",
@@ -1665,6 +1664,7 @@
           "Autheris.Api": "[0.0.0-dev, )",
           "Autheris.Application": "[0.0.0-dev, )",
           "Microsoft.AspNetCore.Mvc.Testing": "[10.0.14, )",
+          "Microsoft.Data.Sqlite": "[10.0.14, )",
           "xunit.extensibility.core": "[2.9.3, )"
         }
       },

@@ -158,13 +158,6 @@ public sealed class SqlDataMaskingProvider
                     return Redact(names, new string(rule.MaskChar ?? '*', 5));
                 }
 
-                if (dialect == DatabaseDialect.Sqlite)
-                {
-                    // The legacy SQLite partial mask always produced five mask characters; the typed variable-length mask would
-                    // reveal the value length there, so SQLite redacts to the same constant length (never more than the legacy output).
-                    return Redact(names, new string(rule.MaskChar ?? '*', 5));
-                }
-
                 return PartialMask(names, rule.KeepPrefix ?? 1, rule.KeepSuffix ?? 0, rule.MaskChar ?? '*');
             case "MASK_EMAIL":
                 // A typed mask never reveals more than the legacy one, neither characters nor length: the legacy mask kept the first
@@ -210,7 +203,7 @@ public sealed class SqlDataMaskingProvider
         }
 
         // no in-database HMAC on Oracle without a DBMS_CRYPTO grant; other dialects have no in-database HMAC either.
-        if (dialect is not (DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Sqlite))
+        if (dialect is not (DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer))
         {
             return null;
         }
@@ -356,11 +349,6 @@ public sealed class SqlDataMaskingProvider
             return $"CASE WHEN INSTR({text}, '@') > 1 THEN SUBSTR({text}, 1, 1) || '***@***' ELSE '***@***' END";
         }
 
-        if (dialect == DatabaseDialect.Sqlite)
-        {
-            return $"CASE WHEN INSTR(CAST({quotedCol} AS TEXT), '@') > 1 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 1) || '***@***' ELSE '***@***' END";
-        }
-
         return $"CASE WHEN POSITION('@' IN CAST({quotedCol} AS TEXT)) > 1 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 1) || '***@***' ELSE '***@***' END";
     }
 
@@ -377,11 +365,6 @@ public sealed class SqlDataMaskingProvider
         {
             string text = $"CAST({quotedCol} AS VARCHAR2(4000))";
             return $"CASE WHEN LENGTH({text}) >= 8 THEN SUBSTR({text}, 1, 2) || '** **** **** ' || SUBSTR({text}, -4) ELSE '****' END";
-        }
-
-        if (dialect == DatabaseDialect.Sqlite)
-        {
-            return $"CASE WHEN LENGTH(CAST({quotedCol} AS TEXT)) >= 8 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 2) || '** **** **** ' || SUBSTR(CAST({quotedCol} AS TEXT), -4) ELSE '****' END";
         }
 
         return $"CASE WHEN LENGTH(CAST({quotedCol} AS TEXT)) >= 8 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 2) || '** **** **** ' || SUBSTR(CAST({quotedCol} AS TEXT), LENGTH(CAST({quotedCol} AS TEXT)) - 3, 4) ELSE '****' END";
@@ -450,8 +433,6 @@ public sealed class SqlDataMaskingProvider
                 $"ENCODE(HMAC(CAST(\"{columnName.Replace("\"", "\"\"", StringComparison.Ordinal)}\" AS TEXT), CAST({keyMarker} AS TEXT), 'sha256'), 'hex')",
             DatabaseDialect.SqlServer =>
                 $"CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', {outerMarker} + HASHBYTES('SHA2_256', {innerMarker} + CAST(CAST([{columnName.Replace("]", "]]", StringComparison.Ordinal)}] AS NVARCHAR(MAX)) AS VARBINARY(MAX)))), 2)",
-            DatabaseDialect.Sqlite =>
-                $"gateway_hmac_sha256(CAST(\"{columnName.Replace("\"", "\"\"", StringComparison.Ordinal)}\" AS TEXT), {keyMarker})",
             _ => null
         };
     }
