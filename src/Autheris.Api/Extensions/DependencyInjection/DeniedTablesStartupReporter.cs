@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.Lint;
 using Autheris.Application.Security;
@@ -37,7 +38,11 @@ public sealed class DeniedTablesStartupReporter(
         await Task.Yield();
         try
         {
-            var catalog = (await tables.GetAllTablesAsync(stoppingToken).ConfigureAwait(false)).Where(static t => t.Table.IsActive).ToList();
+            var catalog = await CatalogTablePageReader.ReadAllAsync(
+                tables,
+                new CatalogTableQuery(IncludeInactive: false),
+                static t => t.Table.IsActive,
+                ct: stoppingToken).ConfigureAwait(false);
 
             var accessProfiles = new List<AccessProfile>();
             if (profiles is not null)

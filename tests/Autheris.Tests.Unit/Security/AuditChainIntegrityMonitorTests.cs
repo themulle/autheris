@@ -158,6 +158,7 @@ public sealed class AuditChainIntegrityMonitorTests
     public async Task Health_GovernanceDbFailure_DoesNotReturnExceptionText()
     {
         var governance = Substitute.For<IGovernanceRepository>();
+        global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(governance);
         governance.GetAllTablesAsync(Arg.Any<System.Threading.CancellationToken>())
             .Returns<Task<System.Collections.Generic.IReadOnlyList<TableMetadata>>>(_ => throw new InvalidOperationException("Server=db-internal;Password=secret"));
 

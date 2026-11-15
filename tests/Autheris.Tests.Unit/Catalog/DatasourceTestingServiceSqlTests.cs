@@ -19,7 +19,8 @@ public sealed class DatasourceTestingServiceSqlTests
 {
     private const string Source = "gateway_lwe";
 
-    private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
+    private readonly ITableMetadataRepository _metadataRepo =
+        global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
     private readonly ISqlConnectionFactory _factory = Substitute.For<ISqlConnectionFactory>();
 

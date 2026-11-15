@@ -117,8 +117,12 @@ public sealed class PatternCoverageMonitor : BackgroundService
             var auditRepo = scope.ServiceProvider.GetService<IAuditLogRepository>();
             var profileAssignmentService = scope.ServiceProvider.GetService<IProfileAssignmentRequestService>();
 
-            var tables = await catalogRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-            var visibleTables = tables.Where(static t => !t.Table.DiscoveryHidden).ToList();
+            var tables = await CatalogTablePageReader.ReadAllAsync(
+                catalogRepo,
+                new CatalogTableQuery(IncludeInactive: false),
+                static t => t.Table.IsActive && !t.Table.DiscoveryHidden,
+                ct: ct).ConfigureAwait(false);
+            var visibleTables = tables;
 
             int detections = 0;
             foreach (var consent in patternConsents)

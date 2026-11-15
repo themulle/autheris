@@ -78,7 +78,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
             else if (_governanceRepository != null)
             {
                 // Fallback check: verify catalog is queryable
-                _ = await _governanceRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+                _ = await _governanceRepository.QueryTablesAsync(new CatalogTableQuery(Limit: 1), ct).ConfigureAwait(false);
                 dbHealthy = true;
                 dbDesc = "Governance DB query succeeded.";
             }

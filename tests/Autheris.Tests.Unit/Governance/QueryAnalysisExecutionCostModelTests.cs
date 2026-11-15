@@ -110,7 +110,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
         var engine = new HotChocolateGraphQlCostAnalysisEngine(provider);
 
         var ordersTable = CreateTable("orders", null, ("id", "varchar", false), ("region", "varchar", false));
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
@@ -149,7 +149,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
         var ordersTable = CreateTable("orders", null, ("id", "varchar", false), ("region", "varchar", false));
         var usersTable = CreateTable("users", null, ("id", "varchar", false), ("name", "varchar", false));
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable, usersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
@@ -183,7 +183,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
         var engine = new HotChocolateGraphQlCostAnalysisEngine(provider);
 
         var ordersTable = CreateTable("orders", null, ("id", "varchar", false));
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
@@ -217,7 +217,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
         var engine = new HotChocolateGraphQlCostAnalysisEngine(provider, Options.Create(options));
 
         var ordersTable = CreateTable("orders", null, ("id", "varchar", false));
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();
@@ -248,7 +248,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
         };
         var ordersTable = CreateTable("orders", maskingRules, ("id", "varchar", false), ("ssn", "varchar", true));
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
 
         var caller = CreatePrincipal("user-1");
@@ -283,7 +283,7 @@ public sealed class QueryAnalysisExecutionCostModelTests
     public async Task FallbackBehavior_WhenEngineIsNull_PreservesExistingBehavior()
     {
         var ordersTable = CreateTable("orders", null, ("id", "varchar", false));
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([ordersTable]);
 
         var consentRepo = Substitute.For<IConsentRepository>();

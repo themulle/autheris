@@ -7,6 +7,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.DataSources;
 using Autheris.Application.Governance.Contracts;
@@ -89,7 +90,11 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         IReadOnlyList<TableMetadata> all;
         try
         {
-            all = await _metadataRepository!.GetAllTablesAsync(ct).ConfigureAwait(false);
+            all = await CatalogTablePageReader.ReadAllAsync(
+                _metadataRepository!,
+                new CatalogTableQuery(IncludeInactive: false),
+                static t => t.Table.IsActive,
+                ct: ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

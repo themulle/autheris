@@ -23,7 +23,8 @@ public sealed class GoldenQuerySecurityTests
 {
     private readonly IMcpToolRegistry _toolRegistry = Substitute.For<IMcpToolRegistry>();
     private readonly IGoldenQueryService _goldenService;
-    private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
+    private readonly ITableMetadataRepository _metadataRepo =
+        global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
     private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
 
     private readonly TableMetadata _customersTable;

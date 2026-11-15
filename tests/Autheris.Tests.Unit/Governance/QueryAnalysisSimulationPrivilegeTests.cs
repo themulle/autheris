@@ -62,7 +62,7 @@ public sealed class QueryAnalysisSimulationPrivilegeTests
             PrimaryKeyColumns = ["id"]
         };
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new[] { table });
 
         // Nobody holds a consent: only administrator semantics could release the table.

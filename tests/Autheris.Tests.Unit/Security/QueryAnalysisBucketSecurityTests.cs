@@ -91,7 +91,7 @@ public sealed class QueryAnalysisBucketSecurityTests
     {
         // SEC-GOV175B-02: Read-only tokens can access /analyze and receive callerQuota,
         // while remaining strictly prohibited from mutation routes.
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         var consentRepo = Substitute.For<IConsentRepository>();
         var auditRepo = Substitute.For<IAuditLogRepository>();
 

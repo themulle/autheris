@@ -203,7 +203,7 @@ public sealed class X1StartupTests
     [Fact]
     public async Task DeniedTablesReporter_ReadsTheStoreAndLogsIdsOnly_AndNeverBlocksTheStart()
     {
-        var tables = Substitute.For<ITableMetadataRepository>();
+        var tables = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([Orders()]));
         var profiles = Substitute.For<IAccessProfileRepository>();
         profiles.GetAllProfilesAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
@@ -237,7 +237,7 @@ public sealed class X1StartupTests
     {
         // a slow governance store must not delay the host start (the listing is background work, not part of StartAsync)
         var release = new TaskCompletionSource<IReadOnlyList<TableMetadata>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var tables = Substitute.For<ITableMetadataRepository>();
+        var tables = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         tables.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(_ => release.Task);
         var reporter = new DeniedTablesStartupReporter(
             tables, Substitute.For<IAccessProfileRepository>(), null, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()),

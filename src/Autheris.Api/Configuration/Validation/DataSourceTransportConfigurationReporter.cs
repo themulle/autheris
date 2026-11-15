@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.DataSources;
 using Autheris.Application.Sql.Services;
 using Autheris.Application.Common.Interfaces;
@@ -227,7 +228,11 @@ public sealed class DataSourceTransportConfigurationReporter : IHostedService, I
                 return;
             }
 
-            var tables = await repository.GetAllTablesAsync(ct).ConfigureAwait(false);
+            var tables = await CatalogTablePageReader.ReadAllAsync(
+                repository,
+                new CatalogTableQuery(IncludeInactive: false),
+                static t => t.Table.IsActive,
+                ct: ct).ConfigureAwait(false);
             var unprofiled = UnprofiledSources(tables.Select(DataSourceAllowlistGuard.LogicalDataSource), _dataSources.CurrentValue);
             if (unprofiled.Count == 0)
             {

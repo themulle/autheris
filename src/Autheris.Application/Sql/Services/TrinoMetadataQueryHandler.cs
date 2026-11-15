@@ -8,6 +8,7 @@ using System.Security.Claims;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
@@ -110,8 +111,12 @@ public static class TrinoMetadataQueryHandler
         }
 
         var sw = Stopwatch.StartNew();
-        var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var activeTables = allTables.Where(t => t.Table.IsActive).ToList();
+        var catalogQuery = BuildCatalogQuery(showSchemasMatch, showTablesMatch);
+        var activeTables = await CatalogTablePageReader.ReadAllAsync(
+            metadataRepository,
+            catalogQuery,
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         var visibleTables = await CatalogVisibility.VisibleTablesAsync(activeTables, user, tenantId, consentRepository, contract: null, Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(gatewayOptions?.Tenancy), gatewayOptions?.Catalog.SharedTables, ct).ConfigureAwait(false);
 
         if (showCatalogsMatch.Success)
@@ -408,4 +413,36 @@ public static class TrinoMetadataQueryHandler
 
     private static bool MatchesFilter(IReadOnlyDictionary<string, string> filters, string key, string candidate) =>
         !filters.TryGetValue(key, out var expected) || string.Equals(candidate, expected, StringComparison.OrdinalIgnoreCase);
+
+    private static CatalogTableQuery BuildCatalogQuery(Match showSchemasMatch, Match showTablesMatch)
+    {
+        if (showSchemasMatch.Success)
+        {
+            var catalogFilter = showSchemasMatch.Groups[1].Success ? SanitizeQueryFilter(Unquote(showSchemasMatch.Groups[1].Value)) : null;
+            return new CatalogTableQuery(DataSource: catalogFilter, IncludeInactive: false);
+        }
+
+        if (showTablesMatch.Success && showTablesMatch.Groups[1].Success)
+        {
+            var parts = showTablesMatch.Groups[1].Value.Split('.', StringSplitOptions.RemoveEmptyEntries).Select(Unquote).ToArray();
+            if (parts.Length >= 2)
+            {
+                return new CatalogTableQuery(DataSource: SanitizeQueryFilter(parts[0]), Schema: SanitizeQueryFilter(parts[1]), IncludeInactive: false);
+            }
+
+            if (parts.Length == 1)
+            {
+                return new CatalogTableQuery(Schema: SanitizeQueryFilter(parts[0]), IncludeInactive: false);
+            }
+        }
+
+        return new CatalogTableQuery(IncludeInactive: false);
+    }
+
+    private static string? SanitizeQueryFilter(string? value) =>
+        string.IsNullOrWhiteSpace(value) ||
+        value.Length > CatalogTableQuery.MaxFilterLength ||
+        value.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0
+            ? null
+            : value;
 }

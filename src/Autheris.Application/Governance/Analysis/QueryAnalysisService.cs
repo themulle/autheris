@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
@@ -155,7 +156,11 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var effectivePrincipal = targetPrincipal ?? callerPrincipal;
         var effectiveSid = ResolvePrincipalSid(effectivePrincipal) ?? callerSid.Value;
 
-        var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var allTables = await CatalogTablePageReader.ReadAllAsync(
+            _metadataRepository,
+            new CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.IsActive,
+            ct: ct).ConfigureAwait(false);
         var tableLookup = BuildTableLookup(allTables);
         var activeConsents = await LoadActiveConsentsAsync(effectivePrincipal, effectiveSid.Value, ct).ConfigureAwait(false);
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);

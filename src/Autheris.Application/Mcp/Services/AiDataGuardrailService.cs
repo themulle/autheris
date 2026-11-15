@@ -2,6 +2,7 @@ namespace Autheris.Application.Mcp.Services;
 
 using Autheris.Application.Tenancy;
 using System;
+using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Services;
 using System.Diagnostics;
 using System.Text.Json;
@@ -475,7 +476,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 try
                 {
                     var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-                    var allTables = _tableMetadataRepository != null ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false) : Array.Empty<TableMetadata>();
+                    var allTables = _tableMetadataRepository != null
+                        ? await CatalogTablePageReader.ReadAllAsync(_tableMetadataRepository, new CatalogTableQuery(IncludeInactive: false), static t => t.Table.IsActive, ct: cancellationToken).ConfigureAwait(false)
+                        : Array.Empty<TableMetadata>();
                     var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
                     visibleKeys = visibleTables?.Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant())).ToHashSet();
                 }

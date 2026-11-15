@@ -211,7 +211,7 @@ public sealed class Issue271SecurityAuditVerificationTests
             ]
         };
 
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var metaRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([meta]);
 
         var consentRepo = Substitute.For<IConsentRepository>();

@@ -110,7 +110,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             },
             rlsExpression: "tenant_id = current_setting('app.tenant_id')");
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable });
 
@@ -224,7 +224,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 new TableColumn { ColumnName = "base_salary", DataType = "decimal", IsSensitive = true }
             });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { customersTable, invoicesTable, secretSalariesTable });
 
@@ -309,7 +309,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 new TableColumn { ColumnName = "actor_ssn", DataType = "varchar", IsSensitive = true }
             });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { usersTable, auditTable });
 
@@ -394,7 +394,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             DatasetVisibility.Full,
             new[] { new TableColumn { ColumnName = "card_last4", DataType = "varchar", IsSensitive = true } });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable, shipmentsTable, paymentsTable });
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(metadataRepo);
@@ -478,7 +478,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             DatasetVisibility.Full,
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable });
 
@@ -565,7 +565,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
             DatasetVisibility.Full,
             new[] { new TableColumn { ColumnName = "id", DataType = "uuid" } });
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { ordersTable, customersTable });
 
@@ -779,7 +779,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
         };
         await profileService.ComputeAndStoreProfileAsync(summaryTable, "secret_email", realSensitiveEmails);
 
-        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var metadataRepo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(Substitute.For<ITableMetadataRepository>());
         metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(new[] { summaryTable });
 
