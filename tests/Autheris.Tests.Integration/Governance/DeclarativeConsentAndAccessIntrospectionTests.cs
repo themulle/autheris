@@ -122,7 +122,8 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
                     "orders",
                     "Group",
                     "S-1-5-21-DATA-SCIENTISTS",
-                    "Allow"
+                    "Allow",
+                    ValidUntil: DateTimeOffset.UtcNow.AddDays(30)
                 )
             ]);
 

@@ -28,7 +28,7 @@ public partial class CachedConsentEnvelope
     public string? RowFilterRecipeJson { get; set; }
 
     /// <summary>Current layout of the restricted-scope fields; an entry with another value (a legacy entry has 0) is a cache miss. Appended (MemoryPack layout).</summary>
-    public const int CurrentRestrictionLayout = 1;
+    public const int CurrentRestrictionLayout = 2;
 
     /// <summary>layout marker of the restriction fields (<see cref="CurrentRestrictionLayout"/>). Appended last (MemoryPack layout).</summary>
     public int RestrictionLayout { get; set; }
@@ -42,7 +42,14 @@ public partial class CachedConsentEnvelope
     /// <summary>The columns cleared by a scope-specific rule (see <see cref="RestrictedScopeClearance.ClearedColumns"/>).</summary>
     public List<string>? ScopeClearedColumns { get; set; }
 
-    public static CachedConsentEnvelope FromDecision(TableAccessDecision decision, long epoch, string? restrictionFingerprint = null)
+    /// <summary>Absolute UTC expiry of the cached grant/decision. Appended last (MemoryPack layout).</summary>
+    public DateTimeOffset ValidUntil { get; set; }
+
+    public static CachedConsentEnvelope FromDecision(
+        TableAccessDecision decision,
+        long epoch,
+        string? restrictionFingerprint = null,
+        DateTimeOffset validUntil = default)
     {
         ArgumentNullException.ThrowIfNull(decision);
 
@@ -61,7 +68,8 @@ public partial class CachedConsentEnvelope
             RestrictionLayout = CurrentRestrictionLayout,
             RestrictionFingerprint = restrictionFingerprint ?? RestrictedScopePolicy.Default.Fingerprint,
             RestrictedScopesHeld = decision.ScopeClearance is { } clearance ? [.. clearance.RestrictedScopesHeld] : null,
-            ScopeClearedColumns = decision.ScopeClearance is { } cleared ? [.. cleared.ClearedColumns] : null
+            ScopeClearedColumns = decision.ScopeClearance is { } cleared ? [.. cleared.ClearedColumns] : null,
+            ValidUntil = validUntil
         };
 
         foreach (var (col, level) in decision.ColumnAccess)
@@ -77,10 +85,22 @@ public partial class CachedConsentEnvelope
     /// restricted-scope list (<paramref name="expectedFingerprint"/>): the restriction of such a decision cannot be trusted.
     /// </summary>
     public TableAccessDecision? ToDecision(string expectedFingerprint)
+        => ToDecision(expectedFingerprint, utcNow: null);
+
+    /// <summary>
+    /// The decision of this entry, or <c>null</c> (a cache miss) when the entry is expired against <paramref name="utcNow"/>,
+    /// has an older layout, or was written under another restricted-scope list (<paramref name="expectedFingerprint"/>).
+    /// </summary>
+    public TableAccessDecision? ToDecision(string expectedFingerprint, DateTimeOffset? utcNow)
     {
         ArgumentNullException.ThrowIfNull(expectedFingerprint);
         if (RestrictionLayout != CurrentRestrictionLayout
             || !string.Equals(RestrictionFingerprint, expectedFingerprint, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        if (utcNow.HasValue && (ValidUntil == default || utcNow.Value >= ValidUntil))
         {
             return null;
         }

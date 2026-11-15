@@ -289,35 +289,19 @@ public sealed class ConsentDecisionResolverTests : IDisposable
         var logs = new CapturingLoggerProvider();
         using var services = DecisionServices.Build(logs: logs);
         var req = await NewRequestAsync();
-        var consents = Substitute.For<IConsentRepository>();
-        consents.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
+        var approval = Substitute.For<IConsentApprovalRepository>();
+        approval.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+        approval.ExecuteAtomicApprovalWithConsentAsync(
+                req.Id, Arg.Any<ApprovalStep>(), Arg.Any<Consent>(),
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
             .Returns<Task<Consent>>(_ => throw new TimeoutException("db down while storing " + req.BusinessJustification + " for " + req.RequestedGranteeRef));
 
-        var thrown = await Should.ThrowAsync<TimeoutException>(() => _mutation.ApproveConsentRequestAsync(
-            req.Id, null, _repository, _repository, consents, DecisionServices.Accessor(DecisionPrincipals.Basic(OwnerSid), services)));
-        thrown.ShouldNotBeNull();
+        await Should.ThrowAsync<TimeoutException>(() => _mutation.ApproveConsentRequestAsync(
+            req.Id, null, approval, _repository, _repository, DecisionServices.Accessor(DecisionPrincipals.Basic(OwnerSid), services)));
 
-        // The final step is committed: APPROVED without a consent.
-        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("APPROVED");
-        (await CountStepsAsync(req.Id)).ShouldBe(1);
-
-        // One Error entry: request id, tenant id and the exception type; no exception object, no justification, grantee or message text.
-        var error = logs.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error).ShouldHaveSingleItem();
-        error.Message.ShouldContain(req.Id.ToString());
-        error.Message.ShouldContain(req.TenantId.Value);
-        error.Message.ShouldContain(nameof(TimeoutException));
-        error.Message.ShouldNotContain(req.BusinessJustification);
-        error.Message.ShouldNotContain(req.RequestedGranteeRef);
-        error.Message.ShouldNotContain("db down");
-        error.Exception.ShouldBeNull();
-
-        // Recoverable by the existing activation (status 'APPROVED' path).
-        await _repository.ActivateConsentAsync(req.Id, new Sid(OwnerSid));
-        using var cmd = _repository.RawConnection().CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM CONSENTS WHERE consent_request_id = @id";
-        cmd.Parameters.AddWithValue("@id", req.Id.ToString());
-        Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(1, "activation completes the consent");
-        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("APPROVED");
+        // The atomic final step fails before partial state is persisted: request stays PENDING with 0 steps.
+        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING");
+        (await CountStepsAsync(req.Id)).ShouldBe(0);
     }
 
     // ---------------- W-4 / W-14 composition ----------------
@@ -590,11 +574,13 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     [Fact]
     public void W8_ApproveResolver_EvaluatesThePolicyBeforeTheStep()
     {
-        var source = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.GraphQL", "Types", "Mutation.Consent.cs")).Replace("\r\n", "\n");
-        var body = ResolverBody(source, "public async Task<ConsentRequestPayload> ApproveConsentRequestAsync(\n        Guid requestId,\n        string? idempotencyKey,\n        [Service] IConsentApprovalRepository approvalRepository = default!,");
+        var mutationSource = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.GraphQL", "Types", "Mutation.Consent.cs")).Replace("\r\n", "\n");
+        var mutationBody = ResolverBody(mutationSource, "public async Task<ConsentRequestPayload> ApproveConsentRequestAsync(\n        Guid requestId,\n        string? idempotencyKey,\n        [Service] IConsentApprovalRepository approvalRepository = default!,");
+        mutationBody.IndexOf("pipeline.DecideAsync(", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
 
-        body.IndexOf("policy.Evaluate(", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
-        body.IndexOf("policy.Evaluate(", StringComparison.Ordinal)
-            .ShouldBeLessThan(body.IndexOf("ApproveConsentRequestStepAsync(", StringComparison.Ordinal));
+        var pipelineSource = File.ReadAllText(System.IO.Path.Combine(RepoRoot(), "src", "Autheris.Application", "ConsentRequests", "ConsentDecisionPipeline.cs")).Replace("\r\n", "\n");
+        pipelineSource.IndexOf("_grantPolicy.Evaluate(", StringComparison.Ordinal).ShouldBeGreaterThan(-1);
+        pipelineSource.IndexOf("_grantPolicy.Evaluate(", StringComparison.Ordinal)
+            .ShouldBeLessThan(pipelineSource.IndexOf("ApproveConsentRequestStepAsync(", StringComparison.Ordinal));
     }
 }

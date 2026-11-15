@@ -179,7 +179,8 @@ public static class ApiErrorCodes
             typeof(Autheris.Application.DataSources.Changes.ChangeDetectionErrorCodes),
             typeof(Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes),
             typeof(Autheris.Application.Analytics.AggregationErrorCodes),
-            typeof(Autheris.Domain.Model.AccessProfileAssignmentRules)
+            typeof(Autheris.Domain.Model.AccessProfileAssignmentRules),
+            typeof(Autheris.Application.ConsentRequests.ConsentDecisionErrorCodes)
         })
         {
             foreach (var field in type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))

@@ -664,7 +664,14 @@ public sealed class AccessProfileTests
         var (status, body) = await ExecuteResultAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
-        body.ShouldContain("validDays must be between 1 and 180");
+        if (days <= 0)
+        {
+            body.ShouldContain("BAD_REQUEST");
+        }
+        else
+        {
+            body.ShouldContain("VALIDITY_EXCEEDS_MAXIMUM");
+        }
     }
 
     [Theory]
@@ -748,7 +755,7 @@ public sealed class AccessProfileTests
             MaskingMode = "unmasked",
             Tables = ["tem.*"],
             Justification = "Enterprise PoC Telemetry Head cleartext exception approved",
-            ValidDays = 90
+            ValidDays = 60
         };
 
         var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);
@@ -840,7 +847,7 @@ public sealed class AccessProfileTests
             Tables = ["tem.*"],
             RowFilter = "status != 'DELIVERED'",
             Justification = "Enterprise PoC Telemetry Head cleartext exception approved",
-            ValidDays = 90
+            ValidDays = 60
         };
 
         var result = await GovernanceEndpoints.CreateBulkConsentAsync(req, context, repo, CancellationToken.None);

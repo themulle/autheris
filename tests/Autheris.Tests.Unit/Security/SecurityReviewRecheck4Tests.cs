@@ -19,65 +19,33 @@ public sealed class SecurityReviewRecheck4Tests
     }
 
     [Fact]
-    public void ItsmApprover_IsRequester_ByAccountPart_IsSelfApproval()
-    {
-        var req = Request("S-1-5-21-1-ALICE", "alice@corp.local");
-
-        ConsentApprovalPolicy.IsSelfApproval(req, new Sid("ITSM_SNOW:inst:alice@corp.local")).ShouldBeTrue();
-    }
-
-    [Fact]
-    public void ItsmApprover_PassedTyped_IsRequester_IsSelfApproval()
-    {
-        var req = Request("S-1-5-21-1-ALICE", "alice@corp.local");
-
-        ConsentApprovalPolicy.IsSelfApproval(req, new Sid("ITSM_SNOW:inst:svc"), "Alice@corp.local").ShouldBeTrue();
-    }
-
-    [Fact]
-    public void ItsmApprover_OtherPerson_IsNotSelfApproval()
-    {
-        var req = Request("S-1-5-21-1-ALICE", "alice@corp.local");
-
-        ConsentApprovalPolicy.IsSelfApproval(req, new Sid("ITSM_SNOW:inst:bob@corp.local"), "bob@corp.local").ShouldBeFalse();
-    }
-
-    [Fact]
-    public void FourEyes_SamePersonViaItsmAndGraphQlAccount_IsSameApprover()
-    {
-        ConsentApprovalPolicy.IsSameApprover("ITSM_SNOW:inst:dataowner@corp.local", new Sid("dataowner@corp.local")).ShouldBeTrue();
-        ConsentApprovalPolicy.IsSameApprover("S-1-5-21-1-OWNER", new Sid("ITSM_SNOW:inst:x"), "S-1-5-21-1-OWNER").ShouldBeTrue();
-        ConsentApprovalPolicy.IsSameApprover("ITSM_SNOW:inst:a@corp.local", new Sid("ITSM_SNOW:inst:b@corp.local"), "b@corp.local").ShouldBeFalse();
-    }
-
-    [Fact]
     public void EmptyApproverIdentity_NeverMatches()
     {
-        ConsentApprovalPolicy.IsSameApprover("ITSM_SNOW:inst:", new Sid("ITSM_OTHER:inst:")).ShouldBeFalse();
-        ConsentApprovalPolicy.IsSelfApproval(Request("S-1-5-21-1-ALICE"), new Sid("ITSM_SNOW:inst:")).ShouldBeFalse();
+        ConsentApprovalPolicy.IsSameApprover(string.Empty, new Sid(" ")).ShouldBeFalse();
+        ConsentApprovalPolicy.IsSelfApproval(Request("S-1-5-21-1-ALICE"), default).ShouldBeFalse();
         Should.NotThrow(() => ConsentApprovalPolicy.IsSelfApproval(Request("S-1-5-21-1-ALICE"), default));
     }
 
     [Theory]
-    [InlineData(true, 1, true, "PENDING_EXTERNAL_APPROVAL")]
-    [InlineData(true, 1, false, "PENDING_SECOND_APPROVAL")]
-    [InlineData(true, 2, true, "APPROVED")]
-    [InlineData(false, 1, false, "APPROVED")]
-    public void StatusAfterApproval_FollowsFourEyesRules(bool fourEyes, int step, bool itsm, string expected) =>
-        ConsentApprovalPolicy.StatusAfterApproval(fourEyes, step, itsm).ShouldBe(expected);
+    [InlineData(true, 1, ConsentWorkflowMode.External, "PENDING_EXTERNAL_APPROVAL")]
+    [InlineData(true, 1, ConsentWorkflowMode.Internal, "PENDING_SECOND_APPROVAL")]
+    [InlineData(true, 2, ConsentWorkflowMode.External, "APPROVED")]
+    [InlineData(false, 1, ConsentWorkflowMode.Internal, "APPROVED")]
+    public void StatusAfterApproval_FollowsFourEyesRules(bool fourEyes, int step, ConsentWorkflowMode mode, string expected) =>
+        ConsentApprovalPolicy.StatusAfterApproval(fourEyes, step, mode).ShouldBe(expected);
 
     [Theory]
-    [InlineData("PENDING", false, true)]
-    [InlineData("PENDING_SECOND_APPROVAL", false, true)]
-    [InlineData("PENDING_EXTERNAL_APPROVAL", false, false)]
-    [InlineData("PENDING_EXTERNAL_APPROVAL", true, true)]
-    [InlineData("PENDING", true, false)]
-    [InlineData("APPROVED", false, false)]
-    [InlineData("ACTIVE", true, false)]
-    [InlineData("REJECTED", false, false)]
-    public void EnsureApprovableStatus_OnlyAllowsTheMatchingChannel(string status, bool itsm, bool allowed)
+    [InlineData("PENDING", ConsentWorkflowMode.Internal, true)]
+    [InlineData("PENDING_SECOND_APPROVAL", ConsentWorkflowMode.Internal, true)]
+    [InlineData("PENDING_EXTERNAL_APPROVAL", ConsentWorkflowMode.Internal, false)]
+    [InlineData("PENDING_EXTERNAL_APPROVAL", ConsentWorkflowMode.External, true)]
+    [InlineData("PENDING", ConsentWorkflowMode.External, false)]
+    [InlineData("APPROVED", ConsentWorkflowMode.Internal, false)]
+    [InlineData("ACTIVE", ConsentWorkflowMode.External, false)]
+    [InlineData("REJECTED", ConsentWorkflowMode.Internal, false)]
+    public void EnsureApprovableStatus_OnlyAllowsTheMatchingChannel(string status, ConsentWorkflowMode mode, bool allowed)
     {
-        void Act() => ConsentApprovalPolicy.EnsureApprovableStatus(Guid.NewGuid(), status, itsm);
+        void Act() => ConsentApprovalPolicy.EnsureApprovableStatus(Guid.NewGuid(), status, mode);
 
         if (allowed) Should.NotThrow(Act); else Should.Throw<InvalidOperationException>(Act);
     }

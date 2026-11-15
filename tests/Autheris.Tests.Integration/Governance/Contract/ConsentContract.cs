@@ -166,7 +166,8 @@ public abstract class ConsentContract : GovernanceContractBase
         var pageA = await Store.Consents.GetConsentPageAsync(new ConsentPageQuery(Store.TenantA));
         pageA.Items.Should().OnlyContain(c => c.TenantId == Store.TenantA);
 
-        var sharedTicket = "INC-" + Guid.NewGuid().ToString("N")[..8];
+        var extSysId = Guid.NewGuid();
+        var sharedRef = "EXT-" + Guid.NewGuid().ToString("N")[..8];
         var reqA = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
         {
             Id = Guid.NewGuid(),
@@ -176,7 +177,9 @@ public abstract class ConsentContract : GovernanceContractBase
             RequestedGranteeRef = GranteeSid.Value,
             BusinessJustification = "Tenant A request",
             RequestedValidTo = now.AddDays(5),
-            ItsmTicketId = sharedTicket,
+            WorkflowMode = ConsentWorkflowMode.External,
+            ExternalSystemId = extSysId,
+            ExternalReference = sharedRef,
             TenantId = Store.TenantA
         });
         _ = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
@@ -188,11 +191,13 @@ public abstract class ConsentContract : GovernanceContractBase
             RequestedGranteeRef = GranteeSid.Value,
             BusinessJustification = "Tenant B request",
             RequestedValidTo = now.AddDays(5),
-            ItsmTicketId = sharedTicket,
+            WorkflowMode = ConsentWorkflowMode.External,
+            ExternalSystemId = extSysId,
+            ExternalReference = sharedRef,
             TenantId = Store.TenantB
         });
 
-        var lookedUpA = await Store.ConsentApprovals.GetConsentRequestByTicketIdAsync(sharedTicket, Store.TenantA);
+        var lookedUpA = await Store.ConsentApprovals.GetConsentRequestByExternalReferenceAsync(extSysId, sharedRef, Store.TenantA);
         lookedUpA.Should().NotBeNull();
         lookedUpA!.Id.Should().Be(reqA.Id);
     }

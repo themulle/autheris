@@ -114,7 +114,7 @@ public sealed class SecurityReviewRemediationCoverageTests
         var statusAfterFirstStep = ConsentApprovalPolicy.StatusAfterApproval(
             requiresFourEyes: false,
             stepNumber: 1,
-            isExternalItsmApproval: false,
+            mode: ConsentWorkflowMode.Internal,
             sensitivity: sensitivity);
 
         if (expectedFourEyes)

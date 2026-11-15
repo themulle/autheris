@@ -54,8 +54,6 @@ public sealed class SecurityReviewG5GovernanceTests
         {
             await Should.ThrowAsync<UnauthorizedAccessException>(() =>
                 repo.RejectConsentRequestAsync(request.Id, new Sid("ITSM_ATTACKER"), "no"));
-            await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-                repo.RejectConsentRequestAsync(request.Id, new Sid("ITSM_ATTACKER"), "no", isExternalItsm: false));
         }
     }
 
@@ -65,7 +63,14 @@ public sealed class SecurityReviewG5GovernanceTests
         var (repo, request) = await PendingExternalRequestAsync();
         using (repo)
         {
-            var rejected = await repo.RejectConsentRequestAsync(request.Id, new Sid("ITSM_SERVICENOW:inst"), "no", isExternalItsm: true);
+            var attr = new ExternalDecisionAttribution(
+                request.ExternalSystemId ?? Guid.NewGuid(),
+                request.ExternalReference ?? "EXT-G5",
+                "REJECTED",
+                new AssertedApprover("board-member", ResolvedSid: "S-1-5-21-EXT-BOARD"),
+                DateTimeOffset.UtcNow);
+            var rejected = await repo.RejectExternalConsentRequestAsync(
+                request.Id, attr, new Sid("S-1-5-21-EXT-BOARD"), "no");
 
             rejected.Status.ShouldBe("REJECTED");
         }
@@ -118,6 +123,9 @@ public sealed class SecurityReviewG5GovernanceTests
             BusinessJustification = "G5",
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(1),
             Status = status,
+            WorkflowMode = status == "PENDING_EXTERNAL_APPROVAL" ? ConsentWorkflowMode.External : ConsentWorkflowMode.Internal,
+            ExternalSystemId = status == "PENDING_EXTERNAL_APPROVAL" ? Guid.Parse("11111111-2222-3333-4444-555555555555") : null,
+            ExternalReference = status == "PENDING_EXTERNAL_APPROVAL" ? $"EXT-{Guid.NewGuid():N}" : null,
             TenantId = new TenantId("tenant-a")
         });
         return (repo, created);

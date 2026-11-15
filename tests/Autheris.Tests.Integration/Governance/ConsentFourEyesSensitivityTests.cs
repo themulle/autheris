@@ -165,7 +165,11 @@ public sealed class ConsentFourEyesSensitivityTests
         string sensitivity,
         string expectedStatus)
     {
-        var status = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, stepNumber, isExternalItsm, sensitivity);
+        var status = ConsentApprovalPolicy.StatusAfterApproval(
+            requiresFourEyes,
+            stepNumber,
+            isExternalItsm ? ConsentWorkflowMode.External : ConsentWorkflowMode.Internal,
+            sensitivity);
         status.ShouldBe(expectedStatus);
     }
 }

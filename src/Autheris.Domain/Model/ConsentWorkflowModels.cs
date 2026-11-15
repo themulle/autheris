@@ -194,7 +194,29 @@ public sealed record ExternalDecisionAttribution(
     Guid ExternalSystemId,
     string ExternalReference,
     string Decision,
-    AssertedApprover Approver,
+    AssertedApprover? Approver,
     DateTimeOffset DecidedAt,
     string? Justification = null,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    IReadOnlyList<AssertedApprover>? AdditionalApprovers = null)
+{
+    public IReadOnlyList<AssertedApprover> EffectiveApprovers
+    {
+        get
+        {
+            if (AdditionalApprovers is not { Count: > 0 })
+            {
+                return Approver is not null ? [Approver] : Array.Empty<AssertedApprover>();
+            }
+
+            var list = new List<AssertedApprover>(AdditionalApprovers.Count + (Approver is not null ? 1 : 0));
+            if (Approver is not null)
+            {
+                list.Add(Approver);
+            }
+
+            list.AddRange(AdditionalApprovers);
+            return list;
+        }
+    }
+}

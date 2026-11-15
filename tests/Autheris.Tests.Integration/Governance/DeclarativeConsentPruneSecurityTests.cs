@@ -89,7 +89,7 @@ public sealed class DeclarativeConsentPruneSecurityTests : IDisposable
         var svc = new DeclarativeConsentApplyService(_repo, _repo, _repo);
         var manifest = new DeclarativeConsentManifest("1",
         [
-            new DeclarativeConsentPolicy(_tableKeep.Domain, _tableKeep.Schema, _tableKeep.TableName, "Group", GroupA.Value, "Allow")
+            new DeclarativeConsentPolicy(_tableKeep.Domain, _tableKeep.Schema, _tableKeep.TableName, "Group", GroupA.Value, "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))
         ]);
 
         var result = await svc.ApplyManifestAsync(TenantAdminPrincipal(), manifest, pruneMode: DeclarativePruneMode.True);

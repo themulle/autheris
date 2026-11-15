@@ -22,15 +22,13 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Default <see cref="IConsentRequestService"/>: validation, idempotency, tenant resolution, auto-approve and the
-/// external approval (ITSM) hand-off, extracted from the GraphQL mutation. Failures surface as <see cref="ConsentRequestException"/>.
+/// external approval hand-off, extracted from the GraphQL mutation. Failures surface as <see cref="ConsentRequestException"/>.
 /// </summary>
 public sealed class ConsentRequestService : IConsentRequestService
 {
     private const string Operation = "RequestTableAccess";
     private const int MinJustificationLength = 5;
     private const int MaxJustificationLength = 2000;
-    private const int MinDurationDays = 1;
-    private const int MaxDurationDays = 365;
     private const int MaxIdempotencyKeyLength = 256;
 
     private readonly ITableMetadataRepository _metadataRepository;
@@ -38,6 +36,9 @@ public sealed class ConsentRequestService : IConsentRequestService
     private readonly IIdempotencyStore? _idempotencyStore;
     private readonly IOptions<GatewayOptions>? _gatewayOptions;
     private readonly IGrantPolicy _grantPolicy;
+    private readonly IGrantValidityPolicy _grantValidityPolicy;
+    private readonly TimeProvider _timeProvider;
+    private readonly IConsentWorkflowConfigRepository? _workflowConfigRepository;
     private readonly IIdentitySubjectResolver? _subjectResolver;
     private readonly IConsentMaterializationGuard? _materializationGuard;
     private readonly IRowPolicyDependencyIndex? _policyDependencyIndex;
@@ -50,13 +51,19 @@ public sealed class ConsentRequestService : IConsentRequestService
         IGrantPolicy? grantPolicy = null,
         IIdentitySubjectResolver? subjectResolver = null,
         IConsentMaterializationGuard? materializationGuard = null,
-        IRowPolicyDependencyIndex? policyDependencyIndex = null)
+        IRowPolicyDependencyIndex? policyDependencyIndex = null,
+        IGrantValidityPolicy? grantValidityPolicy = null,
+        TimeProvider? timeProvider = null,
+        IConsentWorkflowConfigRepository? workflowConfigRepository = null)
     {
         _materializationGuard = materializationGuard;
         _policyDependencyIndex = policyDependencyIndex;
         _grantPolicy = grantPolicy ?? new GrantPolicy();
+        _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
+        _workflowConfigRepository = workflowConfigRepository ?? (_approvalRepository as IConsentWorkflowConfigRepository);
         _idempotencyStore = idempotencyStore;
         _gatewayOptions = gatewayOptions;
         _subjectResolver = subjectResolver;
@@ -91,11 +98,23 @@ public sealed class ConsentRequestService : IConsentRequestService
             throw Invalid("The justification must not exceed 2000 characters.");
         }
 
-        var durationDays = command.DurationDays;
-        if (durationDays < MinDurationDays || durationDays > MaxDurationDays)
+        var now = _timeProvider.GetUtcNow();
+        DateTimeOffset resolvedValidTo;
+        try
         {
-            throw Invalid("The duration (durationDays) must be between 1 and 365 days.");
+            resolvedValidTo = _grantValidityPolicy.ResolveRequestedValidTo(
+                now,
+                command.RequestedValidFrom,
+                command.RequestedValidTo,
+                command.RequestedDuration == null && command.RequestedValidTo == null ? command.DurationDays : null,
+                command.RequestedDuration);
         }
+        catch (GrantValidityException ex)
+        {
+            throw new ConsentRequestException(ex.ErrorCode, ex.Message);
+        }
+
+        var durationDays = Math.Max(1, (int)Math.Ceiling((resolvedValidTo - (command.RequestedValidFrom ?? now)).TotalDays));
 
         if (command.RequestWriteOnly == true && (command.RequestedWriteRules == null || command.RequestedWriteRules.Count == 0))
         {
@@ -145,12 +164,11 @@ public sealed class ConsentRequestService : IConsentRequestService
             meta, command.RequestedWriteRules, tableId, tenantId, _policyDependencyIndex);
 
         // a user request is an individual grant; its duration is bounded by the class of the table (fail closed).
-        var now = DateTimeOffset.UtcNow;
         var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
             GranteeType.User,
             userSid.Value,
             GrantKind.Consent,
-            now.AddDays(durationDays),
+            resolvedValidTo,
             now,
             GrantClassifier.Classify([meta]),
             Requester: userSid.Value,
@@ -159,6 +177,14 @@ public sealed class ConsentRequestService : IConsentRequestService
         {
             throw new ConsentRequestException(grantDecision.ErrorCode ?? GrantErrorCodes.Indeterminate, grantDecision.Reason);
         }
+
+        var route = _workflowConfigRepository != null
+            ? await _workflowConfigRepository.ResolveWorkflowRouteAsync(tenantId, tableId, ct).ConfigureAwait(false)
+            : null;
+        var workflowMode = route?.Mode ?? ConsentWorkflowMode.Internal;
+        var initialStatus = workflowMode == ConsentWorkflowMode.External
+            ? "PENDING_EXTERNAL_APPROVAL"
+            : "PENDING";
 
         string? contextJson = command.Context != null
             ? System.Text.Json.JsonSerializer.Serialize(command.Context)
@@ -173,8 +199,11 @@ public sealed class ConsentRequestService : IConsentRequestService
             RequestedGranteeType = GranteeType.User,
             RequestedGranteeRef = userSid.Value,
             BusinessJustification = justification.Trim(),
-            RequestedValidTo = now.AddDays(durationDays),
-            Status = "PENDING",
+            RequestedValidFrom = command.RequestedValidFrom ?? now,
+            RequestedValidTo = resolvedValidTo,
+            Status = initialStatus,
+            WorkflowMode = workflowMode,
+            ExternalSystemId = workflowMode == ConsentWorkflowMode.External ? route?.ExternalSystemId : null,
             TenantId = tenantId,
             RequesterIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value),
             ContextJson = contextJson,
@@ -184,7 +213,7 @@ public sealed class ConsentRequestService : IConsentRequestService
 
         var created = await _approvalRepository.CreateConsentRequestAsync(request, ct).ConfigureAwait(false);
 
-        if (_gatewayOptions?.Value.IsAutoApproveEnabled == true)
+        if (workflowMode == ConsentWorkflowMode.Internal && _gatewayOptions?.Value.IsAutoApproveEnabled == true)
         {
             await _approvalRepository.ActivateConsentForAutoApproveAsync(created.Id, ct).ConfigureAwait(false);
             var approved = new SubmitConsentRequestResult

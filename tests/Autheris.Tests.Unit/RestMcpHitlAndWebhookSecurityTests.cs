@@ -410,14 +410,8 @@ public class RestMcpHitlAndWebhookSecurityTests
             return request;
         }
 
-        public Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default)
-        {
-            UnscopedLookups++;
-            return Task.FromResult(_requests.FirstOrDefault(r => r.ItsmTicketId == ticketId));
-        }
-
-        public Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, TenantId tenantId, CancellationToken ct = default)
-            => Task.FromResult(_requests.FirstOrDefault(r => r.ItsmTicketId == ticketId && r.TenantId == tenantId));
+        public Task<ConsentRequest?> GetConsentRequestByExternalReferenceAsync(Guid externalSystemId, string externalReference, TenantId tenantId, CancellationToken ct = default)
+            => Task.FromResult(_requests.FirstOrDefault(r => r.ExternalSystemId == externalSystemId && r.ExternalReference == externalReference && r.TenantId == tenantId));
 
         public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default)
             => ActivateConsentAsync(requestId, null, ct);
@@ -474,7 +468,6 @@ public class RestMcpHitlAndWebhookSecurityTests
         public Task<ConsentRequest?> GetConsentRequestAsync(Guid requestId, CancellationToken ct = default) => Task.FromResult(_requests.FirstOrDefault(r => r.Id == requestId));
         public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default) => throw new NotSupportedException();
         public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     // =========================================================================

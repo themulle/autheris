@@ -703,7 +703,7 @@ internal static class ConsentSqlCore
     }
 
     public static async Task<(bool RequiresFourEyes, string? Sensitivity, bool SameApprover, int NextStepNumber)> ReadApprovalStateAsync(
-        DbConnection conn, DbTransaction? tx, Guid requestId, Sid approverSid, string? itsmApproverAccount,
+        DbConnection conn, DbTransaction? tx, Guid requestId, Sid approverSid,
         IReadOnlyCollection<string> approverOwnerIds, Func<IReadOnlyList<string>, Task<IReadOnlyCollection<string>>> resolveOwnerIdsAsync, CancellationToken ct)
     {
         bool requiresFourEyes = false;
@@ -731,7 +731,7 @@ internal static class ConsentSqlCore
             while (await reader.ReadAsync(ct).ConfigureAwait(false)) existingApprovers.Add(reader.GetString(0));
         }
 
-        bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount));
+        bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid));
         for (int i = 0; !sameApprover && i < existingApprovers.Count; i++)
         {
             var storedOwnerIds = await resolveOwnerIdsAsync(ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i])).ConfigureAwait(false);
@@ -773,7 +773,15 @@ internal static class ConsentSqlCore
         await stepInsert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
-    public static async Task ApplyGuardedStatusAsync(DbConnection conn, DbTransaction tx, Func<DbConnection, DbTransaction, CancellationToken, Task>? seam, Guid requestId, string newStatus, string expectedStatus, CancellationToken ct)
+    public static async Task ApplyGuardedStatusAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        Func<DbConnection, DbTransaction, CancellationToken, Task>? seam,
+        Guid requestId,
+        string newStatus,
+        string expectedStatus,
+        CancellationToken ct,
+        DateTimeOffset? updatedAt = null)
     {
         if (seam is not null) await seam(conn, tx, ct).ConfigureAwait(false);
 
@@ -781,6 +789,7 @@ internal static class ConsentSqlCore
         cmd.Transaction = tx;
         cmd.CommandText = ConsentApprovalPolicy.GuardedStatusUpdateSql;
         cmd.AddBound("@st", newStatus);
+        cmd.AddBound("@updatedAt", (updatedAt ?? TimeProvider.System.GetUtcNow()).ToString("O"));
         cmd.AddBound("@id", requestId.ToString());
         cmd.AddBound("@expected", expectedStatus);
         ConsentApprovalPolicy.EnsureTransitionApplied(await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false), requestId);
@@ -807,15 +816,21 @@ internal static class ConsentSqlCore
         return result != null && result != DBNull.Value && Convert.ToInt64(result) > 0;
     }
 
-    public static async Task<Guid?> FindRequestIdByTicketIdAsync(DbConnection conn, string selectIdByTicketSql, string ticketId, TenantId? tenantId, CancellationToken ct)
+    public static async Task<Guid?> FindRequestIdByExternalReferenceAsync(
+        DbConnection conn,
+        Guid externalSystemId,
+        string externalReference,
+        TenantId tenantId,
+        CancellationToken ct)
     {
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = selectIdByTicketSql;
-        cmd.AddBound("@ticket", ticketId);
-        if (tenantId.HasValue) cmd.AddBound("@tenant", tenantId.Value.Value);
+        cmd.CommandText = "SELECT id FROM CONSENT_REQUESTS WHERE external_system_id = @sysId AND external_reference = @extRef AND tenant_id = @tenant ORDER BY requested_at, id";
+        cmd.AddBound("@sysId", externalSystemId.ToString());
+        cmd.AddBound("@extRef", externalReference);
+        cmd.AddBound("@tenant", tenantId.Value);
 
-        var idObj = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return idObj == null ? null : Guid.Parse(idObj.ToString()!);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        return await reader.ReadAsync(ct).ConfigureAwait(false) ? Guid.Parse(reader.GetString(0)) : null;
     }
 
     public static async Task<(bool Claimed, Guid ConsentId, Consent? DraftConsent)> TryClaimConsentRequestActivationAsync(
@@ -938,14 +953,5 @@ internal static class ConsentSqlCore
             cmd.AddBound("@id", requestId.ToString());
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
-    }
-
-    public static async Task UpdateConsentRequestTicketIdAsync(DbConnection conn, Guid requestId, string ticketId, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE CONSENT_REQUESTS SET itsm_ticket_id = @ticket, external_reference = COALESCE(external_reference, @ticket) WHERE id = @id";
-        cmd.AddBound("@id", requestId.ToString());
-        cmd.AddBound("@ticket", ticketId);
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 }

@@ -31,7 +31,8 @@ public sealed class DeclarativeConsentApplyService(
     IDatasetCatalogAdminService? datasetCatalog = null,
     IOptions<GovernanceTextOptions>? textOptions = null,
     IGatewayRoleEvaluator? roleEvaluator = null,
-    IDataOwnershipRepository? dataOwnershipRepository = null) : IDeclarativeConsentApplyService
+    IDataOwnershipRepository? dataOwnershipRepository = null,
+    IGrantValidityPolicy? grantValidityPolicy = null) : IDeclarativeConsentApplyService
 {
     public const int MaxDeclarativePruneCount = 10_000;
     public const string PrunedByManifestReason = "PRUNED_BY_MANIFEST";
@@ -52,6 +53,7 @@ public sealed class DeclarativeConsentApplyService(
     private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
 
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? new GrantPolicy();
+    private readonly IGrantValidityPolicy _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
     private readonly IGatewayRoleEvaluator _roleEvaluator = roleEvaluator ?? new GatewayRoleEvaluator();
     private readonly IDataOwnershipRepository? _dataOwnershipRepository =
         dataOwnershipRepository ?? (metadataRepository as IDataOwnershipRepository) ?? (consentRepository as IDataOwnershipRepository);
@@ -215,7 +217,8 @@ public sealed class DeclarativeConsentApplyService(
                     "Group grant refused: the group memberships of the actor could not be resolved completely (group resolution degraded), so a self-grant through a group cannot be ruled out. Use a token with a resolvable group list or the consent request/approval workflow."));
             }
 
-            DateTimeOffset validTo;
+            _grantValidityPolicy.ValidateDeclarativeValidTo(policy.ValidUntil, now);
+            var validTo = policy.ValidUntil!.Value;
             if (individual)
             {
                 var sensitivity = GrantClassifier.Classify([metadata]);
@@ -246,14 +249,6 @@ public sealed class DeclarativeConsentApplyService(
                         decision.Class,
                         decision.MaxValidTo));
                 }
-
-                // A deny needs no expiry; without one it is stored as long-lived (deny rules are never clamped).
-                validTo = policy.ValidUntil ?? now.AddYears(100);
-            }
-            else
-            {
-                var days = policy.ValidityDays is > 0 ? Math.Min(policy.ValidityDays.Value, 365) : 365;
-                validTo = now.AddDays(days);
             }
 
             var existingConsents = await consentRepository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid!.Value }, tableId, now, tenantId, ct).ConfigureAwait(false);

@@ -4,6 +4,8 @@ using Autheris.Application.Governance.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -34,10 +36,19 @@ public sealed class ManifestIndividualGrantTests
 
     private static DeclarativeApplyResult? Last;
 
-    private static async Task<FakeConsentRepository> ApplyAsync(DeclarativeConsentPolicy p, bool dryRun = false, string sensitivity = "NORMAL", FakeConsentRepository? repo = null)
+    private static async Task<FakeConsentRepository> ApplyAsync(
+        DeclarativeConsentPolicy p,
+        bool dryRun = false,
+        string sensitivity = "NORMAL",
+        FakeConsentRepository? repo = null,
+        IGrantValidityPolicy? validityPolicy = null)
     {
         repo ??= new FakeConsentRepository();
-        var svc = new DeclarativeConsentApplyService(Tables(sensitivity), repo, Substitute.For<IAuditLogRepository>());
+        var svc = new DeclarativeConsentApplyService(
+            Tables(sensitivity),
+            repo,
+            Substitute.For<IAuditLogRepository>(),
+            grantValidityPolicy: validityPolicy);
         Last = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [p]), dryRun);
         return repo;
     }
@@ -91,7 +102,7 @@ public sealed class ManifestIndividualGrantTests
         var repo = await ApplyAsync(User(first));
 
         // The manifest later asks for a longer validity for an otherwise identical policy.
-        await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(100)), repo: repo);
+        await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(50)), repo: repo);
 
         Last!.Unchanged.ShouldBe(1);
         Last.Applied.ShouldBe(0);
@@ -101,19 +112,30 @@ public sealed class ManifestIndividualGrantTests
     [Fact]
     public async Task SEC_SC_20_ServicePrincipalManifestGrant_Allows365Days_AndRequiresExpiry()
     {
-        var repo = await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(300), "ServicePrincipal"));
+        var spValidity = new GrantValidityPolicy(Options.Create(new GrantValidityOptions
+        {
+            DefaultDuration = "P2W",
+            MaxDuration = "P2M",
+            DeclarativeMaxDuration = "P365D"
+        }));
+        var repo = await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(300), "ServicePrincipal"), validityPolicy: spValidity);
         repo.Active(DateTimeOffset.UtcNow).Count.ShouldBe(1);
 
-        await Should.ThrowAsync<GrantPolicyViolationException>(() => ApplyAsync(User(null, "ServicePrincipal")));
+        await Should.ThrowAsync<GrantPolicyViolationException>(() => ApplyAsync(User(null, "ServicePrincipal"), validityPolicy: spValidity));
     }
 
     [Fact]
-    public async Task SEC_SC_20_GroupManifestGrants_KeepTheStandingDefaultOf365Days()
+    public async Task SEC_SC_20_GroupManifestGrants_RequireExplicitValidUntil()
     {
-        var repo = await ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "Group", "S-1-5-21-1-2-3-2002", "Allow"));
+        await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+            ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "Group", "S-1-5-21-1-2-3-2002", "Allow")));
+
+        var repo = await ApplyAsync(new DeclarativeConsentPolicy(
+            "default", "sales", "orders", "Group", "S-1-5-21-1-2-3-2002", "Allow",
+            ValidUntil: DateTimeOffset.UtcNow.AddDays(30)));
 
         var c = repo.Active(DateTimeOffset.UtcNow).ShouldHaveSingleItem();
-        (c.ValidTo - c.ValidFrom).TotalDays.ShouldBe(365, 0.01);
+        (c.ValidTo - c.ValidFrom).TotalDays.ShouldBe(30, 0.5);
     }
 
     [Fact]
@@ -131,7 +153,7 @@ public sealed class ManifestIndividualGrantTests
         shortened.ValidTo.ShouldBeLessThan(DateTimeOffset.UtcNow.AddDays(31));
 
         // a later validUntil is not a change (renewal needs its own approval)
-        await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(90)), repo: repo);
+        await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(45)), repo: repo);
         Last!.Applied.ShouldBe(0);
         Last.Unchanged.ShouldBe(1);
         repo.Active(DateTimeOffset.UtcNow).Single().Id.ShouldBe(shortened.Id);
@@ -151,11 +173,16 @@ public sealed class ManifestIndividualGrantTests
     }
 
     [Fact]
-    public async Task SEC_SC_20_Manifest_DenyWithoutValidUntil_IsAccepted_AndStaysActiveForever()
+    public async Task SEC_SC_20_Manifest_DenyWithoutValidUntil_IsRejected_AndWithValidUntilStaysActive()
     {
-        var repo = await ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "User", "S-1-5-21-ALICE", "Deny", Description: "block"));
+        await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+            ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "User", "S-1-5-21-ALICE", "Deny", Description: "block")));
 
-        var deny = repo.Active(DateTimeOffset.UtcNow.AddDays(2000)).Single();
+        var repo = await ApplyAsync(new DeclarativeConsentPolicy(
+            "default", "sales", "orders", "User", "S-1-5-21-ALICE", "Deny",
+            Description: "block", ValidUntil: DateTimeOffset.UtcNow.AddDays(30)));
+
+        var deny = repo.Active(DateTimeOffset.UtcNow.AddDays(1)).Single();
         deny.Effect.ShouldBe(ConsentEffect.Deny);
     }
 }

@@ -349,26 +349,10 @@ public interface IConsentApprovalRepository
         => Task.FromResult<IReadOnlyList<ConsentRequest>>(Array.Empty<ConsentRequest>());
     Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default);
     Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default);
-    Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, CancellationToken ct = default)
-        => ApproveConsentRequestStepAsync(requestId, approverSid, ct);
-
-    /// <summary>
-    /// Review R3-1: ITSM approval with the approver (account or e-mail) reported by the ITSM system, passed typed.
-    /// Implementations must check it against owners/delegates; the default keeps the previous behaviour.
-    /// </summary>
-    Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, string? itsmApproverAccount, CancellationToken ct = default)
-        => ApproveConsentRequestStepAsync(requestId, approverSid, isExternalItsmApproval, ct);
     Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default);
 
     /// <summary>
-    /// Review G5: rejection with an explicit flag for callers that act on behalf of the verified external ITSM system
-    /// (signed webhook). Authorization never infers this from the SID prefix. The default ignores the flag.
-    /// </summary>
-    Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, bool isExternalItsm, CancellationToken ct = default)
-        => RejectConsentRequestAsync(requestId, approverSid, reason, ct);
-
-    /// <summary>
-    /// Review G5: activation for the insecure getting-started auto-approve path (request still pending).
+    /// Activation for the insecure getting-started auto-approve path (request still pending).
     /// Regular activation (<see cref="ActivateConsentAsync(Guid, Sid?, CancellationToken)"/>) only accepts 'APPROVED'.
     /// </summary>
     Task ActivateConsentForAutoApproveAsync(Guid requestId, CancellationToken ct = default)
@@ -386,23 +370,48 @@ public interface IConsentApprovalRepository
         Guid rowFilterId, TenantId tenant, RowFilterEvaluationSettings settings, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement row filter evaluation updates.");
 
-    Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default);
     Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default);
     Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default);
-    Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default);
 
     /// <summary>
-    /// SEC H-06: Tenant-bound ticket lookup (<c>WHERE itsm_ticket_id = @t AND tenant_id = @tenant</c>).
-    /// SR-M-24: there is no safe default (filtering the unscoped LIMIT 1 lookup lets one tenant's ticket shadow another's),
-    /// so every provider must override it with a scoped query; the default fails closed.
+    /// Tenant-bound external reference lookup (<c>WHERE external_system_id = @sysId AND external_reference = @ref AND tenant_id = @tenant</c>).
+    /// Fails closed when not overridden.
     /// </summary>
-    Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, TenantId tenantId, CancellationToken ct = default)
+    Task<ConsentRequest?> GetConsentRequestByExternalReferenceAsync(
+        Guid externalSystemId,
+        string externalReference,
+        TenantId tenantId,
+        CancellationToken ct = default)
         => throw new NotSupportedException(
-            $"{GetType().Name} does not implement the tenant-scoped ticket lookup; refusing to fall back to an unscoped lookup.");
+            $"{GetType().Name} does not implement tenant-scoped external reference lookup.");
+
+    Task<ConsentRequest> ApproveExternalConsentRequestStepAsync(
+        Guid requestId,
+        ExternalDecisionAttribution attribution,
+        Sid effectiveApproverSid,
+        CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement external approval steps.");
+
+    Task<Consent> ExecuteExternalAtomicApprovalWithConsentAsync(
+        Guid requestId,
+        ExternalDecisionAttribution attribution,
+        ApprovalStep step,
+        Consent consent,
+        IReadOnlyList<ConsentRowFilter> rowFilters,
+        IReadOnlyList<ConsentColumnRule> columnRules,
+        CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement external atomic approval.");
+
+    Task<ConsentRequest> RejectExternalConsentRequestAsync(
+        Guid requestId,
+        ExternalDecisionAttribution attribution,
+        Sid effectiveApproverSid,
+        string reason,
+        CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement external rejection.");
 
     /// <summary>
-    /// SEC H-06: Activates a pending consent request and records <paramref name="approvedBy"/> as audit actor
-    /// (e.g. the ITSM instance/approver instead of the requester). Activation only happens from a pending status.
+    /// Activates a pending consent request and records <paramref name="approvedBy"/> as audit actor.
     /// </summary>
     Task ActivateConsentAsync(Guid requestId, Sid? approvedBy, CancellationToken ct = default)
         => ActivateConsentAsync(requestId, ct);

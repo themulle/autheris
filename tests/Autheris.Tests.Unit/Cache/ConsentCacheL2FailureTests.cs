@@ -159,7 +159,7 @@ public sealed class ConsentCacheL2FailureTests
         db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(ci =>
         {
             var key = ci.Arg<RedisKey>().ToString();
-            var payload = serializer.Serialize(CachedConsentEnvelope.FromDecision(Decision(), epoch: 1));
+            var payload = serializer.Serialize(CachedConsentEnvelope.FromDecision(Decision(), epoch: 1, validUntil: DateTimeOffset.UtcNow.AddMinutes(5)));
             return Task.FromResult((RedisValue)cache.ProtectL2Payload(key, payload, DateTimeOffset.UtcNow.AddMinutes(5)));
         });
         db.KeyDeleteAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns<Task<bool>>(_ => throw RedisFault());

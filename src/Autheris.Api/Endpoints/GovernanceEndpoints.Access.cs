@@ -138,10 +138,19 @@ public static partial class GovernanceEndpoints
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Justification is required and must be at least 15 characters long.", context);
         }
 
-        // ValidDays validation (1 to 180 days)
-        if (req.ValidDays < 1 || req.ValidDays > 180)
+        // ValidDays validation bounded by GrantValidityPolicy
+        var validityPolicy = context.RequestServices.GetService<IGrantValidityPolicy>() ?? GrantValidityPolicy.CreateDefault();
+        try
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "validDays must be between 1 and 180.", context);
+            validityPolicy.ValidateDurationDays(req.ValidDays);
+        }
+        catch (GrantValidityException ex)
+        {
+            var code = ex.ErrorCode == "VALIDATION_ERROR" ? ApiErrorCodes.BadRequest : ex.ErrorCode;
+            var detail = ex.ErrorCode == "VALIDITY_EXCEEDS_MAXIMUM"
+                ? "Requested grant validity exceeds the configured maximum duration."
+                : "validDays must be a positive number of days within the configured maximum.";
+            return ApiProblems.BadRequest(code, detail, context);
         }
 
         // MaskingMode validation. Enum.TryParse also accepts any numeric string (e.g. "7"), so an undefined value is rejected explicitly:

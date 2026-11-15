@@ -69,6 +69,13 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetService<TimeProvider>()));
         services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantChainVerifier, Autheris.Application.Governance.Grants.Records.GrantChainVerifier>();
         services.AddHostedService<GrantRecordKeyStartupCheck>();
+        services.AddOptions<Autheris.Domain.Options.GrantValidityOptions>()
+            .BindConfiguration(Autheris.Domain.Options.GrantValidityOptions.SectionName)
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.GrantValidityOptions>, Autheris.Application.Governance.Grants.GrantValidityOptionsValidator>();
+        services.AddSingleton<Autheris.Application.Governance.Grants.IGrantValidityPolicy, Autheris.Application.Governance.Grants.GrantValidityPolicy>();
+        services.AddSingleton<Autheris.Application.ConsentRequests.IExternalDecisionGuard, Autheris.Application.ConsentRequests.ExternalDecisionGuard>();
+        services.AddScoped<Autheris.Application.ConsentRequests.IConsentDecisionPipeline, Autheris.Application.ConsentRequests.ConsentDecisionPipeline>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService, Autheris.Application.ConsentRequests.ConsentRequestService>();
         services.AddScoped<IConsentRecertificationService, ConsentRecertificationWorkflowService>();
         services.AddHostedService<ConsentRecertificationHostedService>();

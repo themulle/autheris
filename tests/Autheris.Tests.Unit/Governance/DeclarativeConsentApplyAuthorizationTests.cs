@@ -123,6 +123,7 @@ public sealed class DeclarativeConsentApplyAuthorizationTests
                     "Group",
                     "S-1-5-21-GROUP-1",
                     "Allow",
+                    ValidUntil: DateTimeOffset.UtcNow.AddDays(30),
                     TenantId: policyTenant)
             ],
             TenantId: manifestTenant);

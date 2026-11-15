@@ -516,10 +516,9 @@ public sealed class DiscoveryWriteStateTests
             return Task.FromResult(req);
         }
         public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default) => Task.FromResult<ConsentRequest?>(null);
+        public Task<ConsentRequest?> GetConsentRequestByExternalReferenceAsync(Guid externalSystemId, string externalReference, TenantId tenantId, CancellationToken ct = default) => Task.FromResult<ConsentRequest?>(null);
         public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) => Task.CompletedTask;
-        public Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class InMemoryOwnershipRepo : IDataOwnershipRepository

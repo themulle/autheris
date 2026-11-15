@@ -147,10 +147,7 @@ public partial class GovernanceRepository
     }
 
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
-        IsAuthorizedApproverForTableInternalAsync(table, approverSid, null, ct);
-
-    public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct = default) =>
-        IsAuthorizedApproverForTableInternalAsync(table, approverSid, itsmApproverAccount, ct);
+        IsAuthorizedApproverForTableInternalAsync(table, approverSid, ct);
 
     public async Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default)
     {

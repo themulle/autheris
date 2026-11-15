@@ -95,11 +95,11 @@ public sealed class ConsentRequestServiceTests
     }
 
     [Theory]
-    [InlineData("", "dbo", "t", "Valid justification", 7)]
-    [InlineData("hr", "dbo", "t", "abc", 7)]
-    [InlineData("hr", "dbo", "t", "Valid justification", 0)]
-    [InlineData("hr", "dbo", "t", "Valid justification", 366)]
-    public async Task Submit_InvalidArguments_ThrowsInvalidArgument(string domain, string schema, string table, string justification, int days)
+    [InlineData("", "dbo", "t", "Valid justification", 7, "VALIDATION_ERROR")]
+    [InlineData("hr", "dbo", "t", "abc", 7, "VALIDATION_ERROR")]
+    [InlineData("hr", "dbo", "t", "Valid justification", 0, "VALIDATION_ERROR")]
+    [InlineData("hr", "dbo", "t", "Valid justification", 366, "VALIDITY_EXCEEDS_MAXIMUM")]
+    public async Task Submit_InvalidArguments_ThrowsInvalidArgument(string domain, string schema, string table, string justification, int days, string expectedCode)
     {
         var (metadata, approvals, _) = Repositories();
         var service = new ConsentRequestService(metadata, approvals);
@@ -107,7 +107,7 @@ public sealed class ConsentRequestServiceTests
         var ex = await Should.ThrowAsync<ConsentRequestException>(() =>
             service.SubmitAsync(new ConsentRequestSubmission(domain, schema, table, justification, days, null, User, Principal("t"), Autheris.Tests.Common.TestTenants.Default)));
 
-        ex.Code.ShouldBe("VALIDATION_ERROR");
+        ex.Code.ShouldBe(expectedCode);
     }
 
     [Fact]

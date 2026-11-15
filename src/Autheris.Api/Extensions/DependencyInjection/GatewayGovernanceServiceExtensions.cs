@@ -147,6 +147,7 @@ public static partial class GatewayGovernanceServiceExtensions
             ICloudEventSubscriptionStore,
             Autheris.Application.Streaming.Interfaces.ICdcStreamStore,
             Autheris.Application.Streaming.Interfaces.ICdcStreamKeyStore,
+            Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository,
             IIdentityStoreRepository,
             IFunctionalRightRepository,
             IRecertificationRepository,
@@ -174,6 +175,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IAuditPurgeKeyProvider>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentDescriptionRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>()); // INC1 (same validating decorator instance as IConsentRepository)
         services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IDataOwnerAssignmentRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #393 part b: dbt import owner write seam

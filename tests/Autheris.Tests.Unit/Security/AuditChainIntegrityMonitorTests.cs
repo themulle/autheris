@@ -198,12 +198,12 @@ public sealed class AuditChainIntegrityMonitorTests
     {
         var req = new ConsentRequest { RequesterSid = new Sid("S-REQ"), TenantId = new TenantId("tenant-a") };
 
-        var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-APPROVER"), "CONSENT_APPROVAL_STEP", "APPROVED", "APPROVED", "alice@corp", null);
+        var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-APPROVER"), "CONSENT_APPROVAL_STEP", "APPROVED", "APPROVED", null, "EXT-123");
 
         entry.ActorSid.Value.ShouldBe("S-APPROVER");
         entry.TenantId.Value.ShouldBe("tenant-a");
         entry.EventType.ShouldBe("CONSENT_APPROVAL_STEP");
-        entry.DetailsJson.ShouldContain("alice@corp");
+        entry.DetailsJson.ShouldContain("EXT-123");
     }
 
     [Fact]
@@ -211,7 +211,7 @@ public sealed class AuditChainIntegrityMonitorTests
     {
         var req = new ConsentRequest { TenantId = Autheris.Tests.Common.TestTenants.Default, RequesterSid = new Sid("S-REQ") };
 
-        var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-A"), "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, new string('x', 5000));
+        var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-A"), "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", new string('x', 5000));
 
         entry.DetailsJson.Length.ShouldBeLessThan(1000);
     }

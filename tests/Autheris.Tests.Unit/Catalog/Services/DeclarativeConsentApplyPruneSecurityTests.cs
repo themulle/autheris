@@ -317,7 +317,7 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
     private static DeclarativeConsentManifest ManifestFor(params (string Table, string Grantee)[] entries) =>
         new(
             "1",
-            entries.Select(e => new DeclarativeConsentPolicy("default", "sales", e.Table, "Group", e.Grantee, "Allow")).ToList());
+            entries.Select(e => new DeclarativeConsentPolicy("default", "sales", e.Table, "Group", e.Grantee, "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))).ToList());
 
     private static DeclarativeConsentApplyService CreateService(
         InMemoryPruneConsentRepository repo,
