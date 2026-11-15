@@ -8,7 +8,11 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 
 /// <summary>Who changes virtual filters; <see cref="IsSync"/> is the file repository sync (the only writer of managed rows).</summary>
-public sealed record VirtualFilterActor(Sid Sid, bool IsSync, IReadOnlyCollection<string>? Identifiers = null)
+public sealed record VirtualFilterActor(
+    Sid Sid,
+    bool IsSync,
+    IReadOnlyCollection<string>? Identifiers = null,
+    IReadOnlySet<string>? Roles = null)
 {
     public string FormatAllIdentifiers()
     {
@@ -109,6 +113,7 @@ public sealed partial class VirtualFilterAdministrationService
     private readonly ITableMetadataRepository? _catalog;
     private readonly Autheris.Application.Identity.Attributes.ICallerAttributeRegistry? _callerAttributes;
     private readonly SqlDataSourceOptions? _dataSources;
+    private readonly IDataOwnershipRepository? _ownership;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<TenantId, List<(DateTimeOffset Timestamp, int Count)>> _removalHistory = new();
 
     private readonly Autheris.Application.State.IDistributedClusterStateProvider _clusterState;
@@ -120,7 +125,8 @@ public sealed partial class VirtualFilterAdministrationService
         IVirtualFilterSnapshotProvider? snapshots = null,
         ITableMetadataRepository? catalog = null,
         Autheris.Application.Identity.Attributes.ICallerAttributeRegistry? callerAttributes = null,
-        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
+        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null,
+        IDataOwnershipRepository? ownership = null)
     {
         _callerAttributes = options?.Value?.CallerAttributes?.Enabled == true ? callerAttributes : null;
         _catalog = catalog;
@@ -131,6 +137,7 @@ public sealed partial class VirtualFilterAdministrationService
         _federation = _options.Federation ?? new VirtualFilterFederationOptions();
         _snapshots = snapshots;
         _clusterState = clusterState ?? new Autheris.Application.State.InMemoryClusterStateProvider();
+        _ownership = ownership;
     }
 
     public VirtualFilterOptions Options => _options;
@@ -175,6 +182,12 @@ public sealed partial class VirtualFilterAdministrationService
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(actor);
+        if (actor.Roles != null && filter.Sql != null && !actor.IsSync &&
+            !actor.Roles.Contains(nameof(Autheris.Domain.Security.GatewayRole.GovernanceAdmin)))
+        {
+            throw new UnauthorizedAccessException("Only GovernanceAdmin may author a SQL virtual filter.");
+        }
+
         filter = await ValidateDefinitionAsync(filter, ct).ConfigureAwait(false);
 
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
@@ -182,7 +195,8 @@ public sealed partial class VirtualFilterAdministrationService
         EnsureWritable(existing?.ManagedBy, filter.ManagedBy, actor, $"virtual filter '{filter.Name}'");
         ValidateSupersedes(snapshot.Filters.Where(f => f.TenantId == filter.TenantId && f.Name != filter.Name).Append(filter).ToList());
 
-        if (_options.RequireApproval && !actor.IsSync)
+        bool needsApproval = !actor.IsSync && (_options.RequireApproval || filter.Sql != null);
+        if (needsApproval)
         {
             if (existing != null && existing.Status == FilterApprovalStatus.Active)
             {
@@ -294,6 +308,18 @@ public sealed partial class VirtualFilterAdministrationService
         if (!string.Equals(expectedHash, pendingHash, StringComparison.Ordinal))
         {
             throw new VirtualFilterConflictException($"Hash mismatch for virtual filter '{name}': expected '{expectedHash}' but pending definition hash is '{pendingHash}'.");
+        }
+
+        if (!existing.PendingDeletion && (existing.Draft ?? existing) is { Sql: not null } sqlPolicy)
+        {
+            var ownership = _ownership ?? throw new InvalidOperationException("Four-eyes SQL policy approval requires data ownership metadata.");
+            foreach (var table in SqlFilterCompiler.ReferencedTables(sqlPolicy).Distinct())
+            {
+                if (!await ownership.IsAuthorizedApproverForTableAsync(table, actor.Sid, ct).ConfigureAwait(false))
+                {
+                    throw new UnauthorizedAccessException($"Approver '{actor.Sid.Value}' is not an authorized data owner or delegate for table '{table}'.");
+                }
+            }
         }
 
         if (existing.PendingDeletion)

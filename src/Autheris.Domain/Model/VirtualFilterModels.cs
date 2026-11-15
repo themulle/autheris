@@ -61,6 +61,27 @@ public sealed record StructuredFilterDefinition
 /// <summary>Origin of a row managed by a file repository (Talos); such rows only change through the sync.</summary>
 public sealed record ManagedBy(string Path, string Commit);
 
+/// <summary>Typed parameter kind declared on a <see cref="VirtualFilter"/>.</summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Represents row policy parameter scalar types.")]
+public enum RowPolicyParameterType
+{
+    String = 0,
+    Int64 = 1,
+    Decimal = 2,
+    Guid = 3,
+    Date = 4
+}
+
+/// <summary>Typed named parameter accepted by a <see cref="VirtualFilter"/> (<c>:name</c>).</summary>
+public sealed record RowPolicyParameter(string Name, RowPolicyParameterType Type, bool IsList = false, int MaxValues = 100);
+
+/// <summary>Evaluation strategy of a <see cref="VirtualFilter"/>: live correlated query or cached key set.</summary>
+public enum RowPolicyEvaluationMode
+{
+    Live = 0,
+    KeySet = 1
+}
+
 /// <summary>
 /// A named, reusable virtual filter without reference to a protected table. It yields key values (and optionally a
 /// validity window) the protected object must match. It never grants access.
@@ -95,12 +116,22 @@ public sealed record VirtualFilter
     /// <summary>Filters this one replaces on objects where both apply.</summary>
     public IReadOnlyList<string> Supersedes { get; init; } = [];
 
+    /// <summary>Typed named parameters (<c>:name</c>) declared for grant-bound row scopes.</summary>
+    public IReadOnlyList<RowPolicyParameter> Parameters { get; init; } = [];
+
+    /// <summary>Whether the policy evaluates live (correlated subquery) or via a bounded cached key set.</summary>
+    public RowPolicyEvaluationMode EvaluationMode { get; init; } = RowPolicyEvaluationMode.Live;
+
+    /// <summary>Optional maximum cache age when <see cref="EvaluationMode"/> is <see cref="RowPolicyEvaluationMode.KeySet"/>.</summary>
+    public TimeSpan? KeySetMaxAge { get; init; }
+
     public ManagedBy? ManagedBy { get; init; }
     public string? UpdatedBy { get; init; }
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
     public FilterApprovalStatus Status { get; init; } = FilterApprovalStatus.Active;
     public Sid? CreatedBy { get; init; }
     public Sid? ApprovedBy { get; init; }
+    public string? ApprovedBySid => ApprovedBy?.Value;
     public DateTimeOffset? ApprovedAt { get; init; }
     public bool PendingDeletion { get; init; } = false;
     public Sid? DeletionRequestedBy { get; init; }
@@ -122,6 +153,16 @@ public sealed record VirtualFilter
         if (string.IsNullOrWhiteSpace(Source))
         {
             throw new ArgumentException("A virtual filter needs a data source.", nameof(Source));
+        }
+
+        if (KeySetMaxAge is { } maxAge && maxAge <= TimeSpan.Zero)
+            throw new ArgumentException("key_set_max_age must be positive.", nameof(KeySetMaxAge));
+        var paramNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var param in Parameters)
+        {
+            VirtualFilterNames.ValidateIdentifier(param.Name, nameof(Parameters));
+            if (param.MaxValues < 1) throw new ArgumentException($"Parameter '{param.Name}' must allow at least one value.", nameof(Parameters));
+            if (!paramNames.Add(param.Name)) throw new ArgumentException($"Duplicate parameter name '{param.Name}'.", nameof(Parameters));
         }
 
         if ((Structured == null) == (Sql == null))
@@ -209,6 +250,14 @@ public sealed record VirtualFilter
           .Append("valid_from=").Append(ValidFromColumn).Append('\n')
           .Append("valid_to=").Append(ValidToColumn).Append('\n')
           .Append("supersedes=").AppendJoin(',', Supersedes.OrderBy(s => s, StringComparer.Ordinal));
+        if (Parameters.Count > 0 || EvaluationMode != RowPolicyEvaluationMode.Live || KeySetMaxAge != null)
+        {
+            sb.Append('\n').Append("params=").AppendJoin(',', Parameters
+                    .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(p => $"{p.Name}:{p.Type}:{p.IsList}:{p.MaxValues}"))
+              .Append('\n').Append("mode=").Append(EvaluationMode)
+              .Append('\n').Append("max_age=").Append(KeySetMaxAge?.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty);
+        }
         return VirtualFilterNames.Sha256(sb.ToString());
     }
 

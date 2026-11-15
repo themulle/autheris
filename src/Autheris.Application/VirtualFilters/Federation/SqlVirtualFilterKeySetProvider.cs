@@ -79,7 +79,7 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
 
         var set = await _cache.GetOrLoadAsync(
             cacheKey,
-            TimeSpan.FromSeconds(federation.KeyCacheTtlSeconds),
+            RowPolicyParameterBinder.ComputeEffectiveKeySetMaxAge(filter, _options.Value),
             loadCt => LoadAsync(filter, keyTypes, tenant, federation, loadCt),
             ct,
             TimeSpan.FromSeconds(federation.KeyQueryTimeoutSeconds)).ConfigureAwait(false);

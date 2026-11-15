@@ -155,28 +155,40 @@ public static partial class VirtualFilterEndpoints
 
     private static async Task<IResult> ExecuteAsync(
         HttpContext context,
-        GatewayRole requiredRole,
+        GatewayRole? requiredRole,
         Func<SecurityPrincipalContext, VirtualFilterActor, Task<IResult>> action)
     {
         var security = EndpointSecurity.GetSecurityContext(context);
-        if (!security.HasRole(requiredRole))
+        if (requiredRole is { } role && !security.HasRole(role))
         {
-            var audit = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
-            await audit.RecordRequiredAsync(new AuditLogEntry
-            {
-                EventType = "VIRTUAL_FILTER_ADMIN_DENIED",
-                TargetTable = context.Request.Path.Value ?? "virtual_filter",
-                ActorSid = security.UserSid,
-                TenantId = security.TenantId,
-                Decision = "DENY",
-                DetailsJson = JsonSerializer.Serialize(new { error = "Forbidden: missing required role", requiredRole = requiredRole.ToString() }),
-                OccurredAt = DateTimeOffset.UtcNow
-            }, context.RequestAborted).ConfigureAwait(false);
-            return Forbidden();
+            return await AuditDeniedAsync(context, security, role).ConfigureAwait(false);
         }
 
-        var actor = new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers());
+        var roles = new HashSet<string>(security.TenantRoles, StringComparer.OrdinalIgnoreCase);
+        roles.UnionWith(security.ClusterRoles);
+        if (security.HasRole(GatewayRole.GovernanceAdmin))
+        {
+            roles.Add(nameof(GatewayRole.GovernanceAdmin));
+        }
+
+        var actor = new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers(), roles);
         return await MapErrorsAsync(() => action(security, actor), context).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> AuditDeniedAsync(HttpContext context, SecurityPrincipalContext security, GatewayRole requiredRole)
+    {
+        var audit = context.RequestServices.GetRequiredService<Autheris.Application.Audit.IAuditWriter>();
+        await audit.RecordRequiredAsync(new AuditLogEntry
+        {
+            EventType = "VIRTUAL_FILTER_ADMIN_DENIED",
+            TargetTable = context.Request.Path.Value ?? "virtual_filter",
+            ActorSid = security.UserSid,
+            TenantId = security.TenantId,
+            Decision = "DENY",
+            DetailsJson = JsonSerializer.Serialize(new { error = "Forbidden: missing required role", requiredRole = requiredRole.ToString() }),
+            OccurredAt = TimeProvider.System.GetUtcNow()
+        }, context.RequestAborted).ConfigureAwait(false);
+        return Forbidden();
     }
 
     internal static async Task<IResult> MapErrorsAsync(Func<Task<IResult>> action, HttpContext? context = null)
@@ -184,6 +196,10 @@ public static partial class VirtualFilterEndpoints
         try
         {
             return await action().ConfigureAwait(false);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbidden();
         }
         catch (ManagedResourceLockedException ex)
         {

@@ -13,6 +13,7 @@ public sealed partial class VirtualFilterAdministrationService
     private async Task<VirtualFilter> ValidateDefinitionAsync(VirtualFilter filter, CancellationToken ct)
     {
         filter.Validate();
+        RowPolicyParameterBinder.ValidateFilterDeclarations(filter);
         if (filter.Sql == null && filter.Structured == null)
         {
             return filter;
@@ -33,6 +34,28 @@ public sealed partial class VirtualFilterAdministrationService
         }
 
         return filter;
+    }
+
+    private static void ValidateProfileCrossSourceBindings(VirtualFilterAccessProfile profile, IReadOnlyList<VirtualFilter> allFilters)
+    {
+        var filters = allFilters.Where(f => f.TenantId == profile.TenantId).ToDictionary(f => f.Name, StringComparer.Ordinal);
+        foreach (var binding in profile.Bindings)
+        {
+            if (!filters.TryGetValue(binding.FilterName, out var filter))
+            {
+                continue;
+            }
+
+            var pattern = binding.TargetPattern ?? profile.Scope;
+            if (!string.IsNullOrWhiteSpace(pattern) &&
+                !TargetPatternMatcher.IsRegex(pattern) &&
+                !pattern.Contains('*', StringComparison.Ordinal) &&
+                !pattern.Contains('?', StringComparison.Ordinal) &&
+                TableIdentifier.TryParse(pattern, out var target))
+            {
+                RowPolicyParameterBinder.EnsureCrossSourceAllowed(filter, target.Domain);
+            }
+        }
     }
 
     private void ValidateStructuredTablesAgainstCatalog(VirtualFilter filter, IReadOnlyList<TableMetadata> catalog)
@@ -79,6 +102,7 @@ public sealed partial class VirtualFilterAdministrationService
 
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         EnsureFiltersExist(profile, snapshot.Filters.Where(f => f.TenantId == profile.TenantId).Select(f => f.Name));
+        ValidateProfileCrossSourceBindings(profile, snapshot.Filters);
         var existing = FindProfile(snapshot, profile.TenantId, profile.Name);
         EnsureWritable(existing?.ManagedBy, profile.ManagedBy, actor, $"access profile '{profile.Name}'");
 

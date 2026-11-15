@@ -512,7 +512,7 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
 
             using var scope = _factory!.Services.CreateScope();
             var admin = scope.ServiceProvider.GetRequiredService<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
-            var actor = new Autheris.Application.VirtualFilters.VirtualFilterActor(new Sid("S-1-5-21-FILTER-ADMIN"), IsSync: false);
+            var actor = new Autheris.Application.VirtualFilters.VirtualFilterActor(new Sid("S-1-5-21-FILTER-ADMIN"), IsSync: UseSqlDefinition);
             await admin.SaveFilterAsync(UseSqlDefinition
                 ? new VirtualFilter
                 {

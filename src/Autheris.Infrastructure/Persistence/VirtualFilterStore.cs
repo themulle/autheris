@@ -17,12 +17,14 @@ internal static class VirtualFilterStore
     private sealed record TableDto(string Domain, string Schema, string Table);
     private sealed record JoinDto(TableDto Table, string Alias, string Left, string Right);
     private sealed record ConditionDto(string Column, FilterConditionOperator Operator, string? Value);
+    private sealed record ParameterDto(string Name, RowPolicyParameterType Type, bool IsList = false, int MaxValues = 100);
     private sealed record FilterDto(
         TableDto? From, string? FromAlias, List<JoinDto>? Joins, List<ConditionDto>? Where,
         List<string> KeyColumns, string? ValidFrom, string? ValidTo, List<string> Supersedes,
         string? Sql = null, List<string>? SqlTargetColumns = null,
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
-        FilterDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null);
+        FilterDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null,
+        List<ParameterDto>? Parameters = null, RowPolicyEvaluationMode? EvaluationMode = null, TimeSpan? KeySetMaxAge = null);
     private sealed record BindingDto(
         string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap,
         VirtualFilterExecutionStrategy? Strategy = null, PushdownParameterFormat? PushdownFormat = null,
@@ -222,7 +224,10 @@ internal static class VirtualFilterStore
         filter.ApprovedAt,
         filter.Draft == null ? null : FilterToDto(filter.Draft),
         filter.PendingDeletion,
-        filter.DeletionRequestedBy?.Value);
+        filter.DeletionRequestedBy?.Value,
+        filter.Parameters.Count == 0 ? null : filter.Parameters.Select(p => new ParameterDto(p.Name, p.Type, p.IsList, p.MaxValues)).ToList(),
+        filter.EvaluationMode == RowPolicyEvaluationMode.Live ? null : filter.EvaluationMode,
+        filter.KeySetMaxAge);
 
     private static ProfileDto ProfileToDto(VirtualFilterAccessProfile profile) => new(
         profile.GranteeType,
@@ -272,7 +277,10 @@ internal static class VirtualFilterStore
         ApprovedAt = dto.ApprovedAt,
         Draft = dto.Draft == null ? null : DtoToFilter(dto.Draft, Guid.NewGuid(), tenantId, name, source),
         PendingDeletion = dto.PendingDeletion,
-        DeletionRequestedBy = string.IsNullOrWhiteSpace(dto.DeletionRequestedBy) ? (Sid?)null : new Sid(dto.DeletionRequestedBy!)
+        DeletionRequestedBy = string.IsNullOrWhiteSpace(dto.DeletionRequestedBy) ? (Sid?)null : new Sid(dto.DeletionRequestedBy!),
+        Parameters = (dto.Parameters ?? []).Select(p => new RowPolicyParameter(p.Name, p.Type, p.IsList, p.MaxValues)).ToList(),
+        EvaluationMode = dto.EvaluationMode ?? RowPolicyEvaluationMode.Live,
+        KeySetMaxAge = dto.KeySetMaxAge
     };
 
     private static VirtualFilterAccessProfile DtoToProfile(ProfileDto dto, Guid id, TenantId tenantId, string name) => new()

@@ -33,9 +33,15 @@ public static partial class VirtualFilterEndpoints
     }
 
     internal static Task<IResult> PutFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
+        ExecuteAsync(context, requiredRole: null, async (security, actor) =>
         {
             var body = await ReadAsync<FilterBody>(context).ConfigureAwait(false);
+            var requiredRole = body.Sql != null ? GatewayRole.GovernanceAdmin : GatewayRole.FilterAdmin;
+            if (!security.HasRole(requiredRole))
+            {
+                return await AuditDeniedAsync(context, security, requiredRole).ConfigureAwait(false);
+            }
+
             var tenant = ResolveTenant(security, body.Tenant);
             if (tenant == null)
             {
@@ -47,12 +53,27 @@ public static partial class VirtualFilterEndpoints
         });
 
     internal static Task<IResult> ApproveFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.GovernanceAdmin, async (security, actor) =>
+        ExecuteAsync(context, requiredRole: null, async (security, actor) =>
         {
+            if (!security.HasRole(GatewayRole.GovernanceAdmin) && !security.HasRole(GatewayRole.DataOwner))
+            {
+                return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
+            }
+
             var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
             if (tenant == null)
             {
                 return Forbidden();
+            }
+
+            if (!security.HasRole(GatewayRole.GovernanceAdmin))
+            {
+                var snapshot = await service.GetSnapshotAsync(context.RequestAborted).ConfigureAwait(false);
+                var target = snapshot.Filters.FirstOrDefault(f => f.TenantId == tenant.Value && string.Equals(f.Name, name, StringComparison.Ordinal));
+                if ((target?.Draft ?? target)?.Sql == null)
+                {
+                    return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
+                }
             }
 
             // VF-05: no hash, no approval; a mismatch stays a 409.
@@ -130,6 +151,9 @@ public static partial class VirtualFilterEndpoints
         valid_from = f.ValidFromColumn,
         valid_to = f.ValidToColumn,
         supersedes = f.Supersedes,
+        parameters = f.Parameters.Select(p => new { name = p.Name, type = p.Type.ToString(), is_list = p.IsList, max_values = p.MaxValues }),
+        evaluation_mode = f.EvaluationMode.ToString(),
+        key_set_max_age_seconds = f.KeySetMaxAge?.TotalSeconds,
         managed_by = f.ManagedBy,
         definition_hash = f.ComputeDefinitionHash(),
         status = f.Status.ToString(),
@@ -208,6 +232,19 @@ public static partial class VirtualFilterEndpoints
         [JsonPropertyName("value")] public string? Value { get; set; }
     }
 
+    internal sealed class ParameterBody
+    {
+        [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
+        [JsonPropertyName("type")] public string Type { get; set; } = "String";
+        [JsonPropertyName("is_list")] public bool IsList { get; set; }
+        [JsonPropertyName("max_values")] public int MaxValues { get; set; } = 100;
+
+        public RowPolicyParameter ToModel() =>
+            Enum.TryParse<RowPolicyParameterType>(Type, ignoreCase: true, out var parsed)
+                ? new RowPolicyParameter(Name, parsed, IsList, MaxValues)
+                : throw new ArgumentException($"Unknown parameter type '{Type}'.");
+    }
+
     internal sealed class FilterBody
     {
         [JsonPropertyName("tenant")] public string? Tenant { get; set; }
@@ -220,46 +257,29 @@ public static partial class VirtualFilterEndpoints
         [JsonPropertyName("valid_to")] public string? ValidTo { get; set; }
         [JsonPropertyName("supersedes")] public List<string>? Supersedes { get; set; }
         [JsonPropertyName("sql")] public string? Sql { get; set; }
+        [JsonPropertyName("parameters")] public List<ParameterBody>? Parameters { get; set; }
+        [JsonPropertyName("evaluation_mode")] public string? EvaluationMode { get; set; }
+        [JsonPropertyName("key_set_max_age_seconds")] public double? KeySetMaxAgeSeconds { get; set; }
 
         public VirtualFilter ToModel(string name, TenantId tenant)
         {
-            if (Sql != null)
-            {
-                return new VirtualFilter
-                {
-                    TenantId = tenant,
-                    Name = name,
-                    Source = Source,
-                    Sql = Sql,
-                    KeyColumns = KeyColumns ?? [],
-                    ValidFromColumn = ValidFrom,
-                    ValidToColumn = ValidTo,
-                    Structured = From == null ? null : new StructuredFilterDefinition(),
-                    Supersedes = Supersedes ?? []
-                };
-            }
-
-            if (From == null)
-            {
-                throw new ArgumentException("A virtual filter needs 'from' or 'sql'.");
-            }
-
+            var parameters = (Parameters ?? []).Select(p => p.ToModel()).ToList();
+            var mode = string.IsNullOrWhiteSpace(EvaluationMode) ? RowPolicyEvaluationMode.Live
+                : Enum.TryParse<RowPolicyEvaluationMode>(EvaluationMode, true, out var pm) ? pm : throw new ArgumentException($"Unknown evaluation_mode '{EvaluationMode}'.");
+            if (Sql == null && From == null) throw new ArgumentException("A virtual filter needs 'from' or 'sql'.");
             return new VirtualFilter
             {
-                TenantId = tenant,
-                Name = name,
-                Source = Source,
-                KeyColumns = KeyColumns ?? [],
-                Structured = new StructuredFilterDefinition
+                TenantId = tenant, Name = name, Source = Source, KeyColumns = KeyColumns ?? [],
+                ValidFromColumn = ValidFrom, ValidToColumn = ValidTo, Supersedes = Supersedes ?? [],
+                Parameters = parameters, EvaluationMode = mode,
+                KeySetMaxAge = KeySetMaxAgeSeconds is { } sec ? TimeSpan.FromSeconds(sec) : null,
+                Sql = Sql,
+                Structured = Sql != null ? (From == null ? null : new StructuredFilterDefinition()) : new StructuredFilterDefinition
                 {
-                    From = Table(Source, From.Table),
-                    FromAlias = From.Alias,
+                    From = Table(Source, From!.Table), FromAlias = From.Alias,
                     Joins = (Joins ?? []).Select(j => new FilterJoin(Table(Source, j.Table), j.Alias, j.Left, j.Right)).ToList(),
                     Where = (Where ?? []).Select(w => new FilterCondition(w.Column, ParseOperator(w.Op), w.Value)).ToList()
-                },
-                ValidFromColumn = ValidFrom,
-                ValidToColumn = ValidTo,
-                Supersedes = Supersedes ?? []
+                }
             };
         }
 

@@ -4,8 +4,10 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
+using Autheris.Application.VirtualFilters.Federation;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast.Builder;
@@ -68,10 +70,17 @@ public static partial class SqlFilterCompiler
             throw Reject(filter, "the definition must start with FROM (the predicate form: from ... where ... target.<column> ...).");
         }
 
-        var withoutLiterals = StringLiteral().Replace(fragment, "''");
-        if (withoutLiterals.Contains('?', StringComparison.Ordinal) || withoutLiterals.Contains('@', StringComparison.Ordinal) || withoutLiterals.Contains(':', StringComparison.Ordinal))
+        if (RowPolicyParameterBinder.ContainsSqlParameters(fragment) || filter.Parameters.Count > 0)
         {
-            throw Reject(filter, "parameters (?, @name, :name) are not allowed.");
+            fragment = RowPolicyParameterBinder.RewriteSqlParameters(filter, out _);
+        }
+        else
+        {
+            var withoutLiterals = StringLiteral().Replace(fragment, "''");
+            if (withoutLiterals.Contains('?', StringComparison.Ordinal) || withoutLiterals.Contains('@', StringComparison.Ordinal) || withoutLiterals.Contains(':', StringComparison.Ordinal))
+            {
+                throw Reject(filter, "parameters (?, @name, :name) are not allowed.");
+            }
         }
 
         if (StringLiteral().Matches(fragment).Any(m => m.Value.Contains(TargetAlias, StringComparison.OrdinalIgnoreCase)))
@@ -619,10 +628,9 @@ public static partial class SqlFilterCompiler
     public static string Compile(VirtualFilter filter, DatabaseDialect dialect, VirtualFilterTenantContext? tenant = null)
     {
         ArgumentNullException.ThrowIfNull(filter);
-        if (CallerPlaceholders.Contains(filter.Sql))
+        if (CallerPlaceholders.Contains(filter.Sql) || RowPolicyParameterBinder.ContainsSqlParameters(filter.Sql) || filter.Parameters.Count > 0)
         {
-            // BC-129-05: the text form of a caller attribute filter never carries a value or a sentinel (NOT IN of a sentinel would match every
-            // row): it is the constant that denies all rows of this filter. The typed form is authoritative where a row policy factory exists.
+            // BC-129-05: the text form never carries a bound parameter value: it denies all rows unless compiled via CompileTyped.
             return CallerAttributeFilterText;
         }
 
@@ -655,15 +663,19 @@ public static partial class SqlFilterCompiler
     /// <exception cref="InvalidOperationException">The definition has no sql, or does not compile to a correlated subquery.</exception>
     public static PolicyPredicate CompileTyped(
         VirtualFilter filter, DatabaseDialect dialect, ISqlEngine engine, string parameterPrefix = DefaultTypedParameterPrefix,
-        VirtualFilterTenantContext? tenant = null)
+        VirtualFilterTenantContext? tenant = null, IReadOnlyDictionary<string, JsonElement>? parameterValues = null)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(engine);
-        if (CallerPlaceholders.Contains(filter.Sql))
+        IReadOnlyDictionary<string, IReadOnlyList<PolicyValue>>? boundParams = null;
+        if (RowPolicyParameterBinder.ContainsSqlParameters(filter.Sql) || filter.Parameters.Count > 0 || parameterValues is { Count: > 0 })
         {
-            // Re-checked at every compile: a stored definition is never trusted to have been validated (BC-129-05, BC-129-06).
-            filter = filter with { Sql = CallerPlaceholders.Rewrite(filter.Sql!, out _) };
+            RowPolicyParameterBinder.ValidateFilterDeclarations(filter);
+            boundParams = RowPolicyParameterBinder.BindValues(filter, parameterValues);
+            filter = filter with { Sql = RowPolicyParameterBinder.RewriteSqlParameters(filter, out _) };
         }
+        if (CallerPlaceholders.Contains(filter.Sql))
+            filter = filter with { Sql = CallerPlaceholders.Rewrite(filter.Sql!, out _) };
 
         filter = BindTenant(filter, tenant);
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
@@ -672,66 +684,66 @@ public static partial class SqlFilterCompiler
         var secured = new SqlAstBuilder(BuilderOptions()).BuildStatement(tree);
         var simplified = (SqlStatement)new AstSimplificationVisitor().Visit(secured);
         new AstValidationVisitor().Validate(simplified);
-
         if (simplified is not SelectStatement { Body: QuerySpecification { Where: not null } } select)
-        {
             throw new InvalidOperationException($"The virtual filter '{filter.Name}' did not compile to a correlated subquery.");
-        }
-
         if (CallerPlaceholders.Contains(fragment))
         {
-            // On the tree as built, before the simplifier: it rewrites NOT (a = b) to a <> b, which would hide a negation over a placeholder.
             if (secured is not SelectStatement { Body: QuerySpecification { Where: { } securedWhere } } securedSelect)
-            {
                 throw new InvalidOperationException($"The virtual filter '{filter.Name}' did not compile to a correlated subquery.");
-            }
-
             CallerPlaceholders.EnforcePositions(securedSelect, securedWhere);
         }
 
-        var shaper = new TypedShaper(new Sql.Policy.PolicyParameterNamer(parameterPrefix));
-        var shaped = (SelectStatement)shaper.Visit(select);
-        return PolicyPredicate.Create(new ExistsExpression(shaped), shaper.Namer.Values);
+        var shaper = new TypedShaper(new Sql.Policy.PolicyParameterNamer(parameterPrefix), filter, boundParams);
+        return PolicyPredicate.Create(new ExistsExpression((SelectStatement)shaper.Visit(select)), shaper.Namer.Values);
     }
 
-    /// <summary>Rebases <c>target</c> onto the reserved alias and turns comparison operands into policy parameters.</summary>
-    private sealed class TypedShaper(Sql.Policy.PolicyParameterNamer namer) : SqlAstRewriter
+    private sealed class TypedShaper(Sql.Policy.PolicyParameterNamer namer, VirtualFilter filter, IReadOnlyDictionary<string, IReadOnlyList<PolicyValue>>? boundParams) : SqlAstRewriter
     {
         public Sql.Policy.PolicyParameterNamer Namer { get; } = namer;
 
         public override SqlNode Visit(SqlNode node)
         {
             var visited = base.Visit(node);
-            switch (visited)
+            return visited switch
             {
-                case ColumnReference { Name.Parts.Count: > 1 } column
-                    when string.Equals(column.Name.Parts[0].Value, TargetAlias, StringComparison.OrdinalIgnoreCase):
-                    var parts = new List<SqlIdentifier>(column.Name.Parts) { [0] = column.Name.Parts[0] with { Value = RowFilterAliases.Target } };
-                    return column with { Name = new SqlQualifiedName(parts) };
-                case BinaryExpression bin when bin.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual or BinaryOperator.LessThan
-                    or BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual:
-                    return bin with { Left = Bind(bin.Left), Right = Bind(bin.Right) };
-                case InListExpression inList:
-                    return inList with { Items = inList.Items.Select(i => Bind(i)).ToList() };
-                case BetweenExpression between:
-                    return between with { Lower = Bind(between.Lower), Upper = Bind(between.Upper) };
-                case LikeExpression like:
-                    return like with { Pattern = Bind(like.Pattern, isLikePattern: true) };
-                default:
-                    return visited;
-            }
+                ColumnReference { Name.Parts.Count: > 1 } column when string.Equals(column.Name.Parts[0].Value, TargetAlias, StringComparison.OrdinalIgnoreCase) =>
+                    column with { Name = new SqlQualifiedName([.. column.Name.Parts.Select((p, i) => i == 0 ? p with { Value = RowFilterAliases.Target } : p)]) },
+                BinaryExpression bin when bin.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual or BinaryOperator.LessThan
+                    or BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual =>
+                    bin with { Left = Bind(bin.Left), Right = Bind(bin.Right) },
+                InListExpression inList => inList with
+                {
+                    Items = inList.Items.SelectMany(item =>
+                        item is LiteralExpression { Type: LiteralType.String, Value: string s } &&
+                        RowPolicyParameterBinder.TryParseSentinel(s, out var pn) && boundParams != null && boundParams.TryGetValue(pn, out var vals)
+                            ? vals.Select(v => (Expression)Namer.Add(v))
+                            : [Bind(item)]).ToList()
+                },
+                BetweenExpression between => between with { Lower = Bind(between.Lower), Upper = Bind(between.Upper) },
+                LikeExpression like => like with { Pattern = Bind(like.Pattern, isLikePattern: true) },
+                _ => visited
+            };
         }
 
-        private Expression Bind(Expression expression, bool isLikePattern = false) => expression switch
+        private Expression Bind(Expression expression, bool isLikePattern = false)
         {
-            LiteralExpression { Type: LiteralType.String, Value: string sentinel } when CallerPlaceholders.TryParseSentinel(sentinel, out var attribute) =>
-                Autheris.Application.Identity.Attributes.CallerAttributeBinder.CreateSlot(Namer, attribute),
-            LiteralExpression { Type: LiteralType.String, Value: string text } => Namer.Add(new PolicyValue(text, SqlParameterType.String), isLikePattern),
-            LiteralExpression { Type: LiteralType.Integer, Value: long number } => Namer.Add(new PolicyValue(number, SqlParameterType.Int64)),
-            LiteralExpression { Type: LiteralType.Decimal, Value: decimal number } => Namer.Add(new PolicyValue(number, SqlParameterType.Decimal)),
-            LiteralExpression { Type: LiteralType.Boolean, Value: bool flag } => Namer.Add(new PolicyValue(flag, SqlParameterType.Boolean)),
-            _ => expression
-        };
+            if (expression is LiteralExpression { Type: LiteralType.String, Value: string ps } && RowPolicyParameterBinder.TryParseSentinel(ps, out var pn))
+            {
+                if (filter.Parameters.FirstOrDefault(p => string.Equals(p.Name, pn, StringComparison.OrdinalIgnoreCase))?.IsList == true)
+                    throw new VirtualFilterBindingException(VirtualFilterErrorCodes.RowPolicyParameterInvalid, $"List parameter ':{pn}' is only valid inside IN / NOT IN.");
+                return Namer.Add(boundParams![pn][0], isLikePattern);
+            }
+            return expression switch
+            {
+                LiteralExpression { Type: LiteralType.String, Value: string sentinel } when CallerPlaceholders.TryParseSentinel(sentinel, out var attribute) =>
+                    Autheris.Application.Identity.Attributes.CallerAttributeBinder.CreateSlot(Namer, attribute),
+                LiteralExpression { Type: LiteralType.String, Value: string text } => Namer.Add(new PolicyValue(text, SqlParameterType.String), isLikePattern),
+                LiteralExpression { Type: LiteralType.Integer, Value: long number } => Namer.Add(new PolicyValue(number, SqlParameterType.Int64)),
+                LiteralExpression { Type: LiteralType.Decimal, Value: decimal number } => Namer.Add(new PolicyValue(number, SqlParameterType.Decimal)),
+                LiteralExpression { Type: LiteralType.Boolean, Value: bool flag } => Namer.Add(new PolicyValue(flag, SqlParameterType.Boolean)),
+                _ => expression
+            };
+        }
     }
 
     private static AstBuilderOptions BuilderOptions() => new()
