@@ -137,7 +137,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
     private static System.Security.Claims.ClaimsPrincipal ManifestAdmin(string sid, string tenant) => new(new System.Security.Claims.ClaimsIdentity(
     [
         new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, sid),
-        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GOVERNANCE_ADMIN"),
+        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GovernanceAdmin"),
         new System.Security.Claims.Claim("tenant_id", tenant)
     ], "test"));
 

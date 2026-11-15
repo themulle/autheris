@@ -72,7 +72,7 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
             ]);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")],
+            [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GovernanceAdmin")],
             "test"));
 
         // Act
@@ -123,7 +123,7 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
             ]);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GOVERNANCE_ADMIN")],
+            [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Name, "AdminUser"), new Claim(ClaimTypes.Role, "GovernanceAdmin")],
             "test"));
 
         // Act
