@@ -3,7 +3,6 @@ namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,58 +11,31 @@ using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 
 /// <summary>
-/// A real SQLite key source in a temp file (F-GOV-14 WI-5): the David case of <c>RowFilterChannelParityTests</c>
-/// (client JOIN crane WHERE is_delivered IS NULL) plus tables for revocation, duplicates, NULL keys and tenants.
+/// Pure in-memory fixture replacing the temp-file SQLite key source for unit tests of caching,
+/// guardrails, concurrency, and error handling without opening any database engine.
 /// </summary>
-internal sealed class KeySourceSqliteFixture : IDisposable
+internal sealed class KeySourceStubFixture
 {
     internal const string Domain = "lwetem_prod";
 
     internal static readonly TenantId TenantA = new("tenant_lwe");
     internal static readonly TenantId TenantB = new("tenant_other");
 
-    private const string Schema = """
-        CREATE TABLE crane (serial_number TEXT PRIMARY KEY, is_delivered INTEGER);
-        CREATE TABLE client (client_id INTEGER PRIMARY KEY, crane_serial_number TEXT);
-        INSERT INTO crane VALUES ('C1', 1), ('C2', 1), ('C3', NULL), ('C4', NULL), ('C5', NULL);
-        INSERT INTO client VALUES (1, 'C1'), (2, 'C2'), (3, 'C3'), (4, 'C4'), (5, 'C5'), (6, 'NO-CRANE');
+    public bool Cleared { get; set; }
 
-        CREATE TABLE assignment (client_id INTEGER, crane_serial_number TEXT, status TEXT, revoked_at TEXT);
-        INSERT INTO assignment VALUES
-            (3, 'C3', 'ACTIVE', NULL), (3, 'C3', 'ACTIVE', NULL), (4, 'C4', 'INACTIVE', NULL),
-            (5, 'C5', 'ACTIVE', '2024-01-01'), (NULL, 'C3', 'ACTIVE', NULL), (7, 'C3', 'ACTIVE', NULL),
-            (1, 'C1', 'ACTIVE', NULL), (8, 'NO-CRANE', 'ACTIVE', NULL), ('x', 'C3', 'ACTIVE', NULL);
-
-        CREATE TABLE air1 (id INTEGER PRIMARY KEY, client_id INTEGER);
-        INSERT INTO air1 (client_id) VALUES (1), (3), (3), (4), (5), (7), (8), (NULL), (9);
-
-        CREATE TABLE grant_t (client_id INTEGER, tenant_id TEXT);
-        INSERT INTO grant_t VALUES (1, 'tenant_lwe'), (2, 'tenant_lwe'), (3, 'tenant_other'), (3, 'tenant_lwe');
-
-        CREATE TABLE many (k INTEGER);
-        INSERT INTO many VALUES (1), (2), (3), (4), (5), (5);
-        """;
-
-    private readonly string _path;
-
-    public KeySourceSqliteFixture()
+    public KeySourceStubFixture()
     {
-        _path = Path.Combine(Path.GetTempPath(), $"vf_keys_{Guid.NewGuid():N}.db");
-        Execute("PRAGMA journal_mode=WAL;\n" + Schema);
         Catalog = Substitute.For<ITableMetadataRepository>();
         foreach (var table in Tables)
         {
             Catalog.GetTableMetadataAsync(table.Identifier, Arg.Any<CancellationToken>()).Returns(table);
         }
     }
-
-    public string ConnectionString => $"Data Source={_path};Pooling=False";
 
     public ITableMetadataRepository Catalog { get; }
 
@@ -98,7 +70,6 @@ internal sealed class KeySourceSqliteFixture : IDisposable
         }
     };
 
-    /// <summary>assignment JOIN crane WHERE delivered IS NULL AND revoked_at IS NULL AND status &lt;&gt; 'INACTIVE'.</summary>
     internal static VirtualFilter Parity() => Filter("parity", "auth", "assignment", "a", "client_id") with
     {
         Structured = new StructuredFilterDefinition
@@ -126,12 +97,12 @@ internal sealed class KeySourceSqliteFixture : IDisposable
         {
             RequireTenantColumn = requireTenantColumn,
             TenantColumnExemptTables = exempt?.ToList() ?? [],
-            Connections = { [Domain] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = connectionString ?? ConnectionString } }
+            Connections = { [Domain] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = connectionString ?? "Host=stub;Database=vf_keys" } }
         },
         VirtualFilters = new VirtualFilterOptions { Federation = new VirtualFilterFederationOptions { MaxAuthorizedKeys = maxKeys } }
     };
 
-    internal ISqlConnectionFactory CreateFactory() => new SqliteKeySourceConnectionFactory();
+    internal ISqlConnectionFactory CreateFactory() => new StubKeySourceConnectionFactory(this);
 
     internal SqlVirtualFilterKeySetProvider Provider(GatewayOptions? options = null, ISqlConnectionFactory? factory = null, VirtualFilterKeySetCache? cache = null)
     {
@@ -139,89 +110,55 @@ internal sealed class KeySourceSqliteFixture : IDisposable
         return new SqlVirtualFilterKeySetProvider(Catalog, factory ?? CreateFactory(), opts, cache ?? new VirtualFilterKeySetCache(opts));
     }
 
-    internal sealed class SqliteKeySourceConnectionFactory : ISqlConnectionFactory
+    private sealed class StubKeySourceConnectionFactory(KeySourceStubFixture owner) : ISqlConnectionFactory
     {
-        public async Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
+        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
         {
-            var connection = new SqliteConnection(options.ConnectionString);
-            await connection.OpenAsync(ct);
-            var ds = connection.DataSource;
-            if (!string.IsNullOrEmpty(ds))
+            if (options.ConnectionString.Contains("/nonexistent_", StringComparison.Ordinal))
             {
-                foreach (var schema in new[] { "conf", "md", "auth", "fms" })
-                {
-                    await using var attach = connection.CreateCommand();
-                    attach.CommandText = $"ATTACH DATABASE '{ds.Replace("'", "''")}' AS {schema};";
-                    await attach.ExecuteNonQueryAsync(ct);
-                }
+                throw new InvalidOperationException($"unable to open database file {options.ConnectionString}");
             }
 
-            return new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection);
-        }
-    }
+            DbConnection conn = new CallbackDbConnection((sql, _) =>
+            {
+                if (sql.Contains("\"many\"", StringComparison.Ordinal))
+                {
+                    return new StubDbDataReader(["k"], [[1L], [2L], [3L], [4L], [5L]]);
+                }
 
-    internal void Execute(string sql)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
-    }
+                if (sql.Contains("\"is_delivered\" IS NOT NULL", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new StubDbDataReader(["client_id"], [[1L], [2L]]);
+                }
 
-    internal List<object?> Query(string sql)
-    {
-        using var connection = new SqliteConnection(ConnectionString);
-        connection.Open();
-        foreach (var schema in new[] { "conf", "md", "auth", "fms" })
-        {
-            using var attach = connection.CreateCommand();
-            attach.CommandText = $"ATTACH DATABASE '{connection.DataSource.Replace("'", "''")}' AS {schema};";
-            attach.ExecuteNonQuery();
-        }
-        using var cmd = connection.CreateCommand();
-        cmd.CommandText = sql;
-        using var reader = cmd.ExecuteReader();
-        var values = new List<object?>();
-        while (reader.Read())
-        {
-            values.Add(reader.IsDBNull(0) ? null : reader.GetValue(0));
-        }
-
-        return values;
-    }
-
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        try
-        {
-            File.Delete(_path);
-        }
-        catch (IOException)
-        {
-            // best effort
+                IReadOnlyList<object?[]> rows = owner.Cleared ? [] : [[3L], [4L], [5L]];
+                return new StubDbDataReader(["client_id"], rows);
+            });
+            return Task.FromResult(conn);
         }
     }
 }
 
-/// <summary>Counts key-source connections; can delay or fail them to test single-flight loading and failure caching.</summary>
+/// <summary>Counts key-source connections; can pause deterministically via a barrier or fail them to test single-flight loading and failure caching.</summary>
 internal sealed class CountingConnectionFactory(ISqlConnectionFactory inner) : ISqlConnectionFactory
 {
     private int _calls;
 
     public int Calls => Volatile.Read(ref _calls);
 
-    public TimeSpan Delay { get; set; }
+    public TaskCompletionSource? Entered { get; set; }
+
+    public TaskCompletionSource? Gate { get; set; }
 
     public int FailNext { get; set; }
 
     public async Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
     {
         Interlocked.Increment(ref _calls);
-        if (Delay > TimeSpan.Zero)
+        if (Gate is { } gate)
         {
-            await Task.Delay(Delay, ct);
+            Entered?.TrySetResult();
+            await gate.Task.WaitAsync(ct).ConfigureAwait(false);
         }
 
         if (FailNext > 0)
@@ -230,6 +167,6 @@ internal sealed class CountingConnectionFactory(ISqlConnectionFactory inner) : I
             throw new InvalidOperationException("database said: secret-value-42 is invalid");
         }
 
-        return await inner.CreateOpenConnectionAsync(options, ct);
+        return await inner.CreateOpenConnectionAsync(options, ct).ConfigureAwait(false);
     }
 }

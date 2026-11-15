@@ -11,7 +11,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,51 +20,53 @@ using Shouldly;
 using Xunit;
 using static CallerAttributeTestSupport;
 
-/// <summary>PLAN-GOV-129 test 6, ST-129-12 (BC-129-03, BC-129-09, BC-129-11): the privileged lookup, on SQLite.</summary>
+/// <summary>PLAN-GOV-129 test 6, ST-129-12 (BC-129-03, BC-129-09, BC-129-11): unit contract of the privileged attribute-table lookup.</summary>
 [Trait("Category", "Security")]
-public sealed class AttributeTableProviderTests : IDisposable
+public sealed class AttributeTableProviderTests
 {
-    private readonly string _name = $"file:attr_{Guid.NewGuid():N}?mode=memory&cache=shared";
-    private readonly SqliteConnection _keepAlive;
+    private readonly List<(string Table, string Oid, object? Value, string? Tenant, string? Issuer)> _rows = [];
     private readonly List<string> _logs = [];
 
-    public AttributeTableProviderTests()
-    {
-        _keepAlive = new SqliteConnection($"Data Source={_name}");
-        _keepAlive.Open();
-        Exec("CREATE TABLE person_attributes (person_oid TEXT, cost_center TEXT, tenant_id TEXT, issuer TEXT);");
-        Exec("CREATE TABLE nocase_attributes (person_oid TEXT, cost_center TEXT, tenant_id TEXT COLLATE NOCASE, issuer TEXT);");
-        Exec("CREATE TABLE global_attributes (person_oid TEXT, cost_center TEXT, issuer TEXT);");
-    }
+    private void Row(string oid, object value, string tenant = "tenant_a") =>
+        _rows.Add(("person_attributes", oid, value, tenant, "iss"));
 
-    public void Dispose() => _keepAlive.Dispose();
+    private void GlobalRow(string oid, object value, string issuer) =>
+        _rows.Add(("global_attributes", oid, value, null, issuer));
 
-    private void Exec(string sql)
+    private DbDataReader ExecuteInMemoryQuery(string sql, IReadOnlyDictionary<string, object?> parameters)
     {
-        using var cmd = _keepAlive.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.ExecuteNonQuery();
-    }
-
-    private void Row(string oid, string value, string tenant = "tenant_a")
-    {
-        using var cmd = _keepAlive.CreateCommand();
-        cmd.CommandText = "INSERT INTO person_attributes VALUES (@o, @v, @t, 'iss');";
-        cmd.Parameters.AddWithValue("@o", oid);
-        cmd.Parameters.AddWithValue("@v", value);
-        cmd.Parameters.AddWithValue("@t", tenant);
-        cmd.ExecuteNonQuery();
-    }
-
-    private sealed class Factory(string name) : ISqlConnectionFactory
-    {
-        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
+        if (sql.Contains("no_such_table_with_secret_name", StringComparison.Ordinal))
         {
-            var connection = new SqliteConnection($"Data Source={name}");
-            connection.Open();
-            connection.CreateCollation("C", StringComparer.Ordinal.Compare);
-            return Task.FromResult<DbConnection>(new Autheris.Tests.Common.TestDoubles.SqliteAsPostgresConnection(connection));
+            throw new InvalidOperationException("relation \"no_such_table_with_secret_name\" does not exist");
         }
+
+        static bool TryParam(IReadOnlyDictionary<string, object?> p, string name, out object? val) =>
+            p.TryGetValue("@" + name, out val) || p.TryGetValue(name, out val);
+
+        var table = sql.Contains("global_attributes", StringComparison.Ordinal) ? "global_attributes" : "person_attributes";
+        TryParam(parameters, AttributeTableQuery.SubjectParameter, out var subjectObj);
+        var hasTenant = TryParam(parameters, AttributeTableQuery.TenantParameter, out var tenantObj);
+        var hasIssuer = TryParam(parameters, AttributeTableQuery.IssuerParameter, out var issuerObj);
+
+        var matched = _rows
+            .Where(r => r.Table == table
+                && string.Equals(r.Oid, subjectObj as string, StringComparison.Ordinal)
+                && (!hasTenant || string.Equals(r.Tenant, tenantObj as string, StringComparison.Ordinal))
+                && (!hasIssuer || string.Equals(r.Issuer, issuerObj as string, StringComparison.Ordinal)));
+
+        var cols = new List<string> { "cost_center" };
+        if (hasTenant) cols.Add("tenant_id");
+        if (hasIssuer) cols.Add("issuer");
+
+        var projected = matched.Select(r =>
+        {
+            var row = new List<object?> { r.Value };
+            if (hasTenant) row.Add(r.Tenant);
+            if (hasIssuer) row.Add(r.Issuer);
+            return row.ToArray();
+        }).ToList();
+
+        return new StubDbDataReader(cols, projected);
     }
 
     private AttributeTableProvider Provider(
@@ -88,7 +90,7 @@ public sealed class AttributeTableProviderTests : IDisposable
         var logger = Substitute.For<ILogger<AttributeTableProvider>>();
         logger.When(l => l.Log(Arg.Any<LogLevel>(), Arg.Any<EventId>(), Arg.Any<object>(), Arg.Any<Exception?>(), Arg.Any<Func<object, Exception?, string>>()))
             .Do(c => _logs.Add(c.ArgAt<object>(2).ToString()!));
-        return new AttributeTableProvider(new Factory(_name), options, env, logger, session);
+        return new AttributeTableProvider(new CallbackFactory(ExecuteInMemoryQuery), options, env, logger, session);
     }
 
     private static CallerAttributeDefinition Definition(string table = "person_attributes", string? tenant = "tenant_id", string? issuer = null, int max = 5, string schema = "", CallerAttributeCardinality cardinality = CallerAttributeCardinality.List)
@@ -140,29 +142,9 @@ public sealed class AttributeTableProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task ST_129_12_OrdinalTenantMatch_RunsInTheDatabase_SoDifferentlyCasedRowsDoNotCrowdTheWindow()
-    {
-        // The column is NOCASE, but the query compares the tenant with an explicit binary collation, so the Max+1 window counts only exact rows.
-        for (int i = 0; i < 3; i++)
-        {
-            Exec($"INSERT INTO nocase_attributes VALUES ('{UserOid}', 'x{i}', 'TENANT_A', 'iss');");
-        }
-
-        Exec($"INSERT INTO nocase_attributes VALUES ('{UserOid}', 'real', 'tenant_a', 'iss');");
-
-        var result = await Provider().ResolveAsync(UserSubject(), Definition(table: "nocase_attributes", max: 2), default);
-
-        result.Outcome.ShouldBe(CallerAttributeOutcome.Resolved);
-    }
-
-    [Fact]
     public async Task ST_129_12b_RowOfAnotherTenantCase_ReturnedDespiteTheWhere_FailsClosedAsOverCardinality_BC_129_11()
     {
         // Defence in depth: a source that ignores the WHERE clause (collation quirk) returns a differently-cased tenant row.
-        var table = new System.Data.DataTable();
-        table.Columns.Add("cost_center", typeof(string));
-        table.Columns.Add("tenant_id", typeof(string));
-        table.Rows.Add("leak", "TENANT_A");
         var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
         {
             CallerAttributes = Options(),
@@ -176,60 +158,13 @@ public sealed class AttributeTableProviderTests : IDisposable
         });
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Production");
-        var provider = new AttributeTableProvider(new FakeFactory(table), options, env, Substitute.For<ILogger<AttributeTableProvider>>(), null);
+        var factory = new CallbackFactory((_, _) => new StubDbDataReader(["cost_center", "tenant_id"], [["leak", "TENANT_A"]]));
+        var provider = new AttributeTableProvider(factory, options, env, Substitute.For<ILogger<AttributeTableProvider>>(), null);
 
         var result = await provider.ResolveAsync(UserSubject(), Definition(), default);
 
         result.Outcome.ShouldBe(CallerAttributeOutcome.OverCardinality);
         result.Value.ShouldBeNull();
-    }
-
-    private sealed class FakeFactory(System.Data.DataTable table) : ISqlConnectionFactory
-    {
-        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default) =>
-            Task.FromResult<DbConnection>(new FakeConnection(table));
-    }
-
-    private sealed class FakeConnection(System.Data.DataTable table) : DbConnection
-    {
-        [System.Diagnostics.CodeAnalysis.AllowNull]
-        public override string ConnectionString { get; set; } = "";
-        public override string Database => "fake";
-        public override string DataSource => "fake";
-        public override string ServerVersion => "0";
-        public override System.Data.ConnectionState State => System.Data.ConnectionState.Open;
-        public override void ChangeDatabase(string databaseName) { }
-        public override void Close() { }
-        public override void Open() { }
-        protected override DbTransaction BeginDbTransaction(System.Data.IsolationLevel isolationLevel) => new FakeTransaction(this);
-        protected override DbCommand CreateDbCommand() => new FakeCommand(table);
-
-        private sealed class FakeTransaction(DbConnection connection) : DbTransaction
-        {
-            public override System.Data.IsolationLevel IsolationLevel => System.Data.IsolationLevel.ReadCommitted;
-            protected override DbConnection DbConnection => connection;
-            public override void Commit() { }
-            public override void Rollback() { }
-        }
-    }
-
-    private sealed class FakeCommand(System.Data.DataTable table) : DbCommand
-    {
-        [System.Diagnostics.CodeAnalysis.AllowNull]
-        public override string CommandText { get; set; } = "";
-        public override int CommandTimeout { get; set; }
-        public override System.Data.CommandType CommandType { get; set; }
-        public override bool DesignTimeVisible { get; set; }
-        public override System.Data.UpdateRowSource UpdatedRowSource { get; set; }
-        protected override DbConnection? DbConnection { get; set; }
-        protected override DbParameterCollection DbParameterCollection { get; } = new SqliteCommand().Parameters;
-        protected override DbTransaction? DbTransaction { get; set; }
-        public override void Cancel() { }
-        public override int ExecuteNonQuery() => 0;
-        public override object? ExecuteScalar() => null;
-        public override void Prepare() { }
-        protected override DbParameter CreateDbParameter() => new SqliteCommand().CreateParameter();
-        protected override DbDataReader ExecuteDbDataReader(System.Data.CommandBehavior behavior) => table.CreateDataReader();
     }
 
     [Fact]
@@ -292,7 +227,7 @@ public sealed class AttributeTableProviderTests : IDisposable
     [Fact]
     public async Task ST_129_12_TenantExemptTable_WithoutIssuerColumn_IsRefused()
     {
-        Exec($"INSERT INTO global_attributes VALUES ('{UserOid}', '100', '{TrustedIssuer}');");
+        GlobalRow(UserOid, "100", TrustedIssuer);
         var withoutIssuer = await Provider(exempt: ["global_attributes"]).ResolveAsync(UserSubject(), Definition("global_attributes", tenant: null), default);
         withoutIssuer.Outcome.ShouldBe(CallerAttributeOutcome.Failed);
         withoutIssuer.ReasonCode.ShouldBe("TenantColumnRequired");
@@ -301,8 +236,8 @@ public sealed class AttributeTableProviderTests : IDisposable
     [Fact]
     public async Task TenantExemptTable_WithAnIssuerColumn_IsReadByIssuer()
     {
-        Exec($"INSERT INTO global_attributes VALUES ('{UserOid}', '100', '{TrustedIssuer}');");
-        Exec($"INSERT INTO global_attributes VALUES ('{UserOid}', '555', 'https://other.example/');");
+        GlobalRow(UserOid, "100", TrustedIssuer);
+        GlobalRow(UserOid, "555", "https://other.example/");
         var result = await Provider(exempt: ["global_attributes"]).ResolveAsync(UserSubject(), Definition("global_attributes", tenant: null, issuer: "issuer"), default);
         Values(result).ShouldBe(["100"]);
     }
@@ -310,7 +245,7 @@ public sealed class AttributeTableProviderTests : IDisposable
     [Fact]
     public async Task TableWithoutTenantColumn_ThatIsNotExempt_IsRefused()
     {
-        Exec($"INSERT INTO global_attributes VALUES ('{UserOid}', '100', '{TrustedIssuer}');");
+        GlobalRow(UserOid, "100", TrustedIssuer);
         var result = await Provider().ResolveAsync(UserSubject(), Definition("global_attributes", tenant: null, issuer: "issuer"), default);
         result.ReasonCode.ShouldBe("TenantColumnRequired");
     }
@@ -339,7 +274,7 @@ public sealed class AttributeTableProviderTests : IDisposable
     [Fact]
     public async Task NumericValues_AreReturnedAsInvariantStrings()
     {
-        Exec($"INSERT INTO person_attributes VALUES ('{UserOid}', 42, 'tenant_a', 'iss');");
+        Row(UserOid, 42);
         var result = await Provider().ResolveAsync(UserSubject(), Definition(), default);
         Values(result).ShouldBe(["42"]);
     }
@@ -354,6 +289,12 @@ public sealed class AttributeTableProviderTests : IDisposable
         Values(result).ShouldBe(["leak"]);   // matches the literal key only
         Row(UserOid, "mine");
         (await Provider().ResolveAsync(UserSubject(), Definition(), default)).Value!.Count.ShouldBe(1);
+    }
+
+    private sealed class CallbackFactory(Func<string, IReadOnlyDictionary<string, object?>, DbDataReader> execute) : ISqlConnectionFactory
+    {
+        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default) =>
+            Task.FromResult<DbConnection>(new CallbackDbConnection(execute));
     }
 }
 

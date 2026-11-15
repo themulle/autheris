@@ -1,7 +1,7 @@
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Common.Fakes;
 using Shouldly;
 using Xunit;
 
@@ -11,31 +11,38 @@ namespace Autheris.Tests.Unit.Persistence;
 [Trait("Category", "Security")]
 public sealed class AccessProfileTenantIntegrityTests
 {
-    private static async Task<SqliteDataReader> ReaderForAsync(SqliteConnection conn, string tenantColumn)
+    private static StubDbDataReader ReaderFor(string tenantColumn)
     {
-        var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT 'p1', @t, 'name', 'Strict', NULL, NULL, NULL, NULL, '2026-01-01T00:00:00+00:00', NULL";
-        cmd.Parameters.AddWithValue("@t", tenantColumn);
-        var reader = await cmd.ExecuteReaderAsync();
-        (await reader.ReadAsync()).ShouldBeTrue();
+        var columns = new[]
+        {
+            "profile_id", "tenant_id", "name", "masking_mode",
+            "target_tables", "row_scope", "justification", "created_by",
+            "created_at", "valid_to"
+        };
+        var row = new object?[]
+        {
+            "p1", tenantColumn, "name", "Strict",
+            null, null, null, null,
+            "2026-01-01T00:00:00+00:00", null
+        };
+        var reader = new StubDbDataReader(columns, [row]);
+        reader.Read().ShouldBeTrue();
         return reader;
     }
 
     [Fact]
-    public async Task AccessProfile_Invalid_Stored_Tenant_Fails_Closed()
+    public void AccessProfile_Invalid_Stored_Tenant_Fails_Closed()
     {
-        await using var conn = new SqliteConnection("Data Source=:memory:");
-        await conn.OpenAsync();
         var store = new AccessProfileStore(AccessProfileDialect.PostgreSql, (_, _) => throw new InvalidOperationException("not used"));
 
-        await using var bad = await ReaderForAsync(conn, "bad tenant!");
+        using var bad = ReaderFor("bad tenant!");
         var ex = Should.Throw<AccessProfileTenantIntegrityException>(() => store.ReadProfile(bad, 0));
 
         ex.ErrorCode.ShouldBe("ACCESS_PROFILE_TENANT_INVALID");
         ex.Message.ShouldNotContain("bad tenant!");
         ex.InnerException.ShouldBeNull();
 
-        await using var good = await ReaderForAsync(conn, "tenant-a");
+        using var good = ReaderFor("tenant-a");
         store.ReadProfile(good, 0).TenantId.ShouldBe(new TenantId("tenant-a"));
     }
 }

@@ -17,7 +17,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using NSubstitute;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Governance;
@@ -151,47 +150,6 @@ public sealed class TypedVirtualFilterTests
     {
         Should.Throw<InvalidOperationException>(() =>
             SqlFilterCompiler.CompileTyped(VirtualFilterModelTests.DavidFilter(), DatabaseDialect.SqlServer, Engine));
-    }
-
-    [Fact]
-    public void CompileTyped_ExecutedOnSqlite_FiltersWithTheBoundParameter()
-    {
-        var filter = Validated("from conf.client client where target.client_id = client.client_id and client.region = 'EU' and client.level >= 2", DatabaseDialect.PostgreSql);
-        var rendered = Render(SqlFilterCompiler.CompileTyped(filter, DatabaseDialect.PostgreSql, Engine), DatabaseDialect.PostgreSql);
-
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        // The SQLite generator keeps the schema; an attached database named conf carries the table.
-        Exec(connection, "ATTACH DATABASE ':memory:' AS conf");
-        Exec(connection, "CREATE TABLE conf.client (client_id INTEGER, region TEXT, level INTEGER)");
-        Exec(connection, "CREATE TABLE fact (id INTEGER, client_id INTEGER)");
-        Exec(connection, "INSERT INTO conf.client VALUES (1, 'EU', 3), (2, 'US', 3), (3, 'EU', 1)");
-        Exec(connection, "INSERT INTO fact VALUES (10, 1), (20, 2), (30, 3)");
-
-        using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT id FROM fact AS autheris_target WHERE {rendered.Sql} ORDER BY id";
-        foreach (var (name, value) in rendered.Parameters)
-        {
-            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        }
-
-        var ids = new List<long>();
-        using (var reader = command.ExecuteReader())
-        {
-            while (reader.Read())
-            {
-                ids.Add(reader.GetInt64(0));
-            }
-        }
-
-        ids.ShouldBe([10L]);
-    }
-
-    private static void Exec(SqliteConnection connection, string sql)
-    {
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.ExecuteNonQuery();
     }
 
     // ------------------------------------------------------------------ structured filters

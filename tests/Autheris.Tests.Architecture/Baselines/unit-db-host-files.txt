@@ -11,12 +11,8 @@ tests/Autheris.Tests.Unit/DataApi/Issue390ReadOrderDirectionTests.cs
 tests/Autheris.Tests.Unit/DevExperienceTests.cs
 tests/Autheris.Tests.Unit/Governance/ReadPathSwitchesMetricsAndAnalyzeTests.cs
 tests/Autheris.Tests.Unit/Governance/TrustedDocuments/TrustedDocumentAdminEndpointsTests.cs
-tests/Autheris.Tests.Unit/Identity/Attributes/AttributeTableProviderTests.cs
 tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
 tests/Autheris.Tests.Unit/IntegrationGapATests.cs
-tests/Autheris.Tests.Unit/Persistence/AccessProfileTenantIntegrityTests.cs
-tests/Autheris.Tests.Unit/Persistence/TableEpochReadTests.cs
-tests/Autheris.Tests.Unit/Policy/TableAccessPolicyCallerAttributeTests.cs
 tests/Autheris.Tests.Unit/Security/AccessPlanningTenantBindingTests.cs
 tests/Autheris.Tests.Unit/Security/ActivationProbes.cs
 tests/Autheris.Tests.Unit/Security/CorrelatedRowFilterAliasTests.cs
@@ -37,9 +33,4 @@ tests/Autheris.Tests.Unit/Sql/Policy/TypedRowFilterBuilderTests.cs
 tests/Autheris.Tests.Unit/Sql/TimeZones/DuckDbIcuSandboxTests.cs
 tests/Autheris.Tests.Unit/Sql/TrinoColumnTypeTests.cs
 tests/Autheris.Tests.Unit/TestDoubles/SqliteGovernedSqlService.cs
-tests/Autheris.Tests.Unit/VirtualFilters/Federation/KeySourceSqliteFixture.cs
-tests/Autheris.Tests.Unit/VirtualFilters/SqlFilterCompilerCallerAttributeTests.cs
-tests/Autheris.Tests.Unit/VirtualFilters/SqlFilterDefinitionTests.cs
-tests/Autheris.Tests.Unit/VirtualFilters/StructuredFilterSqlTests.cs
-tests/Autheris.Tests.Unit/VirtualFilters/TypedVirtualFilterTests.cs
 tests/Autheris.Tests.Unit/WebSqlParserGatewaySecurityTests.cs

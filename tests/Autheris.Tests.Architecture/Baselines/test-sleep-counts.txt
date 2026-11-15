@@ -51,7 +51,6 @@ tests/Autheris.Tests.Unit/State/DistributedLeaseTests.cs|1
 tests/Autheris.Tests.Unit/State/RedisLeaseTests.cs|2
 tests/Autheris.Tests.Unit/Streaming/CdcWebhookDeliveryServiceTests.cs|2
 tests/Autheris.Tests.Unit/VirtualFilters/Federation/FakeKeySetProvider.cs|1
-tests/Autheris.Tests.Unit/VirtualFilters/Federation/KeySourceSqliteFixture.cs|1
 tests/Autheris.Tests.Unit/VirtualFilters/Federation/PathLookupConnectorTests.cs|3
 tests/Autheris.Tests.Unit/Webhooks/WebhookDeliveryClientTests.cs|1
 tests/TrinoSqlEngine.Tests/Compiler/CheckedDmlExecutorTransactionTests.cs|1

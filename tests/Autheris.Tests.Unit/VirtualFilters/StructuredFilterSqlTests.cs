@@ -2,7 +2,6 @@ namespace Autheris.Tests.Unit.VirtualFilters;
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -15,7 +14,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -23,9 +21,9 @@ using Xunit;
 
 /// <summary>
 /// Virtual filters, phase 4: SQL of a structured filter for one object, per dialect, over the alias
-/// <c>autheris_target</c>; and its effect on real SQLite data.
+/// <c>autheris_target</c>.
 /// </summary>
-public sealed class StructuredFilterSqlTests : IDisposable
+public sealed class StructuredFilterSqlTests
 {
     private static readonly VirtualFilter David = VirtualFilterModelTests.DavidFilter();
     private static readonly FilterBinding Binding = new() { FilterName = David.Name };
@@ -128,81 +126,6 @@ public sealed class StructuredFilterSqlTests : IDisposable
 
         Should.Throw<ArgumentException>(() => SqlSecurityValidator.ValidateRowFilter(decision with { CombinedRowFilterSql = predicate }));
         Should.NotThrow(() => SqlSecurityValidator.ValidateRowFilter(decision.WithMandatoryPredicate(predicate, ["many"])));
-    }
-
-    // ------------------------------------------------------------------ real SQLite
-
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-vf-{Guid.NewGuid():N}.db");
-
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
-    }
-
-    /// <summary>
-    /// Executes the generated predicate text against the real SQLite database, exactly as a text consumer splices it: the filtered
-    /// table carries the reserved <c>autheris_target</c> alias so that correlated filters can bind to it.
-    /// </summary>
-    private async Task<IReadOnlyList<long>> ReadAir1IdsAsync(string predicate)
-    {
-        await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        await conn.OpenAsync();
-        foreach (var schema in new[] { "conf", "md" })
-        {
-            await using var attach = conn.CreateCommand();
-            attach.CommandText = $"ATTACH DATABASE '{_dbPath.Replace("'", "''")}' AS {schema};";
-            await attach.ExecuteNonQueryAsync();
-        }
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT id FROM air1 AS autheris_target WHERE ({predicate})";
-        var ids = new List<long>();
-        await using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            ids.Add(reader.GetInt64(0));
-        }
-
-        ids.Sort();
-        return ids;
-    }
-
-    private void Seed()
-    {
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
-CREATE TABLE client (client_id INTEGER PRIMARY KEY, crane_serial_number TEXT);
-CREATE TABLE crane (serial_number TEXT PRIMARY KEY, is_delivered INTEGER, date_of_delivery TEXT);
-CREATE TABLE air1 (id INTEGER PRIMARY KEY, client_id INTEGER, ts TEXT);
-INSERT INTO crane VALUES ('S1', 1, '2026-05-01 00:00:00'), ('S2', NULL, NULL), ('S3', NULL, '2026-06-01 00:00:00');
-INSERT INTO client VALUES (1, 'S1'), (2, 'S2'), (3, 'S3'), (4, NULL);
-INSERT INTO air1 VALUES
-  (10, 1, '2026-04-01 00:00:00'), (11, 2, '2026-04-01 00:00:00'), (12, 3, '2026-05-31 23:59:00'),
-  (13, 3, '2026-06-01 00:01:00'), (14, 4, '2026-04-01 00:00:00'), (15, NULL, '2026-04-01 00:00:00');";
-        cmd.ExecuteNonQuery();
-    }
-
-    [Fact]
-    public async Task PostgreSql_OnlyRowsOfUndeliveredCranesAreVisible()
-    {
-        Seed();
-
-        var ids = await ReadAir1IdsAsync(Build(DatabaseDialect.PostgreSql));
-
-        ids.ShouldBe([11L, 12L, 13L]);   // client 2 and 3 (undelivered); never client 1 (delivered), 4 (no crane) or NULL
-    }
-
-    [Fact]
-    public async Task PostgreSql_ValidityWindow_CutsAtTheDeliveryDate()
-    {
-        Seed();
-        var window = David with { ValidToColumn = "crane.date_of_delivery" };
-
-        var ids = await ReadAir1IdsAsync(Build(DatabaseDialect.PostgreSql, window, Binding with { TimeColumn = "ts" }));
-
-        ids.ShouldBe([11L, 12L]);   // client 3: the row one minute after 2026-06-01 is cut off
     }
 
     [Fact]

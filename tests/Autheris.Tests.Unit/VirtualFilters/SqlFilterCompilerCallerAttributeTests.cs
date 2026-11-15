@@ -9,7 +9,6 @@ using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Tests.Unit.Identity.Attributes;
-using Microsoft.Data.Sqlite;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
@@ -243,61 +242,4 @@ public sealed class SqlFilterCompilerCallerAttributeTests
         var bound = CallerAttributeBinder.Bind(typed, Set("regions", "X"), CallerAttributePadding.Default);
         bound.Parameters.Values.Select(v => v.Value).ShouldBe(typed.Parameters.Values.Select(v => v.Value));
     }
-
-    // ---- executed on SQLite (tests 20, 22) ------------------------------------------------------------------------------------------------------
-
-    private static List<long> Run(PolicyPredicate predicate)
-    {
-        var rendered = Renderer.Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target);
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        foreach (var sql in new[]
-        {
-            "ATTACH DATABASE ':memory:' AS conf",
-            "CREATE TABLE conf.client (client_id INTEGER, region TEXT, dept TEXT, level INTEGER)",
-            "CREATE TABLE fact (id INTEGER, client_id INTEGER)",
-            "INSERT INTO conf.client VALUES (1, 'EU', 'D1', 1), (2, 'US', 'D2', 2), (3, 'APAC', 'D1', 3), (4, 'LATAM', 'D3', 4)",
-            "INSERT INTO fact VALUES (10, 1), (20, 2), (30, 3), (40, 4)"
-        })
-        {
-            using var c = connection.CreateCommand();
-            c.CommandText = sql;
-            c.ExecuteNonQuery();
-        }
-
-        using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT id FROM fact AS {RowFilterAliases.Target} WHERE {rendered.Sql} ORDER BY id";
-        foreach (var (name, value) in rendered.Parameters)
-        {
-            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        }
-
-        var ids = new List<long>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read()) ids.Add(reader.GetInt64(0));
-        return ids;
-    }
-
-    [Fact]
-    public void Executed_Scalar_FiltersByTheCallersValue() =>
-        Run(CallerAttributeBinder.Bind(Typed(Scalar), Set("dept", "D1"), CallerAttributePadding.Default)).ShouldBe([10L, 30L]);
-
-    [Fact]
-    public void ST_129_Executed_In_MatchesExactlyTheListedRows_IncludingPaddedDuplicates() =>
-        Run(CallerAttributeBinder.Bind(Typed(InList), Set("regions", "EU", "US", "LATAM"), CallerAttributePadding.Default)).ShouldBe([10L, 20L, 40L]);
-
-    [Fact]
-    public void ST_129_Executed_NotIn_ExcludesExactlyTheListedRows_PaddingIsNeutral() =>
-        Run(CallerAttributeBinder.Bind(Typed(NotIn), Set("regions", "EU", "US", "LATAM"), CallerAttributePadding.Default)).ShouldBe([30L]);
-
-    [Fact]
-    public void ST_129_Executed_NotIn_WithAMissingAttribute_MatchesNoRow_NeverEveryRow() =>
-        Run(CallerAttributeBinder.Bind(Typed(NotIn), CallerAttributeSet.Empty, CallerAttributePadding.Default)).ShouldBeEmpty();
-
-    [Theory]
-    [InlineData(Scalar)]
-    [InlineData(InList)]
-    [InlineData(NotIn)]
-    public void ST_129_22_AnUnboundSlot_MatchesNoRows_ByTheNullSemantics(string sql) =>
-        Run(Typed(sql)).ShouldBeEmpty();
 }

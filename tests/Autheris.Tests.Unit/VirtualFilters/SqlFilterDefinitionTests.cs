@@ -3,7 +3,6 @@ namespace Autheris.Tests.Unit.VirtualFilters;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
@@ -16,7 +15,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -28,7 +26,7 @@ using Xunit;
 /// the data source, allowed functions, translatable into the data source's dialect) and rendered per dialect with the
 /// Trino date functions translated; time values are never baked into the SQL.
 /// </summary>
-public sealed class SqlFilterDefinitionTests : IDisposable
+public sealed class SqlFilterDefinitionTests
 {
     private const string DavidLastDay = """
         from conf.client client
@@ -141,16 +139,6 @@ public sealed class SqlFilterDefinitionTests : IDisposable
 
         second.ShouldBe(first);   // same text -> same plan cache entry, evaluated by the database at execution time
         Regex.IsMatch(first, @"\d{4}-\d{2}-\d{2}").ShouldBeFalse();
-    }
-
-    // ------------------------------------------------------------------ real SQLite
-
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"autheris-vf-sql-{Guid.NewGuid():N}.db");
-
-    public void Dispose()
-    {
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_dbPath); } catch { /* best effort */ }
     }
 
     [Fact]
