@@ -39,40 +39,6 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class UsageGrantSecurityTests
 {
-    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => utcNow;
-    }
-
-    private sealed class CapturingAuditWriter : IAuditWriter
-    {
-        public List<AuditLogEntry> Entries { get; } = [];
-
-        public Task RecordRequiredAsync(AuditLogEntry entry, CancellationToken ct = default)
-        {
-            Entries.Add(entry);
-            return Task.CompletedTask;
-        }
-
-        public Task RecordBestEffortAsync(AuditLogEntry entry, CancellationToken ct = default)
-        {
-            Entries.Add(entry);
-            return Task.CompletedTask;
-        }
-
-        public Task RecordAsync(AuditLogEntry entry, CancellationToken ct = default)
-        {
-            Entries.Add(entry);
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class PassThroughMaskingProvider : IColumnMaskingProvider
-    {
-        public object? MaskValue(string columnName, object? value, MaskingRule rule) => value;
-        public string BuildSqlMaskExpression(string columnName, MaskingRule rule, DatabaseDialect dialect) => columnName;
-    }
-
     private static MeterListener StartAllowWithoutGrantListener(Action<long> onMeasurement)
     {
         var listener = new MeterListener
@@ -382,5 +348,39 @@ public sealed class UsageGrantSecurityTests
             persisted.DetailsJson,
             persisted.TenantId.Value);
         recomputed.ShouldBe(persisted.EntryHash);
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
+    private sealed class CapturingAuditWriter : IAuditWriter
+    {
+        public List<AuditLogEntry> Entries { get; } = [];
+
+        public Task RecordRequiredAsync(AuditLogEntry entry, CancellationToken ct = default)
+        {
+            Entries.Add(entry);
+            return Task.CompletedTask;
+        }
+
+        public Task RecordBestEffortAsync(AuditLogEntry entry, CancellationToken ct = default)
+        {
+            Entries.Add(entry);
+            return Task.CompletedTask;
+        }
+
+        public Task RecordAsync(AuditLogEntry entry, CancellationToken ct = default)
+        {
+            Entries.Add(entry);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class PassThroughMaskingProvider : IColumnMaskingProvider
+    {
+        public object? MaskValue(string columnName, object? value, MaskingRule rule) => value;
+        public string BuildSqlMaskExpression(string columnName, MaskingRule rule, DatabaseDialect dialect) => columnName;
     }
 }
