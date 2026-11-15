@@ -44,6 +44,7 @@ internal sealed class SqliteGovernedSqlService(SqliteConnection connection, Test
         var sql = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out _);
         var compiled = env.Compile(sql, tenantId.Value);
 
+        connection.CreateFunction("textsend", (string? s) => s);
         using var command = connection.CreateCommand();
         command.CommandText = compiled.Sql;
         var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -52,7 +53,13 @@ internal sealed class SqliteGovernedSqlService(SqliteConnection connection, Test
             values[name.TrimStart('@')] = value;
         }
 
-        CompiledSqlBinders.For(TargetSqlDialect.Sqlite).Bind(command, compiled, values);
+        foreach (var param in compiled.Parameters)
+        {
+            var raw = param.Origin == ParameterOrigin.ClientNamed && param.SourceName is not null && values.TryGetValue(param.SourceName, out var supplied)
+                ? supplied
+                : param.Value;
+            command.Parameters.AddWithValue(param.Marker, raw ?? DBNull.Value);
+        }
 
         var columns = new List<string>();
         var rows = new List<IReadOnlyDictionary<string, object?>>();

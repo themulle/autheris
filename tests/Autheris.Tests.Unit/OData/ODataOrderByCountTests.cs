@@ -79,7 +79,7 @@ INSERT INTO invoices VALUES (1, 'CH', 300, 'CH01'), (2, 'DE', 100, 'DE02'), (3, 
         _connection = new SqliteConnection($"Data Source={_dbPath}");
         _connection.Open();
         // The row policy of the decision: only the CH rows are visible.
-        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
+        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.PostgreSql)
             .Table("invoices", null, "id:INTEGER", "region", "amount:INTEGER", "iban")
             .Policy("invoices", Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService.RowPolicy("region", "CH"));
         return new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(_connection, env).Executor();

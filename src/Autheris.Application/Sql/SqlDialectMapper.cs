@@ -19,9 +19,6 @@ public static class SqlDialectMapper
             case DatabaseDialect.PostgreSql:
                 target = TargetSqlDialect.PostgreSql;
                 return true;
-            case DatabaseDialect.Sqlite:
-                target = TargetSqlDialect.Sqlite;
-                return true;
             case DatabaseDialect.Oracle:
                 target = TargetSqlDialect.Oracle;
                 return true;

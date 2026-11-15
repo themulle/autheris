@@ -145,7 +145,7 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         CancellationToken ct)
     {
         // 01 c / dialect: the same for every site of the statement.
-        if (context.Dialect is not (TargetSqlDialect.SqlServer or TargetSqlDialect.PostgreSql or TargetSqlDialect.Oracle or TargetSqlDialect.Sqlite))
+        if (context.Dialect is not (TargetSqlDialect.SqlServer or TargetSqlDialect.PostgreSql or TargetSqlDialect.Oracle))
         {
             FallbackAll(report, candidates, KeySetFallbackReason.DialectUnsupported);
             return predicates;
@@ -518,7 +518,6 @@ public sealed class RowFilterKeySetStage : IRowFilterKeySetStage
         TargetSqlDialect.SqlServer => DatabaseDialect.SqlServer,
         TargetSqlDialect.PostgreSql => DatabaseDialect.PostgreSql,
         TargetSqlDialect.Oracle => DatabaseDialect.Oracle,
-        TargetSqlDialect.Sqlite => DatabaseDialect.Sqlite,
         _ => throw new NotSupportedException("The key-set cache has no loader for this dialect.")
     };
 

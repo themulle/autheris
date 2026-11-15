@@ -80,7 +80,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     {
         _connection = new SqliteConnection($"Data Source={_dbPath}");
         _connection.Open();
-        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
+        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.PostgreSql)
             .Table("orders", null, "id:INTEGER", "status", "amount:INTEGER", "card_number");
         return new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(_connection, env).Executor();
     }

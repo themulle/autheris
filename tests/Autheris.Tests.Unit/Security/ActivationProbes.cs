@@ -73,7 +73,7 @@ internal static class ActivationProbes
         foreach (var dialect in new[]
         {
             TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql,
-            TargetSqlDialect.Oracle, TargetSqlDialect.Databricks, TargetSqlDialect.Sqlite
+            TargetSqlDialect.Oracle, TargetSqlDialect.Databricks
         })
         {
             var d = dialect;

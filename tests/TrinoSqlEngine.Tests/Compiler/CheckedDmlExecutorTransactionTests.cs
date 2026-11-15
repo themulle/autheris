@@ -279,7 +279,6 @@ public class CheckedDmlExecutorTransactionTests
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.Databricks)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     public void CompiledSqlBinders_EveryProductionDialect_ReturnsRefusingBinder(TargetSqlDialect dialect)
     {
         var binder = CompiledSqlBinders.For(dialect);

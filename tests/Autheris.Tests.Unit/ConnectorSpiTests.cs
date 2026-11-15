@@ -306,7 +306,7 @@ public class ConnectorSpiTests
             DuckDbOlap = new DuckDbOlapOptions { MaxStagedRowsPerTable = 25000 }
         });
 
-        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
+        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.PostgreSql)
             .Table("orders", "tenant_id", "id:INT", "tenant_id");
         var governed = new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(masterConn, env);
         var sqlConnector = NewSqlConnector("default-sql", new FakeMetadataRepository([meta]), governed, options);

@@ -71,7 +71,7 @@ public sealed class StreamRlsCallerAttributeTests : IDisposable
         metadataRepo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(new TableMetadata
         {
             Identifier = Orders,
-            Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "orders", SourceType = "SQLite", DataSourceType = DataSourceType.Sql, IsActive = true },
+            Table = new Table { SourceName = "erp", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql, IsActive = true },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "cost_center", DataType = "varchar" }]
         }));
         var consents = Substitute.For<IConsentRepository>();

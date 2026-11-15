@@ -7,16 +7,6 @@ namespace TrinoSqlEngine.Tests.Compiler;
 [Trait("Category", "SqlGate")]
 public sealed class SqlFunctionAllowlistParityTests
 {
-    [Trait("Category", "Security")]
-    [Fact]
-    public void Sqlite_DoesNotAdvertiseConvertTimezone()
-    {
-        // SEC-PG-03 / SEC-PG-11: convert_timezone stays a policy violation on SQLite (no zone database).
-        Assert.DoesNotContain("convert_timezone", SqlFunctionAllowlists.Sqlite);
-        Assert.DoesNotContain("convert_timezone", SqlFunctionAllowlists.CompilerNames(TargetSqlDialect.Sqlite));
-        Assert.Contains("convert_timezone", SqlFunctionAllowlists.PostgreSql);
-    }
-
     [Fact]
     public void NoDialect_AdvertisesLeftOrRight()
     {
@@ -46,21 +36,11 @@ public sealed class SqlFunctionAllowlistParityTests
         Assert.Equal(expected, SqlFunctionAllowlists.WithDateTranslation(new HashSet<string>()).Order(StringComparer.Ordinal).ToArray());
     }
 
-    [Trait("Category", "Security")]
-    [Fact]
-    public void SqliteDefaultAllowlist_IsPinned()
-    {
-        // 65 -> 62: left, right and convert_timezone are gone; every other name is unchanged and no date name was added.
-        Assert.Equal(62, SqlFunctionAllowlists.Sqlite.Count);
-        Assert.DoesNotContain("year", SqlFunctionAllowlists.Sqlite);
-        Assert.DoesNotContain("date_trunc", SqlFunctionAllowlists.Sqlite);
-    }
-
     [Fact]
     public void WithoutDateTranslation_RemovesThePartFunctionsWhereTheDialectHasNoNativeOne()
     {
-        var names = SqlFunctionAllowlists.CompilerNames(TargetSqlDialect.Sqlite);
-        var without = SqlFunctionAllowlists.WithoutDateTranslation(TargetSqlDialect.Sqlite, names);
+        var names = SqlFunctionAllowlists.CompilerNames(TargetSqlDialect.Oracle);
+        var without = SqlFunctionAllowlists.WithoutDateTranslation(TargetSqlDialect.Oracle, names);
 
         Assert.Contains("year", names);
         Assert.DoesNotContain("year", without);

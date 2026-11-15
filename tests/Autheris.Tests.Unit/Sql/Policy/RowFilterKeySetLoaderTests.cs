@@ -8,7 +8,6 @@ using Autheris.Application.Sql.Policy.RowFilterKeySets;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Autheris.Domain.Exceptions;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -66,7 +65,6 @@ public sealed class RowFilterKeySetLoaderTests
     {
         TargetSqlDialect.PostgreSql => "PostgreSql",
         TargetSqlDialect.Oracle => "Oracle",
-        TargetSqlDialect.Sqlite => "Sqlite",
         _ => "SqlServer"
     };
 
@@ -204,51 +202,6 @@ public sealed class RowFilterKeySetLoaderTests
     }
 
     [Fact]
-    public async Task Sqlite_BindsRowLimitParameter_AndAllCompiledParameters_D_WPC_8()
-    {
-        // a shared in-memory database stays alive while this keep-alive connection is open; the loader opens (and disposes) its own
-        string connectionString = $"Data Source=file:keyset{Guid.NewGuid():N}?mode=memory&cache=shared";
-        await using var sqlite = new SqliteConnection(connectionString);
-        await sqlite.OpenAsync();
-        await using (var setup = sqlite.CreateCommand())
-        {
-            setup.CommandText = "CREATE TABLE dep (pk INTEGER, tenant TEXT); INSERT INTO dep VALUES (1,'tenant-a'),(2,'tenant-a'),(3,'tenant-a'),(4,'tenant-a'),(5,'tenant-b');";
-            await setup.ExecuteNonQueryAsync();
-        }
-
-        var query = new CompiledKeyQuery(
-            "SELECT DISTINCT pk FROM dep WHERE tenant = ?1 AND pk IS NOT NULL ORDER BY pk LIMIT ?2",
-            [new BoundParameter("?1", "p1", 1, "tenant-a", SqlParameterType.String, ParameterOrigin.Tenant),
-             new BoundParameter("?2", "p2", 2, 4L, SqlParameterType.Int64, ParameterOrigin.QueryLiteral)],
-            "integer", "integer", "fk", "v1");
-        var request = Request(TargetSqlDialect.Sqlite, "Sqlite", query, maxKeys: 3, fkType: "integer", keyType: "integer");
-
-        // MaxKeys + 1 = 4 rows exist for the tenant: that is an overflow
-        var sqliteLoader = new RowFilterKeySetLoader(new SqliteFactory(connectionString), _session, _time);
-        var overflow = await sqliteLoader.LoadAsync(request, CancellationToken.None);
-        overflow.Overflow.ShouldBeTrue();
-        overflow.Keys.ShouldBeEmpty();
-
-        var all = await sqliteLoader.LoadAsync(request with { MaxKeys = 4 }, CancellationToken.None);
-        all.Keys.ShouldBe([1L, 2L, 3L, 4L]);
-
-        // the session is not left read-only: the loader's own connection is disposed, but a write through a fresh one must work
-        await using var write = sqlite.CreateCommand();
-        write.CommandText = "INSERT INTO dep VALUES (9, 'tenant-a')";
-        (await write.ExecuteNonQueryAsync()).ShouldBe(1);
-    }
-
-    [Fact]
-    public async Task Sqlite_SessionIsQueryOnly_WhileTheKeyQueryRuns_SEC_RF107_12()
-    {
-        var db = new RecordingDbConnection { KeyRows = [1] };
-
-        await Loader(db).LoadAsync(Request(TargetSqlDialect.Sqlite, "Sqlite", fkType: "integer", keyType: "integer"), CancellationToken.None);
-
-        db.Commands.Select(c => c.Text).ShouldBe(["PRAGMA query_only = ON", "SELECT DISTINCT dep.pk FROM dep WHERE tenant = :p1", "PRAGMA query_only = OFF"]);
-    }
-
-    [Fact]
     public async Task ReadsAtMostMaxKeysPlusOneRows_AndReportsOverflow_SEC_RF107_13_c()
     {
         var db = Db(Enumerable.Range(1, 1000).Cast<object?>().ToArray());
@@ -381,15 +334,5 @@ public sealed class RowFilterKeySetLoaderTests
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => Loader(Db(1)).LoadAsync(request, CancellationToken.None));
 
         ex.ErrorCode.ShouldBe(RowFilterKeySetErrorCodes.KeySetUnavailable);
-    }
-
-    private sealed class SqliteFactory(string connectionString) : ISqlConnectionFactory
-    {
-        public async Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
-        {
-            var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(ct);
-            return connection;
-        }
     }
 }

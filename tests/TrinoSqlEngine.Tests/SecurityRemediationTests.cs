@@ -296,8 +296,6 @@ public class SecurityRemediationTests
         Assert.Contains("string_agg", SqlFunctionAllowlists.PostgreSql);
         Assert.Contains("dateadd", SqlFunctionAllowlists.SqlServer);
         Assert.Contains("datediff", SqlFunctionAllowlists.SqlServer);
-        Assert.Contains("strftime", SqlFunctionAllowlists.Sqlite);
-        Assert.DoesNotContain("load_extension", SqlFunctionAllowlists.Sqlite);
         Assert.DoesNotContain("session_context", SqlFunctionAllowlists.SqlServer);
     }
 

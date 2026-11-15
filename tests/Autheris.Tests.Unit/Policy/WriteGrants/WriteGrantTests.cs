@@ -44,7 +44,7 @@ public sealed class WriteGrantTests
 {
     private static readonly TenantId Tenant = new("tenant-a");
     private static readonly Sid UserSid = new("S-1-5-21-100-200-401");
-    private static readonly TableIdentifier OrdersId = new("default", "main", "orders");
+    private static readonly TableIdentifier OrdersId = new("default", "public", "orders");
 
     [Fact]
     public async Task Insert_allowed_without_read_grant()
@@ -83,7 +83,7 @@ public sealed class WriteGrantTests
             CancellationToken.None);
         readDecision.IsAllowed.ShouldBeFalse();
 
-        var resolved = h.Resolution.ResolveAccess(UserSid, new HashSet<Sid>(), new HashSet<string>(), OrdersId, [writeOnly], DatabaseDialect.Sqlite);
+        var resolved = h.Resolution.ResolveAccess(UserSid, new HashSet<Sid>(), new HashSet<string>(), OrdersId, [writeOnly], DatabaseDialect.PostgreSql);
         resolved.IsAllowed.ShouldBeFalse();
 
         CatalogVisibility.ComputeAccessStatus(OrdersId, [writeOnly]).ShouldBe("NONE");
@@ -374,8 +374,8 @@ public sealed class WriteGrantTests
             Table = new Table
             {
                 SourceName = string.Empty,
-                SourceType = "Sqlite",
-                SchemaName = "main",
+                SourceType = "PostgreSql",
+                SchemaName = "public",
                 TableName = "orders",
                 IsActive = true
             },
@@ -397,7 +397,7 @@ public sealed class WriteGrantTests
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["default"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub", WriteConnectionString = "Data Source=stub", Provider = "Sqlite" }
+                    ["default"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub", WriteConnectionString = "Data Source=stub", Provider = "PostgreSql", DefaultSchema = "public" }
                 }
             }
         };
@@ -573,6 +573,11 @@ public sealed class WriteGrantTests
             protected override DbParameter CreateDbParameter() => new FakeParam();
             public override int ExecuteNonQuery()
             {
+                if (CommandText.StartsWith("SET ", StringComparison.OrdinalIgnoreCase))
+                {
+                    return 0;
+                }
+
                 var p = _params.ToDict();
                 owner.ExecutedCommands.Add((CommandText, p));
                 return owner.OnExecute(CommandText, p);
@@ -587,7 +592,9 @@ public sealed class WriteGrantTests
         private sealed class FakeParams : DbParameterCollection
         {
             private readonly List<DbParameter> _list = [];
-            public IReadOnlyDictionary<string, object?> ToDict() => _list.ToDictionary(p => p.ParameterName, p => p.Value, StringComparer.OrdinalIgnoreCase);
+            public IReadOnlyDictionary<string, object?> ToDict() => _list
+                .Select((p, index) => (Key: string.IsNullOrEmpty(p.ParameterName) ? $"${index + 1}" : p.ParameterName, p.Value))
+                .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
             public override int Count => _list.Count;
             public override object SyncRoot => _list;
             public override int Add(object value) { _list.Add((DbParameter)value); return _list.Count - 1; }

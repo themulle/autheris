@@ -20,10 +20,10 @@ public sealed class CompileCacheKeyTests
 
     private static string Key(DmlWritePermit? permit)
     {
-        var env = new TestCompileEnv(TargetSqlDialect.Sqlite).Table("orders", "tenant_id", "id:int", "amount:decimal", "tenant_id:varchar");
+        var env = new TestCompileEnv(TargetSqlDialect.PostgreSql).Table("orders", "tenant_id", "id:int", "amount:decimal", "tenant_id:varchar");
         var request = env.Request(statements: StatementPermissions.Update);
         request = request with { Policy = request.Policy with { Write = permit } };
-        return CompileCacheKey.Material(request, Sql, DialectCapabilityTable.Default.Get(TargetSqlDialect.Sqlite));
+        return CompileCacheKey.Material(request, Sql, DialectCapabilityTable.Default.Get(TargetSqlDialect.PostgreSql));
     }
 
     [Fact]

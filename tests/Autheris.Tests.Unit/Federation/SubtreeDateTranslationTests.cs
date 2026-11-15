@@ -23,14 +23,14 @@ public sealed class SubtreeDateTranslationTests
 
     private static TableMetadata CreateTable(string table, IReadOnlyList<string> columns) => new()
     {
-        Identifier = new TableIdentifier("lite", "main", table),
+        Identifier = new TableIdentifier("tsql", "dbo", table),
         Table = new Table
         {
             TableName = table,
-            SchemaName = "main",
-            SourceType = DatabaseDialect.Sqlite.ToString(),
+            SchemaName = "dbo",
+            SourceType = DatabaseDialect.SqlServer.ToString(),
             DataSourceType = DataSourceType.Sql,
-            SourceName = "lite",
+            SourceName = "tsql",
             IsActive = true
         },
         Columns = columns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList()
@@ -43,8 +43,8 @@ public sealed class SubtreeDateTranslationTests
         var items = CreateTable("order_items", ["id", "order_id", "tenant_id"]);
         var tables = new List<ResolvedSourceTable>
         {
-            new(metadata.ReferencedTables[0], orders.Identifier, orders, "lite"),
-            new(metadata.ReferencedTables[1], items.Identifier, items, "lite")
+            new(metadata.ReferencedTables[0], orders.Identifier, orders, "tsql"),
+            new(metadata.ReferencedTables[1], items.Identifier, items, "tsql")
         };
         var (tree, _) = Engine.Parse(sql.AsMemory());
         var subtree = SubtreeGraphPartitioner.Partition(new SqlAstBuilder().BuildStatement(tree), tables, maxTablesPerSubtree: 12).Subtrees.Single();
@@ -54,23 +54,23 @@ public sealed class SubtreeDateTranslationTests
     }
 
     [Theory]
-    [InlineData("year(o.created)", "%Y")]
-    [InlineData("date_part('month', o.created)", "%m")]
-    [InlineData("EXTRACT(day FROM o.created)", "%d")]
-    public void PartFunction_CompilesWithABoundFormat_AndNoStringLiteral(string expression, string format)
+    [InlineData("year(o.created)", "DATEPART(year,")]
+    [InlineData("date_part('month', o.created)", "DATEPART(month,")]
+    [InlineData("EXTRACT(day FROM o.created)", "DATEPART(day,")]
+    public void PartFunction_CompilesWithABoundFormat_AndNoStringLiteral(string expression, string expectedFragment)
     {
-        var plan = Compile($"SELECT o.id FROM lite.main.orders o JOIN lite.main.order_items i ON o.id = i.order_id WHERE {expression} = 2024");
+        var plan = Compile($"SELECT o.id FROM tsql.dbo.orders o JOIN tsql.dbo.order_items i ON o.id = i.order_id WHERE {expression} = 2024");
 
         plan.Compiled.Sql.ShouldNotContain("'");
-        plan.Compiled.Parameters.Select(p => p.Value as string).ShouldContain(format, plan.Compiled.Sql + " | " + string.Join(",", plan.Compiled.Parameters.Select(p => p.Value)));
+        plan.Compiled.Sql.ShouldContain(expectedFragment);
     }
 
     [Fact]
     public void DateTrunc_CompilesWithABoundModifier()
     {
-        var plan = Compile("SELECT o.id FROM lite.main.orders o JOIN lite.main.order_items i ON o.id = i.order_id WHERE date_trunc('year', o.created) = '2024-01-01'");
+        var plan = Compile("SELECT o.id FROM tsql.dbo.orders o JOIN tsql.dbo.order_items i ON o.id = i.order_id WHERE date_trunc('year', o.created) = '2024-01-01'");
 
         plan.Compiled.Sql.ShouldNotContain("'");
-        plan.Compiled.Parameters.Select(p => p.Value as string).ShouldContain("start of year");
+        plan.Compiled.Sql.ShouldContain("DATEFROMPARTS(YEAR(");
     }
 }

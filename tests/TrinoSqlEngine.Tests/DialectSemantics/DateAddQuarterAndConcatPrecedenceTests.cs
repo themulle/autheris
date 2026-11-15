@@ -35,10 +35,6 @@ public sealed class DateAddQuarterAndConcatPrecedenceTests
         Assert.Contains(expected, Generate("date_add('quarter', 2, ts)", dialect), StringComparison.Ordinal);
 
     [Fact]
-    public void Sqlite_DateAddQuarter_IsThreeMonths() =>
-        Assert.Contains("'+6 months'", Generate("date_add('quarter', 2, ts)", TargetSqlDialect.Sqlite), StringComparison.Ordinal);
-
-    [Fact]
     public void Oracle_DateAddMonth_KeepsTheDayOfAnEndOfMonthSource()
     {
         string sql = Generate("date_add('month', 1, ts)", TargetSqlDialect.Oracle);
@@ -51,7 +47,6 @@ public sealed class DateAddQuarterAndConcatPrecedenceTests
     [InlineData(TargetSqlDialect.Oracle, "\"NAME\" || (\"QTY\" + 1)")]
     [InlineData(TargetSqlDialect.Databricks, "`name` || (`qty` + 1)")]
     [InlineData(TargetSqlDialect.SqlServer, "[name] + ([qty] + 1)")]
-    [InlineData(TargetSqlDialect.Sqlite, "\"name\" || (\"qty\" + 1)")]
     [Trait("Category", "Security")]
     public void Concat_WithArithmeticChild_ParenthesizesChildAcrossAllDialects(TargetSqlDialect dialect, string expected)
     {

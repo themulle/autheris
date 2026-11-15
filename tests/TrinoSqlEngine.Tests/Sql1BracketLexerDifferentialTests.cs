@@ -11,11 +11,8 @@ public class Sql1BracketLexerDifferentialTests
     [Theory]
     [InlineData(TargetSqlDialect.SqlServer, "SELECT ARRAY[1,2][1] FROM orders")]
     [InlineData(TargetSqlDialect.SqlServer, "SELECT '[' , x FROM orders WHERE a = ']--'")]
-    [InlineData(TargetSqlDialect.Sqlite, "SELECT '[' || x || ']' FROM orders")]
-    [InlineData(TargetSqlDialect.Sqlite, "SELECT 'a--b' FROM orders")]
     [InlineData(TargetSqlDialect.SqlServer, "SELECT 'a/*b' FROM orders")]
     [InlineData(TargetSqlDialect.SqlServer, "SELECT \"a[b\" FROM orders")]
-    [InlineData(TargetSqlDialect.Sqlite, "SELECT [id] FROM orders")]
     public void BracketsAndBracketLiterals_AreRejected(TargetSqlDialect dialect, string sql)
     {
         Assert.ThrowsAny<ParseCanceledException>(() => new ProbeEnv(dialect).Compile(sql));
@@ -45,10 +42,9 @@ public class Sql1BracketLexerDifferentialTests
     }
 
     [Fact]
-    public void TokenGuards_ForceTheBracketCheckForSqlServerAndSqlite()
+    public void TokenGuards_ForceTheBracketCheckForSqlServer()
     {
         Assert.True(SqlTokenSecurityOptions.ForDialect(TargetSqlDialect.SqlServer).RejectBracketLexerDifferentials);
-        Assert.True(SqlTokenSecurityOptions.ForDialect(TargetSqlDialect.Sqlite).RejectBracketLexerDifferentials);
         Assert.False(SqlTokenSecurityOptions.ForDialect(TargetSqlDialect.PostgreSql).RejectBracketLexerDifferentials);
     }
 

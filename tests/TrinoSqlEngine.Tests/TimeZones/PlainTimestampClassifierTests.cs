@@ -57,7 +57,6 @@ public sealed class PlainTimestampClassifierTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.Databricks)]
     [InlineData(TargetSqlDialect.Ansi)]

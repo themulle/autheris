@@ -18,7 +18,6 @@ public sealed class FunctionCallEmissionTests
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.SqlServer)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.DuckDb)]
     public void CountStar_IsEmittedAsCountStar(TargetSqlDialect dialect)

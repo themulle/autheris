@@ -199,10 +199,6 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             case IntervalLiteralExpression interval:
                 FormatIntervalLiteral(ref builder, interval, context);
                 break;
-            case DateFunctionExpression { Kind: DateFunctionKind.Add, Unit: DateUnit.Quarter } quarter when TargetDialect == TargetSqlDialect.Sqlite:
-                // SQLite has no quarter modifier: three calendar months (the amount is bounded by the AST builder).
-                FormatDateAdd(ref builder, DateUnit.Month, checked(quarter.Amount * 3), quarter.Source, context);
-                break;
             case DateFunctionExpression date when date.Kind == DateFunctionKind.Add:
                 FormatDateAdd(ref builder, date.Unit, date.Amount, date.Source, context);
                 break;
@@ -386,7 +382,6 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 switch (context.Dialect)
                 {
                     case TargetSqlDialect.SqlServer:
-                    case TargetSqlDialect.Sqlite:
                         builder.Append('@');
                         builder.Append(rawName);
                         return;

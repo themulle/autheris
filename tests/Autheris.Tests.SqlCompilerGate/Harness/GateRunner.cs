@@ -31,7 +31,6 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
         GateDialect.PostgreSql => new PostgreSqlCompiledSqlBinder(),
         GateDialect.SqlServer => new SqlServerCompiledSqlBinder(),
         GateDialect.Oracle => new OracleCompiledSqlBinder(),
-        GateDialect.Sqlite => new SqliteCompiledSqlBinder(),
         _ => null
     };
 

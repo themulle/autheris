@@ -22,11 +22,6 @@ public class DmlErrorSanitizerUnknownColumnTests
         public override string? SqlState { get; } = sqlState;
     }
 
-    private sealed class SqliteLikeException(int code, string message) : DbException(message)
-    {
-        public int SqliteErrorCode { get; } = code;
-    }
-
     private sealed class PlainException(string message) : DbException(message);
 
     private const string Leaky = "no such column: VICTIM_SECRET_COLUMN";
@@ -39,10 +34,6 @@ public class DmlErrorSanitizerUnknownColumnTests
         Assert.DoesNotContain("VICTIM", mapped.Message, StringComparison.Ordinal);
         Assert.Null(mapped.InnerException);
     }
-
-    [Fact]
-    public void SqliteNoSuchColumn_IsPolicyDenied() =>
-        AssertDenied(DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite, new SqliteLikeException(1, Leaky)), TargetSqlDialect.Sqlite);
 
     [Fact]
     public void PostgreSqlUndefinedColumn_IsPolicyDenied() =>
@@ -62,16 +53,14 @@ public class DmlErrorSanitizerUnknownColumnTests
 
     [Fact]
     public void WrappedUnknownColumn_IsPolicyDenied() =>
-        AssertDenied(DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite,
-            new InvalidOperationException("wrapper", new SqliteLikeException(1, Leaky))), TargetSqlDialect.Sqlite);
+        AssertDenied(DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql,
+            new InvalidOperationException("wrapper", new SqlStateException("42703", "column \"VICTIM\" does not exist"))), TargetSqlDialect.PostgreSql);
 
     [Fact]
     [Trait("Category", "Security")]
     public void SEC_PG_10_MessageTextAlone_DoesNotClassify()
     {
         // Another error code with the same words is not an unknown column: classification is by provider code first.
-        var sqlite = DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite, new SqliteLikeException(19, Leaky));
-        Assert.Equal(GovernedSqlErrorCodes.ProviderError, sqlite.Code);
         var pg = DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, new SqlStateException("42P01", "column \"x\" does not exist"));
         Assert.Equal(GovernedSqlErrorCodes.ProviderError, pg.Code);
         var sqlServer = DmlErrorSanitizer.Map(TargetSqlDialect.SqlServer, new NumberedException(208, "Invalid column name 'x'."));
@@ -82,7 +71,7 @@ public class DmlErrorSanitizerUnknownColumnTests
     [Trait("Category", "Security")]
     public void SEC_PG_10_UnrecognisedProviderError_StaysProviderError()
     {
-        var mapped = DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite, new SqliteLikeException(1, "near \"FROM\": syntax error VICTIM"));
+        var mapped = DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, new SqlStateException("42601", "syntax error at or near VICTIM"));
         Assert.Equal(GovernedSqlErrorCodes.ProviderError, mapped.Code);
         Assert.DoesNotContain("VICTIM", mapped.Message, StringComparison.Ordinal);
     }
@@ -93,7 +82,6 @@ public class DmlErrorSanitizerUnknownColumnTests
     {
         var cases = new (TargetSqlDialect Dialect, Exception Error)[]
         {
-            (TargetSqlDialect.Sqlite, new SqliteLikeException(1, Leaky)),
             (TargetSqlDialect.PostgreSql, new SqlStateException("42703", "column x does not exist")),
             (TargetSqlDialect.SqlServer, new NumberedException(207, "Invalid column name 'x'.")),
             (TargetSqlDialect.Oracle, new NumberedException(904, "ORA-00904")),
@@ -113,8 +101,8 @@ public class DmlErrorSanitizerUnknownColumnTests
     [Trait("Category", "Security")]
     public void SEC_PG_10_UnknownColumn_IsByteIdenticalToTheDeniedAnswer()
     {
-        var unknown = DmlErrorSanitizer.Map(TargetSqlDialect.Sqlite, new SqliteLikeException(1, Leaky));
-        var denied = new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, TargetSqlDialect.Sqlite);
+        var unknown = DmlErrorSanitizer.Map(TargetSqlDialect.PostgreSql, new SqlStateException("42703", "column \"VICTIM\" does not exist"));
+        var denied = new GovernedSqlException(GovernedSqlErrorCodes.PolicyDenied, TargetSqlDialect.PostgreSql);
         Assert.Equal(denied.Code, unknown.Code);
         Assert.Equal(denied.Message, unknown.Message);
     }

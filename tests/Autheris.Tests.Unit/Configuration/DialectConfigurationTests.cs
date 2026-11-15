@@ -32,6 +32,8 @@ public sealed class DialectConfigurationTests
     [InlineData("Ansi")]
     [InlineData("DuckDb")]
     [InlineData("Snowflake")]
+    [InlineData("Sqlite")]
+    [InlineData("sqlite3")]
     [InlineData("nonsense")]
     public void Unsupported_dialect_fails_validation(string provider)
     {
@@ -41,6 +43,8 @@ public sealed class DialectConfigurationTests
         ex.Provider.ShouldBe(provider);
         ex.Message.ShouldContain("test_source");
         ex.Message.ShouldContain(provider);
+        ex.Message.ShouldNotContain("Host=localhost");
+        ex.Message.ShouldNotContain("ConnectionString");
     }
 
     [Theory]
@@ -48,7 +52,6 @@ public sealed class DialectConfigurationTests
     [InlineData("Databricks")]
     [InlineData("PostgreSql")]
     [InlineData("SqlServer")]
-    [InlineData("Sqlite")]
     public void Oracle_and_Databricks_are_accepted(string provider)
     {
         var options = CreateOptions(provider);

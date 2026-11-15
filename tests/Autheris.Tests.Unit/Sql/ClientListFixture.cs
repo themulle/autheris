@@ -66,7 +66,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
         Func<DbConnection>? openConnection = null,
         IFederatedQueryExecutionService? federated = null,
         bool crossSourceCatalog = false,
-        string provider = "Sqlite",
+        string provider = "PostgreSql",
         Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null)
     {
         string connectionString = $"Data Source=list_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
@@ -99,7 +99,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["default"] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = connectionString, WriteConnectionString = connectionString }
+                    ["default"] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = connectionString, WriteConnectionString = connectionString, DefaultSchema = provider switch { "PostgreSql" => "public", "SqlServer" => "dbo", _ => "main" } }
                 }
             }
         };
@@ -162,7 +162,8 @@ internal sealed class ClientListFixture : IAsyncDisposable
 
                 var connection = new SqliteConnection(connectionString);
                 await connection.OpenAsync();
-                return (DbConnection)connection;
+                connection.CreateFunction("textsend", (string? s) => s);
+                return (DbConnection)new Autheris.Tests.Unit.TestDoubles.SqliteAsPostgresConnection(connection);
             });
 
         var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(

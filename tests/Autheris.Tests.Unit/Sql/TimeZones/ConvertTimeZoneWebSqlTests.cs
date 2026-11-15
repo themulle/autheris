@@ -35,18 +35,6 @@ public sealed class ConvertTimeZoneWebSqlTests
         return $"{mapped.Status} {mapped.Code} {mapped.Title}";
     }
 
-    // ---- T-24 ----
-
-    [Fact]
-    public async Task T24_SqliteIsUnsupportedWithTheFixedBodyThroughTheMapper()
-    {
-        await using var f = await CreateAsync(timeZoneState: new FixedState(true));
-        // GAP-019: convert_timezone is not on the SQLite allowlist, so the function policy answers (403 SQL_POLICY_VIOLATION).
-        var ex = await Should.ThrowAsync<Autheris.Application.Sql.WebSqlPolicyException>(() => f.QueryAsync(Good, null));
-
-        ex.Message.ShouldBe("Function 'convert_timezone' is not permitted in WebSQL.");
-    }
-
     // ---- T-23: the state decides, fail closed ----
 
     [Theory]

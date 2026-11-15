@@ -60,13 +60,4 @@ public class TypedRejectionTests
     [InlineData("SELECT ARRAY[1, 2, 3] AS r FROM t")]
     public void Oracle_ArraysAndSubscripts(string sql) =>
         Assert.Equal(nameof(SqlCompileNotSupportedException), Conformance.ConformanceRunner.Run(sql, "operator", TargetSqlDialect.Oracle).ExceptionType);
-
-    // WP-A (GAP-006, GAP-013): DATE/TIME/TIMESTAMP literals, EXTRACT and the date translation have a bound form on SQLite now
-    // (see SqliteDatePartParityTests); only LOCALTIME/LOCALTIMESTAMP and a bare OFFSET stay without one.
-    [Theory]
-    [InlineData("SELECT localtime AS r FROM orders")]
-    [InlineData("SELECT localtimestamp AS r FROM orders")]
-    [InlineData("SELECT id FROM orders ORDER BY id OFFSET 5")]
-    [InlineData("SELECT id FROM orders OFFSET 0 ROWS")]
-    public void Sqlite_ConstructsWithoutABoundForm(string sql) => AssertTypedRejection(sql, TargetSqlDialect.Sqlite);
 }

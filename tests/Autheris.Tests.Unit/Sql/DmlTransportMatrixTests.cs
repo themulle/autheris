@@ -41,8 +41,8 @@ public sealed class DmlTransportMatrixTests
 {
     private static readonly TenantId Tenant = new("tenant-a");
     private static readonly Sid UserSid = new("S-1-5-21-100-200-301");
-    private static readonly TableIdentifier OrdersId = new("default", "main", "orders");
-    private static readonly TableIdentifier ExtOrdersId = new("other_src", "main", "ext_orders");
+    private static readonly TableIdentifier OrdersId = new("default", "public", "orders");
+    private static readonly TableIdentifier ExtOrdersId = new("other_src", "public", "ext_orders");
 
     [Theory]
     [InlineData(SqlTransports.Trino)]
@@ -192,8 +192,8 @@ public sealed class DmlTransportMatrixTests
             Table = new Table
             {
                 SourceName = string.Empty,
-                SourceType = "Sqlite",
-                SchemaName = "main",
+                SourceType = "PostgreSql",
+                SchemaName = "public",
                 TableName = "orders",
                 IsActive = true
             },
@@ -208,7 +208,7 @@ public sealed class DmlTransportMatrixTests
         var metas = new List<TableMetadata> { ordersMeta };
         var connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
         {
-            ["default"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub", WriteConnectionString = "Data Source=stub", Provider = "Sqlite" }
+            ["default"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub", WriteConnectionString = "Data Source=stub", Provider = "PostgreSql", DefaultSchema = "public" }
         };
 
         if (includeExternalSource)
@@ -220,8 +220,8 @@ public sealed class DmlTransportMatrixTests
                 Table = new Table
                 {
                     SourceName = "other_src",
-                    SourceType = "Sqlite",
-                    SchemaName = "main",
+                    SourceType = "PostgreSql",
+                    SchemaName = "public",
                     TableName = "ext_orders",
                     IsActive = true
                 },
@@ -232,7 +232,7 @@ public sealed class DmlTransportMatrixTests
                     new TableColumn { ColumnName = "amount", DataType = "integer" }
                 ]
             });
-            connections["other_src"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub2", WriteConnectionString = "Data Source=stub2", Provider = "Sqlite" };
+            connections["other_src"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub2", WriteConnectionString = "Data Source=stub2", Provider = "PostgreSql", DefaultSchema = "public" };
         }
 
         var gatewayOptions = new GatewayOptions
@@ -378,7 +378,16 @@ public sealed class DmlTransportMatrixTests
             public override void Cancel() { }
             public override void Prepare() { }
             protected override DbParameter CreateDbParameter() => new FakeParam();
-            public override int ExecuteNonQuery() { owner.ExecutedCommands.Add((CommandText, _params.ToDict())); return 1; }
+            public override int ExecuteNonQuery()
+            {
+                if (CommandText.StartsWith("SET ", StringComparison.OrdinalIgnoreCase))
+                {
+                    return 0;
+                }
+
+                owner.ExecutedCommands.Add((CommandText, _params.ToDict()));
+                return 1;
+            }
             public override Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken) => Task.FromResult(ExecuteNonQuery());
             public override object? ExecuteScalar() => null;
             protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => new DataTable().CreateDataReader();
@@ -387,7 +396,9 @@ public sealed class DmlTransportMatrixTests
         private sealed class FakeParams : DbParameterCollection
         {
             private readonly List<DbParameter> _list = [];
-            public IReadOnlyDictionary<string, object?> ToDict() => _list.ToDictionary(p => p.ParameterName, p => p.Value, StringComparer.OrdinalIgnoreCase);
+            public IReadOnlyDictionary<string, object?> ToDict() => _list
+                .Select((p, index) => (Key: string.IsNullOrEmpty(p.ParameterName) ? $"${index + 1}" : p.ParameterName, p.Value))
+                .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
             public override int Count => _list.Count;
             public override object SyncRoot => _list;
             public override int Add(object value) { _list.Add((DbParameter)value); return _list.Count - 1; }

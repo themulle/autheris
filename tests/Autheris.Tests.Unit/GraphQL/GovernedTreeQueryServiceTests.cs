@@ -49,7 +49,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
 
     public void Dispose() => _keepAlive.Dispose();
 
-    private sealed class CountingFactory(string connectionString) : ISqlConnectionFactory
+    private sealed class CountingFactory(string connectionString, string? stubReaderJson = null) : ISqlConnectionFactory
     {
         public int Opened { get; private set; }
 
@@ -58,7 +58,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             Opened++;
             var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync(ct);
-            return connection;
+            return stubReaderJson is null ? connection : new Autheris.Tests.Unit.TestDoubles.SqliteAsPostgresConnection(connection, stubReaderJson);
         }
     }
 
@@ -99,7 +99,9 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         ITableReadConcurrencyGate? gate = null,
         IColumnMaskingProvider? masking = null,
         Microsoft.Extensions.Logging.ILogger<GovernedTreeQueryService>? logger = null,
-        bool unbackedBlogSource = false)
+        bool unbackedBlogSource = false,
+        string provider = "Sqlite",
+        string? stubReaderJson = null)
     {
         var access = new Dictionary<TableIdentifier, ResolvedTableAccess>
         {
@@ -124,8 +126,8 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
                 MaxConcurrentReadsPerUserAndTable = options.DataSources.MaxConcurrentReadsPerUserAndTable,
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["blog"] = new() { Provider = "Sqlite", ConnectionString = _connectionString },
-                    ["crm"] = new() { Provider = "Sqlite", ConnectionString = _connectionString }
+                    ["blog"] = new() { Provider = provider, ConnectionString = _connectionString },
+                    ["crm"] = new() { Provider = provider, ConnectionString = _connectionString }
                 }
             }
         };
@@ -136,7 +138,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         }
 
         var audit = Substitute.For<IAuditLogRepository>();
-        var factory = new CountingFactory(_connectionString);
+        var factory = new CountingFactory(_connectionString, stubReaderJson);
         var service = new GovernedTreeQueryService(
             resolver, factory, audit, masking ?? Substitute.For<IColumnMaskingProvider>(), Options.Create(effectiveOptions), gate, logger: logger);
         return new Fixture { Service = service, Resolver = resolver, Audit = audit, Factory = factory };
@@ -272,7 +274,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         RelationExecutabilityTests.TreeOutcome outcome)
     {
         _ = name;
-        var authors = MetaOf(Authors, parentSource, "Sqlite", DataSourceType.Sql, null, AuthorColumns);
+        var authors = MetaOf(Authors, parentSource, "PostgreSql", DataSourceType.Sql, null, AuthorColumns);
         var articles = MetaOf(Articles, childSource, childSourceType, childDsType, null, ArticleColumns);
 
         // Runtime: the tree service rejects exactly the cases the shared predicate rejects, with the unchanged errors.
@@ -280,7 +282,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         {
             a[Authors] = Allowed(authors);
             a[Articles] = Allowed(articles);
-        });
+        }, provider: "PostgreSql", stubReaderJson: "[{\"id\":1,\"name\":\"Alice\",\"articles\":[]}]");
         var run = () => fixture.ExecuteAsync(DefaultTenantCaller.Principal(), AuthorsWithArticles(), null);
         switch (outcome)
         {

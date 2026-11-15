@@ -61,7 +61,7 @@ public sealed class SqlaTreeSecurityTests
     {
         var namer = new PolicyParameterNamer("__gql_rls_");
         var parameter = namer.Add(new PolicyValue("EU", SqlParameterType.String));
-        var policy = new PolicyPredicateRowPolicy(PolicyPredicate.Create(build(parameter), namer.Values), TargetSqlDialect.Sqlite, new PolicyPredicateRenderer());
+        var policy = new PolicyPredicateRowPolicy(PolicyPredicate.Create(build(parameter), namer.Values), TargetSqlDialect.PostgreSql, new PolicyPredicateRenderer());
         return Decision().WithAdditionalRowPolicy(policy);
     }
 

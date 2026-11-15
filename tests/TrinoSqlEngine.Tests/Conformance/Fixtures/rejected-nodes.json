@@ -20,9 +20,5 @@
   "Databricks": {
     "ArrayConstructorExpression": "Array constructors and subscripts are not supported for Databricks; the builder rejects the construct.",
     "SubscriptExpression": "Array constructors and subscripts are not supported for Databricks; the builder rejects the construct."
-  },
-  "Sqlite": {
-    "GroupingOperationExpression": "GROUPING() is not supported for SQLite (no grouping sets); the builder rejects the construct.",
-    "IntervalLiteralExpression": "SQLite has no interval type; the builder rejects the construct."
   }
 }

@@ -86,12 +86,17 @@ public sealed class MaskSemanticsCorpusTests
 
     private static object? RunSql(MaskingRule rule, object? clear, string dataType)
     {
-        // The spec is the one of a non-SQLite dialect (variable-length partial mask); only its rendering is SQLite.
+        var sqlDataType = dataType.Equals("datetime", StringComparison.OrdinalIgnoreCase) ? "timestamp" : dataType;
         var spec = SqlDataMaskingProvider.BuildUnkeyedMaskSpec(rule, "v", DatabaseDialect.PostgreSql);
-        var rendered = new MaskSpecRenderer().Render(spec, "v", dataType, TargetSqlDialect.Sqlite, name => DatabaseDialect.Sqlite.FormatParameterMarker(name));
+        var rendered = new MaskSpecRenderer().Render(spec, "v", sqlDataType, TargetSqlDialect.PostgreSql, name => "@" + name);
 
         using var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        connection.CreateFunction("greatest", (long a, long b) => Math.Max(a, b));
+        connection.CreateFunction("repeat", (string? s, long n) => s is null || n <= 0 ? string.Empty : string.Concat(Enumerable.Repeat(s, (int)n)));
+        connection.CreateFunction("left", (string? s, long n) => s is null || n <= 0 ? string.Empty : (n >= s.Length ? s : s[..(int)n]));
+        connection.CreateFunction("right", (string? s, long n) => s is null || n <= 0 ? string.Empty : (n >= s.Length ? s : s[^((int)n)..]));
+        connection.CreateFunction("concat", (string? a, string? b, string? c) => (a ?? string.Empty) + (b ?? string.Empty) + (c ?? string.Empty));
         using var command = connection.CreateCommand();
         command.CommandText = $"SELECT {rendered.Sql} AS m FROM (SELECT @clear_value AS \"v\") AS t";
         command.Parameters.AddWithValue("@clear_value", clear switch

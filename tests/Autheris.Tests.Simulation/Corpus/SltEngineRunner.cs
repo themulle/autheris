@@ -53,7 +53,7 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
     private static readonly TimeSpan CompileTimeout = TimeSpan.FromSeconds(10);
 
     private readonly FastSqlEngine _engine = new();
-    private readonly SqliteCompiledSqlBinder _binder = new();
+    private readonly PostgreSqlCompiledSqlBinder _binder = new();
     private readonly Policies _policies = new(scenario);
     private readonly FrozenSet<string> _consentTables = (scenario == SltScenario.RowFilter ? new HashSet<string>([FilteredTable], StringComparer.OrdinalIgnoreCase) : new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     private InMemoryTableCatalog? _catalog;
@@ -114,10 +114,10 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
     {
         return new CompileRequest
         {
-            TargetDialect = TargetSqlDialect.Sqlite,
-            TokenGuards = SqlTokenSecurityOptions.ForDialect(TargetSqlDialect.Sqlite),
+            TargetDialect = TargetSqlDialect.PostgreSql,
+            TokenGuards = SqlTokenSecurityOptions.ForDialect(TargetSqlDialect.PostgreSql),
             Statements = StatementPermissions.ReadOnly,
-            AllowedFunctions = SqlFunctionAllowlists.Build(TargetSqlDialect.Sqlite, null),
+            AllowedFunctions = SqlFunctionAllowlists.Build(TargetSqlDialect.PostgreSql, null),
             Policy = new GovernancePolicy
             {
                 RowFilters = _policies,

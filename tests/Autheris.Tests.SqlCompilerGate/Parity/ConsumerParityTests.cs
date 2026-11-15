@@ -19,7 +19,7 @@ public sealed class ParityFixture<TDatabase> : IAsyncLifetime
 
     public TDatabase Database { get; } = new();
 
-    public bool Enabled => typeof(TDatabase) == typeof(SqliteGateDatabase) || GateProfile.DifferentialEnabled;
+    public bool Enabled => GateProfile.DifferentialEnabled;
 
     public ParityEnv Env => new(Database, new ParityContext(Database.Dialect, Database.DefaultSchema));
 
@@ -287,9 +287,6 @@ public abstract class ConsumerParityBase<TDatabase>(ParityFixture<TDatabase> fix
         ParityExpectations.UnexpectedStricter(results).ShouldBeEmpty();
     }
 }
-
-public sealed class SqliteConsumerParityTests(ParityFixture<SqliteGateDatabase> fixture, ITestOutputHelper output)
-    : ConsumerParityBase<SqliteGateDatabase>(fixture, output), IClassFixture<ParityFixture<SqliteGateDatabase>>;
 
 public sealed class PostgreSqlConsumerParityTests(ParityFixture<PostgreSqlGateDatabase> fixture, ITestOutputHelper output)
     : ConsumerParityBase<PostgreSqlGateDatabase>(fixture, output), IClassFixture<ParityFixture<PostgreSqlGateDatabase>>;

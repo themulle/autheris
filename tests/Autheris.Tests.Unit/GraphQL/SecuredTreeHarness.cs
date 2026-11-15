@@ -45,6 +45,7 @@ internal sealed class SecuredTreeHarness : IDisposable
     {
         Connection = new SqliteConnection("Data Source=:memory:");
         Connection.Open();
+        Connection.CreateFunction("textsend", (string? s) => s);
         using (var cmd = Connection.CreateCommand())
         {
             cmd.CommandText = """
@@ -141,16 +142,16 @@ internal sealed class SecuredTreeHarness : IDisposable
 
     private static ColumnReference Col(string alias, string column) => new(new SqlQualifiedName([Id(alias), Id(column)]));
 
-    private static NamedTableSource Source(string table, string alias) => new(new SqlQualifiedName([Id("main"), Id(table)]), Id(alias));
+    private static NamedTableSource Source(string table, string alias, string schema = "main") => new(new SqlQualifiedName([Id(schema), Id(table)]), Id(alias));
 
-    private static SelectStatement Select(string table, string alias, string column, Expression where) => new(
+    private static SelectStatement Select(string table, string alias, string column, Expression where, string schema = "main") => new(
         null,
-        new QuerySpecification(false, [new ColumnSelectItem(Col(alias, column), null)], Source(table, alias), where, null, null),
+        new QuerySpecification(false, [new ColumnSelectItem(Col(alias, column), null)], Source(table, alias, schema), where, null, null),
         null,
         null);
 
     /// <summary>EXISTS (SELECT c.order_id FROM main.consents c WHERE c.order_id = autheris_target.id AND c.purpose = :purpose).</summary>
-    public static IRowPolicy ExistsPolicy(string purpose = "analytics")
+    public static IRowPolicy ExistsPolicy(string purpose = "analytics", string schema = "main")
     {
         var namer = new PolicyParameterNamer("__rf_");
         var parameter = namer.Add(new PolicyValue(purpose, SqlParameterType.String));
@@ -159,7 +160,7 @@ internal sealed class SecuredTreeHarness : IDisposable
             BinaryOperator.And,
             new BinaryExpression(Col("c", "purpose"), BinaryOperator.Equal, parameter));
         return new PolicyPredicateRowPolicy(
-            PolicyPredicate.Create(new ExistsExpression(Select("consents", "c", "order_id", where)), namer.Values), TargetSqlDialect.Sqlite, Renderer);
+            PolicyPredicate.Create(new ExistsExpression(Select("consents", "c", "order_id", where, schema)), namer.Values), TargetSqlDialect.PostgreSql, Renderer);
     }
 
     /// <summary>autheris_target.id IN (SELECT c.order_id FROM main.consents c WHERE c.purpose = :purpose).</summary>
@@ -172,7 +173,7 @@ internal sealed class SecuredTreeHarness : IDisposable
             PolicyPredicate.Create(
                 new InSubqueryExpression(PolicyParameterNamer.Column($"{RowFilterAliases.Target}.id"), Select("consents", "c", "order_id", where), false),
                 namer.Values),
-            TargetSqlDialect.Sqlite,
+            TargetSqlDialect.PostgreSql,
             Renderer);
     }
 
@@ -182,7 +183,7 @@ internal sealed class SecuredTreeHarness : IDisposable
         var where = new BinaryExpression(Col("ic", "item_id"), BinaryOperator.Equal, PolicyParameterNamer.Column($"{RowFilterAliases.Target}.id"));
         return new PolicyPredicateRowPolicy(
             PolicyPredicate.Create(new ExistsExpression(Select("item_consents", "ic", "item_id", where)), new Dictionary<string, PolicyValue>()),
-            TargetSqlDialect.Sqlite,
+            TargetSqlDialect.PostgreSql,
             Renderer);
     }
 
@@ -208,7 +209,7 @@ internal sealed class SecuredTreeHarness : IDisposable
             {
                 ColumnMasks = new ColumnMaskPolicy(new Dictionary<string, MaskSpec>
                 {
-                    ["email"] = Autheris.Application.Sql.Masking.SqlDataMaskingProvider.BuildUnkeyedMaskSpec(null, "email", DatabaseDialect.Sqlite)
+                    ["email"] = Autheris.Application.Sql.Masking.SqlDataMaskingProvider.BuildUnkeyedMaskSpec(null, "email", DatabaseDialect.PostgreSql)
                 })
             }
             : decision;
@@ -227,7 +228,7 @@ internal sealed class SecuredTreeHarness : IDisposable
         TreeSecuredSource? source = null;
         if (TreeSqlCompiler.RowPolicyRequiresEnginePipeline(decision))
         {
-            source = await Builder.BuildAsync(Resolved(meta, decision, tenant), DataSource, DatabaseDialect.Sqlite, CancellationToken.None);
+            source = await Builder.BuildAsync(Resolved(meta, decision, tenant), DataSource, DatabaseDialect.PostgreSql, CancellationToken.None);
         }
 
         return new TreeTableAccess(meta, decision, "tenant_id", tenant, source);
@@ -273,12 +274,15 @@ internal sealed class SecuredTreeHarness : IDisposable
             Metadata = new Dictionary<TableIdentity, TableMetadata> { [identity] = meta }
         };
         var governed = await Factory.CreateAsync(input, CancellationToken.None);
-        var request = CompileRequestFactory.Create(governed, TargetSqlDialect.Sqlite, new WebSqlOptions(), false, 0, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var request = CompileRequestFactory.Create(governed, TargetSqlDialect.PostgreSql, new WebSqlOptions(), false, 0, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
         var compiled = Engine.Compile($"SELECT id FROM {table.TableName} ORDER BY id".AsMemory(), request, CancellationToken.None);
 
         using var cmd = Connection.CreateCommand();
         cmd.CommandText = compiled.Sql;
-        CompiledSqlBinders.For(TargetSqlDialect.Sqlite).Bind(cmd, compiled, new Dictionary<string, object?>());
+        foreach (var p in compiled.Parameters)
+        {
+            cmd.Parameters.AddWithValue(p.Marker, p.Value ?? DBNull.Value);
+        }
         using var reader = cmd.ExecuteReader();
         var ids = new List<long>();
         while (reader.Read())

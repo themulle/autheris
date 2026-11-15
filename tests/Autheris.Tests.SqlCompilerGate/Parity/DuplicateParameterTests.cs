@@ -11,8 +11,8 @@ using Xunit.Abstractions;
 /// one decision that name the same parameter (with or without the marker prefix, in another case), or a key that names a parameter the consumer
 /// binds itself (the tenant), would let the provider pick one of two values silently.
 /// </summary>
-public sealed class DuplicateParameterTests(ParityFixture<SqliteGateDatabase> fixture, ITestOutputHelper output)
-    : IClassFixture<ParityFixture<SqliteGateDatabase>>
+public sealed class DuplicateParameterTests(ParityFixture<PostgreSqlGateDatabase> fixture, ITestOutputHelper output)
+    : IClassFixture<ParityFixture<PostgreSqlGateDatabase>>
 {
     private const string Text = "\"status\" = @__gql_rls_0";
 

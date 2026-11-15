@@ -22,8 +22,8 @@ public sealed class BulkKeysetPlannedReadTenantSecurityTests
 {
     private static TableMetadata Orders() => new()
     {
-        Identifier = new TableIdentifier("default", "main", "orders"),
-        Table = new Table { TableName = "orders", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+        Identifier = new TableIdentifier("default", "public", "orders"),
+        Table = new Table { TableName = "orders", SchemaName = "public", SourceName = string.Empty, SourceType = "PostgreSql" },
         PrimaryKeyColumns = ["id"],
         Columns =
         [

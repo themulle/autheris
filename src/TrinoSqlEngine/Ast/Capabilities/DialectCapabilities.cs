@@ -53,14 +53,7 @@ public enum TenantComparisonStyle
     /// is exact regardless of any column collation (for example <c>UTF8_LCASE</c>). There is deliberately no plain <c>col = t</c>
     /// conjunct: Spark's constant propagation would turn the pair into a tautology on collated columns.
     /// </summary>
-    CastBinary,
-
-    /// <summary>
-    /// SQLite: <c>col = t AND CAST(col AS BLOB) = CAST(t AS BLOB)</c>. A BLOB comparison is a plain <c>memcmp</c> and ignores the
-    /// column collation (<c>NOCASE</c>, <c>RTRIM</c>). The tenant column must have TEXT affinity, otherwise the stored
-    /// value was already converted (a NUMERIC column stores <c>'007'</c> as <c>7</c>).
-    /// </summary>
-    CastBlob
+    CastBinary
 }
 
 /// <summary>Declarative Trino-function to dialect rule. No matching rule means the function is rejected (INV-1).</summary>

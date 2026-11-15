@@ -213,7 +213,6 @@ public sealed class GovernedSqlExecutorX1Tests
     [InlineData("PostgreSql", "PostgreSQL", true)]    // the session initializer owns a transaction (set_config(..., true) is transaction-local)
     [InlineData("SqlServer", "SqlServer", false)]     // none of these gives a transaction: the executor begins one after the session is initialized
     [InlineData("Oracle", "Oracle", false)]
-    [InlineData("Sqlite", "Sqlite", false)]
     public async Task WebSqlDml_RunsThroughCheckedExecutor_InSessionTransaction(string provider, string sourceType, bool sessionGivesTransaction)
     {
         var compiled = await CompileAsync(sourceType, "INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, 'tenant_a')");
@@ -243,7 +242,7 @@ public sealed class GovernedSqlExecutorX1Tests
     {
         // Without an active write grant the decision point denies every DML statement, also for a writer role, and no command reaches a connection.
         var connectionFactory = Substitute.For<ISqlConnectionFactory>();
-        var service = BuildService("Sqlite", allowRecursive: false, withWritePermit: false, connectionFactory);
+        var service = BuildService("SqlServer", allowRecursive: false, withWritePermit: false, connectionFactory);
         bool written = false;
 
         await Should.ThrowAsync<Autheris.Application.Sql.WebSqlTableDeniedException>(() => service.ExecuteGovernedQueryAsync(
@@ -261,7 +260,7 @@ public sealed class GovernedSqlExecutorX1Tests
         // SEC-CIFIX-5 and -6: the default test permit never covers a masked column, so writing one is rejected with the
         // not-covered message; only an explicit alsoWritable grant (SEC-SIMPL-121) lets the same statement compile.
         const string Sql = "UPDATE orders SET amount = 1 WHERE id = 1";
-        var env = new TestCompileEnv(TargetSqlDialect.Sqlite)
+        var env = new TestCompileEnv(TargetSqlDialect.SqlServer)
             .Table("orders", "tenant_id", "id:int", "amount:decimal", "tenant_id:varchar")
             .Mask("orders", "amount", Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService.Redact("amount", "***"));
         var decorated = new Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(env.Engine);
@@ -278,9 +277,9 @@ public sealed class GovernedSqlExecutorX1Tests
     public async Task WebSqlDml_TokenCancelledAfterCommit_StillWritesTheAuditRecord_AndTheResponseSucceeds()
     {
         // M-1: a client that disconnects right after the commit must not leave a committed DML without its audit record.
-        var compiled = await CompileAsync("Sqlite", "UPDATE orders SET amount = 1 WHERE id = 1");
+        var compiled = await CompileAsync("SqlServer", "UPDATE orders SET amount = 1 WHERE id = 1");
         using var cts = new CancellationTokenSource();
-        var h = CreateHarness("Sqlite", auditSink: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; });
+        var h = CreateHarness("SqlServer", auditSink: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; });
         h.Connection.AfterCommit = cts.Cancel;
 
         await h.Executor.ExecuteRewrittenAsync(
@@ -295,8 +294,8 @@ public sealed class GovernedSqlExecutorX1Tests
     public async Task WebSqlDml_AuditFailsAfterCommit_IsNotARequestFailure_LogsCritical_AndCountsAMetric()
     {
         // Pre-commit outcome audit: if WEBSQL_DML_EXECUTED fails, the transaction rolls back and AuditUnavailableException propagates.
-        var compiled = await CompileAsync("Sqlite", "UPDATE orders SET amount = 1 WHERE id = 1");
-        var h = CreateHarness("Sqlite", auditSink: (e, _) => e.EventType == AuditEventTypes.WebSqlDmlExecuted ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
+        var compiled = await CompileAsync("SqlServer", "UPDATE orders SET amount = 1 WHERE id = 1");
+        var h = CreateHarness("SqlServer", auditSink: (e, _) => e.EventType == AuditEventTypes.WebSqlDmlExecuted ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
 
         await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() => ExecuteAsync(h, compiled, dml: Dml()));
 
@@ -307,7 +306,7 @@ public sealed class GovernedSqlExecutorX1Tests
 
     [Theory]
     [InlineData("PostgreSql", "PostgreSQL", true)]
-    [InlineData("Sqlite", "Sqlite", false)]
+    [InlineData("SqlServer", "SqlServer", false)]
     public async Task WebSqlDml_AuditKeyUnavailable_FailsClosedBeforeAnyWrite(string provider, string sourceType, bool sessionGivesTransaction)
     {
         // L-2: the audit digest is first needed after the commit; a vault failure must not leave a committed, unaudited write.
@@ -347,12 +346,12 @@ public sealed class GovernedSqlExecutorX1Tests
     public async Task CheckedDmlExecutor_CommitsWithoutTheCallerToken_OnceAllChecksPassed()
     {
         // L2: a client that disconnects between the last check and the commit must not turn a passed check into a rollback race.
-        var compiled = await CompileAsync("Sqlite", "UPDATE orders SET amount = 1 WHERE id = 1");
+        var compiled = await CompileAsync("SqlServer", "UPDATE orders SET amount = 1 WHERE id = 1");
         var connection = new FakeDbConnection();
         var tx = connection.BeginSessionTransaction();
         using var cts = new CancellationTokenSource();
 
-        await CompiledSqlBinders.CheckedExecutorFor(TargetSqlDialect.Sqlite)
+        await CompiledSqlBinders.CheckedExecutorFor(TargetSqlDialect.SqlServer)
             .ExecuteInTransactionAsync(tx, compiled, new Dictionary<string, object?>(), new CheckedDmlLimits(5, 0), cts.Token);
 
         tx.Commits.ShouldBe(1);
@@ -377,11 +376,11 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task ReadAndDml_RunUnderTheProviderExecutionGuard_WithTheConfiguredTimeout()
     {
-        var read = await CompileAsync("Sqlite", "SELECT id FROM orders");
-        var dml = await CompileAsync("Sqlite", "UPDATE orders SET amount = 1 WHERE id = 1");
+        var read = await CompileAsync("SqlServer", "SELECT id FROM orders");
+        var dml = await CompileAsync("SqlServer", "UPDATE orders SET amount = 1 WHERE id = 1");
         var guard = new RecordingGuard();
-        var options = Gateway("Sqlite", timeoutSeconds: 7);
-        var h = CreateHarness("Sqlite", options: options, guard: guard);
+        var options = Gateway("SqlServer", timeoutSeconds: 7);
+        var h = CreateHarness("SqlServer", options: options, guard: guard);
 
         await ExecuteAsync(h, read);
         await ExecuteAsync(h, dml, dml: Dml());
@@ -395,7 +394,6 @@ public sealed class GovernedSqlExecutorX1Tests
         // A three-way cross join of 1500 rows (3.4 billion row combinations): without the guard the statement runs for minutes
         // (SQLite has no server-side timeout; CommandTimeout is only a busy timeout). The guard interrupts it after the 1 s budget.
         const string Sql = "SELECT count(*) FROM orders a, orders b, orders c WHERE a.id + b.id + c.id > 0";
-        var compiled = await CompileAsync("Sqlite", Sql);
         var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "x1-guard-" + Guid.NewGuid().ToString("N") + ".db");
         try
         {
@@ -409,20 +407,15 @@ public sealed class GovernedSqlExecutorX1Tests
                 await create.ExecuteNonQueryAsync();
             }
 
-            var gateway = Gateway("Sqlite", timeoutSeconds: 1);
-            var factory = Substitute.For<ISqlConnectionFactory>();
-            factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-                .Returns(async _ => { var c = new Microsoft.Data.Sqlite.SqliteConnection(connectionString); await c.OpenAsync(); return (DbConnection)c; });
-            var session = Substitute.For<IDbSessionContextInitializer>();
-            session.InitializeSessionAsync(Arg.Any<DbConnection>(), Arg.Any<DatabaseDialect>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
-                .Returns(Task.FromResult<DbTransaction?>(null));
-            var opts = Options.Create(gateway);
-            var executor = new GovernedSqlExecutor(
-                new GovernedSqlRewriter(opts, sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine())), opts, global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard(),
-                factory, null, NullLogger.Instance, null, session);
-            await Should.ThrowAsync<TimeoutException>(() => executor.ExecuteRewrittenAsync(
-                new GovernedSqlQueryRequest(Sql), Writer(), new TenantId(Tenant), Rewrite(compiled), new DmlAuditContext(),
-                new Dictionary<string, object?>(), (_, _) => Task.CompletedTask, CancellationToken.None)).WaitAsync(WaitHelper.HangGuard);
+            await using var conn = new Microsoft.Data.Sqlite.SqliteConnection(connectionString);
+            await conn.OpenAsync();
+            var guard = new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard();
+            await Should.ThrowAsync<TimeoutException>(() => guard.RunAsync(conn, TimeSpan.FromSeconds(1), async () =>
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = Sql;
+                return await cmd.ExecuteScalarAsync(CancellationToken.None);
+            }, CancellationToken.None)).WaitAsync(WaitHelper.HangGuard);
         }
         finally
         {
@@ -438,9 +431,9 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task ProviderError_Sanitized_OriginalLoggedOnly()
     {
-        var compiled = await CompileAsync("Sqlite", "SELECT id FROM orders");
+        var compiled = await CompileAsync("SqlServer", "SELECT id FROM orders");
         const string Secret = "duplicate key value (tenant-secret-42)";
-        var h = CreateHarness("Sqlite", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new FakeDbException(Secret) });
+        var h = CreateHarness("SqlServer", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new FakeDbException(Secret) });
 
         var ex = await Should.ThrowAsync<GovernedSqlException>(() => ExecuteAsync(h, compiled));
 
@@ -453,8 +446,8 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task ProviderError_Timeout_KeepsItsClassification()
     {
-        var compiled = await CompileAsync("Sqlite", "SELECT id FROM orders");
-        var h = CreateHarness("Sqlite", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new TimeoutException("slow") });
+        var compiled = await CompileAsync("SqlServer", "SELECT id FROM orders");
+        var h = CreateHarness("SqlServer", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new TimeoutException("slow") });
 
         // a timeout is classified before the sanitizer: it is not a DbException, and a DbException that is a timeout is passed through too
         await Should.ThrowAsync<TimeoutException>(() => ExecuteAsync(h, compiled));
@@ -483,9 +476,9 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task ErrorAudit_HasCodeNotMessage()
     {
-        var compiled = await CompileAsync("Sqlite", "SELECT id FROM orders");
+        var compiled = await CompileAsync("SqlServer", "SELECT id FROM orders");
         const string Secret = "key (tenant-secret-42) already exists";
-        var h = CreateHarness("Sqlite", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new FakeDbException(Secret) });
+        var h = CreateHarness("SqlServer", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new FakeDbException(Secret) });
 
         await Should.ThrowAsync<GovernedSqlException>(() => ExecuteAsync(h, compiled));
 
@@ -519,8 +512,8 @@ public sealed class GovernedSqlExecutorX1Tests
     }
 
     [Theory]
-    [InlineData("PostgreSQL", "Sqlite")]
-    [InlineData("Sqlite", "PostgreSql")]
+    [InlineData("PostgreSQL", "SqlServer")]
+    [InlineData("Oracle", "PostgreSql")]
     [InlineData("SqlServer", "Oracle")]
     public async Task BinderDialect_FromConnection_MustEqualCompiledDialect(string compiledFor, string connectionProvider)
     {
@@ -544,10 +537,10 @@ public sealed class GovernedSqlExecutorX1Tests
         var master = Encoding.UTF8.GetBytes("master-hmac-secret-0123456789abcdef");
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
         secrets.GetSecretBytes("GQL-HMAC").Returns(master);
-        var compiled = await CompileAsync("Sqlite", GovernedSqlExecutionService.NormalizeClientParameters(
+        var compiled = await CompileAsync("SqlServer", GovernedSqlExecutionService.NormalizeClientParameters(
             "SELECT id FROM orders WHERE id = @who", new Dictionary<string, object?> { ["who"] = 1 }, out _));
-        var gateway = Gateway("Sqlite", hmacRef: "GQL-HMAC");
-        var h = CreateHarness("Sqlite", options: gateway, secrets: secrets);
+        var gateway = Gateway("SqlServer", hmacRef: "GQL-HMAC");
+        var h = CreateHarness("SqlServer", options: gateway, secrets: secrets);
 
         await ExecuteAsync(h, compiled,
             new GovernedSqlQueryRequest("SELECT id FROM orders WHERE id = @who"),
@@ -557,7 +550,7 @@ public sealed class GovernedSqlExecutorX1Tests
         using var json = System.Text.Json.JsonDocument.Parse(entry.DetailsJson);
         var root = json.RootElement;
         root.GetProperty("compiler_version").GetString().ShouldBe(compiled.CompilerVersion);
-        root.GetProperty("dialect").GetString().ShouldBe("Sqlite");
+        root.GetProperty("dialect").GetString().ShouldBe("SqlServer");
         root.GetProperty("bind_count").GetInt32().ShouldBe(compiled.Parameters.Length);
         string digest = root.GetProperty("sql.compiled_digest").GetString()!;
         digest.ShouldBe(CompiledSqlDigest.Compute(CompiledSqlAuditDigester.DeriveKey(CompiledSqlAuditDigester.DeriveAuditKeyFromMaster(master)), compiled));
@@ -571,8 +564,8 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task Audit_CompiledSqlText_IsStoredOnlyWhenConfigured()
     {
-        var compiled = await CompileAsync("Sqlite", "SELECT id FROM orders");
-        var h = CreateHarness("Sqlite", options: Gateway("Sqlite", storeCompiledSql: true));
+        var compiled = await CompileAsync("SqlServer", "SELECT id FROM orders");
+        var h = CreateHarness("SqlServer", options: Gateway("SqlServer", storeCompiledSql: true));
 
         await ExecuteAsync(h, compiled);
 
@@ -584,8 +577,8 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task Audit_RecursiveStatement_HasRecursiveCteField()
     {
-        var compiled = await CompileAsync("Sqlite", RecursiveSql, allowRecursive: true);
-        var h = CreateHarness("Sqlite", options: Gateway("Sqlite", allowRecursive: true));
+        var compiled = await CompileAsync("SqlServer", RecursiveSql, allowRecursive: true);
+        var h = CreateHarness("SqlServer", options: Gateway("SqlServer", allowRecursive: true));
 
         await ExecuteAsync(h, compiled);
 
@@ -596,8 +589,8 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task Audit_NonRecursiveStatement_HasNoRecursiveCteField()
     {
-        var compiled = await CompileAsync("Sqlite", "SELECT id FROM orders");
-        var h = CreateHarness("Sqlite");
+        var compiled = await CompileAsync("SqlServer", "SELECT id FROM orders");
+        var h = CreateHarness("SqlServer");
 
         await ExecuteAsync(h, compiled);
 
@@ -608,9 +601,9 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task RecursiveCte_Runaway_ReleasesConnectionAndAuditsFlag()
     {
-        var compiled = await CompileAsync("Sqlite", RecursiveSql, allowRecursive: true);
-        var h = CreateHarness("Sqlite", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new TimeoutException("runaway recursion") },
-            options: Gateway("Sqlite", allowRecursive: true));
+        var compiled = await CompileAsync("SqlServer", RecursiveSql, allowRecursive: true);
+        var h = CreateHarness("SqlServer", () => new FakeDbCommand { OnExecuteReader = (_, _) => throw new TimeoutException("runaway recursion") },
+            options: Gateway("SqlServer", allowRecursive: true));
 
         await Should.ThrowAsync<TimeoutException>(() => ExecuteAsync(h, compiled));
 
@@ -655,7 +648,7 @@ public sealed class GovernedSqlExecutorX1Tests
 
     private static GovernedSqlExecutionService DevelopmentServiceWithoutDatabase(bool webSqlEnabled, IAuditLogRepository auditLog, params string[] catalogued)
     {
-        var tables = catalogued.Select(t => Orders("Sqlite") with { Identifier = new TableIdentifier("default", "public", t), Table = new Table { TableName = t, SchemaName = "public", SourceType = "Sqlite" } }).ToArray();
+        var tables = catalogued.Select(t => Orders("SqlServer") with { Identifier = new TableIdentifier("default", "public", t), Table = new Table { TableName = t, SchemaName = "public", SourceType = "SqlServer" } }).ToArray();
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(tables.FirstOrDefault(t => t.Identifier.Equals(ci.Arg<TableIdentifier>()))));
@@ -682,8 +675,8 @@ public sealed class GovernedSqlExecutorX1Tests
         var user = Writer();
 
         // an allowed statement: the synthetic reader receives the compiled text (markers), never a bound value
-        var compiled = await service.CompileAsync("SELECT id FROM orders", user, new TenantId(Tenant));
-        var allowed = await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELECT id FROM orders"), user, new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT id FROM orders LIMIT 5", user, new TenantId(Tenant));
+        var allowed = await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELECT id FROM orders LIMIT 5"), user, new TenantId(Tenant));
         allowed.Rows.ShouldHaveSingleItem()["query"].ShouldBe(compiled.Sql);
         allowed.Rows[0]["query"]!.ToString()!.ShouldNotContain(Tenant);
 

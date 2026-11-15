@@ -53,7 +53,7 @@ public sealed class GovernedSqlWriteExecutionSecurityTests
     private const string SubjectB = "S-1-5-21-USER-B";
     private const string ReadConn = "Host=read-replica.internal;Database=app;Username=reader";
     private const string WriteConn = "Host=primary-writer.internal;Database=app;Username=writer";
-    private static readonly TableIdentifier OrdersTable = new("default", "main", "orders");
+    private static readonly TableIdentifier OrdersTable = new("default", "public", "orders");
 
     public static IEnumerable<object[]> BudgetStores()
     {
@@ -268,8 +268,8 @@ public sealed class GovernedSqlWriteExecutionSecurityTests
             Table = new Table
             {
                 SourceName = "default",
-                SourceType = "Sqlite",
-                SchemaName = "main",
+                SourceType = "PostgreSql",
+                SchemaName = "public",
                 TableName = "orders",
                 IsActive = true
             },
@@ -320,9 +320,10 @@ public sealed class GovernedSqlWriteExecutionSecurityTests
                 {
                     ["default"] = new DataSourceConnectionOptions
                     {
-                        Provider = "Sqlite",
+                        Provider = "PostgreSql",
                         ConnectionString = readConn,
-                        WriteConnectionString = writeConn
+                        WriteConnectionString = writeConn,
+                        DefaultSchema = "public"
                     }
                 }
             }
@@ -481,7 +482,15 @@ public sealed class GovernedSqlWriteExecutionSecurityTests
             public override void Cancel() { }
             public override void Prepare() { }
             protected override DbParameter CreateDbParameter() => new FakeParam();
-            public override int ExecuteNonQuery() => owner.OnExecute(CommandText, _params.ToDict());
+            public override int ExecuteNonQuery()
+            {
+                if (CommandText.StartsWith("SET ", StringComparison.OrdinalIgnoreCase))
+                {
+                    return 0;
+                }
+
+                return owner.OnExecute(CommandText, _params.ToDict());
+            }
             public override Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken) => Task.FromResult(ExecuteNonQuery());
             public override object? ExecuteScalar() => null;
             protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior) => new DataTable().CreateDataReader();
@@ -492,7 +501,9 @@ public sealed class GovernedSqlWriteExecutionSecurityTests
         private sealed class FakeParams : DbParameterCollection
         {
             private readonly List<DbParameter> _list = [];
-            public IReadOnlyDictionary<string, object?> ToDict() => _list.ToDictionary(p => p.ParameterName, p => p.Value, StringComparer.OrdinalIgnoreCase);
+            public IReadOnlyDictionary<string, object?> ToDict() => _list
+                .Select((p, index) => (Key: string.IsNullOrEmpty(p.ParameterName) ? $"${index + 1}" : p.ParameterName, p.Value))
+                .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
             public override int Count => _list.Count;
             public override object SyncRoot => _list;
             public override int Add(object value) { _list.Add((DbParameter)value); return _list.Count - 1; }

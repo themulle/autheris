@@ -410,7 +410,8 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     {
         var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
-        return connection;
+        connection.CreateFunction("textsend", (string? s) => s);
+        return new Autheris.Tests.Unit.TestDoubles.SqliteAsPostgresConnection(connection);
     }
 
     internal static ClaimsPrincipal CreateWriter(bool withWriteScope = true)
@@ -447,15 +448,15 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 TenantColumnExemptTables = (exemptTables ?? []).ToList(),
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["default"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = fixture.ConnectionString, WriteConnectionString = fixture.ConnectionString }
+                    ["default"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = fixture.ConnectionString, WriteConnectionString = fixture.ConnectionString, DefaultSchema = "public" }
                 }
             }
         };
 
         var orders = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "orders"),
-            Table = new Table { TableName = "orders", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "public", "orders"),
+            Table = new Table { TableName = "orders", SchemaName = "public", SourceName = string.Empty, SourceType = "PostgreSql" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
@@ -464,24 +465,24 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             ]
         };
 
-        // withDependency: `orders` carries a row policy that reads `main.consents`, which is then a policy dependency table.
+        // withDependency: `orders` carries a row policy that reads `public.consents`, which is then a policy dependency table.
         var consents = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "consents"),
-            Table = new Table { TableName = "consents", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "public", "consents"),
+            Table = new Table { TableName = "consents", SchemaName = "public", SourceName = string.Empty, SourceType = "PostgreSql" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]
         };
-        // columnlessHolder: an active catalog table without columns whose row policy reads `main.consents`; plainTable: a table without a tenant column.
+        // columnlessHolder: an active catalog table without columns whose row policy reads `public.consents`; plainTable: a table without a tenant column.
         var holder = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "holder"),
-            Table = new Table { TableName = "holder", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "public", "holder"),
+            Table = new Table { TableName = "holder", SchemaName = "public", SourceName = string.Empty, SourceType = "PostgreSql" },
             Columns = []
         };
         var plain = new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "main", "plain"),
-            Table = new Table { TableName = "plain", SchemaName = "main", SourceName = string.Empty, SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "public", "plain"),
+            Table = new Table { TableName = "plain", SchemaName = "public", SourceName = string.Empty, SourceType = "PostgreSql" },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
         var known = withDependency || columnlessHolder ? new[] { orders, consents } : plainTable ? new[] { orders, plain } : new[] { orders };
@@ -559,7 +560,9 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 Arg.Any<IReadOnlySet<string>>(),
                 Arg.Any<TableIdentifier>(),
                 Arg.Any<IReadOnlyList<Consent>>(),
-                Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
+                Arg.Any<DatabaseDialect>(),
+                Arg.Any<IReadOnlySet<Sid>?>(),
+                Arg.Any<IReadOnlySet<string>?>())
             .Returns(ci =>
             {
                 var allowed = TableAccessDecision.Allowed(
@@ -568,7 +571,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                     null,
                     hasUnconstrainedColumnAllow: true);
                 return (columnlessHolder ? ci.ArgAt<TableIdentifier>(3).Equals(holder.Identifier) : withDependency && ci.ArgAt<TableIdentifier>(3).Equals(orders.Identifier))
-                    ? allowed with { RowPolicy = Autheris.Tests.Unit.GraphQL.SecuredTreeHarness.ExistsPolicy() }
+                    ? allowed with { RowPolicy = Autheris.Tests.Unit.GraphQL.SecuredTreeHarness.ExistsPolicy(schema: "public") }
                     : allowed;
             });
 

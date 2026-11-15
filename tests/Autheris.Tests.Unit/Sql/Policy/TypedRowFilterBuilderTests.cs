@@ -37,13 +37,13 @@ public sealed class TypedRowFilterBuilderTests
     [InlineData("GT", "\"region\" > @__gql_rls_0")]
     [InlineData("LTE", "\"region\" <= @__gql_rls_0")]
     [InlineData("GTE", "\"region\" >= @__gql_rls_0")]
-    [InlineData("LIKE", "\"region\" LIKE @__gql_rls_0")]
+    [InlineData("LIKE", "\"region\" LIKE @__gql_rls_0 ESCAPE ''")]
     public void BuildsTypedPredicate_ForEveryOperator(string op, string expectedSql)
     {
         var predicate = _builder.Build([Filter("region", op, "\"EU\"")], Orders);
 
         predicate.ReferencedColumns.ShouldContain("region");
-        var rendered = _renderer.Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target);
+        var rendered = _renderer.Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target);
         rendered.Sql.ShouldBe(expectedSql);
         rendered.Parameters["@__gql_rls_0"].ShouldBe("EU");
     }
@@ -52,12 +52,12 @@ public sealed class TypedRowFilterBuilderTests
     public void BuildsTypedPredicate_ForIn_AndNull()
     {
         var inPredicate = _builder.Build([Filter("region", "IN", "[\"EU\",\"US\"]")], Orders);
-        _renderer.Render(inPredicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql
+        _renderer.Render(inPredicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql
             .ShouldBe("\"region\" IN (@__gql_rls_0, @__gql_rls_1)");
 
-        _renderer.Render(_builder.Build([Filter("region", "EQ", "null")], Orders), TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql
+        _renderer.Render(_builder.Build([Filter("region", "EQ", "null")], Orders), TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql
             .ShouldBe("\"region\" IS NULL");
-        _renderer.Render(_builder.Build([Filter("region", "NEQ", "null")], Orders), TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql
+        _renderer.Render(_builder.Build([Filter("region", "NEQ", "null")], Orders), TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql
             .ShouldBe("\"region\" IS NOT NULL");
     }
 
@@ -78,7 +78,7 @@ public sealed class TypedRowFilterBuilderTests
             ignoreOrder: true);
 
         // The AST holds no literal value other than the structural 1 = 0 / 1 = 1: only parameter nodes carry values.
-        var rendered = _renderer.Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target);
+        var rendered = _renderer.Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target);
         rendered.Sql.ShouldNotContain("EU");
         rendered.Sql.ShouldNotContain("100");
         rendered.Sql.ShouldNotContain("'");
@@ -95,7 +95,7 @@ public sealed class TypedRowFilterBuilderTests
             Filter("region", "EQ", "\"US\"", group: 1)
         ], Orders);
 
-        _renderer.Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql
+        _renderer.Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql
             .ShouldBe("((\"region\" = @__gql_rls_0 AND \"amount\" > @__gql_rls_1) OR \"region\" = @__gql_rls_2)");
     }
 
@@ -131,8 +131,8 @@ public sealed class TypedRowFilterBuilderTests
         var a = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = [userAttribute] };
         var d = new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Deny, RowFilters = [userAttribute] };
 
-        _renderer.Render(_builder.BuildCombined([a], [], Orders)!, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql.ShouldBe("1 = 0");
-        _renderer.Render(_builder.BuildCombined([], [d], Orders)!, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql.ShouldBe("NOT (1 = 1)");
+        _renderer.Render(_builder.BuildCombined([a], [], Orders)!, TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql.ShouldBe("1 = 0");
+        _renderer.Render(_builder.BuildCombined([], [d], Orders)!, TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql.ShouldBe("NOT (1 = 1)");
     }
 
     [Theory]
@@ -177,7 +177,7 @@ public sealed class TypedRowFilterBuilderTests
         var sut = new RowFilterSqlBuilder();
 
         var typed = _builder.BuildCombined([a1], [d1], Orders)!;
-        var rendered = _renderer.Render(typed, TargetSqlDialect.Sqlite, RowFilterAliases.Target);
+        var rendered = _renderer.Render(typed, TargetSqlDialect.PostgreSql, RowFilterAliases.Target);
         var legacySql = sut.BuildCombinedRowFilter([a1], [d1], DatabaseDialect.Sqlite)!;
 
         using var connection = SeedOrders();
@@ -199,7 +199,7 @@ public sealed class TypedRowFilterBuilderTests
     {
         var json = JsonSerializer.Serialize(hostile);
         var predicate = _builder.Build([Filter("region", "EQ", json)], Orders);
-        var rendered = _renderer.Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target);
+        var rendered = _renderer.Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target);
 
         rendered.Sql.ShouldNotContain(hostile.Length > 3 ? hostile[..4] : hostile);
         rendered.Parameters.Single().Value.ShouldBe(hostile);
@@ -228,8 +228,8 @@ public sealed class TypedRowFilterBuilderTests
             pkColumn: "id",
             whereColumn: null);
 
-        _renderer.Render(predicate, TargetSqlDialect.Sqlite, "o").Sql.ShouldContain("\"o\".\"customer_id\"");
-        _renderer.Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql.ShouldContain("\"autheris_target\".\"customer_id\"");
+        _renderer.Render(predicate, TargetSqlDialect.PostgreSql, "o").Sql.ShouldContain("\"o\".\"customer_id\"");
+        _renderer.Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql.ShouldContain("\"autheris_target\".\"customer_id\"");
     }
 
     [Fact]
@@ -237,7 +237,7 @@ public sealed class TypedRowFilterBuilderTests
     {
         var predicate = _builder.Build([Filter("region", "EQ", "\"EU\"")], Orders);
 
-        Should.Throw<ArgumentException>(() => _renderer.Render(predicate, TargetSqlDialect.Sqlite, "a\"; --"));
+        Should.Throw<ArgumentException>(() => _renderer.Render(predicate, TargetSqlDialect.PostgreSql, "a\"; --"));
         Should.Throw<ArgumentOutOfRangeException>(() => _renderer.Render(predicate, (TargetSqlDialect)999, RowFilterAliases.Target));
     }
 

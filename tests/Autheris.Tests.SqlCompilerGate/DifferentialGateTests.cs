@@ -169,9 +169,6 @@ public abstract class DifferentialGateBase<TDatabase>(DifferentialFixture<TDatab
     }
 }
 
-public sealed class SqliteDifferentialGateTests(DifferentialFixture<SqliteGateDatabase> fixture, ITestOutputHelper output)
-    : DifferentialGateBase<SqliteGateDatabase>(fixture, output), IClassFixture<DifferentialFixture<SqliteGateDatabase>>;
-
 public sealed class PostgreSqlDifferentialGateTests(DifferentialFixture<PostgreSqlGateDatabase> fixture, ITestOutputHelper output)
     : DifferentialGateBase<PostgreSqlGateDatabase>(fixture, output), IClassFixture<DifferentialFixture<PostgreSqlGateDatabase>>;
 

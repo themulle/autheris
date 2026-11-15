@@ -120,8 +120,7 @@ public sealed class UserLikeEscapeEmissionTests
     [Theory]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.DuckDb)]
-    [InlineData(TargetSqlDialect.Sqlite)]
-    public void Oracle_DuckDb_Sqlite_WithoutExplicitEscape_RemainsUntouched(TargetSqlDialect dialect)
+    public void Oracle_DuckDb_WithoutExplicitEscape_RemainsUntouched(TargetSqlDialect dialect)
     {
         var compiled = Compile("SELECT id FROM orders WHERE name LIKE 'a[b]%'", dialect);
 

@@ -261,7 +261,7 @@ public sealed class SqlTableReadExecutorTests
             await setup.ExecuteNonQueryAsync();
         }
 
-        var env = new TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
+        var env = new TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.PostgreSql)
             .Table("orders", null, "id:INTEGER", "status", "email", "shape")
             .Policy("orders", SqliteGovernedSqlService.RowPolicy("status", "open"))
             .Mask("orders", "email", SqliteGovernedSqlService.Redact("email", "***"));

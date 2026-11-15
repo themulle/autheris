@@ -56,7 +56,7 @@ public sealed class TableAccessPolicyCallerAttributeTests : IDisposable
     private static TableMetadata Meta() => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "SQLite", DataSourceType = DataSourceType.Sql },
+        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
         Columns = [new TableColumn { ColumnName = "cost_center", DataType = "TEXT" }, new TableColumn { ColumnName = "id", DataType = "INTEGER" }]
     };
 

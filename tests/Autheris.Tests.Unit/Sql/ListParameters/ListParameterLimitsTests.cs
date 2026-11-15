@@ -22,7 +22,6 @@ public class ListParameterLimitsTests
         Effective(5000, TargetSqlDialect.Databricks).ShouldBe(900);      // 1,000 - 100
         Effective(1000, TargetSqlDialect.PostgreSql).ShouldBe(1000);
         Effective(10_000, TargetSqlDialect.PostgreSql).ShouldBe(10_000);
-        Effective(1000, TargetSqlDialect.Sqlite).ShouldBe(1000);
         Effective(1000, TargetSqlDialect.DuckDb).ShouldBe(1000);
     }
 

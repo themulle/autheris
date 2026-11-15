@@ -166,7 +166,7 @@ public sealed class DatasetDataEndpointErrorTests
     [Fact]
     public async Task ProviderError_StaysMappedAs502()
     {
-        var (status, body, _) = await RunAsync(new TrinoSqlEngine.Ast.Emit.GovernedSqlException(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ProviderError, TrinoSqlEngine.TargetSqlDialect.Sqlite));
+        var (status, body, _) = await RunAsync(new TrinoSqlEngine.Ast.Emit.GovernedSqlException(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ProviderError, TrinoSqlEngine.TargetSqlDialect.PostgreSql));
 
         status.ShouldBe(502);
         body.GetProperty("code").GetString().ShouldBe("SQL_PROVIDER_ERROR");

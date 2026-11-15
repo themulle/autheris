@@ -43,7 +43,7 @@ public sealed class TreeSecuredSourceWiringTests
             SecuredTreeHarness.Meta(SecuredTreeHarness.OrdersId),
             SecuredTreeHarness.Decision(SecuredTreeHarness.OrdersId, SecuredTreeHarness.ExistsPolicy()),
             "t1");
-        var source = await builder.BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.Sqlite, CancellationToken.None);
+        var source = await builder.BuildAsync(access, SecuredTreeHarness.DataSource, DatabaseDialect.PostgreSql, CancellationToken.None);
 
         source.Sql.ShouldContain("FROM");
     }

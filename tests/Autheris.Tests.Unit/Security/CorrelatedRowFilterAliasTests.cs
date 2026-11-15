@@ -83,7 +83,7 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
             RequestedFields: ["id", "amount"]);
 
         // The correlated row policy (EXISTS over customers of country CH) is applied by the compiler, not spliced as text.
-        var env = new TestCompileEnv(TargetSqlDialect.Sqlite)
+        var env = new TestCompileEnv(TargetSqlDialect.PostgreSql)
             .Table("invoices", null, "id:INTEGER", "customer_id:INTEGER", "amount:INTEGER")
             .Table("customers", null, "id:INTEGER", "country")
             .Policy("invoices", CustomerCountryPolicy());
@@ -123,7 +123,7 @@ INSERT INTO invoices VALUES (10, 1, 100), (11, 2, 200), (12, 1, 300);";
         new BinaryExpression(Col("amount"), BinaryOperator.Equal, new PolicyParameterExpression("__pol_amount", SqlParameterType.Int64)),
         new Dictionary<string, PolicyValue> { ["__pol_amount"] = new(1L, SqlParameterType.Int64) });
 
-    private static TestCompileEnv Env(PolicyPredicate policy) => new TestCompileEnv(TargetSqlDialect.Sqlite)
+    private static TestCompileEnv Env(PolicyPredicate policy) => new TestCompileEnv(TargetSqlDialect.PostgreSql)
         .Table("orders", "tenant_id", "id:INTEGER", "customer_id:INTEGER", "amount:INTEGER", "tenant_id")
         .Table("customers", "tenant_id", "id:INTEGER", "country", "tenant_id")
         .Policy("orders", policy);

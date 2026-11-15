@@ -64,7 +64,6 @@ public sealed class RowFilterKeySetTextBudgetTests
         {
             TargetSqlDialect.SqlServer => ("int", "nvarchar(64)"),
             TargetSqlDialect.Oracle => ("NUMBER(10)", "VARCHAR2(64)"),
-            TargetSqlDialect.Sqlite => ("integer", "text"),
             _ => ("integer", "varchar(64)")
         };
         var provider = new Policies(new Dictionary<TableIdentity, PolicyPredicate> { [Air1] = predicate });
@@ -111,7 +110,6 @@ public sealed class RowFilterKeySetTextBudgetTests
     [InlineData(TargetSqlDialect.SqlServer)]
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.Oracle)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     public void EstimateIsUpperBound_PerDialect_SEC_RF107_18(TargetSqlDialect dialect)
     {
         // A long user statement, so that every list fits the compiler budget and the real emitted length can be measured.

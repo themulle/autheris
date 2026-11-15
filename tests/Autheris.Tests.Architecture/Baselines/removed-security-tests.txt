@@ -160,3 +160,30 @@ Autheris.Tests.Unit.Audit.Harness.BufferStaysBounded_WhileStoreFails	#WP-SIMPL-4
 Autheris.Tests.Unit.Audit.Harness.FailureLog_DoesNotContainActorOrTenantValues	#WP-SIMPL-42	Deleted legacy ConsumerUsageFlushWorker; flush logging covered by UsageFlushWorker
 Autheris.Tests.Unit.Audit.Harness.PersistentFailure_ReEmitsError_AtBoundedInterval	#WP-SIMPL-42	Deleted legacy ConsumerUsageFlushWorker; flush retry logging covered by UsageFlushWorker
 Autheris.Tests.Unit.Audit.Harness.PersistentFailure_ReEmitsError_EveryHundredFailures	#WP-SIMPL-42	Deleted legacy ConsumerUsageFlushWorker; flush retry logging covered by UsageFlushWorker
+TrinoSqlEngine.Tests.Ast.DateTruncQuarterTests.SEC_PGP_04_DateTrunc_Quarter_UnsupportedDialect_Is4xx_NoUnitTextToProvider	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Ast.SqleBuilderCorrectnessTests.UnaryPlus_Column_InSelect_Sqlite	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Ast.SqleBuilderCorrectnessTests.UnaryPlus_InDeleteWhere_Sqlite_NoNot	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.AstSecurityDmlPrecedenceTests.Delete_With_IsDistinctFrom_In_Sqlite_Emits_Parentheses_For_Composite_Operands	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqlFunctionAllowlistParityTests.SqliteDefaultAllowlist_IsPinned	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqlFunctionAllowlistParityTests.Sqlite_DoesNotAdvertiseConvertTimezone	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqleSetOperationPrecedenceTests.ExceptThenIntersect_Sqlite_Rejected	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqleSetOperationPrecedenceTests.IntersectThenUnion_Sqlite_Allowed	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.DateAdd_Bound_AmountIsBoundNumeric	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.DateAdd_NonLiteralOrNonIntegerArgument_IsRejected	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.DateTrunc_UnknownUnit_Rejected	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.EmptyInList_DoesNotRemoveRowPolicy	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.EmptyInList_ParameterHeavyOperand_StaysInsideTheParameterCap	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.EmptyInList_StillVisitsOperand_DeniedColumnRejected	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.EmptyInList_SubqueryOperand_KeepsThePolicyInEveryCopy	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.Extract_Bound_EmitsNoStringLiteral	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.LongChainOfDateFunctions_StaysInsideTheParameterCap	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Compiler.SqliteDatePartParityTests.TypedDateLiteral_Invalid_RejectedWithoutEcho	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Governance.PolicyKeyQueryCompilerTests.Example1_Sqlite_Golden	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Governance.PolicyKeyQueryCompilerTests.Example2_Sqlite_Golden	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Security.SqlePolicyLikeConcatTests.PolicyLike_ConcatPrefix_Sqlite_Rejected	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+Autheris.Tests.Unit.Sql.Policy.KeySetValueConverterTests.Sqlite_AnyInteger_IsInt64Wide	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+Autheris.Tests.Unit.Sql.Policy.RowFilterKeySetLoaderTests.Sqlite_BindsRowLimitParameter_AndAllCompiledParameters_D_WPC_8	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+Autheris.Tests.Unit.Sql.Policy.RowFilterKeySetLoaderTests.Sqlite_SessionIsQueryOnly_WhileTheKeyQueryRuns_SEC_RF107_12	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+TrinoSqlEngine.Tests.Ast.DialectGenerators.UserLikeEscapeEmissionTests.Oracle_DuckDb_Sqlite_WithoutExplicitEscape_RemainsUntouched	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+Autheris.Tests.Unit.WebSqlParserGatewaySecurityTests.P05_SqliteConnection_ExecutesWithoutSessionInitialization	#WP-SIMPL-31	feature deleted, WP-SIMPL-31
+Autheris.Tests.Unit.WebSqlParserGatewaySecurityTests.P06_DollarQuoting_IsRejectedForSqliteTargets	#WP-SIMPL-31	feature deleted, WP-SIMPL-31

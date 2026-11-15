@@ -37,7 +37,6 @@ public sealed class CompileRequestFactoryTests
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.SqlServer)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     public void Create_MapsTargetDialect(TargetSqlDialect dialect) => Create(dialect).TargetDialect.ShouldBe(dialect);
 
@@ -93,7 +92,6 @@ public sealed class CompileRequestFactoryTests
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, false)]
     [InlineData(TargetSqlDialect.SqlServer, true)]
-    [InlineData(TargetSqlDialect.Sqlite, true)]
     public void Create_MapsTokenGuards_PerDialect(TargetSqlDialect dialect, bool rejectBracketLexerDifferentials)
     {
         var guards = Create(dialect).TokenGuards;
@@ -153,9 +151,9 @@ public sealed class CompileRequestFactoryTests
     [Fact]
     public void Create_NullArguments_Throw()
     {
-        Should.Throw<ArgumentNullException>(() => CompileRequestFactory.Create(null!, TargetSqlDialect.Sqlite, new WebSqlOptions(), false, 1, new HashSet<string>()));
-        Should.Throw<ArgumentNullException>(() => CompileRequestFactory.Create(Policy(), TargetSqlDialect.Sqlite, null!, false, 1, new HashSet<string>()));
-        Should.Throw<ArgumentNullException>(() => CompileRequestFactory.Create(Policy(), TargetSqlDialect.Sqlite, new WebSqlOptions(), false, 1, null!));
+        Should.Throw<ArgumentNullException>(() => CompileRequestFactory.Create(null!, TargetSqlDialect.PostgreSql, new WebSqlOptions(), false, 1, new HashSet<string>()));
+        Should.Throw<ArgumentNullException>(() => CompileRequestFactory.Create(Policy(), TargetSqlDialect.PostgreSql, null!, false, 1, new HashSet<string>()));
+        Should.Throw<ArgumentNullException>(() => CompileRequestFactory.Create(Policy(), TargetSqlDialect.PostgreSql, new WebSqlOptions(), false, 1, null!));
     }
 
     [Fact]

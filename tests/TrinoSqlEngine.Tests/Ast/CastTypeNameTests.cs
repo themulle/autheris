@@ -111,7 +111,6 @@ public sealed class CastTypeNameTests
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     public void TryCast_WithoutSupport_IsRejected(TargetSqlDialect dialect)
     {

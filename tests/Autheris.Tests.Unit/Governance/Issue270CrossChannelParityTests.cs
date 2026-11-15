@@ -84,7 +84,7 @@ public sealed class Issue270CrossChannelParityTests
         var metadata = new TableMetadata
         {
             Identifier = _empTableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql, DisplayName = "Employees" },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql, DisplayName = "Employees" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
@@ -185,7 +185,7 @@ public sealed class Issue270CrossChannelParityTests
         var metaTenantA = new TableMetadata
         {
             Identifier = _empTableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
             Columns = [new TableColumn { ColumnName = "account_id", DataType = "bigint" }],
             PrimaryKeyColumns = ["account_id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)

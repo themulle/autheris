@@ -16,7 +16,6 @@ public static class SqlDialectGeneratorFactory
             [TargetSqlDialect.Ansi] = new AnsiDialectGenerator(),
             [TargetSqlDialect.SqlServer] = new SqlServerDialectGenerator(),
             [TargetSqlDialect.PostgreSql] = new PostgreSqlDialectGenerator(),
-            [TargetSqlDialect.Sqlite] = new SqliteDialectGenerator(),
             [TargetSqlDialect.DuckDb] = new DuckDbDialectGenerator(),
             [TargetSqlDialect.Oracle] = new OracleDialectGenerator(),
             [TargetSqlDialect.Databricks] = new DatabricksDialectGenerator()

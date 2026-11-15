@@ -149,10 +149,6 @@ public sealed class KeySetValueConverterTests
         => Convert(Create(TargetSqlDialect.PostgreSql, "uuid", "uuid"), out _, "3f2504e0-4f89-41d3-9a0c-0305e82c3301", text).ShouldBeFalse();
 
     [Fact]
-    public void Sqlite_AnyInteger_IsInt64Wide()
-        => Convert(Create(TargetSqlDialect.Sqlite, "integer", "int"), out var keys, long.MaxValue).ShouldBeTrue();
-
-    [Fact]
     public void EmptySet_Converts_ToAnEmptySet()
     {
         Convert(Create(TargetSqlDialect.SqlServer, "int", "int"), out var keys).ShouldBeTrue();

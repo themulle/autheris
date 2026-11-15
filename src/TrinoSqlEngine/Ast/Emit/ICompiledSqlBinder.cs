@@ -519,17 +519,3 @@ public sealed class DatabricksCompiledSqlBinder : DbCommandCompiledSqlBinder
 {
     protected override TargetSqlDialect Dialect => TargetSqlDialect.Databricks;
 }
-
-/// <summary>
-/// SQLite binder (<c>Microsoft.Data.Sqlite</c>): markers are <c>?1</c>, <c>?2</c> ... and the parameters are bound by the same name.
-/// </summary>
-public sealed class SqliteCompiledSqlBinder : DbCommandCompiledSqlBinder
-{
-    protected override TargetSqlDialect Dialect => TargetSqlDialect.Sqlite;
-
-    /// <summary>Microsoft.Data.Sqlite stores a decimal as TEXT; a SQLite numeric literal such as 1.5 is a REAL.</summary>
-    protected override bool DecimalAsDouble => true;
-
-    /// <summary>The provider matches a numbered marker by its full text (<c>?1</c>), prefix included.</summary>
-    protected override string ParameterNameFor(BoundParameter parameter) => parameter.Marker;
-}

@@ -210,7 +210,7 @@ public sealed class IntegrationGapATests
         }
 
         // The mask comes from the compiler (typed MaskSpec), not from the connector.
-        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.Sqlite)
+        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.PostgreSql)
             .Table("employees", null, "id:INTEGER", "name", "ssn")
             .Mask("employees", "ssn", Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService.Redact("ssn", "***"));
         var governed = new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(keepAlive, env);

@@ -10,7 +10,6 @@ public sealed class TimeZoneCapabilityTests
     [InlineData(TargetSqlDialect.SqlServer, true)]
     [InlineData(TargetSqlDialect.PostgreSql, true)]
     [InlineData(TargetSqlDialect.DuckDb, true)]
-    [InlineData(TargetSqlDialect.Sqlite, false)]
     [InlineData(TargetSqlDialect.Oracle, false)]
     [InlineData(TargetSqlDialect.Databricks, false)]
     public void TheCapabilityFlagIsSetOnlyForTheDialectsWithARule(TargetSqlDialect dialect, bool expected) =>

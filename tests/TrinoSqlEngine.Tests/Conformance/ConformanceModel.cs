@@ -28,14 +28,13 @@ internal sealed record ConformanceFixture(
 
 internal sealed record ConformanceFile(string Dialect, IReadOnlyList<ConformanceFixture> Cases);
 
-/// <summary>The six production dialects of the G2 gate.</summary>
+/// <summary>The five non-ANSI production dialects of the G2 gate.</summary>
 internal static class ConformanceDialects
 {
     public static readonly IReadOnlyList<(string Name, TargetSqlDialect Dialect)> All = new[]
     {
         ("PostgreSql", TargetSqlDialect.PostgreSql),
         ("SqlServer", TargetSqlDialect.SqlServer),
-        ("Sqlite", TargetSqlDialect.Sqlite),
         ("Oracle", TargetSqlDialect.Oracle),
         ("DuckDb", TargetSqlDialect.DuckDb),
         ("Databricks", TargetSqlDialect.Databricks)

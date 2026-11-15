@@ -97,7 +97,7 @@ public sealed class TreeVsCompilePolicyParityTests : IDisposable
 
     private List<(long Id, string? Email)> ViaCompile(string tenant, PolicyPredicate? policy, bool masked)
     {
-        var env = new TestCompileEnv(TargetSqlDialect.Sqlite)
+        var env = new TestCompileEnv(TargetSqlDialect.PostgreSql)
             .Table("orders", "tenant_id", "id:INTEGER", "email", "amount:INTEGER", "tenant_id");
         if (policy != null)
         {
@@ -111,9 +111,13 @@ public sealed class TreeVsCompilePolicyParityTests : IDisposable
 
         var compiled = env.Compile("SELECT id, email FROM orders ORDER BY id", tenant);
 
+        _connection.CreateFunction("textsend", (string? s) => s);
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = compiled.Sql;
-        CompiledSqlBinders.For(TargetSqlDialect.Sqlite).Bind(cmd, compiled, new Dictionary<string, object?>());
+        foreach (var p in compiled.Parameters)
+        {
+            cmd.Parameters.AddWithValue(p.Marker, p.Value ?? DBNull.Value);
+        }
         using var reader = cmd.ExecuteReader();
         var rows = new List<(long, string?)>();
         while (reader.Read())

@@ -142,7 +142,6 @@ public static class GateModel
     /// <summary>The target dialect of the compiler for a gate database.</summary>
     public static TargetSqlDialect ToTarget(GateDialect dialect) => dialect switch
     {
-        GateDialect.Sqlite => TargetSqlDialect.Sqlite,
         GateDialect.PostgreSql => TargetSqlDialect.PostgreSql,
         GateDialect.SqlServer => TargetSqlDialect.SqlServer,
         GateDialect.Oracle => TargetSqlDialect.Oracle,

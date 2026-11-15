@@ -53,4 +53,16 @@ public class CatalogTypeMapTests
     [InlineData(TargetSqlDialect.Ansi, "integer")]
     public void UnknownOrUnsupportedTypes_HaveNoCast(TargetSqlDialect dialect, string? catalogType) =>
         Assert.False(CatalogTypeMap.TryResolve(dialect, catalogType, out _, out _));
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Unsupported_dialect_resolution_fails_closed()
+    {
+        foreach (var dialect in new[] { (TargetSqlDialect)999, (TargetSqlDialect)(-1), TargetSqlDialect.Ansi, TargetSqlDialect.Databricks })
+        {
+            Assert.False(CatalogTypeMap.TryResolve(dialect, "varchar(10)", out string native, out bool isText));
+            Assert.Equal(string.Empty, native);
+            Assert.False(isText);
+        }
+    }
 }

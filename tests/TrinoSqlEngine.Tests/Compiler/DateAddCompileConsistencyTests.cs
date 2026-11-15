@@ -49,7 +49,6 @@ public class DateAddCompileConsistencyTests
     [InlineData(TargetSqlDialect.SqlServer)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.DuckDb)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     public void ConformanceBuild_UsesTheCompilerFunctionMap(TargetSqlDialect dialect)
     {
         // The statement the conformance gate emits must be the one Compile would emit: same function map.

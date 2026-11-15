@@ -232,7 +232,7 @@ public class CheckedDmlExecutorMutationTests
     public async Task ExecuteAsync_StatementOfAnotherDialect_IsRefusedBeforeAnythingRuns()
     {
         var conn = new YConn(ConnectionState.Closed);
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Executor().ExecuteAsync(conn, Dml("UPDATE t SET a = 1", TargetSqlDialect.Sqlite), NoValues));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Executor().ExecuteAsync(conn, Dml("UPDATE t SET a = 1", TargetSqlDialect.PostgreSql), NoValues));
         Assert.Equal("The compiled SQL was generated for another dialect.", ex.Message);
         Assert.Equal(0, conn.OpenCalls);
         Assert.Null(conn.BeganWith);
@@ -244,7 +244,7 @@ public class CheckedDmlExecutorMutationTests
         var conn = new YConn();
         var tx = conn.NewTx();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            Executor().ExecuteInTransactionAsync(tx, Dml("UPDATE t SET a = 1", TargetSqlDialect.Sqlite), NoValues, new CheckedDmlLimits(0, 0)));
+            Executor().ExecuteInTransactionAsync(tx, Dml("UPDATE t SET a = 1", TargetSqlDialect.PostgreSql), NoValues, new CheckedDmlLimits(0, 0)));
         Assert.Equal("The compiled SQL was generated for another dialect.", ex.Message);
         Assert.Equal(1, tx.Rollbacks);
         Assert.Equal(0, tx.Commits);
@@ -256,7 +256,7 @@ public class CheckedDmlExecutorMutationTests
     {
         var conn = new YConn();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            Executor(TargetSqlDialect.Databricks).ExecuteInTransactionAsync(conn.NewTx(), Dml("UPDATE t SET a = 1", TargetSqlDialect.Sqlite), NoValues, new CheckedDmlLimits(0, 0)));
+            Executor(TargetSqlDialect.Databricks).ExecuteInTransactionAsync(conn.NewTx(), Dml("UPDATE t SET a = 1", TargetSqlDialect.PostgreSql), NoValues, new CheckedDmlLimits(0, 0)));
         Assert.Equal("The compiled SQL was generated for another dialect.", ex.Message);
         Assert.Equal(0, conn.CommandsCreated);
     }

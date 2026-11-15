@@ -37,7 +37,7 @@ public sealed class TypedRowFilterBuilderAttributeTests
 
     private static CallerAttributeSet Outcome(string name, CallerAttributeResult result) => new(new Dictionary<string, CallerAttributeResult> { [name] = result });
 
-    private string Render(PolicyPredicate predicate) => _renderer.Render(predicate, TargetSqlDialect.Sqlite, RowFilterAliases.Target).Sql;
+    private string Render(PolicyPredicate predicate) => _renderer.Render(predicate, TargetSqlDialect.PostgreSql, RowFilterAliases.Target).Sql;
 
     private PolicyPredicate Allow(CallerAttributeSet? set, params ConsentRowFilter[] filters) =>
         _builder.BuildCombined([new Consent { TenantId = Autheris.Tests.Common.TestTenants.Default, Effect = ConsentEffect.Allow, RowFilters = filters }], [], Orders, null, set)!;

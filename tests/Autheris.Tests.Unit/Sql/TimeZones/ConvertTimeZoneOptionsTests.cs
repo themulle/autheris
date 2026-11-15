@@ -60,7 +60,6 @@ public sealed class ConvertTimeZoneOptionsTests
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.SqlServer)]
     [InlineData(TargetSqlDialect.DuckDb)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     public void TheAllowlistBuilderNeverAdmitsTheRelatedNamesEvenIfAskedTo(TargetSqlDialect dialect)
     {
         var allowlist = SqlFunctionAllowlists.Build(dialect, ["timezone", "AT_TIMEZONE", "with_timezone", "switchoffset", "todatetimeoffset", "timezone_hour", "timezone_minute", "abs"]);
@@ -69,8 +68,6 @@ public sealed class ConvertTimeZoneOptionsTests
             allowlist.ShouldNotContain(name);
         }
 
-        // GAP-019: SQLite has no zone database and does not advertise convert_timezone.
-        if (dialect == TargetSqlDialect.Sqlite) allowlist.ShouldNotContain("convert_timezone");
-        else allowlist.ShouldContain("convert_timezone");
+        allowlist.ShouldContain("convert_timezone");
     }
 }

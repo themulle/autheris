@@ -221,7 +221,6 @@ public sealed class TimeZoneEmissionTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.Databricks)]
     public void T21_UnsupportedBoundGeneratorsThrowTheUnsupportedCodeEvenForABypassedValidator(TargetSqlDialect dialect)
@@ -233,7 +232,6 @@ public sealed class TimeZoneEmissionTests
 
     [Theory]
     [InlineData(TargetSqlDialect.Ansi)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.Databricks)]
     public void T21_UnboundStringGenerationNeverPassesTheNameThrough(TargetSqlDialect dialect)

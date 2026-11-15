@@ -36,7 +36,6 @@ public class ScalarSubqueryPredicateTests
     [InlineData(TargetSqlDialect.SqlServer)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.PostgreSql)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     public void ScalarSubqueryInTheSelectList_KeepsItsWhereAsACondition(TargetSqlDialect dialect)
     {
         string sql = Sql("SELECT (SELECT count(*) FROM orders) AS n FROM orders WHERE id = 1", dialect);

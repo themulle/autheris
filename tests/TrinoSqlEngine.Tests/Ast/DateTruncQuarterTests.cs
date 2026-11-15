@@ -52,19 +52,6 @@ public sealed class DateTruncQuarterTests
         }
     }
 
-    [Fact]
-    public void DateTrunc_Quarter_Sqlite_ThrowsAstBuild() =>
-        Assert.Throws<AstBuildException>(() => Generate("date_trunc('quarter', ts)", TargetSqlDialect.Sqlite));
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void SEC_PGP_04_DateTrunc_Quarter_UnsupportedDialect_Is4xx_NoUnitTextToProvider()
-    {
-        // SQLite cannot truncate to a quarter: the compile fails with AstBuildException (mapped to 4xx), no SQL with the unit text exists.
-        var ex = Assert.Throws<AstBuildException>(() => Generate("date_trunc('quarter', ts)", TargetSqlDialect.Sqlite));
-        Assert.DoesNotContain("strftime", ex.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
     private static string UnitName(DateUnit unit)
     {
         var method = typeof(SqlDialectGeneratorBase).GetMethod("DateUnitName", BindingFlags.NonPublic | BindingFlags.Static)!;

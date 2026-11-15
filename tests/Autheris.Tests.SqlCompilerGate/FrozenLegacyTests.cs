@@ -40,7 +40,6 @@ public sealed class FrozenLegacyTests
     }
 
     [Theory]
-    [InlineData(GateDialect.Sqlite)]
     [InlineData(GateDialect.PostgreSql)]
     [InlineData(GateDialect.SqlServer)]
     [InlineData(GateDialect.Oracle)]

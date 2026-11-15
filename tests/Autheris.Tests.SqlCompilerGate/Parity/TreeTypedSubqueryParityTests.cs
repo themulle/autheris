@@ -16,8 +16,8 @@ using Xunit.Abstractions;
 /// SQLA-06 follow-up: a typed row policy with a correlated subquery runs in the tree compiler through the secured source (the engine pipeline)
 /// and exposes exactly the rows of the WebSQL compile path on the same database. The tenant wrapper of the engine applies inside the subquery.
 /// </summary>
-public sealed class TreeTypedSubqueryParityTests(ParityFixture<SqliteGateDatabase> fixture, ITestOutputHelper output)
-    : IClassFixture<ParityFixture<SqliteGateDatabase>>
+public sealed class TreeTypedSubqueryParityTests(ParityFixture<PostgreSqlGateDatabase> fixture, ITestOutputHelper output)
+    : IClassFixture<ParityFixture<PostgreSqlGateDatabase>>
 {
     private static SqlIdentifier Id(string name) => new(name, true);
 

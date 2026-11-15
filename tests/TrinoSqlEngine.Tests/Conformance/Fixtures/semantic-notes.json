@@ -19,8 +19,7 @@
     "DuckDb": "semantic-note: LIKE is case-sensitive.",
     "Oracle": "semantic-note: LIKE is case-sensitive (the session NLS_COMP/NLS_SORT is pinned by the gateway).",
     "Databricks": "semantic-note: LIKE is case-sensitive.",
-    "SqlServer": "semantic-note: LIKE follows the column collation (usually case-insensitive).",
-    "Sqlite": "semantic-note: LIKE is ASCII case-insensitive (SEC-ADG-18)."
+    "SqlServer": "semantic-note: LIKE follows the column collation (usually case-insensitive)."
   },
   "literal-013": {
     "Oracle": "semantic-note: the empty string is NULL in Oracle, so the bound '' is NULL (SEC-ADG-17)."
@@ -30,7 +29,6 @@
   },
   "literal-021": {
     "SqlServer": "semantic-note: the boolean literal is emitted as the integer 1 (no boolean type).",
-    "Sqlite": "semantic-note: the boolean literal is emitted as the integer 1 (no boolean type).",
     "Oracle": "semantic-note: the boolean literal is emitted as the integer 1 (no SQL boolean in SELECT lists)."
   },
   "fn-string-009": {

@@ -18,11 +18,6 @@ public class SqleSetOperationPrecedenceTests
             Validate(TargetSqlDialect.Oracle, "SELECT a FROM t UNION SELECT a FROM u INTERSECT SELECT a FROM v"));
 
     [Fact]
-    public void ExceptThenIntersect_Sqlite_Rejected() =>
-        Assert.Throws<SqlCompileNotSupportedException>(() =>
-            Validate(TargetSqlDialect.Sqlite, "SELECT a FROM t EXCEPT SELECT a FROM u INTERSECT SELECT a FROM v"));
-
-    [Fact]
     public void UnionThenIntersect_PostgreSql_EmitsFlat()
     {
         const string sql = "SELECT a FROM t UNION SELECT a FROM u INTERSECT SELECT a FROM v";
@@ -34,17 +29,12 @@ public class SqleSetOperationPrecedenceTests
         Assert.Contains("INTERSECT", emitted);
     }
 
-    [Fact]
-    public void IntersectThenUnion_Sqlite_Allowed() =>
-        Validate(TargetSqlDialect.Sqlite, "SELECT a FROM t INTERSECT SELECT a FROM u UNION SELECT a FROM v");
-
     [Theory]
     [InlineData(TargetSqlDialect.SqlServer, true)]
     [InlineData(TargetSqlDialect.DuckDb, true)]
     [InlineData(TargetSqlDialect.PostgreSql, true)]
     [InlineData(TargetSqlDialect.Databricks, true)]
     [InlineData(TargetSqlDialect.Oracle, false)]
-    [InlineData(TargetSqlDialect.Sqlite, false)]
     public void CapabilityTable_IntersectBindsTighter_ExplicitPerDialect(TargetSqlDialect dialect, bool expected) =>
         Assert.Equal(expected, DialectCapabilityTable.Default.Get(dialect).IntersectBindsTighter);
 }

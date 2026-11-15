@@ -17,14 +17,12 @@ public static class CompiledSqlBinders
     private static readonly PostgreSqlCompiledSqlBinder PostgreSql = new();
     private static readonly OracleCompiledSqlBinder Oracle = new();
     private static readonly DatabricksCompiledSqlBinder Databricks = new();
-    private static readonly SqliteCompiledSqlBinder Sqlite = new();
 
     private static readonly CheckedDmlExecutor SqlServerExecutor = new(SqlServer);
     private static readonly CheckedDmlExecutor DuckDbExecutor = new(DuckDb);
     private static readonly CheckedDmlExecutor PostgreSqlExecutor = new(PostgreSql);
     private static readonly CheckedDmlExecutor OracleExecutor = new(Oracle);
     private static readonly DatabricksCheckedDmlExecutor DatabricksExecutor = new(Databricks);
-    private static readonly CheckedDmlExecutor SqliteExecutor = new(Sqlite);
 
     /// <exception cref="SqlCompileNotSupportedException">Reason Dialect, for Ansi and any dialect without a binder.</exception>
     public static DbCommandCompiledSqlBinder For(TargetSqlDialect dialect)
@@ -55,7 +53,6 @@ public static class CompiledSqlBinders
         TargetSqlDialect.PostgreSql => PostgreSql,
         TargetSqlDialect.Oracle => Oracle,
         TargetSqlDialect.Databricks => Databricks,
-        TargetSqlDialect.Sqlite => Sqlite,
         _ => throw NoBinder(dialect)
     };
 
@@ -67,7 +64,6 @@ public static class CompiledSqlBinders
         TargetSqlDialect.PostgreSql => PostgreSqlExecutor,
         TargetSqlDialect.Oracle => OracleExecutor,
         TargetSqlDialect.Databricks => DatabricksExecutor,
-        TargetSqlDialect.Sqlite => SqliteExecutor,
         _ => throw NoBinder(dialect)
     };
 

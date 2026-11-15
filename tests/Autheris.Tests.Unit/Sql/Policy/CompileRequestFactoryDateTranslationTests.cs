@@ -29,7 +29,7 @@ public sealed class CompileRequestFactoryDateTranslationTests
                 Tenant = new TenantBinding("t", "acme", SqlParameterType.String),
                 Dml = DmlGuardOptions.Strict
             },
-            TargetSqlDialect.Sqlite,
+            TargetSqlDialect.PostgreSql,
             new WebSqlOptions(),
             isDml: false,
             enforcedMaxRows: 10,

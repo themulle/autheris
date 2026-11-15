@@ -236,7 +236,7 @@ internal static class SecurityRegressionCatalog
             new[] { "TrinoSqlEngine.Tests/Security/SecurityMutantGateTests.cs::Mutant_IsKilled", "TrinoSqlEngine.Tests/Security/SecurityTestPolicyTests.cs::SecurityTests_AreNeverRetried" }),
         new("SEC-ADG-14", "session context initializer fails closed for unknown providers", new[] { "WP-F2", "WP-D4" },
             new[] { "Autheris.Tests.Unit/Security/FailClosedDialectDefaultsTests.cs::SEC-ADG-14" }),
-        new("SEC-ADG-15", "HMAC key as a bound parameter", new[] { "WP-A6", "WP-D2", "WP-F6" }, new[] { "Autheris.Tests.Integration/AstCompilerSqliteExecutionTests.cs::Sqlite_HmacMask_UsesGatewayUdf", "Autheris.Tests.Unit/Security/AstCompilerHmacSql4Tests.cs::AstCompiler_HmacMaskedColumn_IsRewritten", "TrinoSqlEngine.Tests/Compiler/OracleGeneratorTests.cs::DBMS_CRYPTO" }),
+        new("SEC-ADG-15", "HMAC key as a bound parameter", new[] { "WP-A6", "WP-D2", "WP-F6" }, new[] { "Autheris.Tests.Unit/Security/AstCompilerHmacSql4Tests.cs::AstCompiler_HmacMaskedColumn_IsRewritten", "TrinoSqlEngine.Tests/Compiler/OracleGeneratorTests.cs::DBMS_CRYPTO" }),
         new("SEC-ADG-16", "side channels: errors and predicate order", new[] { "WP-A3", "WP-X1", "WP-B5" },
             new[] { "TrinoSqlEngine.Tests/Compiler/ColumnBindTypeTests.cs::SEC-ADG-16", "TrinoSqlEngine.Tests/Security/SecurityProbes.cs::ErrorSanitizer_NeverEchoesTheProviderMessage" }),
         new("SEC-ADG-17", "Oracle empty string is NULL", new[] { "WP-F3", "WP-A5" },

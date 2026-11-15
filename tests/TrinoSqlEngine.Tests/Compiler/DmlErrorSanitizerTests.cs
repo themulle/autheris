@@ -101,7 +101,6 @@ public class DmlErrorSanitizerTests
         Assert.Null(DmlErrorSanitizer.TryMap(TargetSqlDialect.SqlServer, new NumberedException(102, "Incorrect syntax")));
         Assert.Null(DmlErrorSanitizer.TryMap(TargetSqlDialect.PostgreSql, new SqlStateException("42601", "syntax error")));
         Assert.Null(DmlErrorSanitizer.TryMap(TargetSqlDialect.Oracle, new InvalidOperationException("x")));
-        Assert.Null(DmlErrorSanitizer.TryMap(TargetSqlDialect.Sqlite, new NumberedException(2627, "x")));
     }
 
     private static void AssertNoLeak(DmlConstraintViolationException error)

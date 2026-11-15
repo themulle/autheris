@@ -84,7 +84,6 @@ public sealed class TypedVirtualFilterTests
     [Theory]
     [InlineData(DatabaseDialect.SqlServer)]
     [InlineData(DatabaseDialect.PostgreSql)]
-    [InlineData(DatabaseDialect.Sqlite)]
     public void CompileTyped_RendersLikeTheLegacyString_WhenTheDefinitionHasNoLiterals(DatabaseDialect dialect)
     {
         var filter = Validated(DavidLastDay, dialect);
@@ -157,8 +156,8 @@ public sealed class TypedVirtualFilterTests
     [Fact]
     public void CompileTyped_ExecutedOnSqlite_FiltersWithTheBoundParameter()
     {
-        var filter = Validated("from conf.client client where target.client_id = client.client_id and client.region = 'EU' and client.level >= 2", DatabaseDialect.Sqlite);
-        var rendered = Render(SqlFilterCompiler.CompileTyped(filter, DatabaseDialect.Sqlite, Engine), DatabaseDialect.Sqlite);
+        var filter = Validated("from conf.client client where target.client_id = client.client_id and client.region = 'EU' and client.level >= 2", DatabaseDialect.PostgreSql);
+        var rendered = Render(SqlFilterCompiler.CompileTyped(filter, DatabaseDialect.PostgreSql, Engine), DatabaseDialect.PostgreSql);
 
         using var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
@@ -205,7 +204,6 @@ public sealed class TypedVirtualFilterTests
     [Theory]
     [InlineData(DatabaseDialect.SqlServer)]
     [InlineData(DatabaseDialect.PostgreSql)]
-    [InlineData(DatabaseDialect.Sqlite)]
     public void Structured_BuildTyped_RendersLikeTheLegacyExists(DatabaseDialect dialect)
     {
         var builder = new StructuredFilterSqlBuilder();

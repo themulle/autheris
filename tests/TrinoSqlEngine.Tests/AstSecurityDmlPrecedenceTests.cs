@@ -28,7 +28,6 @@ public sealed class AstSecurityDmlPrecedenceTests
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.SqlServer)]
     public void Update_With_User_Or_In_Operand_Emits_Parentheses_Preserving_Rls(TargetSqlDialect dialect)
     {
@@ -40,7 +39,6 @@ public sealed class AstSecurityDmlPrecedenceTests
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.SqlServer)]
     public void Delete_With_User_Or_Condition_Does_Not_Bypass_Tenant_Rls(TargetSqlDialect dialect)
     {
@@ -53,7 +51,6 @@ public sealed class AstSecurityDmlPrecedenceTests
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.SqlServer)]
     public void Delete_With_Composite_InSubquery_Operand_Emits_Parentheses(TargetSqlDialect dialect)
     {
@@ -65,23 +62,12 @@ public sealed class AstSecurityDmlPrecedenceTests
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.SqlServer)]
     public void Update_With_Composite_Between_Operand_Emits_Parentheses(TargetSqlDialect dialect)
     {
         var compiled = Compile(dialect, "UPDATE orders SET status = 'active' WHERE (id + amount) BETWEEN 1 AND 10");
 
         Assert.Matches(@"(?i)" + @"\(" + Id + @"\s*\+\s*" + Amount + @"\)\s+BETWEEN", Flatten(compiled.Sql));
-        TenantIsBound(compiled);
-    }
-
-    [Fact]
-    public void Delete_With_IsDistinctFrom_In_Sqlite_Emits_Parentheses_For_Composite_Operands()
-    {
-        var compiled = Compile(TargetSqlDialect.Sqlite, "DELETE FROM orders WHERE (id = 1 OR amount = 2) IS DISTINCT FROM FALSE");
-
-        // SQLite formats IS DISTINCT FROM as IS NOT
-        Assert.Matches(@"(?i)" + @"\(" + Id + @"\s*=\s*\S+\s+OR\s+" + Amount + @"\s*=\s*\S+\)\s+IS\s+NOT", Flatten(compiled.Sql));
         TenantIsBound(compiled);
     }
 }

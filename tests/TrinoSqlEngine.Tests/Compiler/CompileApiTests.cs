@@ -402,7 +402,7 @@ public class CompileApiTests
 
         var changes = new Dictionary<string, CompileRequest>
         {
-            [nameof(CompileRequest.TargetDialect)] = baseRequest with { TargetDialect = TargetSqlDialect.Sqlite },
+            [nameof(CompileRequest.TargetDialect)] = baseRequest with { TargetDialect = TargetSqlDialect.PostgreSql },
             [nameof(CompileRequest.TokenGuards)] = baseRequest with { TokenGuards = SqlTokenSecurityOptions.None },
             [nameof(CompileRequest.Statements)] = baseRequest with { Statements = StatementPermissions.Insert },
             [nameof(CompileRequest.EnforcedMaxRows)] = baseRequest with { EnforcedMaxRows = 7 },

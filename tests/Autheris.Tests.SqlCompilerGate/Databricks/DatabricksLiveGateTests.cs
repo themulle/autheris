@@ -23,7 +23,7 @@ public sealed class DatabricksLiveGateTests
     private static CompileRequest Request(string schema, PolicyScenario scenario, StatementPermissions permissions)
     {
         // Same catalog, tenant binding, consent filter and masks as the other gate legs; only the target dialect is Databricks.
-        var request = new GatePolicies(GateDialect.Sqlite, schema, scenario).AstRequest(permissions);
+        var request = new GatePolicies(GateDialect.PostgreSql, schema, scenario).AstRequest(permissions);
         return request with
         {
             Policy = request.Policy with { Catalog = Catalog(schema) },
@@ -37,15 +37,15 @@ public sealed class DatabricksLiveGateTests
     /// <summary>The gate catalog with Databricks column types (the masks cast to the catalog type of the column).</summary>
     private static InMemoryTableCatalog Catalog(string schema) => new(
         GateModel.Tables.Select(t => new TableCatalogEntry(
-            new TableIdentity(schema, GateModel.Canon(GateDialect.Sqlite, t.Name)),
-            [.. t.Columns.Select(c => new CatalogColumn(GateModel.Canon(GateDialect.Sqlite, c.Name), c.Kind switch
+            new TableIdentity(schema, GateModel.Canon(GateDialect.PostgreSql, t.Name)),
+            [.. t.Columns.Select(c => new CatalogColumn(GateModel.Canon(GateDialect.PostgreSql, c.Name), c.Kind switch
             {
                 ColumnKind.Whole => "bigint",
                 ColumnKind.Fixed => "decimal(18,2)",
                 ColumnKind.Timestamp => "timestamp",
                 _ => "string"
             }))],
-            GateModel.Canon(GateDialect.Sqlite, GateModel.TenantColumn),
+            GateModel.Canon(GateDialect.PostgreSql, GateModel.TenantColumn),
             1)),
         schema);
 

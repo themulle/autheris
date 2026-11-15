@@ -58,7 +58,7 @@ public sealed class GovernancePolicyFactoryTests
             : [new TableColumn { ColumnName = "id" }]
     };
 
-    private static IRowPolicy RegionPolicy(string region = "EU", TargetSqlDialect dialect = TargetSqlDialect.Sqlite)
+    private static IRowPolicy RegionPolicy(string region = "EU", TargetSqlDialect dialect = TargetSqlDialect.PostgreSql)
     {
         var namer = new PolicyParameterNamer("__gql_rls_");
         var parameter = namer.Add(new PolicyValue(region, SqlParameterType.String));
@@ -80,7 +80,7 @@ public sealed class GovernancePolicyFactoryTests
 
     private static ColumnMaskPolicy EmailMask() => new(new Dictionary<string, MaskSpec>
     {
-        ["email"] = SqlDataMaskingProvider.BuildUnkeyedMaskSpec(null, "email", DatabaseDialect.Sqlite)
+        ["email"] = SqlDataMaskingProvider.BuildUnkeyedMaskSpec(null, "email", DatabaseDialect.PostgreSql)
     });
 
     private static GovernedPolicyInput Input(
@@ -88,13 +88,14 @@ public sealed class GovernancePolicyFactoryTests
         new("ds", new TenantId(tenant), decisions, (withoutRls ?? []).ToHashSet(), GovernedSubqueryStrategy.Correlated);
 
     private static CompileRequest Request(GovernancePolicy policy, bool dml = false) =>
-        CompileRequestFactory.Create(policy, TargetSqlDialect.Sqlite, new WebSqlOptions(), dml, 100, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        CompileRequestFactory.Create(policy, TargetSqlDialect.PostgreSql, new WebSqlOptions(), dml, 100, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
 
     private List<object?[]> Run(CompileRequest request, string sql)
     {
         var compiled = _engine.Compile(sql.AsMemory(), request, CancellationToken.None);
         using var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        connection.CreateFunction("textsend", (string? s) => s);
         using (var setup = connection.CreateCommand())
         {
             setup.CommandText = """
@@ -107,7 +108,11 @@ public sealed class GovernancePolicyFactoryTests
         }
 
         using var command = connection.CreateCommand();
-        new SqliteCompiledSqlBinder().Bind(command, compiled, new Dictionary<string, object?>());
+        command.CommandText = compiled.Sql;
+        foreach (var p in compiled.Parameters)
+        {
+            command.Parameters.AddWithValue(p.Marker, p.Value ?? DBNull.Value);
+        }
         var rows = new List<object?[]>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
@@ -317,8 +322,7 @@ public sealed class GovernancePolicyFactoryTests
         var policy = await factory.CreateAsync(
             Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, RegionPolicy()) }), CancellationToken.None);
 
-        // The SQLite tenant comparison needs TEXT affinity; the type comes from the catalog entry, not from the factory.
-        Should.Throw<SecurityException>(() => _engine.Compile("SELECT id FROM orders".AsMemory(), Request(policy), CancellationToken.None));
+        policy.Catalog.Resolve(Orders.ToQualifiedName())!.Columns.Single(c => c.Name == "tenant_id").DataType.ShouldBe("INTEGER");
     }
 
     [Fact]
@@ -381,7 +385,7 @@ public sealed class GovernancePolicyFactoryTests
         var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _);
         var decisions = new Dictionary<TableIdentity, TableAccessDecision>
         {
-            [Orders] = Allowed(OrdersId, RegionPolicy(dialect: TargetSqlDialect.Sqlite)),
+            [Orders] = Allowed(OrdersId, RegionPolicy(dialect: TargetSqlDialect.SqlServer)),
             [Invoices] = Allowed(InvoicesId, RegionPolicy(dialect: TargetSqlDialect.PostgreSql))
         };
 
@@ -405,7 +409,7 @@ public sealed class GovernancePolicyFactoryTests
     {
         var factory = Factory(Catalog(Entry(Orders)), out _);
         var policy = await factory.CreateAsync(
-            Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, RegionPolicy(dialect: TargetSqlDialect.Sqlite)) }),
+            Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, RegionPolicy(dialect: TargetSqlDialect.SqlServer)) }),
             CancellationToken.None);
 
         Should.Throw<SecurityException>(() => CompileRequestFactory.Create(
@@ -431,7 +435,7 @@ public sealed class GovernancePolicyFactoryTests
                     PolicyParameterNamer.Column($"{RowFilterAliases.Target}.id")),
                 null, null),
             null, null)),
-        new Dictionary<string, PolicyValue>()), TargetSqlDialect.Sqlite, Renderer);
+        new Dictionary<string, PolicyValue>()), TargetSqlDialect.PostgreSql, Renderer);
 
     [Fact]
     public async Task PolicySubqueryTable_IsRequestedFromTheProvider_ResolvableForThePolicy_ButNeverAdmitted()
@@ -474,7 +478,7 @@ public sealed class GovernancePolicyFactoryTests
             alias: "dep",
             pkColumn: "id",
             whereColumn: null);
-        var policy = new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.Sqlite, Renderer);
+        var policy = new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.PostgreSql, Renderer);
         var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _);
         var gp = await factory.CreateAsync(Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, policy) }), CancellationToken.None);
         var request = Request(gp);
@@ -592,7 +596,7 @@ public sealed class GovernancePolicyFactoryTests
 
             return Task.FromResult<TableMetadata?>(new TableMetadata
             {
-                Table = new Table { SourceType = "Sqlite", SourceName = isDefault ? "elsewhere" : "ds", SchemaName = id.Schema, TableName = id.TableName, IsActive = true },
+                Table = new Table { SourceType = "PostgreSql", SourceName = isDefault ? "elsewhere" : "ds", SchemaName = id.Schema, TableName = id.TableName, IsActive = true },
                 Identifier = id,
                 Columns = [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "tenant_id" }]
             });
@@ -601,7 +605,7 @@ public sealed class GovernancePolicyFactoryTests
         {
             DataSources = new SqlDataSourceOptions
             {
-                Connections = { ["ds"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "x" } }
+                Connections = { ["ds"] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "x", DefaultSchema = "main" } }
             }
         };
         var provider = new Autheris.Infrastructure.Persistence.Catalog.GovernedCatalogProvider(

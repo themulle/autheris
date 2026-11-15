@@ -21,14 +21,16 @@ using Xunit;
 public sealed class SqlDialectRegistryTests
 {
     [Fact]
-    public void EveryDatabaseDialect_HasProvider_AndConsistentDescriptor()
+    public void EveryAdmittedDatabaseDialect_HasProvider_AndConsistentDescriptor()
     {
         var registry = SqlDialectRegistry.Default;
         var all = registry.GetAll();
 
-        all.Count.ShouldBe(Enum.GetValues<DatabaseDialect>().Length);
+        all.Count.ShouldBe(4);
+        registry.TryGetByName("sqlite", out _).ShouldBeFalse();
+        Should.Throw<NotSupportedException>(() => registry.GetProvider(DatabaseDialect.Sqlite));
 
-        foreach (var dialect in Enum.GetValues<DatabaseDialect>())
+        foreach (var dialect in new[] { DatabaseDialect.SqlServer, DatabaseDialect.PostgreSql, DatabaseDialect.Oracle, DatabaseDialect.Databricks })
         {
             var provider = registry.GetProvider(dialect);
             provider.ShouldNotBeNull();
@@ -55,7 +57,6 @@ public sealed class SqlDialectRegistryTests
     [Theory]
     [InlineData(DatabaseDialect.SqlServer, TargetSqlDialect.SqlServer, true, true, true, "[orders]", "@p0")]
     [InlineData(DatabaseDialect.PostgreSql, TargetSqlDialect.PostgreSql, true, true, true, "\"orders\"", "@p0")]
-    [InlineData(DatabaseDialect.Sqlite, TargetSqlDialect.Sqlite, true, true, true, "\"orders\"", "@p0")]
     [InlineData(DatabaseDialect.Oracle, TargetSqlDialect.Oracle, true, false, false, "\"orders\"", ":p0")]
     [InlineData(DatabaseDialect.Databricks, TargetSqlDialect.Databricks, true, false, false, "`orders`", "@p0")]
     public void Provider_ExposesExpectedCapabilitiesQuotingAndParameterFormatting(
@@ -108,8 +109,8 @@ public sealed class SqlDialectRegistryTests
         var registry = sp.GetRequiredService<ISqlDialectRegistry>();
         var providers = sp.GetServices<ISqlDialectProvider>().ToList();
 
-        providers.Count.ShouldBe(5);
-        registry.GetAll().Count.ShouldBe(5);
+        providers.Count.ShouldBe(4);
+        registry.GetAll().Count.ShouldBe(4);
         registry.TryGetByName("postgres", out var pg).ShouldBeTrue();
         pg!.Descriptor.Dialect.ShouldBe(DatabaseDialect.PostgreSql);
     }
@@ -143,7 +144,6 @@ public sealed class SqlDialectRegistryTests
         var registry = new SqlDialectRegistry([
             SqlServerDialectProvider.Instance,
             PostgreSqlDialectProvider.Instance,
-            SqliteDialectProvider.Instance,
             customOracle,
             customDatabricks
         ]);

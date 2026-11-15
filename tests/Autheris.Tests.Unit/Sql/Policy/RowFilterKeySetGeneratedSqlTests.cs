@@ -407,8 +407,14 @@ public sealed class RowFilterKeySetGeneratedSqlTests
 
     private static List<long> Run(SqliteConnection connection, CompiledSql compiled)
     {
+        connection.CreateFunction("textsend", (string? s) => s);
         using var command = connection.CreateCommand();
-        new SqliteCompiledSqlBinder().Bind(command, compiled, new Dictionary<string, object?>());
+        command.CommandText = compiled.Sql;
+        foreach (var p in compiled.Parameters)
+        {
+            command.Parameters.AddWithValue(p.Marker, p.Value ?? DBNull.Value);
+        }
+
         var rows = new List<long>();
         using var reader = command.ExecuteReader();
         while (reader.Read()) rows.Add(Convert.ToInt64(reader.GetValue(0)));
@@ -418,8 +424,8 @@ public sealed class RowFilterKeySetGeneratedSqlTests
 
     private static List<long> LoadKeys(SqliteConnection connection, ExistsExpression node, PolicyPredicate predicate, ITableCatalog catalog, out CompiledKeyQuery key)
     {
-        key = ((IPolicyKeyQueryCompiler)Compiler).CompileKeyQuery(KeyRequest(node, predicate, catalog, SAir1, TargetSqlDialect.Sqlite), CancellationToken.None);
-        return Run(connection, new CompiledSql(key.Sql, key.Parameters, TargetSqlDialect.Sqlite, SqlStatementClass.Select, [], key.CompilerVersion));
+        key = ((IPolicyKeyQueryCompiler)Compiler).CompileKeyQuery(KeyRequest(node, predicate, catalog, SAir1, TargetSqlDialect.PostgreSql), CancellationToken.None);
+        return Run(connection, new CompiledSql(key.Sql, key.Parameters, TargetSqlDialect.PostgreSql, SqlStatementClass.Select, [], key.CompilerVersion));
     }
 
     /// <summary>Runs the statement with the EXISTS predicate and with every positive site replaced by the keys of its key query; both must agree.</summary>
@@ -427,7 +433,7 @@ public sealed class RowFilterKeySetGeneratedSqlTests
     {
         var catalog = SqliteCatalog();
         const string sql = "SELECT id FROM main.air1";
-        var viaExists = Run(connection, Compile(sql, TargetSqlDialect.Sqlite, catalog, (SAir1, predicate)));
+        var viaExists = Run(connection, Compile(sql, TargetSqlDialect.PostgreSql, catalog, (SAir1, predicate)));
 
         var sites = CorrelatedKeySetSubstitution.FindSites(predicate);
         sites.Count.ShouldBe(expectedSites);
@@ -439,8 +445,8 @@ public sealed class RowFilterKeySetGeneratedSqlTests
                 keys.Select(k => new PolicyValue(k, SqlParameterType.Int64)).ToList(), KeySetPadding.Bucket(keys.Count, 2000), i)));
         }
 
-        var substituted = CorrelatedKeySetSubstitution.Substitute(predicate, map, TargetSqlDialect.Sqlite);
-        var viaKeys = Run(connection, Compile(sql, TargetSqlDialect.Sqlite, catalog, (SAir1, substituted)));
+        var substituted = CorrelatedKeySetSubstitution.Substitute(predicate, map, TargetSqlDialect.PostgreSql);
+        var viaKeys = Run(connection, Compile(sql, TargetSqlDialect.PostgreSql, catalog, (SAir1, substituted)));
         return (viaExists, viaKeys);
     }
 

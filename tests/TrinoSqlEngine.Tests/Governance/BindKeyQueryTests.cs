@@ -25,7 +25,7 @@ public sealed class BindKeyQueryTests
     {
         using var command = new SqliteCommand();
 
-        CompiledSqlBinders.BindKeyQuery(command, Query(Tenant(), Policy()), TargetSqlDialect.Sqlite);
+        CompiledSqlBinders.BindKeyQuery(command, Query(Tenant(), Policy()), TargetSqlDialect.PostgreSql);
 
         Assert.Equal("SELECT DISTINCT dep.pk FROM dep WHERE tenant = $p1 AND kind = $p2 LIMIT 5", command.CommandText);
         Assert.Equal(2, command.Parameters.Count);
@@ -38,7 +38,7 @@ public sealed class BindKeyQueryTests
     {
         using var command = new SqliteCommand();
 
-        CompiledSqlBinders.BindKeyQuery(command, Query(), TargetSqlDialect.Sqlite);
+        CompiledSqlBinders.BindKeyQuery(command, Query(), TargetSqlDialect.PostgreSql);
 
         Assert.Empty(command.Parameters);
     }
@@ -49,7 +49,7 @@ public sealed class BindKeyQueryTests
         using var command = new SqliteCommand();
         var client = new BoundParameter("$p1", "p1", 1, null, SqlParameterType.String, ParameterOrigin.ClientNamed, "who");
 
-        Assert.Throws<MissingClientParameterException>(() => CompiledSqlBinders.BindKeyQuery(command, Query(client), TargetSqlDialect.Sqlite));
+        Assert.Throws<MissingClientParameterException>(() => CompiledSqlBinders.BindKeyQuery(command, Query(client), TargetSqlDialect.PostgreSql));
     }
 
     [Fact]
@@ -58,6 +58,6 @@ public sealed class BindKeyQueryTests
         using var command = new SqliteCommand();
         var client = new BoundParameter("$p1", "p1", 1, "x", SqlParameterType.String, ParameterOrigin.ClientPositional);
 
-        Assert.Throws<SecurityException>(() => CompiledSqlBinders.BindKeyQuery(command, Query(client), TargetSqlDialect.Sqlite));
+        Assert.Throws<SecurityException>(() => CompiledSqlBinders.BindKeyQuery(command, Query(client), TargetSqlDialect.PostgreSql));
     }
 }

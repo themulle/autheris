@@ -15,8 +15,7 @@ public static class DataSourceDialectValidator
         DatabaseDialect.PostgreSql,
         DatabaseDialect.SqlServer,
         DatabaseDialect.Oracle,
-        DatabaseDialect.Databricks,
-        DatabaseDialect.Sqlite
+        DatabaseDialect.Databricks
     ]);
 
     public static readonly string[] AdmittedDialects = Admitted

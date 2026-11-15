@@ -48,7 +48,7 @@ public sealed class GovernedDataQueryServiceTypedPolicyTests
         var predicate = PolicyPredicate.Create(
             new BinaryExpression(PolicyParameterNamer.Column("region"), BinaryOperator.Equal, namer.Add(new PolicyValue("O'Brien", SqlParameterType.String))),
             namer.Values);
-        var policy = new RowPolicyFactory(new PolicyPredicateRenderer()).FromPredicate(predicate, DatabaseDialect.Sqlite);
+        var policy = new RowPolicyFactory(new PolicyPredicateRenderer()).FromPredicate(predicate, DatabaseDialect.PostgreSql);
         var decision = TableAccessDecision.Allowed(Table, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
             .WithAdditionalRowPolicy(policy);
         var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();

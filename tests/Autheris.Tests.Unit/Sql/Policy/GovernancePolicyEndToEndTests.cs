@@ -35,14 +35,14 @@ public sealed class GovernancePolicyEndToEndTests
     private static readonly TableMetadata Meta = new()
     {
         Identifier = OrdersId,
-        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "SQLite", IsActive = true },
+        Table = new Table { SourceName = "ds", SchemaName = "main", TableName = "orders", SourceType = "PostgreSQL", IsActive = true },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "INTEGER" }, new TableColumn { ColumnName = "tenant_id", DataType = "TEXT" },
             new TableColumn { ColumnName = "region", DataType = "TEXT" }, new TableColumn { ColumnName = "email", DataType = "TEXT" },
             new TableColumn { ColumnName = "ssn", DataType = "TEXT" }
         ],
-        ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["email"] = new() { RuleType = "PARTIAL_MASK", KeepPrefix = 1, KeepSuffix = 0 } }
+        ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["email"] = new() { RuleType = "REDACT" } }
     };
 
     private static Consent EuConsent() => new()
@@ -89,11 +89,12 @@ public sealed class GovernancePolicyEndToEndTests
                 new HashSet<TableIdentity>(), GovernedSubqueryStrategy.Correlated)
             { Metadata = new Dictionary<TableIdentity, TableMetadata> { [Orders] = Meta } },
             CancellationToken.None);
-        var request = CompileRequestFactory.Create(policy, TargetSqlDialect.Sqlite, new WebSqlOptions(), isDml: false, 100, new HashSet<string>());
+        var request = CompileRequestFactory.Create(policy, TargetSqlDialect.PostgreSql, new WebSqlOptions(), isDml: false, 100, new HashSet<string>());
 
         var compiled = new FastSqlEngine().Compile(sql.AsMemory(), request, CancellationToken.None);
         using var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
+        connection.CreateFunction("textsend", (string? s) => s);
         using (var setup = connection.CreateCommand())
         {
             setup.CommandText = """
@@ -105,7 +106,11 @@ public sealed class GovernancePolicyEndToEndTests
         }
 
         using var command = connection.CreateCommand();
-        new SqliteCompiledSqlBinder().Bind(command, compiled, new Dictionary<string, object?>());
+        command.CommandText = compiled.Sql;
+        foreach (var p in compiled.Parameters)
+        {
+            command.Parameters.AddWithValue(p.Marker, p.Value ?? DBNull.Value);
+        }
         var rows = new List<object?[]>();
         using var reader = command.ExecuteReader();
         while (reader.Read())
@@ -126,7 +131,7 @@ public sealed class GovernancePolicyEndToEndTests
         // Only the acme/EU row: the US row by the consent filter, 'other' and 'ACME' by the exact tenant comparison.
         rows.Count.ShouldBe(1);
         Convert.ToInt32(rows[0][0]).ShouldBe(1);
-        rows[0][1].ShouldBe("*****");   // typed PARTIAL_MASK on SQLite: the constant-length mask of the legacy SQLite output
+        rows[0][1].ShouldBe("***");
         rows[0][2].ShouldBeNull();                // Deny becomes a typed NULL
     }
 

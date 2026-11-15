@@ -36,7 +36,6 @@ public sealed class SqlServerProjectionAndNullSafeTests
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "\"a\" IS DISTINCT FROM \"b\"", "\"a\" IS NOT DISTINCT FROM \"b\"")]
     [InlineData(TargetSqlDialect.SqlServer, "NOT EXISTS (SELECT [a] INTERSECT SELECT [b])", "EXISTS (SELECT [a] INTERSECT SELECT [b])")]
-    [InlineData(TargetSqlDialect.Sqlite, "\"a\" IS NOT \"b\"", "\"a\" IS \"b\"")]
     [InlineData(TargetSqlDialect.Oracle, "DECODE(\"A\", \"B\", 0, 1) = 1", "DECODE(\"A\", \"B\", 0, 1) = 0")]
     public void IsDistinctFrom(TargetSqlDialect dialect, string distinct, string notDistinct)
     {

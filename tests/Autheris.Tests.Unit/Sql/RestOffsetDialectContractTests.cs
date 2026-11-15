@@ -24,7 +24,6 @@ public sealed class RestOffsetDialectContractTests
 
     [Theory]
     [InlineData("PostgreSQL", "LIMIT", "OFFSET")]
-    [InlineData("Sqlite", "LIMIT", "OFFSET")]
     [InlineData("SqlServer", "FETCH NEXT", "OFFSET")]
     public async Task RestStatement_CompilesToNativePagination(string sourceType, params string[] expectedKeywords)
     {

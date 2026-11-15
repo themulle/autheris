@@ -47,18 +47,6 @@ public sealed class ExtractEmissionTests
     }
 
     [Theory]
-    [InlineData("YEAR", "CAST(strftime('%Y', \"created_at\") AS INTEGER)")]
-    [InlineData("MONTH", "CAST(strftime('%m', \"created_at\") AS INTEGER)")]
-    [InlineData("DAY", "CAST(strftime('%d', \"created_at\") AS INTEGER)")]
-    [InlineData("DAY_OF_YEAR", "CAST(strftime('%j', \"created_at\") AS INTEGER)")]
-    [InlineData("DOW", "((CAST(strftime('%w', \"created_at\") AS INTEGER) + 6) % 7 + 1)")]
-    [InlineData("QUARTER", "((CAST(strftime('%m', \"created_at\") AS INTEGER) + 2) / 3)")]
-    public void Sqlite(string field, string expected)
-    {
-        Assert.Contains(expected, Extract(field, TargetSqlDialect.Sqlite));
-    }
-
-    [Theory]
     [InlineData("YEAR", "EXTRACT(YEAR FROM \"CREATED_AT\")")]
     [InlineData("HOUR", "EXTRACT(HOUR FROM CAST(\"CREATED_AT\" AS TIMESTAMP))")]
     [InlineData("QUARTER", "TO_NUMBER(TO_CHAR(\"CREATED_AT\", 'Q'))")]
@@ -73,8 +61,6 @@ public sealed class ExtractEmissionTests
     [InlineData("EPOCH", TargetSqlDialect.SqlServer)]
     [InlineData("YEAR_OF_WEEK", TargetSqlDialect.SqlServer)]
     [InlineData("TIMEZONE_HOUR", TargetSqlDialect.SqlServer)]
-    [InlineData("WEEK", TargetSqlDialect.Sqlite)]
-    [InlineData("EPOCH", TargetSqlDialect.Sqlite)]
     [InlineData("DOW", TargetSqlDialect.Oracle)]
     public void Unsupported_IsRejected(string field, TargetSqlDialect dialect)
     {

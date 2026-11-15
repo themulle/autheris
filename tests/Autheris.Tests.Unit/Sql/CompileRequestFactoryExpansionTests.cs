@@ -13,7 +13,7 @@ public sealed class CompileRequestFactoryExpansionTests
     {
         var engineDefault = new CompileRequest
         {
-            TargetDialect = TargetSqlDialect.Sqlite,
+            TargetDialect = TargetSqlDialect.PostgreSql,
             Policy = null!,
             TokenGuards = new SqlTokenSecurityOptions()
         }.MaxExpansionFactor;

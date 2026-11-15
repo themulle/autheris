@@ -50,7 +50,7 @@ public sealed class TypedPolicySourcesWiringTests
     private static TableMetadata Meta() => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "SQLite", IsActive = true },
+        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", IsActive = true },
         Columns = [new TableColumn { ColumnName = "id", DataType = "INTEGER" }, new TableColumn { ColumnName = "region", DataType = "TEXT" }]
     };
 
@@ -167,7 +167,7 @@ public sealed class TypedPolicySourcesWiringTests
     private static TableMetadata MetaWithSensitiveColumn() => new()
     {
         Identifier = Orders,
-        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "SQLite", IsActive = true },
+        Table = new Table { SourceName = "sales", SchemaName = "main", TableName = "orders", SourceType = "PostgreSql", IsActive = true },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "INTEGER" },

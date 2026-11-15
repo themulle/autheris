@@ -297,8 +297,7 @@ public sealed class WebSqlParserGatewaySecurityTests
         GovernedSqlExecutionService.TryMapProviderToDialect("npgsql", out _).ShouldBeTrue();
         GovernedSqlExecutionService.TryMapProviderToDialect("mssql", out var mssql).ShouldBeTrue();
         mssql.ShouldBe(DatabaseDialect.SqlServer);
-        GovernedSqlExecutionService.TryMapProviderToDialect("Sqlite", out var sqlite).ShouldBeTrue();
-        sqlite.ShouldBe(DatabaseDialect.Sqlite);
+        GovernedSqlExecutionService.TryMapProviderToDialect("Sqlite", out _).ShouldBeFalse();
         GovernedSqlExecutionService.TryMapProviderToDialect("Oracle", out var oracle).ShouldBeTrue();
         oracle.ShouldBe(DatabaseDialect.Oracle);
         GovernedSqlExecutionService.TryMapProviderToDialect("Databricks", out var databricks).ShouldBeTrue();
@@ -326,31 +325,6 @@ public sealed class WebSqlParserGatewaySecurityTests
         log.Lines.ShouldContain(l => l.Contains("SqliteException") && l.Contains("SET"));
     }
 
-    [Fact]
-    public async Task P05_SqliteConnection_ExecutesWithoutSessionInitialization()
-    {
-        var connectionString = $"Data Source=r4_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        await using var keepAlive = new SqliteConnection(connectionString);
-        await keepAlive.OpenAsync();
-        await using (var setup = keepAlive.CreateCommand())
-        {
-            setup.CommandText =
-                "CREATE TABLE orders (id INTEGER, name TEXT, region TEXT, tenant_id TEXT);" +
-                "INSERT INTO orders VALUES (1, 'a', 'eu', 'tenant_a'), (2, 'b', 'us', 'tenant_b');";
-            await setup.ExecuteNonQueryAsync();
-        }
-
-        var factory = Substitute.For<ISqlConnectionFactory>();
-        factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
-            .Returns(_ => OpenSqliteAsync(connectionString));
-        var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = connectionString });
-        var service = CreateService(options, CreateRepository(CreateTable("orders", "Sqlite")), factory);
-
-        var result = await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELECT id FROM orders"), CreateUser(), new TenantId(Tenant));
-
-        result.RowCount.ShouldBe(1);
-    }
-
     private static async Task<DbConnection> OpenSqliteAsync(string connectionString)
     {
         var connection = new SqliteConnection(connectionString);
@@ -371,14 +345,6 @@ public sealed class WebSqlParserGatewaySecurityTests
         var service = CreatePostgreSqlService();
 
         await Should.ThrowAsync<ArgumentException>(() => RewriteAsync(service, sql));
-    }
-
-    [Fact]
-    public async Task P06_DollarQuoting_IsRejectedForSqliteTargets()
-    {
-        var service = CreateService(CreateOptions(), CreateRepository(CreateTable("orders", "Sqlite")));
-
-        await Should.ThrowAsync<ArgumentException>(() => RewriteAsync(service, "SELECT $$x$$, id FROM orders"));
     }
 
     // =========================================================================
