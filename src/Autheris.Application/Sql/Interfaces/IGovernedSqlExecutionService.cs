@@ -113,6 +113,7 @@ public sealed record GovernedSqlQueryRequest(
     internal ResultByteBudget? ResultByteBudget { get; init; }
 
     internal Autheris.Application.Common.Quota.QueryCostAdmission? Admission { get; init; }
+    public Action<Autheris.Application.Usage.SourceExecutionStats>? OnSourceStats { get; init; }
     public int? PageOffset { get; init; }
     public bool IsPaged { get; init; }
 }
@@ -129,7 +130,8 @@ public sealed record GovernedSqlResult(
     GovernedSqlPageResponse? Page = null,
     string? Next = null,
     string? PagingUnavailable = null,
-    IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null);
+    IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null,
+    [property: System.Text.Json.Serialization.JsonIgnore] Autheris.Application.Usage.SourceExecutionStats SourceStats = default);
 
 public interface IGovernedSqlExecutionService
 {

@@ -2,7 +2,6 @@
 tests/Autheris.Tests.Unit/AccessProfiles/AccessProfileTests.cs
 tests/Autheris.Tests.Unit/AsyncJobEndpointMappingTests.cs
 tests/Autheris.Tests.Unit/Audit/AuditPurgeChainIntegrityTests.cs
-tests/Autheris.Tests.Unit/Audit/ConsumerAggregationSecurityTests.cs
 tests/Autheris.Tests.Unit/Audit/ConsumerAggregationSqlTests.cs
 tests/Autheris.Tests.Unit/Audit/SqliteUnsequencedAuditRowTests.cs
 tests/Autheris.Tests.Unit/Audit/StoredTenantIntegrityTests.cs

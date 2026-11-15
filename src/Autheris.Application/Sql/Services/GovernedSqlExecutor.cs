@@ -144,6 +144,17 @@ public sealed partial class GovernedSqlExecutor
         if (request.OnIndexHints == null)
             request = request with { OnIndexHints = hints => indexHints = hints };
 
+        var sourceStats = default(Autheris.Application.Usage.SourceExecutionStats);
+        var innerOnSourceStats = request.OnSourceStats;
+        request = request with
+        {
+            OnSourceStats = stats =>
+            {
+                sourceStats = stats;
+                innerOnSourceStats?.Invoke(stats);
+            }
+        };
+
         await ExecuteCoreAsync(
             request,
             user,
@@ -184,7 +195,7 @@ public sealed partial class GovernedSqlExecutor
         return new GovernedSqlResult(
             request.Sql, columns.AsReadOnly(), rows.AsReadOnly(), rows.Count, sw.ElapsedMilliseconds,
             isTruncated, columnDescriptions, !_options.Value.IsColumnMaskingDisabled,
-            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints);
+            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints, sourceStats);
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(
@@ -703,6 +714,11 @@ public sealed partial class GovernedSqlExecutor
                     ct).ConfigureAwait(false);
 
                 NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated);
+                if (command is Autheris.Application.Usage.ISourceExecutionStatsProvider statsProvider &&
+                    statsProvider.LastExecutionStats is { } sourceStats)
+                {
+                    request.OnSourceStats?.Invoke(sourceStats);
+                }
                 return compiled.Sql;
             }
             catch

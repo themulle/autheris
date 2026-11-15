@@ -157,7 +157,13 @@ public sealed class SqlConnector : IAutherisConnector
             CopyIngress(session, scope);
             var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
                 ?? throw new InvalidOperationException("No SQL table read executor is registered.");
-            return await executor.ExecuteAsync(dsContext, ct);
+            var rows = await executor.ExecuteAsync(dsContext, ct);
+            if (dsContext.Items.TryGetValue(Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey, out var statsObj) &&
+                statsObj is Autheris.Application.Usage.SourceExecutionStats sourceStats)
+            {
+                session.Items[Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey] = sourceStats;
+            }
+            return rows;
         }
 
         /// <summary>

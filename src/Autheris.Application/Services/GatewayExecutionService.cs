@@ -28,7 +28,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly Autheris.Application.DataSources.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
-    private readonly IConsumerUsageRecorder? _usageRecorder;
+    private readonly Autheris.Application.Usage.IUsageRecorder? _usageRecorder;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _accessDecisionPoint;
 
@@ -58,7 +58,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         TypedPolicySources? typedPolicies = null,
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
-        IConsumerUsageRecorder? usageRecorder = null,
+        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
     {
@@ -194,7 +194,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             await GovernedQueryStages.RecordTableReadAsync(
                 _auditWriter, tenantId, userSid, table, allowed: false,
                 GovernedQueryStages.DecisionDetails(decision), ct,
-                usageRecorder: _usageRecorder).ConfigureAwait(false);
+                usageRecorder: _usageRecorder,
+                dataSource: metadata.Table.SourceName).ConfigureAwait(false);
 
             throw new GatewayForbiddenException($"Access to table '{table}' denied: {string.Join("; ", decision.DeniedReasons)}");
         }
@@ -276,23 +277,24 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             failureDetails["reasons"] = new[] { ex.Message };
             await GovernedQueryStages.RecordTableReadAsync(
                 _auditWriter, tenantId, userSid, table, allowed: false, failureDetails, ct,
-                usageRecorder: _usageRecorder).ConfigureAwait(false);
+                usageRecorder: _usageRecorder,
+                dataSource: metadata.Table.SourceName).ConfigureAwait(false);
             throw;
         }
 
         // SR15-32: ALLOW audit is recorded only after successful validation of all query parameters
         await GovernedQueryStages.RecordTableReadAsync(
             _auditWriter, tenantId, userSid, table, allowed: true,
-            GovernedQueryStages.WithQueryShape(GovernedQueryStages.DecisionDetails(decision), filter, orderBy), ct,
-            usageRecorder: _usageRecorder).ConfigureAwait(false);
+            GovernedQueryStages.WithQueryShape(GovernedQueryStages.DecisionDetails(decision), filter, orderBy), ct).ConfigureAwait(false);
 
         // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
         var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
-        using var readLease = AcquireReadLease(tenantId, userSid, table, maxConcurrentReads);
+        using var readLease = AcquireReadLease(tenantId, userSid, table, maxConcurrentReads, metadata.Table.SourceName);
 
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rawRows;
         bool rlsPushdownAlreadyOccurred = false;
         bool inDbMaskingAlreadyOccurred = false;
+        Autheris.Application.Usage.SourceExecutionStats sourceStats = default;
 
         Autheris.Application.DataSources.Connectors.IAutherisConnector? connector = null;
         bool canUseConnector = _connectorRegistry != null &&
@@ -322,6 +324,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
             rlsPushdownAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.RlsPushdownExecutedKey, out var p1) && p1 is true;
             inDbMaskingAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.InDbColumnMaskingExecutedKey, out var m1) && m1 is true;
+            if (session.Items.TryGetValue(Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey, out var s1) && s1 is Autheris.Application.Usage.SourceExecutionStats st1)
+            {
+                sourceStats = st1;
+            }
         }
         else
         {
@@ -351,6 +357,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
             rlsPushdownAlreadyOccurred = execContext.Items.TryGetValue("RlsPushdownExecuted", out var p2) && p2 is true;
             inDbMaskingAlreadyOccurred = execContext.Items.TryGetValue("InDbColumnMaskingExecuted", out var m2) && m2 is true;
+            if (execContext.Items.TryGetValue(Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey, out var s2) && s2 is Autheris.Application.Usage.SourceExecutionStats st2)
+            {
+                sourceStats = st2;
+            }
         }
 
         // Architecture 2: row filter (unless pushed down), masking exactly once and the response byte cap are the
@@ -370,7 +380,18 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 MaxBytes: maxBytes,
                 RequestedColumns: (requestedFields != null && requestedFields.Count > 0) ? effectiveRequestedFields : null));
 
-        _usageRecorder?.RecordUsage(metadata.Identifier, tenantId, userSid, ConsumerOutcome.Allow, processedRows.Count, rowsMeasured: true);
+        _usageRecorder?.Record(
+            new Autheris.Application.Usage.UsageFact(
+                metadata.Identifier,
+                metadata.Table.SourceName ?? string.Empty,
+                Autheris.Application.Usage.UsageOutcome.Allow,
+                processedRows.Count,
+                RowsMeasured: true,
+                AnalysisCost: 0,
+                Grants: [],
+                Source: sourceStats),
+            tenantId,
+            userSid);
 
         // Issue #94: the transport must not offer a continuation when no deterministic order was possible.
         var unordered = pageItems.TryGetValue(TableQueryItems.Ordering, out var orderingKind) &&
@@ -597,7 +618,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                     ct,
                     eventType: "COLUMN_ACCESS_DENIED",
                     traceId: traceId ?? string.Empty,
-                    usageRecorder: _usageRecorder).ConfigureAwait(false);
+                    usageRecorder: _usageRecorder,
+                    dataSource: metadata.Table.SourceName).ConfigureAwait(false);
 
                 var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
                 throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
@@ -617,7 +639,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         return resolved;
     }
 
-    private IDisposable? AcquireReadLease(TenantId tenantId, Sid userSid, TableIdentifier table, int maxConcurrentReads)
+    private IDisposable? AcquireReadLease(TenantId tenantId, Sid userSid, TableIdentifier table, int maxConcurrentReads, string? dataSource = null)
     {
         if (_concurrencyGate == null || maxConcurrentReads <= 0)
         {
@@ -628,7 +650,18 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         var lease = _concurrencyGate.TryEnter(key, maxConcurrentReads);
         if (lease == null)
         {
-            _usageRecorder?.RecordUsage(table, tenantId, userSid, ConsumerOutcome.DenyRateLimit, 0, false);
+            _usageRecorder?.Record(
+                new Autheris.Application.Usage.UsageFact(
+                    table,
+                    dataSource ?? string.Empty,
+                    Autheris.Application.Usage.UsageOutcome.DenyRateLimit,
+                    Rows: 0,
+                    RowsMeasured: false,
+                    AnalysisCost: 0,
+                    Grants: [],
+                    Source: default),
+                tenantId,
+                userSid);
             throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
         }
         return lease;
@@ -735,7 +768,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 _auditWriter, tenantId, userSid, table, decision.IsAllowed,
                 GovernedQueryStages.DecisionDetails(decision, includeVirtualFilters: false), ct,
                 eventType: "CHILD_RELATION_CHECK",
-                usageRecorder: _usageRecorder).ConfigureAwait(false);
+                usageRecorder: _usageRecorder,
+                dataSource: metadata.Table.SourceName).ConfigureAwait(false);
         }
 
         return decision;

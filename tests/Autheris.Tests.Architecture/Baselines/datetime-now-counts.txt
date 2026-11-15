@@ -109,7 +109,6 @@ src/Autheris.GraphQL/Types/Query.Consent.cs|1
 src/Autheris.Infrastructure/Caching/TableCache/DuckDbPersistentTableCacheStore.cs|1
 src/Autheris.Infrastructure/Caching/TableCache/InMemoryTableCacheStore.cs|1
 src/Autheris.Infrastructure/Idempotency/InMemoryIdempotencyStore.cs|3
-src/Autheris.Infrastructure/Observability/ConsumerUsageRecorder.cs|1
 src/Autheris.Infrastructure/Persistence/AccessProfileStore.cs|2
 src/Autheris.Infrastructure/Persistence/AuditChainAnchorStores.cs|2
 src/Autheris.Infrastructure/Persistence/AuditWormExportService.cs|4

@@ -44,4 +44,9 @@ public static class UsageDiagnostics
         GatewayDiagnostics.Meter.CreateCounter<long>(
             "autheris_usage_grant_validity_conflict_total",
             description: "Accumulated grants whose validity window differs from the stored reference");
+
+    public static readonly Counter<long> UnattributedCounter =
+        GatewayDiagnostics.Meter.CreateCounter<long>(
+            "autheris_usage_unattributed_total",
+            description: "Anonymous or unauthenticated requests not attributed to a usage scope");
 }

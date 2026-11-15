@@ -151,19 +151,34 @@ public sealed class PostgreSqlGovernanceLeastPrivilegeTests : IClassFixture<Post
         var tenant = new TenantId("tenant-lp");
         var day = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
 
-        await repository.RecordDailyUsageAsync(table, tenant, day, "powerbi", "c1", "1.0", 2, 20, 2, 0, 0, 0, 0);
-        await repository.RecordDailyUsageAsync(table, tenant, day, "powerbi", "c1", "1.0", 3, 30, 3, 1, 0, 0, 0);
-        await repository.RecordActorSampleAsync(table, tenant, day, "powerbi", new string('a', 64));
+        var aggregator = new Autheris.Application.Usage.UsageAggregator();
+        var recorder = new Autheris.Application.Usage.UsageRecorder(aggregator);
+        var caller = new Autheris.Domain.Security.CallerContext("powerbi", "1.0", ClientId: "c1");
+        var actor = new Sid("S-1-5-21-lp");
+        using (var scope = Autheris.Application.Usage.UsageRequestScope.Begin(
+            new Autheris.Application.Usage.UsageIdentity(tenant, actor, new System.Collections.Generic.HashSet<Sid>()),
+            Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest, caller, aggregator))
+        {
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.Allow, 20, true, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.Allow, 30, true, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.DenyAccess, 0, false, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.Allow, 0, false, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            recorder.Record(new Autheris.Application.Usage.UsageFact(table, "lpsource", Autheris.Application.Usage.UsageOutcome.Allow, 0, false, 0, Array.Empty<Autheris.Application.Usage.GrantRef>(), default), tenant, actor);
+            scope.Complete(10, 100, 200);
+        }
+
+        await repository.AccumulateAsync(aggregator.Swap());
         await repository.RecordQueryNameAsync(table, tenant, day, "powerbi", "GetReadings", 4);
         await repository.RecordQueryNameAsync(table, tenant, day, "powerbi", "GetReadings", 1);
 
         var rows = await repository.QueryConsumerAppDailyAsync(table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        var actors = await repository.QueryDistinctActorCountsAsync(table, tenant, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
         await repository.PurgeExpiredConsumerMetricsAsync(400, DateTimeOffset.UtcNow);
 
         var row = rows.ShouldHaveSingleItem();
         row.Calls.ShouldBe(5);
         row.RowsReturned.ShouldBe(50);
-        row.DistinctActors.ShouldBe(1);
+        actors["powerbi"].ShouldBe(1);
         row.QueryNames.ShouldBe(["GetReadings"]);
         (await RuntimeFailsAsync("CREATE TABLE consumer_app_runtime_ddl (a int)")).SqlState.ShouldBe("42501");
     }

@@ -84,6 +84,7 @@ public static class GatewayExecutionServiceExtensions
             sp.GetRequiredService<IMandatoryRowFilterResolver>(),
             typedPolicies: sp.GetService<Autheris.Application.Policy.TypedPolicySources>(),
             auditWriter: sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+            usageRecorder: sp.GetService<Autheris.Application.Usage.IUsageRecorder>(),
             transportGate: sp.GetService<Autheris.Application.DataSources.IDataSourceTransportGate>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());

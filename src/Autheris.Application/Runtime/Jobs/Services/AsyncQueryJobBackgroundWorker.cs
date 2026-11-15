@@ -1,8 +1,11 @@
 namespace Autheris.Application.Runtime.Jobs.Services;
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
@@ -12,6 +15,7 @@ using Autheris.Application.Runtime.Jobs.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.State;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Usage;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -251,17 +255,39 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, itemToken);
         string? writtenPath = null;
+        long usageBytes = 0;
+        int usageStatusCode = 200;
+        long startTimestamp = Stopwatch.GetTimestamp();
+        UsageRequestScope? usageScope = null;
 
         try
         {
             using var scope = _scopeFactory.CreateScope();
+            var tenantId = new TenantId(item.Job.TenantId);
+            var userSid = new Sid(item.Job.SubmittedByUserId);
+            IReadOnlySet<Sid> groupSids = item.Job.SubmittedByGroupSids is { Count: > 0 } rawGroups
+                ? new HashSet<Sid>(rawGroups.Select(g => new Sid(g)))
+                : new HashSet<Sid>();
+            var usageAggregator = scope.ServiceProvider.GetService<IUsageAggregator>();
+            if (usageAggregator != null || UsageRequestScope.DefaultAggregator != null)
+            {
+                var scopeTransport = item.Ingress == Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None
+                    ? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest
+                    : item.Ingress;
+                usageScope = UsageRequestScope.Begin(
+                    new UsageIdentity(tenantId, userSid, groupSids),
+                    scopeTransport,
+                    caller: null,
+                    aggregator: usageAggregator);
+            }
+
             // Issue #447: the worker scope carries the ingress persisted with the job at submit. An item without one
             // (None), or a host without the context registration, leaves the ingress unset, which the transport gate denies (fail-closed).
             if (scope.ServiceProvider.GetService<Autheris.Domain.Audit.AuditContext>() is { } auditContext)
             {
                 // a transport denial of this job is audited for the submitting caller and tenant
-                auditContext.TenantId = new TenantId(item.Job.TenantId);
-                auditContext.ActorSid = new Sid(item.Job.SubmittedByUserId);
+                auditContext.TenantId = tenantId;
+                auditContext.ActorSid = userSid;
             }
 
             if (item.Ingress != Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None)
@@ -278,7 +304,6 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 RowLimit: AsyncJobLimits.ResolveRowLimit(item.Request, options),
                 Transport: SqlTransports.AsyncJob);
 
-            var tenantId = new TenantId(item.Job.TenantId);
             var result = await sqlExec.ExecuteQueryBufferedAsync(
                 queryRequest,
                 item.User,
@@ -303,6 +328,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             }
 
             var fileInfo = new FileInfo(filePath);
+            usageBytes = fileInfo.Length;
             var completed = runningJob with
             {
                 State = AsyncJobState.Completed,
@@ -313,6 +339,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             };
             if (!await _queue.TryTransitionAsync(completed, writeCt).ConfigureAwait(false))
             {
+                usageStatusCode = 499;
                 // Lost the race against a cancel: the job stays terminal and its result must not outlive it.
                 try { File.Delete(filePath); } catch (Exception ex) { _logger.LogWarning(ex, "Could not delete result of cancelled job {JobId}", item.Job.JobId); }
                 return;
@@ -323,6 +350,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         // ParseCanceledException derives from OperationCanceledException: a governed SQL error (syntax, parser timeout) is a failed job.
         catch (OperationCanceledException ex) when (!Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out _))
         {
+            usageStatusCode = 499;
             _logger.LogDebug(ex, "Async job {JobId} cancelled or timed out.", item.Job.JobId);
             DeletePartialResult(writtenPath);
             var cancelled = runningJob with
@@ -335,6 +363,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         }
         catch (Exception ex)
         {
+            usageStatusCode = 500;
             DeletePartialResult(writtenPath);
             // WP-X0a: the persisted message is the fixed message of the stable code, never Exception.Message (driver text, values).
             var sanitized = Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.FixedMessageOrDefault(ex, "The job could not be executed. Contact support with the trace id.");
@@ -346,6 +375,15 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             };
             await _queue.TryTransitionAsync(failed, writeCt).ConfigureAwait(false);
             _logger.LogError(ex, "Failed to execute async query job {JobId}", item.Job.JobId);
+        }
+        finally
+        {
+            if (usageScope != null)
+            {
+                long elapsedMs = (long)Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+                usageScope.Complete(elapsedMs, usageBytes, usageStatusCode);
+                usageScope.Dispose();
+            }
         }
     }
 

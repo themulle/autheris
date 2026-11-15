@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
+using Autheris.Application.Usage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -22,7 +23,7 @@ public sealed class TableConsumersDualTierSecurityTests
     private readonly ILineageGraphStore _graphStore = Substitute.For<ILineageGraphStore>();
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
     private readonly ITableMetadataRepository _tableMetadataRepo = Substitute.For<ITableMetadataRepository>();
-    private readonly IConsumerAggregationRepository _consumerAggregationRepo = Substitute.For<IConsumerAggregationRepository>();
+    private readonly IUsageRepository _usageRepo = Substitute.For<IUsageRepository>();
 
     private LineageImpactAnalyzerService CreateService()
     {
@@ -33,7 +34,7 @@ public sealed class TableConsumersDualTierSecurityTests
             _auditRepo,
             _tableMetadataRepo,
             NullLogger<LineageImpactAnalyzerService>.Instance,
-            _consumerAggregationRepo);
+            _usageRepo);
     }
 
     [Fact]
@@ -60,7 +61,7 @@ public sealed class TableConsumersDualTierSecurityTests
             new("powerbi", "2026-10-18", 100, 5000, 100, new RejectionBreakdown(), ["1.0"], ["GetOrders"], DistinctActors: 5),
             new("niche-app", "2026-10-18", 10, 50, 10, new RejectionBreakdown(), ["1.0"], ["PrivateQuery"], DistinctActors: 1)
         };
-        _consumerAggregationRepo.QueryConsumerAppDailyAsync(table, caller.Tenant, Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        _usageRepo.QueryConsumerAppDailyAsync(table, caller.Tenant, Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(summaries);
 
         var actorCounts = new Dictionary<string, int>
@@ -68,7 +69,7 @@ public sealed class TableConsumersDualTierSecurityTests
             ["powerbi"] = 5,
             ["niche-app"] = 1
         };
-        _consumerAggregationRepo.QueryDistinctActorCountsAsync(table, caller.Tenant, Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        _usageRepo.QueryDistinctActorCountsAsync(table, caller.Tenant, Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(actorCounts);
 
         var service = CreateService();
@@ -124,7 +125,7 @@ public sealed class TableConsumersDualTierSecurityTests
         {
             new("powerbi", "2026-10-18", 100, 5000, 100, new RejectionBreakdown(), ["1.0"], ["SelectAllOrders"], DistinctActors: 5)
         };
-        _consumerAggregationRepo.QueryConsumerAppDailyAsync(table, caller.Tenant, Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        _usageRepo.QueryConsumerAppDailyAsync(table, caller.Tenant, Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(summaries);
 
         var service = CreateService();

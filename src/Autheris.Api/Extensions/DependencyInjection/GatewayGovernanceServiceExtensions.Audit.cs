@@ -56,48 +56,6 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddScoped<ILineageImpactAnalyzerService, LineageImpactAnalyzerService>();
         services.AddScoped<IGdprDisclosureReportService, GdprDisclosureReportService>();
         services.AddSingleton<IGdprAuditReportExporter, GdprAuditReportPdfExporter>();
-        services.AddSingleton<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>(sp =>
-        {
-            var env = sp.GetService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
-            var isDev = env?.EnvironmentName == Microsoft.Extensions.Hosting.Environments.Development;
-            var gatewayOptions = sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value;
-            var entraIdOptions = gatewayOptions?.Authentication?.EntraId;
-            var config = sp.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
-
-            string? secret = config?["Gateway:Audit:ActorPseudonymizationKey"]
-                ?? config?["Gateway:GovernanceDb:AuditHmacKey"]
-                ?? config?["Gateway:Audit:AuditHmacKey"]
-                ?? config?["Gateway:Cluster:Secret"];
-
-            if (string.IsNullOrWhiteSpace(secret))
-            {
-                var secretProvider = sp.GetService<Autheris.Application.Common.Interfaces.IKeyVaultSecretProvider>();
-                var auditRef = gatewayOptions?.GovernanceDb?.AuditHmacKeyVaultRef ?? gatewayOptions?.DataMasking?.HmacSecretKeyVaultRef;
-                if (secretProvider != null && !string.IsNullOrWhiteSpace(auditRef))
-                {
-                    try
-                    {
-                        var bytes = secretProvider.GetSecretBytes(auditRef);
-                        if (bytes != null && bytes.Length > 0)
-                        {
-                            secret = Convert.ToHexString(bytes);
-                        }
-                    }
-                    catch { }
-                }
-            }
-
-            if (string.IsNullOrWhiteSpace(secret))
-            {
-                secret = isDev
-                    ? "autheris-default-cluster-telemetry-secret-key-2026"
-                    : Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
-            }
-            var callerProvider = sp.GetService<ICallerContextProvider>();
-            return new Autheris.Infrastructure.Observability.ConsumerUsageRecorder(secret, callerProvider);
-        });
-        services.AddSingleton<IConsumerUsageRecorder>(sp => sp.GetRequiredService<Autheris.Infrastructure.Observability.ConsumerUsageRecorder>());
-        services.AddHostedService<Autheris.Infrastructure.Observability.ConsumerUsageFlushWorker>();
         services.AddOptions<Autheris.Domain.Options.UsageAccountingOptions>()
             .BindConfiguration(Autheris.Domain.Options.GatewaySections.UsageAccounting)
             .ValidateOnStart();

@@ -32,6 +32,7 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
 
     internal const string RlsPushdownExecutedKey = "RlsPushdownExecuted";
     internal const string InDbColumnMaskingExecutedKey = "InDbColumnMaskingExecuted";
+    internal const string SourceExecutionStatsKey = Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey;
 
     private static readonly HashSet<string> SpatialTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -104,6 +105,10 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
 
             context.Items[InDbColumnMaskingExecutedKey] = true;
             context.Items[RlsPushdownExecutedKey] = true;
+            if (subtreeResult.SourceStats != default)
+            {
+                context.Items[SourceExecutionStatsKey] = subtreeResult.SourceStats;
+            }
             return subtreeResult.Rows;
         }
 
@@ -159,6 +164,10 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         }
 
         context.Items[RlsPushdownExecutedKey] = true;
+        if (result.SourceStats != default)
+        {
+            context.Items[SourceExecutionStatsKey] = result.SourceStats;
+        }
         if (_options?.Value?.IsColumnMaskingDisabled != true &&
             planned.ColumnsToSelect.Any(c => decision.GetEffectiveColumnAccess(c, metadata) == ColumnAccessLevel.Mask))
         {
@@ -216,7 +225,10 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             planned.Sql,
             planned.Parameters.Count > 0 ? planned.Parameters : null,
             Transport: intent.Transport,
-            PlannedTableRead: true);
+            PlannedTableRead: true)
+        {
+            OnSourceStats = s => context.Items[SourceExecutionStatsKey] = s
+        };
 
         await foreach (var source in service.StreamRowsAsync(request, context.Principal, tenant, ct).ConfigureAwait(false))
         {

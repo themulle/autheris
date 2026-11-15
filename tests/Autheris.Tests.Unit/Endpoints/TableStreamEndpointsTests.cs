@@ -18,6 +18,7 @@ using Autheris.Application.DataSources.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Usage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -389,7 +390,14 @@ public sealed class TableStreamEndpointsTests
 
     // ---- Issue #418: default slice must be admissible for every tier ----
 
-    private sealed record SliceRun(DefaultHttpContext Context, IRateLimiterService Limiter, IConsumerUsageRecorder Recorder, IClientTierResolver Resolver, ClaimsPrincipal Principal, string Body, List<int> Reserved);
+    private sealed class RecordingUsageRecorder : IUsageRecorder
+    {
+        public List<(UsageFact Fact, TenantId Tenant, Sid Actor)> Recorded { get; } = [];
+
+        public void Record(in UsageFact fact, TenantId tenant, Sid actor) => Recorded.Add((fact, tenant, actor));
+    }
+
+    private sealed record SliceRun(DefaultHttpContext Context, IRateLimiterService Limiter, RecordingUsageRecorder Recorder, IClientTierResolver Resolver, ClaimsPrincipal Principal, string Body, List<int> Reserved);
 
     private sealed class CapturingLoggerFactory : ILoggerFactory
     {
@@ -444,13 +452,13 @@ public sealed class TableStreamEndpointsTests
         var resolver = Substitute.For<IClientTierResolver>();
         resolver.ResolveAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new ClientQuotaContext("subject-418", policy.Tier, policy, "secret-scope")));
-        var recorder = Substitute.For<IConsumerUsageRecorder>();
+        var recorder = new RecordingUsageRecorder();
 
         var services = new ServiceCollection();
         services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(new GatewayOptions()));
         services.AddSingleton(rateLimiter);
         services.AddSingleton(resolver);
-        services.AddSingleton(recorder);
+        services.AddSingleton<IUsageRecorder>(recorder);
         context.RequestServices = services.BuildServiceProvider();
 
         if (bodyJson != null)
@@ -493,7 +501,7 @@ public sealed class TableStreamEndpointsTests
         await run.Limiter.DidNotReceive().ReserveCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>());
         run.Context.Response.Headers.ContainsKey("Retry-After").ShouldBeFalse();
         run.Context.Response.Headers.ContainsKey("X-RateLimit-Scope").ShouldBeFalse();
-        run.Recorder.DidNotReceive().RecordUsage(Arg.Any<TableIdentifier>(), Arg.Any<TenantId>(), Arg.Any<Sid>(), ConsumerOutcome.DenyRateLimit, Arg.Any<long>(), Arg.Any<bool>(), Arg.Any<CallerContext?>());
+        run.Recorder.Recorded.ShouldNotContain(r => r.Fact.Outcome == UsageOutcome.DenyRateLimit);
     }
 
     [Theory]

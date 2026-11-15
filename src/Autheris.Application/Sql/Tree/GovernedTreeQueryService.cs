@@ -68,7 +68,7 @@ public interface IGovernedTreeQueryService
 /// one text value with a size limit, parses it once and only rewrites HMAC columns.</item>
 /// </list>
 /// </summary>
-public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDisposable
+public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService, IDisposable
 {
     private sealed class OperationMemo : IDisposable
     {
@@ -103,7 +103,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly IDbSessionContextInitializer _sessionInitializer;
     private readonly ICrossSourceRelationResolver? _crossSourceResolver;
     private readonly ITableRelationRepository? _relationRepository;
-    private readonly IConsumerUsageRecorder? _usageRecorder;
+    private readonly Autheris.Application.Usage.IUsageRecorder? _usageRecorder;
     private readonly TreeSecuredSourceBuilder? _securedSourceBuilder;
 
     // G3, G4, G7, D7 & R-GQL-3: memo and audit are scoped per operationId, tenant, and user to isolate operations and prevent cross-tenant/cross-principal leak.
@@ -123,9 +123,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         ICrossSourceRelationResolver? crossSourceResolver = null,
         ITableRelationRepository? relationRepository = null,
-        IConsumerUsageRecorder? usageRecorder = null,
-        TreeSecuredSourceBuilder? securedSourceBuilder = null)
-    {
+        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null,
+        TreeSecuredSourceBuilder? securedSourceBuilder = null) {
         _securedSourceBuilder = securedSourceBuilder;
         _accessResolver = accessResolver ?? throw new ArgumentNullException(nameof(accessResolver));
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
@@ -504,9 +503,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         // 4. Bounded concurrency per user and root table, then one round trip.
         using var lease = AcquireLease(rootAccess);
         var stmtSw = System.Diagnostics.Stopwatch.StartNew();
-        var json = await RunAsync(compiled, connOptions, dialect, rootAccess.Tenant, rootAccess.UserSid.Value, purpose: null, ct).ConfigureAwait(false);
+        var statsBox = new UsageStatsBox();
+        var json = await RunAsync(compiled, connOptions, dialect, rootAccess.Tenant, rootAccess.UserSid.Value, purpose: null, ct, statsBox).ConfigureAwait(false);
         stmtSw.Stop();
-
         long measuredRows = 0;
         try
         {
@@ -517,7 +516,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         {
             measuredRows = 1;
         }
-        _usageRecorder?.RecordUsage(rootAccess.Metadata.Identifier, rootAccess.Tenant, rootAccess.UserSid, ConsumerOutcome.Allow, rowsReturned: measuredRows, rowsMeasured: true);
+        RecordTreeUsage(rootAccess, Autheris.Application.Usage.UsageOutcome.Allow, measuredRows, true, statsBox.Value);
 
         var crossListExecs = new List<CrossSourceListExecution>();
 
@@ -759,7 +758,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         await GovernedQueryStages.RecordTableReadAsync(
             _auditWriter, access.Tenant, access.UserSid, table, access.Decision.IsAllowed,
             GovernedQueryStages.DecisionDetails(access.Decision, path: "graphql_tree"), ct,
-            usageRecorder: access.Decision.IsAllowed ? null : _usageRecorder).ConfigureAwait(false);
+            usageRecorder: access.Decision.IsAllowed ? null : _usageRecorder,
+            dataSource: access.Decision.IsAllowed ? null : access.Metadata.Table.SourceName).ConfigureAwait(false);
     }
 
     private IDisposable? AcquireLease(ResolvedTableAccess rootAccess)
@@ -773,7 +773,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         var lease = _concurrencyGate.TryEnter(key, max);
         if (lease == null)
         {
-            _usageRecorder?.RecordUsage(rootAccess.Metadata.Identifier, rootAccess.Tenant, rootAccess.UserSid, ConsumerOutcome.DenyRateLimit, 0, false);
+            RecordTreeUsage(rootAccess, Autheris.Application.Usage.UsageOutcome.DenyRateLimit, 0, false, default);
             throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
         }
         return lease;
@@ -786,7 +786,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         TenantId tenant,
         string? userSid,
         string? purpose,
-        CancellationToken ct)
+        CancellationToken ct,
+        UsageStatsBox? statsBox = null)
     {
         await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
         DbTransaction? tx = null;
@@ -831,6 +832,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                     ? await ReadBoundedTextAsync(reader, MaxResponseBytes(), ct).ConfigureAwait(false)
                     : "[]";
             }
+            CaptureSourceStats(command, statsBox);
 
             return json;
         }

@@ -11,6 +11,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Common.Quota;
 using Autheris.Application.Policy.Pdp;
 using Autheris.Application.State.Caching.Interfaces;
+using Autheris.Application.Usage;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -491,13 +492,16 @@ public sealed class CostAndQuotaMiddleware
 
         if (admission.Outcome == QueryCostOutcome.OverCost)
         {
-            var usageRecorder = services?.GetService<IConsumerUsageRecorder>();
+            var usageRecorder = services?.GetService<IUsageRecorder>();
             if (usageRecorder != null)
             {
                 var tableId = ExtractTableFromDocument(doc);
                 var tenantId = principal.GetTenantId();
                 var userSid = principal.GetUserSid() ?? new Sid(principal?.Identity?.Name ?? "anonymous");
-                usageRecorder.RecordUsage(tableId, tenantId, userSid, ConsumerOutcome.DenyCost, 0, false);
+                usageRecorder.Record(
+                    new UsageFact(tableId, string.Empty, UsageOutcome.DenyCost, 0, false, calculatedCost, Array.Empty<GrantRef>(), default),
+                    tenantId,
+                    userSid);
             }
 
             var error = ErrorBuilder.New()
@@ -514,13 +518,16 @@ public sealed class CostAndQuotaMiddleware
 
         if (admission.Outcome == QueryCostOutcome.QuotaExhausted)
         {
-            var usageRecorder = services?.GetService<IConsumerUsageRecorder>();
+            var usageRecorder = services?.GetService<IUsageRecorder>();
             if (usageRecorder != null)
             {
                 var tableId = ExtractTableFromDocument(doc);
                 var tenantId = principal.GetTenantId();
                 var userSid = principal.GetUserSid() ?? new Sid(principal?.Identity?.Name ?? "anonymous");
-                usageRecorder.RecordUsage(tableId, tenantId, userSid, ConsumerOutcome.DenyRateLimit, 0, false);
+                usageRecorder.Record(
+                    new UsageFact(tableId, string.Empty, UsageOutcome.DenyRateLimit, 0, false, calculatedCost, Array.Empty<GrantRef>(), default),
+                    tenantId,
+                    userSid);
             }
 
             var errorBuilder = ErrorBuilder.New()
@@ -574,6 +581,7 @@ public sealed class CostAndQuotaMiddleware
         {
             if (admission.Outcome == QueryCostOutcome.Admitted && gatewayOptions?.QueryCost?.EnablePostExecutionSettlement != false)
             {
+                UsageRequestScope.Current?.ApplyAnalysisCost(actualCost);
                 var settleResult = await _costQuota.SettleAsync(
                     admission,
                     actualCost,
@@ -605,6 +613,7 @@ public sealed class CostAndQuotaMiddleware
             }
             else if (admission.Outcome == QueryCostOutcome.Admitted)
             {
+                UsageRequestScope.Current?.ApplyAnalysisCost(calculatedCost);
                 HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost", calculatedCost.ToString(CultureInfo.InvariantCulture));
                 HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Remaining", admission.RemainingTokens.ToString(CultureInfo.InvariantCulture));
             }

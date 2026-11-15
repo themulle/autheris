@@ -60,6 +60,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
     private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint? _accessDecisionPoint;
+    private readonly Autheris.Application.Usage.IUsageRecorder? _usageRecorder;
 
     public GovernedProcedureExecutionService(
         IProcedureRegistry registry,
@@ -83,7 +84,8 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         ITableReadConcurrencyGate? concurrencyGate = null,
         ProcedureDenialAuditLimiter? denialAuditLimiter = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
-        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null,
+        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null)
     {
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
@@ -113,6 +115,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         _consentCache = consentCache;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache; _accessProfileCache = accessProfileCache;
+        _usageRecorder = usageRecorder;
     }
 
     public async Task<GovernedProcedureResult> ExecuteAsync(
@@ -129,6 +132,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         // return) and answered exactly like an invisible procedure (04).
         if (string.IsNullOrWhiteSpace(name) || !_registry.TryGet(name, out var registered) || registered == null)
         {
+            RecordUnknownProcedureUsage(name, user, tenantId);
             await AuditUnknownAsync(name, user, tenantId, traceId, ct).ConfigureAwait(false);
             throw new KeyNotFoundException(NotFoundMessage);
         }
@@ -140,6 +144,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         if (definition.Mode != ProcedureMode.Read)
         {
             var denyUser = user.GetUserSid() ?? new Sid("anonymous");
+            RecordProcedureUsage(definition, tenantId, denyUser, Autheris.Application.Usage.UsageOutcome.DenyAccess, 0, false);
             await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, denyUser, new { reason = "write-mode" }, traceId, ct).ConfigureAwait(false);
             throw new KeyNotFoundException(NotFoundMessage);
         }
@@ -152,6 +157,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         var visibility = await EvaluateVisibilityAsync(registered, user, tenantId, traceId, ct).ConfigureAwait(false);
         if (!visibility.Visible)
         {
+            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyAccess, 0, false);
             await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = visibility.Reason }, traceId, ct).ConfigureAwait(false);
             throw new KeyNotFoundException(NotFoundMessage);
         }
@@ -172,6 +178,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         }
         catch (GatewayThrottledException)
         {
+            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyRateLimit, 0, false);
             await AuditAsync("PROCEDURE_THROTTLED", "DENY", definition, tenantId, userSid, new { reason = "concurrency" }, traceId, ct).ConfigureAwait(false);
             throw;
         }
@@ -216,6 +223,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 // D-7: resolve the operator-declared entry; the audit carries the mapped code only (never the message).
                 var mapped = definition.ErrorCodes.FirstOrDefault(e =>
                     (e.Number is not null && e.Number == bex.ErrorNumber) || (e.SqlState is not null && e.SqlState == bex.SqlState));
+                RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.DenyOther, 0, false);
                 await AuditAsync(
                     "PROCEDURE_REJECTED", "DENY", definition, tenantId, userSid,
                     new { reason = "business-error", number = bex.ErrorNumber, sqlState = bex.SqlState, mappedCode = mapped?.Code }, traceId, ct).ConfigureAwait(false);
@@ -227,6 +235,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 _logger?.LogError(
                     "Stored procedure endpoint '{Procedure}' failed with {ExceptionType} (number {Number}, trace {TraceId}).",
                     definition.ProcedureName, dbx.GetType().Name, DbErrorNumber(dbx), traceId);
+                RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.Error, 0, false);
                 await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = dbx.GetType().Name }, traceId, ct).ConfigureAwait(false);
                 throw;
             }
@@ -236,6 +245,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 _logger?.LogError(
                     "Stored procedure endpoint '{Procedure}' failed with {ExceptionType} (trace {TraceId}).",
                     definition.ProcedureName, ex.GetType().Name, traceId);
+                RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.Error, 0, false);
                 await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = ex.GetType().Name }, traceId, ct).ConfigureAwait(false);
                 throw;
             }
@@ -285,6 +295,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 traceId,
                 ct).ConfigureAwait(false);
 
+            RecordProcedureUsage(definition, tenantId, userSid, Autheris.Application.Usage.UsageOutcome.Allow, governed.Rows.Count, true);
             return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, truncated, sw.ElapsedMilliseconds);
         }
         finally

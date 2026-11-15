@@ -116,7 +116,7 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<SecurityContextResolutionMiddleware>();
         app.UseMiddleware<SubjectLockoutMiddleware>();
         app.UseMiddleware<ResourceGroupMiddleware>();
-        app.UseMiddleware<FinOpsBudgetMiddleware>();
+        app.UseMiddleware<UsageMeteringMiddleware>();
         app.UseMiddleware<SchemaContractMiddleware>();
         app.UseMiddleware<IncrementalDeliveryMiddleware>();
         // F-DATA-01: Parquet output negotiation is the outermost output transformation around the governed JSON

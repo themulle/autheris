@@ -204,16 +204,10 @@ public static class GovernedQueryStages
         AuditTier tier = AuditTier.Required,
         string eventType = AuditEventTypes.TableQuery,
         string? traceId = null,
-        IConsumerUsageRecorder? usageRecorder = null)
+        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null,
+        string? dataSource = null)
     {
-        usageRecorder?.RecordUsage(
-            table,
-            tenant,
-            actor,
-            allowed ? ConsumerOutcome.Allow : ConsumerOutcome.DenyAccess,
-            rowsReturned: 0,
-            rowsMeasured: false);
-
+        RecordUsageFact(usageRecorder, tenant, actor, table, allowed, dataSource);
         return WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, details, traceId), tier, ct);
     }
 
@@ -229,16 +223,35 @@ public static class GovernedQueryStages
         AuditTier tier = AuditTier.Required,
         string eventType = AuditEventTypes.TableQuery,
         string? traceId = null,
-        IConsumerUsageRecorder? usageRecorder = null)
+        Autheris.Application.Usage.IUsageRecorder? usageRecorder = null,
+        string? dataSource = null)
     {
-        usageRecorder?.RecordUsage(
-            table,
-            tenant,
-            actor,
-            allowed ? ConsumerOutcome.Allow : ConsumerOutcome.DenyAccess,
-            rowsReturned: 0,
-            rowsMeasured: false);
-
+        RecordUsageFact(usageRecorder, tenant, actor, table, allowed, dataSource);
         return WriteAsync(audit, BuildEntry(eventType, tenant, actor, table.ToString(), allowed, details, traceId), tier, ct);
+    }
+
+    private static void RecordUsageFact(
+        Autheris.Application.Usage.IUsageRecorder? usageRecorder,
+        TenantId tenant,
+        Sid actor,
+        TableIdentifier table,
+        bool allowed,
+        string? dataSource)
+    {
+        if (usageRecorder is null)
+        {
+            return;
+        }
+
+        var fact = new Autheris.Application.Usage.UsageFact(
+            table,
+            dataSource ?? string.Empty,
+            allowed ? Autheris.Application.Usage.UsageOutcome.Allow : Autheris.Application.Usage.UsageOutcome.DenyAccess,
+            Rows: 0,
+            RowsMeasured: false,
+            AnalysisCost: 0,
+            Grants: [],
+            Source: default);
+        usageRecorder.Record(fact, tenant, actor);
     }
 }

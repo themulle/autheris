@@ -26,6 +26,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Usage;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -180,7 +181,7 @@ public static class TableStreamEndpoints
         }
 
         // 4. Governance Authorization Stage (PDP)
-        var usageRecorder = httpContext.RequestServices?.GetService<IConsumerUsageRecorder>();
+        var usageRecorder = httpContext.RequestServices?.GetService<IUsageRecorder>();
         var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
 
         TableAccessDecision decision;
@@ -198,7 +199,10 @@ public static class TableStreamEndpoints
         }
         catch (UnauthorizedAccessException)
         {
-            usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.DenyAccess, 0, false);
+            usageRecorder?.Record(
+                new UsageFact(tableId, metadata.Table.SourceName ?? string.Empty, UsageOutcome.DenyAccess, 0, false, 0, Array.Empty<GrantRef>(), default),
+                tenant,
+                userSid);
             // Anti-enumeration parity: unauthorized table returns 404
             await TableNotFound().ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
@@ -325,7 +329,10 @@ public static class TableStreamEndpoints
             var reservation = await rateLimiter.ReserveCostQuotaAsync(subjectId, reservedCost, policy, ct).ConfigureAwait(false);
             if (!reservation.Allowed)
             {
-                usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.DenyRateLimit, 0, false);
+                usageRecorder?.Record(
+                    new UsageFact(tableId, metadata.Table.SourceName ?? string.Empty, UsageOutcome.DenyRateLimit, 0, false, reservedCost, Array.Empty<GrantRef>(), default),
+                    tenant,
+                    userSid);
                 if (!string.IsNullOrWhiteSpace(clientContext?.ResolvedScope))
                 {
                     httpContext.Response.Headers["X-RateLimit-Scope"] = clientContext.ResolvedScope;
@@ -339,11 +346,15 @@ public static class TableStreamEndpoints
         bool isArrow = string.Equals(request.Format, "arrow", StringComparison.OrdinalIgnoreCase) ||
             (httpContext.Request.Headers.Accept.ToString()?.Contains(IArrowExportService.ArrowStreamContentType, StringComparison.OrdinalIgnoreCase) == true);
 
+        SourceExecutionStats sourceStats = default;
         var queryRequest = new GovernedSqlQueryRequest(
             Sql: planned.Sql,
             Parameters: planned.Parameters,
             Transport: SqlTransports.Rest,
-            PlannedTableRead: true);
+            PlannedTableRead: true)
+        {
+            OnSourceStats = stats => sourceStats = stats
+        };
 
         int rowsEmitted = 0;
         bool hasMore = false;
@@ -629,7 +640,11 @@ public static class TableStreamEndpoints
             if (httpContext.Response.StatusCode != StatusCodes.Status429TooManyRequests)
             {
                 // 9. Post-Stream Settlement & Response Metadata
-                usageRecorder?.RecordUsage(tableId, tenant, userSid, ConsumerOutcome.Allow, rowsEmitted, rowsMeasured: true);
+                int actualCost = rateLimiter != null ? baseCost + (rowsEmitted * costPerRow) : 0;
+                usageRecorder?.Record(
+                    new UsageFact(tableId, metadata.Table.SourceName ?? string.Empty, UsageOutcome.Allow, rowsEmitted, RowsMeasured: true, actualCost, Array.Empty<GrantRef>(), sourceStats),
+                    tenant,
+                    userSid);
                 SetResponseMetadata(httpContext.Response, "X-Rows-Streamed", rowsEmitted.ToString(CultureInfo.InvariantCulture));
                 if (!string.IsNullOrEmpty(nextCursor))
                 {
@@ -640,7 +655,6 @@ public static class TableStreamEndpoints
 
                 if (rateLimiter != null)
                 {
-                    int actualCost = baseCost + (rowsEmitted * costPerRow);
                     // CancellationToken.None: on a client abort the request token is already cancelled; settling with it
                     // would throw from this finally block, mask the original exception and never refund the reservation.
                     var settlement = await rateLimiter.SettleCostQuotaAsync(subjectId, reservedCost, actualCost, policy, CancellationToken.None).ConfigureAwait(false);
