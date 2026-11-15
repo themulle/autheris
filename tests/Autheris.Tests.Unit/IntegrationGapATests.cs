@@ -24,7 +24,6 @@ using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Infrastructure.Connectors;
 using Autheris.Infrastructure.Security;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -156,97 +155,10 @@ public sealed class IntegrationGapATests
     }
 
     // =========================================================================
-    // GAP08 / ARC-I-13: SqlConnector requires a masking provider and reads through the governed pipeline
+    // GAP08 / ARC-I-13: SqlConnector requires a masking provider (DB read covered in IntegrationGapASqlConnectorIntegrationTests)
     // =========================================================================
 
     private const string ConnectorId = "gap-a-sql";
-    private const string RawSsn = "123-45-6789";
-
-    private static TableMetadata CreateEmployeesMetadata() => new()
-    {
-        Identifier = new TableIdentifier("corp", "main", "employees"),
-        Table = new Table
-        {
-            SourceName = ConnectorId,
-            SchemaName = "main",
-            TableName = "employees",
-            DataSourceType = DataSourceType.Sql,
-            SourceType = "PostgreSql"
-        },
-        Columns =
-        [
-            new TableColumn { ColumnName = "id", DataType = "int" },
-            new TableColumn { ColumnName = "name", DataType = "varchar" },
-            new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }
-        ],
-        ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["ssn"] = new MaskingRule { RuleType = "HMAC_SHA256" }
-        }
-    };
-
-    private static SqlConnector NewConnector(IGovernedSqlExecutionService governed, IColumnMaskingProvider maskingProvider)
-    {
-        var services = new ServiceCollection();
-        services.AddScoped<IDataSourceExecutor>(_ => new SqlTableReadExecutor(
-            new Autheris.Application.DataSources.Services.GovernedTableReadPlanner(), () => governed));
-        var provider = services.BuildServiceProvider();
-        return new SqlConnector(
-            connectorId: ConnectorId,
-            metadataRepository: Substitute.For<ITableMetadataRepository>(),
-            maskingProvider: maskingProvider,
-            scopeFactory: provider.GetRequiredService<IServiceScopeFactory>());
-    }
-
-    private static async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadSsnViaConnectorAsync()
-    {
-        var connectionString = $"Data Source=gapa08_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
-        await using var keepAlive = new SqliteConnection(connectionString);
-        await keepAlive.OpenAsync();
-        await using (var setup = keepAlive.CreateCommand())
-        {
-            setup.CommandText = "CREATE TABLE employees (id INTEGER, name TEXT, ssn TEXT); INSERT INTO employees VALUES (1, 'Alice', '" + RawSsn + "');";
-            await setup.ExecuteNonQueryAsync();
-        }
-
-        // The mask comes from the compiler (typed MaskSpec), not from the connector.
-        var env = new Autheris.Tests.Unit.Sql.TestCompileEnv(TrinoSqlEngine.TargetSqlDialect.PostgreSql)
-            .Table("employees", null, "id:INTEGER", "name", "ssn")
-            .Mask("employees", "ssn", Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService.Redact("ssn", "***"));
-        var governed = new Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService(keepAlive, env);
-        var connector = NewConnector(governed, Substitute.For<IColumnMaskingProvider>());
-
-        var metadata = CreateEmployeesMetadata();
-        var decision = TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel>
-        {
-            ["id"] = ColumnAccessLevel.Clear,
-            ["name"] = ColumnAccessLevel.Clear,
-            ["ssn"] = ColumnAccessLevel.Mask
-        });
-
-        var session = new ConnectorSessionContext(
-            Principal: new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-GAPA")], "Test")),
-            Tenant: new TenantId("tenant-gap-a"),
-            AccessDecision: decision,
-            ProjectedColumns: ["id", "name", "ssn"],
-            Arguments: new Dictionary<string, object?>());
-        session.Items["TableMetadata"] = metadata;
-
-        var rows = await connector.RecordSource.ReadBatchAsync(ConnectorSplit.Default(), session);
-        session.Items["InDbColumnMaskingExecuted"].ShouldBe(true);
-        session.Items["RlsPushdownExecuted"].ShouldBe(true);
-        return rows;
-    }
-
-    [Fact]
-    public async Task GAP08_SqlConnector_ReadsAreMaskedByTheGovernedPipeline()
-    {
-        var rows = await ReadSsnViaConnectorAsync();
-
-        rows.Count.ShouldBe(1);
-        rows[0]["ssn"].ShouldBe("***");
-        rows[0]["name"].ShouldBe("Alice");
-    }
 
     [Fact]
     public void GAP08_SqlConnector_WithoutMaskingProvider_CannotBeConstructed_FailClosed()

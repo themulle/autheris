@@ -28,7 +28,7 @@ using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Plugins;
 using Autheris.Infrastructure.Serialization;
-using Microsoft.Data.Sqlite;
+using Autheris.Tests.Unit.TestSupport;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -45,7 +45,7 @@ namespace Autheris.Tests.Unit;
 /// H-01, H-17, M-25, M-26, M-27, M-28, M-29, M-30, M-31 and the MCP JSON-injection low finding.
 /// </summary>
 [Trait("Category", "Security")]
-public sealed class InfrastructureAndPluginSecurityTests : IDisposable
+public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
 {
     private readonly string _tempDir;
 
@@ -57,7 +57,6 @@ public sealed class InfrastructureAndPluginSecurityTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
         try
         {
             foreach (var file in Directory.GetFiles(_tempDir, "*", SearchOption.AllDirectories))
@@ -585,6 +584,7 @@ public sealed class InfrastructureAndPluginSecurityTests : IDisposable
                 Columns = [new TableColumn { ColumnName = "iban", DataType = "varchar", IsSensitive = true, Description = "Account IBAN" }]
             }
         }));
+        repo.ServeCatalogReads();
         var consents = Substitute.For<IConsentRepository>();
         consents.GetTablesWithConsentsForTenantAsync(new TenantId("tenant-a"), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableIdentifier>>([table]));
@@ -759,60 +759,5 @@ public sealed class InfrastructureAndPluginSecurityTests : IDisposable
         tool.GetProperty("name").GetString().ShouldBe(evilName);
         tool.TryGetProperty("injected", out _).ShouldBeFalse();
         tool.GetProperty("inputSchema").GetRawText().ShouldBe("{}");
-    }
-
-    // =========================================================================
-    // SEC-LOW-08: DuckDb disallowed functions & sanitized column collisions
-    // =========================================================================
-
-    [Theory]
-    [InlineData("SELECT * FROM iceberg_scan('s3://bucket/table')")]
-    [InlineData("SELECT * FROM delta_scan('s3://bucket/table')")]
-    [InlineData("SELECT * FROM sqlite_scan('test.db', 'tbl')")]
-    [InlineData("SELECT * FROM postgres_scan('host=localhost', 'public', 'tbl')")]
-    [InlineData("SELECT * FROM mysql_scan('host=localhost', 'db', 'tbl')")]
-    [InlineData("SELECT current_setting('threads')")]
-    [InlineData("SELECT getenv('AWS_SECRET_ACCESS_KEY')")]
-    [InlineData("SELECT * FROM pragma_table_info('tbl')")]
-    public async Task SEC_LOW_08_DuckDb_DisallowedFunctions_AreRejected(string sql)
-    {
-        var engine = new DuckDbOlapEngine(new DuckDbOlapOptions { Enabled = true }, NullLogger<DuckDbOlapEngine>.Instance);
-        var ex = await Should.ThrowAsync<System.Security.SecurityException>(async () =>
-        {
-            await engine.ExecuteOlapQueryAsync(new OlapQueryRequest(sql, []));
-        });
-        ex.Message.ShouldContain("prohibited", Case.Insensitive);
-    }
-
-    [Fact]
-    public async Task SEC_LOW_08_DuckDb_SanitizedColumnCollision_ThrowsInvalidOperationException()
-    {
-        var engine = new DuckDbOlapEngine(new DuckDbOlapOptions { Enabled = true }, NullLogger<DuckDbOlapEngine>.Instance);
-        var tableId = new TableIdentifier("sales", "crm", "contacts");
-        var metadata = new TableMetadata
-        {
-            Identifier = tableId,
-            Table = new Table { SchemaName = "crm", TableName = "contacts" },
-            Columns =
-            [
-                new TableColumn { ColumnName = "user_name", DataType = "string" },
-                new TableColumn { ColumnName = "user-name", DataType = "string" }
-            ]
-        };
-
-        var source = new OlapTableSource(
-            tableId,
-            new List<IReadOnlyDictionary<string, object?>>
-            {
-                new Dictionary<string, object?> { ["user_name"] = "Alice", ["user-name"] = "Bob" }
-            },
-            Metadata: metadata
-        );
-
-        var ex = await Should.ThrowAsync<InvalidOperationException>(async () =>
-        {
-            await engine.ExecuteOlapQueryAsync(new OlapQueryRequest("SELECT * FROM contacts", [source]));
-        });
-        ex.Message.ShouldContain("collision", Case.Insensitive);
     }
 }

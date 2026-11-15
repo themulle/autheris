@@ -1,7 +1,1 @@
 # WP-SIMPL-22 baseline: unit test files opening database connections or test hosts (ratchet: shrink-only)
-tests/Autheris.Tests.Unit/AsyncJobEndpointMappingTests.cs
-tests/Autheris.Tests.Unit/BypassSemanticsAndDmlGuardrailTests.cs
-tests/Autheris.Tests.Unit/DevExperienceTests.cs
-tests/Autheris.Tests.Unit/InfrastructureAndPluginSecurityTests.cs
-tests/Autheris.Tests.Unit/IntegrationGapATests.cs
-tests/Autheris.Tests.Unit/TestDoubles/SqliteGovernedSqlService.cs

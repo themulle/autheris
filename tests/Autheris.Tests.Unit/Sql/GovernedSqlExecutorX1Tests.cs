@@ -262,7 +262,7 @@ public sealed class GovernedSqlExecutorX1Tests
         const string Sql = "UPDATE orders SET amount = 1 WHERE id = 1";
         var env = new TestCompileEnv(TargetSqlDialect.SqlServer)
             .Table("orders", "tenant_id", "id:int", "amount:decimal", "tenant_id:varchar")
-            .Mask("orders", "amount", Autheris.Tests.Unit.TestDoubles.SqliteGovernedSqlService.Redact("amount", "***"));
+            .Mask("orders", "amount", Autheris.Tests.Unit.TestDoubles.TestPolicySpecs.Redact("amount", "***"));
         var decorated = new Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(env.Engine);
 
         var ex = Should.Throw<SecurityException>(() =>
