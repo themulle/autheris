@@ -197,52 +197,46 @@ jobs:
   # Skipped, not failed, while the secrets do not exist (stakeholder item S-4: no workspace yet).
   sql-compiler-gate-databricks-g9:
     name: SQL Compiler Gate G9 (live Databricks)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: databricks-g9
     permissions:
       contents: read
-    env:
-      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
-      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
-      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
-      DATABRICKS_WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
-      DATABRICKS_CATALOG: ${{ secrets.DATABRICKS_CATALOG }}
     steps:
-      - name: Check for Databricks secrets
-        id: gate
-        run: |
-          if [ -n "$DATABRICKS_HOST" ] && [ -n "$DATABRICKS_CLIENT_ID" ] && [ -n "$DATABRICKS_CLIENT_SECRET" ] && [ -n "$DATABRICKS_WAREHOUSE_ID" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::G9 skipped: the Databricks secrets are not configured (S-4)."
-          fi
-
       - name: Checkout repository
-        if: steps.gate.outputs.enabled == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup .NET 10
-        if: steps.gate.outputs.enabled == 'true'
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
 
       - name: Restore with Locked Mode
-        if: steps.gate.outputs.enabled == 'true'
         run: dotnet restore Autheris.sln --locked-mode
 
-      # The live suites (WP-X1-DBX / C5) carry Category=DatabricksLive. Until they exist the filter matches nothing,
-      # so the step fails closed on an empty selection instead of reporting a green G9.
+      # The only step that sees the Databricks secrets. Checkout, setup and restore above carry none.
+      # The live suites carry Category=DatabricksLive. The log goes to RUNNER_TEMP, is never uploaded and never uses detailed verbosity.
       - name: Live Databricks suites
-        if: steps.gate.outputs.enabled == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          DATABRICKS_WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
+          DATABRICKS_CATALOG: ${{ secrets.DATABRICKS_CATALOG }}
         run: |
           set -o pipefail
-          dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category=DatabricksLive" --verbosity normal | tee g9.log
-          if grep -q "No test matches" g9.log; then
+          if [ -z "$DATABRICKS_HOST" ] || [ -z "$DATABRICKS_CLIENT_ID" ] || [ -z "$DATABRICKS_CLIENT_SECRET" ] || [ -z "$DATABRICKS_WAREHOUSE_ID" ]; then
+            echo "engine=spark" >> "$RUNNER_TEMP/g9-engine.txt"
+            echo "G9 not executed (Databricks secrets not configured; engine=spark)" >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::G9 not executed: the Databricks secrets are not configured (S-4)."
+            exit 0
+          fi
+          echo "engine=databricks" >> "$RUNNER_TEMP/g9-engine.txt"
+          dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore -p:AutherisIncludeTestAuth=true --filter "Category=DatabricksLive" --verbosity normal | tee "$RUNNER_TEMP/g9.log"
+          if grep -q "No test matches" "$RUNNER_TEMP/g9.log"; then
             echo "::error::No Category=DatabricksLive test exists; G9 cannot be green."
             exit 1
           fi

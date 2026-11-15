@@ -2,12 +2,14 @@
 """Render the nightly parity report (REQ-PARITY-NIGHTLY D-6, SEC-PAR-06).
 
 Usage:
-    parity-report.py <results.jsonl> <baseline.json> <out.md> [--update-baseline]
+    parity-report.py <results.jsonl> <baseline.json> <out.md> [--update-baseline] [--engine databricks|spark]
     parity-report.py --self-test
 
 Input is untrusted data: parsed with `json` only, bounded in size, validated per line. The report is written to <out.md> and
 appended to $GITHUB_STEP_SUMMARY when set. Exit code 1: invalid input, or a cell that is `pass` in the baseline is now `fail`
 or `gap` (green-to-red). Cells absent from the baseline never fail the report.
+The report names the engine that produced the results (`databricks` or `spark`, default `spark`) and states
+"G9 not executed" when the engine is `spark`, so a skipped live Databricks gate is never read as a green one.
 """
 import html
 import json
@@ -20,6 +22,8 @@ import tempfile
 MAX_BYTES = 50 * 1024 * 1024
 MAX_LINES = 200_000
 OUTCOMES = ("pass", "fail", "gap", "pending")
+ENGINES = ("databricks", "spark")
+DEFAULT_ENGINE = "spark"
 CELL_ID = re.compile(r"^[A-Za-z0-9_.\-]{1,200}$")
 GAP_ID = re.compile(r"^PARITY-GAP-\d{3}$")
 SHORT = re.compile(r"^[A-Za-z0-9_.\- ]{0,64}$")
@@ -63,6 +67,8 @@ def parse_results(path: pathlib.Path) -> list[dict]:
             gap = row.get("gapId")
             if gap is not None and (not isinstance(gap, str) or not GAP_ID.match(gap)):
                 raise InvalidInput(f"line {number}: invalid gapId")
+            if row.get("engine") is not None and row["engine"] not in ENGINES:
+                raise InvalidInput(f"line {number}: invalid engine")
             for key in ("block", "channel", "capability", "dialect"):
                 if not isinstance(row.get(key), str) or not SHORT.match(row[key]):
                     raise InvalidInput(f"line {number}: invalid {key}")
@@ -88,7 +94,15 @@ def parse_baseline(path: pathlib.Path) -> dict[str, str]:
     return dict(cells)
 
 
-def render(rows: list[dict], baseline: dict[str, str]) -> tuple[str, list[str], list[str]]:
+def resolve_engine(rows: list[dict], override: str | None = None) -> str:
+    """The flag wins; otherwise any row reporting databricks marks the run databricks; the default is spark."""
+    if override is not None:
+        return override
+    return "databricks" if any(row.get("engine") == "databricks" for row in rows) else DEFAULT_ENGINE
+
+
+def render(rows: list[dict], baseline: dict[str, str], engine: str | None = None) -> tuple[str, list[str], list[str]]:
+    engine = resolve_engine(rows, engine)
     latest: dict[str, dict] = {}
     for row in rows:
         latest[row["cellId"]] = row
@@ -110,7 +124,10 @@ def render(rows: list[dict], baseline: dict[str, str]) -> tuple[str, list[str], 
             entry["capabilities"].add(row["capability"])
             entry["cells"] += 1
 
-    lines = ["# Parity nightly report", ""]
+    lines = ["# Parity nightly report", "", f"Engine: {engine}"]
+    if engine == "spark":
+        lines.append("G9 not executed")
+    lines.append("")
     lines.append("| pass | fail | gap | pending |")
     lines.append("|---|---|---|---|")
     lines.append("| " + " | ".join(str(counts[o]) for o in OUTCOMES) + " |")
@@ -149,7 +166,7 @@ def update_baseline(rows: list[dict], path: pathlib.Path) -> None:
     path.write_text(json.dumps({"cells": cells}, indent=2) + "\n", encoding="utf-8")
 
 
-def run(results: pathlib.Path, baseline_path: pathlib.Path, out: pathlib.Path, update: bool) -> int:
+def run(results: pathlib.Path, baseline_path: pathlib.Path, out: pathlib.Path, update: bool, engine: str | None = None) -> int:
     try:
         rows = parse_results(results)
         baseline = parse_baseline(baseline_path)
@@ -160,7 +177,7 @@ def run(results: pathlib.Path, baseline_path: pathlib.Path, out: pathlib.Path, u
         update_baseline(rows, baseline_path)
         print(f"parity-report: baseline updated ({sum(1 for r in rows if r['outcome'] == 'pass')} pass cells)")
         return 0
-    text, regressions, _ = render(rows, baseline)
+    text, regressions, _ = render(rows, baseline, engine)
     out.write_text(text, encoding="utf-8")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
@@ -220,6 +237,23 @@ def self_test() -> int:
         rows[0]["channel"] = "Chan nel"
         text, _, _ = render(rows, {})
         assert "PARITY-GAP-003" in text
+        # engine: default spark says G9 not executed; databricks (flag or row) does not; invalid engine rejected
+        write(results, [row("a.x.y.1", "pass"), row("a.x.y.2", "pass")])
+        assert run(results, baseline, out, False) == 0
+        text = out.read_text(encoding="utf-8")
+        assert "Engine: spark" in text and "G9 not executed" in text, "default engine must be spark and say G9 not executed"
+        assert run(results, baseline, out, False, "databricks") == 0
+        text = out.read_text(encoding="utf-8")
+        assert "Engine: databricks" in text and "G9 not executed" not in text, "databricks engine must not claim G9 skipped"
+        on_databricks = row("a.x.y.1", "pass")
+        on_databricks["engine"] = "databricks"
+        write(results, [on_databricks, row("a.x.y.2", "pass")])
+        assert run(results, baseline, out, False) == 0
+        assert "Engine: databricks" in out.read_text(encoding="utf-8"), "row engine must be honoured"
+        bad_engine = row("a.x.y.1", "pass")
+        bad_engine["engine"] = "oracle"
+        write(results, [bad_engine])
+        assert run(results, baseline, out, False) == 1, "unknown engine must exit 1"
         # update-baseline
         write(results, [row("a.x.y.1", "pass"), row("a.x.y.2", "fail")])
         assert run(results, baseline, out, True) == 0
@@ -233,10 +267,18 @@ def main(argv: list[str]) -> int:
         return self_test()
     update = "--update-baseline" in argv
     args = [a for a in argv if a != "--update-baseline"]
+    engine = None
+    if "--engine" in args:
+        at = args.index("--engine")
+        if at + 1 >= len(args) or args[at + 1] not in ENGINES:
+            print(__doc__, file=sys.stderr)
+            return 2
+        engine = args[at + 1]
+        del args[at:at + 2]
     if len(args) != 3:
         print(__doc__, file=sys.stderr)
         return 2
-    return run(pathlib.Path(args[0]), pathlib.Path(args[1]), pathlib.Path(args[2]), update)
+    return run(pathlib.Path(args[0]), pathlib.Path(args[1]), pathlib.Path(args[2]), update, engine)
 
 
 if __name__ == "__main__":
