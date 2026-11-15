@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "policy_epochs", "column": { "name": "change_version", "type": "BIGINT", "family": "integer", "nullable": false } },
+    { "op": "addIndex", "table": "policy_epochs", "name": "ix_policy_epochs_change_version", "unique": false, "columns": ["change_version"] }
+  ]
+}

@@ -73,8 +73,10 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
                 schema_name TEXT NOT NULL,
                 table_name TEXT NOT NULL,
                 epoch INTEGER NOT NULL,
+                change_version INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NULL
             );
+            CREATE INDEX IF NOT EXISTS ix_policy_epochs_change_version ON POLICY_EPOCHS (change_version);
             CREATE TABLE catalog_state (
                 id INTEGER PRIMARY KEY,
                 structure_version INTEGER NOT NULL,

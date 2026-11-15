@@ -208,6 +208,22 @@ WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, is_sensitive
         public const string TableEpochSql = @"SELECT epoch FROM POLICY_EPOCHS
 WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
 
+        public const string SelectChangedTablesSinceSql = @"SELECT domain, schema_name, table_name
+FROM POLICY_EPOCHS
+WHERE change_version > @sinceVersion
+ORDER BY change_version, table_id";
+
+        public const string UpdateTableEpochChangeVersionSql = @"UPDATE POLICY_EPOCHS
+SET change_version = @changeVersion, updated_at = @now
+WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
+
+        public const string SelectRelationTableIdentifiersSql = @"SELECT tp.source_name, tp.schema_name, tp.table_name,
+       tc.source_name, tc.schema_name, tc.table_name
+FROM TABLE_RELATIONS r
+JOIN TABLES tp ON r.parent_table_id = tp.id
+JOIN TABLES tc ON r.child_table_id = tc.id
+WHERE r.id = @id";
+
         public const string RelationsForParentTableSqlPg = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
        tp.source_name, tp.schema_name, tp.table_name,
        tc.source_name, tc.schema_name, tc.table_name,

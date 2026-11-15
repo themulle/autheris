@@ -129,6 +129,55 @@ public sealed class CatalogSnapshot
     public static CatalogSnapshot Empty(CatalogVersion? version = null) =>
         Create(version ?? new CatalogVersion(1, 1), ImmutableArray<TableMetadata>.Empty, ImmutableArray<TableRelation>.Empty);
 
+    /// <summary>
+    /// Returns a new immutable <see cref="CatalogSnapshot"/> produced by removing or replacing
+    /// <paramref name="changedIdentifiers"/> and inserting active <paramref name="updatedTables"/>.
+    /// Existing snapshot collections and indices remain untouched for concurrent readers.
+    /// </summary>
+    public CatalogSnapshot WithDelta(
+        CatalogVersion version,
+        IReadOnlyCollection<TableIdentifier> changedIdentifiers,
+        IReadOnlyList<TableMetadata> updatedTables,
+        IReadOnlyList<TableRelation>? relations = null,
+        int degradedEntityCount = 0,
+        DateTimeOffset? capturedAt = null)
+    {
+        ArgumentNullException.ThrowIfNull(changedIdentifiers);
+        ArgumentNullException.ThrowIfNull(updatedTables);
+
+        var byIdentifier = new Dictionary<TableIdentifier, TableMetadata>(Tables.Count);
+        for (var i = 0; i < Tables.Count; i++)
+        {
+            var existing = Tables[i];
+            byIdentifier[existing.Identifier] = existing;
+        }
+
+        foreach (var changedId in changedIdentifiers)
+        {
+            byIdentifier.Remove(changedId);
+        }
+
+        for (var i = 0; i < updatedTables.Count; i++)
+        {
+            var updated = updatedTables[i];
+            if (updated.Table.IsActive)
+            {
+                byIdentifier[updated.Identifier] = updated;
+            }
+            else
+            {
+                byIdentifier.Remove(updated.Identifier);
+            }
+        }
+
+        return Create(
+            version,
+            byIdentifier.Values.ToList(),
+            relations ?? Relations,
+            degradedEntityCount,
+            capturedAt);
+    }
+
     public bool TryGetOrdinal(CatalogEntryKey key, out int ordinal) =>
         OrdinalByKey.TryGetValue(key, out ordinal);
 

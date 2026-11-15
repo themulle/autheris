@@ -7,6 +7,29 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
 {
     Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns identifiers of tables whose persisted <c>POLICY_EPOCHS.change_version</c> is strictly greater than <paramref name="sinceVersion"/>.
+    /// </summary>
+    Task<IReadOnlyList<TableIdentifier>> GetTablesChangedSinceAsync(long sinceVersion, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement delta table queries.");
+
+    /// <summary>
+    /// Batch-loads active table metadata only for the requested <paramref name="identifiers"/>.
+    /// </summary>
+    async Task<IReadOnlyList<TableMetadata>> GetTablesAsync(IReadOnlyCollection<TableIdentifier> identifiers, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(identifiers);
+        if (identifiers.Count == 0)
+        {
+            return Array.Empty<TableMetadata>();
+        }
+
+        var wanted = identifiers as IReadOnlySet<TableIdentifier> ?? new HashSet<TableIdentifier>(identifiers);
+        var all = await GetAllTablesAsync(ct).ConfigureAwait(false);
+        return all.Where(t => wanted.Contains(t.Identifier)).ToList();
+    }
+
     Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default);
 
     /// <summary>

@@ -73,7 +73,7 @@ public partial class GovernanceRepository
         }
     }
 
-    private async Task<List<(Guid Id, TableIdentifier Identifier, Table Table)>> LoadActiveTablesAsync(
+    internal async Task<List<(Guid Id, TableIdentifier Identifier, Table Table)>> LoadActiveTablesAsync(
         DbCommand cmd,
         CancellationToken ct)
     {

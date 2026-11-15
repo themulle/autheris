@@ -26,6 +26,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
 
     // Bounded (a 10k-table catalog must not grow the cache without limit); a miss just reloads the metadata.
     private readonly Autheris.Application.State.Caching.BoundedCache<string, (TableMetadata? Metadata, long CachedAtTicks, long Epoch)> _metadataCache = new(20_000, comparer: StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<TableIdentifier, long> _deferredEpochTables = new();
+    private long _deferredEpochSeq;
     private readonly CatalogKeyDefinitionStore.KeyTableProbe _keyTables = new();
     private readonly IGovernanceSqlDialect _dialect;
     private readonly ILogger? _logger;
@@ -359,7 +361,12 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         _metadataInvalidator?.Invoke(tableKey);
     }
 
-    internal async Task<long> IncrementTableEpochInternalAsync(DbConnection conn, DbTransaction tx, TableIdentifier table, CancellationToken ct)
+    internal async Task<long> IncrementTableEpochInternalAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        TableIdentifier table,
+        CancellationToken ct,
+        long? changeVersion = null)
     {
         InvalidateTableMetadata(table.ToString().ToLowerInvariant());
         await using (var cmd = conn.CreateCommand())
@@ -369,20 +376,25 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
             if (_dialect is PostgreSqlGovernanceDialect)
             {
                 cmd.CommandText = @"UPDATE POLICY_EPOCHS
-                                    SET epoch = epoch + 1, updated_at = @now
+                                    SET epoch = epoch + 1,
+                                        change_version = COALESCE(@changeVersion, change_version),
+                                        updated_at = @now
                                     WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
                                     RETURNING epoch";
             }
             else
             {
                 cmd.CommandText = @"UPDATE POLICY_EPOCHS
-                                    SET epoch = epoch + 1, updated_at = @now
+                                    SET epoch = epoch + 1,
+                                        change_version = COALESCE(@changeVersion, change_version),
+                                        updated_at = @now
                                     OUTPUT inserted.epoch
                                     WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
             }
             cmd.AddBound("@domain", table.Domain);
             cmd.AddBound("@schema", table.Schema);
             cmd.AddBound("@table", table.TableName);
+            cmd.AddBound("@changeVersion", (object?)changeVersion ?? DBNull.Value, System.Data.DbType.Int64);
             cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
 
             var scalar = await ExecuteScalarAsync(cmd, "Epochs.IncrementExisting", ct).ConfigureAwait(false);
@@ -398,11 +410,11 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
             // Transitional: replace engine-type branch with dialect members once the epoch statements move into the dialect.
             if (_dialect is PostgreSqlGovernanceDialect)
             {
-                insertCmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                          SELECT id, source_name, schema_name, table_name, 2, @now
+                insertCmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                          SELECT id, source_name, schema_name, table_name, 2, COALESCE(@changeVersion, 0), @now
                                           FROM TABLES
                                           WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
-                                          ON CONFLICT (table_id) DO UPDATE SET epoch = POLICY_EPOCHS.epoch + 1, updated_at = EXCLUDED.updated_at
+                                          ON CONFLICT (table_id) DO UPDATE SET epoch = POLICY_EPOCHS.epoch + 1, change_version = COALESCE(@changeVersion, POLICY_EPOCHS.change_version), updated_at = EXCLUDED.updated_at
                                           RETURNING epoch";
             }
             else
@@ -411,14 +423,15 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
                                           USING (SELECT id AS table_id, source_name AS domain, schema_name, table_name FROM TABLES
                                                  WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)) AS source
                                           ON target.table_id = source.table_id
-                                          WHEN MATCHED THEN UPDATE SET epoch = target.epoch + 1, updated_at = @now
-                                          WHEN NOT MATCHED THEN INSERT (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                              VALUES (source.table_id, source.domain, source.schema_name, source.table_name, 2, @now)
+                                          WHEN MATCHED THEN UPDATE SET epoch = target.epoch + 1, change_version = COALESCE(@changeVersion, target.change_version), updated_at = @now
+                                          WHEN NOT MATCHED THEN INSERT (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                              VALUES (source.table_id, source.domain, source.schema_name, source.table_name, 2, COALESCE(@changeVersion, 0), @now)
                                           OUTPUT inserted.epoch;";
             }
             insertCmd.AddBound("@domain", table.Domain);
             insertCmd.AddBound("@schema", table.Schema);
             insertCmd.AddBound("@table", table.TableName);
+            insertCmd.AddBound("@changeVersion", (object?)changeVersion ?? DBNull.Value, System.Data.DbType.Int64);
             insertCmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
 
             var insScalar = await ExecuteScalarAsync(insertCmd, "Epochs.InsertOrIncrement", ct).ConfigureAwait(false);
@@ -429,6 +442,58 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         }
 
         return 0;
+    }
+
+    internal async Task SetTableEpochChangeVersionInternalAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        TableIdentifier table,
+        long changeVersion,
+        CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = CatalogSql.UpdateTableEpochChangeVersionSql;
+        cmd.AddBound("@changeVersion", changeVersion, System.Data.DbType.Int64);
+        cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
+        cmd.AddBound("@domain", table.Domain);
+        cmd.AddBound("@schema", table.Schema);
+        cmd.AddBound("@table", table.TableName);
+        await ExecuteNonQueryAsync(cmd, "Epochs.SetChangeVersion", ct).ConfigureAwait(false);
+    }
+
+    internal void RecordDeferredEpochTable(TableIdentifier table)
+    {
+        var seq = Interlocked.Increment(ref _deferredEpochSeq);
+        _deferredEpochTables.AddOrUpdate(table, seq, (_, _) => seq);
+    }
+
+    internal void RecordDeferredEpochTables(IEnumerable<TableIdentifier> tables)
+    {
+        foreach (var table in tables)
+        {
+            RecordDeferredEpochTable(table);
+        }
+    }
+
+    internal List<(TableIdentifier Table, long Seq)> SnapshotDeferredEpochTables()
+    {
+        var list = new List<(TableIdentifier Table, long Seq)>();
+        foreach (var kv in _deferredEpochTables)
+        {
+            list.Add((kv.Key, kv.Value));
+        }
+
+        return list;
+    }
+
+    internal void ClearDeferredEpochTables(IReadOnlyList<(TableIdentifier Table, long Seq)> flushed)
+    {
+        for (var i = 0; i < flushed.Count; i++)
+        {
+            var entry = flushed[i];
+            _deferredEpochTables.TryRemove(new KeyValuePair<TableIdentifier, long>(entry.Table, entry.Seq));
+        }
     }
 
     internal async Task InvalidateTableEpochAsync(TableIdentifier table, CancellationToken ct)

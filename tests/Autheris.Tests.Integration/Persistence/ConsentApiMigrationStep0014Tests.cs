@@ -337,6 +337,7 @@ public sealed class ConsentApiMigrationStep0014Tests
                 schema_name TEXT NOT NULL,
                 table_name TEXT NOT NULL,
                 epoch INTEGER NOT NULL,
+                change_version INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
             CREATE TABLE AUDIT_LOG_ENTRIES (

@@ -86,10 +86,15 @@ public partial class GovernanceRepository
 
         var relationScope = CatalogWriteScopeContext.TryGetActive(this);
         Autheris.Application.Catalog.CatalogVersion? relationVersion = null;
+        long? changeVersion = null;
         if (relationScope is null)
         {
             relationVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+            changeVersion = relationVersion.Value.StructureVersion + relationVersion.Value.ContentVersion;
         }
+
+        await BumpRelationTableEpochsInternalAsync(
+            conn, tx, relation.ParentTableIdentifier, relation.ChildTableIdentifier, changeVersion, ct).ConfigureAwait(false);
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
         if (relationVersion.HasValue)
@@ -98,10 +103,12 @@ public partial class GovernanceRepository
         }
         else
         {
+            RecordDeferredRelationEpochTables(relation.ParentTableIdentifier, relation.ChildTableIdentifier);
             // A relation add is additive: its version bump and event are coalesced by the active write scope.
             await relationScope!.RecordAdditiveWriteAsync(1, 0, ct).ConfigureAwait(false);
         }
 
+        await InvalidateRelationEpochsAsync(relation.ParentTableIdentifier, relation.ChildTableIdentifier, ct).ConfigureAwait(false);
         return new RelationWriteResult(Guid.Parse(storedId), created, keysChanged);
     }
 
@@ -153,28 +160,47 @@ public partial class GovernanceRepository
 
     public async Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default)
     {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-        try
+        (TableIdentifier Parent, TableIdentifier Child)? endpoints = null;
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
         {
-            var updated = await UpdateRelationCrossDataSourceAsync(conn, tx, relationId, IsPostgreSql ? allowCrossDataSource : (allowCrossDataSource ? 1 : 0), ct).ConfigureAwait(false);
-            if (updated)
+            await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
             {
-                var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
-                await tx.CommitAsync(ct).ConfigureAwait(false);
-                await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
-                await FlushScopePendingAsync(ct).ConfigureAwait(false);
-                return true;
-            }
+                var updated = await UpdateRelationCrossDataSourceAsync(conn, tx, relationId, IsPostgreSql ? allowCrossDataSource : (allowCrossDataSource ? 1 : 0), ct).ConfigureAwait(false);
+                if (updated)
+                {
+                    endpoints = await LoadRelationTableIdentifiersAsync(conn, tx, relationId, ct).ConfigureAwait(false);
+                    var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+                    var changeVersion = newVersion.StructureVersion + newVersion.ContentVersion;
+                    if (endpoints.HasValue)
+                    {
+                        await BumpRelationTableEpochsInternalAsync(
+                            conn, tx, endpoints.Value.Parent, endpoints.Value.Child, changeVersion, ct).ConfigureAwait(false);
+                    }
 
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
-            return false;
+                    await tx.CommitAsync(ct).ConfigureAwait(false);
+                    await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
+                    await FlushScopePendingAsync(ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return false;
+                }
+            }
+            catch
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
         }
-        catch
+
+        if (endpoints.HasValue)
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
-            throw;
+            await InvalidateRelationEpochsAsync(endpoints.Value.Parent, endpoints.Value.Child, ct).ConfigureAwait(false);
         }
+
+        return true;
     }
 
     public async Task<Autheris.Application.Catalog.CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default)
@@ -198,6 +224,7 @@ public partial class GovernanceRepository
     /// </summary>
     public async Task FlushCatalogVersionAsync(long structureDelta, long contentDelta, CancellationToken ct = default)
     {
+        var deferred = SnapshotDeferredEpochTables();
         Autheris.Application.Catalog.CatalogVersion version;
         await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
         {
@@ -205,7 +232,14 @@ public partial class GovernanceRepository
             try
             {
                 version = await BumpCatalogVersionInternalAsync(conn, tx, structureDelta, contentDelta, ct).ConfigureAwait(false);
+                if (deferred.Count > 0)
+                {
+                    var changeVersion = version.StructureVersion + version.ContentVersion;
+                    await CatalogDeltaQueryHelper.StampDeferredChangeVersionsAsync(conn, tx, deferred, changeVersion, ct).ConfigureAwait(false);
+                }
+
                 await tx.CommitAsync(ct).ConfigureAwait(false);
+                ClearDeferredEpochTables(deferred);
             }
             catch
             {
@@ -215,6 +249,61 @@ public partial class GovernanceRepository
         }
 
         await PublishCatalogChangedEventAsync(version, ct).ConfigureAwait(false);
+    }
+
+    private async Task BumpRelationTableEpochsInternalAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        TableIdentifier parent,
+        TableIdentifier child,
+        long? changeVersion,
+        CancellationToken ct)
+    {
+        await IncrementTableEpochInternalAsync(conn, tx, parent, ct, changeVersion).ConfigureAwait(false);
+        if (!child.Equals(parent))
+        {
+            await IncrementTableEpochInternalAsync(conn, tx, child, ct, changeVersion).ConfigureAwait(false);
+        }
+    }
+
+    private void RecordDeferredRelationEpochTables(TableIdentifier parent, TableIdentifier child)
+    {
+        RecordDeferredEpochTable(parent);
+        if (!child.Equals(parent))
+        {
+            RecordDeferredEpochTable(child);
+        }
+    }
+
+    private async Task InvalidateRelationEpochsAsync(TableIdentifier parent, TableIdentifier child, CancellationToken ct)
+    {
+        await InvalidateTableEpochAsync(parent, ct).ConfigureAwait(false);
+        if (!child.Equals(parent))
+        {
+            await InvalidateTableEpochAsync(child, ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<(TableIdentifier Parent, TableIdentifier Child)?> LoadRelationTableIdentifiersAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        Guid relationId,
+        CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = CatalogSql.SelectRelationTableIdentifiersSql;
+        cmd.AddBound("@id", relationId.ToString());
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        var parent = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
+        var child = new TableIdentifier(reader.GetString(3), reader.GetString(4), reader.GetString(5));
+        return (parent, child);
     }
 
     internal async Task<Autheris.Application.Catalog.CatalogVersion> BumpCatalogVersionInternalAsync(

@@ -231,22 +231,31 @@ internal static class CatalogBatchUpsertHelper
             }
             else
             {
+                deferVersionToScope = writeScope is not null && !anyRestrictive;
+                CatalogVersion? newVersion = null;
+                long? changeVersion = null;
+                if (!deferVersionToScope)
+                {
+                    newVersion = await repo.BumpCatalogVersionInternalAsync(conn, tx, totalStructureDelta, totalContentDelta, ct).ConfigureAwait(false);
+                    changeVersion = newVersion.Value.StructureVersion + newVersion.Value.ContentVersion;
+                }
+
+                List<TableIdentifier>? deferredTables = deferVersionToScope ? new List<TableIdentifier>(count) : null;
                 for (var i = 0; i < count; i++)
                 {
                     if (classifications[i] != CatalogWriteClassification.Unchanged)
                     {
-                        await repo.IncrementTableEpochInternalAsync(conn, tx, chunk[i].Identifier, ct).ConfigureAwait(false);
+                        await repo.IncrementTableEpochInternalAsync(conn, tx, chunk[i].Identifier, ct, changeVersion).ConfigureAwait(false);
+                        deferredTables?.Add(chunk[i].Identifier);
                     }
                 }
 
-                deferVersionToScope = writeScope is not null && !anyRestrictive;
-                CatalogVersion? newVersion = null;
-                if (!deferVersionToScope)
-                {
-                    newVersion = await repo.BumpCatalogVersionInternalAsync(conn, tx, totalStructureDelta, totalContentDelta, ct).ConfigureAwait(false);
-                }
-
                 await tx.CommitAsync(ct).ConfigureAwait(false);
+
+                if (deferredTables is { Count: > 0 })
+                {
+                    repo.RecordDeferredEpochTables(deferredTables);
+                }
 
                 if (newVersion.HasValue)
                 {

@@ -153,7 +153,8 @@ public sealed class StepSqlLintTests
                 (11, "role_grantee_and_profile_assignment_retirement"),
                 (12, "scim_identity_correlation"),
                 (13, "catalog_discovery"),
-                (14, "consent_api")
+                (14, "consent_api"),
+                (15, "policy_epochs_change_version")
             ]);
         }
     }

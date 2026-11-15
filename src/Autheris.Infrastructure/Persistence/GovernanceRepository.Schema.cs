@@ -206,8 +206,8 @@ public partial class GovernanceRepository
                     using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = trans;
-                        cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                            VALUES (@id, @domain, @schema, @name, 1, @now)
+                        cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                            VALUES (@id, @domain, @schema, @name, 1, 1, @now)
                                             ON CONFLICT (table_id) DO NOTHING;";
                         cmd.AddBound("@id", tableId);
                         cmd.AddBound("@domain", domain);
@@ -298,8 +298,8 @@ public partial class GovernanceRepository
             using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                    VALUES (@id, 'finance', 'dbo', 'finance_items', 1, @now)
+                cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                    VALUES (@id, 'finance', 'dbo', 'finance_items', 1, 1, @now)
                                     ON CONFLICT DO NOTHING;";
                 cmd.AddBound("@id", childTableId);
                 cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
@@ -496,8 +496,8 @@ public partial class GovernanceRepository
                     using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = trans;
-                        cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                            SELECT @id, @domain, @schema, @name, 1, @now
+                        cmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, change_version, updated_at)
+                                            SELECT @id, @domain, @schema, @name, 1, 1, @now
                                             WHERE NOT EXISTS (SELECT 1 FROM POLICY_EPOCHS WHERE table_id = @id)
                                               AND NOT EXISTS (SELECT 1 FROM POLICY_EPOCHS WHERE domain = @domain AND schema_name = @schema AND table_name = @name);";
                         cmd.AddBound("@id", tableId);

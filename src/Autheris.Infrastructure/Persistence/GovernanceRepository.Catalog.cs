@@ -262,76 +262,128 @@ public partial class GovernanceRepository
             var rowFilterStrategies = await RowFilterEvaluationStore.ReadBatchObjectAsync(
                 conn, null, KeyDialect, ct).ConfigureAwait(false);
 
-            result = new List<TableMetadata>(activeTables.Count);
-            foreach (var (tid, identifier, tableEntity) in activeTables)
-            {
-                if (corruptedTableIds.Contains(tid))
-                {
-                    LogCatalogNotice("A catalog table was omitted: its column or masking rule definition is invalid (fail-closed).");
-                    continue;
-                }
+            result = await AssembleTableMetadataListAsync(
+                conn,
+                activeTables,
+                columnsByTable,
+                maskingRulesByTable,
+                corruptedTableIds,
+                epochs,
+                (tid, cacheKey) => TryGetValidCached(tid, cacheKey, out var hit) ? (true, hit) : (false, null),
+                ct,
+                rowFilterStrategies).ConfigureAwait(false);
+        }
 
-                var cacheKey = identifier.ToString().ToLowerInvariant();
-                if (TryGetValidCached(tid, cacheKey, out var cachedMetadata))
+        return await ApplyDatasetCatalogOverlayAsync(result, ct).ConfigureAwait(false);
+    }
+
+    public Task<IReadOnlyList<TableIdentifier>> GetTablesChangedSinceAsync(long sinceVersion, CancellationToken ct = default)
+        => CatalogDeltaQueryHelper.GetTablesChangedSinceAsync(this, sinceVersion, ct);
+
+    public Task<IReadOnlyList<TableMetadata>> GetTablesAsync(IReadOnlyCollection<TableIdentifier> identifiers, CancellationToken ct = default)
+        => CatalogDeltaQueryHelper.GetTablesAsync(this, identifiers, ct);
+
+    internal async Task<List<TableMetadata>> AssembleTableMetadataListAsync(
+        DbConnection conn,
+        List<(Guid Id, TableIdentifier Identifier, Table Table)> activeTables,
+        Dictionary<Guid, List<TableColumn>> columnsByTable,
+        Dictionary<Guid, Dictionary<string, MaskingRule>> maskingRulesByTable,
+        HashSet<Guid> corruptedTableIds,
+        Dictionary<Guid, long>? epochs,
+        Func<Guid, string, (bool Hit, TableMetadata? Metadata)>? tryGetCached,
+        CancellationToken ct,
+        Dictionary<Guid, RowFilterEvaluationSettings>? prefetchedRowFilterStrategies = null)
+    {
+        Dictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys = null;
+        Dictionary<Guid, List<CatalogPhysicalIndexStore.Row>>? prefetchedPhysical = null;
+        var allActiveTableIds = activeTables.Select(t => t.Id).ToList();
+        if (allActiveTableIds.Count > 0 && await CatalogKeyDefinitionStore.TablesExistAsync(conn, null, KeyDialect, ct, _keyTables).ConfigureAwait(false))
+        {
+            prefetchedKeys = await CatalogKeyDefinitionStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
+            prefetchedPhysical = await CatalogPhysicalIndexStore.ReadBatchAsync(conn, null, KeyDialect, allActiveTableIds, ct).ConfigureAwait(false);
+        }
+
+        var rowFilterStrategies = prefetchedRowFilterStrategies
+            ?? await RowFilterEvaluationStore.ReadBatchObjectAsync(conn, null, KeyDialect, ct).ConfigureAwait(false);
+
+        var result = new List<TableMetadata>(activeTables.Count);
+        foreach (var (tid, identifier, tableEntity) in activeTables)
+        {
+            if (corruptedTableIds.Contains(tid))
+            {
+                LogCatalogNotice("A catalog table was omitted: its column or masking rule definition is invalid (fail-closed).");
+                continue;
+            }
+
+            var cacheKey = identifier.ToString().ToLowerInvariant();
+            if (tryGetCached is not null)
+            {
+                var (hit, cachedMetadata) = tryGetCached(tid, cacheKey);
+                if (hit)
                 {
                     result.Add(cachedMetadata!);
                     continue;
                 }
-
-                var columns = columnsByTable.TryGetValue(tid, out var cols) ? cols : new List<TableColumn>();
-                var maskingRules = maskingRulesByTable.TryGetValue(tid, out var rules)
-                    ? rules
-                    : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
-
-                IReadOnlyList<string> pkColumns;
-                IReadOnlyList<KeyColumnDirection> pkDirections;
-                IReadOnlyList<TableIndexDefinition> indexes;
-                try
-                {
-                    (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
-                        conn, null, KeyDialect, identifier, tid, columns, ct,
-                        _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tid, out var keyRows) ? keyRows : null).ConfigureAwait(false);
-                }
-                catch (TableMetadataUnavailableException)
-                {
-                    LogCatalogNotice("A catalog table was omitted: its declared key or index definition is invalid.");
-                    continue;
-                }
-
-                rowFilterStrategies.TryGetValue(tid, out var rowFilterEvaluation);
-
-                var meta = new TableMetadata
-                {
-                    Identifier = identifier,
-                    Table = tableEntity,
-                    Columns = columns,
-                    ColumnMaskingRules = maskingRules,
-                    PrimaryKeyColumns = pkColumns,
-                    PrimaryKeyDirections = pkDirections,
-                    Indexes = indexes,
-                    PhysicalIndexes = prefetchedPhysical is not null && prefetchedPhysical.TryGetValue(tid, out var physicalRows) ? CatalogPhysicalIndexStore.Assemble(columns, physicalRows) : Array.Empty<PhysicalIndexDefinition>(),
-                    RowFilterEvaluation = rowFilterEvaluation
-                };
-
-                try
-                {
-                    meta.ValidateRequiredFilterColumns();
-                }
-                catch (CatalogValidationException)
-                {
-                    LogCatalogNotice("A catalog table was omitted: its required filter column definition is invalid.");
-                    continue;
-                }
-
-                if (epochs != null)
-                {
-                    _metadataCache[cacheKey] = (meta, TimeProvider.System.GetUtcNow().UtcTicks, epochs.TryGetValue(tid, out var loaded) ? loaded : -1);
-                }
-
-                result.Add(meta);
             }
+
+            var columns = columnsByTable.TryGetValue(tid, out var cols) ? cols : new List<TableColumn>();
+            var maskingRules = maskingRulesByTable.TryGetValue(tid, out var rules)
+                ? rules
+                : new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
+
+            IReadOnlyList<string> pkColumns;
+            IReadOnlyList<KeyColumnDirection> pkDirections;
+            IReadOnlyList<TableIndexDefinition> indexes;
+            try
+            {
+                (pkColumns, pkDirections, indexes) = await CatalogKeyDefinitionStore.ReadAsync(
+                    conn, null, KeyDialect, identifier, tid, columns, ct,
+                    _keyTables, prefetchedKeys is not null && prefetchedKeys.TryGetValue(tid, out var keyRows) ? keyRows : null).ConfigureAwait(false);
+            }
+            catch (TableMetadataUnavailableException)
+            {
+                LogCatalogNotice("A catalog table was omitted: its declared key or index definition is invalid.");
+                continue;
+            }
+
+            rowFilterStrategies.TryGetValue(tid, out var rowFilterEvaluation);
+
+            var meta = new TableMetadata
+            {
+                Identifier = identifier,
+                Table = tableEntity,
+                Columns = columns,
+                ColumnMaskingRules = maskingRules,
+                PrimaryKeyColumns = pkColumns,
+                PrimaryKeyDirections = pkDirections,
+                Indexes = indexes,
+                PhysicalIndexes = prefetchedPhysical is not null && prefetchedPhysical.TryGetValue(tid, out var physicalRows) ? CatalogPhysicalIndexStore.Assemble(columns, physicalRows) : Array.Empty<PhysicalIndexDefinition>(),
+                RowFilterEvaluation = rowFilterEvaluation
+            };
+
+            try
+            {
+                meta.ValidateRequiredFilterColumns();
+            }
+            catch (CatalogValidationException)
+            {
+                LogCatalogNotice("A catalog table was omitted: its required filter column definition is invalid.");
+                continue;
+            }
+
+            if (epochs != null)
+            {
+                _metadataCache[cacheKey] = (meta, TimeProvider.System.GetUtcNow().UtcTicks, epochs.TryGetValue(tid, out var loaded) ? loaded : -1);
+            }
+
+            result.Add(meta);
         }
 
+        return result;
+    }
+
+    internal async Task<List<TableMetadata>> ApplyDatasetCatalogOverlayAsync(List<TableMetadata> result, CancellationToken ct)
+    {
         if (result.Count == 0)
         {
             return result;
@@ -383,6 +435,7 @@ public partial class GovernanceRepository
                 }
 
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+                await SetTableEpochChangeVersionInternalAsync(conn, tx, table, newVersion.StructureVersion + newVersion.ContentVersion, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
                 await FlushScopePendingAsync(ct).ConfigureAwait(false);
@@ -417,6 +470,7 @@ public partial class GovernanceRepository
                 }
 
                 var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 1, 0, ct).ConfigureAwait(false);
+                await SetTableEpochChangeVersionInternalAsync(conn, tx, table, newVersion.StructureVersion + newVersion.ContentVersion, ct).ConfigureAwait(false);
                 await tx.CommitAsync(ct).ConfigureAwait(false);
                 await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
                 await FlushScopePendingAsync(ct).ConfigureAwait(false);
@@ -509,6 +563,8 @@ public partial class GovernanceRepository
                 if (change.Changed)
                 {
                     newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
+                    var changeVersion = newVersion.Value.StructureVersion + newVersion.Value.ContentVersion;
+                    await IncrementTableEpochInternalAsync(conn, tx, table, ct, changeVersion).ConfigureAwait(false);
                 }
 
                 await tx.CommitAsync(ct).ConfigureAwait(false);
@@ -527,7 +583,7 @@ public partial class GovernanceRepository
 
         if (change.Changed)
         {
-            InvalidateTableMetadata(table.ToString().ToLowerInvariant());
+            await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
         }
 
         return change;

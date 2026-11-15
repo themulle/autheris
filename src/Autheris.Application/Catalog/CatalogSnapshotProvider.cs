@@ -15,12 +15,14 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
     public static readonly TimeSpan MinimumRefreshInterval = TimeSpan.FromSeconds(1);
     public static readonly TimeSpan FullReloadBackstopInterval = TimeSpan.FromMinutes(10);
     public const int DegradedFailureThreshold = 3;
+    public const int MaxDeltaVersionSpan = 500;
 
     private readonly IGovernanceRepository _governanceRepo;
     private readonly ICatalogVersionProvider _versionProvider;
     private readonly IEventBus? _eventBus;
     private readonly ILogger<CatalogSnapshotProvider>? _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly ICatalogDirtyFlag? _dirtyFlag;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private readonly Channel<bool> _changeSignal = Channel.CreateBounded<bool>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
@@ -32,6 +34,7 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
     private IDisposable? _eventSubscription;
     private DateTimeOffset? _lastRefreshCompletedUtc;
     private DateTimeOffset _lastFullReloadUtc = DateTimeOffset.MinValue;
+    private long _lastLoadedVersion;
     private bool _initialized;
     private int _consecutiveFailures;
     private int _pendingSignal;
@@ -51,13 +54,15 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
         ICatalogVersionProvider versionProvider,
         IEventBus? eventBus = null,
         ILogger<CatalogSnapshotProvider>? logger = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ICatalogDirtyFlag? dirtyFlag = null)
     {
         _governanceRepo = governanceRepo ?? throw new ArgumentNullException(nameof(governanceRepo));
         _versionProvider = versionProvider ?? throw new ArgumentNullException(nameof(versionProvider));
         _eventBus = eventBus;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _dirtyFlag = dirtyFlag;
         _currentSnapshot = CatalogSnapshot.Empty(new CatalogVersion(1, 1));
 
         if (_eventBus != null)
@@ -137,6 +142,25 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
                 }
             }
 
+            var dbCombinedVersion = dbVersion.StructureVersion + dbVersion.ContentVersion;
+            var canAttemptDelta =
+                _initialized &&
+                !backstopDue &&
+                _lastLoadedVersion > 0 &&
+                (_dirtyFlag is null || !_dirtyFlag.IsDirty) &&
+                current.TableCount > 0 &&
+                dbCombinedVersion > _lastLoadedVersion &&
+                (dbCombinedVersion - _lastLoadedVersion) <= MaxDeltaVersionSpan;
+
+            if (canAttemptDelta)
+            {
+                var deltaApplied = await TryApplyDeltaRefreshAsync(current, dbVersion, dbCombinedVersion, ct).ConfigureAwait(false);
+                if (deltaApplied)
+                {
+                    return;
+                }
+            }
+
             IReadOnlyList<TableMetadata> tables;
             try
             {
@@ -179,6 +203,7 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
 
             Volatile.Write(ref _currentSnapshot, newSnapshot);
             _lastFullReloadUtc = capturedAt;
+            _lastLoadedVersion = dbCombinedVersion;
             _initialized = true;
             Interlocked.Exchange(ref _consecutiveFailures, 0);
             _logger?.LogInformation(
@@ -193,6 +218,71 @@ public sealed class CatalogSnapshotProvider : ICatalogSnapshotProvider, IDisposa
             }
 
             _refreshLock.Release();
+        }
+    }
+
+    private async Task<bool> TryApplyDeltaRefreshAsync(
+        CatalogSnapshot current,
+        CatalogVersion dbVersion,
+        long dbCombinedVersion,
+        CancellationToken ct)
+    {
+        try
+        {
+            var changed = await _governanceRepo.GetTablesChangedSinceAsync(_lastLoadedVersion, ct).ConfigureAwait(false);
+            if (changed.Count == 0 && dbVersion.StructureVersion > current.Version.StructureVersion)
+            {
+                _logger?.LogInformation(
+                    "Catalog structure version advanced from {OldStructure} to {NewStructure} with zero changed table entries; falling back to full reload.",
+                    current.Version.StructureVersion, dbVersion.StructureVersion);
+                return false;
+            }
+
+            if (changed.Count > 1 && changed.Count * 5 >= current.TableCount)
+            {
+                _logger?.LogInformation(
+                    "Catalog delta contains {ChangedCount} of {TableCount} tables (>= 20%); falling back to full reload.",
+                    changed.Count, current.TableCount);
+                return false;
+            }
+
+            IReadOnlyList<TableMetadata> updatedTables = changed.Count > 0
+                ? await _governanceRepo.GetTablesAsync(changed, ct).ConfigureAwait(false)
+                : Array.Empty<TableMetadata>();
+
+            IReadOnlyList<TableRelation>? relations = dbVersion.StructureVersion > current.Version.StructureVersion
+                ? await _governanceRepo.GetAllRelationsAsync(ct).ConfigureAwait(false)
+                : null;
+
+            var capturedAt = _timeProvider.GetUtcNow();
+            var updatedSnapshot = current.WithDelta(
+                dbVersion,
+                changed,
+                updatedTables,
+                relations,
+                degradedEntityCount: 0,
+                capturedAt: capturedAt);
+
+            Volatile.Write(ref _currentSnapshot, updatedSnapshot);
+            _lastLoadedVersion = dbCombinedVersion;
+            Interlocked.Exchange(ref _consecutiveFailures, 0);
+            _logger?.LogInformation(
+                "Catalog snapshot delta-updated to version {StructureVersion}.{ContentVersion} ({ChangedCount} changed, {TableCount} tables).",
+                dbVersion.StructureVersion, dbVersion.ContentVersion, changed.Count, updatedSnapshot.TableCount);
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Delta catalog refresh failed at version {StructureVersion}.{ContentVersion}; falling back to full reload.", dbVersion.StructureVersion, dbVersion.ContentVersion);
+            return false;
         }
     }
 
