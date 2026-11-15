@@ -38,7 +38,7 @@ public sealed class CatalogSearchSuggestedGraphQlFieldTests
     public CatalogSearchSuggestedGraphQlFieldTests()
     {
         IReadOnlyList<TableMetadata> tables = [Table(Gps, DataSourceType.Sql), Table(GpsFiles, DataSourceType.LakehouseIceberg)];
-        _metadata.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(tables));
+        _metadata.StubTables(tables);
     }
 
     private static TableMetadata Table(TableIdentifier id, DataSourceType type) => new()

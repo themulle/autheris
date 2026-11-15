@@ -2,6 +2,7 @@
 
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Tests.Unit.Catalog;
 using Autheris.Application.Audit;
 using Autheris.Tests.Unit.TestDoubles;
 using System;
@@ -200,6 +201,7 @@ public sealed class DynamicMaskingAndConnectorGuardTests
     public async Task RR_L3_04_DuckDbOlap_InProduction_HidesTableOracleAndDeniedReasons()
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.StubTables([]);
         metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<TableMetadata?>(null));
 

@@ -2,6 +2,7 @@
 
 namespace Autheris.Tests.Unit;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -119,6 +120,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     private static ITableMetadataRepository CreateRepository(params TableMetadata[] tables)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
+        repo.StubTables(tables);
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
@@ -798,6 +800,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
 
         var employeesMeta = CreateEmployeesMetadata("pg_ds");
         var tableRepo = Substitute.For<ITableMetadataRepository>();
+        tableRepo.StubTables([employeesMeta]);
         tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
 
