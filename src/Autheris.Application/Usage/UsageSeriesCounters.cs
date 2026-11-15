@@ -61,16 +61,7 @@ public sealed class UsageSeriesCounters
         if (bytes != 0) Interlocked.Add(ref _bytes, bytes);
         if (durationMs != 0) Interlocked.Add(ref _durationMs, durationMs);
         if (analysisCost != 0) Interlocked.Add(ref _analysisCost, analysisCost);
-        if (sourceComputeMs.HasValue)
-        {
-            Interlocked.Add(ref _sourceComputeMs, sourceComputeMs.Value);
-            Interlocked.Increment(ref _sourceComputeMeasured);
-        }
-        if (sourceCostMicros.HasValue)
-        {
-            Interlocked.Add(ref _sourceCostMicros, sourceCostMicros.Value);
-            Interlocked.Increment(ref _sourceCostMeasured);
-        }
+        AddSourceStats(sourceComputeMs, sourceCostMicros);
 
         switch (outcome)
         {
@@ -95,6 +86,21 @@ public sealed class UsageSeriesCounters
             case UsageOutcome.Error:
                 Interlocked.Increment(ref _errors);
                 break;
+        }
+    }
+
+    public void AddSourceStats(long? sourceComputeMs, long? sourceCostMicros)
+    {
+        if (sourceComputeMs.HasValue)
+        {
+            Interlocked.Add(ref _sourceComputeMs, sourceComputeMs.Value);
+            Interlocked.Increment(ref _sourceComputeMeasured);
+        }
+
+        if (sourceCostMicros.HasValue)
+        {
+            Interlocked.Add(ref _sourceCostMicros, sourceCostMicros.Value);
+            Interlocked.Increment(ref _sourceCostMeasured);
         }
     }
 

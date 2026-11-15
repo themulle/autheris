@@ -743,16 +743,7 @@ internal static class UsageStore
         UsageGroupBy.Application => row.Application, UsageGroupBy.ClientId => row.ClientId, UsageGroupBy.Grant => row.GrantId, _ => null
     };
 
-    private static byte[] ComputeSeriesHash(UsageSeriesKey k)
-    {
-        using var ms = new MemoryStream(256);
-        using (var w = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true))
-        {
-            w.Write(k.Tenant.Value); w.Write(k.UserKey); w.Write(k.GroupSetId); w.Write(k.BillingGroup);
-            w.Write((short)k.Transport); w.Write(k.Application); w.Write(k.ClientId); w.Write(k.DataSource); w.Write(k.TableId);
-        }
-        return SHA256.HashData(ms.GetBuffer().AsSpan(0, (int)ms.Length));
-    }
+    private static byte[] ComputeSeriesHash(UsageSeriesKey k) => UsageSeriesHash.Compute(k);
 
     private static void AddDate(DbCommand c, string n, DateOnly v) => c.AddBound(n, new DateTime(v.Year, v.Month, v.Day, 0, 0, 0, DateTimeKind.Utc), DbType.Date);
     private static void AddNullableDate(DbCommand c, string n, DateOnly? v) => c.AddBound(n, v.HasValue ? new DateTime(v.Value.Year, v.Value.Month, v.Value.Day, 0, 0, 0, DateTimeKind.Utc) : DBNull.Value, DbType.Date);

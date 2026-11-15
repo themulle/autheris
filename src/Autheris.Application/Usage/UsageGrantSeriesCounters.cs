@@ -34,6 +34,11 @@ public sealed class UsageGrantSeriesCounters
         if (rows != 0) Interlocked.Add(ref _rows, rows);
         if (bytes != 0) Interlocked.Add(ref _bytes, bytes);
         if (analysisCost != 0) Interlocked.Add(ref _analysisCost, analysisCost);
+        AddSourceStats(sourceComputeMs, sourceCostMicros);
+    }
+
+    public void AddSourceStats(long? sourceComputeMs, long? sourceCostMicros)
+    {
         if (sourceComputeMs.HasValue) Interlocked.Add(ref _sourceComputeMs, sourceComputeMs.Value);
         if (sourceCostMicros.HasValue) Interlocked.Add(ref _sourceCostMicros, sourceCostMicros.Value);
     }

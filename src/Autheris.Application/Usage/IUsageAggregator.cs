@@ -48,4 +48,23 @@ public interface IUsageAggregator
 
     /// <summary>Merges a previously swapped generation back into the current generation after a transient flush failure.</summary>
     void Merge(UsageGenerationSnapshot snapshot);
+
+    /// <summary>Current approximate count of queries awaiting late source-cost collection.</summary>
+    int PendingSourceQueryCount { get; }
+
+    /// <summary>Accumulates delayed source compute and cost measurements onto an existing usage series without altering request/query/outcome counts.</summary>
+    void AggregateSourceStats(
+        in UsageSeriesKey key,
+        IReadOnlyList<string>? grantIds,
+        long? sourceComputeMs,
+        long? sourceCostMicros);
+
+    /// <summary>Enqueues a pending source query for asynchronous collection if capacity permits.</summary>
+    bool TryEnqueuePendingSourceQuery(PendingSourceQuery query);
+
+    /// <summary>Dequeues up to <paramref name="maxCount"/> pending source queries for processing.</summary>
+    IReadOnlyList<PendingSourceQuery> DrainPendingSourceQueries(int maxCount);
+
+    /// <summary>Validates that <paramref name="sourceCostUnit"/> matches the expected unit configured for <paramref name="dataSource"/>.</summary>
+    bool IsSourceCostUnitValid(string dataSource, string? sourceCostUnit);
 }

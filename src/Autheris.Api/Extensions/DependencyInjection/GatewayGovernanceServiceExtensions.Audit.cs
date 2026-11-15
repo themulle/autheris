@@ -62,6 +62,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Usage.IUsageAggregator>(sp =>
             new Autheris.Application.Usage.UsageAggregator(
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
+                expectedCostUnitResolver: BuildExpectedCostUnitResolver(sp),
                 timeProvider: sp.GetService<TimeProvider>()));
         services.AddSingleton<Autheris.Application.Usage.IUsageRecorder, Autheris.Application.Usage.UsageRecorder>();
         services.AddSingleton<Autheris.Application.Usage.IUsageTariffService>(sp =>
@@ -73,7 +74,8 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Usage.UsageTariffService>>(),
                 sp.GetService<TimeProvider>(),
-                dataSource => gateway.CurrentValue.DataSources.Connections.ContainsKey(dataSource));
+                dataSource => gateway.CurrentValue.DataSources.Connections.ContainsKey(dataSource),
+                BuildExpectedCostUnitResolver(sp));
         });
         services.AddSingleton<Autheris.Application.Usage.IUsageGroupNameResolver>(sp =>
             new Autheris.Application.Usage.UsageGroupNameResolver(
@@ -88,6 +90,17 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.UsageAccountingOptions>>(),
                 sp.GetService<TimeProvider>()));
         services.AddHostedService<Autheris.Infrastructure.Usage.UsageFlushWorker>();
+        services.AddHostedService<Autheris.Infrastructure.Usage.SourceCostCollectorWorker>();
         services.AddHostedService<Autheris.Infrastructure.Usage.UsageInitialTariffSeedService>();
+    }
+
+    private static Func<string, string?> BuildExpectedCostUnitResolver(IServiceProvider sp)
+    {
+        var gateway = sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Autheris.Domain.Options.GatewayOptions>>();
+        var collectors = sp.GetServices<Autheris.Application.Usage.ISourceCostCollector>().ToArray();
+        return dataSource =>
+            Autheris.Application.Usage.SourceCostCollectorResolver
+                .FindForDataSource(dataSource, gateway.CurrentValue, collectors)?
+                .CostUnit;
     }
 }

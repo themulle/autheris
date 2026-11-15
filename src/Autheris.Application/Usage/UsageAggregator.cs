@@ -14,26 +14,35 @@ using Microsoft.Extensions.Options;
 
 public sealed class UsageAggregator : IUsageAggregator
 {
+    public const int MaxPendingSourceQueries = 50_000;
+
     private readonly UsageAccountingOptions _options;
     private readonly byte[]? _hmacKey;
     private readonly Func<string, string?>? _expectedCostUnitResolver;
     private readonly TimeProvider _timeProvider;
+    private readonly int _maxPendingQueries;
+    private readonly ConcurrentQueue<PendingSourceQuery> _pendingQueue = new();
+    private int _pendingCount;
     private UsageGeneration _currentGeneration;
 
     public UsageAggregator(
         IOptions<UsageAccountingOptions>? options = null,
         byte[]? hmacKey = null,
         Func<string, string?>? expectedCostUnitResolver = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        int maxPendingQueries = MaxPendingSourceQueries)
     {
         _options = options?.Value ?? new UsageAccountingOptions();
         _hmacKey = hmacKey;
         _expectedCostUnitResolver = expectedCostUnitResolver;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _maxPendingQueries = maxPendingQueries > 0 ? maxPendingQueries : MaxPendingSourceQueries;
         int maxSeries = _options.MaxSeries > 0 ? _options.MaxSeries : UsageAccountingOptions.DefaultMaxSeries;
         _currentGeneration = new UsageGeneration(maxSeries);
         UsageRequestScope.DefaultAggregator ??= this;
     }
+
+    public int PendingSourceQueryCount => Math.Max(0, Volatile.Read(ref _pendingCount));
 
     public void Aggregate(
         in UsageSeriesKey key,
@@ -210,6 +219,7 @@ public sealed class UsageAggregator : IUsageAggregator
                     costMicros,
                     fact.Outcome);
 
+                IReadOnlyList<string> recordedGrantIds = Array.Empty<string>();
                 if (fact.Outcome == UsageOutcome.Allow)
                 {
                     if (fact.Grants == null || fact.Grants.Count == 0)
@@ -228,9 +238,11 @@ public sealed class UsageAggregator : IUsageAggregator
                             factAnalysisCost,
                             computeMs,
                             costMicros);
+                        recordedGrantIds = [GrantRef.Invalid.GrantId];
                     }
                     else
                     {
+                        var grantList = new List<string>(fact.Grants.Count);
                         foreach (var grant in fact.Grants)
                         {
                             bool isInvalid =
@@ -239,13 +251,14 @@ public sealed class UsageAggregator : IUsageAggregator
                                 (grant.ValidUntil.HasValue && grant.ValidUntil.Value < now) ||
                                 (grant.ValidFrom.HasValue && grant.ValidFrom.Value > now);
 
+                            var effectiveGrant = isInvalid ? GrantRef.Invalid : grant;
                             RecordGrantEntry(
                                 gen,
                                 identity.Tenant,
                                 dayUtc,
                                 dataSource,
                                 tableId,
-                                isInvalid ? GrantRef.Invalid : grant,
+                                effectiveGrant,
                                 isInvalid,
                                 factQueries,
                                 factRows,
@@ -253,8 +266,26 @@ public sealed class UsageAggregator : IUsageAggregator
                                 factAnalysisCost,
                                 computeMs,
                                 costMicros);
+                            grantList.Add(effectiveGrant.GrantId);
                         }
+
+                        recordedGrantIds = grantList;
                     }
+                }
+
+                if (!string.IsNullOrWhiteSpace(fact.Source.SourceQueryId) &&
+                    !string.IsNullOrWhiteSpace(dataSource) &&
+                    (!computeMs.HasValue || !costMicros.HasValue))
+                {
+                    TryEnqueuePendingSourceQuery(new PendingSourceQuery(
+                        identity.Tenant,
+                        dataSource,
+                        fact.Source.SourceQueryId,
+                        dayUtc,
+                        UsageSeriesHash.Compute(key),
+                        key,
+                        recordedGrantIds,
+                        now));
                 }
             }
         }
@@ -365,6 +396,87 @@ public sealed class UsageAggregator : IUsageAggregator
         }
     }
 
+    public void AggregateSourceStats(
+        in UsageSeriesKey key,
+        IReadOnlyList<string>? grantIds,
+        long? sourceComputeMs,
+        long? sourceCostMicros)
+    {
+        if (!sourceComputeMs.HasValue && !sourceCostMicros.HasValue)
+        {
+            return;
+        }
+
+        var gen = _currentGeneration;
+        gen.Enter();
+        try
+        {
+            gen.AddSeriesSourceStats(key, sourceComputeMs, sourceCostMicros);
+            if (grantIds is { Count: > 0 })
+            {
+                foreach (var grantId in grantIds)
+                {
+                    if (string.IsNullOrWhiteSpace(grantId))
+                    {
+                        continue;
+                    }
+
+                    var grantKey = new UsageGrantSeriesKey(
+                        key.Tenant,
+                        key.DayUtc,
+                        grantId,
+                        key.DataSource,
+                        key.TableId);
+                    gen.AddGrantSeriesSourceStats(grantKey, sourceComputeMs, sourceCostMicros);
+                }
+            }
+        }
+        finally
+        {
+            gen.Exit();
+        }
+    }
+
+    public bool TryEnqueuePendingSourceQuery(PendingSourceQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        while (true)
+        {
+            int current = Volatile.Read(ref _pendingCount);
+            if (current >= _maxPendingQueries)
+            {
+                UsageDiagnostics.SourceCostQueueOverflowCounter.Add(1);
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _pendingCount, current + 1, current) == current)
+            {
+                _pendingQueue.Enqueue(query);
+                return true;
+            }
+        }
+    }
+
+    public IReadOnlyList<PendingSourceQuery> DrainPendingSourceQueries(int maxCount)
+    {
+        if (maxCount <= 0)
+        {
+            return Array.Empty<PendingSourceQuery>();
+        }
+
+        var drained = new List<PendingSourceQuery>();
+        while (drained.Count < maxCount && _pendingQueue.TryDequeue(out var item))
+        {
+            Interlocked.Decrement(ref _pendingCount);
+            drained.Add(item);
+        }
+
+        return drained;
+    }
+
+    public bool IsSourceCostUnitValid(string dataSource, string? sourceCostUnit) =>
+        IsSourceUnitValid(dataSource, sourceCostUnit);
+
     private bool IsSourceUnitValid(string dataSource, string? sourceCostUnit)
     {
         if (_expectedCostUnitResolver == null)
@@ -442,6 +554,16 @@ public sealed class UsageAggregator : IUsageAggregator
             long? sourceCostMicros)
         {
             ResolveGrantSeriesTarget(key)?.Add(accesses, queries, rows, bytes, analysisCost, sourceComputeMs, sourceCostMicros);
+        }
+
+        public void AddSeriesSourceStats(in UsageSeriesKey key, long? sourceComputeMs, long? sourceCostMicros)
+        {
+            ResolveSeriesTarget(key, dropWeight: 1)?.AddSourceStats(sourceComputeMs, sourceCostMicros);
+        }
+
+        public void AddGrantSeriesSourceStats(in UsageGrantSeriesKey key, long? sourceComputeMs, long? sourceCostMicros)
+        {
+            ResolveGrantSeriesTarget(key)?.AddSourceStats(sourceComputeMs, sourceCostMicros);
         }
 
         public void MergeGrantSeries(in UsageGrantSeriesKey key, UsageGrantSeriesCounters source)
