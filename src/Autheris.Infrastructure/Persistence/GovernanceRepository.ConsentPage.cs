@@ -14,7 +14,8 @@ using Autheris.Infrastructure.Persistence.Dialects;
 public partial class GovernanceRepository
 {
     private const string SelectConsentPagePrefix =
-        "SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to, c.is_revoked, c.tenant_id, c.renewal_count, t.source_name, t.schema_name, t.table_name FROM CONSENTS c JOIN TABLES t ON c.table_id = t.id WHERE ";
+        "SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to, c.is_revoked, c.tenant_id, c.renewal_count, t.source_name, t.schema_name, t.table_name, " +
+        ConsentWorkflowSql.ConsentColumns + " FROM CONSENTS c JOIN TABLES t ON c.table_id = t.id WHERE ";
 
     private const string SelectConsentPageSuffix =
         " ORDER BY c.id OFFSET 0 ROWS FETCH NEXT @take ROWS ONLY";
@@ -92,23 +93,23 @@ public partial class GovernanceRepository
                         break;
                     }
 
-                    consents.Add(new Consent
-                    {
-                        Id = Guid.Parse(reader.GetString(0)),
-                        TableId = Guid.Parse(reader.GetString(1)),
-                        ConsentRequestId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
-                        Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), true),
-                        GranteeType = Enum.Parse<GranteeType>(reader.GetString(4), true),
-                        GranteeSid = reader.IsDBNull(5) ? (Sid?)null : new Sid(reader.GetString(5)),
-                        RoleId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
-                        RoleName = reader.IsDBNull(7) ? null : reader.GetString(7),
-                        ValidFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
-                        ValidTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
-                        IsRevoked = reader.GetInt32(10) == 1,
-                        TenantId = StoredTenant.Parse(reader.IsDBNull(11) ? null : reader.GetString(11)),
-                        RenewalCount = reader.GetInt32(12),
-                        TableIdentifier = new TableIdentifier(reader.GetString(13), reader.GetString(14), reader.GetString(15))
-                    });
+                    consents.Add(ConsentWorkflowSql.BuildConsent(
+                        Guid.Parse(reader.GetString(0)),
+                        Guid.Parse(reader.GetString(1)),
+                        new TableIdentifier(reader.GetString(13), reader.GetString(14), reader.GetString(15)),
+                        reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)),
+                        Enum.Parse<ConsentEffect>(reader.GetString(3), true),
+                        Enum.Parse<GranteeType>(reader.GetString(4), true),
+                        reader.IsDBNull(5) ? (Sid?)null : new Sid(reader.GetString(5)),
+                        reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6)),
+                        reader.IsDBNull(7) ? null : reader.GetString(7),
+                        DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
+                        DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture),
+                        reader.GetInt32(10) == 1,
+                        StoredTenant.Parse(reader.IsDBNull(11) ? null : reader.GetString(11)),
+                        reader,
+                        16,
+                        renewalCount: reader.GetInt32(12)));
                 }
             }
         }

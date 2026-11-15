@@ -273,7 +273,8 @@ public sealed class DeclarativeConsentApplyService(
                     Description = description,
                     ValidFrom = now,
                     ValidTo = validTo,
-                    IsRevoked = false
+                    IsRevoked = false,
+                    GrantSource = ConsentGrantSource.Declarative
                 };
 
                 // Build column rules

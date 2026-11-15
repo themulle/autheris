@@ -1,0 +1,197 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "version", "type": "INTEGER", "family": "integer", "nullable": false } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "workflow_mode", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "external_system_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "external_reference", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "requested_valid_from", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "request_kind", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "profile_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true } },
+    { "op": "addIndex", "table": "consent_requests", "name": "ix_consent_requests_tenant_updated", "unique": false, "columns": ["tenant_id", "updated_at", "id"] },
+    { "op": "addColumn", "table": "consents", "column": { "name": "expiry_notice_sent_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "grant_record_seq", "type": "BIGINT", "family": "integer", "nullable": false } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "grant_source", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "profile_assignment_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true } },
+    { "op": "addIndex", "table": "consents", "name": "ix_consents_tenant_grant_source", "unique": false, "columns": ["tenant_id", "grant_source"] },
+    {
+      "op": "addTable",
+      "table": "profile_assignment_items",
+      "newTable": {
+        "name": "profile_assignment_items",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "request_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "item_no", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "object_ref", "type": "CHARACTER VARYING(512)", "family": "string", "nullable": false },
+          { "name": "owner_sid", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "owner_decision", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false },
+          { "name": "decided_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true },
+          { "name": "decided_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["tenant_id", "request_id", "item_no", "owner_sid"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "consent_workflow_routes",
+      "newTable": {
+        "name": "consent_workflow_routes",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "scope_kind", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false },
+          { "name": "scope_ref", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "mode", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false },
+          { "name": "external_system_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true },
+          { "name": "max_duration_days", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "request_timeout_days", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "expiry_notice_lead_hours", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "require_resolvable_approver", "type": "BOOLEAN", "family": "boolean", "nullable": false },
+          { "name": "updated_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "scope_kind", "scope_ref"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "external_workflow_systems",
+      "newTable": {
+        "name": "external_workflow_systems",
+        "columns": [
+          { "name": "id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "name", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "client_id", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "webhook_url", "type": "CHARACTER VARYING(2048)", "family": "string", "nullable": false },
+          { "name": "webhook_secret_protected", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "enabled", "type": "BOOLEAN", "family": "boolean", "nullable": false },
+          { "name": "created_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "created_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false },
+          { "name": "disabled_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "external_workflow_systems", "name": "ux_external_workflow_systems_tenant_client", "unique": true, "columns": ["tenant_id", "client_id"] },
+    {
+      "op": "addTable",
+      "table": "grant_records",
+      "newTable": {
+        "name": "grant_records",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "record_type", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false },
+          { "name": "consent_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true },
+          { "name": "request_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true },
+          { "name": "grant_source", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false },
+          { "name": "profile_assignment_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true },
+          { "name": "grantee_type", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": false },
+          { "name": "grantee_ref", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "object_id", "type": "CHARACTER VARYING(512)", "family": "string", "nullable": false },
+          { "name": "scope_json", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "valid_from", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true },
+          { "name": "valid_until", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true },
+          { "name": "requested_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "decision_json", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "decided_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false },
+          { "name": "recorded_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false },
+          { "name": "prev_hash", "type": "CHARACTER(64)", "family": "string", "nullable": false },
+          { "name": "record_hash", "type": "CHARACTER(64)", "family": "string", "nullable": false },
+          { "name": "signature", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "key_id", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "seq"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "grant_record_heads",
+      "newTable": {
+        "name": "grant_record_heads",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "last_seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "last_hash", "type": "CHARACTER(64)", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "consent_events",
+      "newTable": {
+        "name": "consent_events",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "type", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "subject_id", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "payload_json", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "created_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "seq"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "consent_event_deliveries",
+      "newTable": {
+        "name": "consent_event_deliveries",
+        "columns": [
+          { "name": "event_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "external_system_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "attempts", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "next_attempt_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false },
+          { "name": "delivered_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true },
+          { "name": "dead_lettered_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true },
+          { "name": "lease_owner", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": true },
+          { "name": "lease_until", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["event_id", "external_system_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "catalog_object_versions",
+      "newTable": {
+        "name": "catalog_object_versions",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "object_id", "type": "CHARACTER VARYING(512)", "family": "string", "nullable": false },
+          { "name": "content_hash", "type": "CHARACTER(64)", "family": "string", "nullable": false },
+          { "name": "seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "removed", "type": "BOOLEAN", "family": "boolean", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "object_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "catalog_changes",
+      "newTable": {
+        "name": "catalog_changes",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "object_id", "type": "CHARACTER VARYING(512)", "family": "string", "nullable": false },
+          { "name": "kind", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false },
+          { "name": "changed_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "seq"],
+        "indexes": []
+      }
+    }
+  ]
+}

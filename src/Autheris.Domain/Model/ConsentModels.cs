@@ -97,6 +97,10 @@ public sealed class Consent
 
     /// <summary>number of approved renewals (extensions) of this grant; persisted by the repositories.</summary>
     public int RenewalCount { get; init; }
+    public ConsentGrantSource GrantSource { get; init; } = ConsentGrantSource.ConsentRequest;
+    public long GrantRecordSeq { get; init; }
+    public Guid? ProfileAssignmentId { get; init; }
+    public DateTimeOffset? ExpiryNoticeSentAt { get; init; }
 
     /// <summary>
     /// owner-authored explanation of why this grant exists (persisted, normalised by<c>UntrustedText</c>). Settable because
