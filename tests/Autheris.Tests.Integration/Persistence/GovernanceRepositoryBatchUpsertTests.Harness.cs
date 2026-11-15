@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Persistence;
+namespace Autheris.Tests.Integration.Persistence;
 
 using System;
 using System.Collections.Generic;
