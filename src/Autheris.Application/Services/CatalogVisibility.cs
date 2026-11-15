@@ -34,7 +34,8 @@ public static class CatalogVisibility
 
         var hasAllow = activeConsents.Any(c =>
             c.TableIdentifier == table &&
-            c.Effect == ConsentEffect.Allow);
+            c.Effect == ConsentEffect.Allow &&
+            (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0));
 
         var hasUnconditionalDeny = activeConsents.Any(c =>
             c.TableIdentifier == table &&
@@ -100,7 +101,7 @@ public static class CatalogVisibility
         var tenantConsents = activeConsents.Where(c => c.TenantId == tenantId).ToList();
 
         var allowedTableIds = tenantConsents
-            .Where(c => c.Effect == ConsentEffect.Allow)
+            .Where(c => c.Effect == ConsentEffect.Allow && (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0))
             .Select(c => c.TableIdentifier)
             .ToHashSet();
 
@@ -137,7 +138,7 @@ public static class CatalogVisibility
             }
 
             var tableConsents = consentsByTable.TryGetValue(table.Identifier, out var tc) ? tc : [];
-            var tableAllows = tableConsents.Where(c => c.Effect == ConsentEffect.Allow).ToList();
+            var tableAllows = tableConsents.Where(c => c.Effect == ConsentEffect.Allow && (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0)).ToList();
 
             // Issue #127: scope-aware like the data path. A Deny column rule of any consent (SR15-52: also of an Allow consent) hides the
             // column only for callers it applies to (unscoped, or one of its scopes is held); an Allow consent shows it when its resolved level is not Deny.

@@ -142,7 +142,12 @@ public class ArchitectureAndCleanCodeTests
         // from roles and every DML statement stays denied. WP-SIMPL-45 PR 4 adds the decision-point mapping as the only allowed entry.
         string root = RepoRoot();
         string engineDir = Path.Combine(root, "src", "TrinoSqlEngine") + Path.DirectorySeparatorChar;
-        var allowList = Array.Empty<string>();
+        string[] allowList =
+        [
+            "src/Autheris.Application/Sql/Policy/GovernancePolicyFactory.cs",
+            "src/Autheris.Application/Sql/Services/GovernedSqlRewriter.cs",
+            "src/Autheris.Application/Sql/Services/GovernedSqlRewriter.WriteGrants.cs"
+        ];
         // 'new DmlWritePermit(', object-initializer and target-typed forms ('Write = new(...)', 'DmlWritePermit? x = new(...)').
         var forms = new Regex(@"\bnew\s+DmlWritePermit\b|\bDmlWritePermit\b|\bWrite\s*=\s*new\s*[(\{]|\bWritePermit\s*=", RegexOptions.CultureInvariant);
 

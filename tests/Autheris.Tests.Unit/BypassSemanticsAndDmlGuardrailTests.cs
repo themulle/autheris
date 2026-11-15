@@ -430,12 +430,6 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
 
     internal static GovernedSqlExecutionService CreateDmlService(DmlFixture fixture, bool allowDml = true, long maxAffectedRows = 1000, bool permissiveWrite = true, bool withDependency = false, bool columnlessHolder = false, bool plainTable = false, bool requireTenantColumn = false, string[]? exemptTables = null)
     {
-        if (permissiveWrite)
-        {
-            // Test-only seam: the production write decision denies every DML target.
-            Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
-        }
-
         var options = new GatewayOptions
         {
             WebSql = new WebSqlOptions
@@ -496,6 +490,58 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             .Returns(ci => Task.FromResult<TableMetadata?>(known.FirstOrDefault(t => t.Identifier.Equals(ci.Arg<TableIdentifier>()))));
         repo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(catalog));
 
+        var writeConsents = new List<Consent>();
+        if (permissiveWrite)
+        {
+            writeConsents.Add(new Consent
+            {
+                TableIdentifier = orders.Identifier,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-1-5-21-DML-WRITER"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                WriteRules =
+                [
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id", "amount", "tenant_id"], WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["id", "amount", "tenant_id"], WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)
+                ]
+            });
+            writeConsents.Add(new Consent
+            {
+                TableIdentifier = plain.Identifier,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-1-5-21-DML-WRITER"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                WriteRules =
+                [
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id"], WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["id"], WriteRowScope.AllRows),
+                    new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)
+                ]
+            });
+        }
+
+        // Reads stay independent of writes: every table is also readable by the writer through a plain read consent.
+        foreach (var readable in new[] { orders, consents, holder, plain })
+        {
+            writeConsents.Add(new Consent
+            {
+                TableIdentifier = readable.Identifier,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-1-5-21-DML-WRITER"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+            });
+        }
+
         var consentRepository = Substitute.For<IConsentRepository>();
         consentRepository.GetActiveConsentsForSubjectsAsync(
                 Arg.Any<IEnumerable<Sid>>(),
@@ -503,7 +549,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<TenantId?>(),
                 Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+            .Returns(ci => Task.FromResult<IReadOnlyList<Consent>>(writeConsents.Where(c => c.TableIdentifier.Equals(ci.ArgAt<TableIdentifier>(1))).ToList()));
 
         var consentResolution = Substitute.For<IConsentResolutionService>();
         consentResolution.ResolveAccess(
@@ -540,6 +586,14 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         connectionFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
             .Returns(_ => OpenSqliteAsync(fixture.ConnectionString));
 
+        var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            Options.Create(options),
+            consentResolution,
+            consentRepository,
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            writeGrantEvaluator: new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(consentRepository, allowDeleteGrants: permissiveWrite));
+
         return global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             consentResolution: consentResolution,
@@ -551,12 +605,13 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consentRepository,
             secretProvider: null,
-            sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
+            sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
+            accessDecisionPoint: pdp);
     }
 
     internal static Task ExecuteAsync(GovernedSqlExecutionService service, string sql) =>
         service.ExecuteGovernedQueryAsync(
-            new GovernedSqlQueryRequest(sql),
+            new GovernedSqlQueryRequest(sql, Transport: SqlTransports.WebSql),
             CreateWriter(),
             new TenantId(Tenant),
             (_, _) => Task.CompletedTask);
@@ -597,7 +652,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         TokenAccessScope.MarkReadOnly((ClaimsIdentity)writer.Identity!);
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => service.ExecuteGovernedQueryAsync(
-            new GovernedSqlQueryRequest("DELETE FROM orders WHERE amount = 10"),
+            new GovernedSqlQueryRequest("DELETE FROM orders WHERE amount = 10", Transport: SqlTransports.WebSql),
             writer,
             new TenantId(Tenant),
             (_, _) => Task.CompletedTask));

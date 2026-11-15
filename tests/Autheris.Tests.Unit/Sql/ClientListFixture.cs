@@ -122,9 +122,26 @@ internal sealed class ClientListFixture : IAsyncDisposable
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<TableMetadata?>(ci.Arg<TableIdentifier>().Equals(orders.Identifier) ? orders : null));
 
+        var writeConsent = new Consent
+        {
+            TableIdentifier = orders.Identifier,
+            TenantId = new TenantId(TenantA),
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-5-21-LIST-USER"),
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            WriteRules =
+            [
+                new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id", "status", "amount", "tenant_id"], WriteRowScope.AllRows),
+                new WriteRule(Guid.NewGuid(), WriteOperation.Update, ["id", "status", "amount", "tenant_id"], WriteRowScope.AllRows),
+                new WriteRule(Guid.NewGuid(), WriteOperation.Delete, [], WriteRowScope.AllRows)
+            ]
+        };
+
         var consentRepository = Substitute.For<IConsentRepository>();
         consentRepository.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([writeConsent]));
 
         var consentResolution = Substitute.For<IConsentResolutionService>();
         consentResolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), callerScopes: Arg.Any<IReadOnlySet<string>?>())
@@ -148,6 +165,14 @@ internal sealed class ClientListFixture : IAsyncDisposable
                 return (DbConnection)connection;
             });
 
+        var pdp = new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            Options.Create(options),
+            consentResolution,
+            consentRepository,
+            Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
+            writeGrantEvaluator: new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(consentRepository, allowDeleteGrants: true));
+
         var service = global::Autheris.Tests.Unit.TestDoubles.GovernedSqlExecutionServiceFactory.Create(
             Options.Create(options), executionGuard: GovernedTestSupport.Guard,
             consentResolution: consentResolution,
@@ -161,7 +186,8 @@ internal sealed class ClientListFixture : IAsyncDisposable
             secretProvider: null,
             federatedExecutionService: federated,
             timeZoneState: timeZoneState,
-            sqlEngine: new global::Autheris.Tests.Unit.TestDoubles.TestWritePermitSqlEngine(new TrinoSqlEngine.FastSqlEngine()));
+            sqlEngine: new TrinoSqlEngine.FastSqlEngine(),
+            accessDecisionPoint: pdp);
         return new ClientListFixture(keepAlive, connectionString, service, fixtureEntries);
     }
 
@@ -171,8 +197,6 @@ internal sealed class ClientListFixture : IAsyncDisposable
 
     public static ClaimsPrincipal User(string tenant = TenantA, bool writer = true)
     {
-        // Test-only seam: the production write decision denies every DML target.
-        Autheris.Application.Policy.DmlWriteDecisionTestSeam.EnablePermissiveWrite();
         return Autheris.Tests.Unit.TestSupport.PipelinePrincipals.MarkComplete(new ClaimsPrincipal(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-LIST-USER"),

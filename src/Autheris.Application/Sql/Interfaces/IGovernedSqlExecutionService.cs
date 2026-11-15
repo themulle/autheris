@@ -63,6 +63,18 @@ public static class SqlTransports
         [WebSql, Trino, Rest, Mcp, ArrowExport, SqlEndpoints, AsyncJob, Olap];
 }
 
+/// <summary>
+/// Transports wired to governed write grant enforcement. Non-listed transports must reject DML fail-closed.
+/// </summary>
+public static class DmlTransports
+{
+    public static System.Collections.Frozen.FrozenSet<string> Allowed { get; } =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet([SqlTransports.WebSql], StringComparer.OrdinalIgnoreCase);
+
+    public static bool IsAllowed(string? transport) =>
+        !string.IsNullOrWhiteSpace(transport) && Allowed.Contains(transport);
+}
+
 /// <param name="PlannedTableRead">
 /// True only for a table read whose SQL the gateway planned itself (OData, GraphQL, MCP, connectors). Such a read is not
 /// client SQL and is therefore not gated by <c>WebSql:Enabled</c>; it still runs through the full governed pipeline.

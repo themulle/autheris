@@ -41,6 +41,11 @@ public sealed record GovernedPolicyInput(
     /// assembly is byte-identical to the one without the feature (AC-8).
     /// </summary>
     public RowFilterKeySetStatement? KeySetStatement { get; init; }
+
+    /// <summary>
+    /// Governed DML write permit produced by the access decision point when compiling a write statement.
+    /// </summary>
+    public DmlWritePermit? WritePermit { get; init; }
 }
 
 /// <summary>
@@ -144,7 +149,10 @@ public sealed class GovernancePolicyFactory(
                 }
 
                 dialect = rowPolicy.Dialect;
-                consentFiltered.Add(identity.ToString());
+                if (input.WritePermit is null || PolicySubqueryTables.Names(rowPolicy.Predicate).Any())
+                {
+                    consentFiltered.Add(identity.ToString());
+                }
             }
 
             // No row policy and not declared without one: deny-all for this table (never "no policy").
@@ -204,7 +212,8 @@ public sealed class GovernancePolicyFactory(
             Tenant = new TenantBinding(RowPolicyFactory.TenantParameterName, input.Tenant.Value, SqlParameterType.String),
             TablesWithConsentRowFilter = consentFiltered.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             TablesWithMaskedColumns = masked.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
-            SubqueryStrategy = input.SubqueryStrategy
+            SubqueryStrategy = input.SubqueryStrategy,
+            Write = input.WritePermit
         };
 
         return new GovernedPolicyAssembly(policyResult, keySets);

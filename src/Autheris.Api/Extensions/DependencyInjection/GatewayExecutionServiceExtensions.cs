@@ -93,6 +93,11 @@ public static class GatewayExecutionServiceExtensions
             sp.GetService<TrinoSqlEngine.ISqlEngine>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<TreeSecuredSourceBuilder>>()));
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
+        services.AddScoped<Autheris.Application.Policy.WriteGrants.IWriteGrantEvaluator>(sp =>
+            new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(
+                sp.GetRequiredService<IConsentRepository>(),
+                sp.GetService<Autheris.Application.Policy.WriteGrants.IRowPolicyDependencyIndex>(),
+                sp.GetService<TimeProvider>()));
         services.AddScoped<Autheris.Application.Policy.Pdp.IAccessDecisionPoint, Autheris.Application.Policy.Pdp.AccessDecisionPoint>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
 
