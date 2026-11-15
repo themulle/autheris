@@ -14,8 +14,8 @@ public sealed class PolicyEpochsChangeVersionMigration0015Tests
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
             var steps = SqlMigrationStep.LoadEmbedded(engine);
-            var step = steps.Single(s => s.Version == 15 && s.Name == "policy_epochs_change_version");
-            step.Phase3Marker.ShouldBe("MIG-0015");
+            var step = steps.Single(s => s.Version == 16 && s.Name == "policy_epochs_change_version");
+            step.Phase3Marker.ShouldBe("MIG-0016");
 
             StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
 
@@ -23,7 +23,7 @@ public sealed class PolicyEpochsChangeVersionMigration0015Tests
             var checksumsPath = Path.Combine(
                 repoRoot, "tests", "Autheris.Tests.Architecture", "Golden", "GovernanceSteps", $"checksums.{engine}.txt");
             var recordedLine = File.ReadAllLines(checksumsPath)
-                .Single(l => l.StartsWith("0015 policy_epochs_change_version ", StringComparison.Ordinal));
+                .Single(l => l.StartsWith("0016 policy_epochs_change_version ", StringComparison.Ordinal));
             var recordedSha = recordedLine.Split(' ', StringSplitOptions.RemoveEmptyEntries)[2];
             step.Checksum.ShouldBe(recordedSha);
 
@@ -56,7 +56,7 @@ public sealed class PolicyEpochsChangeVersionMigration0015Tests
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
             var step = SqlMigrationStep.LoadEmbedded(engine)
-                .Single(s => s.Version == 15 && s.Name == "policy_epochs_change_version");
+                .Single(s => s.Version == 16 && s.Name == "policy_epochs_change_version");
 
             step.Sql.ShouldContain("change_version BIGINT NOT NULL", Case.Insensitive);
             step.Sql.ShouldContain("COALESCE((SELECT structure_version + content_version FROM", Case.Insensitive);

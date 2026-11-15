@@ -19,8 +19,8 @@ public sealed class ConsentApiMigrationStep0014Tests
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
             var steps = SqlMigrationStep.LoadEmbedded(engine);
-            var step = steps.Single(s => s.Version == 14 && s.Name == "consent_api");
-            step.Phase3Marker.ShouldBe("MIG-0014");
+            var step = steps.Single(s => s.Version == 15 && s.Name == "consent_api");
+            step.Phase3Marker.ShouldBe("MIG-0015");
 
             StepSqlLint.Validate(step.Sql, step.GuardSql, step.Phase3Marker).ShouldBeEmpty();
 
@@ -28,7 +28,7 @@ public sealed class ConsentApiMigrationStep0014Tests
             var checksumsPath = Path.Combine(
                 repoRoot, "tests", "Autheris.Tests.Architecture", "Golden", "GovernanceSteps", $"checksums.{engine}.txt");
             var recordedLine = File.ReadAllLines(checksumsPath)
-                .Single(l => l.StartsWith("0014 consent_api ", StringComparison.Ordinal));
+                .Single(l => l.StartsWith("0015 consent_api ", StringComparison.Ordinal));
             var recordedSha = recordedLine.Split(' ', StringSplitOptions.RemoveEmptyEntries)[2];
             step.Checksum.ShouldBe(recordedSha);
 
@@ -86,7 +86,7 @@ public sealed class ConsentApiMigrationStep0014Tests
     {
         foreach (var engine in new[] { "postgresql", "sqlserver" })
         {
-            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 14 && s.Name == "consent_api");
+            var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 15 && s.Name == "consent_api");
             step.Sql.ShouldContain("grant_source");
             step.Sql.ShouldContain("'CONSENT_REQUEST'");
             step.Sql.ShouldNotContain("DECLARATIVE", Case.Insensitive);

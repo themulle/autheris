@@ -20,7 +20,7 @@ using Npgsql;
 using Shouldly;
 using Xunit;
 
-/// <summary>Issue #666: TABLES.dbt_unique_id (step 0016) is nullable, never backfilled, written by the dbt sync and kept when an update carries none.</summary>
+/// <summary>Issue #666: TABLES.dbt_unique_id (step 0012) is nullable, never backfilled, written by the dbt sync and kept when an update carries none.</summary>
 public abstract class TableDbtUniqueIdContractBase
 {
     protected abstract Task<string?> CreateDatabaseAsync();
@@ -57,7 +57,7 @@ public abstract class TableDbtUniqueIdContractBase
 
         try
         {
-            await MigrateAsync(cs, 15);
+            await MigrateAsync(cs, 11);
             await using (var raw = OpenRaw(cs))
             {
                 await ExecAsync(raw, "INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t666', 'Test', 'uid_666', 'sales', 't_old', 't_old', 'Public', 0, 1)");

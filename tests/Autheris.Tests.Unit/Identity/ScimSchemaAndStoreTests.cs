@@ -45,8 +45,8 @@ public sealed class ScimSchemaAndStoreTests
     {
         var root = FindRepoRoot();
         var stepsDir = Path.Combine(root, "src", "Autheris.Infrastructure", "Persistence", "Migrations", "Steps", engine);
-        var sqlPath = Path.Combine(stepsDir, "0012_scim_identity_correlation.sql");
-        var shapePath = Path.Combine(stepsDir, "0012_scim_identity_correlation.shape.json");
+        var sqlPath = Path.Combine(stepsDir, "0013_scim_identity_correlation.sql");
+        var shapePath = Path.Combine(stepsDir, "0013_scim_identity_correlation.shape.json");
 
         File.Exists(sqlPath).ShouldBeTrue($"Missing migration step SQL: {sqlPath}");
         File.Exists(shapePath).ShouldBeTrue($"Missing migration step shape sidecar: {shapePath}");

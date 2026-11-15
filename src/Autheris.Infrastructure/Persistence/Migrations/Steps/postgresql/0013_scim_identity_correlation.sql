@@ -1,4 +1,4 @@
--- 0012_scim_identity_correlation (PostgreSQL)
+-- 0013_scim_identity_correlation (PostgreSQL)
 -- Forward-only migration: add hybrid AD / Entra correlation columns to IDENTITY_USERS
 -- and IDENTITY_GROUPS, create IDENTITY_GROUP_NESTING and SCIM_REALM_SYNC_STATE tables,
 -- and create per-(tenant_id, realm_id) filtered unique correlation indexes.

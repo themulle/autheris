@@ -40,9 +40,9 @@ public sealed class TableDbtUniqueIdSqlTests
     [Theory]
     [InlineData("postgresql")]
     [InlineData("sqlserver")]
-    public void Step0016_IsEmbedded_AddsANullableColumnWithoutBackfill(string engine)
+    public void Step0012_IsEmbedded_AddsANullableColumnWithoutBackfill(string engine)
     {
-        var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 16);
+        var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Version == 12);
 
         step.Name.ShouldBe("dbt_unique_id");
         step.Sql.ShouldContain("dbt_unique_id");

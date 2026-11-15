@@ -1,4 +1,4 @@
--- phase3: MIG-0015
+-- phase3: MIG-0016
 -- Add catalog change_version watermark and index to POLICY_EPOCHS for delta snapshot reloads.
 
 IF COL_LENGTH(N'dbo.POLICY_EPOCHS', N'change_version') IS NULL

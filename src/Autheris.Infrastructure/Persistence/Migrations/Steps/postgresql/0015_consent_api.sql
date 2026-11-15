@@ -1,4 +1,4 @@
--- phase3: MIG-0014
+-- phase3: MIG-0015
 -- External consent API schema and workflow foundation.
 
 ALTER TABLE CONSENT_REQUESTS ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;

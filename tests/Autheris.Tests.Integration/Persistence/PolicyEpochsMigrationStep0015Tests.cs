@@ -47,7 +47,7 @@ public sealed class PolicyEpochsMigrationStep0015Tests
         backfilled.ShouldBe(8);
 
         var step = SqlMigrationStep.LoadEmbedded("postgresql")
-            .Single(s => s.Version == 15 && s.Name == "policy_epochs_change_version");
+            .Single(s => s.Version == 16 && s.Name == "policy_epochs_change_version");
         step.Sql.ShouldContain("change_version");
     }
 
