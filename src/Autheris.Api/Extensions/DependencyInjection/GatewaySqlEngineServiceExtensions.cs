@@ -76,6 +76,7 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddSingleton<Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec, Autheris.Application.Sql.Paging.WebSqlPageTokenCodec>();
         services.AddScoped<GovernedSqlRewriteDependencies>();
         services.AddScoped<GovernedSqlExecutionDependencies>();
+        services.TryAddSingleton<Autheris.Application.Policy.WriteGrants.IWriteBudgetStore, Autheris.Infrastructure.RateLimiting.InMemoryWriteBudgetStore>();
         // R-4: the federated executor is resolved on first cross-source use (breaks the construction cycle without a service locator).
         services.AddScoped(sp => new Lazy<IFederatedQueryExecutionService>(() => sp.GetRequiredService<IFederatedQueryExecutionService>()));
         services.AddScoped<IGovernedSqlExecutionService, GovernedSqlExecutionService>();

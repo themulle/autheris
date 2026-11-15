@@ -36,6 +36,12 @@ public sealed class DataSourceConnectionOptions
 {
     public string Provider { get; init; } = "Sqlite"; // "Sqlite", "SqlServer", "PostgreSql"
     public string ConnectionString { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Dedicated connection string used exclusively for governed DML write statements. Read queries never use this connection string.
+    /// </summary>
+    public string? WriteConnectionString { get; init; }
+
     [Range(1, 300)] public int CommandTimeoutSeconds { get; init; } = 30;
 
     /// <summary>
@@ -131,6 +137,36 @@ public sealed class DataSourceConnectionOptions
     /// <c>NTLM_USER_FILE</c> and never placed into the connection string or logs.
     /// </summary>
     public SqlServerWindowsAuthOptions? WindowsAuth { get; init; }
+
+    /// <summary>
+    /// Returns a connection options copy configured to connect using the dedicated <paramref name="writeConnectionString"/>.
+    /// </summary>
+    public DataSourceConnectionOptions ForWriteExecution(string writeConnectionString)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(writeConnectionString);
+        return new DataSourceConnectionOptions
+        {
+            Provider = Provider,
+            ConnectionString = writeConnectionString,
+            WriteConnectionString = WriteConnectionString,
+            CommandTimeoutSeconds = CommandTimeoutSeconds,
+            EnforcementMode = EnforcementMode,
+            CoLocationGroup = CoLocationGroup,
+            ServerName = ServerName,
+            ReadUncommitted = false,
+            LoginFailureCooldownSeconds = LoginFailureCooldownSeconds,
+            KeySetCacheAllowed = KeySetCacheAllowed,
+            AllowKeySetImport = AllowKeySetImport,
+            CallerAttributeLookupAllowed = CallerAttributeLookupAllowed,
+            CallerAttributeSharedLoginAcknowledged = CallerAttributeSharedLoginAcknowledged,
+            CallerAttributeDedicatedLogin = CallerAttributeDedicatedLogin,
+            PasswordKeyVaultRef = PasswordKeyVaultRef,
+            DefaultSchema = DefaultSchema,
+            RequireDefaultSchema = RequireDefaultSchema,
+            Databricks = Databricks,
+            WindowsAuth = WindowsAuth
+        };
+    }
 }
 
 /// <summary>Windows authentication mode for SQL Server data sources on Linux/Windows (Issue #102).</summary>

@@ -38,4 +38,5 @@ public sealed record GovernedSqlExecutionDependencies(
     CompiledSqlAuditDigester? AuditDigester = null,
     Autheris.Application.DataSources.IDataSourceTransportGate? TransportGate = null,
     Autheris.Application.Common.Quota.IQueryCostQuota? CostQuota = null,
-    Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? PageTokenCodec = null);
+    Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? PageTokenCodec = null,
+    Autheris.Application.Policy.WriteGrants.IWriteBudgetStore? WriteBudgetStore = null);

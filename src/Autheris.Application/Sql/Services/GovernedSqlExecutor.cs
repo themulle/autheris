@@ -80,9 +80,11 @@ public sealed partial class GovernedSqlExecutor
         CompiledSqlAuditDigester? auditDigester = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null,
-        Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null)
+        Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null,
+        Autheris.Application.Policy.WriteGrants.IWriteBudgetStore? writeBudgetStore = null)
     {
         _costQuota = costQuota;
+        _writeBudgetStore = writeBudgetStore;
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
@@ -524,8 +526,13 @@ public sealed partial class GovernedSqlExecutor
 
         var binder = CompiledSqlBinders.For(binderDialect);
 
+        var effectiveConnOptions = ResolveEffectiveConnectionOptions(connOptions, dmlContext.IsDml);
+        long effectiveMaxAffectedRows = 0;
+
         if (dmlContext.IsDml)
         {
+            effectiveMaxAffectedRows = await PrepareDmlExecutionLimitsAsync(tenantId, user, rewrite, ct).ConfigureAwait(false);
+
             // L-2: the audit key is resolved before the statement can write. A key that cannot be read fails the statement closed here,
             // not after the commit (a committed write without its audit record).
             _digester.EnsureKey();
@@ -565,7 +572,7 @@ public sealed partial class GovernedSqlExecutor
 
         try
         {
-            await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
+            await using var connection = await _connectionFactory.CreateOpenConnectionAsync(effectiveConnOptions, ct).ConfigureAwait(false);
             DbTransaction? tx = null;
             bool txCompleted = false;
             try
@@ -607,13 +614,7 @@ public sealed partial class GovernedSqlExecutor
                     tx ??= await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
                     txCompleted = true;
 
-                    long maxAffectedRows = _options.Value.WebSql.MaxAffectedRows;
-                    if (rewrite.WriteMaxRowsPerStatement is long grantCap && grantCap > 0)
-                    {
-                        maxAffectedRows = maxAffectedRows > 0 ? Math.Min(maxAffectedRows, grantCap) : grantCap;
-                    }
-
-                    var limits = new CheckedDmlLimits(commandTimeout, maxAffectedRows);
+                    var limits = new CheckedDmlLimits(commandTimeout, effectiveMaxAffectedRows);
                     int affectedRows;
                     try
                     {
@@ -621,13 +622,21 @@ public sealed partial class GovernedSqlExecutor
                         affectedRows = await _executionGuard.RunAsync(
                             connection,
                             TimeSpan.FromSeconds(commandTimeout),
-                            () => CompiledSqlBinders.CheckedExecutorFor(binderDialect).ExecuteInTransactionAsync(checkedTx, compiled, clientValues, limits, ct),
+                            () => CompiledSqlBinders.CheckedExecutorFor(binderDialect).ExecuteInTransactionAsync(
+                                checkedTx,
+                                compiled,
+                                clientValues,
+                                limits,
+                                (affected, token) => OnBeforeDmlCommitAsync(tenantId, user, dsName, dmlContext, compiled, affected, token),
+                                ct),
                             ct).ConfigureAwait(false);
                         deliveredOrAffectedRows = affectedRows;
                     }
                     catch (Exception dmlEx)
                     {
-                        bool rejected = dmlEx is DmlAffectedRowsLimitException or DmlCheckOptionViolationException;
+                        bool rejected = dmlEx is DmlAffectedRowsLimitException
+                            or DmlCheckOptionViolationException
+                            or Autheris.Application.Policy.WriteGrants.WriteBudgetExhaustedException;
                         try
                         {
                             await RecordDmlAuditAsync(
@@ -644,8 +653,6 @@ public sealed partial class GovernedSqlExecutor
 
                         throw;
                     }
-
-                    await RecordCommittedDmlAuditAsync(tenantId, user, dsName, dmlContext, compiled, affectedRows).ConfigureAwait(false);
 
                     using var emptyTable = new DataTable();
                     using var emptyReader = emptyTable.CreateDataReader();

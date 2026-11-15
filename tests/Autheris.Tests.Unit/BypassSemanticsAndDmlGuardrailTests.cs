@@ -447,7 +447,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
                 TenantColumnExemptTables = (exemptTables ?? []).ToList(),
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["default"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = fixture.ConnectionString }
+                    ["default"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = fixture.ConnectionString, WriteConnectionString = fixture.ConnectionString }
                 }
             }
         };

@@ -73,11 +73,15 @@ public static class GovernedSqlErrorCodes
     public const string PagingUnsupported = "SQL_PAGING_UNSUPPORTED";
     public const string PagingTokenInvalid = "SQL_PAGING_TOKEN_INVALID";
     public const string MethodNotAllowed = "METHOD_NOT_ALLOWED";
+    public const string WriteBudgetExhausted = "WRITE_BUDGET_EXHAUSTED";
+    public const string DmlWriteConnectionMissing = "DML_WRITE_CONNECTION_MISSING";
 
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
     {
         MethodNotAllowed => "This SQL endpoint cannot be executed via HTTP GET.",
+        WriteBudgetExhausted => "Write budget exhausted for this tenant and identity. Retry after the budget window resets.",
+        DmlWriteConnectionMissing => "DML execution is not enabled for this data source because no dedicated write connection string is configured.",
         QueryCostExceeded => "The statement cost exceeds the allowed limit. Add a LIMIT, a filter or fewer joins.",
         RateLimitExceeded => "Query cost quota exhausted.",
         ServiceUnavailable => "The service is temporarily unavailable.",

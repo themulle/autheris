@@ -95,6 +95,21 @@ public sealed class WebSqlOptions
     public long MaxAffectedRows { get; init; } = 1000;
 
     /// <summary>
+    /// Maximum number of DML write statements per minute allowed for a single tenant and caller identity when DML is enabled.
+    /// </summary>
+    public int WriteStatementsPerMinute { get; init; } = 60;
+
+    /// <summary>
+    /// Maximum cumulative number of rows affected per hour across DML write statements for a single tenant and caller identity when DML is enabled.
+    /// </summary>
+    public long WriteRowsPerHour { get; init; } = 10_000;
+
+    /// <summary>
+    /// Retention window in seconds for DML idempotency replay and conflict records.
+    /// </summary>
+    public int WriteIdempotencyTtlSeconds { get; init; } = 86_400;
+
+    /// <summary>
     /// SQ-06 / SEC P-02: Additional SQL function names (unqualified, case-insensitive) permitted in WebSQL on top of the
     /// curated allowlist of the target dialect (TrinoSqlEngine.SqlFunctionAllowlists). Names on the built-in function
     /// denylist are never permitted, even if listed here. Since X1 the list can only narrow the dialect's function map

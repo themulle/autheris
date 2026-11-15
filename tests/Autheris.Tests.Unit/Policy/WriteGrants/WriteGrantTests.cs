@@ -397,7 +397,7 @@ public sealed class WriteGrantTests
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["default"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub", Provider = "Sqlite" }
+                    ["default"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub", WriteConnectionString = "Data Source=stub", Provider = "Sqlite" }
                 }
             }
         };

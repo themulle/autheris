@@ -39,6 +39,19 @@ public interface ICheckedDmlExecutor
         IReadOnlyDictionary<string, object?> clientParameterValues,
         CheckedDmlLimits limits,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs the statement in <paramref name="transaction"/>, enforces <paramref name="limits"/> and row-count checks, invokes
+    /// <paramref name="beforeCommit"/> before committing, and rolls back on any failure.
+    /// </summary>
+    Task<int> ExecuteInTransactionAsync(
+        DbTransaction transaction,
+        CompiledSql compiled,
+        IReadOnlyDictionary<string, object?> clientParameterValues,
+        CheckedDmlLimits limits,
+        Func<int, CancellationToken, Task>? beforeCommit,
+        CancellationToken cancellationToken = default) =>
+        ExecuteInTransactionAsync(transaction, compiled, clientParameterValues, limits, cancellationToken);
 }
 
 /// <summary>
@@ -80,14 +93,23 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
         }
 
         await using var transaction = await connection.BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
-        return await RunAndCompleteAsync(transaction, compiled, clientParameterValues, new CheckedDmlLimits(0, 0), cancellationToken).ConfigureAwait(false);
+        return await RunAndCompleteAsync(transaction, compiled, clientParameterValues, new CheckedDmlLimits(0, 0), beforeCommit: null, cancellationToken).ConfigureAwait(false);
     }
+
+    public Task<int> ExecuteInTransactionAsync(
+        DbTransaction transaction,
+        CompiledSql compiled,
+        IReadOnlyDictionary<string, object?> clientParameterValues,
+        CheckedDmlLimits limits,
+        CancellationToken cancellationToken = default) =>
+        ExecuteInTransactionAsync(transaction, compiled, clientParameterValues, limits, beforeCommit: null, cancellationToken);
 
     public async Task<int> ExecuteInTransactionAsync(
         DbTransaction transaction,
         CompiledSql compiled,
         IReadOnlyDictionary<string, object?> clientParameterValues,
         CheckedDmlLimits limits,
+        Func<int, CancellationToken, Task>? beforeCommit,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
@@ -104,7 +126,7 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
         }
 
         // From here on the executor owns the completion, so a rejected statement (for example of another dialect) rolls back as well.
-        return await RunAndCompleteAsync(transaction, compiled, clientParameterValues, limits, cancellationToken).ConfigureAwait(false);
+        return await RunAndCompleteAsync(transaction, compiled, clientParameterValues, limits, beforeCommit, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<int> RunAndCompleteAsync(
@@ -112,6 +134,7 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
         CompiledSql compiled,
         IReadOnlyDictionary<string, object?> clientParameterValues,
         CheckedDmlLimits limits,
+        Func<int, CancellationToken, Task>? beforeCommit,
         CancellationToken cancellationToken)
     {
         try
@@ -147,6 +170,11 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
             if (enforceLimit && limits.MaxAffectedRows > 0 && (affected < 0 || affected > limits.MaxAffectedRows))
             {
                 throw new DmlAffectedRowsLimitException(compiled.Dialect);
+            }
+
+            if (beforeCommit is not null)
+            {
+                await beforeCommit(affected, cancellationToken).ConfigureAwait(false);
             }
 
             // L2: every check has passed. The commit does not take the caller's token: a client that disconnects at this moment must not
@@ -196,11 +224,20 @@ internal sealed class DatabricksCheckedDmlExecutor : ICheckedDmlExecutor
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Databricks has no transaction; use ExecuteInTransactionAsync.");
 
+    public Task<int> ExecuteInTransactionAsync(
+        DbTransaction transaction,
+        CompiledSql compiled,
+        IReadOnlyDictionary<string, object?> clientParameterValues,
+        CheckedDmlLimits limits,
+        CancellationToken cancellationToken = default) =>
+        ExecuteInTransactionAsync(transaction, compiled, clientParameterValues, limits, beforeCommit: null, cancellationToken);
+
     public async Task<int> ExecuteInTransactionAsync(
         DbTransaction transaction,
         CompiledSql compiled,
         IReadOnlyDictionary<string, object?> clientParameterValues,
         CheckedDmlLimits limits,
+        Func<int, CancellationToken, Task>? beforeCommit,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transaction);
@@ -231,6 +268,12 @@ internal sealed class DatabricksCheckedDmlExecutor : ICheckedDmlExecutor
         command.Transaction = transaction;
         if (limits.CommandTimeoutSeconds > 0) command.CommandTimeout = limits.CommandTimeoutSeconds;
         _binder.Bind(command, compiled, clientParameterValues);
-        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        int affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (beforeCommit is not null)
+        {
+            await beforeCommit(affected, cancellationToken).ConfigureAwait(false);
+        }
+
+        return affected;
     }
 }

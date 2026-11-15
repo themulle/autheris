@@ -57,23 +57,13 @@ public sealed class DmlWriteAheadAuditTests
         var compiled = await GovernedSqlExecutorX1Tests.CompileAsync("Sqlite", Update);
         var h = GovernedSqlExecutorX1Tests.CreateHarness("Sqlite", auditSink: (e, _) =>
             e.EventType == AuditEventTypes.WebSqlDmlExecuted ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
-        long failures = 0;
-        using var listener = new System.Diagnostics.Metrics.MeterListener();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Name == "autheris_dml_audit_failed_total")
-            {
-                l.EnableMeasurementEvents(instrument);
-            }
-        };
-        listener.SetMeasurementEventCallback<long>((_, value, _, _) => Interlocked.Add(ref failures, value));
-        listener.Start();
 
-        var sql = await GovernedSqlExecutorX1Tests.ExecuteAsync(h, compiled, dml: GovernedSqlExecutorX1Tests.Dml());
+        await Should.ThrowAsync<AuditUnavailableException>(() =>
+            GovernedSqlExecutorX1Tests.ExecuteAsync(h, compiled, dml: GovernedSqlExecutorX1Tests.Dml()));
 
-        sql.ShouldBe(compiled.Sql);
-        h.Connection.Transactions.ShouldHaveSingleItem().Commits.ShouldBe(1);
-        Interlocked.Read(ref failures).ShouldBe(1);
+        var tx = h.Connection.Transactions.ShouldHaveSingleItem();
+        tx.Commits.ShouldBe(0);
+        tx.Rollbacks.ShouldBe(1);
     }
 
     [Fact]
@@ -83,9 +73,10 @@ public sealed class DmlWriteAheadAuditTests
         var h = GovernedSqlExecutorX1Tests.CreateHarness("Sqlite", auditSink: (e, _) =>
             e.EventType == AuditEventTypes.WebSqlDmlExecuted ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
 
-        await GovernedSqlExecutorX1Tests.ExecuteAsync(h, compiled, dml: GovernedSqlExecutorX1Tests.Dml());
+        await Should.ThrowAsync<AuditUnavailableException>(() =>
+            GovernedSqlExecutorX1Tests.ExecuteAsync(h, compiled, dml: GovernedSqlExecutorX1Tests.Dml()));
 
-        h.Log.Entries.ShouldContain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Critical);
+        h.Connection.Transactions.ShouldHaveSingleItem().Commits.ShouldBe(0);
     }
 
     [Fact]

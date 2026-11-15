@@ -208,7 +208,7 @@ public sealed class DmlTransportMatrixTests
         var metas = new List<TableMetadata> { ordersMeta };
         var connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
         {
-            ["default"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub", Provider = "Sqlite" }
+            ["default"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub", WriteConnectionString = "Data Source=stub", Provider = "Sqlite" }
         };
 
         if (includeExternalSource)
@@ -232,7 +232,7 @@ public sealed class DmlTransportMatrixTests
                     new TableColumn { ColumnName = "amount", DataType = "integer" }
                 ]
             });
-            connections["other_src"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub2", Provider = "Sqlite" };
+            connections["other_src"] = new DataSourceConnectionOptions { ConnectionString = "Data Source=stub2", WriteConnectionString = "Data Source=stub2", Provider = "Sqlite" };
         }
 
         var gatewayOptions = new GatewayOptions

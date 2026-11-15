@@ -53,6 +53,10 @@ public static class GatewayStorageServiceExtensions
             services.AddSingleton<IEventBus, RedisEventBus>();
             services.AddSingleton<IRateLimiterService, RedisRateLimiterService>();
             services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
+            services.AddSingleton<Autheris.Application.Policy.WriteGrants.IWriteBudgetStore>(sp =>
+                sp.GetService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>() is { } distributedCache
+                    ? new DistributedCacheWriteBudgetStore(distributedCache, sp.GetService<TimeProvider>())
+                    : new DistributedCacheWriteBudgetStore(sp.GetRequiredService<IConnectionMultiplexer>(), sp.GetService<TimeProvider>()));
             services.AddSingleton<ITokenRevocationService, RedisTokenRevocationService>(); // SEC M-14 (GAP-B)
             services.AddClusterState(ClusterStateMode.External);
         }
@@ -61,6 +65,7 @@ public static class GatewayStorageServiceExtensions
             services.AddSingleton<IEventBus, InProcessChannelEventBus>();
             services.AddSingleton<IRateLimiterService, InMemoryRateLimiterService>();
             services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
+            services.AddSingleton<Autheris.Application.Policy.WriteGrants.IWriteBudgetStore, InMemoryWriteBudgetStore>();
             services.AddSingleton<ITokenRevocationService, InMemoryTokenRevocationService>(); // SEC M-14 (GAP-B)
             services.AddClusterState(ClusterStateMode.InMemory);
         }

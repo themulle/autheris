@@ -57,4 +57,60 @@ public sealed class WriteGrantStartupTests
         Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), _ => null));
     }
+
+    [Theory]
+    [InlineData(0, 60, 10_000, 86_400)]
+    [InlineData(1000, 0, 10_000, 86_400)]
+    [InlineData(1000, 60, 0, 86_400)]
+    [InlineData(1000, 60, 10_000, 0)]
+    public void AllowDml_with_invalid_limit_or_budget_fails_startup_validation(
+        long maxAffectedRows,
+        int writeStatementsPerMinute,
+        long writeRowsPerHour,
+        int writeIdempotencyTtlSeconds)
+    {
+        var options = new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                AllowDml = true,
+                MaxAffectedRows = maxAffectedRows,
+                WriteStatementsPerMinute = writeStatementsPerMinute,
+                WriteRowsPerHour = writeRowsPerHour,
+                WriteIdempotencyTtlSeconds = writeIdempotencyTtlSeconds
+            },
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" },
+            Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
+        };
+
+        Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), _ => null));
+    }
+
+    [Fact]
+    public void AllowDml_false_with_WriteConnectionString_fails_startup_validation()
+    {
+        var options = new GatewayOptions
+        {
+            WebSql = new WebSqlOptions { Enabled = true, AllowDml = false },
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["default"] = new DataSourceConnectionOptions
+                    {
+                        Provider = "Sqlite",
+                        ConnectionString = "Data Source=read",
+                        WriteConnectionString = "Data Source=write"
+                    }
+                }
+            },
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" },
+            Audit = new AuditOptions { ChainAnchorPath = "/var/anchor/audit-anchor.json" }
+        };
+
+        Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), _ => null));
+    }
 }

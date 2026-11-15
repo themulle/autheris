@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security;
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -150,12 +151,22 @@ public static partial class WebSqlEndpoints
             waitTimeout = ParseDuration(queryVal.ToString().Trim());
         }
 
-        if (await RefuseDmlRequestAsync(httpContext, sql, gatewayOptions.Value.IsWebSqlDmlAllowed, tenantId, logger, ct))
+        var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
+        var (dmlHandled, idempotencyLease) = await TryGuardDmlRequestAsync(
+            httpContext,
+            sql,
+            dataSource,
+            parameters,
+            gatewayOptions.Value.IsWebSqlDmlAllowed,
+            tenantId,
+            webSqlOptions.WriteIdempotencyTtlSeconds,
+            logger,
+            ct);
+        if (dmlHandled)
         {
             return;
         }
 
-        var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
         var rowLimit = SqlRowLimit.For(webSqlOptions);
 
         var pageReq = bodyDto?.Page;
@@ -224,6 +235,31 @@ public static partial class WebSqlEndpoints
             try
             {
                 var status = await statementManager.SubmitOrWaitAsync(governedRequest, user, owner, tenantId, waitTimeout.Value, ingress, ct);
+                if (idempotencyLease != null && string.Equals(status.State, "FINISHED", StringComparison.Ordinal))
+                {
+                    var originalBody = httpContext.Response.Body;
+                    using var capture = new MemoryStream();
+                    httpContext.Response.Body = capture;
+                    try
+                    {
+                        await WriteWebSqlStatementResponseAsync(httpContext, status, ct);
+                    }
+                    finally
+                    {
+                        httpContext.Response.Body = originalBody;
+                    }
+
+                    string body = Encoding.UTF8.GetString(capture.GetBuffer(), 0, (int)capture.Length);
+                    await idempotencyLease.SaveOutcomeAsync(
+                        httpContext.Response.StatusCode,
+                        httpContext.Response.ContentType ?? "application/json; charset=utf-8",
+                        body,
+                        CancellationToken.None);
+                    capture.Position = 0;
+                    await capture.CopyToAsync(originalBody, ct);
+                    return;
+                }
+
                 await WriteWebSqlStatementResponseAsync(httpContext, status, ct);
                 return;
             }
@@ -263,6 +299,7 @@ public static partial class WebSqlEndpoints
         // SEC M-10: The JSON writer is created lazily when the first result arrives. Policy/parse errors raised while the
         // statement is governed therefore never start the response, so the 4xx/5xx status and the curated body can still be sent.
         Utf8JsonWriter? writer = null;
+        MemoryStream? idempotencyBuffer = idempotencyLease != null ? new MemoryStream() : null;
         try
         {
             int rowCount = 0;
@@ -278,7 +315,7 @@ public static partial class WebSqlEndpoints
                     httpContext.Response.StatusCode = StatusCodes.Status200OK;
                     httpContext.Response.ContentType = "application/json; charset=utf-8";
 
-                    var w = new Utf8JsonWriter(httpContext.Response.Body);
+                    var w = new Utf8JsonWriter(idempotencyBuffer ?? httpContext.Response.Body);
                     writer = w;
                     w.WriteStartObject();
 
@@ -348,7 +385,7 @@ public static partial class WebSqlEndpoints
                 // No result set was produced: emit an empty, well-formed result
                 httpContext.Response.StatusCode = StatusCodes.Status200OK;
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
-                writer = new Utf8JsonWriter(httpContext.Response.Body);
+                writer = new Utf8JsonWriter(idempotencyBuffer ?? httpContext.Response.Body);
                 writer.WriteStartObject();
                 writer.WriteStartArray("columns");
                 writer.WriteEndArray();
@@ -403,6 +440,17 @@ public static partial class WebSqlEndpoints
                 httpContext.Response.Headers["X-Autheris-Truncated"] = "true";
             }
             await writer.FlushAsync(ct);
+            if (idempotencyBuffer != null && idempotencyLease != null)
+            {
+                string capturedBody = Encoding.UTF8.GetString(idempotencyBuffer.GetBuffer(), 0, (int)idempotencyBuffer.Length);
+                await idempotencyLease.SaveOutcomeAsync(
+                    httpContext.Response.StatusCode,
+                    httpContext.Response.ContentType ?? "application/json; charset=utf-8",
+                    capturedBody,
+                    CancellationToken.None);
+                idempotencyBuffer.Position = 0;
+                await idempotencyBuffer.CopyToAsync(httpContext.Response.Body, ct);
+            }
             await httpContext.Response.Body.FlushAsync(ct);
         }
         catch (Exception ex)
@@ -415,6 +463,7 @@ public static partial class WebSqlEndpoints
             {
                 await writer.DisposeAsync();
             }
+            idempotencyBuffer?.Dispose();
         }
     }
 

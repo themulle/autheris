@@ -24,11 +24,11 @@ public sealed partial class AdvisoryRegressionTests
 
         // A writer role alone grants nothing, also on a table the writer can read.
         await Should.ThrowAsync<WebSqlTableDeniedException>(() =>
-            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest("UPDATE orders SET amount = 0 WHERE id = 1"), writer, tenant, (_, _) => Task.CompletedTask));
+            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest("UPDATE orders SET amount = 0 WHERE id = 1", Transport: SqlTransports.WebSql), writer, tenant, (_, _) => Task.CompletedTask));
 
         // A table read by a row policy is refused with its own code before the write decision.
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
-            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest("DELETE FROM consents WHERE id = 1"), writer, tenant, (_, _) => Task.CompletedTask));
+            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest("DELETE FROM consents WHERE id = 1", Transport: SqlTransports.WebSql), writer, tenant, (_, _) => Task.CompletedTask));
         ex.ShouldNotBeOfType<WebSqlTableDeniedException>();
 
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders WHERE amount = 0")).ShouldBe(0);

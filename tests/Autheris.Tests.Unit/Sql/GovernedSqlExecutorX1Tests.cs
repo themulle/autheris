@@ -79,7 +79,7 @@ public sealed class GovernedSqlExecutorX1Tests
         {
             Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                [DataSource] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = "Host=unused" }
+                [DataSource] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = "Host=unused", WriteConnectionString = "Host=unused" }
             }
         }
     };
@@ -294,26 +294,15 @@ public sealed class GovernedSqlExecutorX1Tests
     [Fact]
     public async Task WebSqlDml_AuditFailsAfterCommit_IsNotARequestFailure_LogsCritical_AndCountsAMetric()
     {
-        // M-1: a request failure after the commit would make the client retry (and duplicate) the DML.
+        // Pre-commit outcome audit: if WEBSQL_DML_EXECUTED fails, the transaction rolls back and AuditUnavailableException propagates.
         var compiled = await CompileAsync("Sqlite", "UPDATE orders SET amount = 1 WHERE id = 1");
         var h = CreateHarness("Sqlite", auditSink: (e, _) => e.EventType == AuditEventTypes.WebSqlDmlExecuted ? throw new InvalidOperationException("audit store down") : Task.CompletedTask);
-        long failures = 0;
-        using var listener = new System.Diagnostics.Metrics.MeterListener();
-        listener.InstrumentPublished = (instrument, l) =>
-        {
-            if (instrument.Name == "autheris_dml_audit_failed_total")
-            {
-                l.EnableMeasurementEvents(instrument);
-            }
-        };
-        listener.SetMeasurementEventCallback<long>((_, value, _, _) => Interlocked.Add(ref failures, value));
-        listener.Start();
 
-        await ExecuteAsync(h, compiled, dml: Dml());   // does not throw
+        await Should.ThrowAsync<Autheris.Application.Audit.AuditUnavailableException>(() => ExecuteAsync(h, compiled, dml: Dml()));
 
-        h.Connection.Transactions.ShouldHaveSingleItem().Commits.ShouldBe(1);
-        h.Log.Entries.ShouldContain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Critical);
-        Interlocked.Read(ref failures).ShouldBe(1);
+        var tx = h.Connection.Transactions.ShouldHaveSingleItem();
+        tx.Commits.ShouldBe(0);
+        tx.Rollbacks.ShouldBe(1);
     }
 
     [Theory]

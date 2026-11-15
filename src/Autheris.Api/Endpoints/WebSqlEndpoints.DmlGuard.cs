@@ -27,9 +27,26 @@ public static partial class WebSqlEndpoints
         };
 
     /// <summary>
-    /// Request-level guard: delegates to <see cref="DmlRequestGuard"/> with no behaviour change.
+    /// Request-level guard with replay/conflict semantics for WebSQL DML statements.
     /// </summary>
-    private static Task<bool> RefuseDmlRequestAsync(
-        HttpContext httpContext, string sql, bool dmlAllowed, TenantId tenantId, ILogger logger, CancellationToken ct) =>
-        DmlRequestGuard.RefuseDmlRequestAsync(httpContext, sql, dmlAllowed, tenantId, logger, ct);
+    private static Task<(bool Handled, DmlIdempotencyLease? Lease)> TryGuardDmlRequestAsync(
+        HttpContext httpContext,
+        string sql,
+        string? dataSource,
+        IReadOnlyDictionary<string, object?>? parameters,
+        bool dmlAllowed,
+        TenantId tenantId,
+        int ttlSeconds,
+        ILogger logger,
+        CancellationToken ct) =>
+        DmlRequestGuard.TryGuardDmlWithReplayAsync(
+            httpContext,
+            sql,
+            dataSource,
+            parameters,
+            dmlAllowed,
+            tenantId,
+            ttlSeconds,
+            logger,
+            ct);
 }

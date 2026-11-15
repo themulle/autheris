@@ -300,6 +300,47 @@ public class CheckedDmlExecutorTransactionTests
         Assert.Throws<SqlCompileNotSupportedException>(() => CompiledSqlBinders.CheckedExecutorFor(dialect));
     }
 
+    [Fact]
+    public async Task ExecuteInTransaction_BeforeCommit_InvokedAfterChecks_AndCommitsOnSuccess()
+    {
+        await using var connection = await OpenTableAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        int? observedAffected = null;
+
+        int affected = await Executor().ExecuteInTransactionAsync(
+            transaction,
+            Dml("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2"),
+            NoValues,
+            new CheckedDmlLimits(30, 5),
+            (rows, _) =>
+            {
+                observedAffected = rows;
+                return Task.CompletedTask;
+            });
+
+        Assert.Equal(2, affected);
+        Assert.Equal(2, observedAffected);
+        Assert.Equal(2, await CountAsync(connection));
+    }
+
+    [Fact]
+    public async Task ExecuteInTransaction_BeforeCommitThrows_RollsBackTransaction()
+    {
+        await using var connection = await OpenTableAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        var compiled = Dml("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", expected: 2);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Executor().ExecuteInTransactionAsync(
+            transaction,
+            compiled,
+            NoValues,
+            new CheckedDmlLimits(30, 5),
+            (_, _) => throw new InvalidOperationException("pre-commit audit failed")));
+
+        Assert.Null(transaction.Connection);
+        Assert.Equal(0, await CountAsync(connection));
+    }
+
     // ---- minimal ADO.NET fake ----
 
     private sealed class FakeConnection : DbConnection

@@ -66,7 +66,7 @@ public sealed class ReadOnlyReadSessionTests
         {
             Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                [DataSource] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = "Host=unused" }
+                [DataSource] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = "Host=unused", WriteConnectionString = "Host=unused" }
             }
         }
     };

@@ -99,7 +99,7 @@ internal sealed class ClientListFixture : IAsyncDisposable
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["default"] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = connectionString }
+                    ["default"] = new DataSourceConnectionOptions { Provider = provider, ConnectionString = connectionString, WriteConnectionString = connectionString }
                 }
             }
         };

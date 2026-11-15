@@ -24,7 +24,7 @@ public sealed partial class AdvisoryRegressionTests
         var tenant = new TenantId(BypassSemanticsAndDmlGuardrailTests.Tenant);
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
-            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(WriteScopeSql), BypassSemanticsAndDmlGuardrailTests.CreateWriter(withWriteScope: false), tenant, (_, _) => Task.CompletedTask));
+            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(WriteScopeSql, Transport: SqlTransports.WebSql), BypassSemanticsAndDmlGuardrailTests.CreateWriter(withWriteScope: false), tenant, (_, _) => Task.CompletedTask));
         ex.Code.ShouldBe(WebSqlPolicyException.ReadOnlyTokenCode);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
     }
@@ -38,7 +38,7 @@ public sealed partial class AdvisoryRegressionTests
         TokenAccessScope.MarkReadOnly((ClaimsIdentity)writer.Identity!);
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
-            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(WriteScopeSql), writer, new TenantId(BypassSemanticsAndDmlGuardrailTests.Tenant), (_, _) => Task.CompletedTask));
+            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(WriteScopeSql, Transport: SqlTransports.WebSql), writer, new TenantId(BypassSemanticsAndDmlGuardrailTests.Tenant), (_, _) => Task.CompletedTask));
         ex.Code.ShouldBe(WebSqlPolicyException.ReadOnlyTokenCode);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
     }
@@ -51,7 +51,7 @@ public sealed partial class AdvisoryRegressionTests
         var service = BypassSemanticsAndDmlGuardrailTests.CreateDmlService(fixture, allowDml: true, permissiveWrite: false, withDependency: true);
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
-            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(WriteScopeSql), BypassSemanticsAndDmlGuardrailTests.CreateWriter(), new TenantId(BypassSemanticsAndDmlGuardrailTests.Tenant), (_, _) => Task.CompletedTask));
+            service.ExecuteGovernedQueryAsync(new GovernedSqlQueryRequest(WriteScopeSql, Transport: SqlTransports.WebSql), BypassSemanticsAndDmlGuardrailTests.CreateWriter(), new TenantId(BypassSemanticsAndDmlGuardrailTests.Tenant), (_, _) => Task.CompletedTask));
         ex.Code.ShouldNotBe(WebSqlPolicyException.ReadOnlyTokenCode);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
     }
