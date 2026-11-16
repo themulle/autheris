@@ -225,6 +225,41 @@ public sealed class ConsentDecisionPipelineTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task DecideAsync_SensitiveColumnTableWithoutFourEyesFlag_SingleApproval_CreatesTheConsentAtomically_NeverLeavesApprovedRequestWithoutConsent()
+    {
+        // A table with a sensitive column classifies a user grant as GrantClass.Sensitive, but the repositories (authoritative under the row
+        // lock) only require a second approver for highly sensitive tables. If the pipeline routed this through the step-only path the request
+        // would become APPROVED without any consent row, so the requester would stay denied.
+        var (pipeline, approvals, metadata, _, _, _, _, _) = BuildSut(tableFourEyes: false);
+        var plain = TableMeta(fourEyes: false, sensitivity: "NORMAL");
+        var meta = new TableMetadata
+        {
+            Identifier = plain.Identifier,
+            Table = plain.Table,
+            Columns =
+            [
+                plain.Columns[0],
+                new TableColumn { Id = Guid.NewGuid(), TableId = plain.Table.Id, ColumnName = "email", DataType = "VARCHAR", IsSensitive = true }
+            ]
+        };
+        metadata.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
+        var req = Request();
+        approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+        approvals.ExecuteAtomicApprovalWithConsentAsync(
+                req.Id, Arg.Any<ApprovalStep>(), Arg.Any<Consent>(),
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.ArgAt<Consent>(2));
+
+        var result = await pipeline.DecideAsync(new ConsentDecisionCommand(
+            req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid)));
+
+        result.Request.Status.ShouldBe("APPROVED");
+        result.ActivatedConsent.ShouldNotBeNull();
+        await approvals.DidNotReceiveWithAnyArgs().ApproveConsentRequestStepAsync(default, default, default);
+    }
+
+    [Fact]
     public async Task DecideAsync_FourEyes_FirstStepAdvancesStatus_SecondSameApproverRefused_DistinctApproverCompletes()
     {
         var (pipeline, approvals, _, _, _, _, _, _) = BuildSut(tableFourEyes: true);

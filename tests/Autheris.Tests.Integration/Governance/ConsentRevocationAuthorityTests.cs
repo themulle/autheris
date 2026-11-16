@@ -225,7 +225,7 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
         var caller = PrincipalWith(Admin.Value, "GovernanceAdmin", TenantA.Value);
         var manifest = new DeclarativeConsentManifest("2",
         [
-            new DeclarativeConsentPolicy(_table.Domain, _table.Schema, _table.TableName, "Group", "S-1-5-21-GROUP-2", "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))
+            new DeclarativeConsentPolicy(_table.Domain, _table.Schema, _table.TableName, "Group", "S-1-5-21-GROUP-1", "Deny", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))
         ]);
 
         var result = await svc.ApplyManifestAsync(caller, manifest);

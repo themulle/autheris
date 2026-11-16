@@ -381,7 +381,6 @@ public sealed class ConsentDecisionPipeline(
             : [actorSid.Value];
         var combinedApprovers = approversSoFar.Concat(currentApprovers).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-        bool grantRequiresFourEyes = false;
         if (req.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal)
         {
             var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
@@ -395,8 +394,6 @@ public sealed class ConsentDecisionPipeline(
                 Requester: req.RequesterSid.Value,
                 Approvers: combinedApprovers,
                 Justification: req.BusinessJustification));
-            grantRequiresFourEyes = grantDecision.RequiresFourEyes;
-
             if (!grantDecision.Allowed && !string.Equals(grantDecision.ErrorCode, GrantErrorCodes.FourEyesRequired, StringComparison.Ordinal))
             {
                 throw new ConsentDecisionException(
@@ -406,7 +403,10 @@ public sealed class ConsentDecisionPipeline(
             }
         }
 
-        bool requiresFourEyes = (meta?.Table.IsHighlySensitive ?? false) || grantRequiresFourEyes;
+        // The repositories decide the status of a first step under the row lock and only require a second approver for highly sensitive
+        // tables. Routing a first step through the step-only path for any other reason (for example the grant class of a table with a
+        // sensitive column) would leave the request APPROVED without a consent row, so the grant-class flag must not choose the path.
+        bool requiresFourEyes = meta?.Table.IsHighlySensitive ?? false;
 
         bool isFinalApproval = !requiresFourEyes || combinedApprovers.Count >= 2 || string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase);
 
