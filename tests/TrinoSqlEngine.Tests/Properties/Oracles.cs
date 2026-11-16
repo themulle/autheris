@@ -222,6 +222,12 @@ internal static class Oracles
             m = m.Replace(" ESCAPE '\\'", string.Empty, StringComparison.Ordinal);
         }
 
+        // Spark reads a backslash in a string literal as an escape, so the Databricks generator spells the single escape character as '\\'.
+        if (dialect == TargetSqlDialect.Databricks)
+        {
+            m = m.Replace(" ESCAPE '\\\\'", string.Empty, StringComparison.Ordinal);
+        }
+
         if (dialect is TargetSqlDialect.PostgreSql or TargetSqlDialect.Databricks)
         {
             m = m.Replace(" ESCAPE ''", string.Empty, StringComparison.Ordinal);
@@ -549,7 +555,9 @@ internal static class Oracles
             return false;
         }
 
-        if (!Regex.IsMatch(sql, $@"\bLIKE\s+{Regex.Escape(marker)}\s+ESCAPE\s+'\\'", RegexOptions.IgnoreCase))
+        // The escape clause is the one fixed constant of the dialect: '\' everywhere, '\\' on Databricks (Spark reads a backslash in a literal as an escape).
+        string escapeLiteral = dialect == TargetSqlDialect.Databricks ? @"'\\\\'" : @"'\\'";
+        if (!Regex.IsMatch(sql, $@"\bLIKE\s+{Regex.Escape(marker)}\s+ESCAPE\s+{escapeLiteral}", RegexOptions.IgnoreCase))
         {
             return false;
         }
