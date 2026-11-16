@@ -256,7 +256,7 @@ public static partial class ConsentApiEndpoints
                         schema,
                         tableName,
                         body.Justification ?? string.Empty,
-                        body.DurationDays ?? 30,
+                        body.DurationDays ?? DefaultDurationDays(context),
                         idempotencyKey,
                         userSid.Value,
                         context.User,
@@ -625,6 +625,14 @@ public static partial class ConsentApiEndpoints
             _ => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Consent request payload is invalid.", context)
         };
     }
+
+    /// <summary>The validity of a request that states no duration: the configured default of the grant validity policy (no hard-coded number).</summary>
+    private static int DefaultDurationDays(HttpContext context)
+    {
+        var policy = context.RequestServices.GetRequiredService<Autheris.Application.Governance.Grants.IGrantValidityPolicy>();
+        return (int)Math.Clamp(Math.Ceiling(policy.DefaultDuration.TotalDays), 1, int.MaxValue);
+    }
+
 }
 
 public sealed record CreateConsentRequestBody(
