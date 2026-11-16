@@ -355,12 +355,17 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     continue;
                 }
 
+                // Root field of the table and field of each visible column in the catalog GraphQL schema; only columns of the caller's own view are emitted.
+                var graphQlMapping = _graphQlMap is null ? null : await _graphQlMap.GetTableAsync(tableId, ct).ConfigureAwait(false);
+                var graphQlFields = graphQlMapping?.Columns.ToDictionary(m => m.ColumnName, m => m.Field, StringComparer.OrdinalIgnoreCase);
+
                 var columns = detail.Columns.Select(c => new McpTableBriefColumn(
                     Name: c.Name,
                     Type: c.Type,
                     Description: c.Description,
                     PrimaryKey: c.IsPrimaryKey,
-                    IsSensitive: !string.IsNullOrEmpty(c.Sensitivity) && !string.Equals(c.Sensitivity, "Public", StringComparison.OrdinalIgnoreCase) && !string.Equals(c.Sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase)
+                    IsSensitive: !string.IsNullOrEmpty(c.Sensitivity) && !string.Equals(c.Sensitivity, "Public", StringComparison.OrdinalIgnoreCase) && !string.Equals(c.Sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase),
+                    GraphQlField: graphQlFields is not null && graphQlFields.TryGetValue(c.Name, out var columnField) ? columnField : null
                 )).ToList();
 
                 // MCP-05: only declared relations are emitted, never guessed from column names.
@@ -374,7 +379,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                     Description: detail.Description,
                     PrimaryKeys: detail.PrimaryKeys,
                     Columns: columns,
-                    Relations: relations));
+                    Relations: relations,
+                    GraphQlField: graphQlMapping?.QueryField));
             }
 
             return JsonSerializer.Serialize(new McpTableSchemaResult(briefSchemas.Count, briefSchemas), JsonOpts);

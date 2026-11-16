@@ -203,7 +203,8 @@ public sealed record McpTableBriefColumn(
     string Type,
     string? Description = null,
     bool PrimaryKey = false,
-    bool IsSensitive = false);
+    bool IsSensitive = false,
+    string? GraphQlField = null);
 
 /// <summary>Join relationship between datasets for automated query/report construction.</summary>
 public sealed record McpTableRelation(
@@ -219,7 +220,8 @@ public sealed record McpTableBriefSchema(
     IReadOnlyList<string> PrimaryKeys,
     IReadOnlyList<McpTableBriefColumn> Columns,
     IReadOnlyList<McpTableRelation> Relations,
-    string? AccessStatus = null);
+    string? AccessStatus = null,
+    string? GraphQlField = null);
 
 /// <summary>Result of get_table_schema.</summary>
 public sealed record McpTableSchemaResult(
