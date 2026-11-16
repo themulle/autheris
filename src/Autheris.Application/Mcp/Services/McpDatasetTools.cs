@@ -309,6 +309,7 @@ public static class McpDatasetTools
                 "query": { "type": "string", "description": "Search query text (natural language intention, keywords, or exact table codes)." },
                 "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales', 'finance', 'core')." },
                 "limit": { "type": "integer", "description": "Maximum number of candidate tables to return (default: 5, max: 20)." },
+                "tag": { "type": "string", "description": "Optional exact tag filter (case-insensitive), same as on list_datasets; only datasets carrying the tag are returned." },
                 "mode": { "type": "string", "enum": ["hybrid", "semantic", "keyword"], "description": "Search mode: 'hybrid' (default), 'semantic', or 'keyword'." },
                 "language": { "type": "string", "description": "Optional BCP 47 language tag (e.g. 'de', 'en') or Accept-Language range for query language bias and localized hit descriptions." }
               }
