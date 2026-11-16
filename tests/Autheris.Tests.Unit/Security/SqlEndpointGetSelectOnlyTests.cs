@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit;
+namespace Autheris.Tests.Unit.Security;
 
 using System.Collections.Generic;
 using System.IO;
