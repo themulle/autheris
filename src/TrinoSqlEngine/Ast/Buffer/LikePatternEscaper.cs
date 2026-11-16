@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Buffer;
 
 using System;
+using System.Collections.Generic;
 using System.Text;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Capabilities;
@@ -50,7 +51,11 @@ internal static class LikePatternEscaper
     /// Validates user LIKE escape clauses and normalizes dialect-sensitive user LIKE patterns in a single idempotent pass.
     /// Preserves SQL pattern wildcards (<c>%</c> and <c>_</c>) while neutralizing dialect-specific metacharacters.
     /// </summary>
-    public static LikeExpression NormalizeUserLike(LikeExpression like, TargetSqlDialect? dialect, int? maxQueryLength)
+    public static LikeExpression NormalizeUserLike(
+        LikeExpression like,
+        TargetSqlDialect? dialect,
+        int? maxQueryLength,
+        IReadOnlySet<string>? gatewayParameters = null)
     {
         char? userEscape = ValidateUserEscape(like.Escape);
         if (like.IsPatternNormalized || ContainsPolicyParameter(like.Pattern) || IsRenderedPolicyMarker(like.Pattern))
@@ -60,6 +65,13 @@ internal static class LikePatternEscaper
 
         if (dialect == TargetSqlDialect.SqlServer && like.Pattern is not LiteralExpression { Type: LiteralType.String })
         {
+            // A gateway-owned parameter (tree filter value, escaped with the clause's explicit escape character, never pre-escaped for
+            // '[') is admitted: the generator wraps it so '[' in the value is literal. Anything else stays rejected (fail closed).
+            if (like.Pattern is ParameterReference { Name: var name } && gatewayParameters?.Contains(name) == true && userEscape is not (null or '['))
+            {
+                return like with { IsPatternNormalized = true, IsGatewayOwnedPattern = true };
+            }
+
             throw new SqlCompileNotSupportedException(
                 SqlCompileNotSupportedReason.Construct,
                 "SQL Server LIKE requires a string literal pattern");

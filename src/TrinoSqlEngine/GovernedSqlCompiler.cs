@@ -408,6 +408,7 @@ internal sealed class GovernedSqlCompiler
             EnforcedMaxRows = request.EnforcedMaxRows,
             AllowRecursiveCte = request.AllowRecursiveCte,
             BindPageOffset = request.BindPageOffset,
+            GatewayLikePatternParameters = request.GatewayLikePatternParameters,
             TargetDialect = request.TargetDialect,
             MaxQueryLength = maxQueryLength,
             TablesWithConsentRowFilter = CaseInsensitive(request.Policy.TablesWithConsentRowFilter),

@@ -162,7 +162,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         CancellationToken ct,
         SqlRowLimit? rowLimit = null,
         bool probeExtraRow = false,
-        bool plannedTableRead = false,
+        bool plannedTableRead = false, IReadOnlySet<string>? gatewayLikePatternParameters = null,
         ClientListShapes? clientLists = null,
         SqlPageWindow? page = null,
         bool readOnlyRequired = false,
@@ -800,7 +800,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             };
 
         var assembly = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: false), ct).ConfigureAwait(false);
-        var request = CreateCompileRequest(assembly.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, bindPageOffset, pageOffsetVal, maxOffset);
+        var request = CreateCompileRequest(assembly.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, gatewayLikePatternParameters, bindPageOffset, pageOffsetVal, maxOffset);
 
         // -------------------------------------------------------------
         // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
@@ -822,7 +822,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             // The retry starts from the original decisions and the unsubstituted predicates (never from the first assembly's provider), with the
             // stage disabled: no epoch read, cache lookup or key query, same token and deadline. Its failure is not retried.
             var retried = await policyFactory.CreateAssemblyAsync(PolicyInput(disabled: true), ct).ConfigureAwait(false);
-            request = CreateCompileRequest(retried.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, bindPageOffset, pageOffsetVal, maxOffset);
+            request = CreateCompileRequest(retried.Policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, gatewayLikePatternParameters, bindPageOffset, pageOffsetVal, maxOffset);
             compiled = CompileStatement(rawSql, request, mayRetry: false, ct);
         }
 
@@ -920,8 +920,8 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         long enforcedMaxRows,
         IReadOnlySet<string> allowedFunctions,
         ClientListShapes? clientLists,
-        bool bindPageOffset = false,
-        long? pageOffset = null,
+        IReadOnlySet<string>? gatewayLikePatternParameters,
+        bool bindPageOffset = false, long? pageOffset = null,
         long maxOffset = 1_000_000)
     {
         // a table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
@@ -937,10 +937,8 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 
         return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists,
             timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false,
-            translateDateFunctions: true,
-            bindPageOffset: bindPageOffset,
-            pageOffset: pageOffset,
-            maxOffset: maxOffset);
+            translateDateFunctions: true, gatewayLikePatternParameters: gatewayLikePatternParameters,
+            bindPageOffset: bindPageOffset, pageOffset: pageOffset, maxOffset: maxOffset);
     }
 
     private CompiledSql CompileStatement(string rawSql, CompileRequest request, bool mayRetry, CancellationToken ct)

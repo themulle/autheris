@@ -14,7 +14,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     public override SqlNode VisitLikeExpression(LikeExpression node)
     {
         var visited = (LikeExpression)base.VisitLikeExpression(node);
-        return LikePatternEscaper.NormalizeUserLike(visited, _options.TargetDialect, _options.MaxQueryLength);
+        return LikePatternEscaper.NormalizeUserLike(visited, _options.TargetDialect, _options.MaxQueryLength, _options.GatewayLikePatternParameters);
     }
 
     public override SqlNode VisitExistsExpression(ExistsExpression node) =>

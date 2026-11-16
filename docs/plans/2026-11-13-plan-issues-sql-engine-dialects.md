@@ -112,3 +112,12 @@ Recommended order: #486 (security guard, S) -> #478 A/B (parallel; different pro
 ## Owner decisions (2026-11-13)
 
 The owner confirmed the recommended default of every open question (`Q-*`) in this file. The defaults in the question tables are binding for the implementation; a later owner decision wins. Phase 3 (security review) still applies before implementation starts.
+
+### Q-SQL-3 amendment (2026-11-16): gateway-owned LIKE parameters on SQL Server
+
+The reject rule of Q-SQL-3 broke every GraphQL aggregate with a `contains`, `startsWith` or `endsWith` filter on SQL Server, because the tree filter renders `col LIKE @__gql_tf_N ESCAPE '!'` with a bound gateway parameter (aliased `gw_tf_N`). Owner decision: a bound parameter pattern is admitted on SQL Server only when it is a gateway-owned parameter.
+
+- The exemption is an explicit allow-list, `CompileRequest.GatewayLikePatternParameters` (default empty, part of the cache key), copied to `AstSecurityVisitorOptions`. Only `GovernedSqlExecutor` fills it, from the aliases of `GovernedSqlQueryRequest.GatewayParameters` of a planned table read (`GovernedSqlExecutionService.GatewayParameterAliases`).
+- User SQL cannot name such a parameter: the client parameter guard rejects the `gw_tf_` prefix, the text guard rejects `__gql_`/`__param_`, and a merged name collision fails closed.
+- The pattern also needs an explicit single-character `ESCAPE` other than `[`. The generator then emits `LIKE REPLACE(<param>, '[', <escape> + '[') ESCAPE <escape>`, so `[` in the value is literal; the value stays bound and is never inlined. The tree filter escapes `%`, `_` and the escape character itself and never pre-escapes `[`, so nothing is escaped twice.
+- Unchanged: column and expression patterns and every non-allow-listed parameter pattern are still rejected on SQL Server; other dialects and literal patterns are unchanged.

@@ -1,6 +1,8 @@
 namespace TrinoSqlEngine.Tests.Ast.DialectGenerators;
 
 using System;
+using System.Collections.Frozen;
+using System.Linq;
 using System.Collections.Immutable;
 using System.Threading;
 using TrinoSqlEngine;
@@ -34,12 +36,14 @@ public sealed class UserLikeEscapeEmissionTests
         string sql,
         TargetSqlDialect dialect,
         FastSqlEngine? engine = null,
-        DictPolicyProvider? rowFilters = null) =>
+        DictPolicyProvider? rowFilters = null,
+        string[]? gatewayParameters = null) =>
         (engine ?? new FastSqlEngine()).Compile(
             sql.AsMemory(),
             new CompileRequest
             {
                 TargetDialect = dialect,
+                GatewayLikePatternParameters = (gatewayParameters ?? Array.Empty<string>()).ToFrozenSet(StringComparer.OrdinalIgnoreCase),
                 TokenGuards = SqlTokenSecurityOptions.Strict with
                 {
                     RejectBackslashInStrings = false,
@@ -89,6 +93,53 @@ public sealed class UserLikeEscapeEmissionTests
     {
         var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(sql, TargetSqlDialect.PostgreSql));
         Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+    }
+
+    [Fact]
+    public void SqlServer_GatewayOwnedParameterPattern_IsWrappedSoBracketIsLiteral_AndStaysBound()
+    {
+        var compiled = Compile(
+            "SELECT id FROM orders WHERE name LIKE __param_gw_tf_0 ESCAPE '!'",
+            TargetSqlDialect.SqlServer,
+            gatewayParameters: new[] { "gw_tf_0" });
+
+        Assert.Contains("REPLACE(", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains("'['", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains(" ESCAPE ", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains(compiled.Parameters, p => p.SourceName == "gw_tf_0");
+        Assert.Contains(compiled.Parameters, p => Equals(p.Value, "!"));
+        Assert.DoesNotContain("gw_tf_0", compiled.Sql, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE name LIKE __param_userp ESCAPE '!'")]
+    [InlineData("SELECT id FROM orders WHERE name LIKE __param_userp")]
+    [InlineData("SELECT id FROM orders WHERE name LIKE __param_gw_tf_1 ESCAPE '!'")]
+    [InlineData("SELECT id FROM orders WHERE name LIKE __param_gw_tf_0")]
+    [InlineData("SELECT id FROM orders WHERE name LIKE __param_gw_tf_0 || '%' ESCAPE '!'")]
+    [InlineData("SELECT id FROM orders WHERE name LIKE email ESCAPE '!'")]
+    public void SqlServer_NonGatewayOrUnescapedNonLiteralPattern_IsRejectedEvenWithAllowList(string sql)
+    {
+        var ex = Assert.Throws<SqlCompileNotSupportedException>(() =>
+            Compile(sql, TargetSqlDialect.SqlServer, gatewayParameters: new[] { "gw_tf_0" }));
+        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+    }
+
+    [Fact]
+    public void SqlServer_GatewayParameterPattern_WithBracketEscape_IsRejected()
+    {
+        Assert.Throws<SqlCompileNotSupportedException>(() => Compile(
+            "SELECT id FROM orders WHERE name LIKE __param_gw_tf_0 ESCAPE '['",
+            TargetSqlDialect.SqlServer,
+            gatewayParameters: new[] { "gw_tf_0" }));
+    }
+
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE name LIKE __param_userp ESCAPE '!'")]
+    [InlineData("SELECT id FROM orders WHERE name LIKE __param_gw_tf_0 ESCAPE '!'")]
+    public void SqlServer_ParameterPattern_WithEmptyAllowList_IsRejected(string sql)
+    {
+        Assert.Throws<SqlCompileNotSupportedException>(() => Compile(sql, TargetSqlDialect.SqlServer));
     }
 
     [Theory]

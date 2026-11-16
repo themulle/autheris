@@ -417,7 +417,8 @@ public class CompileApiTests
             [nameof(CompileRequest.TimeZoneConversionAvailable)] = baseRequest with { TimeZoneConversionAvailable = true },
             [nameof(CompileRequest.AllowRecursiveCte)] = baseRequest with { AllowRecursiveCte = true },
             [nameof(CompileRequest.MaxRecursionDepth)] = baseRequest with { MaxRecursionDepth = 7 },
-            [nameof(CompileRequest.BindPageOffset)] = baseRequest with { BindPageOffset = true }
+            [nameof(CompileRequest.BindPageOffset)] = baseRequest with { BindPageOffset = true },
+            [nameof(CompileRequest.GatewayLikePatternParameters)] = baseRequest with { GatewayLikePatternParameters = new HashSet<string> { "gw_tf_0" } }
         };
 
         // Every property of CompileRequest except the policy must be covered above.
