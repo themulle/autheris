@@ -146,7 +146,7 @@ public sealed class AtomicApprovalFourEyesTests
             var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
                 repo.ExecuteAtomicApprovalWithConsentAsync(request.Id, step, consent, [], [], CancellationToken.None));
             ex.ShouldNotBeOfType<ConsentRequestStatusConflictException>();
-            ex.Message.ShouldContain("Vier-Augen-Prinzip");
+            ex.Message.ShouldContain("FOUR_EYES_SAME_APPROVER");
 
             (await repo.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("PENDING_SECOND_APPROVAL");
             (await CountStepsAsync(repo, request.Id)).ShouldBe(1);
