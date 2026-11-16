@@ -7,6 +7,7 @@ using TrinoSqlEngine.Tests.Security;
 using Xunit;
 
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public class SecurityReviewMediumSqlEngineTests
 {
     private static ProbeEnv Env(TargetSqlDialect dialect = TargetSqlDialect.SqlServer) => new(dialect);

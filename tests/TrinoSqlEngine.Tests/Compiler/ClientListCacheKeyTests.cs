@@ -6,6 +6,7 @@ using static TrinoSqlEngine.Tests.Compiler.ClientListHarness;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>REQ-SQL-128: the list shape (never the values) is part of the template cache key (SEC-128-04, M-13).</summary>
+[Trait("Category", "SqlGate")]
 public class ClientListCacheKeyTests
 {
     private const string Sql = "SELECT id FROM orders WHERE id IN (__param_ids)";

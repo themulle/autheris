@@ -15,6 +15,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// the outcome. The coverage verifier accepts exactly that constant (the integer 1 as an EXISTS projection) and still rejects every other raw
 /// literal in an injected predicate (INV-5).
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class ExistsProjectionCoverageTests
 {
     private readonly FastSqlEngine _engine = new();

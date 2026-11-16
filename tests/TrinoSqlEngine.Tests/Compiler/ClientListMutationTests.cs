@@ -10,6 +10,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>REQ-SQL-128 Phase 3: order, position, per-statement cap and output allowance, each pinned by a mutation control.</summary>
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public class ClientListMutationTests
 {
     private const StatementPermissions Dml = StatementPermissions.Update | StatementPermissions.Delete;

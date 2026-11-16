@@ -3,6 +3,7 @@ namespace TrinoSqlEngine.Tests.TimeZones;
 using TrinoSqlEngine.Ast.Security;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class PlainTimestampClassifierTests
 {
     [Theory]

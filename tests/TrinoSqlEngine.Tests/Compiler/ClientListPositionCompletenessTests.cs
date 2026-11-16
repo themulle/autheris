@@ -14,6 +14,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// Expression) is filled with a list reference; the expander must reach it. A node added without a visit makes this test fail.
 /// </summary>
 [Trait("Category", "Security")]
+[Trait("Category", "SqlGate")]
 public class ClientListPositionCompletenessTests
 {
     /// <summary>Nodes the rewriter deliberately never descends into: injected security nodes are created after the pass runs and are opaque to every rewriter (SecurityCoverageTests).</summary>
