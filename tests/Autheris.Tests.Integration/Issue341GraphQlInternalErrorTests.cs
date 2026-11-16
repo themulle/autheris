@@ -230,6 +230,7 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(dbFile),
                 ["Gateway:Insecure:danger_bypass_consent_checks"] = bypassConsent ? "true" : "false",
                 ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
                 ["Gateway:DataSources:Connections:default:ConnectionString"] = PostgresDataSource.Create("i341"),
             },
             configureWebHost: b => b.ConfigureLogging(l => l.AddProvider(logs)));

@@ -83,6 +83,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
             ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("GovernedWebSqlIntegrationTests"),
             ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+            ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
             ["Gateway:DataSources:Connections:default:ConnectionString"] = dbPath,
             ["Gateway:WebSql:Enabled"] = "true",
             ["Gateway:WebSql:DefaultDataSourceName"] = "default",

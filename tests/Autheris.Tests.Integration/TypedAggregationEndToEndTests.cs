@@ -78,6 +78,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregati
             ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(govPath),
             ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
             ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+            ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
             ["Gateway:DataSources:Connections:default:ConnectionString"] = dataPath,
         };
     }

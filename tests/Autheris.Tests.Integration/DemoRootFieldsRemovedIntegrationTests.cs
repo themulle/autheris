@@ -145,6 +145,7 @@ public sealed class DemoRootFieldsRemovedIntegrationTests : IDisposable
             }
 
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "main");
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", PostgresDataSource.Create("rdf"));
         });
 }

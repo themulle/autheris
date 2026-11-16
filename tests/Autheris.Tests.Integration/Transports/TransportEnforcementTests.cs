@@ -89,8 +89,10 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":Provider", "PostgreSql");
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":DefaultSchema", "main");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":ConnectionString", sConn);
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":Provider", "PostgreSql");
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":DefaultSchema", "main");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":ConnectionString", tConn);
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:DefaultDataSourceName", SourceT);

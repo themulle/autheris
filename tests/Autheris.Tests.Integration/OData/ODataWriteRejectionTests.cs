@@ -61,6 +61,7 @@ public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejection
                 builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "PostgreSql");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:DefaultSchema", "main");
                 builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", dbPath);
                 builder.UseSetting("Gateway:OData:Enabled", "true");
                 builder.ConfigureServices(services =>

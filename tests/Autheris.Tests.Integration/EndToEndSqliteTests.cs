@@ -72,6 +72,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
 
                 // Echte Datenquelle: PostgreSQL-Datenbank
                 b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+                b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "main");
                 b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", dbPath);
 
                 b.UseSetting("Gateway:WebSql:Enabled", "true");

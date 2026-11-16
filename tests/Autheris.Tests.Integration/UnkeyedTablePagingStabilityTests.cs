@@ -44,6 +44,7 @@ public sealed class UnkeyedTablePagingStabilityTests : IDisposable
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("UnkeyedTablePagingStabilityTests"));
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", "PostgreSql");
+            builder.UseSetting($"Gateway:DataSources:Connections:{Source}:DefaultSchema", "main");
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", _path);
         });
 

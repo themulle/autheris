@@ -338,6 +338,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("run"));
 
                 b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+                b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "main");
                 b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", dbPath);
 
                 if (UseKeySetCache)

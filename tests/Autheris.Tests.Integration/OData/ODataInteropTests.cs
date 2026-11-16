@@ -54,6 +54,7 @@ public sealed class ODataInteropTests : IClassFixture<ODataInteropTests.Fixture>
                 builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "PostgreSql");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:DefaultSchema", "main");
                 builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", dbPath);
                 builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "erp");
                 builder.UseSetting("Gateway:OData:Enabled", "true");

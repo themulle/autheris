@@ -52,6 +52,7 @@ public class ODataIntegrationTests : IClassFixture<ODataIntegrationTests.HostFix
                 ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("ODataIntegrationTests"),
                 ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
                 ["Gateway:DataSources:Connections:default:ConnectionString"] = _dataDbPath,
             });
         }

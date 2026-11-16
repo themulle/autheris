@@ -58,6 +58,7 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("McpDatasetToolsEndToEndTests"));
             builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "main");
             builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", _dbPath);
             builder.UseSetting("Gateway:Mcp:Enabled", "true");
             builder.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");

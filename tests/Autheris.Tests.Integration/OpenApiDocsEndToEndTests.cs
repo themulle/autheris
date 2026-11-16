@@ -71,6 +71,7 @@ public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEnd
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("OpenApiDocsEndToEndTests"),
                 ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
                 ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:DefaultSchema"] = "main",
                 ["Gateway:DataSources:Connections:default:ConnectionString"] = _dbPath,
                 ["Gateway:WebSql:Enabled"] = "true",
                 ["Gateway:WebSql:DefaultDataSourceName"] = "default",

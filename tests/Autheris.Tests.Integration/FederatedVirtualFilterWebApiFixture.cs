@@ -225,10 +225,13 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
             b.UseSetting("Gateway:VirtualFilters:Federation:KeyCacheTtlSeconds", "1");
 
             b.UseSetting("Gateway:DataSources:Connections:erp:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:erp:DefaultSchema", "main");
             b.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", erp);
             b.UseSetting("Gateway:DataSources:Connections:authz:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:authz:DefaultSchema", "main");
             b.UseSetting("Gateway:DataSources:Connections:authz:ConnectionString", authz);
             b.UseSetting("Gateway:DataSources:Connections:authz_down:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:authz_down:DefaultSchema", "main");
             b.UseSetting("Gateway:DataSources:Connections:authz_down:ConnectionString", authzDown);
 
             b.UseSetting("Gateway:WebSql:Enabled", "true");
