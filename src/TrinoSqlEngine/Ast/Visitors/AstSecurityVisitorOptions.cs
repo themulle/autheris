@@ -38,7 +38,7 @@ internal sealed record AstSecurityVisitorOptions
     public DmlWritePermit? WritePermit { get; init; }
 
     /// <summary>Gateway-owned parameter names allowed as a SQL Server LIKE pattern (<see cref="CompileRequest.GatewayLikePatternParameters"/>).</summary>
-    public IReadOnlySet<string> GatewayLikePatternParameters { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlySet<string> GatewayLikePatternParameters { get; init; } = new HashSet<string>(StringComparer.Ordinal);
 
     public bool RejectMaskedColumnsInPredicates { get; init; } = true;
     public bool RejectMaskedColumnsInDml { get; init; } = true;

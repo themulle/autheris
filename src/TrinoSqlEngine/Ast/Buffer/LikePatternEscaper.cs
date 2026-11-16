@@ -67,6 +67,8 @@ internal static class LikePatternEscaper
         {
             // A gateway-owned parameter (tree filter value, escaped with the clause's explicit escape character, never pre-escaped for
             // '[') is admitted: the generator wraps it so '[' in the value is literal. Anything else stays rejected (fail closed).
+            // Invariant: a value that already escaped '[' would be escaped twice and match the wrong rows, so a pattern source that
+            // pre-escapes '[' must never be on this list (TreeFilterClauseBuilder is pinned to never escape '[' by a unit test).
             if (like.Pattern is ParameterReference { Name: var name } && gatewayParameters?.Contains(name) == true && userEscape is not (null or '['))
             {
                 return like with { IsPatternNormalized = true, IsGatewayOwnedPattern = true };

@@ -88,9 +88,10 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 if (normalized.IsGatewayOwnedPattern && normalized.Escape != null)
                 {
                     // SQL Server: '[' in the bound value is a character class; prefixing it with the clause's escape character makes it literal.
-                    builder.Append("REPLACE(");
+                    // REPLACE keeps the type of its first argument: CAST to nvarchar(max) so doubled brackets never truncate the value.
+                    builder.Append("REPLACE(CAST(");
                     GeneratePredicateOperand(normalized.Pattern, ref builder, context);
-                    builder.Append(", ");
+                    builder.Append(" AS nvarchar(max)), ");
                     int bracketStart = builder.Length;
                     builder.Append("'['");
                     context.RegisterConstantFragment(bracketStart, builder.Length - bracketStart);

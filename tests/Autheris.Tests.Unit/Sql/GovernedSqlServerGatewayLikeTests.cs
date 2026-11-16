@@ -34,12 +34,12 @@ public sealed class GovernedSqlServerGatewayLikeTests
     private const string AggregateSql =
         "SELECT region, COUNT(*) AS n FROM dbo.orders WHERE region LIKE @__gql_tf_0 ESCAPE '!' GROUP BY region";
 
-    private static GovernedSqlRewriter CreateRewriter()
+    private static GovernedSqlRewriter CreateRewriter(string sourceType = "SqlServer")
     {
         var table = new TableMetadata
         {
             Identifier = new TableIdentifier("default", "dbo", "orders"),
-            Table = new Table { TableName = "orders", SchemaName = "dbo", SourceType = "SqlServer", SourceName = "default" },
+            Table = new Table { TableName = "orders", SchemaName = "dbo", SourceType = sourceType, SourceName = "default" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
@@ -92,11 +92,48 @@ public sealed class GovernedSqlServerGatewayLikeTests
             text, User(), new TenantId(Tenant), dataSourceName: null, dmlContext: null, CancellationToken.None,
             plannedTableRead: true, gatewayLikePatternParameters: aliases);
 
-        rewrite.Compiled.Sql.ShouldContain("REPLACE(");
+        rewrite.Compiled.Sql.ShouldContain("REPLACE(CAST(");
         rewrite.Compiled.Sql.ShouldContain(" ESCAPE ");
         rewrite.Compiled.Sql.ShouldNotContain("SENTINEL");
         rewrite.Compiled.Parameters.ShouldContain(p => p.SourceName == "gw_tf_0");
-        rewrite.Compiled.Parameters.ShouldAllBe(p => !Equals(p.Value, Sentinel));
+        // The value is bound by name and resolved at execution: it never appears in the SQL text.
+        rewrite.Compiled.Sql.ShouldNotContain(Sentinel);
+    }
+
+    [Fact]
+    public async Task PlannedAggregate_CompiledWithAllowList_IsNotReusedWithoutIt()
+    {
+        var rewriter = CreateRewriter();
+        var (text, aliases) = Prepare(Planned(AggregateSql, "%a%"));
+        await rewriter.RewriteCoreAsync(
+            text, User(), new TenantId(Tenant), dataSourceName: null, dmlContext: null, CancellationToken.None,
+            plannedTableRead: true, gatewayLikePatternParameters: aliases);
+
+        await Should.ThrowAsync<SqlCompileNotSupportedException>(() => rewriter.RewriteCoreAsync(
+            text, User(), new TenantId(Tenant), dataSourceName: null, dmlContext: null, CancellationToken.None, plannedTableRead: true));
+    }
+
+    [Fact]
+    public async Task PlannedAggregate_OnPostgreSql_HasNoSqlServerWrapper()
+    {
+        var (text, aliases) = Prepare(Planned(AggregateSql, "%a%"));
+        var rewrite = await CreateRewriter("PostgreSql").RewriteCoreAsync(
+            text, User(), new TenantId(Tenant), dataSourceName: null, dmlContext: null, CancellationToken.None,
+            plannedTableRead: true, gatewayLikePatternParameters: aliases);
+
+        rewrite.Compiled.Sql.ShouldNotContain("REPLACE(");
+    }
+
+    [Fact]
+    public void TreeFilterClauseBuilder_NeverEscapesBracket_SoTheGatewayWrapperDoesNotDoubleEscape()
+    {
+        // The SQL Server wrapper doubles '[' with the clause's escape character. That is only right while the builder leaves '[' alone:
+        // a pattern source that pre-escapes '[' must never be placed on the gateway allow-list.
+        var clause = TreeFilterClauseBuilder.Build(
+            new TreeComparison("region", TreeFilterOperator.Contains, "a[b_c"),
+            _ => new ColumnRef("region", ColumnValueKind.String));
+
+        clause.Parameters.Values.ShouldHaveSingleItem().ShouldBe("%a[b!_c%");
     }
 
     [Fact]

@@ -43,7 +43,7 @@ public sealed class UserLikeEscapeEmissionTests
             new CompileRequest
             {
                 TargetDialect = dialect,
-                GatewayLikePatternParameters = (gatewayParameters ?? Array.Empty<string>()).ToFrozenSet(StringComparer.OrdinalIgnoreCase),
+                GatewayLikePatternParameters = (gatewayParameters ?? Array.Empty<string>()).ToFrozenSet(StringComparer.Ordinal),
                 TokenGuards = SqlTokenSecurityOptions.Strict with
                 {
                     RejectBackslashInStrings = false,
@@ -103,7 +103,8 @@ public sealed class UserLikeEscapeEmissionTests
             TargetSqlDialect.SqlServer,
             gatewayParameters: new[] { "gw_tf_0" });
 
-        Assert.Contains("REPLACE(", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains("REPLACE(CAST(", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains("AS nvarchar(max)", compiled.Sql, StringComparison.Ordinal);
         Assert.Contains("'['", compiled.Sql, StringComparison.Ordinal);
         Assert.Contains(" ESCAPE ", compiled.Sql, StringComparison.Ordinal);
         Assert.Contains(compiled.Parameters, p => p.SourceName == "gw_tf_0");
@@ -190,6 +191,30 @@ public sealed class UserLikeEscapeEmissionTests
 
         var ex = Assert.Throws<SqlLimitExceededException>(() => Compile(sql, TargetSqlDialect.SqlServer, engine));
         Assert.Equal(SqlLimitKind.QueryLength, ex.Kind);
+    }
+
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE name LIKE __param_gw_tf_10 ESCAPE '!'")]
+    [InlineData("SELECT id FROM orders WHERE name LIKE __param_GW_TF_1 ESCAPE '!'")]
+    public void SqlServer_AllowListMatchIsExactAndCaseSensitive(string sql)
+    {
+        Assert.Throws<SqlCompileNotSupportedException>(() =>
+            Compile(sql, TargetSqlDialect.SqlServer, gatewayParameters: new[] { "gw_tf_1" }));
+    }
+
+    [Fact]
+    public void SqlServer_GatewayParameterPattern_IsCastToMaxSoDoubledBracketsCannotTruncate()
+    {
+        // The engine only emits SQL: the invariant is the CAST in the text, because REPLACE keeps the type of its first argument
+        // (a 4001-character value of only '[' doubles to 8002 characters and would be cut for a plain nvarchar(4000) parameter).
+        var compiled = Compile(
+            "SELECT id FROM orders WHERE name LIKE __param_gw_tf_0 ESCAPE '!'",
+            TargetSqlDialect.SqlServer,
+            gatewayParameters: new[] { "gw_tf_0" });
+
+        Assert.Contains("REPLACE(CAST(", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains("AS nvarchar(max)), '[', ", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains(compiled.Parameters, p => p.SourceName == "gw_tf_0");
     }
 
     [Fact]

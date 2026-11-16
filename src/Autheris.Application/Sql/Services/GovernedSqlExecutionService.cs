@@ -533,7 +533,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
     internal static IReadOnlySet<string> GatewayParameterAliases(IReadOnlyDictionary<string, object?>? gatewayParameters) =>
         gatewayParameters is not { Count: > 0 }
             ? FrozenSet<string>.Empty
-            : gatewayParameters.Keys.Select(GatewayParameterAlias).ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+            : gatewayParameters.Keys.Select(GatewayParameterAlias).ToFrozenSet(StringComparer.Ordinal);
 
     private static bool IsGatewayScalar(object? value) =>
         value is null or string or decimal or Guid or DateTime or DateTimeOffset or DateOnly or TimeOnly or TimeSpan ||
