@@ -231,7 +231,10 @@ public sealed class GovernanceTestStore : IAsyncDisposable
             {
                 ["Gateway:GovernanceDb:Provider"] = gatewayOptions.GovernanceDb.Provider,
                 ["Gateway:GovernanceDb:ConnectionString"] = gatewayOptions.GovernanceDb.ConnectionString,
-                ["Gateway:CdcWebhooks:Enabled"] = "true"
+                ["Gateway:CdcWebhooks:Enabled"] = "true",
+                ["Gateway:Governance:Grants:DefaultDuration"] = "P2W",
+                ["Gateway:Governance:Grants:MaxDuration"] = "P2M",
+                ["Gateway:Governance:Grants:DeclarativeMaxDuration"] = "P2M"
             })
             .Build();
 

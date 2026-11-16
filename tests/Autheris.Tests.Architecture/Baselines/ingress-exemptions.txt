@@ -12,9 +12,8 @@ route /api/admin/tokens/revoke | admin route (tenant registry, token revocation)
 route /api/auth/login | auth, dev-persona or portal route; no governed data access
 route /api/auth/logout | auth, dev-persona or portal route; no governed data access
 route /api/auth/session | auth, dev-persona or portal route; no governed data access
-route /api/catalog/datasets/{id}/keys | direct catalog dataset metadata route (keys/required-filters/synthetic-samples); governance repositories only, no C1..C5 data read
-route /api/catalog/datasets/{id}/required-filters | direct catalog dataset metadata route (keys/required-filters/synthetic-samples); governance repositories only, no C1..C5 data read
-route /api/catalog/datasets/{id}/synthetic-samples | direct catalog dataset metadata route (keys/required-filters/synthetic-samples); governance repositories only, no C1..C5 data read
+route /api/catalog/datasets/{id}/keys | direct catalog dataset metadata route (keys/required-filters); governance repositories only, no C1..C5 data read
+route /api/catalog/datasets/{id}/required-filters | direct catalog dataset metadata route (keys/required-filters); governance repositories only, no C1..C5 data read
 route /api/dev/info | auth, dev-persona or portal route; no governed data access
 route /api/dev/login/{persona} | auth, dev-persona or portal route; no governed data access
 route /api/dev/personas | auth, dev-persona or portal route; no governed data access
@@ -63,6 +62,8 @@ route /api/v1/admin/consent/routes/{scopeKind}/{scopeRef} | governance admin rou
 route /api/v1/admin/consent/external-systems/{id:guid} | governance admin route; no C1..C5 choke point
 route /api/v1/admin/consent/external-systems/{id:guid}:disable | governance admin route; no C1..C5 choke point
 route /api/v1/admin/consent/requests:reroute | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/grant-records/{grantId:guid}/export | governance admin route; no C1..C5 choke point
+route /api/v1/admin/consent/grant-records:verify | governance admin route; no C1..C5 choke point
 route /api/v1/cdc/events | CDC ingestion: the caller pushes the event body and the response carries only an event id; no source is read (Streaming services have no source-reader dependency, CdcRoutesReachNoSourceReaderTests)
 route /api/v1/cdc/streams | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
 route /api/v1/cdc/streams/{id}/reset-watermark | CDC stream admin or change-detection route; reads governance/CDC state, no C1..C5 choke point
@@ -78,6 +79,7 @@ route /api/v1/consent/grant-records/{seq:long} | governance, consent, ReBAC, Fin
 route /api/v1/consent/grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/grants/{id:guid} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/grants/{id:guid}/revoke | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/profile-assignments/{id:guid}/revoke | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/requests | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/requests/{id:guid} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/requests/{id:guid}/decision | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
