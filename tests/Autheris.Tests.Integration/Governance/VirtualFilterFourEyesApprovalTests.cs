@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -55,7 +56,7 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
     public VirtualFilterFourEyesApprovalTests()
     {
         var catalog = Substitute.For<ITableMetadataRepository>();
-        catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([
+        catalog.StubTables([
             Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
             Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
         ]);

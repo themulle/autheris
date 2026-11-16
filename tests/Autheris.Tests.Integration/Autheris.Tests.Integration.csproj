@@ -61,6 +61,7 @@
     <Compile Include="..\Autheris.Tests.Unit\Cdc\CdcStreamStoreContractTests.cs" Link="Cdc\CdcStreamStoreContractTests.cs" />
     <Compile Include="..\Autheris.Tests.Unit\VirtualFilters\VirtualFilterTestData.cs" Link="VirtualFilterTestData.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Catalog\Wp0CatalogFixtures.cs" Link="Catalog\Wp0CatalogFixtures.cs" />
+    <Compile Include="..\Autheris.Tests.Unit\Catalog\CatalogRepositoryStubs.cs" Link="Catalog\CatalogRepositoryStubs.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Identity\Attributes\CallerAttributeTestSupport.cs" Link="Identity\CallerAttributeTestSupport.cs" />
     <Compile Include="..\Autheris.Tests.Unit\TestDoubles\AuditWriterTestServices.cs" Link="TestDoubles\AuditWriterTestServices.cs" />
     <Compile Include="..\Autheris.Tests.Unit\Sql\Policy\TestCorrelatedPredicateBuilder.cs" Link="Sql\Policy\TestCorrelatedPredicateBuilder.cs" />

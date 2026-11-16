@@ -806,7 +806,7 @@ internal static class ConsentSqlCore
         cmd.Transaction = tx;
         cmd.CommandText = ConsentApprovalPolicy.GuardedStatusUpdateSql;
         cmd.AddBound("@st", newStatus);
-        cmd.AddBound("@updatedAt", (updatedAt ?? TimeProvider.System.GetUtcNow()).ToString("O"));
+        cmd.AddBoundTimestamp("@updatedAt", updatedAt ?? TimeProvider.System.GetUtcNow());
         cmd.AddBound("@id", requestId.ToString());
         cmd.AddBound("@expected", expectedStatus);
         ConsentApprovalPolicy.EnsureTransitionApplied(await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false), requestId);

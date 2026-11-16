@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Integration.Governance;
 
+using Autheris.Tests.Unit.Catalog;
 using System;
 using System.IO;
 using System.Linq;
@@ -43,7 +44,7 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
     public VirtualFilterBindingServiceValidationTests()
     {
         var catalog = Substitute.For<ITableMetadataRepository>();
-        catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
+        catalog.StubTables(new System.Collections.Generic.List<TableMetadata>
         {
             Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
             Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
@@ -146,7 +147,7 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
     {
         await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), DbtActor);
         var catalog = Substitute.For<ITableMetadataRepository>();
-        catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
+        catalog.StubTables(new System.Collections.Generic.List<TableMetadata>
         {
             Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
             Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
