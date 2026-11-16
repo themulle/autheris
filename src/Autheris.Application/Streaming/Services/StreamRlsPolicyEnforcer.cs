@@ -330,6 +330,16 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
                 ? activePerCell.ResolveColumnForSignatures(catalogColumn.ColumnName, matchedPerCellSignatures)
                 : decision.GetEffectiveColumnAccess(catalogColumn.ColumnName, metadata);
 
+            // The decision point also applies the access profiles; it can only tighten the consent level of a column (Clear < Mask < Deny).
+            if (matchedPerCellSignatures is null && accessLevel != ColumnAccessLevel.Deny)
+            {
+                var pdpLevel = pdpDecision.GetEffectiveColumnAccess(catalogColumn.ColumnName, metadata);
+                if (pdpLevel == ColumnAccessLevel.Deny || (pdpLevel == ColumnAccessLevel.Mask && accessLevel == ColumnAccessLevel.Clear))
+                {
+                    accessLevel = pdpLevel;
+                }
+            }
+
             switch (accessLevel)
             {
                 case ColumnAccessLevel.Deny:

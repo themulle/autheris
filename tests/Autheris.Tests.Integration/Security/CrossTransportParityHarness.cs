@@ -120,7 +120,12 @@ public sealed record ParityOutcome(
     bool HasRowFilter = false,
     bool HasMandatoryFilter = false,
     bool SsnMasked = false,
-    bool SsnDenied = false);
+    bool SsnDenied = false,
+    string? Diagnostic = null)
+{
+    /// <summary>A denial caused by an exception the surface turned into a deny; the type and message stay visible in the assertion message.</summary>
+    public static ParityOutcome DeniedBy(Exception ex) => new(false, Diagnostic: $"{ex.GetType().Name}: {ex.Message}");
+}
 
 public sealed record ParityScenario(
     ParityScenarioId Id,
@@ -185,15 +190,15 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 SsnMasked = false,
                 SsnDenied = false
             },
-        // Procedures without row-scope keys fail closed on consent/mandatory row filters, while honoring column masking.
+        // Procedures without row-scope keys fail closed on consent/mandatory row filters, while honoring column masking and dropping denied columns.
         ParitySurface.Procedure =>
             baseline with
             {
                 Allowed = baseline.Allowed && !baseline.HasRowFilter && !baseline.HasMandatoryFilter,
                 HasRowFilter = false,
                 HasMandatoryFilter = false,
-                SsnMasked = baseline.Allowed && !baseline.HasRowFilter && !baseline.HasMandatoryFilter && (baseline.SsnMasked || baseline.SsnDenied),
-                SsnDenied = false
+                SsnMasked = baseline.Allowed && !baseline.HasRowFilter && !baseline.HasMandatoryFilter && baseline.SsnMasked,
+                SsnDenied = baseline.Allowed && !baseline.HasRowFilter && !baseline.HasMandatoryFilter && baseline.SsnDenied
             },
         // Streaming cannot evaluate mandatory subquery filters on change events; it honors simple row filters and column masking/denial.
         // A row filter that matches no row (unresolved caller attribute) drops every event, so nothing is delivered.
@@ -232,7 +237,8 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
             HasRowFilter: decision.IsAllowed && !string.IsNullOrWhiteSpace(consentRowFilter),
             HasMandatoryFilter: decision.IsAllowed && !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql),
             SsnMasked: decision.IsAllowed && decision.GetEffectiveColumnAccess("ssn", metadata) == ColumnAccessLevel.Mask,
-            SsnDenied: decision.IsAllowed && decision.GetEffectiveColumnAccess("ssn", metadata) == ColumnAccessLevel.Deny);
+            SsnDenied: decision.IsAllowed && decision.GetEffectiveColumnAccess("ssn", metadata) == ColumnAccessLevel.Deny,
+            Diagnostic: decision.IsAllowed ? null : string.Join("; ", decision.DeniedReasons));
     }
 
     public async Task<ParityOutcome> EvaluateAsync(ParitySurface surface, ParityScenario scenario, CancellationToken ct = default)
@@ -356,7 +362,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         }
         catch (Exception ex) when (IsAuthorizationFailure(ex))
         {
-            return new ParityOutcome(false);
+            return ParityOutcome.DeniedBy(ex);
         }
     }
 
@@ -401,11 +407,13 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
             var ssnMasked = res.Columns.Contains("ssn", StringComparer.OrdinalIgnoreCase) &&
                             res.Rows.Count > 0 && res.Rows[0].TryGetValue("ssn", out var ssnVal) &&
                             string.Equals(ssnVal?.ToString(), "[REDACTED]", StringComparison.Ordinal);
-            return new ParityOutcome(true, SsnMasked: ssnMasked);
+            // A denied column is dropped from the procedure result (GovernResult), never returned masked.
+            var ssnDenied = !res.Columns.Contains("ssn", StringComparer.OrdinalIgnoreCase);
+            return new ParityOutcome(true, SsnMasked: ssnMasked, SsnDenied: ssnDenied);
         }
         catch (Exception ex) when (IsAuthorizationFailure(ex) || ex is KeyNotFoundException)
         {
-            return new ParityOutcome(false);
+            return ParityOutcome.DeniedBy(ex);
         }
     }
 
@@ -429,7 +437,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         }
         catch (Exception ex) when (IsAuthorizationFailure(ex))
         {
-            return new ParityOutcome(false);
+            return ParityOutcome.DeniedBy(ex);
         }
     }
 
@@ -476,14 +484,14 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         {
             var tenant = s.Principal.GetTenantId();
             var req = new GovernedSqlQueryRequest(
-                "SELECT a.id, a.region FROM orders a JOIN orders_ref b ON a.id = b.id", DataSourceName: "default", Transport: SqlTransports.WebSql);
+                "SELECT a.id, a.region FROM main.orders a JOIN main.orders_ref b ON a.id = b.id", DataSourceName: "default", Transport: SqlTransports.WebSql);
             await fed.ExecuteQueryBufferedAsync(req, s.Principal, tenant, ct);
             var direct = await federatedPdp.DecideAsync(new AccessRequest(SecurityContextOf(s), s.Table, AccessOperation.Read, AccessTransport.Federation), ct);
             return Normalize(direct, s.Table);
         }
         catch (Exception ex) when (IsAuthorizationFailure(ex))
         {
-            return new ParityOutcome(false);
+            return ParityOutcome.DeniedBy(ex);
         }
     }
 
@@ -561,7 +569,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         }
         catch (Exception ex) when (IsAuthorizationFailure(ex))
         {
-            return new ParityOutcome(false);
+            return ParityOutcome.DeniedBy(ex);
         }
     }
 
@@ -610,7 +618,8 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         bool ssnDenied = explanation.Columns.Any(c => string.Equals(c.ColumnName, "ssn", StringComparison.OrdinalIgnoreCase) && c.Level == ColumnAccessLevel.Deny);
         return new ParityOutcome(
             explanation.Allowed,
-            HasRowFilter: explanation.Allowed && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql),
+            // The combined filter also carries the mandatory predicate; the consent row filter alone is what the baseline compares (as in Normalize).
+            HasRowFilter: explanation.Allowed && !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql is null ? decision.CombinedRowFilterSql : decision.RowFilterSqlBeforeVirtualFilters),
             HasMandatoryFilter: explanation.Allowed && !string.IsNullOrWhiteSpace(decision.MandatoryRowPredicateSql),
             SsnMasked: ssnMasked,
             SsnDenied: ssnDenied);

@@ -75,7 +75,7 @@ public sealed class CrossTransportAuthorizationParityTests
         await using var harness = new CrossTransportParityHarness();
         var actual = await harness.EvaluateAsync(surface, scenario, CancellationToken.None);
 
-        actual.Allowed.ShouldBe(expected.Allowed, $"Surface={surface}, Scenario={scenarioId} Allowed mismatch.");
+        actual.Allowed.ShouldBe(expected.Allowed, $"Surface={surface}, Scenario={scenarioId} Allowed mismatch. Diagnostic: {actual.Diagnostic ?? "none"}");
         if (expected.Allowed)
         {
             actual.SsnMasked.ShouldBe(expected.SsnMasked, $"Surface={surface}, Scenario={scenarioId} SsnMasked mismatch.");
