@@ -107,3 +107,11 @@ Rule for all three: an automatic issue is closed by the PR that makes the next s
 
 Each package: Phase 3 review (the `include` allow-list and the visibility rule are the binding conditions to confirm),
 then Phase 4 with filtered unit tests only; integration and parity run on GitHub Actions.
+
+## 8. Delivery log
+
+- 2026-11-16: branch `feat/issue-backlog-2026-11` implements MCP-1 (#703: `DiscoveryTextSanitizer.Summarize` on list items and search hits),
+  MCP-2 (#704, #709: `McpDescribeNarrowing` with `include` allow-list, `columns`, `columnOffset`/`columnLimit`, `relations` term, applied to the
+  authorized result so it only removes members), MCP-3 (#705: `McpBudgetShortening` keeps whole datasets and reports `_meta`) and MCP-4 (#714: column
+  `longDescription` on the legacy catalog path, served only with `include: longDescription`). The discovery-service describe path does not yet carry
+  the column long description (the discovery column model has no such member). MCP-5..MCP-8 are not started.
