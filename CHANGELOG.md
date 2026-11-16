@@ -6,11 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-16
+
 ### BREAKING
 - OpenSchema removal (OD-19): The `Gateway:OpenSchema` and `Gateway:Catalog:OpenSchema` keys were removed and setting either key triggers startup failure via `LegacySwitchGuard`. Anonymous catalog access is not supported. Authenticated users discover the catalog by default ("visible unless hidden"); objects and columns can be explicitly hidden using `PUT /api/v1/catalog/datasets/{id}/discovery`, and the legacy `visibility` tier is ignored.
 - MCP `search_catalog` and `find_relevant_tables` name a table hit and its join targets with the `list_datasets` id `domain.schema.table` instead of `domain.table` (`table`, `join_relations[].target_table`, `candidates[].dataset`, `candidates[].relations[].targetTable`), so a hit can be passed to `describe_dataset` and tables with the same name in two schemas are distinct hits (#627). `join_condition` keeps the table names.
 - An unsupported governance provider fails startup: `Gateway:GovernanceDb:Provider` accepts only `PostgreSql` (default) and `SqlServer`; `Sqlite` and SQLite connection strings are rejected in every environment, and an empty connection string fails startup. There is no migration tool from SQLite governance files. The deploy stack (compose, Helm, benchmark) uses PostgreSQL and the `governance-seed` container is removed. See [Governance store migration](docs/operations/migration-simplification.md#3-governance-store-migration-postgresql-and-sql-server).
 - SQLite data-source support removed (OD-2): `Gateway:DataSources:*` with `Provider = "Sqlite"` (or `"sqlite3"`) or an empty `Provider` fails startup fail-closed with `UnsupportedDataSourceDialectException`; `Microsoft.Data.Sqlite` is removed from production and module projects.
+
+### Added
+- Authorized data discovery replaces the anonymous OpenSchema: catalog listing, search and describe tools return only what the caller may see, with per-column access states (`Clear`, `Mask`, `Deny`).
+- External catalog and consent API with a configurable workflow mode, time-limited signed grants (grant records with a verifiable hash chain), owner grants, profile assignments, consent events and a webhook with HMAC signatures.
+- Unified authorization model: one grant model and one decision point for REST, GraphQL, MCP, SQL, Envoy ext_authz, streaming, Lakehouse and federation; row policies, dynamic object coverage and per-cell column state.
+- Classification-based masking and governed classifications; masked catalog text is configurable per scope.
+- Usage accounting per user and AD group; MCP row cap and truthful catalog hints for query clients; WebSQL client contract with cost and quota, typed columns, syntax positions and paging.
+- Docs ingestion and MCP doc tools on a governance document store (migration step `0022_docs_store`); governed stored procedures with a clean core design.
+- Catalog performance for large catalogs: paged and filtered catalog reads, batch upserts for table metadata, one version bump and change event per multi-table write, incremental search index updates.
+- Catalog search: BM25F per-field weights and matching query tokens as parts of indexed words.
+
+### Changed
+- Grant validity: grants may be valid for several years. There is no compiled-in maximum; `Gateway:Governance:Grants:MaxDuration` and `DeclarativeMaxDuration` are required configuration (startup fails without them), and `Gateway:Governance:IndividualGrants:*` are optional operator limits. The former per-class ceilings (180/90/30/7/365/90 days) and the group exemption are gone. REST requests without a duration use `DefaultDuration`.
+- Governance schema steps `0013` to `0022` are new (`0012_dbt_unique_id` stays as released); only PostgreSQL and SQL Server are supported governance stores.
+- Authentication and authorization core with direct and upstream-header modes; the Casbin engine and its options were deleted.
 
 ### Removed
 - Anonymous `OpenSchema` options (`Gateway:OpenSchema`, `Gateway:Catalog:OpenSchema`, `OpenApiDocumentOptions.OpenSchema`) and branches across GraphQL, OData, WebSQL, SQL endpoints, and stored procedures.
@@ -25,8 +42,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - dbt sync registers sources under their `identifier` and models and seeds under their `alias` (falling back to `name`), so catalog entries, relations and generated SQL endpoints point to the physical table; new entries show the dbt name as display name. A catalog entry records the dbt node that owns it (governance step 0016); a node whose physical name is taken by an entry of another origin, and all nodes of one manifest that map to the same table, are skipped with `PHYSICAL_NAME_COLLISION` (before, the second of two such nodes was skipped as `DUPLICATE`). Entries registered under the logical name are left unchanged and reported with the warning `PHYSICAL_NAME_CHANGED` (#666).
 - Catalog search hits (MCP and `GET /api/v1/catalog/search`) suggest the real GraphQL root field of the table (`domain_schema_table`, sanitized) from the catalog GraphQL schema, or none when the table has no root field, instead of a non-existent `domain_table` (#682).
 
+- A first approval on a table with a sensitive column left the consent request `APPROVED` without creating a consent; the approval path no longer routes by grant class.
+- SCIM realms other than the default realm always answered 403; the realm of the authenticated SCIM handler is kept.
+- The grant record hash chain no longer breaks when PostgreSQL stores timestamps with microsecond precision.
+- The grant expiry sweep accepts consents of the platform tenant; owner grants without a request tenant are readable.
+- `CONSENT_REQUEST_NOT_FOUND` and the related decision codes are no longer masked as `INTERNAL_SERVER_ERROR`.
+- Audit details keep fields such as `primaryKeyDirections` and `pushdownKeyCount` instead of redacting every key that contains `key`.
+- `POST /api/v1/authz/explain` and the grants view answered 404 for every REST caller (#733); the request principal is now attached to the security context.
+- The attribute table provider reads `citext` columns and compares tenant and issuer ordinally in the database.
+- `is_active` is bound as a boolean, so classification reads work on PostgreSQL; timestamps of consent and virtual filter writes are bound as `timestamptz`.
+
 ### Security
-- None yet.
+- GET on a SQL endpoint refuses every definition that is not a single SELECT (#730).
+- A hard row policy whose stored pattern cannot be evaluated denies access (`VF_PATTERN_EVALUATION_FAILED`) instead of failing open.
+- Streaming applies the stricter column level of the decision point (strict access profile) over the consent level.
 
 ## [1.7.0] - 2026-10-15
 
