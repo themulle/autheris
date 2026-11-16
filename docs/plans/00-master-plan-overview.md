@@ -29,6 +29,8 @@
 
 **Rule (owner):** Security-critical items and bugs first, then urgently missing features, only then larger add-ons. Work is pulled strictly top-down; every item passes the 5-phase standard implementation lifecycle (Product Manager qualification $\to$ Solution Architect plan with Gemini 4 Pro $\to$ Security Expert audit $\to$ C# TDD Developer execution $\to$ Code Reviewer inspection). There is no documentation phase in `docs/` (owner rule 2026-10-17); all progress is tracked exclusively here in `docs/plans/00-master-plan-overview.md`.
 
+**Owner decision 2026-11-16 (grant validity):** individual and group grants may be valid for several years. There is no compiled-in maximum: the maximum comes only from `Gateway:Governance:Grants:MaxDuration` / `DeclarativeMaxDuration` (required configuration, startup fails without it) and the optional operator class limits in `Gateway:Governance:IndividualGrants:*`; the former built-in ceilings (180/90/30/7/365/90 days) and the group exemption are gone. Details: [`WP-SIMPL-47`](simplification/WP-SIMPL-47-external-catalog-and-consent-api.md) step 7 and its changelog.
+
 ### Active Tracks
 
 | Rank | Item | Size | Status | Next Milestone / Notes |
