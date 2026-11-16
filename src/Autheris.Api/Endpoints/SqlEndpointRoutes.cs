@@ -416,15 +416,6 @@ public static class SqlEndpointRoutes
             return;
         }
 
-        // Fail closed: GET runs only a definition that is a GET endpoint and a single SELECT; anything else is 405 before execution.
-        if (httpContext.RequestServices?.GetService<ISqlEndpointRegistry>() is { } registry
-            && registry.TryGet(name, out var requested) && requested is not null && !(IsGetMethod(requested) && IsSingleSelect(requested, logger)))
-        {
-            httpContext.Response.Headers.Allow = "POST";
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status405MethodNotAllowed, ApiErrorCodes.BadRequest, "This SQL endpoint cannot be executed with GET.", ct).ConfigureAwait(false);
-            return;
-        }
-
         try
         {
             Autheris.Domain.Model.SqlEndpointDefinition? precheckDefinition = null;
