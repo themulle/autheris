@@ -16,6 +16,10 @@ using Autheris.Application.Governance.Paging;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Olap;
+using Autheris.Application.Plugins.Auth;
+using Autheris.Application.Policy.Pdp;
+using Autheris.Application.Policy.Services;
+using Autheris.Application.Services;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.VirtualFilters;
@@ -28,7 +32,7 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Security;
 using Autheris.Extensions.Lakehouse.Interfaces;
-using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
 using TrinoSqlEngine.Governance;
 
 internal sealed partial class CrossTransportParityHarness
@@ -43,8 +47,8 @@ internal sealed partial class CrossTransportParityHarness
 
         return
         [
-            new(ParityScenarioId.S01_UserGrant, user, TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(true)),
-            new(ParityScenarioId.S02_GroupGrant, groupUser, TenantA, table, [AllowGroup(GroupSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(true)),
+            new(ParityScenarioId.S01_UserGrant, user, TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnMasked: true)),
+            new(ParityScenarioId.S02_GroupGrant, groupUser, TenantA, table, [AllowGroup(GroupSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnMasked: true)),
             new(ParityScenarioId.S03_RoleGrantIgnored, CompleteUser(BobSid, roles: ["Analyst"]), TenantA, table, [], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S04_DenyWinsOverAllow, groupUser, TenantA, table, [AllowUser(BobSid, now), DenyGroup(GroupSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S05_WriteConsentDoesNotGrantRead, user, TenantA, table, [WriteOnlyConsent(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
@@ -52,21 +56,29 @@ internal sealed partial class CrossTransportParityHarness
             new(ParityScenarioId.S07_ExpiredConsentDenied, user, TenantA, table, [AllowUser(AliceSid, now, validFrom: now.AddDays(-5), validTo: now.AddDays(-1))], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S08_RevokedConsentDenied, user, TenantA, table, [AllowUser(AliceSid, now, revoked: true)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S09_TenantMismatchDenied, user, TenantA, table, [AllowUser(AliceSid, now, tenant: TenantB)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
-            new(ParityScenarioId.S10_RowFilterApplied, user, TenantA, table, [AllowUser(AliceSid, now, rowFilters: [RegionFilter()])], [], VirtualFilterSnapshot.Empty, false, false, new(true, HasRowFilter: true)),
-            new(ParityScenarioId.S11_MandatoryVirtualFilterApplied, user, TenantA, table, [AllowUser(AliceSid, now)], [], RegionMandatorySnapshot(), false, false, new(true, HasMandatoryFilter: true)),
-            new(ParityScenarioId.S12_UnresolvedCallerAttribute, user, TenantA, table, [AllowUser(AliceSid, now, rowFilters: [AttributeFilter()])], [], VirtualFilterSnapshot.Empty, true, false, new(false)),
-            new(ParityScenarioId.S13_StrictProfileMasking, user, TenantA, table, [AllowUser(AliceSid, now)], [StrictProfile(AliceSid, now)], VirtualFilterSnapshot.Empty, false, false, new(true, SsnMasked: true)),
-            new(ParityScenarioId.S14_ColumnDenyRule, user, TenantA, table, [AllowUser(AliceSid, now, colRules: [SsnRule(ColumnAccessLevel.Deny)])], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnDenied: true)),
-            new(ParityScenarioId.S15_IpRangeMismatchDenied, user, TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, true, new(false)),
-            new(ParityScenarioId.S16_RestrictedScopeDenied, user, TenantA, table, [AllowUser(AliceSid, now, colRules: [SsnScopeRule("Agent.Read", ColumnAccessLevel.Clear)])], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnDenied: true)),
-            new(ParityScenarioId.S17_RestrictedScopeCleared, CompleteUser(AliceSid, scopes: ["Agent.Read"]), TenantA, table, [AllowUser(AliceSid, now, colRules: [SsnScopeRule("Agent.Read", ColumnAccessLevel.Clear)])], [], VirtualFilterSnapshot.Empty, false, false, new(true)),
-            new(ParityScenarioId.S18_DelegatedEnforcementMode, user, TenantA, DelegatedTable(), [AllowUser(AliceSid, now, rowFilters: [RegionFilter()])], [], VirtualFilterSnapshot.Empty, false, false, new(true)),
+            new(ParityScenarioId.S10_RowFilterApplied, user, TenantA, table, [AllowUser(AliceSid, now, rowFilters: [RegionFilter()])], [], VirtualFilterSnapshot.Empty, false, false, new(true, HasRowFilter: true, SsnMasked: true)),
+            new(ParityScenarioId.S11_MandatoryVirtualFilterApplied, user, TenantA, table, [AllowUser(AliceSid, now)], [], RegionMandatorySnapshot(), false, false, new(true, HasMandatoryFilter: true, SsnMasked: true)),
+            new(ParityScenarioId.S12_UnresolvedCallerAttribute, user, TenantA, table, [AllowUser(AliceSid, now, rowFilters: [AttributeFilter()])], [], VirtualFilterSnapshot.Empty, true, false, new(true, HasRowFilter: true, SsnMasked: true, MatchesNoRows: true)),
+            new(ParityScenarioId.S13_StrictProfileMasking, user, TenantA, table, [AllowUser(AliceSid, now)], [StrictProfile(AliceSid, now)], VirtualFilterSnapshot.Empty, false, false, new(true, SsnDenied: true)),
+            new(ParityScenarioId.S14_ColumnDenyRule, user, TenantA, table, [AllowUser(AliceSid, now, colRules: ColumnRulesWith(SsnRule(ColumnAccessLevel.Deny)))], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnDenied: true)),
+            new(ParityScenarioId.S15_ClientIpIsNoCoreGrantDimension, user, TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, true, new(true, SsnMasked: true)),
+            new(ParityScenarioId.S16_RestrictedScopeDenied, user, TenantA, table, [AllowUser(AliceSid, now, colRules: ColumnRulesWith(SsnScopeRule("Agent.Read", ColumnAccessLevel.Clear)))], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnDenied: true)),
+            new(ParityScenarioId.S17_RestrictedScopeCleared, CompleteUser(AliceSid, scopes: ["Agent.Read"]), TenantA, table, [AllowUser(AliceSid, now, colRules: ColumnRulesWith(SsnScopeRule("Agent.Read", ColumnAccessLevel.Clear)))], [], VirtualFilterSnapshot.Empty, false, false, new(true)),
+            new(ParityScenarioId.S18_DelegatedEnforcementMode, user, TenantA, DelegatedTable(), [AllowUser(AliceSid, now, rowFilters: [RegionFilter()])], [], VirtualFilterSnapshot.Empty, false, false, new(true, SsnMasked: true)),
             new(ParityScenarioId.S19_UnauthenticatedDenied, new ClaimsPrincipal(new ClaimsIdentity()), TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S20_InvalidTenantClaimDenied, InvalidTenantUser(AliceSid), TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S21_MissingUserSidDenied, MissingSidUser(), TenantA, table, [AllowUser(AliceSid, now)], [], VirtualFilterSnapshot.Empty, false, false, new(false)),
             new(ParityScenarioId.S22_ForeignTenantObject, user, TenantA, DefaultOrdersTable(), [AllowUser(AliceSid, now, tenant: TenantB)], [], VirtualFilterSnapshot.Empty, false, false, new(false))
         ];
     }
+
+    /// <summary>A decision point with an authorization hook host: the only core extension point that can restrict a read by client address.</summary>
+    internal static AccessDecisionPoint BuildPdpWithAuthorizationHook(ParityScenario s, IAuthPluginHost host) =>
+        new(Options.Create(new GatewayOptions()), new ConsentResolutionService(new RowFilterSqlBuilder()), new InMemoryConsentRepo(s.Consents),
+            NullConsentCacheService.Instance, authPluginHost: host);
+
+    internal static SecurityPrincipalContext SubjectWithClientIp(ParityScenario s, IPAddress clientIp) =>
+        SecurityPrincipalContext.FromPrincipal(s.Principal, s.EffectiveTenant, clientIp: clientIp);
 
     private static TableMetadata DefaultOrdersTable() => new()
     {
@@ -80,6 +92,39 @@ internal sealed partial class CrossTransportParityHarness
             new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true },
             new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
         ]
+    };
+
+    /// <summary>The same table in a second data source (<c>orders_ref</c>), so a join of the two is a cross-source read.</summary>
+    private static TableMetadata SecondSourceTable(TableMetadata table) => new()
+    {
+        Identifier = new TableIdentifier(table.Identifier.Domain, table.Identifier.Schema, "orders_ref"),
+        Table = new Table
+        {
+            Id = Guid.NewGuid(),
+            SourceName = "default_ref",
+            SchemaName = table.Table.SchemaName,
+            TableName = "orders_ref",
+            SourceType = table.Table.SourceType,
+            IsActive = table.Table.IsActive
+        },
+        TenantColumnName = table.TenantColumnName,
+        Columns = table.Columns,
+        ColumnMaskingRules = table.ColumnMaskingRules
+    };
+
+    private static Consent CopyForTable(Consent c, TableIdentifier table) => new()
+    {
+        TableIdentifier = table,
+        TenantId = c.TenantId,
+        GranteeType = c.GranteeType,
+        GranteeSid = c.GranteeSid,
+        Effect = c.Effect,
+        ValidFrom = c.ValidFrom,
+        ValidTo = c.ValidTo,
+        IsRevoked = c.IsRevoked,
+        RowFilters = c.RowFilters,
+        ColumnRules = c.ColumnRules,
+        WriteRules = c.WriteRules
     };
 
     private static TableMetadata DelegatedTable() => new()
@@ -183,6 +228,18 @@ internal sealed partial class CrossTransportParityHarness
 
     private static ConsentRowFilter RegionFilter() => new() { ColumnName = "region", Operator = "EQ", ValueType = "string", ValueJson = "\"EMEA\"" };
     private static ConsentRowFilter AttributeFilter() => new() { ColumnName = "region", Operator = "EQ", ValueType = "string", ValueSource = "USER_ATTRIBUTE", UserAttribute = "department" };
+    /// <summary>
+    /// A consent with column rules is an allow list: every column without a rule is denied. The scenarios that vary the ssn level keep the
+    /// other columns readable, so only the ssn column differs from the unconstrained grants.
+    /// </summary>
+    private static IReadOnlyList<ConsentColumnRule> ColumnRulesWith(ConsentColumnRule ssnRule) =>
+    [
+        new() { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+        new() { ColumnName = "region", AccessLevel = ColumnAccessLevel.Clear },
+        new() { ColumnName = "tenant_id", AccessLevel = ColumnAccessLevel.Clear },
+        ssnRule
+    ];
+
     private static ConsentColumnRule SsnRule(ColumnAccessLevel level) => new() { ColumnName = "ssn", AccessLevel = level };
     private static ConsentColumnRule SsnScopeRule(string scope, ColumnAccessLevel level) => new() { ColumnName = "ssn", AccessLevel = level, ApplicableScopes = [scope] };
 
@@ -336,14 +393,15 @@ internal sealed partial class CrossTransportParityHarness
         }
     }
 
-    private sealed class InMemorySqliteConnectionFactory : ISqlConnectionFactory
+    private sealed class FixedRowsSqlExecutor : IDataSourceExecutor
     {
-        public async Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
-        {
-            var conn = new SqliteConnection("Data Source=ParityMatrixOrders;Mode=Memory;Cache=Shared");
-            await conn.OpenAsync(ct);
-            return conn;
-        }
+        public DataSourceType SupportedType => DataSourceType.Sql;
+
+        public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(DataSourceExecutionContext context, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>(
+            [
+                new Dictionary<string, object?> { ["id"] = 1, ["region"] = "EMEA", ["ssn"] = "123-45-6789", ["tenant_id"] = "tenant-a" }
+            ]);
     }
 
     private sealed class StubMcpQueryExecutor : IMcpQueryExecutor
