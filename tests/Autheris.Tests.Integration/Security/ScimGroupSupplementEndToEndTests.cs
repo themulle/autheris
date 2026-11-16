@@ -288,7 +288,10 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
             new Claim("oid", AliceOid),
             new Claim("onprem_sid", UserSid),
             new Claim("tid", RequestTenant),
-            Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(ScimGroupSid)
+            Autheris.Domain.Common.IdentityClaimIssuers.CreateGroupSidClaim(ScimGroupSid),
+            // A principal built by hand carries the pipeline's group-resolution result; without it the groups count as unresolved (fail-closed).
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateMarker(),
+            Autheris.Domain.Identity.GroupResolutionClaims.CreateStatus(Autheris.Domain.Identity.GroupResolutionStatus.Complete)
         ], "Bearer"));
 
         var effective = await explain.ExplainMyAccessAsync(principal, FilteredTable);
