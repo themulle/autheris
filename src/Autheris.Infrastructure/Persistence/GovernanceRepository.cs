@@ -545,4 +545,22 @@ internal static class SqlCoreBinding
         cmd.Parameters.Add(parameter);
         return parameter;
     }
+    /// <summary>
+    /// Binds an instant to a command. PostgreSQL columns added by later migrations are typed
+    /// TIMESTAMPTZ and reject text parameters, whereas the other engines keep ISO-8601 text.
+    /// </summary>
+    public static DbParameter AddBoundTimestamp(this DbCommand cmd, string name, DateTimeOffset? value)
+    {
+        if (cmd is Npgsql.NpgsqlCommand)
+        {
+            var pg = new Npgsql.NpgsqlParameter(name, NpgsqlTypes.NpgsqlDbType.TimestampTz)
+            {
+                Value = value.HasValue ? value.Value.UtcDateTime : DBNull.Value
+            };
+            cmd.Parameters.Add(pg);
+            return pg;
+        }
+
+        return cmd.AddBound(name, value?.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+    }
 }

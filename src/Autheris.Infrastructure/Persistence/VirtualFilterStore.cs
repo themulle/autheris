@@ -140,7 +140,7 @@ internal static class VirtualFilterStore
                     ("@keySetMaxAgeSec", keySetMaxAgeSeconds),
                     ("@status", filter.Status.ToString()),
                     ("@approvedBySid", filter.ApprovedBySid),
-                    ("@approvedAt", filter.ApprovedAt?.ToString("O", CultureInfo.InvariantCulture))
+                    ("@approvedAt", new Stamp(filter.ApprovedAt))
                 ], ct).ConfigureAwait(false);
         }
 
@@ -206,6 +206,8 @@ internal static class VirtualFilterStore
         return value is null or DBNull ? 0 : Convert.ToInt64(value, CultureInfo.InvariantCulture);
     }
 
+    private readonly record struct Stamp(DateTimeOffset? Value);
+
     private static DbCommand Command(DbConnection connection, DbTransaction? tx, string sql, (string Name, object? Value)[] parameters)
     {
         var cmd = connection.CreateCommand();
@@ -213,6 +215,12 @@ internal static class VirtualFilterStore
         cmd.CommandText = sql;
         foreach (var (name, value) in parameters)
         {
+            if (value is Stamp stamp)
+            {
+                cmd.AddBoundTimestamp(name, stamp.Value);
+                continue;
+            }
+
             var p = cmd.CreateParameter();
             p.ParameterName = name;
             p.Value = value ?? DBNull.Value;

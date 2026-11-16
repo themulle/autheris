@@ -305,7 +305,8 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 typed, null, pdp);
             var execDeps = new GovernedSqlExecutionDependencies(
                 ConnectionFactory: new InMemorySqliteConnectionFactory(),
-                TransportGate: AllowingTransportGate.Instance);
+                TransportGate: AllowingTransportGate.Instance,
+                AuditDigester: new Autheris.Application.Sql.Services.CompiledSqlAuditDigester(options, null, new DevelopmentEnvironment()));
             var exec = new GovernedSqlExecutionService(
                 options, new AuditWriter(auditRepo, NullLogger<AuditWriter>.Instance),
                 PassThroughExecutionGuard.Instance, rewriteDeps, execDeps,

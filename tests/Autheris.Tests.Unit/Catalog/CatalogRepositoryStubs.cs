@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using NSubstitute;
 

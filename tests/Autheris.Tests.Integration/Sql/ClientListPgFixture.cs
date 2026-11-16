@@ -206,7 +206,8 @@ internal sealed class ClientListPgFixture : IAsyncDisposable
             pdp);
         var execDeps = new GovernedSqlExecutionDependencies(
             ConnectionFactory: new SqlConnectionFactory(new DevelopmentEnvironment()),
-            TransportGate: AllowingTransportGate.Instance);
+            TransportGate: AllowingTransportGate.Instance,
+                AuditDigester: new Autheris.Application.Sql.Services.CompiledSqlAuditDigester(options, null, new DevelopmentEnvironment()));
 
         var service = new GovernedSqlExecutionService(
             options,
