@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Visitors;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 
 /// <summary>
@@ -38,7 +39,7 @@ internal sealed record AstSecurityVisitorOptions
     public DmlWritePermit? WritePermit { get; init; }
 
     /// <summary>Gateway-owned parameter names allowed as a SQL Server LIKE pattern (<see cref="CompileRequest.GatewayLikePatternParameters"/>).</summary>
-    public IReadOnlySet<string> GatewayLikePatternParameters { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+    public IReadOnlySet<string> GatewayLikePatternParameters { get; init; } = FrozenSet<string>.Empty;
 
     public bool RejectMaskedColumnsInPredicates { get; init; } = true;
     public bool RejectMaskedColumnsInDml { get; init; } = true;

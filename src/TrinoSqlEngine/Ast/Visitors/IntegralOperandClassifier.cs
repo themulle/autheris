@@ -20,14 +20,14 @@ internal sealed class IntegralOperandClassifier(ITableCatalog catalog) : ColumnS
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
-    private readonly HashSet<OrderByClause> _selectOrderBys = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<Expression, bool> _integralNodes = new(ReferenceEqualityComparer.Instance);
+    private HashSet<OrderByClause>? _selectOrderBys;
+    private HashSet<Expression>? _integralNodes;
 
     public override SqlNode VisitSelectStatement(SelectStatement node)
     {
         if (node.OrderBy is not null && node.Body is QuerySpecification)
         {
-            _selectOrderBys.Add(node.OrderBy);
+            (_selectOrderBys ??= new(ReferenceEqualityComparer.Instance)).Add(node.OrderBy);
         }
 
         return base.VisitSelectStatement(node);
@@ -35,7 +35,7 @@ internal sealed class IntegralOperandClassifier(ITableCatalog catalog) : ColumnS
 
     public override SqlNode VisitOrderByClause(OrderByClause node)
     {
-        if (!_selectOrderBys.Remove(node) || !PushLastBlock())
+        if (_selectOrderBys is null || !_selectOrderBys.Remove(node) || !PushLastBlock())
         {
             return base.VisitOrderByClause(node);
         }
@@ -96,7 +96,7 @@ internal sealed class IntegralOperandClassifier(ITableCatalog catalog) : ColumnS
 
         if (isIntegral)
         {
-            _integralNodes[result] = true;
+            (_integralNodes ??= new(ReferenceEqualityComparer.Instance)).Add(result);
         }
 
         return result;
@@ -109,9 +109,9 @@ internal sealed class IntegralOperandClassifier(ITableCatalog catalog) : ColumnS
     {
         while (true)
         {
-            if (_integralNodes.TryGetValue(expr, out bool known))
+            if (_integralNodes is not null && _integralNodes.Contains(expr))
             {
-                return known;
+                return true;
             }
 
             switch (expr)
@@ -127,7 +127,7 @@ internal sealed class IntegralOperandClassifier(ITableCatalog catalog) : ColumnS
                 case CastExpression cast:
                     return IsIntegralTypeName(cast.TargetType);
                 case ColumnReference:
-                    return Resolve(expr) is { } resolved && IsIntegralTypeName(resolved.Column.DataType);
+                    return ResolveColumn(expr) is { } resolved && IsIntegralTypeName(resolved.DataType);
                 case BinaryExpression b when b.Operator == BinaryOperator.Divide:
                     return b.IsIntegralDivision;
                 default:
