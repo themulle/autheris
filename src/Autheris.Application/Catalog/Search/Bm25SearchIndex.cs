@@ -62,6 +62,18 @@ public sealed class Bm25SearchIndex
     private const double B = 0.75;
     private const int FirstColumnField = (int)Bm25Field.ColumnNames;
 
+    /// <summary>Query tokens shorter than this match whole words only.</summary>
+    public const int MinPartialMatchLength = 4;
+
+    /// <summary>Indexed tokens one query token may expand to (bounds the cost of a query).</summary>
+    public const int MaxPartialExpansions = 32;
+
+    /// <summary>Query tokens scored per search; further tokens are ignored (availability bound).</summary>
+    public const int MaxQueryTerms = 64;
+
+    /// <summary>A partial match scores this fraction of a whole-word match of the same field statistics.</summary>
+    private const double PartialMatchFactor = 0.4;
+
     private sealed record IndexedDocument(
         TableIdentifier TableId,
         Dictionary<string, int>?[] FieldTermFrequencies,
@@ -71,6 +83,12 @@ public sealed class Bm25SearchIndex
     private readonly Dictionary<string, double> _idfMap;
     private readonly double[] _avgFieldLength = new double[CatalogSearchFieldWeights.FieldCount];
     private readonly double[] _weights;
+
+    // Distinct indexed tokens ordered by (length, ordinal): partial matches prefer the tokens closest to the whole word.
+    // The table-level vocabulary excludes tokens that occur only in column fields, so a caller with hidden columns
+    // never gets an expansion (or a cap slot) taken by hidden column text.
+    private string[] _vocabulary = [];
+    private string[] _tableLevelVocabulary = [];
 
     /// <summary>Single-field convenience: the whole text is indexed as the short description.</summary>
     public Bm25SearchIndex(IEnumerable<(TableIdentifier TableId, string Content)> source)
@@ -152,7 +170,92 @@ public sealed class Bm25SearchIndex
         {
             _idfMap[term] = Math.Log(1.0 + (totalDocs - count + 0.5) / (count + 0.5));
         }
+
+        var tableLevel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var doc in _documents)
+        {
+            for (int f = 0; f < FirstColumnField; f++)
+            {
+                if (doc.FieldTermFrequencies[f] is { } tf)
+                {
+                    tableLevel.UnionWith(tf.Keys);
+                }
+            }
+        }
+
+        _vocabulary = SortVocabulary(_idfMap.Keys);
+        _tableLevelVocabulary = SortVocabulary(tableLevel);
     }
+
+    private static string[] SortVocabulary(IEnumerable<string> tokens)
+    {
+        var array = tokens.ToArray();
+        Array.Sort(array, static (a, b) =>
+        {
+            int byLength = a.Length.CompareTo(b.Length);
+            return byLength != 0 ? byLength : string.CompareOrdinal(a, b);
+        });
+        return array;
+    }
+
+    /// <summary>
+    /// Indexed tokens that contain <paramref name="term"/> (ordinal; tokens are already lower-cased invariantly by the tokenizer),
+    /// shortest first, at most <see cref="MaxPartialExpansions"/>. Empty for tokens below <see cref="MinPartialMatchLength"/>.
+    /// </summary>
+    private static List<string> Expand(string term, string[] vocabulary)
+    {
+        var result = new List<string>();
+        if (term.Length < MinPartialMatchLength) return result;
+
+        foreach (var candidate in vocabulary)
+        {
+            if (candidate.Length <= term.Length) continue;
+            if (candidate.Contains(term, StringComparison.Ordinal))
+            {
+                result.Add(candidate);
+                if (result.Count >= MaxPartialExpansions) break;
+            }
+        }
+
+        return result;
+    }
+
+    private sealed record QueryTermPlan(string Term, double? Idf, List<(string Token, double Idf)> Expansions);
+
+    private QueryTermPlan[] BuildPlan(string[] queryTerms, string[] vocabulary)
+    {
+        int count = Math.Min(queryTerms.Length, MaxQueryTerms);
+        var plan = new QueryTermPlan[count];
+        for (int i = 0; i < count; i++)
+        {
+            var term = queryTerms[i];
+            double? idf = _idfMap.TryGetValue(term, out var v) ? v : null;
+            var expansions = Expand(term, vocabulary)
+                .Select(e => (e, _idfMap[e]))
+                .ToList();
+            plan[i] = new QueryTermPlan(term, idf, expansions);
+        }
+
+        return plan;
+    }
+
+    private double PseudoTf(IndexedDocument doc, string token, int fieldLimit)
+    {
+        double pseudoTf = 0.0;
+        for (int f = 0; f < fieldLimit; f++)
+        {
+            var tfMap = doc.FieldTermFrequencies[f];
+            if (tfMap is null || _avgFieldLength[f] <= 0.0) continue;
+            if (!tfMap.TryGetValue(token, out var tf)) continue;
+
+            double norm = 1.0 - B + B * (doc.FieldLengths[f] / _avgFieldLength[f]);
+            pseudoTf += _weights[f] * tf / norm;
+        }
+
+        return double.IsFinite(pseudoTf) ? pseudoTf : 0.0;
+    }
+
+    private static double Saturate(double idf, double pseudoTf) => idf * (pseudoTf * (K1 + 1.0) / (pseudoTf + K1));
 
     private static double[] ValidateWeights(IReadOnlyList<double> weights)
     {
@@ -187,6 +290,9 @@ public sealed class Bm25SearchIndex
         var queryTerms = SmartSchemaTokenizer.Tokenize(query, expandAbbreviations: false);
         if (queryTerms.Length == 0 || _documents.Count == 0) return [];
 
+        var fullPlan = BuildPlan(queryTerms, _vocabulary);
+        var tableLevelPlan = isColumnRestricted != null ? BuildPlan(queryTerms, _tableLevelVocabulary) : fullPlan;
+
         var results = new List<(TableIdentifier TableId, double Score, IReadOnlyList<string> MatchedTerms)>();
 
         foreach (var doc in _documents)
@@ -196,35 +302,47 @@ public sealed class Bm25SearchIndex
                 continue;
             }
 
-            int fieldLimit = isColumnRestricted != null && isColumnRestricted(doc.TableId)
-                ? FirstColumnField
-                : CatalogSearchFieldWeights.FieldCount;
+            bool restricted = isColumnRestricted != null && isColumnRestricted(doc.TableId);
+            int fieldLimit = restricted ? FirstColumnField : CatalogSearchFieldWeights.FieldCount;
+            var plan = restricted ? tableLevelPlan : fullPlan;
 
             double score = 0.0;
             List<string>? matched = null;
 
-            foreach (var term in queryTerms)
+            foreach (var entry in plan)
             {
-                if (!_idfMap.TryGetValue(term, out var idf)) continue;
-
                 // BM25F: weighted, per-field length-normalized pseudo term frequency
-                double pseudoTf = 0.0;
-                for (int f = 0; f < fieldLimit; f++)
+                double pseudoTf = entry.Idf is not null ? PseudoTf(doc, entry.Term, fieldLimit) : 0.0;
+                if (pseudoTf > 0.0)
                 {
-                    var tfMap = doc.FieldTermFrequencies[f];
-                    if (tfMap is null || _avgFieldLength[f] <= 0.0) continue;
-                    if (!tfMap.TryGetValue(term, out var tf)) continue;
-
-                    double norm = 1.0 - B + B * (doc.FieldLengths[f] / _avgFieldLength[f]);
-                    pseudoTf += _weights[f] * tf / norm;
+                    score += Saturate(entry.Idf!.Value, pseudoTf);
+                    matched ??= [];
+                    matched.Add(entry.Term);
+                    continue;
                 }
 
-                if (pseudoTf <= 0.0 || !double.IsFinite(pseudoTf)) continue;
+                // No whole-word match in this document: the best partial match counts, at a lower weight.
+                double bestPartial = 0.0;
+                string? bestToken = null;
+                foreach (var (token, expansionIdf) in entry.Expansions)
+                {
+                    double partialTf = PseudoTf(doc, token, fieldLimit);
+                    if (partialTf <= 0.0) continue;
 
-                score += idf * (pseudoTf * (K1 + 1.0) / (pseudoTf + K1));
+                    double partial = PartialMatchFactor * Saturate(expansionIdf, partialTf);
+                    if (partial > bestPartial)
+                    {
+                        bestPartial = partial;
+                        bestToken = token;
+                    }
+                }
 
-                matched ??= [];
-                matched.Add(term);
+                if (bestToken is not null)
+                {
+                    score += bestPartial;
+                    matched ??= [];
+                    matched.Add(bestToken);
+                }
             }
 
             if (double.IsFinite(score) && score > 0.001)

@@ -401,5 +401,72 @@ public sealed class CatalogSearchMetamorphicTests
         shaped.Bm25Score.ShouldBeNull();
     }
 
+    [Fact]
+    public void PartialMatch_ThroughRestrictedColumnField_NotReturned()
+    {
+        var t = TableIdentifier.Parse("hr.employees");
+        var index = new Bm25SearchIndex(
+        [
+            new Bm25Document(t, TechnicalName: "hr employees", ColumnNames: "gehaltsstufe", ColumnDescriptions: "Monatsgehalt"),
+            new Bm25Document(TableIdentifier.Parse("hr.teams"), TechnicalName: "hr teams"),
+        ]);
+
+        index.Search("gehalt").Select(r => r.TableId).ShouldBe([t]);
+        index.Search("gehalt", isColumnRestricted: id => id == t).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void PartialMatchOnHiddenColumnText_NoHitForRestrictedCaller()
+    {
+        // A table-level partial match still works for a restricted caller; the hidden column text adds nothing to it.
+        var t = TableIdentifier.Parse("hr.employees");
+        var index = new Bm25SearchIndex(
+        [
+            new Bm25Document(t, TechnicalName: "hr employees", ShortDescription: "Mitarbeiterstammdaten", ColumnNames: "gehaltsstufe"),
+        ]);
+
+        var hits = index.Search("gehalt stamm", isColumnRestricted: id => id == t);
+
+        hits.Single().MatchedTerms.ShouldBe(["mitarbeiterstammdaten"]);
+    }
+
+    [Fact]
+    public void HiddenTokenCannotCrowdOutVisibleExpansion()
+    {
+        var restricted = TableIdentifier.Parse("hr.employees");
+        var hiddenColumnText = string.Join(' ', Enumerable.Range(0, Bm25SearchIndex.MaxPartialExpansions + 8).Select(i => $"kran{i:D2}"));
+        var index = new Bm25SearchIndex(
+        [
+            new Bm25Document(restricted, TechnicalName: "hr employees", ShortDescription: "Kranspezifikationen", ColumnNames: hiddenColumnText),
+        ]);
+
+        var hits = index.Search("kran", isColumnRestricted: id => id == restricted);
+
+        hits.Single().MatchedTerms.ShouldBe(["kranspezifikationen"]);
+    }
+
+    [Fact]
+    public void PartialMatch_RestrictedTable_ScoreStaysNull()
+    {
+        var id = TableIdentifier.Parse("hr.employees");
+        TableMetadata Meta(params string[] cols) => new()
+        {
+            Identifier = id,
+            Table = new Autheris.Domain.Model.Table { TableName = "employees", Description = "Mitarbeiterstammdaten" },
+            Columns = cols.Select(c => new Autheris.Domain.Model.TableColumn { ColumnName = c, DataType = "text" }).ToList(),
+        };
+
+        var all = new Dictionary<TableIdentifier, TableMetadata> { [id] = Meta("id", "gehaltsstufe") };
+        var permitted = new Dictionary<TableIdentifier, TableMetadata> { [id] = Meta("id") };
+        var partialHit = new CatalogSearchHit(id, "employees", "Mitarbeiterstammdaten", "hr", "High", 0.9, 4.2, null, ["mitarbeiterstammdaten"], [], [], null);
+        var hiddenOnlyHit = partialHit with { MatchedTerms = ["gehaltsstufe"] };
+
+        var shaped = Autheris.Application.Catalog.Services.CatalogDiscoveryService.ShapeHit(partialHit, permitted, all, ["stamm"]);
+        shaped.ShouldNotBeNull();
+        shaped.Bm25Score.ShouldBeNull();
+
+        Autheris.Application.Catalog.Services.CatalogDiscoveryService.ShapeHit(hiddenOnlyHit, permitted, all, ["gehalt"]).ShouldBeNull();
+    }
+
     #endregion
 }
