@@ -45,14 +45,10 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 {
-    /// <summary>
-    /// Rejects statements that name a reserved gateway identifier. "__rls_ks" is the reserved prefix of the key-set subquery parameters (07(e)).
-    /// A pure deny check in its own method: the statement text never decides whether later governance steps run.
-    /// </summary>
+    // 07(e): "__rls_ks" is the reserved prefix of the key-set subquery parameters. A pure deny check; the text never decides whether later steps run.
     private static void ThrowIfReservedGatewayIdentifier(string rawSql)
     {
-        if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
-            rawSql.Contains("__rls_ks", StringComparison.OrdinalIgnoreCase))
+        if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) || rawSql.Contains("__rls_ks", StringComparison.OrdinalIgnoreCase))
         {
             throw new WebSqlPolicyException("The SQL statement references a reserved gateway identifier.");
         }
