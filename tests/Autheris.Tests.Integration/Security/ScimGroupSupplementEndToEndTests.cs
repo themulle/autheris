@@ -85,7 +85,7 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
                     new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = RequestTenant }));
                 builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
 
-                builder.UseSetting("Gateway:Authentication:Mode", "Jwt");
+                builder.UseSetting("Gateway:Authentication:Mode", "Direct");
                 builder.UseSetting("Gateway:Authentication:EntraId:Enabled", "true");
                 builder.UseSetting("Gateway:Authentication:EntraId:TenantId", EntraTenant);
                 builder.UseSetting("Gateway:Authentication:EntraId:ClientId", EntraClient);
