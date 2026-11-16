@@ -124,17 +124,22 @@ public sealed class SqlServerConsentContractTests : IAsyncLifetime
         {
             await conn.OpenAsync();
             await using var roleCmd = new SqlCommand(@"
-                INSERT INTO ROLES (id, role_name, description)
-                SELECT @rid, 'GovernanceAdmin', 'Governance Administrator'
-                WHERE NOT EXISTS (SELECT 1 FROM ROLES WHERE role_name = 'GovernanceAdmin');
-                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m1, id, 'User', 'S-1-5-21-APP1' FROM ROLES WHERE role_name = 'GovernanceAdmin';
-                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
-                SELECT @m2, id, 'User', 'S-1-5-21-APP2' FROM ROLES WHERE role_name = 'GovernanceAdmin';
+                INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
+                SELECT @o1, 'S-1-5-21-APP1', 'CORP\\S-1-5-21-APP1', 'Owner 1', 'S-1-5-21-APP1@corp.example', 1
+                WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP1');
+                INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
+                SELECT @to1, @tid, id, 'PRIMARY' FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP1';
+                INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
+                SELECT @o2, 'S-1-5-21-APP2', 'CORP\\S-1-5-21-APP2', 'Owner 2', 'S-1-5-21-APP2@corp.example', 1
+                WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP2');
+                INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
+                SELECT @to2, @tid, id, 'PRIMARY' FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP2';
             ", conn);
-            roleCmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
-            roleCmd.Parameters.AddWithValue("@m1", Guid.NewGuid().ToString());
-            roleCmd.Parameters.AddWithValue("@m2", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@o1", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@to1", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@o2", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@to2", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@tid", meta.Table.Id.ToString());
             await roleCmd.ExecuteNonQueryAsync();
         }
 

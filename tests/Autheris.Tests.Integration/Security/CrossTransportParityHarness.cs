@@ -416,7 +416,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         var planner = new CrossSourcePlanner(FastSqlEngine.Default);
         var fed = new FederatedDuckDbExecutionService(options, auditRepo, router, planner,
             new StubStagingService(), new StubDuckDbEngine(), FastSqlEngine.Default, resolution, consentRepo,
-            NullConsentCacheService.Instance, ipResolver, mandatory, null, profiles, null, null, null, typed, null,
+            NullConsentCacheService.Instance, ipResolver, mandatory, null, profiles, null, null, null, typed, new CompiledSqlAuditDigester(options, null, new DevelopmentEnvironment()),
             AllowingTransportGate.Instance, null, pdp);
         try
         {
@@ -488,6 +488,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 SchemaName = s.Table.Identifier.Schema,
                 TableName = s.Table.Identifier.TableName,
                 SourceType = "LakehouseIceberg",
+                DataSourceType = DataSourceType.LakehouseIceberg,
                 Location = "s3://bucket/warehouse/orders/metadata/v2.metadata.json",
                 IsActive = s.Table.Table.IsActive
             },
@@ -574,6 +575,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
                 SchemaName = s.Table.Table.SchemaName,
                 TableName = s.Table.Table.TableName,
                 SourceType = "HttpDeclarative",
+                DataSourceType = DataSourceType.HttpDeclarative,
                 HttpEndpoint = new HttpEndpointDescriptor { BaseUrl = "https://api.example.invalid", PathTemplate = "/orders" },
                 IsActive = s.Table.Table.IsActive
             },

@@ -104,8 +104,6 @@ SELECT COUNT(*)
 FROM TABLE_OWNERS
 WHERE table_id = @tid AND data_owner_id = @oid";
 
-    private const string SelectTableTenantSql = "SELECT tenant_id FROM TABLES WHERE id = @tid";
-
     private const string SelectActiveProfileConsentsSql = @"
 SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
        c.grantee_sid, c.role_id, c.role_name, c.valid_from, c.valid_to,
@@ -418,7 +416,7 @@ WHERE c.tenant_id = @tenantId
                 continue;
             }
 
-            var tenant = await ResolveTableTenantAsync(conn, tx, tableIdRaw, request.TenantId, ct).ConfigureAwait(false);
+            var tenant = ResolveGrantTenant(request.TenantId);
             if (change.Kind == DataOwnerChangeKind.OwnerAssigned)
             {
                 await ownerService.GrantOwnerAsync(tx, new OwnerGrantAssignment(
@@ -434,21 +432,8 @@ WHERE c.tenant_id = @tenantId
         }
     }
 
-    private static async Task<TenantId> ResolveTableTenantAsync(
-        DbConnection conn, DbTransaction tx, string tableId, TenantId? fallbackTenant, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = SelectTableTenantSql;
-        cmd.AddBound("@tid", tableId);
-        var raw = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
-        if (!string.IsNullOrWhiteSpace(raw) && !string.Equals(raw, "NULL", StringComparison.OrdinalIgnoreCase))
-        {
-            return StoredTenant.Parse(raw).Value;
-        }
-
-        return fallbackTenant ?? TenantId.Platform;
-    }
+    /// <summary>The catalog is global (TABLES has no tenant column), so an owner grant takes the tenant of the request, else the platform tenant.</summary>
+    private static TenantId ResolveGrantTenant(TenantId? requestTenant) => requestTenant ?? TenantId.Platform;
 
     private static Consent ReadConsentRowWithTable(DbDataReader reader, bool hasPatternCols)
     {
