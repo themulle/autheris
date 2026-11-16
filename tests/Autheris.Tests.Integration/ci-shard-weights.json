@@ -267,7 +267,6 @@
   "SqlServerVirtualFilterContractTests": 9.4,
   "SqlServerWebhookOutboxContractTests": 33.2,
   "SqlVirtualFilterChannelParityTests": 1.1,
-  "SqliteGovernedEndToEndTests": 43.3,
   "StartupWarmupExecutorIntegrationTests": 26.9,
   "StartupWarmupFoundationTests": 40.5,
   "StartupWarmupReadinessTests": 21.1,
@@ -278,7 +277,7 @@
   "TypedAggregationEndToEndTests": 98.7,
   "TypedAggregationParityEndToEndTests": 0.8,
   "UnkeyedTableODataReadSqlServerTests": 38.8,
-  "UnkeyedTableODataReadSqliteTests": 32,
+  "UnkeyedTableODataReadPostgreSqlTests": 32,
   "UnkeyedTablePagingStabilityTests": 10.3,
   "VirtualFilterChannelParityTests": 1.1,
   "WalkingSkeletonIntegrationTests": 83.2

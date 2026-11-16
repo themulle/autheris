@@ -65,7 +65,7 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
         {
             Factory.Dispose();
             _root.Dispose();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
     }
 

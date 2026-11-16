@@ -16,7 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -51,17 +51,10 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
             _workDir = Path.Combine(Path.GetTempPath(), "autheris-x1ep-" + Guid.NewGuid().ToString("N"));
             _queries = Path.Combine(_workDir, "queries");
             Directory.CreateDirectory(_queries);
-            _dbPath = Path.Combine(_workDir, "data.db");
-            using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
-            {
-                conn.Open();
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = """
-                    CREATE TABLE ep_orders (id INTEGER, tenant_id TEXT, name TEXT);
-                    INSERT INTO ep_orders VALUES (1,'acme','acme-row-1'),(2,'acme','acme-row-2'),(3,'other','other-row-3');
-                    """;
-                cmd.ExecuteNonQuery();
-            }
+            _dbPath = PostgresDataSource.Create("x1ep", """
+                CREATE TABLE ep_orders (id INTEGER, tenant_id TEXT, name TEXT);
+                INSERT INTO ep_orders VALUES (1,'acme','acme-row-1'),(2,'acme','acme-row-2'),(3,'other','other-row-3');
+                """);
 
             File.WriteAllText(Path.Combine(_queries, "ep_orders_list.sql"),
                 "-- @name ep_orders_list\n-- @datasource default\n-- @summary orders\n-- @method GET\n\nSELECT id, name FROM main.ep_orders ORDER BY id");
@@ -76,8 +69,8 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
                 ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("GovernedEntryPointsEndToEndTests"),
                 ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
-                ["Gateway:DataSources:Connections:default:Provider"] = "Sqlite",
-                ["Gateway:DataSources:Connections:default:ConnectionString"] = $"Data Source={_dbPath}",
+                ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:ConnectionString"] = _dbPath,
                 ["Gateway:WebSql:Enabled"] = "true",
                 ["Gateway:WebSql:DefaultDataSourceName"] = "default",
                 ["Gateway:SqlEndpoints:Enabled"] = "true",
@@ -92,7 +85,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            SqliteConnection.ClearAllPools();
+            NpgsqlConnection.ClearAllPools();
             try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
         }
     }
@@ -103,7 +96,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "ep_orders", TableName = "ep_orders", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "ep_orders", TableName = "ep_orders", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default" },
             Identifier = new TableIdentifier("default", "main", "ep_orders"),
             Columns =
             [

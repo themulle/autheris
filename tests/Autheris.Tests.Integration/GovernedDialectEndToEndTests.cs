@@ -16,7 +16,6 @@ using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Shouldly;
@@ -27,7 +26,7 @@ using Autheris.Tests.Integration.Governance;
 /// <summary>
 /// WP-X1 (M-7): the governed WebSQL pipeline end to end on every admitted dialect, through the real DI container
 /// (<c>WebApplicationFactory&lt;Program&gt;</c>): real catalog reader of the dialect, session pinning, compiler, binder, checked executor and
-/// error sanitizer against a real database. One scenario set, four dialects (PostgreSQL, SQL Server, Oracle, SQLite): tenant isolation
+/// error sanitizer against a real database. One scenario set, three dialects (PostgreSQL, SQL Server, Oracle): tenant isolation
 /// (an exact tenant comparison, <c>ACME</c> is another tenant than <c>acme</c>), client parameters bound by name, masks computed in the
 /// database, a provider error reduced to a stable code, and DML that is tenant scoped, limited by <c>MaxAffectedRows</c> and rolled back.
 /// </summary>
@@ -249,41 +248,7 @@ public abstract class GovernedDialectEndToEndBase : IDisposable
     public virtual void Dispose()
     {
         _host?.Dispose();
-        SqliteConnection.ClearAllPools();
-    }
-}
-
-[Trait("Category", "Security")]
-public sealed class SqliteGovernedEndToEndTests : GovernedDialectEndToEndBase
-{
-    private string? _dir;
-    private DialectTarget? _target;
-    protected override DialectTarget? Target => _target;
-
-    protected override Task<DialectTarget?> StartAsync()
-    {
-        _dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "autheris-x1sqlite-" + Guid.NewGuid().ToString("N"));
-        System.IO.Directory.CreateDirectory(_dir);
-        var connectionString = $"Data Source={System.IO.Path.Combine(_dir, "x1.db")}";
-        using (var conn = new SqliteConnection(connectionString))
-        {
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                CREATE TABLE x1_orders (id INTEGER, tenant_id TEXT, region TEXT, email TEXT);
-                INSERT INTO x1_orders VALUES (1,'acme','EU','alice@x.example'),(2,'acme','US','bob@x.example'),(3,'acme','EU','cara@x.example'),(5,'other','EU','dan@x.example'),(6,'ACME','EU','eve@x.example');
-                """;
-            cmd.ExecuteNonQuery();
-        }
-
-        _target = new DialectTarget("Sqlite", "Sqlite", connectionString, null, "main", "x1_orders", ConversionFails: false);
-        return Task.FromResult<DialectTarget?>(_target);
-    }
-
-    public override void Dispose()
-    {
-        base.Dispose();
-        try { if (_dir is not null) System.IO.Directory.Delete(_dir, true); } catch { /* best effort */ }
+        NpgsqlConnection.ClearAllPools();
     }
 }
 

@@ -18,7 +18,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -430,34 +430,26 @@ public sealed class ReadPathAsyncJobWebSqlOffIntegrationTests : IClassFixture<Re
 
     public sealed class HostFixture : IntegrationHost
     {
-        private readonly string _workDir = Path.Combine(Path.GetTempPath(), "autheris-rps-" + Guid.NewGuid().ToString("N"));
         private readonly string _dbPath;
 
         public HostFixture()
         {
-            Directory.CreateDirectory(_workDir);
-            _dbPath = Path.Combine(_workDir, "data.db");
-            using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "CREATE TABLE rps_orders (id INTEGER, tenant_id TEXT, name TEXT); INSERT INTO rps_orders VALUES (1,'acme','visible-row');";
-            cmd.ExecuteNonQuery();
+            _dbPath = PostgresDataSource.Create("rps", "CREATE TABLE rps_orders (id INTEGER, tenant_id TEXT, name TEXT); INSERT INTO rps_orders VALUES (1,'acme','visible-row');");
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder) =>
             ReadPathHost.Configure(
                 builder,
                 ("Gateway:Insecure:danger_bypass_consent_checks", "true"),
-                ("Gateway:DataSources:Connections:default:Provider", "Sqlite"),
-                ("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}"),
+                ("Gateway:DataSources:Connections:default:Provider", "PostgreSql"),
+                ("Gateway:DataSources:Connections:default:ConnectionString", _dbPath),
                 ("Gateway:WebSql:Enabled", "false"),
                 ("Gateway:WebSql:DefaultDataSourceName", "default"));
 
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            SqliteConnection.ClearAllPools();
-            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+            NpgsqlConnection.ClearAllPools();
         }
     }
 

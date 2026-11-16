@@ -134,7 +134,7 @@ public sealed class AuthModeEndToEndTests : IClassFixture<AuthModeEndToEndTests.
             {
                 await repo.UpsertTableMetadataAsync(new TableMetadata
                 {
-                    Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "Sqlite", SourceName = id.Domain, IsActive = true },
+                    Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain, IsActive = true },
                     Identifier = id,
                     Columns =
                     [

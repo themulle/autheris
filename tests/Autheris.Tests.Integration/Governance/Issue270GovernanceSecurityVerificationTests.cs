@@ -59,7 +59,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         var meta = new TableMetadata
         {
             Identifier = validTableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql, DisplayName = "Customers" },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql, DisplayName = "Customers" },
             Columns = [new TableColumn { ColumnName = "ssn", DataType = "bigint", IsSensitive = true }],
             PrimaryKeyColumns = ["ssn"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -99,7 +99,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         var meta = new TableMetadata
         {
             Identifier = tableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql, DisplayName = "Users" },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql, DisplayName = "Users" },
             Columns =
             [
                 new TableColumn { ColumnName = "user_id", DataType = "bigint", Description = "Enterprise user identifier." }
@@ -184,7 +184,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         var meta = new TableMetadata
         {
             Identifier = tableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
             Columns = [new TableColumn { ColumnName = "account_id", DataType = "bigint" }],
             PrimaryKeyColumns = ["account_id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -254,7 +254,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         var meta = new TableMetadata
         {
             Identifier = tableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
             Columns = [new TableColumn { ColumnName = "event_id", DataType = "bigint" }],
             PrimaryKeyColumns = ["event_id"],
             ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
@@ -347,7 +347,7 @@ public sealed class Issue270GovernanceSecurityVerificationTests : IDisposable
         var initialMeta = new TableMetadata
         {
             Identifier = tableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql, DisplayName = "Financials" },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql, DisplayName = "Financials" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },

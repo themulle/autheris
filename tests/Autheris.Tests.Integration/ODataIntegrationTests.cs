@@ -13,7 +13,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -35,11 +35,11 @@ public class ODataIntegrationTests : IClassFixture<ODataIntegrationTests.HostFix
 
     public sealed class HostFixture : IntegrationHost<HostFixture>
     {
-        private readonly string _dataDbPath = Path.Combine(Path.GetTempPath(), $"odata-rows-{Guid.NewGuid():N}.db");
+        private readonly string _dataDbPath;
 
         public HostFixture()
         {
-            SeedRowsDatabase(_dataDbPath);
+            _dataDbPath = PostgresDataSource.Create("odatarows", "CREATE TABLE odata_rows (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO odata_rows VALUES (1, 'alpha'), (2, 'beta');");
         }
 
         protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
@@ -51,26 +51,16 @@ public class ODataIntegrationTests : IClassFixture<ODataIntegrationTests.HostFix
                 ["Gateway:Authentication:EnableTestAuthHandler"] = "true",
                 ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("ODataIntegrationTests"),
-                ["Gateway:DataSources:Connections:default:Provider"] = "Sqlite",
-                ["Gateway:DataSources:Connections:default:ConnectionString"] = $"Data Source={_dataDbPath}",
+                ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:ConnectionString"] = _dataDbPath,
             });
         }
 
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            SqliteConnection.ClearAllPools();
-            try { File.Delete(_dataDbPath); } catch (IOException) { }
+            NpgsqlConnection.ClearAllPools();
         }
-    }
-
-    private static void SeedRowsDatabase(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "CREATE TABLE odata_rows (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO odata_rows VALUES (1, 'alpha'), (2, 'beta');";
-        cmd.ExecuteNonQuery();
     }
 
     /// <summary>Registers <see cref="RowsTable"/> in the catalog and grants the user a clear consent on every column.</summary>
@@ -80,7 +70,7 @@ public class ODataIntegrationTests : IClassFixture<ODataIntegrationTests.HostFix
         var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = RowsTable.TableName, TableName = RowsTable.TableName, SchemaName = RowsTable.Schema, SourceType = "Sqlite", SourceName = "default" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = RowsTable.TableName, TableName = RowsTable.TableName, SchemaName = RowsTable.Schema, SourceType = "PostgreSql", SourceName = "default" },
             Identifier = RowsTable,
             Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }, new TableColumn { ColumnName = "name", DataType = "varchar" }]
         });

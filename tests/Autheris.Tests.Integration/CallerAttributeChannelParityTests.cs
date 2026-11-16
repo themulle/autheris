@@ -12,7 +12,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -50,7 +50,7 @@ public sealed class CallerAttributeChannelParityTests : IClassFixture<CallerAttr
             builder.UseSetting("Gateway:DataSources:Connections:default:CallerAttributeDedicatedLogin", "true");
         }
 
-        protected override void SeedExtraData(SqliteConnection connection)
+        protected override void SeedExtraData(NpgsqlConnection connection)
         {
             using var cmd = connection.CreateCommand();
             cmd.CommandText = $@"

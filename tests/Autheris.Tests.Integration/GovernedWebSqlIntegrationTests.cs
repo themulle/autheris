@@ -16,7 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -48,8 +48,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         {
             _workDir = Path.Combine(Path.GetTempPath(), "autheris-gws-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_workDir);
-            _dbPath = Path.Combine(_workDir, "data.db");
-            Seed(_dbPath);
+            _dbPath = Seed();
 
             var recursiveSettings = BaseSettings(_dbPath);
             recursiveSettings["Gateway:WebSql:AllowRecursiveCte"] = "true";
@@ -72,7 +71,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             }
 
             base.Dispose(disposing);
-            SqliteConnection.ClearAllPools();
+            NpgsqlConnection.ClearAllPools();
             try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
         }
 
@@ -83,8 +82,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
             ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
             ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("GovernedWebSqlIntegrationTests"),
-            ["Gateway:DataSources:Connections:default:Provider"] = "Sqlite",
-            ["Gateway:DataSources:Connections:default:ConnectionString"] = $"Data Source={dbPath}",
+            ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+            ["Gateway:DataSources:Connections:default:ConnectionString"] = dbPath,
             ["Gateway:WebSql:Enabled"] = "true",
             ["Gateway:WebSql:DefaultDataSourceName"] = "default",
             ["Gateway:WebSql:AllowDml"] = "false",
@@ -93,12 +92,9 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         };
     }
 
-    private static void Seed(string path)
+    private static string Seed()
     {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
+        var script = """
             CREATE TABLE customers (id TEXT, name TEXT, email TEXT, active TEXT, tenant_id TEXT);
             INSERT INTO customers VALUES ('1','Ada','ada@x.example','1','tenant_alpha'),('2','Bob','bob@x.example','0','tenant_alpha');
             CREATE TABLE users (id TEXT, name TEXT, tenant_id TEXT);
@@ -117,10 +113,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
                 ('3','2','grandchild','333-33-3333','tenant_alpha'),('9',NULL,'foreignroot','999-99-9999','tenant_other'),
                 ('10','9','foreignchild','888-88-8888','tenant_other');
             """;
-        cmd.ExecuteNonQuery();
-        using var rows = conn.CreateCommand();
-        rows.CommandText = "INSERT INTO orders VALUES " + string.Join(",", Enumerable.Range(1, 700).Select(i => $"('{i}','{i}','e{i}@x.example','000','tenant_123')")) + ",('9999','1','x','000','tenant_other');";
-        rows.ExecuteNonQuery();
+        var orders = "INSERT INTO orders VALUES " + string.Join(",", Enumerable.Range(1, 700).Select(i => $"('{i}','{i}','e{i}@x.example','000','tenant_123')")) + ",('9999','1','x','000','tenant_other');";
+        return PostgresDataSource.Create("gws", script + "\n" + orders);
     }
 
     // SEC C-03: WebSQL rejects tables without catalog metadata, so every table used by these tests is registered first.
@@ -133,7 +127,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await tableRepo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = tableName, TableName = tableName, SchemaName = "main", SourceName = "default", SourceType = "Sqlite" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = tableName, TableName = tableName, SchemaName = "main", SourceName = "default", SourceType = "PostgreSql" },
             Identifier = new TableIdentifier("default", "main", tableName),
             Columns = columns,
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
@@ -363,7 +357,7 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
 
         await tableRepo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "org", TableName = "org", SchemaName = "main", SourceName = "default", SourceType = "Sqlite" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "org", TableName = "org", SchemaName = "main", SourceName = "default", SourceType = "PostgreSql" },
             Identifier = new TableIdentifier("default", "main", "org"),
             Columns = columns,
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()

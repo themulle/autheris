@@ -89,7 +89,7 @@ public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
         var meta = new TableMetadata
         {
             Identifier = _txTableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql, DisplayName = "Transactions" },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql, DisplayName = "Transactions" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
@@ -143,7 +143,7 @@ public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
         var meta = new TableMetadata
         {
             Identifier = _txTableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql, DisplayName = "Transactions" },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql, DisplayName = "Transactions" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },
@@ -197,7 +197,7 @@ public sealed class Issue270CatalogGraphQlHmacIntegrationTests : IDisposable
         var initialMeta = new TableMetadata
         {
             Identifier = _txTableId,
-            Table = new Table { IsActive = true, SourceType = "Sqlite", DataSourceType = DataSourceType.Sql, DisplayName = "Transactions" },
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql, DisplayName = "Transactions" },
             Columns =
             [
                 new TableColumn { ColumnName = "id", DataType = "int" },

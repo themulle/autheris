@@ -26,7 +26,7 @@ public sealed class DemoRootFieldsRemovedIntegrationTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        Npgsql.NpgsqlConnection.ClearAllPools();
         foreach (var f in new[] { _dbFile, _dataFile }.Where(File.Exists))
         {
             try { File.Delete(f); } catch (IOException) { }
@@ -144,7 +144,7 @@ public sealed class DemoRootFieldsRemovedIntegrationTests : IDisposable
                 b.UseSetting("Gateway:GraphQL:AppScopedTrustedDocuments:Enabled", "true");
             }
 
-            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dataFile}");
+            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", PostgresDataSource.Create("rdf"));
         });
 }

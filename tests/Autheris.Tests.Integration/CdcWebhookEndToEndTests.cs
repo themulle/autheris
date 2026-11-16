@@ -20,7 +20,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -65,7 +65,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<CdcWebhookEndToEndTe
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            SqliteConnection.ClearAllPools();
+            NpgsqlConnection.ClearAllPools();
             try { File.Delete(_dbPath); } catch { /* best effort */ }
         }
 
@@ -91,7 +91,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<CdcWebhookEndToEndTe
             try { d.Dispose(); } catch { /* best effort */ }
         }
 
-        SqliteConnection.ClearAllPools();
+        NpgsqlConnection.ClearAllPools();
         try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
     }
 
@@ -185,7 +185,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<CdcWebhookEndToEndTe
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "customers", TableName = "customers", SchemaName = "crm", SourceType = "Sqlite", SourceName = "salesdb" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "customers", TableName = "customers", SchemaName = "crm", SourceType = "PostgreSql", SourceName = "salesdb" },
             Identifier = new TableIdentifier("salesdb", "crm", "customers"),
             Columns =
             [
@@ -283,7 +283,7 @@ public sealed class CdcWebhookEndToEndTests : IClassFixture<CdcWebhookEndToEndTe
         await RegisterCatalogAsync(first);
         await CreateSubscriptionAsync(Client(first, "GovernanceAdmin", "S-1-5-E2E-ADMIN"), receiver.Url);
         first.Dispose();
-        SqliteConnection.ClearAllPools();
+        NpgsqlConnection.ClearAllPools();
 
         var second = NewHost(db);
         await RegisterCatalogAsync(second);

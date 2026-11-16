@@ -58,7 +58,7 @@ public sealed class ReleaseSurfaceTests : IClassFixture<ReleaseSurfaceTests.Host
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
             try { if (System.IO.File.Exists(_tempDbPath)) System.IO.File.Delete(_tempDbPath); } catch { }
             try { if (System.IO.File.Exists(_tempAnchorPath)) System.IO.File.Delete(_tempAnchorPath); } catch { }
         }

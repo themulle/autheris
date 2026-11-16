@@ -71,7 +71,7 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
         }
     }
 
-    private async Task<WebApplicationFactory<Program>?> HostAsync(string? webSqlMappingTarget, bool withSqliteConnection = false)
+    private async Task<WebApplicationFactory<Program>?> HostAsync(string? webSqlMappingTarget, bool withOtherDialectConnection = false)
     {
         if (_db is null || !_db.IsAvailable)
         {
@@ -94,9 +94,9 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
                 builder.UseSetting($"Gateway:WebSql:DataSourceMappings:{Logical}", webSqlMappingTarget);
             }
 
-            if (withSqliteConnection)
+            if (withOtherDialectConnection)
             {
-                builder.UseSetting("Gateway:DataSources:Connections:litedata:Provider", "Sqlite");
+                builder.UseSetting("Gateway:DataSources:Connections:litedata:Provider", "PostgreSql");
                 builder.UseSetting("Gateway:DataSources:Connections:litedata:ConnectionString", "Data Source=:memory:");
             }
 
@@ -157,7 +157,7 @@ public sealed class WebSqlDbtMappedTableTests : IAsyncLifetime
     [Trait("Category", "Security")]
     public async Task Query_MappingToConnectionOfOtherDialect_Denied()
     {
-        if (await HostAsync("litedata", withSqliteConnection: true) is not { } host) return;
+        if (await HostAsync("litedata", withOtherDialectConnection: true) is not { } host) return;
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => QueryAsync(host, "SELECT id FROM salesdb.public.orders"));
 

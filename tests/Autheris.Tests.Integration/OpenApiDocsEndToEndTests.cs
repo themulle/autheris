@@ -16,7 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -51,15 +51,10 @@ public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEnd
             _workDir = Path.Combine(Path.GetTempPath(), "autheris-openapi-e2e-" + Guid.NewGuid().ToString("N"));
             _queriesDir = Path.Combine(_workDir, "queries");
             Directory.CreateDirectory(_queriesDir);
-            _dbPath = Path.Combine(_workDir, "data.db");
-            using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
-            {
-                conn.Open();
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = @"CREATE TABLE e2e_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL);
-INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkran');";
-                cmd.ExecuteNonQuery();
-            }
+            _dbPath = PostgresDataSource.Create("openapie2e", """
+                CREATE TABLE e2e_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL);
+                INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkran');
+                """);
 
             File.WriteAllText(Path.Combine(_queriesDir, "cranes_by_type.sql"),
                 "-- @name cranes_by_type\n-- @datasource default\n-- @summary Krane nach Typ\n-- @method GET\n\n" +
@@ -75,8 +70,8 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
                 ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
                 ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.Create("OpenApiDocsEndToEndTests"),
                 ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
-                ["Gateway:DataSources:Connections:default:Provider"] = "Sqlite",
-                ["Gateway:DataSources:Connections:default:ConnectionString"] = $"Data Source={_dbPath}",
+                ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+                ["Gateway:DataSources:Connections:default:ConnectionString"] = _dbPath,
                 ["Gateway:WebSql:Enabled"] = "true",
                 ["Gateway:WebSql:DefaultDataSourceName"] = "default",
                 ["Gateway:SqlEndpoints:Enabled"] = "true",
@@ -89,7 +84,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            SqliteConnection.ClearAllPools();
+            NpgsqlConnection.ClearAllPools();
             try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
         }
     }
@@ -108,7 +103,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default" },
             Identifier = new TableIdentifier("default", "main", "e2e_cranes"),
             Columns = new List<TableColumn>
             {

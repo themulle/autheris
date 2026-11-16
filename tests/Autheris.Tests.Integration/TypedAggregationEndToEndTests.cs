@@ -14,7 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -49,9 +49,8 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregati
         {
             _workDir = Path.Combine(Path.GetTempPath(), "autheris-agg-e2e-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_workDir);
-            _dataPath = Path.Combine(_workDir, "data.db");
             _govPath = Path.Combine(_workDir, "gov.db");
-            Seed(_dataPath);
+            _dataPath = Seed();
 
             using var seeding = NewHost();
             RegisterCatalogAsync(seeding).GetAwaiter().GetResult();
@@ -67,7 +66,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregati
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            SqliteConnection.ClearAllPools();
+            NpgsqlConnection.ClearAllPools();
             try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
         }
 
@@ -78,37 +77,22 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregati
             ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
             ["Gateway:GovernanceDb:ConnectionString"] = GovernanceTestDatabase.CreateStable(govPath),
             ["Gateway:Insecure:danger_bypass_consent_checks"] = "true",
-            ["Gateway:DataSources:Connections:default:Provider"] = "Sqlite",
-            ["Gateway:DataSources:Connections:default:ConnectionString"] = $"Data Source={dataPath}",
+            ["Gateway:DataSources:Connections:default:Provider"] = "PostgreSql",
+            ["Gateway:DataSources:Connections:default:ConnectionString"] = dataPath,
         };
     }
 
     // Groups: A 99,991 rows, B 5, C 4, D 1 = 100,001 rows.
-    private static void Seed(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var create = conn.CreateCommand();
-        create.CommandText = "CREATE TABLE agg_orders (id INTEGER PRIMARY KEY, region TEXT NOT NULL, amount INTEGER NOT NULL);";
-        create.ExecuteNonQuery();
-        using var tx = conn.BeginTransaction();
-        using var insert = conn.CreateCommand();
-        insert.Transaction = tx;
-        insert.CommandText = "INSERT INTO agg_orders (region, amount) VALUES ($r, 2);";
-        var region = insert.CreateParameter();
-        region.ParameterName = "$r";
-        insert.Parameters.Add(region);
-        foreach (var (name, count) in new[] { ("A", 99_981), ("B", 10), ("E", 5), ("C", 4), ("D", 1) })
-        {
-            region.Value = name;
-            for (var i = 0; i < count; i++)
-            {
-                insert.ExecuteNonQuery();
-            }
-        }
-
-        tx.Commit();
-    }
+    private static string Seed() => PostgresDataSource.Create("aggorders", """
+        CREATE TABLE agg_orders (id INTEGER PRIMARY KEY, region TEXT NOT NULL, amount INTEGER NOT NULL);
+        INSERT INTO agg_orders (id, region, amount)
+        SELECT row_number() OVER (), r, 2 FROM (
+            SELECT 'A' AS r FROM generate_series(1, 99981)
+            UNION ALL SELECT 'B' FROM generate_series(1, 10)
+            UNION ALL SELECT 'E' FROM generate_series(1, 5)
+            UNION ALL SELECT 'C' FROM generate_series(1, 4)
+            UNION ALL SELECT 'D' FROM generate_series(1, 1)) AS t;
+        """);
 
     private WebApplicationFactory<Program> NewHost() => _fixture.NewHost();
 
@@ -120,7 +104,7 @@ public sealed class TypedAggregationEndToEndTests : IClassFixture<TypedAggregati
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "agg_orders", TableName = "agg_orders", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "agg_orders", TableName = "agg_orders", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default" },
             Identifier = new TableIdentifier("default", "main", "agg_orders"),
             Columns = new List<TableColumn>
             {

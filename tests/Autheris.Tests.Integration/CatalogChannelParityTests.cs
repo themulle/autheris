@@ -52,7 +52,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
             TierFactory.Dispose();
             MultiFactory.Dispose();
             Root.Dispose();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
     }
 
@@ -99,7 +99,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         {
             await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "Sqlite", SourceName = id.Domain, Description = description },
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain, Description = description },
                 Identifier = id,
                 Columns = new List<TableColumn>
                 {
@@ -273,7 +273,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         {
             await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "Sqlite", SourceName = id.Domain, Description = "Tier fixture " + id.TableName },
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain, Description = "Tier fixture " + id.TableName },
                 Identifier = id,
                 Columns = [new() { ColumnName = "id", DataType = "integer" }, new() { ColumnName = "tier_secret_col", DataType = "varchar" }]
             });

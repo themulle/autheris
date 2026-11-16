@@ -127,7 +127,7 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         var tsColumn = new TableColumn { TableId = tableId, ColumnName = "ts", DataType = "datetime" };
         await repository.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = tableId, DisplayName = "readings", TableName = "readings", SchemaName = "dbo", SourceType = "Sqlite", SourceName = "lpsource" },
+            Table = new Table { Id = tableId, DisplayName = "readings", TableName = "readings", SchemaName = "dbo", SourceType = "PostgreSql", SourceName = "lpsource" },
             Identifier = identifier,
             Columns = [idColumn, tsColumn],
             PrimaryKeyColumns = ["client_id", "ts"],
@@ -200,7 +200,7 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         var column = new TableColumn { TableId = tableId, ColumnName = "customer_id", DataType = "int" };
         await repository.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = tableId, DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "Sqlite", SourceName = "lpsource" },
+            Table = new Table { Id = tableId, DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "PostgreSql", SourceName = "lpsource" },
             Identifier = identifier,
             Columns = [column]
         });
@@ -237,7 +237,7 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         var identifier = new TableIdentifier("lpsource", "dbo", "tags_" + Guid.NewGuid().ToString("N")[..8]);
         await repository.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "Sqlite", SourceName = "lpsource" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "t", TableName = identifier.TableName, SchemaName = "dbo", SourceType = "PostgreSql", SourceName = "lpsource" },
             Identifier = identifier,
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         });

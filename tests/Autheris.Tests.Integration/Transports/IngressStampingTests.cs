@@ -98,7 +98,7 @@ public sealed class IngressStampingTests : IClassFixture<IngressStampingTests.Fi
         {
             Factory.Dispose();
             _root.Dispose();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
     }
 

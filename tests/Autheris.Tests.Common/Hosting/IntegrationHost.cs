@@ -76,16 +76,34 @@ public class IntegrationHost<TConfig> : WebApplicationFactory<Program>
             logging.AddFilter("System", LogLevel.Warning);
         });
 
+        // Program.cs reads builder.Configuration synchronously (for example the governance provider guard) before the
+        // WebApplicationFactory configuration callbacks of IWebHostBuilder.ConfigureAppConfiguration are applied. The
+        // configuration is therefore evaluated once here, promoted to host settings (UseSetting is visible to that early read),
+        // and the very same configuration sources are added again later, so each value is computed exactly once.
+        var early = new ConfigurationBuilder();
+        if (_settings is { Count: > 0 })
+        {
+            early.AddInMemoryCollection(_settings);
+        }
+
+        _configInstance?.ConfigureConfiguration(early);
+        _configureConfiguration?.Invoke(early);
+        ConfigureHostConfiguration(early);
+
+        foreach (var pair in early.Build().AsEnumerable())
+        {
+            if (pair.Value is not null)
+            {
+                builder.UseSetting(pair.Key, pair.Value);
+            }
+        }
+
         builder.ConfigureAppConfiguration((_, config) =>
         {
-            if (_settings is { Count: > 0 })
+            foreach (var source in early.Sources)
             {
-                config.AddInMemoryCollection(_settings);
+                config.Add(source);
             }
-
-            _configInstance?.ConfigureConfiguration(config);
-            _configureConfiguration?.Invoke(config);
-            ConfigureHostConfiguration(config);
         });
 
         _configInstance?.ConfigureWebHost(builder);

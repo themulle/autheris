@@ -15,7 +15,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -40,17 +40,18 @@ public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejection
     public sealed class Fixture : IDisposable
     {
         private readonly WebApplicationFactory<Program> _root = new();
-        private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"odata-write-reject-{Guid.NewGuid():N}.db");
+        private readonly string _dbPath;
         public WebApplicationFactory<Program> Factory { get; }
         internal SourceConnectionCounter ConnectionCounter { get; } = new();
         public bool Seeded { get; set; }
 
         public Fixture()
         {
-            SeedDatabase(_dbPath);
+            _dbPath = SeedDatabase();
 
             var counter = ConnectionCounter;
             var dbPath = _dbPath;
+            var dbMarker = new NpgsqlConnectionStringBuilder(_dbPath).Database!;
 
             Factory = _root.WithWebHostBuilder(builder =>
             {
@@ -59,8 +60,8 @@ public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejection
                 builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "5000");
                 builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
-                builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "Sqlite");
-                builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", $"Data Source={dbPath}");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:Provider", "PostgreSql");
+                builder.UseSetting("Gateway:DataSources:Connections:erp:ConnectionString", dbPath);
                 builder.UseSetting("Gateway:OData:Enabled", "true");
                 builder.ConfigureServices(services =>
                 {
@@ -70,7 +71,7 @@ public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejection
                         new CountingSqlConnectionFactory(
                             (ISqlConnectionFactory)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
                             counter,
-                            dbPath));
+                            dbMarker));
                 });
             });
         }
@@ -79,19 +80,11 @@ public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejection
         {
             Factory.Dispose();
             _root.Dispose();
-            SqliteConnection.ClearAllPools();
-            try { File.Delete(_dbPath); } catch (IOException) { }
+            NpgsqlConnection.ClearAllPools();
         }
     }
 
-    private static void SeedDatabase(string path)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL); INSERT INTO items VALUES (1, 'initial');";
-        cmd.ExecuteNonQuery();
-    }
+    private static string SeedDatabase() => PostgresDataSource.Create("odatawrite", "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL); INSERT INTO items VALUES (1, 'initial');");
 
     private async Task EnsureSeededAsync()
     {
@@ -110,7 +103,7 @@ public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejection
                 DisplayName = "items",
                 TableName = "items",
                 SchemaName = "main",
-                SourceType = "Sqlite",
+                SourceType = "PostgreSql",
                 SourceName = "erp",
                 IsActive = true
             },

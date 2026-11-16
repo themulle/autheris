@@ -178,7 +178,7 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
         {
             _withoutDefaultTenant.Dispose();
             _withDefaultTenant.Dispose();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
     }
 }

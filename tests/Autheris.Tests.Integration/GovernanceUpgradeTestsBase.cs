@@ -114,7 +114,7 @@ public abstract class GovernanceUpgradeTestsBase
         var identifier = new TableIdentifier("src388", "dbo", "readings");
         await repository.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = tableId, DisplayName = "readings", TableName = "readings", SchemaName = "dbo", SourceType = "Sqlite", SourceName = "src388" },
+            Table = new Table { Id = tableId, DisplayName = "readings", TableName = "readings", SchemaName = "dbo", SourceType = "PostgreSql", SourceName = "src388" },
             Identifier = identifier,
             Columns = [new TableColumn { TableId = tableId, ColumnName = "client_id", DataType = "varchar" }],
             PrimaryKeyColumns = ["client_id"]

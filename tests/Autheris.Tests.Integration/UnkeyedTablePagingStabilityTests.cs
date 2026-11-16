@@ -13,7 +13,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -24,17 +24,13 @@ public sealed class UnkeyedTablePagingStabilityTests : IDisposable
 {
     private const string Source = "default";
     private static readonly Sid User = new("S-1-5-21-PAGING-1");
-    private readonly string _path = Path.Combine(Path.GetTempPath(), $"paging-{Guid.NewGuid():N}.db");
+    private readonly string _path;
     private WebApplicationFactory<Program>? _host;
 
     public UnkeyedTablePagingStabilityTests()
     {
-        using var conn = new SqliteConnection($"Data Source={_path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = "CREATE TABLE air1 (vehicle TEXT, seq INTEGER, pressure REAL); " +
-            string.Join(' ', Enumerable.Range(1, 12).Select(i => $"INSERT INTO air1 VALUES ('v{i % 2}', {i}, {i}.5);"));
-        cmd.ExecuteNonQuery();
+        _path = PostgresDataSource.Create("paging", "CREATE TABLE air1 (vehicle TEXT, seq INTEGER, pressure REAL); " +
+            string.Join(' ', Enumerable.Range(1, 12).Select(i => $"INSERT INTO air1 VALUES ('v{i % 2}', {i}, {i}.5);")));
     }
 
     [Fact]
@@ -47,8 +43,8 @@ public sealed class UnkeyedTablePagingStabilityTests : IDisposable
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("UnkeyedTablePagingStabilityTests"));
-            builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", "Sqlite");
-            builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", $"Data Source={_path}");
+            builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", "PostgreSql");
+            builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", _path);
         });
 
         var identifier = new TableIdentifier(Source, "main", "air1");
@@ -57,7 +53,7 @@ public sealed class UnkeyedTablePagingStabilityTests : IDisposable
             var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
             await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), DisplayName = "air1", TableName = "air1", SchemaName = "main", SourceType = "Sqlite", SourceName = Source },
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = "air1", TableName = "air1", SchemaName = "main", SourceType = "PostgreSql", SourceName = Source },
                 Identifier = identifier,
                 Columns =
                 [
@@ -109,7 +105,6 @@ public sealed class UnkeyedTablePagingStabilityTests : IDisposable
     public void Dispose()
     {
         _host?.Dispose();
-        SqliteConnection.ClearAllPools();
-        try { File.Delete(_path); } catch (IOException) { }
+        NpgsqlConnection.ClearAllPools();
     }
 }

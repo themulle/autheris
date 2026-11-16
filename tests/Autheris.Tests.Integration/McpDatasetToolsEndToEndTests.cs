@@ -16,7 +16,7 @@ using Autheris.Domain.Model;
 using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -45,14 +45,10 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
 
         public HostFixture()
         {
-            _dbPath = Path.Combine(Path.GetTempPath(), "autheris-mcp-e2e-" + Guid.NewGuid().ToString("N") + ".db");
-            using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            conn.Open();
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = @"
-CREATE TABLE mcp_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL, tonnage INTEGER NOT NULL, owner_email TEXT);
-INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-1230','Mobilkran',230,'b@x.test'),(3,'LR-1600','Raupenkran',600,'c@x.test');";
-            cmd.ExecuteNonQuery();
+            _dbPath = PostgresDataSource.Create("mcp", """
+                CREATE TABLE mcp_cranes (id INTEGER PRIMARY KEY, serial_number TEXT NOT NULL, crane_type TEXT NOT NULL, tonnage INTEGER NOT NULL, owner_email TEXT);
+                INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-1230','Mobilkran',230,'b@x.test'),(3,'LR-1600','Raupenkran',600,'c@x.test');
+                """);
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -61,8 +57,8 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
             builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("McpDatasetToolsEndToEndTests"));
-            builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
-            builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}");
+            builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", _dbPath);
             builder.UseSetting("Gateway:Mcp:Enabled", "true");
             builder.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
         }
@@ -70,8 +66,7 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            SqliteConnection.ClearAllPools();
-            try { File.Delete(_dbPath); } catch { /* best effort */ }
+            NpgsqlConnection.ClearAllPools();
         }
     }
 
@@ -82,7 +77,7 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
         var tableId = Guid.NewGuid();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = tableId, DisplayName = "mcp_cranes", TableName = "mcp_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default", Description = "Crane fleet" },
+            Table = new Table { Id = tableId, DisplayName = "mcp_cranes", TableName = "mcp_cranes", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default", Description = "Crane fleet" },
             Identifier = Cranes,
             Columns = new List<TableColumn>
             {

@@ -20,7 +20,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -59,7 +59,6 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     public sealed class Fixture : IDisposable
     {
         private readonly WebApplicationFactory<Program> _root = new();
-        private readonly string _workDir;
         public WebApplicationFactory<Program> Factory { get; }
         internal ReloadableConfig Config { get; } = new();
         internal ConnectionCounter Connections { get; } = new();
@@ -68,12 +67,9 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
 
         public Fixture()
         {
-            _workDir = Path.Combine(Path.GetTempPath(), "autheris-atr-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(_workDir);
-            var sPath = Path.Combine(_workDir, "s.db");
-            var tPath = Path.Combine(_workDir, "t.db");
-            Seed(sPath, "s_items");
-            Seed(tPath, "t_items");
+            var sConn = Seed("atrs", "s_items");
+            var tConn = Seed("atrt", "t_items");
+            var sMarker = new NpgsqlConnectionStringBuilder(sConn).Database!;
 
             var connections = Connections;
             var config = Config;
@@ -92,10 +88,10 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("Fixture"));
                 b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
-                b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":Provider", "Sqlite");
-                b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":ConnectionString", $"Data Source={sPath}");
-                b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":Provider", "Sqlite");
-                b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":ConnectionString", $"Data Source={tPath}");
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":Provider", "PostgreSql");
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceS + ":ConnectionString", sConn);
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":Provider", "PostgreSql");
+                b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":ConnectionString", tConn);
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:DefaultDataSourceName", SourceT);
                 b.UseSetting("Gateway:WebSql:AllowedDataSources:0", SourceT);
@@ -117,7 +113,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
                         new CountingFactory(
                             (ISqlConnectionFactory)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
                             connections,
-                            sPath));
+                            sMarker));
                 });
             });
 
@@ -129,19 +125,12 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
             Metric.Dispose();
             Factory.Dispose();
             _root.Dispose();
-            SqliteConnection.ClearAllPools();
-            try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+            NpgsqlConnection.ClearAllPools();
         }
     }
 
-    private static void Seed(string path, string table)
-    {
-        using var conn = new SqliteConnection($"Data Source={path}");
-        conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"CREATE TABLE {table} (id INTEGER PRIMARY KEY, name TEXT NOT NULL); INSERT INTO {table} VALUES (1,'row-one'),(2,'row-two');";
-        cmd.ExecuteNonQuery();
-    }
+    private static string Seed(string name, string table) =>
+        PostgresDataSource.Create(name, $"CREATE TABLE {table} (id INTEGER PRIMARY KEY, name TEXT NOT NULL); INSERT INTO {table} VALUES (1,'row-one'),(2,'row-two');");
 
     private async Task EnsureSeededAsync()
     {
@@ -156,7 +145,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         {
             await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), DisplayName = table, TableName = table, SchemaName = "main", SourceType = "Sqlite", SourceName = source },
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = table, TableName = table, SchemaName = "main", SourceType = "PostgreSql", SourceName = source },
                 Identifier = new TableIdentifier(source, "main", table),
                 CatalogView = CatalogView.Full, // sample rows are only read for a Full catalog shape
                 Columns =
@@ -831,11 +820,11 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         }
     }
 
-    private sealed class CountingFactory(ISqlConnectionFactory inner, ConnectionCounter counter, string sPath) : ISqlConnectionFactory
+    private sealed class CountingFactory(ISqlConnectionFactory inner, ConnectionCounter counter, string sMarker) : ISqlConnectionFactory
     {
         public Task<System.Data.Common.DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
         {
-            counter.Opened(options.ConnectionString?.Contains(sPath, StringComparison.Ordinal) == true);
+            counter.Opened(options.ConnectionString?.Contains(sMarker, StringComparison.Ordinal) == true);
             return inner.CreateOpenConnectionAsync(options, ct);
         }
     }

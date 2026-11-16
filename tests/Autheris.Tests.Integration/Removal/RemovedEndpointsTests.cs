@@ -161,7 +161,7 @@ public sealed class RemovedEndpointsTests : IClassFixture<RemovedEndpointsTests.
         {
             Factory.Dispose();
             _root.Dispose();
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
     }
 }
