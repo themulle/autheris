@@ -123,8 +123,15 @@ internal abstract class ColumnScopeTracker(ITableCatalog catalog) : SqlAstRewrit
     }
 
     /// <summary>The catalog column of <paramref name="expression"/> when it is a resolvable column of the current query block, or null when it is not.</summary>
-    protected ResolvedColumn? Resolve(Expression expression)
+    protected ResolvedColumn? Resolve(Expression expression) =>
+        ResolveColumn(expression, out var table) is { } column ? new ResolvedColumn(table!, column) : null;
+
+    /// <summary>Like <see cref="Resolve"/> but without allocating a <see cref="ResolvedColumn"/>: the column and, as an out value, its table.</summary>
+    protected CatalogColumn? ResolveColumn(Expression expression) => ResolveColumn(expression, out _);
+
+    private CatalogColumn? ResolveColumn(Expression expression, out TableCatalogEntry? table)
     {
+        table = null;
         if (expression is not ColumnReference column || _scopes.Count == 0) return null;
         var parts = column.Name.Parts;
         string name = parts[^1].Value;
@@ -144,7 +151,9 @@ internal abstract class ColumnScopeTracker(ITableCatalog catalog) : SqlAstRewrit
                 only = source.Entry;
             }
 
-            return found == 1 && only is { } qualified ? Lookup(qualified, name) : null;
+            if (found != 1 || only is not { } qualified) return null;
+            table = qualified;
+            return Lookup(qualified, name);
         }
 
         // Unqualified: only decidable when every source is a catalog table and exactly one of them has the column.
@@ -154,19 +163,23 @@ internal abstract class ColumnScopeTracker(ITableCatalog catalog) : SqlAstRewrit
         {
             var source = sources[i];
             if (source.Entry is null) return null;
-            if (!HasColumn(source.Entry, name)) continue;
+            if (Lookup(source.Entry, name) is null) continue;
             if (++owners == 1) owner = source.Entry;
         }
 
-        return owners == 1 ? Lookup(owner!, name) : null;
+        if (owners != 1) return null;
+        table = owner;
+        return Lookup(owner!, name);
     }
 
-    private static bool HasColumn(TableCatalogEntry entry, string name) =>
-        entry.Columns.Any(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
-
-    private static ResolvedColumn? Lookup(TableCatalogEntry entry, string name)
+    private static CatalogColumn? Lookup(TableCatalogEntry entry, string name)
     {
-        var column = entry.Columns.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
-        return column is null ? null : new ResolvedColumn(entry, column);
+        var columns = entry.Columns;
+        for (int i = 0; i < columns.Length; i++)
+        {
+            if (string.Equals(columns[i].Name, name, StringComparison.OrdinalIgnoreCase)) return columns[i];
+        }
+
+        return null;
     }
 }

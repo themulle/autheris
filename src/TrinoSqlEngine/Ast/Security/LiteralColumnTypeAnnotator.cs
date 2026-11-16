@@ -20,7 +20,7 @@ using TrinoSqlEngine.Governance;
 internal sealed class LiteralColumnTypeAnnotator(ITableCatalog catalog) : ColumnScopeTracker(catalog)
 {
     private (bool Resolved, string? DataType) TypeOf(Expression expression) =>
-        Resolve(expression) is { } column ? (true, column.Column.DataType) : (false, null);
+        ResolveColumn(expression) is { } column ? (true, column.DataType) : (false, null);
 
     /// <summary>The literal under an optional unary minus, or null when <paramref name="expression"/> is another expression.</summary>
     private static LiteralExpression? LiteralOf(Expression expression) => expression switch

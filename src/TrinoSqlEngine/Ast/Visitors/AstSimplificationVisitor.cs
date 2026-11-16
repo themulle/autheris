@@ -109,6 +109,13 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
 
     private static List<Expression> CollectSameOperatorOperands(Expression root, BinaryOperator op)
     {
+        if (root is BinaryExpression { Left: var l, Right: var r } rootBinary && rootBinary.Operator == op
+            && !(l is BinaryExpression lb && lb.Operator == op) && !(r is BinaryExpression rb && rb.Operator == op))
+        {
+            // The common shape (two operands, neither of the same operator): no work stack.
+            return [l, r];
+        }
+
         var result = new List<Expression>();
         var stack = new Stack<Expression>();
         stack.Push(root);
@@ -333,6 +340,12 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
 
     private static void FlattenAnd(Expression expr, List<Expression> collector)
     {
+        if (expr is not BinaryExpression { Operator: BinaryOperator.And })
+        {
+            collector.Add(expr);
+            return;
+        }
+
         var stack = new Stack<Expression>();
         stack.Push(expr);
         while (stack.Count > 0)
@@ -352,6 +365,12 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
 
     private static void FlattenOr(Expression expr, List<Expression> collector)
     {
+        if (expr is not BinaryExpression { Operator: BinaryOperator.Or })
+        {
+            collector.Add(expr);
+            return;
+        }
+
         var stack = new Stack<Expression>();
         stack.Push(expr);
         while (stack.Count > 0)

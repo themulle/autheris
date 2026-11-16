@@ -329,48 +329,66 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             return;
         }
 
-        var frames = new List<(BinaryExpression Node, bool ParensLeft, bool ParensRight)>();
-        Expression cur = b;
-        while (cur is BinaryExpression cb && !RequiresCustomBinaryFormat(cb))
+        // One reusable frame stack per thread: a nested chain (GenerateExpression of a right operand) pushes above this call's frames
+        // and removes its own before it returns, so the entries below stay intact and no list is allocated per chain.
+        var frames = t_binaryFrames ??= [];
+        int start = frames.Count;
+        try
         {
-            if (frames.Count > 0)
+            Expression cur = b;
+            while (cur is BinaryExpression cb && !RequiresCustomBinaryFormat(cb))
             {
-                ExecutionStackGuard.Ensure();
-                context.Tick();
+                if (frames.Count > start)
+                {
+                    ExecutionStackGuard.Ensure();
+                    context.Tick();
+                }
+
+                if (TryAppendCanonicalConstant(ref builder, cb, context))
+                {
+                    cur = null!;
+                    break;
+                }
+
+                bool parensLeft = NeedsParentheses(cb.Left, cb.Operator, isLeft: true);
+                bool parensRight = NeedsParentheses(cb.Right, cb.Operator, isLeft: false);
+                if (parensLeft) builder.Append('(');
+                frames.Add((cb, parensLeft, parensRight));
+                cur = cb.Left;
             }
 
-            if (TryAppendCanonicalConstant(ref builder, cb, context))
+            if (cur is not null)
             {
-                cur = null!;
-                break;
+                GenerateExpression(cur, ref builder, context);
             }
 
-            bool parensLeft = NeedsParentheses(cb.Left, cb.Operator, isLeft: true);
-            bool parensRight = NeedsParentheses(cb.Right, cb.Operator, isLeft: false);
-            if (parensLeft) builder.Append('(');
-            frames.Add((cb, parensLeft, parensRight));
-            cur = cb.Left;
+            for (int i = frames.Count - 1; i >= start; i--)
+            {
+                var (node, parensLeft, parensRight) = frames[i];
+                // Drop this frame before descending: a nested call must see only the frames below its own start.
+                frames.RemoveAt(i);
+                if (parensLeft) builder.Append(')');
+
+                builder.Append(' ');
+                builder.Append(GetBinaryOperatorString(node.Operator));
+                builder.Append(' ');
+
+                if (parensRight) builder.Append('(');
+                GenerateExpression(node.Right, ref builder, context);
+                if (parensRight) builder.Append(')');
+            }
         }
-
-        if (cur is not null)
+        finally
         {
-            GenerateExpression(cur, ref builder, context);
-        }
-
-        for (int i = frames.Count - 1; i >= 0; i--)
-        {
-            var (node, parensLeft, parensRight) = frames[i];
-            if (parensLeft) builder.Append(')');
-
-            builder.Append(' ');
-            builder.Append(GetBinaryOperatorString(node.Operator));
-            builder.Append(' ');
-
-            if (parensRight) builder.Append('(');
-            GenerateExpression(node.Right, ref builder, context);
-            if (parensRight) builder.Append(')');
+            if (frames.Count > start)
+            {
+                frames.RemoveRange(start, frames.Count - start);
+            }
         }
     }
+
+    [ThreadStatic]
+    private static List<(BinaryExpression Node, bool ParensLeft, bool ParensRight)>? t_binaryFrames;
 
     private bool TryAppendCanonicalConstant(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
     {

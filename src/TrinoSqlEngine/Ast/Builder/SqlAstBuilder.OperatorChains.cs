@@ -38,12 +38,14 @@ public sealed partial class SqlAstBuilder
     private Expression VisitAndChain(SqlBaseParser.AndContext context)
     {
         using var _ = EnterScope();
-        var rights = new List<SqlBaseParser.BooleanExpressionContext>();
+        SqlBaseParser.BooleanExpressionContext? firstRight = null;
+        List<SqlBaseParser.BooleanExpressionContext>? moreRights = null;
+        int count = 0;
         SqlBaseParser.BooleanExpressionContext cur = context;
         while (cur is SqlBaseParser.AndContext and)
         {
-            rights.Add(and.booleanExpression(1));
-            if (rights.Count >= MaxOperatorChainTerms)
+            AddChainTerm(ref firstRight, ref moreRights, ref count, and.booleanExpression(1));
+            if (count >= MaxOperatorChainTerms)
             {
                 throw new AstBuildException(
                     $"Logical AND chain exceeded the maximum allowed length of {MaxOperatorChainTerms} terms.");
@@ -53,9 +55,9 @@ public sealed partial class SqlAstBuilder
         }
 
         var acc = (Expression)Visit(cur);
-        for (int i = rights.Count - 1; i >= 0; i--)
+        for (int i = count - 1; i >= 0; i--)
         {
-            var right = (Expression)Visit(rights[i]);
+            var right = (Expression)Visit(i == 0 ? firstRight! : moreRights![i - 1]);
             acc = new BinaryExpression(acc, BinaryOperator.And, right);
         }
 
@@ -65,12 +67,14 @@ public sealed partial class SqlAstBuilder
     private Expression VisitOrChain(SqlBaseParser.OrContext context)
     {
         using var _ = EnterScope();
-        var rights = new List<SqlBaseParser.BooleanExpressionContext>();
+        SqlBaseParser.BooleanExpressionContext? firstRight = null;
+        List<SqlBaseParser.BooleanExpressionContext>? moreRights = null;
+        int count = 0;
         SqlBaseParser.BooleanExpressionContext cur = context;
         while (cur is SqlBaseParser.OrContext or)
         {
-            rights.Add(or.booleanExpression(1));
-            if (rights.Count >= MaxOperatorChainTerms)
+            AddChainTerm(ref firstRight, ref moreRights, ref count, or.booleanExpression(1));
+            if (count >= MaxOperatorChainTerms)
             {
                 throw new AstBuildException(
                     $"Logical OR chain exceeded the maximum allowed length of {MaxOperatorChainTerms} terms.");
@@ -80,9 +84,9 @@ public sealed partial class SqlAstBuilder
         }
 
         var acc = (Expression)Visit(cur);
-        for (int i = rights.Count - 1; i >= 0; i--)
+        for (int i = count - 1; i >= 0; i--)
         {
-            var right = (Expression)Visit(rights[i]);
+            var right = (Expression)Visit(i == 0 ? firstRight! : moreRights![i - 1]);
             acc = new BinaryExpression(acc, BinaryOperator.Or, right);
         }
 
@@ -92,12 +96,14 @@ public sealed partial class SqlAstBuilder
     private Expression VisitConcatenationChain(SqlBaseParser.ConcatenationContext context)
     {
         using var _ = EnterScope();
-        var rights = new List<SqlBaseParser.ValueExpressionContext>();
+        SqlBaseParser.ValueExpressionContext? firstRight = null;
+        List<SqlBaseParser.ValueExpressionContext>? moreRights = null;
+        int count = 0;
         SqlBaseParser.ValueExpressionContext cur = context;
         while (cur is SqlBaseParser.ConcatenationContext concat)
         {
-            rights.Add(concat.right);
-            if (rights.Count >= MaxOperatorChainTerms)
+            AddChainTerm(ref firstRight, ref moreRights, ref count, concat.right);
+            if (count >= MaxOperatorChainTerms)
             {
                 throw new AstBuildException(
                     $"Concatenation chain exceeded the maximum allowed length of {MaxOperatorChainTerms} terms.");
@@ -107,9 +113,9 @@ public sealed partial class SqlAstBuilder
         }
 
         var acc = (Expression)Visit(cur);
-        for (int i = rights.Count - 1; i >= 0; i--)
+        for (int i = count - 1; i >= 0; i--)
         {
-            var right = (Expression)Visit(rights[i]);
+            var right = (Expression)Visit(i == 0 ? firstRight! : moreRights![i - 1]);
             acc = new BinaryExpression(acc, BinaryOperator.Concat, right);
         }
 
@@ -119,13 +125,15 @@ public sealed partial class SqlAstBuilder
     private Expression VisitArithmeticChain(SqlBaseParser.ArithmeticBinaryContext context)
     {
         using var _ = EnterScope();
-        var rights = new List<(SqlBaseParser.ValueExpressionContext Right, BinaryOperator Op)>();
+        (SqlBaseParser.ValueExpressionContext Right, BinaryOperator Op) firstRight = default;
+        List<(SqlBaseParser.ValueExpressionContext Right, BinaryOperator Op)>? moreRights = null;
+        int count = 0;
         SqlBaseParser.ValueExpressionContext cur = context;
         while (cur is SqlBaseParser.ArithmeticBinaryContext arith)
         {
             var op = MapArithmeticOperator(arith.@operator);
-            rights.Add((arith.right, op));
-            if (rights.Count >= MaxOperatorChainTerms)
+            AddChainTerm(ref firstRight, ref moreRights, ref count, (arith.right, op));
+            if (count >= MaxOperatorChainTerms)
             {
                 throw new AstBuildException(
                     $"Arithmetic chain exceeded the maximum allowed length of {MaxOperatorChainTerms} terms.");
@@ -135,9 +143,9 @@ public sealed partial class SqlAstBuilder
         }
 
         var acc = (Expression)Visit(cur);
-        for (int i = rights.Count - 1; i >= 0; i--)
+        for (int i = count - 1; i >= 0; i--)
         {
-            var (rightCtx, op) = rights[i];
+            var (rightCtx, op) = i == 0 ? firstRight : moreRights![i - 1];
             var right = (Expression)Visit(rightCtx);
             acc = _options.TranslateTrinoDateFunctions && (acc is IntervalLiteralExpression || right is IntervalLiteralExpression)
                 ? BuildIntervalArithmetic(acc, op, right)
@@ -145,6 +153,22 @@ public sealed partial class SqlAstBuilder
         }
 
         return acc;
+    }
+
+    // The first term lives in a local and the list is created only for a second one: most chains have a single term, and the
+    // per-chain list and its backing array were a measurable share of the allocations of a small statement.
+    private static void AddChainTerm<T>(ref T? first, ref List<T>? more, ref int count, T term)
+    {
+        if (count == 0)
+        {
+            first = term;
+        }
+        else
+        {
+            (more ??= []).Add(term);
+        }
+
+        count++;
     }
 
     private static BinaryOperator MapArithmeticOperator(IToken opToken) => opToken.Type switch

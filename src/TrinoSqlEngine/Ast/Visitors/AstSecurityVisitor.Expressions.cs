@@ -30,6 +30,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     {
         if (root == null) return false;
 
+        // Leaves need no work stack (the typical operand of a required-filter comparison is a literal or a parameter).
+        if (root is ColumnReference) return true;
+        if (root is LiteralExpression or ParameterReference) return false;
+
         var stack = new Stack<Expression>();
         stack.Push(root);
         while (stack.Count > 0)
