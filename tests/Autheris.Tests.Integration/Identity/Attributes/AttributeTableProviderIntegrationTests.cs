@@ -56,6 +56,7 @@ public sealed class AttributeTableProviderIntegrationTests
                     ["hr_db"] = new()
                     {
                         Provider = "PostgreSql",
+                        DefaultSchema = "public",
                         ConnectionString = connectionString,
                         CallerAttributeLookupAllowed = true,
                         CallerAttributeDedicatedLogin = true

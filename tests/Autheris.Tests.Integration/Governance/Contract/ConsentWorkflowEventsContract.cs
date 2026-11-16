@@ -91,7 +91,7 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
 
         var appendMissing = () => Store.ConsentEventOutbox.AppendAsync(new ConsentEventWrite(
             string.Empty, Guid.NewGuid(), ConsentEventTypes.RequestCreated, "sub-1", "{}", FixedNow, null));
-        await appendMissing.Should().ThrowAsync<ArgumentException>();
+        await appendMissing.Should().ThrowAsync<Autheris.Domain.Exceptions.StoredTenantIntegrityException>();
     }
 
     [RequiresContainerRuntimeFact]

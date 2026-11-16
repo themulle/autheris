@@ -120,7 +120,7 @@ public sealed class SqlVirtualFilterKeySetProviderIntegrationTests
             {
                 RequireTenantColumn = requireTenantColumn,
                 TenantColumnExemptTables = exempt?.ToList() ?? [],
-                Connections = { [Domain] = new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = connectionString } }
+                Connections = { [Domain] = new DataSourceConnectionOptions { Provider = "PostgreSql", DefaultSchema = "public", ConnectionString = connectionString } }
             },
             VirtualFilters = new VirtualFilterOptions { Federation = new VirtualFilterFederationOptions { MaxAuthorizedKeys = 50_000 } }
         };

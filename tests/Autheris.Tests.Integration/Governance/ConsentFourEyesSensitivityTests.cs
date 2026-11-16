@@ -106,7 +106,7 @@ public sealed class ConsentFourEyesSensitivityTests
             // Re-approval by Approver 1 must fail due to four-eyes principle
             var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
                 repo.ApproveConsentRequestStepAsync(request.Id, approver1));
-            ex.Message.ShouldContain("Vier-Augen-Prinzip");
+            ex.Message.ShouldContain("FOUR_EYES_SAME_APPROVER");
 
             // Step 2: Approver 2 approves
             var step2Result = await repo.ApproveConsentRequestStepAsync(request.Id, approver2);

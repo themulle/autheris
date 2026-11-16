@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
+using Autheris.Infrastructure.Persistence.Dialects;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Persistence.Migrations.Shape;
 using Microsoft.Extensions.Hosting;
@@ -52,7 +53,8 @@ internal static class GovernanceSchemaTestSupport
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
         return new PostgreSqlGovernanceRepository(
             Substitute.For<IEpochValidationService>(), options, env, secrets,
-            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null), Substitute.For<ICallerContextProvider>());
+            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null), Substitute.For<ICallerContextProvider>(),
+            grantWriter: GovernanceStoreFactory.CreateGrantWriter(new PostgreSqlGovernanceDialect(options.Value.GovernanceDb.ConnectionString)));
     }
 
     public static SqlServerGovernanceRepository UnmigratedSqlServer(IOptions<GatewayOptions> options)
@@ -61,7 +63,8 @@ internal static class GovernanceSchemaTestSupport
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
         return new SqlServerGovernanceRepository(
             Substitute.For<IEpochValidationService>(), options, env, secrets,
-            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null), Substitute.For<ICallerContextProvider>());
+            AuditChainAnchorStoreFactory.CreateForGovernance(options.Value, env, secrets, null, null), Substitute.For<ICallerContextProvider>(),
+            grantWriter: GovernanceStoreFactory.CreateGrantWriter(new SqlServerGovernanceDialect(options.Value.GovernanceDb.ConnectionString)));
     }
 
     /// <summary>Runs the migration runner of the engine against the connection string in the given mode.</summary>
