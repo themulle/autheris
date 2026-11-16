@@ -292,7 +292,7 @@ SQL table reads (GraphQL, OData, MCP, connectors) run through the governed SQL p
 
 #### 2.4.1 SQL Server Windows Authentication (NTLM / Kerberos) in Linux Containers
 
-When connecting from a Linux container (`mcr.microsoft.com/dotnet/aspnet:10.0`) to an on-premises SQL Server that requires Active Directory Windows Authentication (`Integrated Security=true` / `Integrated Security=SSPI`), `Microsoft.Data.SqlClient` delegates authentication to GSSAPI (`libgssapi-krb5-2`) and the NTLM GSSAPI plugin (`gss-ntlmssp`).
+When connecting from a Linux container (`mcr.microsoft.com/dotnet/aspnet:11.0`) to an on-premises SQL Server that requires Active Directory Windows Authentication (`Integrated Security=true` / `Integrated Security=SSPI`), `Microsoft.Data.SqlClient` delegates authentication to GSSAPI (`libgssapi-krb5-2`) and the NTLM GSSAPI plugin (`gss-ntlmssp`).
 
 All official Autheris container images (`Dockerfile`, `Dockerfile.production`, `Dockerfile.staging`) pre-install `libgssapi-krb5-2`, `gss-ntlmssp`, `krb5-user`, and `libkrb5-3`, register `/etc/gss/mech.d/mech.ntlmssp.conf` (and `/etc/gss/mech`) with read permissions for the non-root container user (`10001:10001`), and provide `/app/data/gss` (`0700`) for runtime GSS state.
 

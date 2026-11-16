@@ -10,7 +10,7 @@ public static class BenchmarkRunnerApp
     {
         Console.WriteLine("================================================================================");
         Console.WriteLine(" GraphQL Enterprise Gateway - Performance Benchmark Suite (NF-PERF-01 / 02)");
-        Console.WriteLine(" Environment: .NET 10 / Ubuntu Linux / Release Optimized");
+        Console.WriteLine(" Environment: .NET 11 / Ubuntu Linux / Release Optimized");
         Console.WriteLine("================================================================================");
         Console.WriteLine();
 
