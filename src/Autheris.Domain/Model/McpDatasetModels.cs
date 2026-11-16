@@ -167,7 +167,8 @@ public sealed record McpDatasetDescription(
     string? Language = null,
     string? RequestedLanguage = null,
     IReadOnlyList<McpKeyColumn>? PrimaryKeyOrder = null,
-    McpDatasetSize? Size = null);
+    McpDatasetSize? Size = null,
+    int? ColumnTotal = null);
 
 /// <summary>Issue #390: one primary key column in key order with its declared sort direction (<c>ASC</c> or <c>DESC</c>).</summary>
 public sealed record McpKeyColumn(string Column, string Direction);
